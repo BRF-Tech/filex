@@ -13,6 +13,7 @@ import {
   Share2,
   Search,
   Info,
+  Trash2,
   X,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
@@ -40,6 +41,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'storages' }, label: t('nav.storages'), icon: Database, group: 'main' },
   { to: { name: 'sync' }, label: t('nav.sync'), icon: RefreshCcw, group: 'main' },
   { to: { name: 'shares' }, label: t('nav.shares'), icon: Share2, group: 'main' },
+  { to: { name: 'trash' }, label: t('nav.trash'), icon: Trash2, group: 'main' },
   { to: { name: 'search' }, label: t('nav.search'), icon: Search, group: 'main' },
 
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },

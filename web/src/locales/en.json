@@ -76,6 +76,7 @@
     "audit": "Audit log",
     "sync": "Sync runs",
     "shares": "Shares",
+    "trash": "Trash",
     "search": "Search",
     "about": "About",
     "profile": "My profile",
@@ -337,5 +338,30 @@
     "forbidden": "You don’t have permission for this action",
     "notFound": "Not found",
     "validationFailed": "Please check the highlighted fields"
+  },
+  "trash": {
+    "title": "Trash",
+    "subtitle": "Soft-deleted files — purged automatically once retention expires.",
+    "all_storages": "All storages",
+    "empty": "Empty trash",
+    "empty_title": "Trash is empty",
+    "empty_description": "Nothing has been deleted.",
+    "col_name": "Name",
+    "col_storage": "Storage",
+    "col_size": "Size",
+    "col_deleted_at": "Deleted",
+    "col_ttl": "TTL",
+    "days_left": "days",
+    "restore": "Restore",
+    "purge": "Purge",
+    "restored": "{name} restored",
+    "purged": "{name} permanently deleted",
+    "purge_confirm": "{name} will be permanently deleted. Continue?",
+    "empty_modal_title": "Empty trash",
+    "empty_modal_body": "This cannot be undone. If you picked a storage, only that one is affected.",
+    "older_than_days": "Older than (days)",
+    "all_ages": "any age (leave blank)",
+    "empty_done": "{count} item(s) purged",
+    "total_count": "Total: {n}"
   }
 }

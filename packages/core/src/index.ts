@@ -18,6 +18,12 @@
 
 export { default as FileExplorer } from './FileExplorer.vue';
 
+// ——— Phase-2 standalone components (consumers can mount these
+//      independently of the FileExplorer host, e.g. a sidebar tray).
+export { default as StarButton } from './components/StarButton.vue';
+export { default as TagPicker } from './components/TagPicker.vue';
+export { default as RecentlyOpened } from './components/RecentlyOpened.vue';
+
 // ——— Types ———
 export type {
   ExplorerConfig,

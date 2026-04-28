@@ -97,6 +97,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.shares' },
       },
       {
+        path: 'trash',
+        name: 'trash',
+        component: () => import('@/views/Trash.vue'),
+        meta: { breadcrumb: 'nav.trash' },
+      },
+      {
         path: 'search',
         name: 'search',
         component: () => import('@/views/SearchTest.vue'),

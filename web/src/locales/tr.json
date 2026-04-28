@@ -76,6 +76,7 @@
     "audit": "Denetim kaydı",
     "sync": "Senkron çalışmaları",
     "shares": "Paylaşımlar",
+    "trash": "Çöp kutusu",
     "search": "Arama",
     "about": "Hakkında",
     "profile": "Profilim",
@@ -337,5 +338,30 @@
     "forbidden": "Bu işlem için yetkin yok",
     "notFound": "Bulunamadı",
     "validationFailed": "Lütfen işaretli alanları kontrol et"
+  },
+  "trash": {
+    "title": "Çöp kutusu",
+    "subtitle": "Yumuşak silinmiş dosyalar — saklanma süresi dolduğunda otomatik temizlenir.",
+    "all_storages": "Tüm depolar",
+    "empty": "Çöpü boşalt",
+    "empty_title": "Çöp kutusu boş",
+    "empty_description": "Hiçbir şey silinmemiş.",
+    "col_name": "İsim",
+    "col_storage": "Depo",
+    "col_size": "Boyut",
+    "col_deleted_at": "Silinme",
+    "col_ttl": "Kalan süre",
+    "days_left": "gün",
+    "restore": "Geri yükle",
+    "purge": "Kalıcı sil",
+    "restored": "{name} geri yüklendi",
+    "purged": "{name} kalıcı olarak silindi",
+    "purge_confirm": "{name} kalıcı silinecek. Emin misin?",
+    "empty_modal_title": "Çöpü boşalt",
+    "empty_modal_body": "Bu işlem geri alınamaz. Tek bir depoyu seçtiysen sadece o etkilenir.",
+    "older_than_days": "Şundan eski (gün)",
+    "all_ages": "tümü (boş bırak)",
+    "empty_done": "{count} öğe silindi",
+    "total_count": "Toplam: {n}"
   }
 }
