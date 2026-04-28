@@ -1,0 +1,74 @@
+# filex production compose for files.brf.sh
+#
+# Drop into /root/filex/docker-compose.yml on the main Hetzner box, then:
+#
+#   docker compose pull
+#   docker compose up -d
+#   docker compose logs -f filex   # see banner; copy admin password ONCE
+#
+# Reverse proxy (CloudPanel nginx vhost or Caddy on brkip) terminates TLS
+# and proxies https://files.brf.sh → http://127.0.0.1:5212.
+#
+# Keycloak realm `brf` should expose a confidential client `filex` with:
+#   - Valid redirect URIs: https://files.brf.sh/api/auth/oidc/callback
+#   - Web origins: https://files.brf.sh
+#   - Client authentication: ON
+#   - Standard flow: ON
+# The client secret goes into FILEX_OIDC_CLIENT_SECRET below.
+
+services:
+  filex:
+    image: registry.gitlab.com/brftech/filemanager:latest
+    container_name: filex
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5212:5212"
+    volumes:
+      - /opt/filex/data:/data        # SQLite + first-run secret
+      - /opt/filex/storages:/storages # any local-driver storages
+    environment:
+      FILEX_PUBLIC_URL: https://files.brf.sh
+      FILEX_LISTEN: 0.0.0.0:5212
+
+      # ── DB ────────────────────────────────────────────────────
+      FILEX_DB_DRIVER: sqlite              # switch to 'postgres' to use the postgres service below
+      # FILEX_DB_DSN: postgres://filex:CHANGEME@postgres:5432/filex?sslmode=disable
+
+      # ── Auth ──────────────────────────────────────────────────
+      FILEX_AUTH_DRIVERS: local,oidc
+
+      FILEX_OIDC_ISSUER: https://auth.brf.sh/realms/brf
+      FILEX_OIDC_CLIENT_ID: filex
+      FILEX_OIDC_CLIENT_SECRET: ${FILEX_OIDC_CLIENT_SECRET}
+      FILEX_OIDC_REDIRECT_URL: https://files.brf.sh/api/auth/oidc/callback
+      FILEX_OIDC_ROLE_CLAIM: realm_access.roles
+      FILEX_OIDC_ADMIN_GROUP: filex-admin
+
+      # ── External services (plug & play) ──────────────────────
+      FILEX_ONLYOFFICE_URL: https://docs.brf.sh
+      FILEX_ONLYOFFICE_JWT: ${ONLYOFFICE_JWT_SECRET}
+      FILEX_DRAWIO_URL: https://embed.diagrams.net
+
+      # ── Sync / thumbs ─────────────────────────────────────────
+      FILEX_SYNC_DEFAULT_INTERVAL: 15m
+      FILEX_THUMBS_ENABLED: "true"
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5212/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional — enable when migrating off SQLite. Remember to also set
+  # FILEX_DB_DRIVER=postgres + FILEX_DB_DSN above.
+  postgres:
+    image: postgres:16-alpine
+    container_name: filex-postgres
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: filex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?need POSTGRES_PASSWORD}
+      POSTGRES_DB: filex
+    volumes:
+      - /opt/filex/postgres:/var/lib/postgresql/data

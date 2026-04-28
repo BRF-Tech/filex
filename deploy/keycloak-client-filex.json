@@ -1,0 +1,44 @@
+{
+  "_comment": "Import via Keycloak admin console: realm 'brf' → Clients → Import. After import, generate the client secret under Credentials and paste it into /root/filex/.env as FILEX_OIDC_CLIENT_SECRET.",
+  "clientId": "filex",
+  "name": "filex — file manager",
+  "description": "Self-hosted file manager at files.brf.sh",
+  "rootUrl": "https://files.brf.sh",
+  "adminUrl": "https://files.brf.sh",
+  "baseUrl": "/admin",
+  "enabled": true,
+  "alwaysDisplayInConsole": true,
+  "clientAuthenticatorType": "client-secret",
+  "redirectUris": [
+    "https://files.brf.sh/api/auth/oidc/callback",
+    "https://files.brf.sh/*"
+  ],
+  "webOrigins": [
+    "https://files.brf.sh"
+  ],
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "publicClient": false,
+  "frontchannelLogout": true,
+  "protocol": "openid-connect",
+  "attributes": {
+    "saml.assertion.signature": "false",
+    "post.logout.redirect.uris": "+",
+    "oauth2.device.authorization.grant.enabled": "false",
+    "backchannel.logout.session.required": "true",
+    "use.refresh.tokens": "true"
+  },
+  "defaultClientScopes": [
+    "web-origins",
+    "acr",
+    "profile",
+    "roles",
+    "email"
+  ],
+  "optionalClientScopes": [
+    "offline_access",
+    "microprofile-jwt"
+  ]
+}
