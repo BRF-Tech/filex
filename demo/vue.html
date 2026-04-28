@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>filex demo · Vue 3</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body, #app { margin:0; padding:0; height:100%; font-family: system-ui, -apple-system, sans-serif; }
+    #app { display: flex; flex-direction: column; }
+    header { padding: 16px 24px; background: linear-gradient(135deg,#10b981,#059669); color: white; }
+    header h1 { margin:0; font-size:18px; font-weight:600; }
+    header p  { margin:4px 0 0; font-size:13px; opacity:.85; }
+    .bar { padding:8px 16px; background: rgba(0,0,0,.04); display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px; }
+    @media (prefers-color-scheme: dark) { .bar { background: rgba(255,255,255,.06); } }
+    .bar input { padding:4px 8px; border-radius:4px; border:1px solid rgba(0,0,0,.2); min-width:280px; }
+    .bar button { padding:4px 12px; cursor:pointer; }
+    main { flex: 1; min-height: 0; display: flex; }
+    main > * { flex: 1; min-height: 0; }
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@brftech/filex-core/dist/style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>filex · Vue 3 demo</h1>
+      <p>Mount <code>&lt;FileExplorer&gt;</code> from <code>@brftech/filex-core</code>. SFC source of truth.</p>
+    </header>
+
+    <div class="bar">
+      <label>API base:
+        <input v-model.trim="apiBase" />
+      </label>
+      <label>Bearer:
+        <input v-model.trim="token" placeholder="(optional JWT)" />
+      </label>
+      <button @click="rebuild">Apply</button>
+      <span style="opacity:.7">{{ status }}</span>
+    </div>
+
+    <main>
+      <FileExplorer
+        :config="config"
+        @ready="onReady"
+        @error="onError"
+        @navigate="onNavigate"
+        @share-created="onShare"
+      />
+    </main>
+  </div>
+
+  <!-- Vue ESM build + the package itself.
+       In a real app you'd pnpm-install + bundle. This page is intentionally
+       framework-only so it works with `python -m http.server`. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "vue": "https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.esm-browser.js",
+        "@brftech/filex-core": "https://cdn.jsdelivr.net/npm/@brftech/filex-core/dist/filex-core.js"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import { createApp, ref, computed } from 'vue';
+    import { FileExplorer } from '@brftech/filex-core';
+
+    createApp({
+      components: { FileExplorer },
+      setup() {
+        const apiBase = ref('http://localhost:5212');
+        const token = ref('');
+        const status = ref('idle');
+
+        // Force re-render of the explorer when the user clicks Apply by
+        // swapping the config reference (a new object).
+        const stamp = ref(0);
+        const config = computed(() => {
+          // touch stamp so this recomputes
+          // eslint-disable-next-line no-unused-expressions
+          stamp.value;
+          return {
+            apiBase: apiBase.value.replace(/\/$/, ''),
+            auth: token.value ? { kind: 'bearer', token: token.value } : { kind: 'cookie' },
+            startPath: '/',
+            locale: 'auto',
+            theme: 'auto',
+          };
+        });
+        function rebuild() { stamp.value++; status.value = 'connecting...'; }
+
+        function onReady(e)    { status.value = `ready · v${e.capabilities.version}`; }
+        function onError(e)    { status.value = `error: ${e.code} — ${e.message}`; }
+        function onNavigate(e) { status.value = `path: ${e.path}`; }
+        function onShare(e)    {
+          navigator.clipboard.writeText(e.share.url);
+          status.value = `share copied: ${e.share.url}`;
+        }
+
+        return { apiBase, token, status, config, rebuild, onReady, onError, onNavigate, onShare };
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

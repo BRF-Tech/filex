@@ -1,0 +1,45 @@
+package model
+
+import "time"
+
+// Capabilities is the runtime feature snapshot returned by /api/capabilities.
+// The frontend uses this to enable/disable UI affordances.
+type Capabilities struct {
+	// Storage write operations.
+	Upload  bool `json:"upload"`
+	Move    bool `json:"move"`
+	Copy    bool `json:"copy"`
+	Delete  bool `json:"delete"`
+	Mkdir   bool `json:"mkdir"`
+	Presign bool `json:"presign"` // browser-direct uploads
+
+	// Search & versioning.
+	Search   bool `json:"search"`
+	Versions bool `json:"versions"`
+
+	// Thumbnail backends present in the runtime.
+	Thumbs ThumbCapabilities `json:"thumbs"`
+
+	// Plug-and-play external services.
+	External map[string]ExternalServiceState `json:"external"`
+
+	// Backend-effective limits.
+	MaxUploadSize int64 `json:"max_upload_size"`
+	ChunkSize     int64 `json:"chunk_size"`
+}
+
+// ThumbCapabilities indicates which media types can be thumbnailed.
+type ThumbCapabilities struct {
+	Image  bool `json:"image"`
+	Video  bool `json:"video"`
+	PDF    bool `json:"pdf"`
+	Office bool `json:"office"`
+}
+
+// ExternalServiceState describes a plug-and-play integration's runtime status.
+type ExternalServiceState struct {
+	Enabled   bool       `json:"enabled"`
+	URL       string     `json:"url,omitempty"`
+	State     string     `json:"state"` // "ok", "unreachable", "unauthorized", "disabled"
+	LastCheck *time.Time `json:"last_check,omitempty"`
+}

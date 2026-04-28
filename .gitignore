@@ -1,0 +1,76 @@
+# --- Build outputs ---
+/bin/
+/goreleaser-dist/
+/backend/dist/
+/backend/embed/web/
+/backend/embed/admin/
+/packages/*/dist/
+/web/dist/
+/demo/dist/
+
+# --- Go ---
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.txt
+coverage.html
+go.work
+go.work.sum
+
+# --- Node ---
+node_modules/
+.pnpm-store/
+.turbo/
+.cache/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.yarn/
+
+# --- IDE ---
+.vscode/*
+!.vscode/settings.json.example
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Env ---
+.env
+.env.local
+.env.*.local
+.env.production
+config.local.yaml
+
+# --- Local dev DB / data ---
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+*.db-shm
+*.db-wal
+/data/
+/storage-data/
+
+# --- OS ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- Misc ---
+*.pid
+*.seed
+*.tar.gz
+*.tgz
+.pnp.*

@@ -1,0 +1,168 @@
+package db
+
+import (
+	"context"
+	"time"
+
+	"gitlab.com/brftech/filemanager/backend/internal/model"
+)
+
+// Store is the interface implemented by every dialect-specific query
+// adapter. Methods are intentionally tiny domain operations — handlers
+// should never reach into *sql.DB directly.
+//
+// In a fully-generated setup this surface would be sqlc's Querier
+// interface; here we hand-roll it so the skeleton compiles without a
+// `sqlc generate` step.
+type Store interface {
+	// Lifecycle
+	Ping(ctx context.Context) error
+	Close() error
+
+	// Storages
+	CreateStorage(ctx context.Context, s *model.Storage) (*model.Storage, error)
+	GetStorage(ctx context.Context, id int64) (*model.Storage, error)
+	GetStorageByName(ctx context.Context, name string) (*model.Storage, error)
+	ListStorages(ctx context.Context) ([]*model.Storage, error)
+	ListEnabledStorages(ctx context.Context) ([]*model.Storage, error)
+	UpdateStorage(ctx context.Context, s *model.Storage) error
+	UpdateStorageSyncCursor(ctx context.Context, id int64, at time.Time, token string) error
+	DeleteStorage(ctx context.Context, id int64) error
+
+	// Nodes
+	CreateNode(ctx context.Context, n *model.Node) (*model.Node, error)
+	GetNode(ctx context.Context, id int64) (*model.Node, error)
+	GetNodeByPath(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
+	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
+	UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error
+	TouchNodeSeen(ctx context.Context, id int64) error
+	SoftDeleteNode(ctx context.Context, id int64) error
+	HardDeleteNode(ctx context.Context, id int64) error
+	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
+	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
+	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
+	SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error)
+
+	// Users
+	CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error)
+	GetUser(ctx context.Context, id int64) (*model.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*model.User, error)
+	ListUsers(ctx context.Context) ([]*model.User, error)
+	CountUsers(ctx context.Context) (int64, error)
+	UpdateUserPassword(ctx context.Context, id int64, hash string) error
+	UpdateUserEmail(ctx context.Context, id int64, email string) error
+	UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error
+	UpdateUserRole(ctx context.Context, id int64, role string) error
+	TouchLastLogin(ctx context.Context, id int64) error
+	DeleteUser(ctx context.Context, id int64) error
+
+	// TOTP / 2FA
+	SetTotpPendingSecret(ctx context.Context, id int64, secret string, recoveryCodes []string) error
+	ActivateTotp(ctx context.Context, id int64) error
+	ClearTotp(ctx context.Context, id int64) error
+
+	// Sessions
+	CreateSession(ctx context.Context, userID int64, token string, expiresAt time.Time, ip, ua string) (*model.Session, error)
+	GetSessionByToken(ctx context.Context, token string) (*model.Session, error)
+	DeleteSession(ctx context.Context, token string) error
+	DeleteSessionsForUser(ctx context.Context, userID int64, exceptToken string) error
+	CountActiveSessions(ctx context.Context) (int64, error)
+	DeleteExpiredSessions(ctx context.Context) error
+
+	// Shares
+	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)
+	GetShareByID(ctx context.Context, id int64) (*model.Share, error)
+	GetShareByToken(ctx context.Context, token string) (*model.Share, error)
+	ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Share, error)
+	ListAllShares(ctx context.Context, creatorID *int64, activeOnly bool, limit, offset int) ([]*ShareWithMeta, int64, error)
+	RevokeShare(ctx context.Context, id int64) error
+	IncrementShareDownload(ctx context.Context, id int64) error
+	DeleteShare(ctx context.Context, id int64) error
+	DeleteExpiredShares(ctx context.Context) error
+
+	// Chunked uploads
+	CreateChunkedUpload(ctx context.Context, u *model.ChunkedUpload) error
+	GetChunkedUpload(ctx context.Context, id string) (*model.ChunkedUpload, error)
+	UpdateChunkedUploadParts(ctx context.Context, id string, parts []model.UploadPart) error
+	DeleteChunkedUpload(ctx context.Context, id string) error
+	DeleteExpiredChunkedUploads(ctx context.Context) error
+
+	// Sync runs / conflicts
+	CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error)
+	FinishSyncRun(ctx context.Context, id int64, cursorAfter string, seen, added, updated, deleted int, status, errMsg string) error
+	GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error)
+	GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error)
+	ListSyncRuns(ctx context.Context, storageID int64, limit int) ([]*model.SyncRun, error)
+	ListSyncRunsAcrossAll(ctx context.Context, storageID int64, status string, limit, offset int) ([]*model.SyncRun, int64, error)
+	CreateSyncConflict(ctx context.Context, c *model.SyncConflict) error
+	ListUnresolvedConflicts(ctx context.Context) ([]*model.SyncConflict, error)
+	ListConflictsByStorage(ctx context.Context, storageID int64, limit int) ([]*model.SyncConflict, error)
+	CountSyncConflictsByRun(ctx context.Context, runID int64) (int64, error)
+	ResolveConflict(ctx context.Context, id int64, resolution string) error
+	CountQueueDepth(ctx context.Context) (int64, error)
+
+	// Audit
+	InsertAuditEntry(ctx context.Context, e *model.AuditEntry) error
+	ListAuditRecent(ctx context.Context, limit int) ([]*model.AuditEntry, error)
+	ListAuditFiltered(ctx context.Context, userID *int64, action string, from, to *time.Time, limit, offset int) ([]*AuditEntryWithUser, int64, error)
+
+	// Settings
+	GetSetting(ctx context.Context, key string) (string, error)
+	UpsertSetting(ctx context.Context, key, value string) error
+	ListSettings(ctx context.Context) (map[string]string, error)
+
+	// External services
+	UpsertExternalService(ctx context.Context, name string, enabled bool, url, secretEnc, optionsJSON string, lastCheck time.Time, lastState string) error
+	GetExternalService(ctx context.Context, name string) (*ExternalService, error)
+	ListExternalServices(ctx context.Context) ([]*ExternalService, error)
+	UpdateExternalServiceState(ctx context.Context, name string, lastCheck time.Time, state string) error
+
+	// Cross-storage analytics for the dashboard
+	SumNodesBytesByStorage(ctx context.Context, storageID int64) (int64, error)
+	CountNodesAddedSince(ctx context.Context, storageID int64, since time.Time) (int64, error)
+	CountNodesDeletedSince(ctx context.Context, storageID int64, since time.Time) (int64, error)
+	CountTotalShares(ctx context.Context) (int64, error)
+
+	// Thumbnails
+	GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error)
+	UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error
+	SetThumbnailState(ctx context.Context, nodeID int64, state, errMsg string) error
+
+	// Node versions
+	CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*model.NodeVersion, error)
+	ListNodeVersions(ctx context.Context, nodeID int64) ([]*model.NodeVersion, error)
+
+	// Sync conflicts (admin views)
+	ListSyncConflictsByRun(ctx context.Context, runID int64) ([]*model.SyncConflict, error)
+	ListSyncConflictsByStorage(ctx context.Context, storageID int64, limit int) ([]*model.SyncConflict, error)
+
+	// Search rebuild
+	AllNodesForIndex(ctx context.Context) ([]*model.Node, error)
+}
+
+// ExternalService is the DB row representation. Lives in the db package so
+// model can stay pure-domain.
+type ExternalService struct {
+	Name        string
+	Enabled     bool
+	URL         string
+	SecretEnc   string
+	OptionsJSON string
+	LastCheck   *time.Time
+	LastState   string
+}
+
+// ShareWithMeta is the admin-list row that joins shares + creator email +
+// node path so the admin UI doesn't have to issue N follow-up queries.
+type ShareWithMeta struct {
+	Share        *model.Share `json:"share"`
+	CreatorEmail string       `json:"creator_email,omitempty"`
+	NodePath     string       `json:"node_path,omitempty"`
+}
+
+// AuditEntryWithUser is an audit row joined with the user.email column
+// for nicer admin UI rendering.
+type AuditEntryWithUser struct {
+	Entry     *model.AuditEntry `json:"entry"`
+	UserEmail string            `json:"user_email,omitempty"`
+}

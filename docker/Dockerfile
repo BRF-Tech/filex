@@ -1,0 +1,103 @@
+# filex slim image (~40 MB)
+# - Pure Go binary (CGO=0, modernc.org/sqlite)
+# - No external thumbnail tools (image still works via Go GD; ffmpeg/ghostscript/libreoffice absent)
+# - Use Dockerfile.full if you need full thumbnail support
+#
+# Build (from repo root):
+#   docker build -t brftech/filex:slim -f docker/Dockerfile .
+#
+# Run:
+#   docker run -p 5212:5212 -v $(pwd)/data:/data brftech/filex:slim
+
+# ---------------------------------------------------------------------------
+# Stage 1: Build npm packages (filex-core, webcomponent, react) + admin UI
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-build
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /src
+
+# Copy lockfiles + workspace manifests first so Docker layer cache survives
+# source code edits when only deps haven't changed.
+COPY package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml* ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/webcomponent/package.json ./packages/webcomponent/
+COPY packages/react/package.json ./packages/react/
+COPY web/package.json ./web/
+
+# Install all workspace deps (core/webcomponent/react/web). Use --no-frozen-lockfile
+# in dev images that don't ship a lockfile yet; CI ships a lockfile so it's frozen.
+RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+
+# Copy sources after install for max cache hit.
+COPY packages/ ./packages/
+COPY web/ ./web/
+
+# Build npm packages first (web depends on them transitively for type imports
+# and the webcomponent dist gets embedded into the Go binary).
+RUN pnpm -r --filter='./packages/*' build
+RUN pnpm --filter='./web' build
+
+# ---------------------------------------------------------------------------
+# Stage 2: Stage embed assets in /tmp for the Go build to consume
+# ---------------------------------------------------------------------------
+FROM frontend-build AS embed-prep
+RUN mkdir -p /tmp/embed/admin /tmp/embed/web && \
+    cp -r /src/web/dist/. /tmp/embed/admin/ && \
+    cp -r /src/packages/webcomponent/dist/. /tmp/embed/web/
+
+# ---------------------------------------------------------------------------
+# Stage 3: Build the Go binary with embedded assets
+# ---------------------------------------------------------------------------
+FROM golang:1.23-alpine AS backend-build
+RUN apk --no-cache add git ca-certificates
+WORKDIR /src
+
+# Cache deps layer. We accept a missing go.sum (first-time build before
+# `go mod tidy` has been run locally) — `go mod download` will create one.
+COPY backend/go.mod ./
+COPY backend/go.sum* ./
+RUN go mod download || go mod tidy
+
+# Copy backend sources + drop in embed assets from the frontend stage.
+COPY backend/ ./
+COPY --from=embed-prep /tmp/embed/admin ./embed/admin
+COPY --from=embed-prep /tmp/embed/web   ./embed/web
+
+# `go mod tidy` here (not just in the deps layer) because the COPY above
+# overwrites any go.sum produced earlier when the source tree didn't ship
+# one. This guarantees a complete go.sum before `go build`.
+RUN go mod tidy
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -o /out/filex \
+    ./cmd/filex
+
+# ---------------------------------------------------------------------------
+# Stage 4: Slim runtime
+# ---------------------------------------------------------------------------
+FROM alpine:3.20
+
+# su-exec lets us drop privileges if the user mounts /data with a custom UID.
+RUN apk --no-cache add ca-certificates tzdata su-exec && \
+    addgroup -S filex && adduser -S -G filex filex
+
+COPY --from=backend-build /out/filex /usr/local/bin/filex
+
+EXPOSE 5212
+VOLUME ["/data"]
+
+ENV FILEX_DATA_DIR=/data \
+    FILEX_LISTEN=0.0.0.0:5212
+
+# Healthcheck — assumes /healthz is mounted unauthenticated by the server.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:5212/healthz || exit 1
+
+ENTRYPOINT ["/usr/local/bin/filex"]
+CMD ["serve"]

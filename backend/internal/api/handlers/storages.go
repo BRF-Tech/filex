@@ -1,0 +1,121 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+
+	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/model"
+	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
+)
+
+// Storages handles /api/admin/storages.
+type Storages struct {
+	Store  db.Store
+	Worker *syncpkg.Worker
+}
+
+// NewStorages constructs a Storages handler.
+func NewStorages(store db.Store, worker *syncpkg.Worker) *Storages {
+	return &Storages{Store: store, Worker: worker}
+}
+
+// List returns all configured storages.
+func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
+	out, err := h.Store.ListStorages(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// Create adds a new storage.
+func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
+	var st model.Storage
+	if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if st.Name == "" || st.Driver == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and driver required"})
+		return
+	}
+	if st.SyncMode == "" {
+		st.SyncMode = model.SyncModePoll
+	}
+	if st.SyncIntervalS == 0 {
+		st.SyncIntervalS = 900
+	}
+	created, err := h.Store.CreateStorage(r.Context(), &st)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if h.Worker != nil && created.Enabled {
+		_ = h.Worker.AddStorage(r.Context(), created)
+	}
+	writeJSON(w, http.StatusOK, created)
+}
+
+// Update modifies a storage row.
+func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	cur, err := h.Store.GetStorage(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err := json.NewDecoder(r.Body).Decode(cur); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	cur.ID = id
+	if err := h.Store.UpdateStorage(r.Context(), cur); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, cur)
+}
+
+// Delete removes a storage and its descendant nodes (cascade).
+func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if h.Worker != nil {
+		h.Worker.RemoveStorage(id)
+	}
+	if err := h.Store.DeleteStorage(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// TriggerSync forces an immediate sync run for a storage.
+func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if h.Worker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "worker offline"})
+		return
+	}
+	if err := h.Worker.Trigger(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}

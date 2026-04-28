@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>filex demo · React</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body, #root { margin:0; padding:0; height:100%; font-family: system-ui, -apple-system, sans-serif; }
+    #root { display: flex; flex-direction: column; }
+    header { padding: 16px 24px; background: linear-gradient(135deg,#f59e0b,#d97706); color: white; }
+    header h1 { margin:0; font-size:18px; font-weight:600; }
+    header p  { margin:4px 0 0; font-size:13px; opacity:.85; }
+    .bar { padding:8px 16px; background: rgba(0,0,0,.04); display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:13px; }
+    @media (prefers-color-scheme: dark) { .bar { background: rgba(255,255,255,.06); } }
+    .bar input { padding:4px 8px; border-radius:4px; border:1px solid rgba(0,0,0,.2); min-width:280px; }
+    .bar button { padding:4px 12px; cursor:pointer; }
+    main { flex: 1; min-height: 0; display: flex; }
+    main > * { flex: 1; min-height: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!--
+    React via ESM CDN + JSX via Babel standalone.
+    For a real app: pnpm add react react-dom @brftech/filex-react and bundle.
+    This page is just to demonstrate the API in a single-file way.
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.3.1",
+        "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+        "@brftech/filex-react": "https://esm.sh/@brftech/filex-react"
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-type="module" data-presets="env,react">
+    import React, { useState, useMemo, useCallback } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { FileManager } from '@brftech/filex-react';
+
+    function App() {
+      const [apiBase, setApiBase] = useState('http://localhost:5212');
+      const [token, setToken]     = useState('');
+      const [stamp, setStamp]     = useState(0);
+      const [status, setStatus]   = useState('idle');
+
+      const config = useMemo(() => ({
+        apiBase: apiBase.replace(/\/$/, ''),
+        auth: token ? { kind: 'bearer', token } : { kind: 'cookie' },
+        startPath: '/',
+        locale: 'auto',
+        theme: 'auto',
+        // include stamp so React unmounts/remounts on Apply
+        _v: stamp,
+      }), [apiBase, token, stamp]);
+
+      const onReady    = useCallback((e) => setStatus(`ready · v${e.capabilities.version}`), []);
+      const onError    = useCallback((e) => setStatus(`error: ${e.code} — ${e.message}`), []);
+      const onNavigate = useCallback(({ path }) => setStatus(`path: ${path}`), []);
+      const onShare    = useCallback(({ share }) => {
+        navigator.clipboard.writeText(share.url);
+        setStatus(`share copied: ${share.url}`);
+      }, []);
+
+      return (
+        <>
+          <header>
+            <h1>filex · React demo</h1>
+            <p>Mount <code>&lt;FileManager&gt;</code> from <code>@brftech/filex-react</code>. Lit/React adapter.</p>
+          </header>
+
+          <div className="bar">
+            <label>API base:
+              <input value={apiBase} onChange={(e) => setApiBase(e.target.value.trim())} />
+            </label>
+            <label>Bearer:
+              <input value={token} onChange={(e) => setToken(e.target.value.trim())} placeholder="(optional JWT)" />
+            </label>
+            <button onClick={() => { setStamp((n) => n + 1); setStatus('connecting...'); }}>Apply</button>
+            <span style={{ opacity: 0.7 }}>{status}</span>
+          </div>
+
+          <main>
+            <FileManager
+              key={stamp}
+              config={config}
+              onReady={onReady}
+              onError={onError}
+              onNavigate={onNavigate}
+              onShareCreated={onShare}
+            />
+          </main>
+        </>
+      );
+    }
+
+    createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

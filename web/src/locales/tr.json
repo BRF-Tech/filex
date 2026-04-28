@@ -1,0 +1,341 @@
+{
+  "app": {
+    "name": "filex",
+    "tagline": "Self-hosted dosya yöneticisi",
+    "admin": "Yönetim"
+  },
+  "common": {
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "delete": "Sil",
+    "edit": "Düzenle",
+    "create": "Oluştur",
+    "add": "Ekle",
+    "remove": "Kaldır",
+    "close": "Kapat",
+    "confirm": "Onayla",
+    "yes": "Evet",
+    "no": "Hayır",
+    "ok": "Tamam",
+    "back": "Geri",
+    "next": "İleri",
+    "previous": "Önceki",
+    "loading": "Yükleniyor…",
+    "loadingShort": "Yükleniyor",
+    "saving": "Kaydediliyor…",
+    "saved": "Kaydedildi",
+    "search": "Ara",
+    "filter": "Filtrele",
+    "reset": "Sıfırla",
+    "refresh": "Yenile",
+    "all": "Tümü",
+    "none": "Yok",
+    "name": "İsim",
+    "email": "E-posta",
+    "password": "Şifre",
+    "currentPassword": "Mevcut şifre",
+    "newPassword": "Yeni şifre",
+    "role": "Rol",
+    "status": "Durum",
+    "created": "Oluşturuldu",
+    "updated": "Güncellendi",
+    "actions": "İşlemler",
+    "test": "Test",
+    "testNow": "Şimdi test et",
+    "enabled": "Aktif",
+    "disabled": "Pasif",
+    "configured": "Yapılandırılmış",
+    "unconfigured": "Yapılandırılmamış",
+    "healthy": "Sağlıklı",
+    "unreachable": "Erişilemiyor",
+    "running": "Çalışıyor",
+    "ok": "Tamam",
+    "error": "Hata",
+    "pending": "Bekliyor",
+    "neverRan": "Hiç çalışmadı",
+    "copy": "Kopyala",
+    "copied": "Kopyalandı",
+    "show": "Göster",
+    "hide": "Gizle",
+    "yesDelete": "Evet, sil",
+    "syncNow": "Şimdi senkronize et",
+    "details": "Detay",
+    "openLink": "Aç",
+    "submit": "Gönder",
+    "required": "zorunlu",
+    "optional": "opsiyonel",
+    "more": "Daha fazla"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "storages": "Depolar",
+    "users": "Kullanıcılar",
+    "settings": "Ayarlar",
+    "external": "Dış servisler",
+    "authProviders": "Kimlik sağlayıcılar",
+    "audit": "Denetim kaydı",
+    "sync": "Senkron çalışmaları",
+    "shares": "Paylaşımlar",
+    "search": "Arama",
+    "about": "Hakkında",
+    "profile": "Profilim",
+    "logout": "Çıkış yap",
+    "language": "Dil",
+    "theme": "Tema",
+    "themeAuto": "Otomatik",
+    "themeLight": "Aydınlık",
+    "themeDark": "Karanlık"
+  },
+  "login": {
+    "title": "Oturum aç",
+    "subtitle": "filex yönetim hesabınla giriş yap",
+    "remember": "30 gün boyunca beni hatırla",
+    "submit": "Giriş yap",
+    "or": "veya",
+    "oidc": "Tek oturum (SSO) ile devam et",
+    "totpHint": "Authenticator uygulamandaki 6 haneli kodu gir",
+    "errInvalid": "E-posta veya şifre yanlış",
+    "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
+    "errGeneric": "Bir şeyler ters gitti. Tekrar dene."
+  },
+  "dashboard": {
+    "title": "Panel",
+    "subtitle": "filex sunucunun genel durumu",
+    "stats": {
+      "storages": "Depolar",
+      "users": "Kullanıcılar",
+      "files": "İndekslenmiş dosya",
+      "totalSize": "Toplam boyut",
+      "activeSyncs": "Aktif senkron",
+      "queueDepth": "Kuyruk derinliği"
+    },
+    "recentActivity": "Son aktivite",
+    "recentSyncs": "Son senkronlar",
+    "noStorages": "Henüz depo eklenmedi. Başlamak için bir tane ekle.",
+    "noStoragesCta": "Depo ekle",
+    "noActivity": "Henüz aktivite yok.",
+    "lastSync": "Son senkron",
+    "added": "Eklendi",
+    "deleted": "Silindi",
+    "updatedFiles": "Güncellendi"
+  },
+  "storages": {
+    "title": "Depolar",
+    "subtitle": "Üst düzey klasör olarak görünen mount noktaları",
+    "addNew": "Depo ekle",
+    "newTitle": "Yeni depo ekle",
+    "editTitle": "Depo düzenle",
+    "driverLabel": "Sürücü",
+    "driver": {
+      "local": "Yerel dosya sistemi",
+      "s3": "S3 / Hetzner / MinIO",
+      "sftp": "SFTP",
+      "webdav": "WebDAV"
+    },
+    "fields": {
+      "name": "Görünen isim",
+      "namePlaceholder": "Kişisel fotoğraflar",
+      "readOnly": "Salt okunur mount",
+      "path": "Dizin yolu",
+      "endpoint": "Endpoint",
+      "region": "Bölge",
+      "bucket": "Bucket",
+      "accessKey": "Access key",
+      "secretKey": "Secret key",
+      "pathStyle": "Path-style URL kullan (Hetzner, MinIO)",
+      "host": "Sunucu",
+      "port": "Port",
+      "user": "Kullanıcı",
+      "keyPath": "Özel anahtar yolu",
+      "basePath": "Temel yol",
+      "url": "Temel URL"
+    },
+    "actions": {
+      "test": "Bağlantıyı test et",
+      "testing": "Test ediliyor…",
+      "ok": "Bağlantı başarılı",
+      "fail": "Bağlantı başarısız",
+      "syncHistory": "Senkron geçmişi",
+      "drift": "Drift raporu"
+    },
+    "deleteConfirm": "\"{name}\" deposunu sil? Backend'deki dosyalar korunur, sadece filex indeksinden çıkarılır.",
+    "deletedOk": "Depo silindi",
+    "createdOk": "Depo oluşturuldu",
+    "updatedOk": "Depo güncellendi",
+    "syncStarted": "Senkron başladı"
+  },
+  "users": {
+    "title": "Kullanıcılar",
+    "subtitle": "Yerel hesaplar ve OIDC eşlemeleri",
+    "addNew": "Kullanıcı ekle",
+    "newTitle": "Kullanıcı ekle",
+    "editTitle": "Kullanıcı düzenle",
+    "fields": {
+      "displayName": "Görünen isim",
+      "oidcSubject": "OIDC subject ID",
+      "sendInvite": "Davet e-postası gönder"
+    },
+    "roles": {
+      "admin": "Yönetici",
+      "editor": "Düzenleyici",
+      "viewer": "İzleyici"
+    },
+    "deleteConfirm": "\"{email}\" kullanıcısını sil?",
+    "resetPasswordTitle": "Yeni şifre",
+    "resetPasswordSubtitle": "Şifreyi kopyala — bir daha gösterilmeyecek.",
+    "resetPasswordOk": "Şifre sıfırlandı",
+    "createdOk": "Kullanıcı oluşturuldu",
+    "updatedOk": "Kullanıcı güncellendi",
+    "deletedOk": "Kullanıcı silindi"
+  },
+  "profile": {
+    "title": "Profilim",
+    "subtitle": "Hesabına özel ayarlar",
+    "section": {
+      "account": "Hesap",
+      "security": "Güvenlik",
+      "preferences": "Tercihler"
+    },
+    "saved": "Profil kaydedildi",
+    "passwordChanged": "Şifre değiştirildi",
+    "totp": {
+      "title": "İki adımlı doğrulama",
+      "enabled": "Aktif",
+      "disabled": "Pasif",
+      "enable": "2FA'yı aç",
+      "disable": "2FA'yı kapat",
+      "code": "Doğrulama kodu",
+      "scanHint": "Bu QR kodu authenticator uygulamanla tara, sonra 6 haneli kodu gir."
+    },
+    "timezone": "Zaman dilimi",
+    "locale": "Dil"
+  },
+  "settings": {
+    "title": "Ayarlar",
+    "subtitle": "Sunucu geneli yapılandırma",
+    "siteName": "Site adı",
+    "publicUrl": "Public URL",
+    "publicUrlHelp": "Paylaşım linkleri ve e-posta şablonlarında kullanılır.",
+    "syncInterval": "Senkron aralığı (saniye)",
+    "syncIntervalHelp": "Worker'ın her depoyu kaç saniyede bir tarayacağı.",
+    "logLevel": "Log seviyesi",
+    "defaultLocale": "Varsayılan dil",
+    "defaultTimezone": "Varsayılan zaman dilimi",
+    "savedOk": "Ayarlar kaydedildi"
+  },
+  "external": {
+    "title": "Dış servisler",
+    "subtitle": "Opsiyonel editör ve render servisleri — sadece erişilebilirse mount edilir",
+    "fields": {
+      "url": "Servis URL",
+      "jwtSecret": "JWT secret",
+      "jwtSecretHint": "Boş bırakırsan mevcut secret korunur"
+    },
+    "states": {
+      "healthy": "Sağlıklı",
+      "configured-unreachable": "Yapılandırılmış ama erişilemiyor",
+      "disabled": "Pasif",
+      "unconfigured": "Yapılandırılmamış"
+    },
+    "savedOk": "Servis güncellendi",
+    "testOk": "Erişilebilir",
+    "testFail": "Sağlık kontrolü başarısız"
+  },
+  "authProviders": {
+    "title": "Kimlik sağlayıcılar",
+    "subtitle": "Kullanıcıların nasıl giriş yapacağını yapılandır",
+    "providers": {
+      "local": "Yerel (e-posta + şifre)",
+      "oidc": "OIDC (Keycloak, Auth0, Authentik…)",
+      "ldap": "LDAP / Active Directory",
+      "proxy-header": "Reverse-proxy header"
+    },
+    "savedOk": "Sağlayıcı güncellendi",
+    "testOk": "Sağlayıcı tamam",
+    "testFail": "Sağlayıcı kontrolü başarısız"
+  },
+  "audit": {
+    "title": "Denetim kaydı",
+    "subtitle": "Yönetim panelinden yapılan her değişiklik",
+    "fields": {
+      "user": "Kullanıcı",
+      "action": "İşlem",
+      "target": "Hedef",
+      "ip": "IP",
+      "from": "Başlangıç",
+      "to": "Bitiş"
+    },
+    "noResults": "Eşleşen olay yok"
+  },
+  "sync": {
+    "title": "Senkron çalışmaları",
+    "subtitle": "Her depo için ETag-diff bazlı periyodik tarama",
+    "fields": {
+      "storage": "Depo",
+      "started": "Başladı",
+      "finished": "Bitti",
+      "state": "Durum",
+      "scanned": "Tarandı",
+      "added": "Eklendi",
+      "updated": "Güncellendi",
+      "deleted": "Silindi",
+      "duration": "Süre"
+    },
+    "noResults": "Senkron kaydı yok"
+  },
+  "shares": {
+    "title": "Paylaşımlar",
+    "subtitle": "Kullanıcıların oluşturduğu public linkler",
+    "fields": {
+      "token": "Token",
+      "storage": "Depo",
+      "path": "Yol",
+      "expires": "Sona erer",
+      "downloads": "İndirme",
+      "creator": "Oluşturan",
+      "pin": "PIN"
+    },
+    "revokeConfirm": "Bu paylaşımı iptal et? Mevcut linkler çalışmaz olacak.",
+    "deleteConfirm": "Bu paylaşım kalıcı olarak silinsin mi?",
+    "revokedOk": "Paylaşım iptal edildi",
+    "deletedOk": "Paylaşım silindi",
+    "noResults": "Aktif paylaşım yok"
+  },
+  "search": {
+    "title": "Arama indeksi",
+    "subtitle": "Gömülü Bleve indeksini incele ve yeniden oluştur",
+    "stats": {
+      "documents": "İndekslenmiş döküman",
+      "size": "İndeks boyutu",
+      "lastBuilt": "Son derleme"
+    },
+    "rebuild": "İndeksi yeniden oluştur",
+    "rebuildHint": "Tüm depoları gezerek dosya metadata'sını yeniden indeksler. Milyon dosya başına birkaç dakika.",
+    "rebuildStarted": "Yeniden oluşturma başladı",
+    "queryPlaceholder": "Dosya ara…",
+    "noResults": "Eşleşme yok"
+  },
+  "about": {
+    "title": "Hakkında",
+    "subtitle": "Sürüm ve derleme bilgisi",
+    "version": "Sürüm",
+    "build": "Build",
+    "drivers": "Yüklü sürücüler",
+    "storage": "Depo",
+    "auth": "Kimlik doğrulama",
+    "db": "Veritabanı",
+    "thumbnails": "Thumbnail araçları",
+    "links": "Bağlantılar",
+    "documentation": "Belgeler",
+    "source": "Kaynak kod",
+    "license": "Lisans",
+    "donate": "Geliştirmeyi destekle"
+  },
+  "errors": {
+    "generic": "Bir şeyler ters gitti",
+    "network": "Ağ hatası — backend çalışıyor mu?",
+    "forbidden": "Bu işlem için yetkin yok",
+    "notFound": "Bulunamadı",
+    "validationFailed": "Lütfen işaretli alanları kontrol et"
+  }
+}

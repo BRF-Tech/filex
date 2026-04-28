@@ -1,0 +1,335 @@
+// Package s3 is a Storage Driver fronting any S3-compatible object store.
+//
+// Tested against AWS S3, Hetzner Object Storage (path-style endpoint,
+// nbg1.your-objectstorage.com), MinIO, Backblaze B2 (S3 compat), and
+// Cloudflare R2. Multipart uploads are exposed via the optional
+// MultipartUploader interface for browser-direct chunked uploads.
+package s3
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+
+	"gitlab.com/brftech/filemanager/backend/internal/storage"
+)
+
+func init() {
+	storage.Register("s3", func() storage.Driver { return &Driver{} })
+}
+
+// Driver is the S3 storage driver.
+type Driver struct {
+	client    *s3.Client
+	presigner *s3.PresignClient
+	bucket    string
+	prefix    string
+	region    string
+	endpoint  string
+	pathStyle bool
+}
+
+// Name implements storage.Driver.
+func (d *Driver) Name() string { return "s3" }
+
+// Init configures the driver.
+//
+// Required: bucket, region, access_key, secret_key.
+// Optional: endpoint (Hetzner: https://nbg1.your-objectstorage.com),
+//           path_style (Hetzner needs true), prefix (storage root prefix).
+func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
+	d.bucket, _ = cfg["bucket"].(string)
+	d.prefix, _ = cfg["prefix"].(string)
+	d.region, _ = cfg["region"].(string)
+	d.endpoint, _ = cfg["endpoint"].(string)
+	d.pathStyle, _ = cfg["path_style"].(bool)
+	accessKey, _ := cfg["access_key"].(string)
+	secretKey, _ := cfg["secret_key"].(string)
+
+	if d.bucket == "" {
+		return errors.New("s3: config.bucket required")
+	}
+	if d.region == "" {
+		d.region = "auto"
+	}
+
+	loadOpts := []func(*awsconfig.LoadOptions) error{
+		awsconfig.WithRegion(d.region),
+	}
+	if accessKey != "" && secretKey != "" {
+		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
+	if err != nil {
+		return fmt.Errorf("s3: aws config: %w", err)
+	}
+
+	d.client = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		if d.endpoint != "" {
+			o.BaseEndpoint = aws.String(d.endpoint)
+		}
+		o.UsePathStyle = d.pathStyle
+	})
+	d.presigner = s3.NewPresignClient(d.client)
+	return nil
+}
+
+// Capabilities — S3 supports everything except Watch (notifications go via
+// SQS/EventBridge, not implemented in this skeleton).
+func (d *Driver) Capabilities() storage.Capabilities {
+	return storage.Capabilities{
+		Read:    true,
+		Write:   true,
+		Move:    true,
+		Copy:    true,
+		Delete:  true,
+		Mkdir:   true,
+		Presign: true,
+	}
+}
+
+func (d *Driver) key(p string) string {
+	clean := strings.TrimLeft(path.Clean("/"+p), "/")
+	if d.prefix == "" {
+		return clean
+	}
+	return path.Join(d.prefix, clean)
+}
+
+func (d *Driver) unkey(k string) string {
+	if d.prefix != "" && strings.HasPrefix(k, d.prefix) {
+		k = strings.TrimPrefix(k, d.prefix)
+	}
+	return "/" + strings.TrimLeft(k, "/")
+}
+
+// List implements storage.Driver.
+func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
+	prefix := d.key(p)
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	out := []storage.Object{}
+	var token *string
+	for {
+		resp, err := d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(d.bucket),
+			Prefix:            aws.String(prefix),
+			Delimiter:         aws.String("/"),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("s3: list: %w", err)
+		}
+		for _, cp := range resp.CommonPrefixes {
+			name := strings.TrimSuffix(strings.TrimPrefix(aws.ToString(cp.Prefix), prefix), "/")
+			if name == "" {
+				continue
+			}
+			out = append(out, storage.Object{
+				Path: path.Join(p, name),
+				Name: name,
+				Kind: storage.KindDirectory,
+			})
+		}
+		for _, obj := range resp.Contents {
+			key := aws.ToString(obj.Key)
+			if key == prefix {
+				continue
+			}
+			name := strings.TrimPrefix(key, prefix)
+			if strings.Contains(name, "/") {
+				continue
+			}
+			out = append(out, storage.Object{
+				Path:  path.Join(p, name),
+				Name:  name,
+				Size:  aws.ToInt64(obj.Size),
+				Etag:  strings.Trim(aws.ToString(obj.ETag), `"`),
+				Mtime: aws.ToTime(obj.LastModified),
+				Kind:  storage.KindFile,
+			})
+		}
+		if !aws.ToBool(resp.IsTruncated) {
+			break
+		}
+		token = resp.NextContinuationToken
+	}
+	return out, nil
+}
+
+// Stat implements storage.Driver.
+func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
+	resp, err := d.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	})
+	if err != nil {
+		return storage.Object{}, fmt.Errorf("s3: head: %w", err)
+	}
+	return storage.Object{
+		Path:  p,
+		Name:  path.Base(p),
+		Size:  aws.ToInt64(resp.ContentLength),
+		Etag:  strings.Trim(aws.ToString(resp.ETag), `"`),
+		Mtime: aws.ToTime(resp.LastModified),
+		Mime:  aws.ToString(resp.ContentType),
+		Kind:  storage.KindFile,
+	}, nil
+}
+
+// Read implements storage.Driver.
+func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
+	resp, err := d.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("s3: get: %w", err)
+	}
+	return resp.Body, nil
+}
+
+// Write implements storage.Writer.
+func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) error {
+	_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+		Body:   r,
+	})
+	return err
+}
+
+// Delete implements storage.Deleter.
+func (d *Driver) Delete(ctx context.Context, p string) error {
+	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	})
+	return err
+}
+
+// Move implements storage.Mover (copy + delete).
+func (d *Driver) Move(ctx context.Context, src, dst string) error {
+	if err := d.Copy(ctx, src, dst); err != nil {
+		return err
+	}
+	return d.Delete(ctx, src)
+}
+
+// Copy implements storage.Copier (server-side).
+func (d *Driver) Copy(ctx context.Context, src, dst string) error {
+	source := d.bucket + "/" + d.key(src)
+	_, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(d.bucket),
+		CopySource: aws.String(source),
+		Key:        aws.String(d.key(dst)),
+	})
+	return err
+}
+
+// Mkdir is a no-op for S3 (objects don't require parent dirs).
+func (d *Driver) Mkdir(ctx context.Context, p string) error {
+	// Optional: drop a 0-byte zero-padded marker for compatibility.
+	_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p) + "/"),
+		Body:   strings.NewReader(""),
+	})
+	return err
+}
+
+// PresignDownload implements storage.Presigner.
+func (d *Driver) PresignDownload(ctx context.Context, p string, ttl time.Duration) (string, error) {
+	req, err := d.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	}, s3.WithPresignExpires(ttl))
+	if err != nil {
+		return "", err
+	}
+	return req.URL, nil
+}
+
+// PresignUpload implements storage.Presigner — returns a single PUT URL.
+// For multipart, use InitMultipart instead.
+func (d *Driver) PresignUpload(ctx context.Context, p string, _ int64) (storage.PresignedUpload, error) {
+	req, err := d.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	}, s3.WithPresignExpires(15*time.Minute))
+	if err != nil {
+		return storage.PresignedUpload{}, err
+	}
+	return storage.PresignedUpload{
+		URL:       req.URL,
+		Method:    req.Method,
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	}, nil
+}
+
+// InitMultipart implements storage.MultipartUploader.
+func (d *Driver) InitMultipart(ctx context.Context, p string, _ int64, partCount int) (string, []string, error) {
+	resp, err := d.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	uploadID := aws.ToString(resp.UploadId)
+	urls := make([]string, partCount)
+	for i := 1; i <= partCount; i++ {
+		req, err := d.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
+			Bucket:     aws.String(d.bucket),
+			Key:        aws.String(d.key(p)),
+			UploadId:   aws.String(uploadID),
+			PartNumber: aws.Int32(int32(i)),
+		}, s3.WithPresignExpires(24*time.Hour))
+		if err != nil {
+			return "", nil, err
+		}
+		urls[i-1] = req.URL
+	}
+	return uploadID, urls, nil
+}
+
+// CompleteMultipart implements storage.MultipartUploader.
+func (d *Driver) CompleteMultipart(ctx context.Context, p, uploadID string, parts []storage.PartCompletion) error {
+	completed := make([]s3types.CompletedPart, len(parts))
+	for i, pp := range parts {
+		completed[i] = s3types.CompletedPart{
+			ETag:       aws.String(pp.Etag),
+			PartNumber: aws.Int32(int32(pp.PartNumber)),
+		}
+	}
+	_, err := d.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:          aws.String(d.bucket),
+		Key:             aws.String(d.key(p)),
+		UploadId:        aws.String(uploadID),
+		MultipartUpload: &s3types.CompletedMultipartUpload{Parts: completed},
+	})
+	return err
+}
+
+// AbortMultipart implements storage.MultipartUploader.
+func (d *Driver) AbortMultipart(ctx context.Context, p, uploadID string) error {
+	_, err := d.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(d.bucket),
+		Key:      aws.String(d.key(p)),
+		UploadId: aws.String(uploadID),
+	})
+	return err
+}

@@ -1,0 +1,1148 @@
+// Package postgres is the PostgreSQL DB driver.
+//
+// Uses jackc/pgx/v5 via the stdlib database/sql interface. Most query
+// implementations mirror the SQLite Store but adapted to use $N placeholders
+// and JSONB column types.
+//
+// To keep the skeleton compact, this file embeds the pgx-flavoured Store
+// methods only as forwarding shells — the actual SQL bodies live inline
+// here and are functionally identical to the SQLite version with the
+// dialect-specific tweaks. Any TODO marker indicates a path that needs the
+// full pg-specific tuning before going to production.
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/model"
+
+	postgres_migrations "gitlab.com/brftech/filemanager/backend/db/migrations/postgres"
+)
+
+func init() {
+	db.Register("postgres", func() db.Driver { return &Driver{} })
+}
+
+// Driver implements db.Driver for Postgres.
+type Driver struct{}
+
+// Name implements db.Driver.
+func (Driver) Name() string { return "postgres" }
+
+// Dialect for goose.
+func (Driver) Dialect() string { return "postgres" }
+
+// MigrationsFS returns the embedded Postgres migrations.
+func (Driver) MigrationsFS() embed.FS { return postgres_migrations.FS }
+
+// Open returns a configured *sql.DB. DSN follows pgx semantics, e.g.
+// `postgres://user:pass@host:5432/dbname?sslmode=require`.
+func (Driver) Open(_ context.Context, dsn string) (*sql.DB, error) {
+	if dsn == "" {
+		return nil, errors.New("postgres: empty DSN")
+	}
+	conn, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: open: %w", err)
+	}
+	conn.SetMaxOpenConns(20)
+	conn.SetMaxIdleConns(4)
+	conn.SetConnMaxIdleTime(5 * time.Minute)
+	return conn, nil
+}
+
+// NewStore returns a Store backed by the given *sql.DB.
+func (Driver) NewStore(sqlDB *sql.DB) db.Store {
+	return &Store{db: sqlDB}
+}
+
+// Store implements db.Store atop Postgres.
+//
+// NOTE: This is a stub for the parts of the surface that have non-trivial
+// dialect-specific quirks. The methods that already work cleanly with
+// $N substitution are filled in; the rest delegate to TODOs that callers
+// will recognize.
+type Store struct {
+	db *sql.DB
+}
+
+func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+func (s *Store) Close() error                   { return s.db.Close() }
+
+// ─────────────────── Storages ───────────────────
+
+func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.Storage, error) {
+	cfg := st.ConfigJSON
+	if len(cfg) == 0 {
+		cfg = []byte("{}")
+	}
+	row := s.db.QueryRowContext(ctx,
+		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only)
+		 VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8) RETURNING id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, st.Enabled, st.ReadOnly)
+	return scanStorage(row)
+}
+
+func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages WHERE id=$1`, id)
+	return scanStorage(row)
+}
+
+func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages WHERE name=$1`, name)
+	return scanStorage(row)
+}
+
+func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Storage
+	for rows.Next() {
+		st, err := scanStorage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages WHERE enabled=true ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Storage
+	for rows.Next() {
+		st, err := scanStorage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
+	cfg := st.ConfigJSON
+	if len(cfg) == 0 {
+		cfg = []byte("{}")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE storages SET name=$1, driver=$2, mount_path=$3, config_json=$4::jsonb, sync_mode=$5, sync_interval_s=$6, enabled=$7, read_only=$8 WHERE id=$9`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, st.Enabled, st.ReadOnly, st.ID)
+	return err
+}
+
+func (s *Store) UpdateStorageSyncCursor(ctx context.Context, id int64, at time.Time, token string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE storages SET last_sync_at=$1, last_sync_token=$2 WHERE id=$3`, at, token, id)
+	return err
+}
+
+func (s *Store) DeleteStorage(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM storages WHERE id=$1`, id)
+	return err
+}
+
+// ─────────────────── Nodes (key paths only) ───────────────────
+
+func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, error) {
+	row := s.db.QueryRowContext(ctx,
+		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		 RETURNING `+nodeColumns(),
+		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState)
+	return scanNode(row)
+}
+
+func (s *Store) GetNode(ctx context.Context, id int64) (*model.Node, error) {
+	return scanNode(s.db.QueryRowContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE id=$1`, id))
+}
+
+func (s *Store) GetNodeByPath(ctx context.Context, storageID int64, hash string) (*model.Node, error) {
+	return scanNode(s.db.QueryRowContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE storage_id=$1 AND path_hash=$2 AND deleted_at IS NULL`, storageID, hash))
+}
+
+func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error) {
+	q := `SELECT ` + nodeColumns() + ` FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL AND parent_id `
+	args := []any{storageID}
+	if parentID == nil {
+		q += `IS NULL`
+	} else {
+		q += `=$2`
+		args = append(args, *parentID)
+	}
+	q += ` ORDER BY type DESC, name`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET size=$1, mime=$2, etag=$3, backend_mtime=$4, seen_at=NOW(), updated_at=NOW() WHERE id=$5`, size, mime, etag, mtime, id)
+	return err
+}
+
+func (s *Store) TouchNodeSeen(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET seen_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) HardDeleteNode(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM nodes WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) MoveNode(ctx context.Context, id int64, parentID *int64, name, path, hash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET parent_id=$1, name=$2, path=$3, path_hash=$4, updated_at=NOW() WHERE id=$5`, parentID, name, path, hash, id)
+	return err
+}
+
+func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE storage_id=$1 AND seen_at < $2 AND deleted_at IS NULL`, storageID, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`, storageID).Scan(&n)
+	return n, err
+}
+
+func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE storage_id=$1 AND name ILIKE $2 AND deleted_at IS NULL ORDER BY name LIMIT $3`, storageID, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// ─────────────────── Users / sessions / shares / chunks / sync / audit / settings ───────────────────
+//
+// To keep this file readable, the methods below mirror the SQLite Store
+// 1:1 with $N placeholders and NOW()/CURRENT_TIMESTAMP swaps. They are
+// intentionally lightweight — no fancy Postgres-specific optimization yet.
+
+func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		`INSERT INTO users (email, password_hash, role, locale, timezone) VALUES ($1,$2,$3,$4,$5)
+		 RETURNING id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at`,
+		email, hash, role, locale, tz)
+	return scanUser(row)
+}
+
+func (s *Store) GetUser(ctx context.Context, id int64) (*model.User, error) {
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at FROM users WHERE id=$1`, id))
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at FROM users WHERE email=$1`, email))
+}
+
+func (s *Store) ListUsers(ctx context.Context) ([]*model.User, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, id int64, hash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=$1, updated_at=NOW() WHERE id=$2`, hash, id)
+	return err
+}
+
+func (s *Store) UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET locale=$1, timezone=$2, updated_at=NOW() WHERE id=$3`, locale, tz, id)
+	return err
+}
+
+func (s *Store) UpdateUserRole(ctx context.Context, id int64, role string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET role=$1, updated_at=NOW() WHERE id=$2`, role, id)
+	return err
+}
+
+func (s *Store) TouchLastLogin(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET last_login_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) DeleteUser(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) CreateSession(ctx context.Context, userID int64, token string, expiresAt time.Time, ip, ua string) (*model.Session, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO sessions (user_id, token, expires_at, ip, user_agent) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+		userID, token, expiresAt, ip, ua).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return &model.Session{ID: id, UserID: userID, Token: token, ExpiresAt: expiresAt, IP: ip, UserAgent: ua, CreatedAt: time.Now()}, nil
+}
+
+func (s *Store) GetSessionByToken(ctx context.Context, token string) (*model.Session, error) {
+	out := &model.Session{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, token, expires_at, COALESCE(ip,''), COALESCE(user_agent,''), created_at FROM sessions WHERE token=$1 AND expires_at > NOW()`,
+		token).Scan(&out.ID, &out.UserID, &out.Token, &out.ExpiresAt, &out.IP, &out.UserAgent, &out.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) DeleteSession(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token=$1`, token)
+	return err
+}
+
+func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= NOW()`)
+	return err
+}
+
+func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO shares (node_id, token, pin_hash, expires_at, max_downloads, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		sh.NodeID, sh.Token, sh.PinHash, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	sh.ID = id
+	sh.CreatedAt = time.Now()
+	sh.HasPin = sh.PinHash != ""
+	return sh, nil
+}
+
+func (s *Store) GetShareByToken(ctx context.Context, token string) (*model.Share, error) {
+	return scanShare(s.db.QueryRowContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at FROM shares WHERE token=$1`, token))
+}
+
+func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Share, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at FROM shares WHERE node_id=$1 ORDER BY created_at DESC`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Share
+	for rows.Next() {
+		sh, err := scanShare(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sh)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) IncrementShareDownload(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1 WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) DeleteShare(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM shares WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) DeleteExpiredShares(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM shares WHERE expires_at IS NOT NULL AND expires_at < NOW()`)
+	return err
+}
+
+func (s *Store) CreateChunkedUpload(ctx context.Context, u *model.ChunkedUpload) error {
+	parts, _ := json.Marshal(u.Parts)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO chunked_uploads (id, storage_id, storage_key, upload_id, total_size, parts_json, expires_at) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`,
+		u.ID, u.StorageID, u.StorageKey, u.UploadID, u.TotalSize, string(parts), u.ExpiresAt)
+	return err
+}
+
+func (s *Store) GetChunkedUpload(ctx context.Context, id string) (*model.ChunkedUpload, error) {
+	out := &model.ChunkedUpload{}
+	var partsJSON string
+	err := s.db.QueryRowContext(ctx, `SELECT id, storage_id, storage_key, upload_id, total_size, parts_json::text, expires_at FROM chunked_uploads WHERE id=$1`, id).
+		Scan(&out.ID, &out.StorageID, &out.StorageKey, &out.UploadID, &out.TotalSize, &partsJSON, &out.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(partsJSON), &out.Parts)
+	return out, nil
+}
+
+func (s *Store) UpdateChunkedUploadParts(ctx context.Context, id string, parts []model.UploadPart) error {
+	pj, _ := json.Marshal(parts)
+	_, err := s.db.ExecContext(ctx, `UPDATE chunked_uploads SET parts_json=$1::jsonb WHERE id=$2`, string(pj), id)
+	return err
+}
+
+func (s *Store) DeleteChunkedUpload(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM chunked_uploads WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) DeleteExpiredChunkedUploads(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM chunked_uploads WHERE expires_at < NOW()`)
+	return err
+}
+
+func (s *Store) CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO sync_runs (storage_id, cursor_before, status) VALUES ($1,$2,'running') RETURNING id`, storageID, cursorBefore).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return &model.SyncRun{ID: id, StorageID: storageID, StartedAt: time.Now(), CursorBefore: cursorBefore, Status: "running"}, nil
+}
+
+func (s *Store) FinishSyncRun(ctx context.Context, id int64, cursorAfter string, seen, added, updated, deleted int, status, errMsg string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sync_runs SET finished_at=NOW(), cursor_after=$1, seen_count=$2, added=$3, updated=$4, deleted=$5, status=$6, error=$7 WHERE id=$8`,
+		cursorAfter, seen, added, updated, deleted, status, errMsg, id)
+	return err
+}
+
+func (s *Store) GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error) {
+	return scanSyncRun(s.db.QueryRowContext(ctx, `SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'') FROM sync_runs WHERE storage_id=$1 ORDER BY started_at DESC LIMIT 1`, storageID))
+}
+
+func (s *Store) ListSyncRuns(ctx context.Context, storageID int64, limit int) ([]*model.SyncRun, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'') FROM sync_runs WHERE storage_id=$1 ORDER BY started_at DESC LIMIT $2`, storageID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.SyncRun
+	for rows.Next() {
+		sr, err := scanSyncRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sr)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateSyncConflict(ctx context.Context, c *model.SyncConflict) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO sync_conflicts (node_id, storage_id, storage_key, db_etag, backend_etag, db_mtime, backend_mtime) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		c.NodeID, c.StorageID, c.StorageKey, c.DBEtag, c.BackendEtag, c.DBMtime, c.BackendMtime)
+	return err
+}
+
+func (s *Store) ListUnresolvedConflicts(ctx context.Context) ([]*model.SyncConflict, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, node_id, storage_id, COALESCE(storage_key,''), COALESCE(db_etag,''), COALESCE(backend_etag,''), db_mtime, backend_mtime, detected_at, resolved_at, COALESCE(resolution,'') FROM sync_conflicts WHERE resolved_at IS NULL ORDER BY detected_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.SyncConflict
+	for rows.Next() {
+		c := &model.SyncConflict{}
+		if err := rows.Scan(&c.ID, &c.NodeID, &c.StorageID, &c.StorageKey, &c.DBEtag, &c.BackendEtag, &c.DBMtime, &c.BackendMtime, &c.DetectedAt, &c.ResolvedAt, &c.Resolution); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ResolveConflict(ctx context.Context, id int64, resolution string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE sync_conflicts SET resolved_at=NOW(), resolution=$1 WHERE id=$2`, resolution, id)
+	return err
+}
+
+func (s *Store) InsertAuditEntry(ctx context.Context, e *model.AuditEntry) error {
+	mj, _ := json.Marshal(e.Metadata)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO audit_log (user_id, action, target_type, target_id, metadata_json, ip) VALUES ($1,$2,$3,$4,$5::jsonb,$6)`,
+		e.UserID, e.Action, e.TargetType, e.TargetID, string(mj), e.IP)
+	return err
+}
+
+func (s *Store) ListAuditRecent(ctx context.Context, limit int) ([]*model.AuditEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, action, COALESCE(target_type,''), COALESCE(target_id,''), metadata_json::text, COALESCE(ip,''), created_at FROM audit_log ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.AuditEntry
+	for rows.Next() {
+		e := &model.AuditEntry{}
+		var meta string
+		if err := rows.Scan(&e.ID, &e.UserID, &e.Action, &e.TargetType, &e.TargetID, &meta, &e.IP, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(meta), &e.Metadata)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(value,'') FROM settings WHERE key=$1`, key).Scan(&v)
+	return v, err
+}
+
+func (s *Store) UpsertSetting(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO settings (key, value, updated_at) VALUES ($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=NOW()`,
+		key, value)
+	return err
+}
+
+func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, COALESCE(value,'') FROM settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpsertExternalService(ctx context.Context, name string, enabled bool, urlS, secretEnc, optionsJSON string, lastCheck time.Time, lastState string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO external_services (name, enabled, url, secret_enc, options_json, last_check, last_state) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
+		 ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled, url=excluded.url, secret_enc=excluded.secret_enc, options_json=excluded.options_json, last_check=excluded.last_check, last_state=excluded.last_state`,
+		name, enabled, urlS, secretEnc, optionsJSON, lastCheck, lastState)
+	return err
+}
+
+func (s *Store) GetExternalService(ctx context.Context, name string) (*db.ExternalService, error) {
+	es := &db.ExternalService{}
+	err := s.db.QueryRowContext(ctx,
+		`SELECT name, enabled, COALESCE(url,''), COALESCE(secret_enc,''), options_json::text, last_check, COALESCE(last_state,'') FROM external_services WHERE name=$1`, name).
+		Scan(&es.Name, &es.Enabled, &es.URL, &es.SecretEnc, &es.OptionsJSON, &es.LastCheck, &es.LastState)
+	if err != nil {
+		return nil, err
+	}
+	return es, nil
+}
+
+func (s *Store) ListExternalServices(ctx context.Context) ([]*db.ExternalService, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT name, enabled, COALESCE(url,''), COALESCE(secret_enc,''), options_json::text, last_check, COALESCE(last_state,'') FROM external_services ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*db.ExternalService
+	for rows.Next() {
+		es := &db.ExternalService{}
+		if err := rows.Scan(&es.Name, &es.Enabled, &es.URL, &es.SecretEnc, &es.OptionsJSON, &es.LastCheck, &es.LastState); err != nil {
+			return nil, err
+		}
+		out = append(out, es)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateExternalServiceState(ctx context.Context, name string, lastCheck time.Time, state string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE external_services SET last_check=$1, last_state=$2 WHERE name=$3`, lastCheck, state, name)
+	return err
+}
+
+func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error) {
+	t := &model.Thumbnail{}
+	err := s.db.QueryRowContext(ctx, `SELECT node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at FROM thumbnails WHERE node_id=$1`, nodeID).
+		Scan(&t.NodeID, &t.State, &t.StorageKey, &t.Width, &t.Height, &t.Error, &t.GeneratedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (s *Store) UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO thumbnails (node_id, state, storage_key, width, height, error, generated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
+		 ON CONFLICT(node_id) DO UPDATE SET state=excluded.state, storage_key=excluded.storage_key, width=excluded.width, height=excluded.height, error=excluded.error, generated_at=excluded.generated_at`,
+		t.NodeID, t.State, t.StorageKey, t.Width, t.Height, t.Error, t.GeneratedAt)
+	return err
+}
+
+func (s *Store) SetThumbnailState(ctx context.Context, nodeID int64, state, errMsg string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE thumbnails SET state=$1, error=$2 WHERE node_id=$3`, state, errMsg, nodeID)
+	return err
+}
+
+func (s *Store) CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*model.NodeVersion, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO node_versions (node_id, version_n, storage_key, size, etag) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+		v.NodeID, v.VersionN, v.StorageKey, v.Size, v.Etag).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	v.ID = id
+	v.CreatedAt = time.Now()
+	return v, nil
+}
+
+func (s *Store) ListNodeVersions(ctx context.Context, nodeID int64) ([]*model.NodeVersion, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at FROM node_versions WHERE node_id=$1 ORDER BY version_n DESC`, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.NodeVersion
+	for rows.Next() {
+		v := &model.NodeVersion{}
+		if err := rows.Scan(&v.ID, &v.NodeID, &v.VersionN, &v.StorageKey, &v.Size, &v.Etag, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// ─────────────────── helpers ───────────────────
+
+type rowScanner interface {
+	Scan(dst ...any) error
+}
+
+func nodeColumns() string {
+	return `id, storage_id, parent_id, name, path, path_hash, COALESCE(storage_key,''), type, size, COALESCE(mime,''), COALESCE(etag,''), backend_mtime, db_mtime, sync_state, seen_at, deleted_at, created_at, updated_at`
+}
+
+func scanNode(r rowScanner) (*model.Node, error) {
+	n := &model.Node{}
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
+func scanStorage(r rowScanner) (*model.Storage, error) {
+	st := &model.Storage{}
+	var cfg string
+	err := r.Scan(&st.ID, &st.Name, &st.Driver, &st.MountPath, &cfg, &st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken, &st.Enabled, &st.ReadOnly, &st.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	st.ConfigJSON = []byte(cfg)
+	return st, nil
+}
+
+func scanUser(r rowScanner) (*model.User, error) {
+	u := &model.User{}
+	if err := r.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func scanShare(r rowScanner) (*model.Share, error) {
+	sh := &model.Share{}
+	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt); err != nil {
+		return nil, err
+	}
+	sh.HasPin = sh.PinHash != ""
+	return sh, nil
+}
+
+func scanSyncRun(r rowScanner) (*model.SyncRun, error) {
+	sr := &model.SyncRun{}
+	if err := r.Scan(&sr.ID, &sr.StorageID, &sr.StartedAt, &sr.FinishedAt, &sr.CursorBefore, &sr.CursorAfter, &sr.SeenCount, &sr.Added, &sr.Updated, &sr.Deleted, &sr.Status, &sr.Error); err != nil {
+		return nil, err
+	}
+	return sr, nil
+}
+
+// ─────────────────── Sync conflicts (admin) ───────────────────
+
+const conflictColumnsPg = `id, node_id, storage_id, storage_key, db_etag, backend_etag, db_mtime, backend_mtime, detected_at, resolved_at, resolution`
+
+// ListSyncConflictsByRun returns conflicts attributed to a specific sync_run.
+func (s *Store) ListSyncConflictsByRun(ctx context.Context, runID int64) ([]*model.SyncConflict, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+conflictColumnsPg+`
+		FROM sync_conflicts c
+		WHERE c.detected_at >= COALESCE((SELECT started_at FROM sync_runs WHERE id=$1), c.detected_at)
+		  AND c.detected_at <= COALESCE((SELECT finished_at FROM sync_runs WHERE id=$1), NOW())
+		ORDER BY c.detected_at DESC
+		LIMIT 500`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanConflictsPg(rows)
+}
+
+// ListSyncConflictsByStorage returns recent unresolved conflicts.
+func (s *Store) ListSyncConflictsByStorage(ctx context.Context, storageID int64, limit int) ([]*model.SyncConflict, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+conflictColumnsPg+`
+		FROM sync_conflicts
+		WHERE storage_id=$1 AND resolved_at IS NULL
+		ORDER BY detected_at DESC
+		LIMIT $2`, storageID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanConflictsPg(rows)
+}
+
+func scanConflictsPg(rows *sql.Rows) ([]*model.SyncConflict, error) {
+	out := []*model.SyncConflict{}
+	for rows.Next() {
+		c := &model.SyncConflict{}
+		if err := rows.Scan(&c.ID, &c.NodeID, &c.StorageID, &c.StorageKey, &c.DBEtag, &c.BackendEtag, &c.DBMtime, &c.BackendMtime, &c.DetectedAt, &c.ResolvedAt, &c.Resolution); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ─────────────────── Search rebuild support ───────────────────
+
+// AllNodesForIndex returns every non-deleted node for the search rebuild job.
+func (s *Store) AllNodesForIndex(ctx context.Context) ([]*model.Node, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+nodeColumns()+`
+		FROM nodes
+		WHERE deleted_at IS NULL
+		ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.Node{}
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// ─────────────────── TOTP / 2FA ───────────────────
+
+// SetTotpPendingSecret stores a freshly-enrolled TOTP secret + recovery
+// codes prior to the user verifying with a one-time code.
+func (s *Store) SetTotpPendingSecret(ctx context.Context, id int64, secret string, recoveryCodes []string) error {
+	codes, _ := json.Marshal(recoveryCodes)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET totp_pending_secret=$1, totp_recovery_codes_json=$2::jsonb, updated_at=NOW() WHERE id=$3`,
+		secret, string(codes), id)
+	return err
+}
+
+// ActivateTotp moves the pending secret into totp_secret and flips totp_enabled.
+func (s *Store) ActivateTotp(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET totp_secret=COALESCE(totp_pending_secret,''), totp_pending_secret=NULL, totp_enabled=TRUE, updated_at=NOW() WHERE id=$1`,
+		id)
+	return err
+}
+
+// ClearTotp wipes all 2FA state.
+func (s *Store) ClearTotp(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET totp_secret=NULL, totp_pending_secret=NULL, totp_enabled=FALSE, totp_recovery_codes_json='[]'::jsonb, updated_at=NOW() WHERE id=$1`,
+		id)
+	return err
+}
+
+// ─────────────────── Counters needed by dashboard / metrics ───────────────────
+
+// CountActiveSessions counts non-expired sessions.
+func (s *Store) CountActiveSessions(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sessions WHERE expires_at > NOW()`).Scan(&n)
+	return n, err
+}
+
+// CountNodesAddedSince counts non-deleted nodes created in the given window.
+func (s *Store) CountNodesAddedSince(ctx context.Context, storageID int64, since time.Time) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND created_at >= $2 AND deleted_at IS NULL`,
+		storageID, since).Scan(&n)
+	return n, err
+}
+
+// CountNodesDeletedSince counts soft-deleted nodes in the given window.
+func (s *Store) CountNodesDeletedSince(ctx context.Context, storageID int64, since time.Time) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NOT NULL AND deleted_at >= $2`,
+		storageID, since).Scan(&n)
+	return n, err
+}
+
+// CountTotalShares returns the number of currently-active shares.
+func (s *Store) CountTotalShares(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM shares WHERE expires_at IS NULL OR expires_at > NOW()`).Scan(&n)
+	return n, err
+}
+
+// CountQueueDepth returns the number of running sync_runs.
+func (s *Store) CountQueueDepth(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sync_runs WHERE status='running'`).Scan(&n)
+	return n, err
+}
+
+// ListAuditFiltered returns paginated audit entries with user_email join + filters.
+func (s *Store) ListAuditFiltered(ctx context.Context, userID *int64, action string, from, to *time.Time, limit, offset int) ([]*db.AuditEntryWithUser, int64, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	cond := "1=1"
+	args := []any{}
+	idx := 1
+	if userID != nil {
+		cond += fmt.Sprintf(" AND a.user_id = $%d", idx)
+		args = append(args, *userID)
+		idx++
+	}
+	if action != "" {
+		cond += fmt.Sprintf(" AND a.action = $%d", idx)
+		args = append(args, action)
+		idx++
+	}
+	if from != nil {
+		cond += fmt.Sprintf(" AND a.created_at >= $%d", idx)
+		args = append(args, *from)
+		idx++
+	}
+	if to != nil {
+		cond += fmt.Sprintf(" AND a.created_at <= $%d", idx)
+		args = append(args, *to)
+		idx++
+	}
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log a WHERE `+cond, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	limPlaceholder := fmt.Sprintf("$%d", idx)
+	idx++
+	offPlaceholder := fmt.Sprintf("$%d", idx)
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT a.id, a.user_id, COALESCE(u.email,''), a.action, COALESCE(a.target_type,''),
+		       COALESCE(a.target_id,''), COALESCE(a.metadata_json::text,''), COALESCE(a.ip,''), a.created_at
+		FROM audit_log a
+		LEFT JOIN users u ON u.id = a.user_id
+		WHERE `+cond+`
+		ORDER BY a.id DESC LIMIT `+limPlaceholder+` OFFSET `+offPlaceholder, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := []*db.AuditEntryWithUser{}
+	for rows.Next() {
+		entry := &model.AuditEntry{}
+		var metaJSON string
+		row := &db.AuditEntryWithUser{Entry: entry}
+		if err := rows.Scan(&entry.ID, &entry.UserID, &row.UserEmail, &entry.Action, &entry.TargetType, &entry.TargetID, &metaJSON, &entry.IP, &entry.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		if metaJSON != "" {
+			_ = json.Unmarshal([]byte(metaJSON), &entry.Metadata)
+		}
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
+}
+
+// SumNodesBytesByStorage returns the total size in bytes of non-deleted files for one storage.
+func (s *Store) SumNodesBytesByStorage(ctx context.Context, storageID int64) (int64, error) {
+	var total sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(size),0) FROM nodes WHERE storage_id=$1 AND type=1 AND deleted_at IS NULL`,
+		storageID).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	return total.Int64, nil
+}
+
+// CountSyncConflictsByRun counts conflicts within a run's time window.
+func (s *Store) CountSyncConflictsByRun(ctx context.Context, runID int64) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM sync_conflicts c
+		WHERE c.detected_at >= COALESCE((SELECT started_at FROM sync_runs WHERE id=$1), c.detected_at)
+		  AND c.detected_at <= COALESCE((SELECT finished_at FROM sync_runs WHERE id=$1), NOW())`,
+		runID).Scan(&n)
+	return n, err
+}
+
+// ─────────────────── Missing methods carried over from sqlite ───────────────────
+
+// DeleteSessionsForUser revokes all sessions for a user, optionally
+// keeping `exceptToken` (the current session) alive.
+func (s *Store) DeleteSessionsForUser(ctx context.Context, userID int64, exceptToken string) error {
+	if exceptToken == "" {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=$1`, userID)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=$1 AND token<>$2`, userID, exceptToken)
+	return err
+}
+
+// UpdateUserEmail changes a user's email address.
+func (s *Store) UpdateUserEmail(ctx context.Context, id int64, email string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET email=$1, updated_at=NOW() WHERE id=$2`, email, id)
+	return err
+}
+
+// GetShareByID looks up a share by its row ID.
+func (s *Store) GetShareByID(ctx context.Context, id int64) (*model.Share, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at FROM shares WHERE id=$1`, id)
+	return scanShare(row)
+}
+
+// RevokeShare soft-revokes by setting expires_at = NOW (audit trail intact).
+func (s *Store) RevokeShare(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE shares SET expires_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+// ListAllShares returns the admin overview of every share. `creatorID`
+// nil means all users; activeOnly excludes expired/revoked rows.
+func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly bool, limit, offset int) ([]*db.ShareWithMeta, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	conds := []string{"1=1"}
+	args := []any{}
+	idx := 1
+	if creatorID != nil {
+		conds = append(conds, fmt.Sprintf("s.created_by=$%d", idx))
+		args = append(args, *creatorID)
+		idx++
+	}
+	if activeOnly {
+		conds = append(conds, "(s.expires_at IS NULL OR s.expires_at > NOW())")
+		conds = append(conds, "(s.max_downloads IS NULL OR s.download_count < s.max_downloads)")
+	}
+	whereSQL := strings.Join(conds, " AND ")
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM shares s WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limPlaceholder := fmt.Sprintf("$%d", idx)
+	idx++
+	offPlaceholder := fmt.Sprintf("$%d", idx)
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.id, s.node_id, s.token, COALESCE(s.pin_hash,''), s.expires_at, s.max_downloads, s.download_count, s.created_by, s.created_at,
+		       COALESCE(u.email,''), COALESCE(n.path,'')
+		FROM shares s
+		LEFT JOIN users u ON u.id = s.created_by
+		LEFT JOIN nodes n ON n.id = s.node_id
+		WHERE `+whereSQL+`
+		ORDER BY s.id DESC LIMIT `+limPlaceholder+` OFFSET `+offPlaceholder, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := []*db.ShareWithMeta{}
+	for rows.Next() {
+		sh := &model.Share{}
+		row := &db.ShareWithMeta{Share: sh}
+		if err := rows.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt, &row.CreatorEmail, &row.NodePath); err != nil {
+			return nil, 0, err
+		}
+		sh.HasPin = sh.PinHash != ""
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
+}
+
+// GetSyncRun looks up a sync_run by id.
+func (s *Store) GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
+		 FROM sync_runs WHERE id=$1`, id)
+	return scanSyncRun(row)
+}
+
+// ListSyncRunsAcrossAll returns paginated runs across every storage.
+// storageID==0 means "all", status=="" means "all".
+func (s *Store) ListSyncRunsAcrossAll(ctx context.Context, storageID int64, status string, limit, offset int) ([]*model.SyncRun, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	conds := []string{"1=1"}
+	args := []any{}
+	idx := 1
+	if storageID > 0 {
+		conds = append(conds, fmt.Sprintf("storage_id=$%d", idx))
+		args = append(args, storageID)
+		idx++
+	}
+	if status != "" {
+		conds = append(conds, fmt.Sprintf("status=$%d", idx))
+		args = append(args, status)
+		idx++
+	}
+	whereSQL := strings.Join(conds, " AND ")
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sync_runs WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	limPlaceholder := fmt.Sprintf("$%d", idx)
+	idx++
+	offPlaceholder := fmt.Sprintf("$%d", idx)
+	args = append(args, limit, offset)
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, storage_id, started_at, finished_at, COALESCE(cursor_before,''), COALESCE(cursor_after,''), seen_count, added, updated, deleted, status, COALESCE(error,'')
+		 FROM sync_runs
+		 WHERE `+whereSQL+`
+		 ORDER BY id DESC LIMIT `+limPlaceholder+` OFFSET `+offPlaceholder, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := []*model.SyncRun{}
+	for rows.Next() {
+		sr, err := scanSyncRun(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, sr)
+	}
+	return out, total, rows.Err()
+}
+
+// ListConflictsByStorage returns recent sync conflicts for one storage.
+func (s *Store) ListConflictsByStorage(ctx context.Context, storageID int64, limit int) ([]*model.SyncConflict, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, node_id, storage_id, COALESCE(storage_key,''), COALESCE(db_etag,''), COALESCE(backend_etag,''), db_mtime, backend_mtime, detected_at, resolved_at, COALESCE(resolution,'')
+		 FROM sync_conflicts WHERE storage_id=$1 ORDER BY detected_at DESC LIMIT $2`, storageID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.SyncConflict{}
+	for rows.Next() {
+		c := &model.SyncConflict{}
+		if err := rows.Scan(&c.ID, &c.NodeID, &c.StorageID, &c.StorageKey, &c.DBEtag, &c.BackendEtag, &c.DBMtime, &c.BackendMtime, &c.DetectedAt, &c.ResolvedAt, &c.Resolution); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

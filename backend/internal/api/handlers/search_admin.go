@@ -1,0 +1,68 @@
+// Package handlers — search_admin.go
+//
+// Admin endpoints for the embedded Bleve full-text index.
+//
+//   GET  /api/admin/search/stats     — index stats
+//   POST /api/admin/search/rebuild   — drop and rebuild the index from nodes
+package handlers
+
+import (
+	"net/http"
+	"sync/atomic"
+
+	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/search"
+)
+
+// SearchAdmin holds the Bleve admin actions.
+type SearchAdmin struct {
+	Index *search.Index
+	Store db.Store
+
+	// rebuildLock prevents concurrent rebuilds.
+	rebuilding atomic.Bool
+}
+
+// NewSearchAdmin constructs the handler.
+func NewSearchAdmin(idx *search.Index, store db.Store) *SearchAdmin {
+	return &SearchAdmin{Index: idx, Store: store}
+}
+
+// Stats returns index document counts and size.
+func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
+	if h.Index == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":         false,
+			"document_count":  0,
+			"index_size_bytes": 0,
+		})
+		return
+	}
+	stats := h.Index.Stats()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":          true,
+		"document_count":   stats.DocCount,
+		"index_size_bytes": stats.SizeBytes,
+		"last_updated_at":  stats.LastUpdated,
+	})
+}
+
+// Rebuild drops the existing index and reindexes every node row.
+func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
+	if h.Index == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search index disabled"})
+		return
+	}
+	if !h.rebuilding.CompareAndSwap(false, true) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "rebuild already in progress"})
+		return
+	}
+	go func() {
+		defer h.rebuilding.Store(false)
+		_ = h.Index.RebuildAll(r.Context(), h.Store)
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":   true,
+		"note": "rebuild started in background",
+	})
+}
