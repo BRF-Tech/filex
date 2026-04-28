@@ -350,6 +350,56 @@ export function useFileApi(config: ExplorerConfig) {
     return managerUrl('preview', { path });
   }
 
+  /**
+   * Fetch a file body with the configured auth headers + credentials,
+   * returning the raw blob plus a normalized object URL viewers can mount
+   * directly. Used by the rich viewers (3D, EPUB, PDF, PSD, TIFF, …) which
+   * need an `ArrayBuffer` or a `Blob`-backed `objectURL` rather than the
+   * relative preview URL.
+   *
+   * Caller is responsible for revoking `url` (`URL.revokeObjectURL(url)`)
+   * once the viewer unmounts to avoid leaking the blob.
+   */
+  async function fetchBlob(
+    path: string,
+  ): Promise<{ url: string; blob: Blob; mime: string }> {
+    const headers = await authHeaders();
+    const res = await fetch(previewUrl(path), {
+      headers,
+      credentials: credentialsMode(),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`,
+      );
+    }
+    const blob = await res.blob();
+    const mime = blob.type || res.headers.get('content-type') || '';
+    const url = URL.createObjectURL(blob);
+    return { url, blob, mime };
+  }
+
+  /**
+   * Like `fetchBlob` but returns the raw bytes — viewers that need
+   * binary parsing (utif, ag-psd, pdfjs-dist) get the buffer directly
+   * without the extra `Blob → arrayBuffer` round trip.
+   */
+  async function fetchArrayBuffer(path: string): Promise<ArrayBuffer> {
+    const headers = await authHeaders();
+    const res = await fetch(previewUrl(path), {
+      headers,
+      credentials: credentialsMode(),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`,
+      );
+    }
+    return res.arrayBuffer();
+  }
+
   // --------------------------------------------------------------------
   // Peripheral endpoints
   // --------------------------------------------------------------------
@@ -454,6 +504,8 @@ export function useFileApi(config: ExplorerConfig) {
     uploadMultipart,
     downloadUrl,
     previewUrl,
+    fetchBlob,
+    fetchArrayBuffer,
     // Peripheral
     limits,
     capabilities,

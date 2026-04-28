@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -66,7 +67,7 @@ func (h *Thumb) checkSig(idStr, sig string) bool {
 		// Tighten this when the embed JS gains its own signed-URL flow.
 		return true
 	}
-	key, _ := h.Store.GetSetting(noctx{}, "thumb_signing_key")
+	key, _ := h.Store.GetSetting(context.Background(), "thumb_signing_key")
 	if key == "" {
 		return true
 	}

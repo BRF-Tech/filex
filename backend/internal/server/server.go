@@ -23,6 +23,8 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
+	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -45,6 +47,7 @@ type Server struct {
 	store  db.Store
 	sqlDB  *sql.DB
 	worker *syncpkg.Worker
+	ops    *ops.Service
 	srv    *http.Server
 	idx    *search.Index
 
@@ -159,6 +162,20 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		storages: map[int64]storage.Driver{},
 	}
 
+	// OnlyOffice integration — disabled if no document server URL/secret
+	// is configured (the handlers return 503 in that case).
+	var ooSvc *onlyoffice.Service
+	if cfg.ExternalServices.OnlyOffice.URL != "" && cfg.ExternalServices.OnlyOffice.JWTSecret != "" {
+		ooSvc = onlyoffice.New(
+			store,
+			nil, // resolver wired below once it exists
+			cfg.ExternalServices.OnlyOffice.URL,
+			cfg.ExternalServices.OnlyOffice.JWTSecret,
+			cfg.PublicURL,
+			0,
+		)
+	}
+
 	// Storage resolver — connects API handlers and pipeline to live drivers.
 	resolver := func(id int64) (storage.Driver, error) {
 		srvObj.mu.RLock()
@@ -196,6 +213,19 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
+	// Now that resolver exists, fill in dependents that need it.
+	caps.AttachStorageResolver(resolver)
+	if ooSvc != nil {
+		ooSvc.StorageResolver = resolver
+	}
+
+	// Async ops queue — DB-backed, restart-safe.
+	opsSvc := ops.New(sqlDB, resolver)
+	if err := opsSvc.Migrate(ctx); err != nil {
+		slog.Warn("ops: migrate", slog.String("err", err.Error()))
+	}
+	srvObj.ops = opsSvc
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -204,6 +234,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Caps:            caps,
 		Thumbs:          pipeline,
 		Share:           shareSvc,
+		OnlyOffice:      ooSvc,
+		Ops:             opsSvc,
 		StorageResolver: resolver,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
@@ -237,6 +269,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.worker.Start(ctx); err != nil {
 		slog.Warn("sync worker failed to start", slog.String("err", err.Error()))
 	}
+	if s.ops != nil {
+		go s.ops.Run(ctx)
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -245,6 +280,9 @@ func (s *Server) Start(ctx context.Context) error {
 		defer cancel()
 		_ = s.srv.Shutdown(shutCtx)
 		s.worker.Stop()
+		if s.ops != nil {
+			s.ops.Stop()
+		}
 		if s.idx != nil {
 			_ = s.idx.Close()
 		}

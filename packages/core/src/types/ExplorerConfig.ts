@@ -157,6 +157,37 @@ export interface ExplorerConfig {
   /** Drawio iframe base. */
   drawioBase?: string;
 
+  /**
+   * Drawio embed URL (full URL to the embed endpoint). Defaults to
+   * `https://embed.diagrams.net`. The DrawioViewer iframes this with
+   * `?embed=1&proto=json` postMessage handshake to load + save XML.
+   */
+  drawioUrl?: string;
+
+  /**
+   * Optional URL where serialized PDF annotations / form data is
+   * persisted. POST `{ path, base64 }` — the rich PdfViewer uses
+   * `pdf.saveDocument()` and forwards the saved bytes here when the
+   * user clicks the save annotation button.
+   */
+  pdfSaveUrl?: string;
+
+  /**
+   * Override the pdf.js worker URL. Defaults to a CDN copy matching
+   * the version pdfjs-dist resolves to at runtime — hosts can pin
+   * their own self-hosted worker for CSP-strict environments.
+   */
+  pdfWorkerUrl?: string;
+
+  /**
+   * Standalone full-screen viewer route. The PreviewModal toolbar's
+   * "Open in new tab" button navigates to
+   * `${viewerBaseUrl}?path=…&storage=…&type=…`. The consumer wires
+   * that route to mount the same viewer fullscreen (admin UI / fishapp
+   * embed). Defaults to `/files/viewer`.
+   */
+  viewerBaseUrl?: string;
+
   /** Upload chunk size (bytes). Default 5 MB. */
   chunkSize?: number;
 

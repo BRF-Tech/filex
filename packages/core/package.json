@@ -32,21 +32,33 @@
     "clean": "rimraf dist"
   },
   "peerDependencies": {
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "monaco-editor": "*",
+    "highlight.js": "*",
+    "markdown-it": "*",
+    "codemirror": "*",
+    "@google/model-viewer": "*",
+    "epubjs": "*",
+    "mermaid": "*",
+    "utif": "*",
+    "ag-psd": "*",
+    "pdfjs-dist": "*",
+    "papaparse": "*",
+    "katex": "*"
   },
   "peerDependenciesMeta": {
-    "monaco-editor": {
-      "optional": true
-    },
-    "highlight.js": {
-      "optional": true
-    },
-    "markdown-it": {
-      "optional": true
-    },
-    "codemirror": {
-      "optional": true
-    }
+    "monaco-editor": { "optional": true },
+    "highlight.js": { "optional": true },
+    "markdown-it": { "optional": true },
+    "codemirror": { "optional": true },
+    "@google/model-viewer": { "optional": true },
+    "epubjs": { "optional": true },
+    "mermaid": { "optional": true },
+    "utif": { "optional": true },
+    "ag-psd": { "optional": true },
+    "pdfjs-dist": { "optional": true },
+    "papaparse": { "optional": true },
+    "katex": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

@@ -3,12 +3,15 @@ package handlers
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -17,7 +20,8 @@ import (
 // Archive handles zip-listing, zip-extract, and zip-create operations.
 //
 // All zip ops materialize the source archive to a tmp file (since
-// archive/zip needs a Seeker), then stream extracts back to the storage.
+// archive/zip needs an io.ReaderAt + Seeker), then stream extracts back
+// to storage.
 type Archive struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
@@ -28,11 +32,30 @@ func NewArchive(store db.Store, resolver func(int64) (storage.Driver, error)) *A
 	return &Archive{Store: store, StorageResolver: resolver}
 }
 
+// archiveRequest is the union body for /api/files/archive/{list,extract,add}.
 type archiveRequest struct {
 	StorageID int64    `json:"storage_id"`
 	Path      string   `json:"path"`
 	Members   []string `json:"members,omitempty"`
 	DestDir   string   `json:"dest,omitempty"`
+	Files     []addEntry `json:"files,omitempty"`
+}
+
+// addEntry is one source for /archive/add.
+//
+// Source is the path inside the storage to read from; Name is the
+// destination path inside the zip.
+type addEntry struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+// archiveListEntry is the wire format for /archive/list responses.
+type archiveListEntry struct {
+	Name  string    `json:"name"`
+	Size  int64     `json:"size"`
+	Mtime time.Time `json:"mtime"`
+	IsDir bool      `json:"is_dir"`
 }
 
 // List enumerates archive members.
@@ -42,6 +65,10 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	if req.StorageID == 0 || req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		return
+	}
 	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -55,17 +82,14 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zr.Close()
-	type entry struct {
-		Name string `json:"name"`
-		Size int64  `json:"size"`
-		Dir  bool   `json:"dir"`
-	}
-	out := make([]entry, 0, len(zr.File))
+
+	out := make([]archiveListEntry, 0, len(zr.File))
 	for _, f := range zr.File {
-		out = append(out, entry{
-			Name: f.Name,
-			Size: int64(f.UncompressedSize64),
-			Dir:  strings.HasSuffix(f.Name, "/"),
+		out = append(out, archiveListEntry{
+			Name:  f.Name,
+			Size:  int64(f.UncompressedSize64),
+			Mtime: f.Modified,
+			IsDir: strings.HasSuffix(f.Name, "/"),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
@@ -73,88 +97,15 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 
 // Extract pulls members out of an archive into the destination directory.
 //
-// The DestDir path is interpreted on the SAME storage as the source.
-// Members defaults to "all" when empty.
+// DestDir is interpreted on the SAME storage as the source. Members
+// defaults to "all" when empty.
 func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	var req archiveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer os.Remove(tmp)
-
-	drv, err := a.StorageResolver(req.StorageID)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage"})
-		return
-	}
-	writer, ok := drv.(storage.Writer)
-	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "storage not writable"})
-		return
-	}
-
-	zr, err := zip.OpenReader(tmp)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a zip: " + err.Error()})
-		return
-	}
-	defer zr.Close()
-	wanted := map[string]bool{}
-	for _, m := range req.Members {
-		wanted[m] = true
-	}
-	dest := req.DestDir
-	if dest == "" {
-		dest = path.Dir(req.Path)
-	}
-	extracted := 0
-	for _, f := range zr.File {
-		if len(wanted) > 0 && !wanted[f.Name] {
-			continue
-		}
-		// zip-slip protection: ensure the joined path doesn't escape dest.
-		clean := filepath.ToSlash(path.Clean("/" + f.Name))
-		if strings.Contains(clean, "..") {
-			continue
-		}
-		target := path.Join(dest, clean)
-		if strings.HasSuffix(f.Name, "/") {
-			if md, ok := drv.(storage.Mkdirer); ok {
-				_ = md.Mkdir(r.Context(), target)
-			}
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		if err := writer.Write(r.Context(), target, rc, int64(f.UncompressedSize64)); err != nil {
-			rc.Close()
-			continue
-		}
-		rc.Close()
-		extracted++
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"extracted": extracted})
-}
-
-// Add packs members into a (new or existing) zip archive on the same storage.
-//
-// V1 simplification: always rewrites the archive from scratch — appending
-// to an existing zip would require a multi-pass merge.
-func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
-	var req archiveRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
-		return
-	}
-	if req.StorageID == 0 || req.Path == "" || len(req.Members) == 0 {
+	if req.StorageID == 0 || req.Path == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
 		return
 	}
@@ -168,25 +119,162 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "storage not writable"})
 		return
 	}
-	tmp, err := os.CreateTemp("", "filex-zip-*.zip")
+
+	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	defer os.Remove(tmp.Name())
+	defer os.Remove(tmp)
+
+	zr, err := zip.OpenReader(tmp)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a zip: " + err.Error()})
+		return
+	}
+	defer zr.Close()
+
+	wanted := map[string]bool{}
+	for _, m := range req.Members {
+		wanted[m] = true
+	}
+	dest := req.DestDir
+	if dest == "" {
+		dest = path.Dir(req.Path)
+	}
+	dest = "/" + strings.TrimLeft(path.Clean("/"+dest), "/")
+
+	mkdirer, _ := drv.(storage.Mkdirer)
+	keys := make([]string, 0)
+	for _, f := range zr.File {
+		if len(wanted) > 0 && !wanted[f.Name] && !wanted[strings.TrimSuffix(f.Name, "/")] {
+			continue
+		}
+		safeRel, err := sanitizeZipPath(f.Name)
+		if err != nil {
+			slog.Warn("archive: skipped zip-slip entry", slog.String("name", f.Name), slog.String("err", err.Error()))
+			continue
+		}
+		target := path.Join(dest, safeRel)
+		// Defense in depth: ensure the joined target stays under dest.
+		if !strings.HasPrefix(target+"/", strings.TrimRight(dest, "/")+"/") {
+			slog.Warn("archive: target escapes dest after join", slog.String("target", target))
+			continue
+		}
+		if strings.HasSuffix(f.Name, "/") {
+			if mkdirer != nil {
+				_ = mkdirer.Mkdir(r.Context(), target)
+			}
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			slog.Warn("archive: zip member open", slog.String("name", f.Name), slog.String("err", err.Error()))
+			continue
+		}
+		err = writer.Write(r.Context(), target, rc, int64(f.UncompressedSize64))
+		_ = rc.Close()
+		if err != nil {
+			slog.Warn("archive: extract write", slog.String("target", target), slog.String("err", err.Error()))
+			continue
+		}
+		keys = append(keys, target)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"keys":  keys,
+		"count": len(keys),
+	})
+}
+
+// Add packs members into a (new or existing) zip archive on the same storage.
+//
+// If the destination zip exists, we download it, append the new entries,
+// then re-upload. Names are zip-slip protected on the read side.
+func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
+	var req archiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if req.StorageID == 0 || req.Path == "" || len(req.Files) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		return
+	}
+	drv, err := a.StorageResolver(req.StorageID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage"})
+		return
+	}
+	writer, ok := drv.(storage.Writer)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "storage not writable"})
+		return
+	}
+
+	// Try to fetch the existing zip — non-fatal if missing (we just create one).
+	var existingMembers []*zip.File
+	var existingTmp string
+	if tmp, err := a.fetchToTemp(r, req.StorageID, req.Path); err == nil {
+		existingTmp = tmp
+		zr, zerr := zip.OpenReader(tmp)
+		if zerr == nil {
+			existingMembers = append(existingMembers, zr.File...)
+			defer zr.Close()
+		} else {
+			slog.Warn("archive: existing zip unreadable, overwriting", slog.String("err", zerr.Error()))
+		}
+	}
+	if existingTmp != "" {
+		defer os.Remove(existingTmp)
+	}
+
+	// New tmp file we'll stream the rebuilt archive into.
+	tmp, err := os.CreateTemp("", "filex-zip-add-*.zip")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
 	zw := zip.NewWriter(tmp)
-	for _, member := range req.Members {
-		rc, err := drv.Read(r.Context(), member)
+	addedNames := map[string]bool{}
+	for _, e := range req.Files {
+		safe, err := sanitizeZipPath(e.Name)
 		if err != nil {
 			continue
 		}
-		fw, err := zw.Create(strings.TrimLeft(member, "/"))
+		rc, err := drv.Read(r.Context(), e.Source)
 		if err != nil {
-			rc.Close()
+			slog.Warn("archive: source read", slog.String("source", e.Source), slog.String("err", err.Error()))
+			continue
+		}
+		fw, err := zw.Create(safe)
+		if err != nil {
+			_ = rc.Close()
+			continue
+		}
+		if _, err := io.Copy(fw, rc); err != nil {
+			_ = rc.Close()
+			slog.Warn("archive: copy member", slog.String("err", err.Error()))
+			continue
+		}
+		_ = rc.Close()
+		addedNames[safe] = true
+	}
+	for _, f := range existingMembers {
+		if addedNames[f.Name] {
+			continue // overwrite by name
+		}
+		fw, err := zw.CreateRaw(&f.FileHeader)
+		if err != nil {
+			continue
+		}
+		rc, err := f.OpenRaw()
+		if err != nil {
 			continue
 		}
 		_, _ = io.Copy(fw, rc)
-		rc.Close()
 	}
 	if err := zw.Close(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -201,7 +289,11 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size": stat.Size()})
+	_ = tmp.Close()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path": req.Path,
+		"size": stat.Size(),
+	})
 }
 
 // fetchToTemp pulls a remote object into a local tmp file and returns the path.
@@ -228,3 +320,40 @@ func (a *Archive) fetchToTemp(r *http.Request, storageID int64, p string) (strin
 	return tmp.Name(), nil
 }
 
+// sanitizeZipPath enforces zip-slip protection.
+//
+// Rules:
+//   - Replace backslashes (Windows-authored zips) with forward slashes
+//   - Reject absolute paths (drive letters, leading "/")
+//   - Reject any path that resolves to "..", "." escapes, or that contains
+//     a literal ".." component
+//   - Strip leading "./"
+//
+// Returns the cleaned RELATIVE path or an error.
+func sanitizeZipPath(name string) (string, error) {
+	if name == "" {
+		return "", errors.New("empty entry name")
+	}
+	clean := strings.ReplaceAll(name, `\`, `/`)
+	clean = strings.TrimPrefix(clean, "./")
+	clean = strings.TrimLeft(clean, "/")
+	if clean == "" {
+		return "", errors.New("empty after sanitize")
+	}
+	// Drive letters (e.g. "C:foo") — uncommon but possible from Windows zips.
+	if len(clean) >= 2 && clean[1] == ':' {
+		return "", fmt.Errorf("absolute path: %q", name)
+	}
+	// Component check.
+	for _, part := range strings.Split(clean, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("parent traversal: %q", name)
+		}
+	}
+	// Final clean — guarantees no "." segments.
+	clean = strings.TrimLeft(path.Clean("/"+clean), "/")
+	if clean == "" || strings.HasPrefix(clean, "..") {
+		return "", fmt.Errorf("clean rejected: %q", name)
+	}
+	return clean, nil
+}

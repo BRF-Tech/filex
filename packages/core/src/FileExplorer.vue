@@ -1103,6 +1103,10 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :open-mode="previewMode"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"
+      :drawio-url="props.config.drawioUrl || props.config.drawioBase || null"
+      :pdf-worker-url="props.config.pdfWorkerUrl || null"
+      :pdf-save-url="props.config.pdfSaveUrl || null"
+      :viewer-base-url="props.config.viewerBaseUrl || null"
       @close="showPreview = false"
     />
 

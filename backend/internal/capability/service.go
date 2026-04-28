@@ -8,26 +8,39 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
 
 // Service answers /api/capabilities and persists external_services state.
 type Service struct {
 	store db.Store
 
-	mu     sync.RWMutex
-	cached *model.Capabilities
-	until  time.Time
+	mu              sync.RWMutex
+	cached          *model.Capabilities
+	until           time.Time
+	storageResolver func(int64) (storage.Driver, error)
 }
 
 // New constructs a Service.
 func New(store db.Store) *Service { return &Service{store: store} }
+
+// AttachStorageResolver wires the resolver used for per-storage capability
+// probes. Optional — when nil the response omits the per-storage map.
+func (s *Service) AttachStorageResolver(resolver func(int64) (storage.Driver, error)) {
+	s.mu.Lock()
+	s.storageResolver = resolver
+	s.cached = nil
+	s.mu.Unlock()
+}
 
 // Get returns the current Capabilities snapshot, refreshing if cache
 // expired (1h).
@@ -129,11 +142,54 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 		}
 	}
 
+	// Per-storage capability probe — opt-in via AttachStorageResolver.
+	s.mu.RLock()
+	resolver := s.storageResolver
+	s.mu.RUnlock()
+	if resolver != nil {
+		caps.Storage = map[string]model.StorageCapabilities{}
+		if storages, err := s.store.ListEnabledStorages(ctx); err == nil {
+			for _, st := range storages {
+				drv, err := resolver(st.ID)
+				if err != nil {
+					slog.Debug("capability: resolve storage", slog.String("name", st.Name), slog.String("err", err.Error()))
+					continue
+				}
+				caps.Storage[strconv.FormatInt(st.ID, 10)] = probeStorage(drv)
+				// If any backend supports presign, mark global presign too.
+				if _, ok := drv.(storage.Presigner); ok {
+					caps.Presign = true
+				}
+			}
+		}
+	}
+
 	s.mu.Lock()
 	s.cached = caps
 	s.until = time.Now().Add(time.Hour)
 	s.mu.Unlock()
 	return caps, nil
+}
+
+// probeStorage uses ComputeCapabilities (which uses interface assertions)
+// plus the additional MultipartUploader / Watcher checks that need the
+// driver's actual type.
+func probeStorage(drv storage.Driver) model.StorageCapabilities {
+	c := storage.ComputeCapabilities(drv)
+	out := model.StorageCapabilities{
+		Read:    c.Read,
+		Write:   c.Write,
+		Move:    c.Move,
+		Copy:    c.Copy,
+		Delete:  c.Delete,
+		Mkdir:   c.Mkdir,
+		Presign: c.Presign,
+		Events:  c.Watch,
+	}
+	if _, ok := drv.(storage.MultipartUploader); ok {
+		out.Multipart = true
+	}
+	return out
 }
 
 // has reports whether bin is in $PATH.

@@ -131,6 +131,10 @@ type Store interface {
 	// Node versions
 	CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*model.NodeVersion, error)
 	ListNodeVersions(ctx context.Context, nodeID int64) ([]*model.NodeVersion, error)
+	GetNodeVersion(ctx context.Context, id int64) (*model.NodeVersion, error)
+	NextNodeVersionNumber(ctx context.Context, nodeID int64) (int, error)
+	DeleteNodeVersion(ctx context.Context, id int64) error
+	DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep int) ([]*model.NodeVersion, error)
 
 	// Sync conflicts (admin views)
 	ListSyncConflictsByRun(ctx context.Context, runID int64) ([]*model.SyncConflict, error)
@@ -138,6 +142,32 @@ type Store interface {
 
 	// Search rebuild
 	AllNodesForIndex(ctx context.Context) ([]*model.Node, error)
+
+	// Quota
+	GetUserUsage(ctx context.Context, userID int64) (used, limit int64, err error)
+	IncrementUserUsage(ctx context.Context, userID int64, delta int64) error
+	SetUserQuota(ctx context.Context, userID int64, bytes int64) error
+	RecomputeUserUsage(ctx context.Context, userID int64) (int64, error)
+
+	// Node owner
+	SetNodeOwner(ctx context.Context, nodeID int64, ownerID *int64) error
+	GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error)
+
+	// Trash retention
+	ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error)
+	RestoreNode(ctx context.Context, id int64) error
+
+	// Per-user metadata (tags, starred, last_opened)
+	SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, value string) error
+	DeleteUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) error
+	GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error)
+	ListUserNodeMetaForNode(ctx context.Context, userID, nodeID int64, prefix string) (map[string]string, error)
+	ListNodesByUserMeta(ctx context.Context, userID int64, key string, limit int) ([]*model.Node, error)
+
+	// Tags use the shared node_meta table (key='tag:<name>', value='1').
+	SetNodeTags(ctx context.Context, nodeID int64, tags []string) error
+	GetNodeTags(ctx context.Context, nodeID int64) ([]string, error)
+	ListAllTagsForStorage(ctx context.Context, storageID int64) ([]string, error)
 }
 
 // ExternalService is the DB row representation. Lives in the db package so

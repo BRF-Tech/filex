@@ -18,6 +18,8 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
+	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -34,6 +36,8 @@ type Deps struct {
 	Caps            *capability.Service
 	Thumbs          *thumb.Pipeline
 	Share           *share.Service
+	OnlyOffice      *onlyoffice.Service
+	Ops             *ops.Service
 	StorageResolver func(int64) (storage.Driver, error)
 	Embed           embed.FS // web/dist + admin
 	LocalAuth       auth.LoginDriver
@@ -56,11 +60,12 @@ func BuildRouter(d *Deps) http.Handler {
 	}))
 
 	// Existing user-facing handlers.
-	mh := handlers.NewManager(d.Store)
-	uh := handlers.NewUpload(d.Store, d.StorageResolver)
+	mh := handlers.NewManager(d.Store, d.StorageResolver)
+	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
-	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver)
-	oh := handlers.NewOps(d.Store, d.StorageResolver)
+	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
+	oh := handlers.NewOps(d.Ops)
+	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps)
 	stg := handlers.NewStorages(d.Store, d.Worker)
@@ -84,6 +89,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
 	r.Get("/s/{token}", sh.HandleDownload)
+	r.Post("/s/{token}", sh.HandleDownload) // PIN form posts to same URL
+
+	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
+	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)
+	r.Post("/api/files/onlyoffice/callback", ooh.Callback)
 
 	// ────── auth (always public) ──────
 	r.Route("/api/auth", func(r chi.Router) {
@@ -133,6 +143,8 @@ func BuildRouter(d *Deps) http.Handler {
 
 			r.Post("/share", sh.HandleCreate)
 			r.Delete("/share/{id}", sh.HandleDelete)
+
+			r.Get("/onlyoffice/config", ooh.Config)
 		})
 	})
 

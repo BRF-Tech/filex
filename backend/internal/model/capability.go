@@ -20,12 +20,30 @@ type Capabilities struct {
 	// Thumbnail backends present in the runtime.
 	Thumbs ThumbCapabilities `json:"thumbs"`
 
+	// Per-storage capability probe — keyed by storage ID (string for JSON).
+	Storage map[string]StorageCapabilities `json:"storage,omitempty"`
+
 	// Plug-and-play external services.
 	External map[string]ExternalServiceState `json:"external"`
 
 	// Backend-effective limits.
 	MaxUploadSize int64 `json:"max_upload_size"`
 	ChunkSize     int64 `json:"chunk_size"`
+}
+
+// StorageCapabilities describes a single backend's optional features. Used
+// by the frontend to decide whether to show the chunked upload UI, the
+// browser-direct upload button, or the live event indicator.
+type StorageCapabilities struct {
+	Read      bool `json:"read"`
+	Write     bool `json:"write"`
+	Move      bool `json:"move"`
+	Copy      bool `json:"copy"`
+	Delete    bool `json:"delete"`
+	Mkdir     bool `json:"mkdir"`
+	Presign   bool `json:"presign"`
+	Multipart bool `json:"multipart"`
+	Events    bool `json:"events"`
 }
 
 // ThumbCapabilities indicates which media types can be thumbnailed.

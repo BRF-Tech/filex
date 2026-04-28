@@ -1146,3 +1146,319 @@ func (s *Store) ListConflictsByStorage(ctx context.Context, storageID int64, lim
 	}
 	return out, rows.Err()
 }
+
+// ─────────────────── Node versions (extended) ───────────────────
+
+// GetNodeVersion looks up a single version row by id.
+func (s *Store) GetNodeVersion(ctx context.Context, id int64) (*model.NodeVersion, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at FROM node_versions WHERE id=$1`, id)
+	v := &model.NodeVersion{}
+	if err := row.Scan(&v.ID, &v.NodeID, &v.VersionN, &v.StorageKey, &v.Size, &v.Etag, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// NextNodeVersionNumber returns COALESCE(MAX(version_n),0)+1 for a node.
+func (s *Store) NextNodeVersionNumber(ctx context.Context, nodeID int64) (int, error) {
+	var n sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_n),0) FROM node_versions WHERE node_id=$1`, nodeID).Scan(&n); err != nil {
+		return 0, err
+	}
+	return int(n.Int64) + 1, nil
+}
+
+// DeleteNodeVersion removes a single version row.
+func (s *Store) DeleteNodeVersion(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM node_versions WHERE id=$1`, id)
+	return err
+}
+
+// DeleteOldNodeVersions deletes all but the newest `keep` versions for a node.
+// Returns the rows that were removed.
+func (s *Store) DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep int) ([]*model.NodeVersion, error) {
+	if keep < 0 {
+		keep = 0
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at
+		 FROM node_versions
+		 WHERE node_id=$1
+		 ORDER BY version_n DESC
+		 OFFSET $2`, nodeID, keep)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var doomed []*model.NodeVersion
+	for rows.Next() {
+		v := &model.NodeVersion{}
+		if err := rows.Scan(&v.ID, &v.NodeID, &v.VersionN, &v.StorageKey, &v.Size, &v.Etag, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		doomed = append(doomed, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, v := range doomed {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM node_versions WHERE id=$1`, v.ID); err != nil {
+			return doomed, err
+		}
+	}
+	return doomed, nil
+}
+
+// ─────────────────── Quota ───────────────────
+
+// GetUserUsage returns (used_bytes, quota_bytes).
+func (s *Store) GetUserUsage(ctx context.Context, userID int64) (int64, int64, error) {
+	var used, limit int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(usage_bytes,0), COALESCE(quota_bytes,0) FROM users WHERE id=$1`, userID).
+		Scan(&used, &limit)
+	if err != nil {
+		return 0, 0, err
+	}
+	return used, limit, nil
+}
+
+// IncrementUserUsage atomically adjusts usage_bytes (delta may be negative).
+func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET usage_bytes = GREATEST(0, COALESCE(usage_bytes,0) + $1) WHERE id=$2`, delta, userID)
+	return err
+}
+
+// SetUserQuota writes the quota_bytes value (0 = unlimited).
+func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) error {
+	if bytes < 0 {
+		bytes = 0
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET quota_bytes=$1 WHERE id=$2`, bytes, userID)
+	return err
+}
+
+// RecomputeUserUsage scans nodes owned by this user, sets usage_bytes.
+func (s *Store) RecomputeUserUsage(ctx context.Context, userID int64) (int64, error) {
+	var total sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(size),0) FROM nodes WHERE owner_id=$1 AND deleted_at IS NULL AND type='file'`,
+		userID).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE users SET usage_bytes=$1 WHERE id=$2`, total.Int64, userID); err != nil {
+		return 0, err
+	}
+	return total.Int64, nil
+}
+
+// ─────────────────── Node owner ───────────────────
+
+// SetNodeOwner updates the owner_id column for one node.
+func (s *Store) SetNodeOwner(ctx context.Context, nodeID int64, ownerID *int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET owner_id=$1 WHERE id=$2`, ownerID, nodeID)
+	return err
+}
+
+// GetNodeOwner returns the owner_id (nullable) for one node.
+func (s *Store) GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error) {
+	var owner sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT owner_id FROM nodes WHERE id=$1`, nodeID).Scan(&owner)
+	if err != nil {
+		return nil, err
+	}
+	if !owner.Valid {
+		return nil, nil
+	}
+	v := owner.Int64
+	return &v, nil
+}
+
+// ─────────────────── Trash retention ───────────────────
+
+// ListTrashedExpired returns soft-deleted nodes whose deleted_at is older than `before`.
+func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+nodeColumns()+`
+		 FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < $1
+		 ORDER BY deleted_at ASC LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// RestoreNode flips deleted_at back to NULL.
+func (s *Store) RestoreNode(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+// ─────────────────── User-scoped node meta ───────────────────
+
+// SetUserNodeMeta upserts a (user, node, key) row.
+func (s *Store) SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO user_node_meta (user_id, node_id, key, value, updated_at)
+		 VALUES ($1,$2,$3,$4,NOW())
+		 ON CONFLICT (user_id, node_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+		userID, nodeID, key, value)
+	return err
+}
+
+// DeleteUserNodeMeta removes a single (user, node, key) row.
+func (s *Store) DeleteUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM user_node_meta WHERE user_id=$1 AND node_id=$2 AND key=$3`, userID, nodeID, key)
+	return err
+}
+
+// GetUserNodeMeta fetches a single value (returns empty string + sql.ErrNoRows if absent).
+func (s *Store) GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error) {
+	var v sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM user_node_meta WHERE user_id=$1 AND node_id=$2 AND key=$3`, userID, nodeID, key).Scan(&v)
+	if err != nil {
+		return "", err
+	}
+	return v.String, nil
+}
+
+// ListUserNodeMetaForNode returns all (key,value) for one (user,node) pair.
+func (s *Store) ListUserNodeMetaForNode(ctx context.Context, userID, nodeID int64, prefix string) (map[string]string, error) {
+	q := `SELECT key, COALESCE(value,'') FROM user_node_meta WHERE user_id=$1 AND node_id=$2`
+	args := []any{userID, nodeID}
+	if prefix != "" {
+		q += ` AND key LIKE $3`
+		args = append(args, prefix+"%")
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+// ListNodesByUserMeta returns the nodes flagged with (key) for the given user.
+func (s *Store) ListNodesByUserMeta(ctx context.Context, userID int64, key string, limit int) ([]*model.Node, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		 FROM user_node_meta m
+		 INNER JOIN nodes n ON n.id = m.node_id
+		 WHERE m.user_id=$1 AND m.key=$2 AND n.deleted_at IS NULL
+		 ORDER BY m.updated_at DESC
+		 LIMIT $3`, userID, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// ─────────────────── Tags (shared via node_meta) ───────────────────
+
+const tagPrefixPg = "tag:"
+
+// SetNodeTags wipes tag:* rows and writes new ones.
+func (s *Store) SetNodeTags(ctx context.Context, nodeID int64, tags []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_meta WHERE node_id=$1 AND key LIKE $2`, nodeID, tagPrefixPg+"%"); err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	for _, raw := range tags {
+		t := strings.ToLower(strings.TrimSpace(raw))
+		if t == "" {
+			continue
+		}
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO node_meta (node_id, key, value) VALUES ($1,$2,$3)
+			 ON CONFLICT (node_id, key) DO UPDATE SET value=EXCLUDED.value`,
+			nodeID, tagPrefixPg+t, "1"); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetNodeTags returns the tag list (without prefix) for one node.
+func (s *Store) GetNodeTags(ctx context.Context, nodeID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key FROM node_meta WHERE node_id=$1 AND key LIKE $2 ORDER BY key`, nodeID, tagPrefixPg+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, strings.TrimPrefix(k, tagPrefixPg))
+	}
+	return out, rows.Err()
+}
+
+// ListAllTagsForStorage returns every distinct tag used in a storage.
+func (s *Store) ListAllTagsForStorage(ctx context.Context, storageID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT m.key
+		 FROM node_meta m
+		 INNER JOIN nodes n ON n.id = m.node_id
+		 WHERE n.storage_id=$1 AND n.deleted_at IS NULL AND m.key LIKE $2
+		 ORDER BY m.key`, storageID, tagPrefixPg+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, strings.TrimPrefix(k, tagPrefixPg))
+	}
+	return out, rows.Err()
+}
