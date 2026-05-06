@@ -374,7 +374,11 @@
     "loading": "Loading…",
     "noStorage": "No storages configured yet.",
     "addStorage": "Add storage",
-    "gotoAdmin": "Admin panel"
+    "gotoAdmin": "Admin panel",
+    "root": "Root",
+    "empty": "This folder is empty.",
+    "download": "Download",
+    "cols": { "name": "Name", "size": "Size", "mime": "Type", "modified": "Modified" }
   },
   "demo": {
     "badge": "Live demo",

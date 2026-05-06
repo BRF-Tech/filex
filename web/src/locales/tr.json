@@ -374,7 +374,11 @@
     "loading": "Yükleniyor…",
     "noStorage": "Henüz depo eklenmedi.",
     "addStorage": "Depo ekle",
-    "gotoAdmin": "Admin paneli"
+    "gotoAdmin": "Admin paneli",
+    "root": "Kök",
+    "empty": "Bu klasör boş.",
+    "download": "İndir",
+    "cols": { "name": "Ad", "size": "Boyut", "mime": "Tür", "modified": "Değiştirildi" }
   },
   "demo": {
     "badge": "Canlı Demo",
