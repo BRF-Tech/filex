@@ -1,201 +1,195 @@
-# HANDOVER — Burak'ın lokal'inden devam (2026-05-06)
+# HANDOVER — v0.1.0-rc (2026-05-06, eveninɡ)
 
-> Bu dosya: Coder workspace'i Go derleme yükünden patladığı için planı dosyalara döküp Burak'ın lokal makinesine bırakıyoruz. Burak lokalden devam edecek.
-
----
-
-## TL;DR
-
-1. `git pull origin main`
-2. `cat plan/00-ROADMAP.md` (yol haritası)
-3. `cat SPEC.md` (tüm karar matrisi + mimari)
-4. `cd backend && go build ./...` — patlarsa Round A WIP düzelt
-5. WIP düzeldikten sonra Round B'den devam (queue → notify → replica)
+> Önceki Coder workspace patladı, plan dosyaları lokal'e taşındı (commit
+> `e40000c`). Bu HANDOVER lokalde Round A doğrulama + B + C + D
+> hazırlığı bitirildikten sonra yazıldı.
 
 ---
 
-## Bu commit ne içeriyor
+## TL;DR — neresi tamam, neresi kaldı
 
-### Yeni dosyalar
-- `SPEC.md` (root) — Tek dosyada tüm spec
-- `plan/00-ROADMAP.md` — Yol haritası + tamamlanan/kalan tablosu
-- `plan/01-storage-deltas.md` — FTP, root guard, prefix UI
-- `plan/02-auth-deltas.md` — Proxy-header, role-based admin
-- `plan/03-queue.md` — Persistent queue (driver-based)
-- `plan/04-notify.md` — Notifications (webhook + in-app)
-- `plan/05-replica.md` — Replica storage layer + rules + reconcile + cron
-- `plan/06-admin-ui.md` — Admin UI delta sayfaları
-- `plan/07-integration-and-release.md` — brf-mono, fishapp, v0.1.0, demo deploy
-- `plan/HANDOVER.md` — bu dosya
+| Round | Durum | Commit |
+|-------|-------|--------|
+| A — testutil cycle fix | ✅ | `235d437` |
+| A — FTP / proxy-header / root guard validation | ✅ (commit'te) | `e40000c` (önceden) |
+| B — persistent queue | ✅ | `b7cf68c` |
+| B — notifications | ✅ | `be021f7` |
+| B — replica + rules + reconcile + cron | ✅ | `448523c` |
+| C — admin UI delta pages | ✅ | `9fa5872` |
+| D — release prep (CHANGELOG + deploy env + docs) | ✅ | `120becf` |
+| D — git tag v0.1.0 + GitLab Release | ⏳ Burak'a kaldı |
+| D — brf-mono A planı (frontend swap) | ⏳ Burak'a kaldı |
+| D — fishapp PWA frontend swap | ⏳ Burak'a kaldı |
+| D — demo-fm.brf.sh deploy (brkip Caddy) | ⏳ Burak'a kaldı |
 
-### WIP delta kodları (subagent'lardan, build doğrulanmamış)
-- `backend/internal/storage/drivers/ftp/ftp.go` + `ftp_test.go`
-- `backend/internal/auth/drivers/proxyheader/proxyheader.go` + `proxyheader_test.go`
-- `backend/internal/storage/validate.go` + `validate_test.go`
-- `backend/cmd/filex/main.go` (modifiye — yeni driver blank import'ları eklenmiş olabilir)
-- `backend/internal/api/handlers/storages.go` (modifiye — root guard çağrısı?)
-- `backend/internal/server/server.go` (modifiye — bilmiyorum, kontrol et)
-- `backend/go.mod` + `backend/go.sum` (jlaffaye/ftp dep eklenmiş)
-
-### Demo URL rename (tamam)
-- `deploy/files.brf.sh.compose.yml` → `demo-fm.brf.sh.compose.yml`
-- `deploy/nginx.files.brf.sh.conf` → `nginx.demo-fm.brf.sh.conf`
-- `deploy/keycloak-client-filex.json` (içerik update)
-- `docs/DEPLOY_BRF.md` (içerik update)
-- `docs/MIGRATION_FISHAPP.md` (URL update)
-- `deploy/.env.example` (yorum update)
-- `deploy/README.md` (tablo update)
+`go build ./...` + `go test ./...` + `pnpm -r build` hepsi yeşil.
 
 ---
 
-## Kararlar (Burak onayladı, SPEC.md §1)
+## Burak'ın yapacakları (ortam-spesifik, lokal Claude tutamadı)
 
-| # | Konu | Karar |
-|---|------|-------|
-| 1 | License | Şimdilik ertelendi |
-| 2 | Container Registry | GitLab private (sonra GitHub public) |
-| 3 | Demo URL | `demo-fm.brf.sh` (brkip Caddy DR-site) |
-| 4 | Auth | Basic + OIDC. Hazır paketler: `coreos/go-oidc`, `chi BasicAuth` |
-| 5 | Queue persistence | ZORUNLU, driver-based (sqlite/redis/postgres) |
-| 6 | Admin yetki | Role-based: JWT claim `roles:["admin"]` veya local user.role |
-| 7 | Yapım | Subagent paralel iş bölümü |
-| 8 | DB | Driver-based: sqlite default, postgres, mysql |
-| 9 | Migration consumer'lar | brf-mono ilk, fishapp ikinci |
-| 10 | Mevcut paketten geçiş | Standalone uygulama hedefi |
-| A1 | Replica yazımı | Async + kullanıcı tanımlı cron status raporu (preset+raw) |
-| A2 | Read fallback | Primary fail → replica + bildirim (webhook + opsiyonel in-app) |
-| A3 | Replica delete | Mirror default; path-based rule (mirror/append-only/skip) |
-| A4 | Reconciliation | UI'da "Fix" butonu (replica_failures'tan retry) |
-| B | Storage drivers V0.1 | S3, Local, FTP, SFTP, WebDAV (5 driver) |
-| C | Storage prefix | Driver config'inde zorunlu, root yasak |
-| D | Admin role | JWT claim/local user.role/env CSV |
-| E1 | Replica rules | DB tablo + Admin UI form |
-| E2 | Default rule yokken | Mirror |
-| F1 | Cron formatı | Preset + advanced raw |
-| F2 | Status persistence | Sadece son rapor DB; webhook ingest tam detay |
-| F3 | Rapor içeriği | UI özet, DB tekil paginated, webhook tam |
-| G1 | Webhook payload | Generic JSON (Slack/Discord template yok) |
-| G2 | In-app | Bell + history + read/unread |
-| G3 | Event listesi | Tümü ingest'e echo |
-| H1 | WebDAV auth | Basic only |
-| H2 | FTP/SFTP | İki ayrı driver |
-| H3 | GCS/Azure | Hayır, S3 yeterli |
-| I1 | Storage config | .env bootstrap + Admin UI override |
-| I2 | Multi-storage | Tek primary; çift istiyorsa iki kurulum |
-| J1 | Root klasör | YASAK; primary+replica alt klasör zorunlu |
-
----
-
-## Lokal'de ilk kontrol
+### 1. v0.1.0 release tag
 
 ```bash
-cd /home/coder/filemanager   # veya senin lokal yolun
-git pull origin main
-
-# Subagent'ların yarım bıraktığı durumu gör:
-git log -1 --stat
-git status
-
-# Backend build:
-cd backend
-go mod tidy
-go build ./...
-go test ./...
-
-# Frontend build:
-cd ..
-pnpm install
-pnpm -r build
-pnpm -r test
-
-# E2E (storage erişimi gerek):
-pnpm e2e
+cd /g/mail/filemanager
+git push origin main
+git tag v0.1.0 -m "v0.1.0 — first public release"
+git push --tags
 ```
 
-### Build patlarsa
-Subagent'lar tüm raporlarını bitirmeden Coder durdu. Yarı yazılmış kod olabilir.
+GitLab CI tag pipeline:
+- `npm publish` (private GitLab npm registry — `@brftech/filex-core`,
+  `@brftech/filex`, `@brftech/filex-react`).
+- Docker `docker push registry.gitlab.com/brftech/filemanager:v0.1.0`.
+- Goreleaser binary matrix (Linux / macOS / Windows × amd64 / arm64).
 
-**Yapacakların:**
-1. `git diff backend/cmd/filex/main.go` — yeni driver blank import'ları doğru mu?
-2. `git diff backend/internal/api/handlers/storages.go` — `storage.ValidateNonRootPath` çağrısı doğru import edilmiş mi?
-3. `git diff backend/internal/server/server.go` — neye dokunulmuş?
-4. `cat backend/internal/storage/drivers/ftp/ftp.go` — Driver methodları tam mı (List/Stat/Read/Write/Move/Copy/Delete/Mkdir)?
-5. `cat backend/internal/auth/drivers/proxyheader/proxyheader.go` — auth.Driver interface uyumlu mu?
+GitLab Release sayfasına `CHANGELOG.md` `[0.1.0]` bölümü kopyala.
 
-İhtiyaç olursa **plan dosyalarındaki kod örneklerini referans al**:
-- FTP → `plan/01-storage-deltas.md` §1
-- Proxy-header → `plan/02-auth-deltas.md` §1
-- Root guard → `plan/01-storage-deltas.md` §2
+### 2. brf-mono entegrasyon (A planı — frontend swap)
 
-### Hızlı yapım yolu (Round A doğrulandıktan sonra)
+`plan/07-integration-and-release.md` §1.A.
 
-1. **Round B — Queue** (`plan/03-queue.md`):
-   - `backend/internal/queue/` klasörünü sıfırdan yaz
-   - Migration `00006_queue.sql`
-   - Bootstrap `cmd/filex/main.go`'da
-   - Test: SQLite round-trip
+```bash
+cd /g/mail/brf-mono
+pnpm config set @brftech:registry https://gitlab.com/api/v4/projects/<projID>/packages/npm/
+pnpm install @brftech/filex-core
+```
 
-2. **Round B — Notify** (`plan/04-notify.md`):
-   - `backend/internal/notify/` klasörünü sıfırdan yaz
-   - Migration `00007_notifications.sql`
-   - Webhook delivery + retry
-   - DB store methods (3 dialekt)
-   - API endpoints
+`resources/js/file-manager.ts`:
 
-3. **Round B — Replica** (`plan/05-replica.md`):
-   - Queue + Notify hazır olduktan sonra
-   - `backend/internal/storage/replicated.go` wrapper
-   - Migration `00008_replica.sql`
-   - Rule engine + reconcile + cron report
-   - API endpoints
+```diff
+- import FileExplorer from './vendor/file-explorer/file-explorer.js';
++ import { FileExplorer } from '@brftech/filex-core';
++ import '@brftech/filex-core/style.css';
+```
 
-4. **Round C — Admin UI** (`plan/06-admin-ui.md`):
-   - `web/src/views/{Replica,Notifications,Queue}.vue`
-   - `NotificationBell.vue` component
-   - Stores + API clients + i18n + router
+`resources/js/vendor/file-explorer/` SİL.
 
-5. **Round D — Release** (`plan/07-integration-and-release.md`):
-   - brf-mono A planı (frontend swap)
-   - fishapp PWA
-   - v0.1.0 tag + GitLab release
-   - demo-fm.brf.sh brkip Caddy deploy
+`Modules/FishApp/Http/Controllers/FilesController.php` shim'i — Filex
+paketinin beklediği endpoint shape'ine göre response adapt et (eski
+Vuefinder kontratı yerleşkten farklı olabilir; mevcut endpoint'leri
+mock POST ile smoke test et).
+
+### 3. fishapp PWA
+
+`plan/07-integration-and-release.md` §2.
+
+```bash
+cd ~/webstorm/fishprogram
+npm install @brftech/filex-core
+```
+
+`src/views/FilesPage.vue`:
+
+```diff
+- import FileExplorer from '@/vendor/file-explorer/file-explorer.js';
++ import { FileExplorer } from '@brftech/filex-core';
+```
+
+`src/vendor/file-explorer/` SİL. Sanctum bearer token Filex `auth: {
+kind: 'bearer', token }` config alanıyla geçer.
+
+`pnpm build` + WSL → main rsync → `fish.brf.sh/dist/`.
+
+### 4. demo-fm.brf.sh deploy (brkip Caddy)
+
+`plan/07-integration-and-release.md` §4.
+
+```bash
+# DNS — brf.sh zone
+curl -X POST -H "X-Auth-Email: ..." -H "X-Auth-Key: $CF_TOKEN" \
+  "https://api.cloudflare.com/client/v4/zones/15a5559714ccad6709385b135d89efd3/dns_records" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"A","name":"demo-fm","content":"88.228.71.208","proxied":false,"ttl":1}'
+
+# Caddy
+ssh brkip "cat > /opt/brkip-stack/caddy/Caddyfile.d/demo-fm.brf.sh.caddy <<'EOF'
+demo-fm.brf.sh {
+  tls internal
+  reverse_proxy 127.0.0.1:5212
+}
+EOF"
+
+# Compose
+ssh brkip "mkdir -p /opt/brkip-stack/filex-demo && cd /opt/brkip-stack/filex-demo && \
+  curl -s https://gitlab.com/brftech/filemanager/-/raw/v0.1.0/deploy/demo-fm.brf.sh.compose.yml \
+    > docker-compose.yml && \
+  docker compose up -d"
+
+# Caddy reload
+ssh brkip "docker exec brkip-caddy caddy reload --config /etc/caddy/Caddyfile"
+
+# Smoke
+curl -fsS https://demo-fm.brf.sh/healthz
+```
+
+Notify ekle: brf-mono Modules/Uptime → yeni monitor `demo-fm.brf.sh`
+(`/healthz`, 60s, group `demo`).
 
 ---
 
-## Subagent durumu (referans)
+## Test sonuçları
 
-Coder workspace'inde 6 paralel subagent başlatıldı. Sadece 1 tanesinden rapor alındı (demo rename — tamam). Diğerleri kod üretti ama rapor vermeden Coder durdu.
+```bash
+$ cd /g/mail/filemanager/backend
+$ go build ./...      # exit 0
+$ go test ./...       # all packages OK
+$ cd ../web
+$ pnpm build          # ✓ built in ~9s
+```
 
-| Subagent | Rapor | Çıktı (lokal'de doğrula) |
-|----------|-------|--------------------------|
-| Demo URL rename | ✅ | deploy/ + docs/ commit'te |
-| FTP driver | ❌ rapor yok | `backend/internal/storage/drivers/ftp/` mevcut |
-| Proxy-header auth | ❌ rapor yok | `backend/internal/auth/drivers/proxyheader/` mevcut |
-| Root path guard | ❌ rapor yok | `backend/internal/storage/validate*.go` mevcut |
-| Persistent queue | ❌ output yok | `backend/internal/queue/` muhtemelen yok — sıfırdan |
-| Notifications | ❌ output yok | `backend/internal/notify/` muhtemelen yok — sıfırdan |
+Yeni paket eklemeleri:
 
----
-
-## Build guard notları (CLAUDE.md'den hatırlatma)
-
-- Türkçe konuş
-- Direkt çöz, gevezelik yok
-- Pre-push hook + GitLab CI smoke test (build guard'ları)
-- Yeni Laravel 13 / Filament v5 tuzakları çıkarsa CLAUDE.md tablosuna ekle (consumer projeler için)
-- Filex Go bir backend olduğu için Laravel guard'ları doğrudan uygulanmaz, AMA brf-mono/fishapp consumer entegrasyonunda dikkat
+| Paket | Commit | Boyut (gzip JS) |
+|-------|--------|-----------------|
+| `internal/queue` | `b7cf68c` | 3 driver + worker pool (1.4 kB asset added to admin) |
+| `internal/notify` | `be021f7` | webhook+bell+settings (Bell component bundled into vue-vendor) |
+| `internal/storage/replicated.go` + `internal/replica` | `448523c` | rules engine + reconcile + cron |
+| `web/src/views/{Replica, Notifications, Queue}.vue` | `9fa5872` | Replica 4.78 kB / Notifications 2.61 kB / Queue 2.63 kB |
 
 ---
 
-## Sentry / izleme
+## v0.2 yapılacaklar (CHANGELOG'daki "Known Gaps")
 
-- Filex repo'su Sentry'ye bağlı değil (henüz). brf-mono `brftech/brf-mono` projesi var (`memory/sentry_access.md`).
-- V0.2'de filex Sentry SDK entegrasyonu — `getsentry/sentry-go`.
+1. **brf-mono B planı** — filex Go binary'yi tek backend olarak çalıştır.
+   PHP `Modules/FishApp/Services/{VuefinderService, ChunkedUploadService,
+   ArchiveService, CapabilityService}.php` SİL. brf-mono ↔ filex auth
+   bridge (Keycloak token → filex auth driver). `file_shares` tablosu
+   → filex `shares` tablosu one-time data migration.
+2. **Replica auto-pairing** — `storages.role` + `replica_of_id` admin
+   UI'dan ayarlanmalı (şu an SQL ile manuel set ediyor; bootstrap
+   ReplicatedDriver'ı buna göre wrap'lasın).
+3. **E2E Playwright** suite genişlet — yeni admin sayfaları (Replica,
+   Queue, Notifications) flow testleri.
+4. **Sentry SDK** entegrasyonu (`getsentry/sentry-go`) — relay.brf.sh
+   üzerinden TR DPI bypass'lı + DSN env'de.
+5. **Çoklu replica** desteği (V0.3+) — şu an tek primary + tek replica
+   (Burak I2). DB'de `replica_of_id` çoklu replikalar için zaten foreign
+   key, sadece bootstrap çoklu fan-out'a girmiyor.
+
+---
+
+## Subagent durumu (Round B'deki postgres + redis driver'lar)
+
+Round B persistent queue'da subagent'lar paralel çalıştırıldı:
+
+| Subagent | Çıktı | Doğrulanma |
+|----------|-------|------------|
+| postgres queue driver | `internal/queue/drivers/postgres/postgres.go` | `go build` + raporda 469 satır, JSONB::text scan trick |
+| redis queue driver | `internal/queue/drivers/redis/redis.go` | `go build` + raporda 889 satır, BRPOPLPUSH + scheduled ZSET promoter |
+
+Her iki driver da blank-import edildi (server.go), `go.mod` jackc/pgx
++ go-redis/v9 pin'lendi. SQLite test suite kontratı da bağlayıcı —
+postgres/redis canlı entegrasyon testleri V0.2'de eklenecek (CI matrix
+gerek).
 
 ---
 
 ## Soruların olursa
 
-Lokalde Claude Code çalıştır, `cat SPEC.md && cat plan/00-ROADMAP.md && cat plan/HANDOVER.md` ile başla. Sonra hangi delta'yı yapıyorsan ilgili plan dosyasını oku.
+`SPEC.md` + `plan/00-ROADMAP.md` + bu HANDOVER kombosu yeter. Round
+B/C komutları + dosya yolları her commit'in body'sinde detaylı.
+Round D §1-§4 adımları yukarıda; her biri `plan/07-integration-and-
+release.md`'ye işaret ediyor.
 
-İyi şanslar 🍀
+İyi şanslar — v0.1.0 hazır 🚀
