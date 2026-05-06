@@ -25,7 +25,7 @@ You have two options:
 
 | Option | Backend | When to pick |
 |--------|---------|--------------|
-| **A1. filex** at `files.brf.sh` | New Go service from this repo | Recommended once `files.brf.sh` is live (see `DEPLOY_BRF.md`) |
+| **A1. filex** at `demo-fm.brf.sh` | New Go service from this repo | Recommended once `demo-fm.brf.sh` is live (see `DEPLOY_BRF.md`) |
 | **A2. brf-mono** (status quo)   | Existing PHP controllers     | Keeps current setup running while migration is incremental |
 
 The new package supports both — it just needs the right `apiBase` and
@@ -81,7 +81,7 @@ import { useAuthStore } from '@/stores/auth';
 const auth = useAuthStore();
 
 const config = {
-  apiBase: import.meta.env.VITE_FILES_API_BASE,           // https://files.brf.sh
+  apiBase: import.meta.env.VITE_FILES_API_BASE,           // https://demo-fm.brf.sh
   auth: { kind: 'bearer' as const, token: () => auth.token },
   locale: 'tr' as const,
   trashVisible: true,

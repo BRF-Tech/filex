@@ -7,9 +7,9 @@ copied onto the server.
 
 | File | Destination on `main` |
 |------|----------------------|
-| `files.brf.sh.compose.yml` | `/root/filex/docker-compose.yml` |
+| `demo-fm.brf.sh.compose.yml` | `/root/filex/docker-compose.yml` |
 | `.env.example`             | `/root/filex/.env` (after editing) |
-| `nginx.files.brf.sh.conf`  | `/etc/nginx/sites-available/files.brf.sh` |
+| `nginx.demo-fm.brf.sh.conf`  | `/etc/nginx/sites-available/demo-fm.brf.sh` |
 | `keycloak-client-filex.json` | imported via Keycloak admin UI |
 
 For brkip DR (mirror), the same compose works as long as

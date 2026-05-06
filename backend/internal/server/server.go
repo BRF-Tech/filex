@@ -19,6 +19,7 @@ import (
 	authldap "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/ldap"
 	authlocal "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/local"
 	authoidc "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/oidc"
+	authproxyheader "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/proxyheader"
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
@@ -35,6 +36,7 @@ import (
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/mysql"
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/postgres"
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/sqlite"
+	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/ftp"
 	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/local"
 	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/s3"
 	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/sftp"
@@ -115,6 +117,19 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				"start_tls":     cfg.Auth.LDAP.StartTLS,
 			}); err != nil {
 				slog.Warn("ldap driver init failed", slog.String("err", err.Error()))
+				continue
+			}
+			enabled = append(enabled, d)
+		case "proxy-header", "proxyheader", "header_proxy":
+			d := authproxyheader.New(store)
+			if err := d.Init(ctx, map[string]any{
+				"header_user":     "X-Auth-User",
+				"header_email":    cfg.Auth.Header.EmailHeader,
+				"header_roles":    cfg.Auth.Header.GroupHeader,
+				"trusted_proxies": cfg.Auth.Header.TrustedIPs,
+				"admin_role":      cfg.Auth.Header.AdminGroup,
+			}); err != nil {
+				slog.Warn("proxy-header driver init failed", slog.String("err", err.Error()))
 				continue
 			}
 			enabled = append(enabled, d)

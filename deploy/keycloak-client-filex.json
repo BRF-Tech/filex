@@ -2,19 +2,19 @@
   "_comment": "Import via Keycloak admin console: realm 'brf' → Clients → Import. After import, generate the client secret under Credentials and paste it into /root/filex/.env as FILEX_OIDC_CLIENT_SECRET.",
   "clientId": "filex",
   "name": "filex — file manager",
-  "description": "Self-hosted file manager at files.brf.sh",
-  "rootUrl": "https://files.brf.sh",
-  "adminUrl": "https://files.brf.sh",
+  "description": "Self-hosted file manager at demo-fm.brf.sh",
+  "rootUrl": "https://demo-fm.brf.sh",
+  "adminUrl": "https://demo-fm.brf.sh",
   "baseUrl": "/admin",
   "enabled": true,
   "alwaysDisplayInConsole": true,
   "clientAuthenticatorType": "client-secret",
   "redirectUris": [
-    "https://files.brf.sh/api/auth/oidc/callback",
-    "https://files.brf.sh/*"
+    "https://demo-fm.brf.sh/api/auth/oidc/callback",
+    "https://demo-fm.brf.sh/*"
   ],
   "webOrigins": [
-    "https://files.brf.sh"
+    "https://demo-fm.brf.sh"
   ],
   "standardFlowEnabled": true,
   "implicitFlowEnabled": false,

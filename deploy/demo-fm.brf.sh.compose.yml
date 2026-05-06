@@ -1,4 +1,4 @@
-# filex production compose for files.brf.sh
+# filex production compose for demo-fm.brf.sh
 #
 # Drop into /root/filex/docker-compose.yml on the main Hetzner box, then:
 #
@@ -7,11 +7,11 @@
 #   docker compose logs -f filex   # see banner; copy admin password ONCE
 #
 # Reverse proxy (CloudPanel nginx vhost or Caddy on brkip) terminates TLS
-# and proxies https://files.brf.sh → http://127.0.0.1:5212.
+# and proxies https://demo-fm.brf.sh → http://127.0.0.1:5212.
 #
 # Keycloak realm `brf` should expose a confidential client `filex` with:
-#   - Valid redirect URIs: https://files.brf.sh/api/auth/oidc/callback
-#   - Web origins: https://files.brf.sh
+#   - Valid redirect URIs: https://demo-fm.brf.sh/api/auth/oidc/callback
+#   - Web origins: https://demo-fm.brf.sh
 #   - Client authentication: ON
 #   - Standard flow: ON
 # The client secret goes into FILEX_OIDC_CLIENT_SECRET below.
@@ -27,7 +27,7 @@ services:
       - /opt/filex/data:/data        # SQLite + first-run secret
       - /opt/filex/storages:/storages # any local-driver storages
     environment:
-      FILEX_PUBLIC_URL: https://files.brf.sh
+      FILEX_PUBLIC_URL: https://demo-fm.brf.sh
       FILEX_LISTEN: 0.0.0.0:5212
 
       # ── DB ────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ services:
       FILEX_OIDC_ISSUER: https://auth.brf.sh/realms/brf
       FILEX_OIDC_CLIENT_ID: filex
       FILEX_OIDC_CLIENT_SECRET: ${FILEX_OIDC_CLIENT_SECRET}
-      FILEX_OIDC_REDIRECT_URL: https://files.brf.sh/api/auth/oidc/callback
+      FILEX_OIDC_REDIRECT_URL: https://demo-fm.brf.sh/api/auth/oidc/callback
       FILEX_OIDC_ROLE_CLAIM: realm_access.roles
       FILEX_OIDC_ADMIN_GROUP: filex-admin
 

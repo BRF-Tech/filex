@@ -352,7 +352,7 @@ func storageAddCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&name, "name", "", "logical name")
-	c.Flags().StringVar(&driver, "driver", "", "driver: local | s3 | sftp | webdav")
+	c.Flags().StringVar(&driver, "driver", "", "driver: local | s3 | sftp | ftp | webdav")
 	c.Flags().StringVar(&mount, "mount", "/", "logical mount path")
 	c.Flags().StringVar(&configJSON, "config", "{}", "JSON object with driver-specific options")
 	return c

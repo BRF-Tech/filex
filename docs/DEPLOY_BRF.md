@@ -1,4 +1,4 @@
-# filex deployment — `files.brf.sh`
+# filex deployment — `demo-fm.brf.sh`
 
 End-to-end deployment runbook for the Hetzner main box. All paths are
 production paths; substitute as needed.
@@ -13,12 +13,12 @@ cd /root/filex
 docker compose pull
 docker compose up -d
 docker compose logs filex            # banner — copy admin password ONCE
-nginx -t && systemctl reload nginx   # bring https://files.brf.sh online
+nginx -t && systemctl reload nginx   # bring https://demo-fm.brf.sh online
 ```
 
 ## 1. Prerequisites
 
-- DNS: A record `files.brf.sh → 167.235.143.222` (`proxied: false` in
+- DNS: A record `demo-fm.brf.sh → 167.235.143.222` (`proxied: false` in
   Cloudflare zone `brf.sh`). The DR site can later point a CNAME at
   brkip if/when needed.
 - Keycloak realm `brf` (auth.brf.sh) with admin access.
@@ -35,10 +35,10 @@ nginx -t && systemctl reload nginx   # bring https://files.brf.sh online
 curl -X POST "https://api.cloudflare.com/client/v4/zones/15a5559714ccad6709385b135d89efd3/dns_records" \
   -H "Authorization: Bearer ${CF_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{"type":"A","name":"files","content":"167.235.143.222","ttl":1,"proxied":false}'
+  -d '{"type":"A","name":"demo-fm","content":"167.235.143.222","ttl":1,"proxied":false}'
 ```
 
-Verify: `dig +short files.brf.sh` → `167.235.143.222`.
+Verify: `dig +short demo-fm.brf.sh` → `167.235.143.222`.
 
 ## 3. Keycloak realm setup
 
@@ -63,7 +63,7 @@ sudo chown -R 1000:1000 /opt/filex                 # match the alpine user insid
 # Pull the artifacts from the repo
 cd /tmp
 git clone git@gitlab.com:brftech/filemanager.git
-cp filemanager/deploy/files.brf.sh.compose.yml /root/filex/docker-compose.yml
+cp filemanager/deploy/demo-fm.brf.sh.compose.yml /root/filex/docker-compose.yml
 cp filemanager/deploy/.env.example              /root/filex/.env
 chmod 600 /root/filex/.env
 
@@ -84,18 +84,18 @@ once you've safely stored the password.
 ## 5. Nginx vhost
 
 ```bash
-sudo cp /tmp/filemanager/deploy/nginx.files.brf.sh.conf \
-        /etc/nginx/sites-available/files.brf.sh
-sudo ln -s /etc/nginx/sites-available/files.brf.sh \
-           /etc/nginx/sites-enabled/files.brf.sh
+sudo cp /tmp/filemanager/deploy/nginx.demo-fm.brf.sh.conf \
+        /etc/nginx/sites-available/demo-fm.brf.sh
+sudo ln -s /etc/nginx/sites-available/demo-fm.brf.sh \
+           /etc/nginx/sites-enabled/demo-fm.brf.sh
 
 # Issue/renew the cert (CloudPanel may already do this on its own)
-sudo certbot certonly --nginx -d files.brf.sh
+sudo certbot certonly --nginx -d demo-fm.brf.sh
 
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Open https://files.brf.sh/admin → login with `admin@local` + the
+Open https://demo-fm.brf.sh/admin → login with `admin@local` + the
 banner password, OR click **Sign in with Keycloak** if you assigned
 yourself the `filex-admin` role.
 
@@ -149,10 +149,10 @@ direction (`docker compose run --rm filex migrate down 1`).
 | Check | Command |
 |-------|---------|
 | Container alive | `docker compose ps filex \| grep healthy` |
-| HTTP responding | `curl -fsS https://files.brf.sh/healthz` → `{"status":"ok"}` |
-| Capabilities    | `curl -fsS https://files.brf.sh/api/capabilities \| jq .external` |
+| HTTP responding | `curl -fsS https://demo-fm.brf.sh/healthz` → `{"status":"ok"}` |
+| Capabilities    | `curl -fsS https://demo-fm.brf.sh/api/capabilities \| jq .external` |
 | OIDC discovery  | `curl -fsS https://auth.brf.sh/realms/brf/.well-known/openid-configuration \| jq -r .issuer` |
-| Audit + sync    | https://files.brf.sh/admin/dashboard → recent activity card |
+| Audit + sync    | https://demo-fm.brf.sh/admin/dashboard → recent activity card |
 
 Add the first three to `infra-watchdog` so they show up in the
 existing notify channel.

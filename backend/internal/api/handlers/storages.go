@@ -9,8 +9,23 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/storage"
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 )
+
+// validateStorageRootPath decodes ConfigJSON and rejects storages that
+// would mount at the backend root (empty or "/" prefix/path). A non-root
+// sub-folder is required so that filemanager never shadows pre-existing
+// files at the bucket / FS root. See storage.ValidateNonRootPath.
+func validateStorageRootPath(st *model.Storage) error {
+	cfg := map[string]any{}
+	if len(st.ConfigJSON) > 0 {
+		if err := json.Unmarshal(st.ConfigJSON, &cfg); err != nil {
+			return err
+		}
+	}
+	return storage.ValidateNonRootPath(st.Driver, cfg)
+}
 
 // Storages handles /api/admin/storages.
 type Storages struct {
@@ -42,6 +57,10 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if st.Name == "" || st.Driver == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and driver required"})
+		return
+	}
+	if err := validateStorageRootPath(&st); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if st.SyncMode == "" {
@@ -78,6 +97,10 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur.ID = id
+	if err := validateStorageRootPath(cur); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	if err := h.Store.UpdateStorage(r.Context(), cur); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
