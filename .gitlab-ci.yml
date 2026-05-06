@@ -26,7 +26,10 @@ stages:
   - release
 
 variables:
-  GO_VERSION: "1.23"
+  # Bumped to 1.24 because go-redis/v9 (Round B persistent queue) requires
+  # it. The toolchain directive in backend/go.mod auto-downloads 1.24 even
+  # on a 1.23 image, but using a 1.24 image avoids an extra download in CI.
+  GO_VERSION: "1.24"
   NODE_VERSION: "20"
   PNPM_VERSION: "9.12.0"
   PNPM_HOME: "/root/.local/share/pnpm"

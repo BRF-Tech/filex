@@ -10,9 +10,12 @@
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)             │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header     │
-│  Storage Drivers:│  local · s3 · sftp · webdav             │
+│  Storage Drivers:│  local · s3 · ftp · sftp · webdav       │
 │  DB Drivers:     │  sqlite (default) · mysql · postgres    │
+│  Queue Drivers:  │  sqlite (default) · redis · postgres    │
 │  Sync Worker:    │  ETag diff + tombstone guard            │
+│  Replica Layer:  │  primary→replica + rules + reconcile    │
+│  Notifications:  │  webhook + in-app bell + read/unread    │
 │  Search:         │  Bleve (full-text, embedded)            │
 │  Thumbnails:     │  image · video · pdf · office           │
 │  Plug & Play:    │  OnlyOffice · Drawio · Mermaid          │
@@ -97,9 +100,13 @@ import { FileManager } from '@brftech/filex-react';
 ## Features
 
 - **Multi-storage** — Mount many storages at once. Each appears as a top-level folder named by you.
-- **Driver-pluggable everything** — Storage / Auth / DB drivers are opt-in via env (`AUTH_DRIVERS=local,oidc`).
+- **Driver-pluggable everything** — Storage / Auth / DB / Queue drivers are opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
+- **Replica + reconciliation** — Primary→replica fan-out (mirror / append-only / skip per path-glob rule), read fallback, scheduled status report, one-click "Fix all" UI.
+- **Persistent op queue** — Restart-safe `ops_queue` table (or Redis / Postgres). Worker pool with retries + cancel + admin dashboard.
+- **Notifications** — Generic JSON webhook (Slack/Discord-agnostic) + in-app bell with read/unread + per-user mute matrix.
 - **DB-backed file tree** — Listings come from the DB cache (1-5 ms), not the storage backend (~100 ms).
 - **Storage sync** — Periodic ETag-diff polling catches manual changes (e.g. someone uploads from S3 console).
+- **Storage path guard** — Empty / `"/"` prefix is rejected; pre-existing files at the bucket root are never silently shadowed.
 - **Single binary** — `goreleaser` matrix: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **Plug & play services** — OnlyOffice, Drawio, Mermaid mount only if URL is configured.
 - **Multi-framework component** — One Vue 3 source, exported as Vue / React / Web Component.

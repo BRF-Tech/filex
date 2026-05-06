@@ -16,6 +16,17 @@
 #   - Standard flow: ON
 # The client secret goes into FILEX_OIDC_CLIENT_SECRET below.
 
+# NOTE on the image tag below:
+#
+#   registry.gitlab.com/brftech/filemanager:latest is published by the
+#   GitLab CI release:docker job after `git tag vX.Y.Z && git push --tags`.
+#   Before the first tag exists, you have two options:
+#
+#   1. Pin to a specific tag once it lands: ":v0.1.0".
+#   2. Build locally during the demo bring-up:
+#        cd ~/filemanager && docker build -t filex:demo -f docker/Dockerfile .
+#        # Then change the image: line below to "filex:demo".
+
 services:
   filex:
     image: registry.gitlab.com/brftech/filemanager:latest

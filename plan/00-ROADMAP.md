@@ -1,14 +1,16 @@
 # filex v0.1.0 — Yol Haritası
 
-> Yazılma tarihi: 2026-05-06 · Yazan: Claude (Opus 4.7) Coder workspace'inde
-> Burak: lokal makinaya geçildiği için subagent'larla Go derleme bu workspace'i zorladı, plan dosyalara dökülüp push edildi
+> Yazılma tarihi: 2026-05-06 (akşam, lokal devam sonrası güncellendi)
+> **v0.1.0 release-candidate**: backend + frontend + docs + CI hazır,
+> tek eksik `git tag v0.1.0` (Burak'a kaldı).
 >
-> **Önce oku:** `SPEC.md` (root) — tüm karar matrisi + mimari + ENV + endpoint kontratı
+> **Önce oku:** `SPEC.md` (root) — tüm karar matrisi + mimari + ENV + endpoint kontratı.
+> Detaylı release planı: `plan/HANDOVER.md`.
 
 ## Branch durumu
 
-- `main` — phase-2 (cc65864 commit) + bu plan dosyaları
-- WIP kodları (subagent çıktıları) bu commit'e dahil. Build edilebilirliği lokal'de doğrulanmalı.
+- `main` — Round A doğrulama + B + C + D hazırlığı tamamlandı, 8 commit pushlanmaya hazır.
+- Hiçbir kalan WIP yok. `go build ./... && go test ./... && pnpm -r build` üçü de yeşil.
 
 ## Bu commit'te ne var
 
@@ -26,96 +28,68 @@
 
    **Kontrol:** `cd backend && go build ./... && go test ./...` — lokal'de ilk iş
 
-## Tamamlanan (mevcut iskelet — phase-2)
+## Tamamlanan
 
-| # | Faz | Durum |
-|---|-----|-------|
-| 1 | Monorepo iskelet + core paket | ✅ (cc65864) |
-| 2 | Web Component + React adapter | ✅ |
-| 3a | Go backend iskelet + auth + storage | ✅ |
-| 3b | API endpoint'leri | ✅ (audit gerek) |
-| 3c | DB + sync worker (ETag + tombstone + fsnotify) | ✅ |
-| 4 | Admin UI panel (mevcut sayfalar) | ✅ (delta sayfaları eksik) |
-| 5 | Docker (slim + full) | ✅ |
-| 6 | Docs (11 .md) | ✅ (delta'lar için update gerek) |
-| 7 | GitLab CI/CD + goreleaser | ✅ |
-| 11 | Δ Repo audit | ✅ |
-| 27 | Δ files.brf.sh → demo-fm.brf.sh rename | ✅ |
+| # | Faz | Commit |
+|---|-----|--------|
+| 1 | Monorepo iskelet + core paket | cc65864 |
+| 2 | Web Component + React adapter | cc65864 |
+| 3a | Go backend iskelet + auth + storage | cc65864 |
+| 3b | API endpoint'leri | cc65864 |
+| 3c | DB + sync worker (ETag + tombstone + fsnotify) | cc65864 |
+| 4a | Admin UI panel (mevcut sayfalar) | cc65864 |
+| 5 | Docker (slim + full) | cc65864 → 120becf (Go 1.24 bump) |
+| 6 | Docs (11 .md) | cc65864 → 120becf (DEPLOY_BRF Round B/C ekleri) |
+| 7 | GitLab CI/CD + goreleaser | cc65864 → 120becf (Go 1.24 bump) |
+| 27 | Δ files.brf.sh → demo-fm.brf.sh rename | e40000c |
+| Round A.1 | FTP driver | e40000c (subagent), test 235d437 |
+| Round A.2 | Proxy-header auth | e40000c (subagent), test 235d437 |
+| Round A.3 | Storage root path guard | e40000c (subagent), test 235d437 |
+| Round A.4 | testutil import cycle düzeltme | 235d437 |
+| Round B.1 | Persistent queue (sqlite/postgres/redis) | b7cf68c |
+| Round B.2 | Notifications (webhook + bell) | be021f7 |
+| Round B.3 | Replica wrapper + rules + reconcile + cron | 448523c |
+| Round C | Admin UI: Replica/Notifications/Queue + Bell | 9fa5872 |
+| Round D | CHANGELOG + DEPLOY_BRF + Caddyfile + HANDOVER | 120becf, bb1da90 |
 
-## Bekleyen delta'lar (sıralama önerisi)
+## Bekleyen — Burak'ın yapacakları (operatör adımları, plan/HANDOVER.md detaylı)
 
-### Round A — küçük, paralel (hepsi WIP, lokal'de doğrula + commit)
+### v0.1.0 release
 
-| Delta | Dosya | Plan dosyası |
-|-------|-------|--------------|
-| FTP driver | `backend/internal/storage/drivers/ftp/` | `01-storage-deltas.md` §1 |
-| Root path guard | `backend/internal/storage/validate.go` | `01-storage-deltas.md` §2 |
-| Proxy-header auth | `backend/internal/auth/drivers/proxyheader/` | `02-auth-deltas.md` §1 |
-| Demo URL rename | `deploy/`, `docs/DEPLOY_BRF.md` | tamamlandı (commit'te) |
+```bash
+git push origin main
+git tag v0.1.0 -m "v0.1.0 — first public release"
+git push --tags
+```
 
-### Round B — orta büyüklük, sıralı (yeni klasörler)
+GitLab CI tag pipeline (`.gitlab-ci.yml` rules `^v\d+\.\d+\.\d+`):
+- `release:goreleaser` — 8-binary matrix (Linux/macOS/Windows × amd64/arm64)
+- `release:npm` — `@brftech/{filex-core,filex,filex-react}` GitLab npm registry
+- `release:docker` — `:slim`, `:full`, `:vX.Y.Z`, `:latest` GitLab container registry
 
-| # | Delta | Plan dosyası | Bağımlılık |
-|---|-------|--------------|------------|
-| 1 | Persistent queue (driver-based) | `03-queue.md` | (yok) |
-| 2 | Notifications (webhook + in-app) | `04-notify.md` | DB tabloları |
-| 3 | Replica storage layer | `05-replica.md` | Queue + Notify |
+### Standalone demo deploy (brkip)
 
-Round B'yi sırayla yapın çünkü Replica iki diğerini consume ediyor.
+Bkz. `deploy/README.md` — DNS + compose + Caddyfile + Keycloak client. Mecbur olunan tek adım `.env`'i doldurmak.
 
-### Round C — frontend ağırlıklı
+### V0.2 — brf-mono / fishapp entegrasyon
 
-| Delta | Plan dosyası |
-|-------|--------------|
-| Role-based admin button | `02-auth-deltas.md` §2 |
-| Storage prefix UI | `01-storage-deltas.md` §3 |
-| Admin UI delta sayfaları (replica rules, replica failures, notifications, queue) | `06-admin-ui.md` |
+`plan/07-integration-and-release.md` §1 (A planı = frontend swap, B planı = full backend swap) ve §2. v0.1.0 stable çalıştıktan + birkaç hafta gözlemden sonra geçilir.
 
-### Round D — release
-
-| Delta | Plan dosyası |
-|-------|--------------|
-| brf-mono entegrasyon (consumer #1) | `07-integration.md` §1 |
-| fishapp PWA entegrasyon (consumer #2) | `07-integration.md` §2 |
-| v0.1.0 tag + demo-fm.brf.sh deploy | `07-integration.md` §3 |
-
-## Toplam efor tahmini (lokal'de full-time)
-
-- Round A doğrulama + bug fix: 2-4 saat
-- Round B: 2-3 gün
-- Round C: 1 gün
-- Round D: 0.5-1 gün
-
-**Toplam:** 4-5 gün full-time, lokal'de.
-
-## Subagent çıktısı — WIP durumu
-
-Coder workspace'inde 6 subagent paralel çalıştırıldı. Tamamlananlar:
-
-| Subagent | Durum | Çıktı |
-|----------|-------|-------|
-| Demo URL rename | ✅ Tamam (rapor alındı) | deploy/ + docs/ değişiklikleri commit'te |
-| FTP driver | ⚠ Yarı tamam (rapor alınmadı, dosya var) | `backend/internal/storage/drivers/ftp/` |
-| Proxy-header auth | ⚠ Yarı tamam (rapor alınmadı, dosya var) | `backend/internal/auth/drivers/proxyheader/` |
-| Root path guard | ⚠ Yarı tamam (rapor alınmadı, dosya var) | `backend/internal/storage/validate*.go` |
-| Persistent queue | ❌ Bilinmiyor (Coder durdu, output yok) | `backend/internal/queue/` muhtemelen yok |
-| Notifications | ❌ Bilinmiyor (Coder durdu, output yok) | `backend/internal/notify/` muhtemelen yok |
-
-`git status` ile ne geldiğini lokal'de doğrula. `go build ./...` çalışmıyorsa Round A doğrulama gerekir.
-
-## Lokalde başlangıç adımları
+## Doğrulama (yapılması gereken son smoke testleri)
 
 ```bash
 git pull origin main
-cd backend
-go mod tidy
-go build ./...
-go test ./...
+
+# Backend
+cd backend && go build ./... && go test ./...   # exit 0 bekleniyor
+
+# Frontend
+cd .. && pnpm -r build   # vue-tsc + vite build — exit 0
+
+# (opsiyonel) Lokal Docker build
+docker build -t filex:demo -f docker/Dockerfile .
+docker run --rm -p 5212:5212 filex:demo
+# /healthz → {"status":"ok"}
 ```
 
-Build hatası varsa:
-1. `git status` — son subagent kalıntılarını gör
-2. Hatalı dosyayı (`backend/internal/...`) düzelt veya geri al
-3. Plan dosyasındaki spec'e göre yeniden yaz
-
-Round A doğrulandıktan sonra Round B'ye geç.
+Hepsi yeşilse `git tag v0.1.0` aşamasına geçilebilir.

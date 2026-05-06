@@ -5,7 +5,7 @@
 
 **Repo:** `git@gitlab.com:brftech/filemanager.git` (private GitLab şimdilik)
 **Demo URL:** `demo-fm.brf.sh` (brkip Caddy, DR-site, readonly)
-**Versiyon:** v0.1.0 hedef · şu an v0.1.0-dev (commit `cc65864`)
+**Versiyon:** v0.1.0 (release-candidate, awaiting `git tag v0.1.0`)
 
 ---
 
@@ -435,28 +435,29 @@ GET    /api/me
 
 | Faz | İş | Status |
 |-----|------|--------|
-| 0 | SPEC.md (bu dosya) | ⏳ |
-| 1 | Monorepo iskelet + core | ✅ (mevcut) |
-| 2 | WC + React adapter | ✅ (mevcut) |
-| 3a | Backend iskelet + auth + storage | ✅ (mevcut) |
-| 3b | API endpoint'leri | ✅ (mevcut, audit eksikleri Faz 11) |
-| 3c | DB metadata cache | ✅ (mevcut, sync worker) |
-| Δ-FTP | FTP driver | ❌ |
-| Δ-Root | Root path guard | ❌ |
-| Δ-Replica | ReplicatedStorage + rules + reconcile | ❌ |
-| Δ-Queue | Driver-based persistent queue | ❌ |
-| Δ-Notify | Webhook + in-app | ❌ |
-| Δ-Role | Role-based admin button | ❌ |
-| Δ-Prefix | Storage prefix UI | ⚠️ kısmen (S3 backend'de var, UI eksik) |
-| Δ-Demo | demo-fm.brf.sh rename | ❌ |
-| 4 | Admin UI panel (replica + notify sayfaları) | ⚠️ (mevcut, replica/notify sayfaları yok) |
-| 5 | Docker | ✅ (mevcut) |
-| 6 | Docs | ✅ (mevcut, replica/notify ekle) |
-| 7 | CI/CD | ✅ (mevcut, audit) |
-| 8 | v0.1.0 release + demo-fm.brf.sh | ❌ |
-| 9 | brf-mono entegrasyon | ❌ |
-| 10 | fishapp PWA entegrasyon | ❌ |
-| 11 | Audit + tests + smoke | ❌ |
+| 0 | SPEC.md (bu dosya) | ✅ |
+| 1 | Monorepo iskelet + core | ✅ |
+| 2 | WC + React adapter | ✅ |
+| 3a | Backend iskelet + auth + storage | ✅ |
+| 3b | API endpoint'leri | ✅ |
+| 3c | DB metadata cache | ✅ |
+| Δ-FTP | FTP driver | ✅ (Round A) |
+| Δ-Root | Root path guard | ✅ (Round A) |
+| Δ-Proxy | Proxy-header auth driver | ✅ (Round A) |
+| Δ-Replica | ReplicatedStorage + rules + reconcile + cron | ✅ (Round B) |
+| Δ-Queue | Driver-based persistent queue (sqlite/redis/postgres) | ✅ (Round B) |
+| Δ-Notify | Webhook + in-app bell + read/unread | ✅ (Round B) |
+| Δ-Demo | demo-fm.brf.sh rename + Caddyfile sample | ✅ |
+| 4 | Admin UI delta sayfaları (Replica/Queue/Notifications + Bell) | ✅ (Round C) |
+| 5 | Docker (slim + full) | ✅ (Go 1.24'e bump) |
+| 6 | Docs | ✅ (DEPLOY_BRF + CHANGELOG + HANDOVER) |
+| 7 | CI/CD | ✅ (Go 1.24'e bump, release pipeline tag-tetikli) |
+| 8 | v0.1.0 release + demo-fm.brf.sh | ⏳ Burak: `git tag v0.1.0` + brkip deploy |
+| 9 | brf-mono entegrasyon | ⏳ V0.2 (filex stable olduktan sonra) |
+| 10 | fishapp PWA entegrasyon | ⏳ V0.2 |
+| 11 | Audit + tests + smoke | ✅ go build/test + pnpm build green |
+| Δ-Role | Role-based admin button | ⏸️ V0.2 (proxy-header `admin_role` zaten var; UI button minor) |
+| Δ-Prefix | Storage prefix UI | ⏸️ V0.2 (root guard backend zorluyor; UI form alanı opsiyonel cilalama) |
 
 ---
 
