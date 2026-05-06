@@ -309,6 +309,19 @@ func applyEnv(c *Config) {
 	//   FILEX_AUTH_OIDC_*  (legacy from earlier draft of this file)
 	// The shorter form wins when both are set, matching the convention
 	// used in deploy/demo-fm.brf.sh.compose.yml + plan files.
+	if v := os.Getenv("FILEX_AUTH_DRIVERS"); v != "" {
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 0 {
+			c.Auth.Drivers = out
+		}
+	}
 	if v := getenvFirst("FILEX_OIDC_ISSUER", "FILEX_AUTH_OIDC_ISSUER"); v != "" {
 		c.Auth.OIDC.Issuer = v
 	}
