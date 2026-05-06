@@ -1,6 +1,6 @@
 module gitlab.com/brftech/filemanager/backend
 
-go 1.23
+go 1.24
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.30.3
@@ -20,6 +20,7 @@ require (
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/pkg/sftp v1.13.6
 	github.com/pressly/goose/v3 v3.21.1
+	github.com/redis/go-redis/v9 v9.19.0
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/crypto v0.25.0
@@ -64,6 +65,7 @@ require (
 	github.com/blevesearch/zapx/v14 v14.3.10 // indirect
 	github.com/blevesearch/zapx/v15 v15.3.13 // indirect
 	github.com/blevesearch/zapx/v16 v16.1.5 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.5 // indirect
@@ -93,9 +95,10 @@ require (
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect

@@ -20,6 +20,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
+	"gitlab.com/brftech/filemanager/backend/internal/queue"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -38,6 +39,7 @@ type Deps struct {
 	Share           *share.Service
 	OnlyOffice      *onlyoffice.Service
 	Ops             *ops.Service
+	Queue           queue.Driver
 	StorageResolver func(int64) (storage.Driver, error)
 	Embed           embed.FS // web/dist + admin
 	LocalAuth       auth.LoginDriver
@@ -85,6 +87,7 @@ func BuildRouter(d *Deps) http.Handler {
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
 	usersAdmH := handlers.NewUsersAdmin(d.Store)
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
+	queueH := handlers.NewQueue(d.Queue)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -210,6 +213,14 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/search", func(r chi.Router) {
 				r.Get("/stats", searchAdmH.Stats)
 				r.Post("/rebuild", searchAdmH.Rebuild)
+			})
+
+			r.Route("/queue", func(r chi.Router) {
+				r.Get("/stats", queueH.Stats)
+				r.Get("/", queueH.List)
+				r.Get("/{id}", queueH.Get)
+				r.Post("/{id}/retry", queueH.Retry)
+				r.Delete("/{id}", queueH.Cancel)
 			})
 		})
 	})

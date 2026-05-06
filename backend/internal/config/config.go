@@ -36,6 +36,26 @@ type Config struct {
 	Thumbs           ThumbsConfig   `yaml:"thumbs"`
 	Search           SearchConfig   `yaml:"search"`
 	CORS             CORSConfig     `yaml:"cors"`
+	Queue            QueueConfig    `yaml:"queue"`
+}
+
+// QueueConfig — persistent op queue. Driver "sqlite" (default) shares
+// the application DB; "postgres" / "redis" can be wired for production
+// or HA setups (see internal/queue/drivers/{postgres,redis}).
+type QueueConfig struct {
+	// Driver selects the queue backend: sqlite | postgres | redis.
+	// Empty defaults to "sqlite".
+	Driver string `yaml:"driver"`
+	// DSN is the connection string for postgres ("postgres://...") or
+	// redis ("redis://..."). For sqlite the application DB handle is
+	// shared automatically and DSN is ignored.
+	DSN string `yaml:"dsn"`
+	// Workers controls Pool size. <=0 → 4.
+	Workers int `yaml:"workers"`
+	// Enabled lets operators turn the persistent queue off entirely
+	// (the legacy ops.Service still handles copy/move/delete in that
+	// case). Default: true.
+	Enabled bool `yaml:"enabled"`
 }
 
 // LogConfig — slog level + format.
@@ -159,6 +179,11 @@ func Default() Config {
 		Search: SearchConfig{
 			Enabled: true,
 		},
+		Queue: QueueConfig{
+			Driver:  "sqlite",
+			Workers: 4,
+			Enabled: true,
+		},
 		CORS: CORSConfig{
 			AllowedOrigins: []string{"*"},
 			AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
@@ -269,5 +294,19 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_CORS_ALLOWED_ORIGINS"); v != "" {
 		c.CORS.AllowedOrigins = strings.Split(v, ",")
+	}
+	if v := os.Getenv("FILEX_QUEUE_DRIVER"); v != "" {
+		c.Queue.Driver = v
+	}
+	if v := os.Getenv("FILEX_QUEUE_DSN"); v != "" {
+		c.Queue.DSN = v
+	}
+	if v := os.Getenv("FILEX_QUEUE_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Queue.Workers = n
+		}
+	}
+	if v := os.Getenv("FILEX_QUEUE_ENABLED"); v != "" {
+		c.Queue.Enabled = v == "1" || strings.EqualFold(v, "true")
 	}
 }

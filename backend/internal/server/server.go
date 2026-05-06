@@ -26,6 +26,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
+	"gitlab.com/brftech/filemanager/backend/internal/queue"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -36,6 +37,9 @@ import (
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/mysql"
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/postgres"
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/sqlite"
+	_ "gitlab.com/brftech/filemanager/backend/internal/queue/drivers/postgres"
+	_ "gitlab.com/brftech/filemanager/backend/internal/queue/drivers/redis"
+	_ "gitlab.com/brftech/filemanager/backend/internal/queue/drivers/sqlite"
 	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/ftp"
 	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/local"
 	_ "gitlab.com/brftech/filemanager/backend/internal/storage/drivers/s3"
@@ -45,13 +49,15 @@ import (
 
 // Server is the high-level wrapper around HTTP + workers.
 type Server struct {
-	cfg    config.Config
-	store  db.Store
-	sqlDB  *sql.DB
-	worker *syncpkg.Worker
-	ops    *ops.Service
-	srv    *http.Server
-	idx    *search.Index
+	cfg     config.Config
+	store   db.Store
+	sqlDB   *sql.DB
+	worker  *syncpkg.Worker
+	ops     *ops.Service
+	queue   queue.Driver
+	qpool   *queue.Pool
+	srv     *http.Server
+	idx     *search.Index
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -241,6 +247,58 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 	srvObj.ops = opsSvc
 
+	// Driver-based persistent queue. Bound to the same *sql.DB for the
+	// sqlite default; postgres/redis open their own connection from
+	// cfg.Queue.DSN. The Pool itself starts in Start().
+	if cfg.Queue.Enabled {
+		qDriverName := cfg.Queue.Driver
+		if qDriverName == "" {
+			qDriverName = "sqlite"
+		}
+		qd, err := queue.Get(qDriverName)
+		if err != nil {
+			slog.Warn("queue: unknown driver, falling back to sqlite",
+				slog.String("requested", qDriverName), slog.String("err", err.Error()))
+			qd, _ = queue.Get("sqlite")
+			qDriverName = "sqlite"
+		}
+		qcfg := map[string]any{}
+		switch qDriverName {
+		case "sqlite":
+			// Re-use the application *sql.DB so the queue lives in the
+			// same file as the metadata store. Also avoids a second
+			// migration pipeline — db.Migrate already created ops_queue
+			// via 00006_queue.sql.
+			qcfg["db"] = sqlDB
+		case "postgres", "redis":
+			if cfg.Queue.DSN != "" {
+				if qDriverName == "redis" {
+					qcfg["url"] = cfg.Queue.DSN
+				} else {
+					qcfg["dsn"] = cfg.Queue.DSN
+				}
+			}
+		}
+		if err := qd.Init(ctx, qcfg); err != nil {
+			slog.Warn("queue: init failed; persistent queue disabled",
+				slog.String("driver", qDriverName), slog.String("err", err.Error()))
+		} else {
+			// On boot, re-queue any rows left in `running` from a crash.
+			if n, err := qd.RecoverOrphans(ctx, 5*time.Minute); err != nil {
+				slog.Warn("queue: recover orphans", slog.String("err", err.Error()))
+			} else if n > 0 {
+				slog.Info("queue: recovered orphan running ops",
+					slog.Int64("count", n), slog.String("driver", qDriverName))
+			}
+			workers := cfg.Queue.Workers
+			if workers <= 0 {
+				workers = 4
+			}
+			srvObj.queue = qd
+			srvObj.qpool = queue.NewPool(qd, workers)
+		}
+	}
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -251,6 +309,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Share:           shareSvc,
 		OnlyOffice:      ooSvc,
 		Ops:             opsSvc,
+		Queue:           srvObj.queue,
 		StorageResolver: resolver,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
@@ -287,6 +346,12 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.ops != nil {
 		go s.ops.Run(ctx)
 	}
+	if s.qpool != nil {
+		// Default handlers: deliberately empty in v0.1 — the legacy
+		// ops.Service still owns copy/move/delete. Replica retry,
+		// reconcile and report handlers attach in Round-B (replica).
+		s.qpool.Start(ctx)
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -297,6 +362,12 @@ func (s *Server) Start(ctx context.Context) error {
 		s.worker.Stop()
 		if s.ops != nil {
 			s.ops.Stop()
+		}
+		if s.qpool != nil {
+			s.qpool.Stop()
+		}
+		if s.queue != nil {
+			_ = s.queue.Close()
 		}
 		if s.idx != nil {
 			_ = s.idx.Close()
