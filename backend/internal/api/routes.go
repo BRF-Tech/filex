@@ -9,6 +9,7 @@ package api
 import (
 	"embed"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -281,15 +282,188 @@ func BuildRouter(d *Deps) http.Handler {
 	return r
 }
 
-// wireStatic mounts the embedded /admin and /embed.js routes.
+// wireStatic mounts the embedded /admin SPA and the per-asset Web
+// Component bundle at /embed.js (+ neighbouring assets).
+//
+// Layout inside the embed.FS:
+//
+//	admin/  ← Vite-built Vue 3 admin SPA (index.html + assets/...)
+//	web/    ← @brftech/filex Web Component bundle (filex.iife.js +
+//	          style.css + LICENSE)
+//
+// SPA fallback: any /admin/* request that doesn't map to a real file
+// falls back to admin/index.html so vue-router's client routes work.
+//
+// /embed.js + /embed.css + neighbouring map files are served from the
+// `web/` subtree so consumers can <script src="/embed.js"> regardless
+// of where the iife was actually filed.
 func wireStatic(r chi.Router, fs embed.FS) {
-	// /admin → admin SPA. Falls back to index.html for client routing.
-	r.Get("/admin/*", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: implement embed FS subdir + SPA fallback.
-		http.Error(w, "admin not embedded yet", http.StatusNotFound)
-	})
-	r.Get("/embed.js", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: implement embed.js bundling.
-		http.Error(w, "embed.js not embedded yet", http.StatusNotFound)
-	})
+	adminFS, err := stripPrefix(fs, "admin")
+	if err != nil {
+		// embed/admin missing entirely (likely local dev where the
+		// frontend hasn't been built). Surface the error so the
+		// operator knows to run pnpm build:web.
+		r.Get("/admin/*", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "admin SPA not bundled — frontend build missing", http.StatusNotFound)
+		})
+	} else {
+		spa := spaHandler{root: adminFS, urlPrefix: "/admin"}
+		r.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
+		r.Handle("/admin/", spa)
+		r.Handle("/admin/*", spa)
+	}
+
+	webFS, err := stripPrefix(fs, "web")
+	if err != nil {
+		r.Get("/embed.js", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "embed.js not bundled — packages/webcomponent build missing", http.StatusNotFound)
+		})
+		return
+	}
+
+	// /embed.js (+ /embed.css + .map files) — Web Component bundle.
+	// We don't expose the whole web/ tree under a public prefix; only
+	// the canonical entry points. Each request maps the public name
+	// to the actual filename inside web/ at lookup time.
+	mountWebAsset := func(public, internal string) {
+		r.Get(public, func(w http.ResponseWriter, _ *http.Request) {
+			data, err := webFS.ReadFile(internal)
+			if err != nil {
+				http.NotFound(w, nil)
+				return
+			}
+			ct := contentTypeForName(internal)
+			if ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			_, _ = w.Write(data)
+		})
+	}
+	mountWebAsset("/embed.js", "filex.iife.js")
+	mountWebAsset("/embed.css", "style.css")
+}
+
+// spaHandler serves files under root with an index.html fallback.
+type spaHandler struct {
+	root      *embedSubFS
+	urlPrefix string
+}
+
+func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Strip the URL prefix to get a path inside admin/.
+	rel := strings.TrimPrefix(r.URL.Path, h.urlPrefix)
+	rel = strings.TrimPrefix(rel, "/")
+	if rel == "" {
+		rel = "index.html"
+	}
+
+	// Try the requested file; fall through to index.html for SPA routes.
+	data, err := h.root.ReadFile(rel)
+	if err != nil {
+		// .map / .json missing → 404 (don't return index.html for these
+		// or the browser tries to parse HTML as JS).
+		if hasAssetExt(rel) {
+			http.NotFound(w, r)
+			return
+		}
+		data, err = h.root.ReadFile("index.html")
+		if err != nil {
+			http.Error(w, "admin SPA missing index.html", http.StatusInternalServerError)
+			return
+		}
+		rel = "index.html"
+	}
+
+	ct := contentTypeForName(rel)
+	if ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	// Hashed Vite assets get long cache; everything else (index.html,
+	// favicon) stays short-lived so a redeploy is picked up promptly.
+	if strings.HasPrefix(rel, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+	_, _ = w.Write(data)
+}
+
+// embedSubFS is a thin wrapper around embed.FS that prepends a directory
+// prefix to every ReadFile call. We can't use fs.Sub because embed.FS's
+// reflection layer doesn't compose cleanly here — a manual wrapper is
+// 6 lines and gives us the path-strip behavior the SPA handler needs.
+type embedSubFS struct {
+	root   embed.FS
+	prefix string
+}
+
+func stripPrefix(fs embed.FS, prefix string) (*embedSubFS, error) {
+	// Probe: does the prefix exist + contain at least one entry?
+	entries, err := fs.ReadDir(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, &emptyEmbedErr{prefix: prefix}
+	}
+	return &embedSubFS{root: fs, prefix: prefix}, nil
+}
+
+func (e *embedSubFS) ReadFile(name string) ([]byte, error) {
+	return e.root.ReadFile(e.prefix + "/" + name)
+}
+
+type emptyEmbedErr struct{ prefix string }
+
+func (e *emptyEmbedErr) Error() string {
+	return "embed/" + e.prefix + " is empty (frontend build missing)"
+}
+
+// contentTypeForName picks a sensible Content-Type. We deliberately
+// avoid net/http's DetectContentType for .js + .css because it returns
+// text/plain for those, which breaks ESM in modern browsers.
+func contentTypeForName(name string) string {
+	ext := name[strings.LastIndex(name, ".")+1:]
+	switch strings.ToLower(ext) {
+	case "html":
+		return "text/html; charset=utf-8"
+	case "css":
+		return "text/css; charset=utf-8"
+	case "js", "mjs":
+		return "application/javascript; charset=utf-8"
+	case "json":
+		return "application/json"
+	case "svg":
+		return "image/svg+xml"
+	case "woff":
+		return "font/woff"
+	case "woff2":
+		return "font/woff2"
+	case "ttf":
+		return "font/ttf"
+	case "ico":
+		return "image/x-icon"
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "webp":
+		return "image/webp"
+	case "map":
+		return "application/json"
+	}
+	return ""
+}
+
+// hasAssetExt reports whether the path looks like a static asset
+// reference (so the SPA handler does NOT fall through to index.html
+// for missing ones).
+func hasAssetExt(name string) bool {
+	for _, ext := range []string{".js", ".css", ".map", ".json", ".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".woff", ".woff2", ".ttf"} {
+		if strings.HasSuffix(strings.ToLower(name), ext) {
+			return true
+		}
+	}
+	return false
 }
