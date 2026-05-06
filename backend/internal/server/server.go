@@ -32,6 +32,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
+	"gitlab.com/brftech/filemanager/backend/internal/version"
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 	"gitlab.com/brftech/filemanager/backend/internal/thumb"
 
@@ -163,6 +164,16 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Capability service.
 	caps := capability.New(store)
+	caps.SetStaticInventory(
+		cfg.Auth.Drivers,
+		storage.Names(),
+		cfg.DB.Driver,
+		cfg.Search.Enabled,
+		version.String(),
+		"",
+		cfg.Demo.Mode,
+		cfg.Demo.User,
+	)
 
 	// Sync worker.
 	worker := syncpkg.New(store)

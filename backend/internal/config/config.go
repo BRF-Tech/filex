@@ -38,6 +38,21 @@ type Config struct {
 	CORS             CORSConfig     `yaml:"cors"`
 	Queue            QueueConfig    `yaml:"queue"`
 	Notify           NotifyConfig   `yaml:"notify"`
+	Demo             DemoConfig     `yaml:"demo"`
+}
+
+// DemoConfig — public-demo affordances. When Mode=true the login page
+// renders an "Open the demo" CTA that auto-submits the supplied
+// credentials, plus a feature-tour card above the form.
+type DemoConfig struct {
+	// Mode flips the UI into the demo presentation. Backend itself
+	// stays a normal install — auth still happens against the local
+	// driver, the demo creds are just a regular user.
+	Mode bool `yaml:"mode"`
+	// User + Pass are the credentials the "Open the demo" CTA submits.
+	// Defaults: demo@demo.com / demo (operators must keep DB in sync).
+	User string `yaml:"user"`
+	Pass string `yaml:"pass"`
 }
 
 // NotifyConfig — webhook + in-app channel configuration. Both are
@@ -201,6 +216,11 @@ func Default() Config {
 		Notify: NotifyConfig{
 			Enabled: true,
 		},
+		Demo: DemoConfig{
+			Mode: false,
+			User: "demo@demo.com",
+			Pass: "demo",
+		},
 		CORS: CORSConfig{
 			AllowedOrigins: []string{"*"},
 			AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
@@ -235,6 +255,18 @@ func Load(path string) (Config, error) {
 		cfg.Thumbs.CacheDir = filepath.Join(cfg.DataDir, "thumbs")
 	}
 	return cfg, nil
+}
+
+// getenvFirst returns the value of the first non-empty env var.
+// Used by applyEnv to honor both the short FILEX_OIDC_* prefix
+// (current convention) and the legacy FILEX_AUTH_OIDC_* prefix.
+func getenvFirst(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func expandHome(p string) string {
@@ -272,17 +304,28 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_DB_DSN"); v != "" {
 		c.DB.DSN = v
 	}
-	if v := os.Getenv("FILEX_AUTH_OIDC_ISSUER"); v != "" {
+	// OIDC env mapping accepts both prefixes:
+	//   FILEX_OIDC_*       (deploy/.env.example + docs)
+	//   FILEX_AUTH_OIDC_*  (legacy from earlier draft of this file)
+	// The shorter form wins when both are set, matching the convention
+	// used in deploy/demo-fm.brf.sh.compose.yml + plan files.
+	if v := getenvFirst("FILEX_OIDC_ISSUER", "FILEX_AUTH_OIDC_ISSUER"); v != "" {
 		c.Auth.OIDC.Issuer = v
 	}
-	if v := os.Getenv("FILEX_AUTH_OIDC_CLIENT_ID"); v != "" {
+	if v := getenvFirst("FILEX_OIDC_CLIENT_ID", "FILEX_AUTH_OIDC_CLIENT_ID"); v != "" {
 		c.Auth.OIDC.ClientID = v
 	}
-	if v := os.Getenv("FILEX_AUTH_OIDC_CLIENT_SECRET"); v != "" {
+	if v := getenvFirst("FILEX_OIDC_CLIENT_SECRET", "FILEX_AUTH_OIDC_CLIENT_SECRET"); v != "" {
 		c.Auth.OIDC.ClientSecret = v
 	}
-	if v := os.Getenv("FILEX_AUTH_OIDC_REDIRECT_URL"); v != "" {
+	if v := getenvFirst("FILEX_OIDC_REDIRECT_URL", "FILEX_AUTH_OIDC_REDIRECT_URL"); v != "" {
 		c.Auth.OIDC.RedirectURL = v
+	}
+	if v := getenvFirst("FILEX_OIDC_ROLE_CLAIM", "FILEX_AUTH_OIDC_ROLE_CLAIM"); v != "" {
+		c.Auth.OIDC.RoleClaim = v
+	}
+	if v := getenvFirst("FILEX_OIDC_ADMIN_GROUP", "FILEX_AUTH_OIDC_ADMIN_GROUP"); v != "" {
+		c.Auth.OIDC.AdminGroup = v
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.URL = v
@@ -334,5 +377,14 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_WEBHOOK_TOKEN"); v != "" {
 		c.Notify.WebhookToken = v
+	}
+	if v := os.Getenv("FILEX_DEMO_MODE"); v != "" {
+		c.Demo.Mode = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_DEMO_USER"); v != "" {
+		c.Demo.User = v
+	}
+	if v := os.Getenv("FILEX_DEMO_PASS"); v != "" {
+		c.Demo.Pass = v
 	}
 }

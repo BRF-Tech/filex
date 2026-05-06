@@ -369,6 +369,30 @@
     "empty_done": "{count} öğe silindi",
     "total_count": "Toplam: {n}"
   },
+  "demo": {
+    "badge": "Canlı Demo",
+    "title": "filex — kendi dosya yöneticini sun",
+    "subtitle": "Self-hosted, Go binary'ı + Vue 3 paneli; çoklu storage, replica + queue + bildirim, multi-framework embed. Demo ortamı readonly seed verisiyle dolu — gerçek yönetim için altta giriş formunu aç.",
+    "openCta": "Filex'i göster",
+    "showSignIn": "Yönetici girişi",
+    "hideSignIn": "Yönetici girişini kapat",
+    "creds": "Demo hesabı: {email} · şifre: {password}",
+    "adminHint": "Demo dışı bir hesabınla manuel oturum aç.",
+    "features": {
+      "storageTitle": "5 Storage Driver",
+      "storageBody": "local, S3, FTP, SFTP, WebDAV — driver-based interface, kendi backend'ini yazabilirsin.",
+      "replicaTitle": "Replica + Reconcile",
+      "replicaBody": "Primary→replica fan-out, path-glob kuralları (mirror/append-only/skip), cron rapor, tek tıkla 'Fix all'.",
+      "queueTitle": "Persistent Queue",
+      "queueBody": "sqlite (default), Redis, Postgres — restart-safe; retry/cancel admin paneli.",
+      "notifyTitle": "Webhook + Bell",
+      "notifyBody": "Generic JSON webhook + in-app bell + okundu/okunmadı + per-user mute.",
+      "authTitle": "Auth çoklu",
+      "authBody": "local (bcrypt), Keycloak OIDC, LDAP, proxy-header (Cloudflare Access / oauth2-proxy).",
+      "openTitle": "Açık kaynak (yakında)",
+      "openBody": "MIT, monorepo + GitLab CI:"
+    }
+  },
   "queue": {
     "title": "Kuyruk",
     "filter": { "status": "Durum" },

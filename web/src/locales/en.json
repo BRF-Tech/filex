@@ -369,6 +369,30 @@
     "empty_done": "{count} item(s) purged",
     "total_count": "Total: {n}"
   },
+  "demo": {
+    "badge": "Live demo",
+    "title": "filex — host your own file manager",
+    "subtitle": "Self-hosted, single Go binary + Vue 3 admin; multi-storage, replica + queue + notifications, multi-framework embed. The demo runs read-only against seed data — open the sign-in form for full admin.",
+    "openCta": "Open the demo",
+    "showSignIn": "Admin sign-in",
+    "hideSignIn": "Hide admin sign-in",
+    "creds": "Demo account: {email} · password: {password}",
+    "adminHint": "Sign in with a non-demo account for full admin.",
+    "features": {
+      "storageTitle": "5 Storage drivers",
+      "storageBody": "local, S3, FTP, SFTP, WebDAV — driver-based interface; bring your own backend.",
+      "replicaTitle": "Replica + reconcile",
+      "replicaBody": "Primary→replica fan-out, path-glob rules (mirror/append-only/skip), cron report, one-click 'Fix all'.",
+      "queueTitle": "Persistent queue",
+      "queueBody": "sqlite (default), Redis, Postgres — restart-safe; admin retry/cancel UI.",
+      "notifyTitle": "Webhook + bell",
+      "notifyBody": "Generic JSON webhook + in-app bell + read/unread + per-user mute.",
+      "authTitle": "Auth-pluggable",
+      "authBody": "local (bcrypt), Keycloak OIDC, LDAP, proxy-header (Cloudflare Access / oauth2-proxy).",
+      "openTitle": "Open source (soon)",
+      "openBody": "MIT, monorepo + GitLab CI:"
+    }
+  },
   "queue": {
     "title": "Queue",
     "filter": { "status": "Status" },

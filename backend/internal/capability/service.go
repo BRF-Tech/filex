@@ -28,10 +28,42 @@ type Service struct {
 	cached          *model.Capabilities
 	until           time.Time
 	storageResolver func(int64) (storage.Driver, error)
+
+	// Static fields filled by the bootstrap that don't need probing.
+	authDrivers    []string
+	storageDrivers []string
+	dbDriver       string
+	searchEnabled  bool
+	version        string
+	build          string
+	demoMode       bool
+	demoUser       string
 }
 
 // New constructs a Service.
 func New(store db.Store) *Service { return &Service{store: store} }
+
+// SetStaticInventory wires the boot-time-known fields into the
+// Capabilities response. Safe to call once before the first Get().
+func (s *Service) SetStaticInventory(
+	authDrivers, storageDrivers []string,
+	dbDriver string,
+	searchEnabled bool,
+	version, build string,
+	demoMode bool, demoUser string,
+) {
+	s.mu.Lock()
+	s.authDrivers = append(s.authDrivers[:0], authDrivers...)
+	s.storageDrivers = append(s.storageDrivers[:0], storageDrivers...)
+	s.dbDriver = dbDriver
+	s.searchEnabled = searchEnabled
+	s.version = version
+	s.build = build
+	s.demoMode = demoMode
+	s.demoUser = demoUser
+	s.cached = nil
+	s.mu.Unlock()
+}
 
 // AttachStorageResolver wires the resolver used for per-storage capability
 // probes. Optional — when nil the response omits the per-storage map.
@@ -105,9 +137,20 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 			Image: true,
 		},
 		External:      map[string]model.ExternalServiceState{},
-		MaxUploadSize: 5 * 1024 * 1024 * 1024,  // 5 GB default
-		ChunkSize:     8 * 1024 * 1024,         // 8 MB default
+		MaxUploadSize: 5 * 1024 * 1024 * 1024, // 5 GB default
+		ChunkSize:     8 * 1024 * 1024,        // 8 MB default
 	}
+	// Static inventory wired from server bootstrap.
+	s.mu.RLock()
+	caps.AuthDrivers = append([]string(nil), s.authDrivers...)
+	caps.StorageDrivers = append([]string(nil), s.storageDrivers...)
+	caps.DBDriver = s.dbDriver
+	caps.SearchEnabled = s.searchEnabled
+	caps.Version = s.version
+	caps.Build = s.build
+	caps.DemoMode = s.demoMode
+	caps.DemoUser = s.demoUser
+	s.mu.RUnlock()
 	if has("ffmpeg") {
 		caps.Thumbs.Video = true
 	}

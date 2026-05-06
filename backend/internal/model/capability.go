@@ -29,6 +29,24 @@ type Capabilities struct {
 	// Backend-effective limits.
 	MaxUploadSize int64 `json:"max_upload_size"`
 	ChunkSize     int64 `json:"chunk_size"`
+
+	// Driver inventory (UI uses these to render the right login form,
+	// drop-down for storage create wizard, etc.). Frontend has matching
+	// defaults in stores/capabilities.ts so a missing field never
+	// crashes a caller.
+	AuthDrivers    []string `json:"auth_drivers"`
+	StorageDrivers []string `json:"storage_drivers"`
+	DBDriver       string   `json:"db_driver"`
+	SearchEnabled  bool     `json:"search_enabled"`
+
+	// Build metadata.
+	Version string `json:"version"`
+	Build   string `json:"build"`
+
+	// Demo-mode toggles a public landing on Login.vue with an "Open
+	// the demo" CTA that auto-submits the supplied creds.
+	DemoMode bool   `json:"demo_mode"`
+	DemoUser string `json:"demo_user,omitempty"`
 }
 
 // StorageCapabilities describes a single backend's optional features. Used

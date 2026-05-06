@@ -91,6 +91,11 @@ export interface DriftReport {
   details_url?: string;
 }
 
+export interface DemoMode {
+  enabled: boolean;
+  user: string;
+}
+
 export interface Capabilities {
   version: string;
   build: string;
@@ -106,6 +111,8 @@ export interface Capabilities {
   auth_drivers: string[];
   db_driver: string;
   search_enabled: boolean;
+  demo_mode?: boolean;
+  demo_user?: string;
 }
 
 export interface SettingsMap {

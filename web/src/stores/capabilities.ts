@@ -18,6 +18,8 @@ const EMPTY: Capabilities = {
   auth_drivers: [],
   db_driver: 'sqlite',
   search_enabled: false,
+  demo_mode: false,
+  demo_user: '',
 };
 
 export const useCapabilitiesStore = defineStore('capabilities', () => {
