@@ -28,7 +28,11 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
   async function fetch(): Promise<void> {
     loading.value = true;
     try {
-      data.value = await CapabilitiesApi.fetch();
+      const res = await CapabilitiesApi.fetch();
+      // Merge over EMPTY so a backend that omits a field (e.g. older
+      // builds without auth_drivers) doesn't leave the field undefined
+      // and crash callers that read `.length` / `.includes(...)`.
+      data.value = { ...EMPTY, ...res };
       loaded.value = true;
     } catch {
       // Capabilities are best-effort. Keep defaults if backend isn't ready yet.
