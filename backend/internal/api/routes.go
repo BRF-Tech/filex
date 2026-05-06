@@ -18,6 +18,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/notify"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/queue"
@@ -40,6 +41,7 @@ type Deps struct {
 	OnlyOffice      *onlyoffice.Service
 	Ops             *ops.Service
 	Queue           queue.Driver
+	Notify          notify.Service
 	StorageResolver func(int64) (storage.Driver, error)
 	Embed           embed.FS // web/dist + admin
 	LocalAuth       auth.LoginDriver
@@ -88,6 +90,7 @@ func BuildRouter(d *Deps) http.Handler {
 	usersAdmH := handlers.NewUsersAdmin(d.Store)
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
 	queueH := handlers.NewQueue(d.Queue)
+	notifH := handlers.NewNotifications(d.Notify)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -127,6 +130,16 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/api/auth/totp/enroll", authSelf.TotpEnroll)
 		r.Post("/api/auth/totp/verify", authSelf.TotpVerify)
 		r.Post("/api/auth/totp/disable", authSelf.TotpDisable)
+
+		// Per-user notifications (bell + history + read/unread).
+		r.Route("/api/notifications", func(r chi.Router) {
+			r.Get("/", notifH.List)
+			r.Get("/unread-count", notifH.UnreadCount)
+			r.Post("/{id}/read", notifH.MarkRead)
+			r.Post("/read-all", notifH.MarkAllRead)
+			r.Get("/settings", notifH.GetSettings)
+			r.Patch("/settings", notifH.UpdateSettings)
+		})
 
 		r.Route("/api/files", func(r chi.Router) {
 			r.Get("/manager", mh.List)
@@ -221,6 +234,13 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/{id}", queueH.Get)
 				r.Post("/{id}/retry", queueH.Retry)
 				r.Delete("/{id}", queueH.Cancel)
+			})
+
+			r.Route("/notifications", func(r chi.Router) {
+				r.Get("/", notifH.AdminList)
+				r.Post("/test", notifH.AdminTest)
+				r.Get("/webhook-config", notifH.AdminWebhookConfig)
+				r.Patch("/webhook-config", notifH.AdminUpdateWebhookConfig)
 			})
 		})
 	})

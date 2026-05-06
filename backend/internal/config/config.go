@@ -37,6 +37,20 @@ type Config struct {
 	Search           SearchConfig   `yaml:"search"`
 	CORS             CORSConfig     `yaml:"cors"`
 	Queue            QueueConfig    `yaml:"queue"`
+	Notify           NotifyConfig   `yaml:"notify"`
+}
+
+// NotifyConfig — webhook + in-app channel configuration. Both are
+// optional; leaving WebhookURL empty disables outbound delivery while
+// the in-app bell continues to record events.
+type NotifyConfig struct {
+	// Enabled toggles the entire subsystem. When false the API returns
+	// 503 from /api/notifications/... and Service.Send is a no-op.
+	Enabled bool `yaml:"enabled"`
+	// WebhookURL receives a generic JSON POST per event.
+	WebhookURL string `yaml:"webhook_url"`
+	// WebhookToken — optional Authorization: Bearer <token>.
+	WebhookToken string `yaml:"webhook_token"`
 }
 
 // QueueConfig — persistent op queue. Driver "sqlite" (default) shares
@@ -184,6 +198,9 @@ func Default() Config {
 			Workers: 4,
 			Enabled: true,
 		},
+		Notify: NotifyConfig{
+			Enabled: true,
+		},
 		CORS: CORSConfig{
 			AllowedOrigins: []string{"*"},
 			AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
@@ -308,5 +325,14 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_QUEUE_ENABLED"); v != "" {
 		c.Queue.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_NOTIFY_ENABLED"); v != "" {
+		c.Notify.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_WEBHOOK_URL"); v != "" {
+		c.Notify.WebhookURL = v
+	}
+	if v := os.Getenv("FILEX_WEBHOOK_TOKEN"); v != "" {
+		c.Notify.WebhookToken = v
 	}
 }

@@ -1497,3 +1497,245 @@ func (s *Store) ListAllTagsForStorage(ctx context.Context, storageID int64) ([]s
 	}
 	return out, rows.Err()
 }
+
+// ─────────────────── Notifications ───────────────────
+
+// InsertNotification persists a new in-app notification row. Webhook
+// status starts at "pending" — Service.Send updates it after the HTTP
+// attempt finishes. meta_json is normalized to "{}" when empty so the
+// scan path always finds valid JSON.
+func (s *Store) InsertNotification(ctx context.Context, n *model.NotificationInput) (int64, error) {
+	if n == nil {
+		return 0, errors.New("sqlite: nil notification")
+	}
+	if n.Event == "" || n.Severity == "" || n.Title == "" {
+		return 0, errors.New("sqlite: notification missing event/severity/title")
+	}
+	meta := n.MetaJSON
+	if len(meta) == 0 {
+		meta = []byte("{}")
+	}
+	var userID any
+	if n.UserID != nil {
+		userID = *n.UserID
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO notifications (event, severity, title, body, meta_json, user_id, webhook_status)
+		 VALUES (?,?,?,?,?,?,?)`,
+		n.Event, n.Severity, n.Title, n.Body, string(meta), userID, "pending",
+	)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: insert notification: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+// GetNotification returns a single row by id.
+func (s *Store) GetNotification(ctx context.Context, id int64) (*model.Notification, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, event, severity, title, body, meta_json,
+		        user_id, read_at, webhook_status, COALESCE(webhook_error,''), created_at
+		 FROM notifications WHERE id=?`, id)
+	return scanNotification(row)
+}
+
+// ListNotifications paginates either a user's view (broadcasts +
+// user-scoped) or admin/global view (userID == nil).
+//
+// onlyUnread filters read_at IS NULL.
+func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var (
+		args   []any
+		whereC []string
+	)
+	if userID != nil {
+		whereC = append(whereC, "(user_id IS NULL OR user_id = ?)")
+		args = append(args, *userID)
+	}
+	if onlyUnread {
+		whereC = append(whereC, "read_at IS NULL")
+	}
+	whereSQL := ""
+	if len(whereC) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereC, " AND ")
+	}
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM notifications "+whereSQL, args...,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("sqlite: count notifications: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, event, severity, title, body, meta_json,
+		        user_id, read_at, webhook_status, COALESCE(webhook_error,''), created_at
+		 FROM notifications `+whereSQL+`
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("sqlite: list notifications: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.Notification
+	for rows.Next() {
+		n, err := scanNotification(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, n)
+	}
+	return out, total, rows.Err()
+}
+
+// MarkNotificationRead bumps read_at on a single row. When userID is
+// non-nil it must match the row (or the row must be a broadcast).
+func (s *Store) MarkNotificationRead(ctx context.Context, id int64, userID *int64) error {
+	q := `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+	      WHERE id=? AND read_at IS NULL`
+	args := []any{id}
+	if userID != nil {
+		q += ` AND (user_id IS NULL OR user_id = ?)`
+		args = append(args, *userID)
+	}
+	_, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("sqlite: mark notif read: %w", err)
+	}
+	return nil
+}
+
+// MarkAllNotificationsRead bumps read_at for every unread row visible
+// to userID. Pass nil for the global "mark all" admin sweep.
+func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) error {
+	q := `UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE read_at IS NULL`
+	var args []any
+	if userID != nil {
+		q += ` AND (user_id IS NULL OR user_id = ?)`
+		args = append(args, *userID)
+	}
+	_, err := s.db.ExecContext(ctx, q, args...)
+	return err
+}
+
+// UnreadNotificationCount returns the bell badge number for a user.
+// Pass nil for the global unread count (admin dashboard).
+func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64) (int64, error) {
+	q := `SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`
+	var args []any
+	if userID != nil {
+		q += ` AND (user_id IS NULL OR user_id = ?)`
+		args = append(args, *userID)
+	}
+	var n int64
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// UpdateWebhookStatus is invoked by Service.Send after the HTTP attempt
+// chain completes (or skips).
+func (s *Store) UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE notifications SET webhook_status=?, webhook_error=? WHERE id=?`,
+		status, errMsg, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: update webhook status: %w", err)
+	}
+	return nil
+}
+
+// GetNotificationSettings returns the per-user toggle. A missing row
+// is treated as the default (in_app_enabled=true, no muted events).
+func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT user_id, in_app_enabled, muted_events
+		 FROM notification_settings WHERE user_id=?`, userID)
+	out := &model.NotificationSettings{UserID: userID, InAppEnabled: true, MutedEventsRaw: []byte("[]")}
+	var (
+		gotUser  int64
+		enabled  int
+		mutedRaw string
+	)
+	if err := row.Scan(&gotUser, &enabled, &mutedRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("sqlite: get notif settings: %w", err)
+	}
+	out.UserID = gotUser
+	out.InAppEnabled = enabled != 0
+	out.MutedEventsRaw = json.RawMessage(mutedRaw)
+	if len(out.MutedEventsRaw) == 0 {
+		out.MutedEventsRaw = []byte("[]")
+	}
+	return out, nil
+}
+
+// UpsertNotificationSettings stores the user's preferences.
+func (s *Store) UpsertNotificationSettings(ctx context.Context, st *model.NotificationSettings) error {
+	if st == nil || st.UserID == 0 {
+		return errors.New("sqlite: invalid notif settings")
+	}
+	muted := st.MutedEventsRaw
+	if len(muted) == 0 {
+		muted = []byte("[]")
+	}
+	enabled := 0
+	if st.InAppEnabled {
+		enabled = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO notification_settings (user_id, in_app_enabled, muted_events, updated_at)
+		 VALUES (?,?,?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(user_id) DO UPDATE SET
+		   in_app_enabled = excluded.in_app_enabled,
+		   muted_events   = excluded.muted_events,
+		   updated_at     = CURRENT_TIMESTAMP`,
+		st.UserID, enabled, string(muted))
+	if err != nil {
+		return fmt.Errorf("sqlite: upsert notif settings: %w", err)
+	}
+	return nil
+}
+
+// scanNotification accepts both *sql.Row and *sql.Rows (rowScanner).
+func scanNotification(rs interface {
+	Scan(...any) error
+}) (*model.Notification, error) {
+	n := &model.Notification{}
+	var (
+		metaRaw string
+		userID  sql.NullInt64
+		readAt  sql.NullTime
+		errMsg  string
+	)
+	if err := rs.Scan(
+		&n.ID, &n.Event, &n.Severity, &n.Title, &n.Body, &metaRaw,
+		&userID, &readAt, &n.WebhookStatus, &errMsg, &n.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if metaRaw == "" {
+		metaRaw = "{}"
+	}
+	n.MetaJSON = json.RawMessage(metaRaw)
+	if userID.Valid {
+		v := userID.Int64
+		n.UserID = &v
+	}
+	if readAt.Valid {
+		t := readAt.Time
+		n.ReadAt = &t
+	}
+	n.WebhookError = errMsg
+	return n, nil
+}

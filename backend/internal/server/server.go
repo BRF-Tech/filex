@@ -24,6 +24,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/notify"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/queue"
@@ -56,6 +57,7 @@ type Server struct {
 	ops     *ops.Service
 	queue   queue.Driver
 	qpool   *queue.Pool
+	notify  notify.Service
 	srv     *http.Server
 	idx     *search.Index
 
@@ -299,6 +301,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
+	// Notifications subsystem.
+	if cfg.Notify.Enabled {
+		srvObj.notify = notify.New(store, notify.Config{
+			WebhookURL:   cfg.Notify.WebhookURL,
+			WebhookToken: cfg.Notify.WebhookToken,
+		})
+	}
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -310,6 +320,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		OnlyOffice:      ooSvc,
 		Ops:             opsSvc,
 		Queue:           srvObj.queue,
+		Notify:          srvObj.notify,
 		StorageResolver: resolver,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
@@ -368,6 +379,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.queue != nil {
 			_ = s.queue.Close()
+		}
+		if s.notify != nil {
+			s.notify.Stop()
 		}
 		if s.idx != nil {
 			_ = s.idx.Close()
