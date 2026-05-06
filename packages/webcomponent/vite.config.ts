@@ -27,6 +27,17 @@ export default defineConfig({
   resolve: {
     alias: { '@': resolve(__dirname, 'src') },
   },
+  // Several deps (Vue dev-warnings, jose, formidable-debug) read
+  // `process.env.NODE_ENV` at module-init time. Vite's `lib` build
+  // does NOT auto-replace those because the consumer is supposed to
+  // be a bundler with a real `process` shim. Our consumer is a raw
+  // <script type="module"> on demo-fm.brf.sh, so define them
+  // explicitly. NODE_ENV=production strips Vue's dev warnings AND
+  // compiles out the dev-only code paths in dependencies.
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+    'process.env': '{}',
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
