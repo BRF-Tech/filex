@@ -15,6 +15,9 @@ import {
   Info,
   Trash2,
   X,
+  ListChecks,
+  Bell,
+  GitBranch,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -54,6 +57,9 @@ const items = computed<NavItem[]>(() => [
 
   { to: { name: 'settings' }, label: t('nav.settings'), icon: Settings, group: 'ops' },
   { to: { name: 'external' }, label: t('nav.external'), icon: PlugZap, group: 'ops' },
+  { to: { name: 'replica' }, label: t('nav.replica'), icon: GitBranch, group: 'ops' },
+  { to: { name: 'queue' }, label: t('nav.queue'), icon: ListChecks, group: 'ops' },
+  { to: { name: 'notifications' }, label: t('nav.notifications'), icon: Bell, group: 'ops' },
   { to: { name: 'audit' }, label: t('nav.audit'), icon: ScrollText, group: 'ops' },
 
   { to: { name: 'about' }, label: t('nav.about'), icon: Info, group: 'meta' },

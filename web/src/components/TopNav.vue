@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import LocaleSwitcher from './LocaleSwitcher.vue';
 import DarkModeToggle from './DarkModeToggle.vue';
+import NotificationBell from './NotificationBell.vue';
 
 const emit = defineEmits<{ (e: 'toggleSidebar'): void }>();
 
@@ -47,6 +48,7 @@ function gotoSearch() {
     </button>
 
     <div class="ml-auto flex items-center gap-1.5">
+      <NotificationBell />
       <DarkModeToggle />
       <LocaleSwitcher />
 

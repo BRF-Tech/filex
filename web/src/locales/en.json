@@ -64,7 +64,9 @@
     "submit": "Submit",
     "required": "required",
     "optional": "optional",
-    "more": "More"
+    "more": "More",
+    "prev": "Previous",
+    "pageOf": "Page {current} of {total}"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -78,6 +80,9 @@
     "shares": "Shares",
     "trash": "Trash",
     "search": "Search",
+    "replica": "Replica",
+    "queue": "Queue",
+    "notifications": "Notifications",
     "about": "About",
     "profile": "My profile",
     "logout": "Sign out",
@@ -363,5 +368,140 @@
     "all_ages": "any age (leave blank)",
     "empty_done": "{count} item(s) purged",
     "total_count": "Total: {n}"
+  },
+  "queue": {
+    "title": "Queue",
+    "filter": { "status": "Status" },
+    "fields": {
+      "id": "ID",
+      "type": "Type",
+      "status": "Status",
+      "attempts": "Attempts",
+      "payload": "Payload",
+      "lastError": "Last error",
+      "enqueued": "Enqueued"
+    },
+    "stats": {
+      "pending": "Pending",
+      "running": "Running",
+      "failed": "Failed",
+      "done24h": "Done 24h",
+      "cancelled": "Cancelled"
+    },
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "retried": "Re-queued",
+    "cancelled": "Cancelled",
+    "empty": "Queue is empty"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "adminTitle": "Notifications admin",
+    "bell": "Notifications",
+    "empty": "No notifications yet",
+    "viewAll": "View all",
+    "markAllRead": "Mark all read",
+    "unreadOnly": "Unread only",
+    "unreadCount": "{n} unread",
+    "sendTest": "Send test",
+    "testSent": "Test notification #{id} sent",
+    "webhookConfig": "Webhook configuration",
+    "webhookUrl": "Webhook URL",
+    "webhookToken": "Bearer token",
+    "tokenSet": "Token set",
+    "tokenUnset": "No token",
+    "tokenPlaceholder": "Token (leave empty to clear)",
+    "tokenHint": "Submitting an empty token clears the existing one.",
+    "webhookSaved": "Webhook saved",
+    "notConfigured": "not configured",
+    "fields": {
+      "event": "Event",
+      "severity": "Severity",
+      "title": "Title",
+      "body": "Body",
+      "scope": "Scope",
+      "webhook": "Webhook",
+      "createdAt": "Created"
+    }
+  },
+  "replica": {
+    "title": "Replication",
+    "tabs": {
+      "rules": "Rules",
+      "failures": "Failures",
+      "report": "Report",
+      "settings": "Settings"
+    },
+    "mode": {
+      "mirror": "Mirror",
+      "appendOnly": "Append-only",
+      "skip": "Skip"
+    },
+    "rules": {
+      "title": "Path rules",
+      "add": "New rule",
+      "newTitle": "New rule",
+      "editTitle": "Edit rule",
+      "fields": {
+        "pattern": "Path pattern",
+        "mode": "Mode",
+        "priority": "Priority",
+        "enabled": "Enabled",
+        "description": "Description"
+      },
+      "empty": "No rules yet — every path uses the default mode.",
+      "created": "Rule created",
+      "updated": "Rule updated",
+      "deleted": "Rule deleted",
+      "confirmDelete": "Delete rule for {p}?"
+    },
+    "failures": {
+      "title": "Replica failures",
+      "fixAll": "Fix all",
+      "fixOne": "Fix",
+      "unresolvedOnly": "Unresolved only",
+      "queued": "{n} retries queued",
+      "queuedOne": "Retry queued",
+      "fields": {
+        "path": "Path",
+        "op": "Op",
+        "errorCode": "Code",
+        "error": "Error",
+        "attempts": "Attempts",
+        "lastAttempt": "Last attempt",
+        "resolved": "Resolved"
+      },
+      "resolvedYes": "yes",
+      "resolvedNo": "no",
+      "empty": "No replica failures recorded"
+    },
+    "report": {
+      "title": "Status report",
+      "runNow": "Run now",
+      "ran": "Report generated",
+      "empty": "No report yet. Click \"Run now\" to generate one, or schedule a cron under Settings.",
+      "fields": {
+        "generatedAt": "Generated",
+        "totalFiles": "Total files",
+        "failedCount": "Failed",
+        "repairedCount": "Repaired"
+      }
+    },
+    "settings": {
+      "title": "Replica settings",
+      "reportEnabled": "Enable cron report",
+      "defaultMode": "Default mode (catch-all)",
+      "cronPreset": "Preset",
+      "cronRaw": "Cron expression",
+      "cronHint": "Standard 5-field cron — e.g. '0 3 * * *' = every night 03:00. Pick \"Custom\" to enter your own expression.",
+      "saved": "Settings saved"
+    },
+    "cron": {
+      "custom": "Custom",
+      "hourly": "Hourly",
+      "every6h": "Every 6 hours",
+      "daily3am": "Daily 03:00",
+      "weekly": "Weekly Sunday 03:00"
+    }
   }
 }

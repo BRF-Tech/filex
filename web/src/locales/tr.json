@@ -64,7 +64,9 @@
     "submit": "Gönder",
     "required": "zorunlu",
     "optional": "opsiyonel",
-    "more": "Daha fazla"
+    "more": "Daha fazla",
+    "prev": "Önceki",
+    "pageOf": "Sayfa {current} / {total}"
   },
   "nav": {
     "dashboard": "Panel",
@@ -78,6 +80,9 @@
     "shares": "Paylaşımlar",
     "trash": "Çöp kutusu",
     "search": "Arama",
+    "replica": "Replikasyon",
+    "queue": "Kuyruk",
+    "notifications": "Bildirimler",
     "about": "Hakkında",
     "profile": "Profilim",
     "logout": "Çıkış yap",
@@ -363,5 +368,140 @@
     "all_ages": "tümü (boş bırak)",
     "empty_done": "{count} öğe silindi",
     "total_count": "Toplam: {n}"
+  },
+  "queue": {
+    "title": "Kuyruk",
+    "filter": { "status": "Durum" },
+    "fields": {
+      "id": "ID",
+      "type": "Tür",
+      "status": "Durum",
+      "attempts": "Denemeler",
+      "payload": "İçerik",
+      "lastError": "Son hata",
+      "enqueued": "Sıraya alındı"
+    },
+    "stats": {
+      "pending": "Bekleyen",
+      "running": "Çalışan",
+      "failed": "Hatalı",
+      "done24h": "24s tamam",
+      "cancelled": "İptal"
+    },
+    "retry": "Yeniden",
+    "cancel": "İptal et",
+    "retried": "Yeniden kuyruğa alındı",
+    "cancelled": "İptal edildi",
+    "empty": "Kuyrukta görünür iş yok"
+  },
+  "notifications": {
+    "title": "Bildirimler",
+    "adminTitle": "Bildirim Yönetimi",
+    "bell": "Bildirim çanı",
+    "empty": "Henüz bildirim yok",
+    "viewAll": "Tümünü gör",
+    "markAllRead": "Tümünü okundu işaretle",
+    "unreadOnly": "Sadece okunmamış",
+    "unreadCount": "{n} okunmamış",
+    "sendTest": "Test gönder",
+    "testSent": "Test bildirimi #{id} gönderildi",
+    "webhookConfig": "Webhook yapılandırması",
+    "webhookUrl": "Webhook URL",
+    "webhookToken": "Bearer token",
+    "tokenSet": "Token ayarlı",
+    "tokenUnset": "Token yok",
+    "tokenPlaceholder": "Token (boş bırakılırsa silinir)",
+    "tokenHint": "Boş gönderirsen mevcut token silinir.",
+    "webhookSaved": "Webhook kaydedildi",
+    "notConfigured": "yapılandırılmamış",
+    "fields": {
+      "event": "Olay",
+      "severity": "Önem",
+      "title": "Başlık",
+      "body": "İçerik",
+      "scope": "Kapsam",
+      "webhook": "Webhook",
+      "createdAt": "Oluşturuldu"
+    }
+  },
+  "replica": {
+    "title": "Replikasyon",
+    "tabs": {
+      "rules": "Kurallar",
+      "failures": "Hatalar",
+      "report": "Rapor",
+      "settings": "Ayarlar"
+    },
+    "mode": {
+      "mirror": "Aynala",
+      "appendOnly": "Sadece ekle",
+      "skip": "Atla"
+    },
+    "rules": {
+      "title": "Yol kuralları",
+      "add": "Yeni kural",
+      "newTitle": "Yeni kural",
+      "editTitle": "Kuralı düzenle",
+      "fields": {
+        "pattern": "Yol kalıbı",
+        "mode": "Mod",
+        "priority": "Öncelik",
+        "enabled": "Aktif",
+        "description": "Açıklama"
+      },
+      "empty": "Henüz kural yok — tüm yollar varsayılan moda göre işlenir.",
+      "created": "Kural oluşturuldu",
+      "updated": "Kural güncellendi",
+      "deleted": "Kural silindi",
+      "confirmDelete": "Kural silinecek: {p}. Onaylıyor musun?"
+    },
+    "failures": {
+      "title": "Replikasyon hataları",
+      "fixAll": "Tümünü onar",
+      "fixOne": "Onar",
+      "unresolvedOnly": "Sadece çözülmeyenler",
+      "queued": "{n} retry kuyruğa alındı",
+      "queuedOne": "Retry kuyruğa alındı",
+      "fields": {
+        "path": "Yol",
+        "op": "İşlem",
+        "errorCode": "Kod",
+        "error": "Hata",
+        "attempts": "Deneme",
+        "lastAttempt": "Son deneme",
+        "resolved": "Çözüldü"
+      },
+      "resolvedYes": "evet",
+      "resolvedNo": "hayır",
+      "empty": "Replikasyon hatası yok"
+    },
+    "report": {
+      "title": "Durum raporu",
+      "runNow": "Şimdi çalıştır",
+      "ran": "Rapor üretildi",
+      "empty": "Henüz rapor üretilmedi. \"Şimdi çalıştır\" ile manuel tetikleyebilir veya cron ayarlayabilirsin.",
+      "fields": {
+        "generatedAt": "Üretildi",
+        "totalFiles": "Toplam dosya",
+        "failedCount": "Hatalı",
+        "repairedCount": "Onarıldı"
+      }
+    },
+    "settings": {
+      "title": "Replika ayarları",
+      "reportEnabled": "Cron raporunu aktif et",
+      "defaultMode": "Varsayılan mod (catch-all)",
+      "cronPreset": "Hazır cron",
+      "cronRaw": "Cron ifadesi",
+      "cronHint": "Standart 5-alan cron — örnek: '0 3 * * *' her gece 03:00. Hazır cron'u 'Özel' yaparsan sağdaki alanı kendin gir.",
+      "saved": "Ayarlar kaydedildi"
+    },
+    "cron": {
+      "custom": "Özel",
+      "hourly": "Saatlik",
+      "every6h": "6 saatte bir",
+      "daily3am": "Günlük 03:00",
+      "weekly": "Pazar 03:00 (haftalık)"
+    }
   }
 }

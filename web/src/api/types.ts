@@ -197,3 +197,130 @@ export interface PaginatedResponse<T> {
   page: number;
   page_size: number;
 }
+
+// ─── Queue ────────────────────────────────────────────────────
+
+export type QueueOpStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+
+export interface QueueOp {
+  id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  status: QueueOpStatus;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  last_error?: string;
+  enqueued_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  not_before?: string | null;
+}
+
+export interface QueueStats {
+  pending: number;
+  running: number;
+  failed: number;
+  done_24h: number;
+  cancelled: number;
+}
+
+export interface QueueListResponse {
+  items: QueueOp[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ─── Notifications ────────────────────────────────────────────
+
+export type Severity = 'info' | 'warning' | 'error' | 'critical';
+
+export type WebhookStatus = 'pending' | 'sent' | 'failed' | 'skipped';
+
+export interface NotificationItem {
+  id: number;
+  event: string;
+  severity: Severity;
+  title: string;
+  body: string;
+  meta: Record<string, unknown>;
+  user_id?: number | null;
+  read_at?: string | null;
+  webhook_status: WebhookStatus;
+  webhook_error?: string;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  items: NotificationItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface NotificationSettings {
+  user_id: number;
+  in_app_enabled: boolean;
+  muted_events: string[]; // raw JSON array name; backend exposes muted_events (json.RawMessage)
+}
+
+export interface WebhookConfig {
+  url: string;
+  token_set: boolean;
+}
+
+// ─── Replica ─────────────────────────────────────────────────
+
+export type ReplicaMode = 'mirror' | 'append_only' | 'skip';
+
+export interface ReplicaRule {
+  id: number;
+  path_pattern: string;
+  mode: ReplicaMode;
+  priority: number;
+  enabled: boolean;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReplicaRuleInput {
+  path_pattern: string;
+  mode: ReplicaMode;
+  priority: number;
+  enabled: boolean;
+  description: string;
+}
+
+export interface ReplicaFailure {
+  id: number;
+  path: string;
+  op: string;
+  error_code: string;
+  error_msg: string;
+  attempts: number;
+  last_attempt_at: string;
+  resolved_at?: string | null;
+}
+
+export interface ReplicaFailureListResponse {
+  items: ReplicaFailure[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ReplicaStatusReport {
+  generated_at: string;
+  total_files: number;
+  failed_count: number;
+  repaired_count: number;
+  summary: Record<string, unknown>;
+}
+
+export interface ReplicaSettings {
+  report_cron: string;
+  report_enabled: boolean;
+  default_mode: ReplicaMode;
+}

@@ -109,6 +109,24 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.search' },
       },
       {
+        path: 'replica',
+        name: 'replica',
+        component: () => import('@/views/Replica.vue'),
+        meta: { breadcrumb: 'nav.replica' },
+      },
+      {
+        path: 'queue',
+        name: 'queue',
+        component: () => import('@/views/Queue.vue'),
+        meta: { breadcrumb: 'nav.queue' },
+      },
+      {
+        path: 'notifications',
+        name: 'notifications',
+        component: () => import('@/views/Notifications.vue'),
+        meta: { breadcrumb: 'nav.notifications' },
+      },
+      {
         path: 'about',
         name: 'about',
         component: () => import('@/views/About.vue'),
