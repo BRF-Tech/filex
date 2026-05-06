@@ -179,6 +179,25 @@ type Store interface {
 	UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertNotificationSettings(ctx context.Context, s *model.NotificationSettings) error
+
+	// Replica rules + failures + report + settings
+	ListReplicaRules(ctx context.Context) ([]*model.ReplicaRule, error)
+	GetReplicaRule(ctx context.Context, id int64) (*model.ReplicaRule, error)
+	CreateReplicaRule(ctx context.Context, in *model.ReplicaRuleInput) (*model.ReplicaRule, error)
+	UpdateReplicaRule(ctx context.Context, id int64, in *model.ReplicaRuleInput) (*model.ReplicaRule, error)
+	DeleteReplicaRule(ctx context.Context, id int64) error
+
+	UpsertReplicaFailure(ctx context.Context, path, op, errCode, errMsg string) error
+	ResolveReplicaFailure(ctx context.Context, path, op string) error
+	ListReplicaFailures(ctx context.Context, onlyUnresolved bool, limit, offset int) ([]*model.ReplicaFailure, int64, error)
+	CountUnresolvedReplicaFailures(ctx context.Context) (int64, error)
+	CountRecentlyResolvedReplicaFailures(ctx context.Context, since time.Time) (int64, error)
+
+	UpsertReplicaStatusReport(ctx context.Context, total, failed, repaired int64, summaryJSON []byte) error
+	GetReplicaStatusReport(ctx context.Context) (*model.ReplicaStatusReport, error)
+
+	GetReplicaSettings(ctx context.Context) (*model.ReplicaSettings, error)
+	UpsertReplicaSettings(ctx context.Context, s *model.ReplicaSettings) error
 }
 
 // ExternalService is the DB row representation. Lives in the db package so

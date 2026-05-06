@@ -1707,6 +1707,292 @@ func (s *Store) UpsertNotificationSettings(ctx context.Context, st *model.Notifi
 	return nil
 }
 
+// ─────────────────── Replica ───────────────────
+
+// ListReplicaRules returns the rule list ordered priority asc.
+func (s *Store) ListReplicaRules(ctx context.Context) ([]*model.ReplicaRule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, path_pattern, mode, priority, enabled, description, created_at, updated_at
+		 FROM replica_rules
+		 ORDER BY priority ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list replica rules: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.ReplicaRule
+	for rows.Next() {
+		r := &model.ReplicaRule{}
+		var enabled int
+		if err := rows.Scan(&r.ID, &r.PathPattern, &r.Mode, &r.Priority, &enabled, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		r.Enabled = enabled != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetReplicaRule returns a single rule by id.
+func (s *Store) GetReplicaRule(ctx context.Context, id int64) (*model.ReplicaRule, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, path_pattern, mode, priority, enabled, description, created_at, updated_at
+		 FROM replica_rules WHERE id=?`, id)
+	r := &model.ReplicaRule{}
+	var enabled int
+	if err := row.Scan(&r.ID, &r.PathPattern, &r.Mode, &r.Priority, &enabled, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		return nil, err
+	}
+	r.Enabled = enabled != 0
+	return r, nil
+}
+
+// CreateReplicaRule inserts a new rule.
+func (s *Store) CreateReplicaRule(ctx context.Context, in *model.ReplicaRuleInput) (*model.ReplicaRule, error) {
+	if err := validateReplicaRule(in); err != nil {
+		return nil, err
+	}
+	enabled := 0
+	if in.Enabled {
+		enabled = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO replica_rules (path_pattern, mode, priority, enabled, description)
+		 VALUES (?,?,?,?,?)`,
+		in.PathPattern, in.Mode, in.Priority, enabled, in.Description)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: create replica rule: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return s.GetReplicaRule(ctx, id)
+}
+
+// UpdateReplicaRule replaces a rule's fields by id.
+func (s *Store) UpdateReplicaRule(ctx context.Context, id int64, in *model.ReplicaRuleInput) (*model.ReplicaRule, error) {
+	if err := validateReplicaRule(in); err != nil {
+		return nil, err
+	}
+	enabled := 0
+	if in.Enabled {
+		enabled = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE replica_rules
+		 SET path_pattern=?, mode=?, priority=?, enabled=?, description=?, updated_at=CURRENT_TIMESTAMP
+		 WHERE id=?`,
+		in.PathPattern, in.Mode, in.Priority, enabled, in.Description, id)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: update replica rule: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return s.GetReplicaRule(ctx, id)
+}
+
+// DeleteReplicaRule removes a rule.
+func (s *Store) DeleteReplicaRule(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM replica_rules WHERE id=?`, id)
+	return err
+}
+
+// UpsertReplicaFailure either inserts a new failure or bumps attempts
+// + last_attempt_at + the latest error code/message for the existing
+// (path, op) row. Idempotent under retry.
+func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, errMsg string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO replica_failures (path, op, error_code, error_msg, attempts, last_attempt_at)
+		 VALUES (?,?,?,?,1, CURRENT_TIMESTAMP)
+		 ON CONFLICT(path, op) DO UPDATE SET
+		   error_code      = excluded.error_code,
+		   error_msg       = excluded.error_msg,
+		   attempts        = replica_failures.attempts + 1,
+		   last_attempt_at = CURRENT_TIMESTAMP,
+		   resolved_at     = NULL`,
+		path, op, errCode, errMsg)
+	if err != nil {
+		return fmt.Errorf("sqlite: upsert replica failure: %w", err)
+	}
+	return nil
+}
+
+// ResolveReplicaFailure stamps resolved_at on the matching row.
+// Missing rows are a no-op.
+func (s *Store) ResolveReplicaFailure(ctx context.Context, path, op string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE replica_failures SET resolved_at = CURRENT_TIMESTAMP
+		 WHERE path=? AND op=? AND resolved_at IS NULL`, path, op)
+	return err
+}
+
+// ListReplicaFailures paginates either all rows or only unresolved.
+func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, limit, offset int) ([]*model.ReplicaFailure, int64, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	whereSQL := ""
+	if onlyUnresolved {
+		whereSQL = "WHERE resolved_at IS NULL"
+	}
+	var total int64
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM replica_failures "+whereSQL,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("sqlite: count replica failures: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at
+		 FROM replica_failures `+whereSQL+`
+		 ORDER BY last_attempt_at DESC, id DESC
+		 LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("sqlite: list replica failures: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*model.ReplicaFailure
+	for rows.Next() {
+		f := &model.ReplicaFailure{}
+		var resolvedAt sql.NullTime
+		if err := rows.Scan(&f.ID, &f.Path, &f.Op, &f.ErrorCode, &f.ErrorMsg, &f.Attempts, &f.LastAttemptAt, &resolvedAt); err != nil {
+			return nil, 0, err
+		}
+		if resolvedAt.Valid {
+			t := resolvedAt.Time
+			f.ResolvedAt = &t
+		}
+		out = append(out, f)
+	}
+	return out, total, rows.Err()
+}
+
+// CountUnresolvedReplicaFailures returns the unresolved count
+// directly — cheaper than List for the dashboard counter.
+func (s *Store) CountUnresolvedReplicaFailures(ctx context.Context) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM replica_failures WHERE resolved_at IS NULL`,
+	).Scan(&n)
+	return n, err
+}
+
+// CountRecentlyResolvedReplicaFailures returns the number of rows
+// whose resolved_at is more recent than `since`. Used by the cron
+// status report's "repaired_count" metric.
+func (s *Store) CountRecentlyResolvedReplicaFailures(ctx context.Context, since time.Time) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM replica_failures
+		 WHERE resolved_at IS NOT NULL AND resolved_at >= ?`, since,
+	).Scan(&n)
+	return n, err
+}
+
+// UpsertReplicaStatusReport replaces (id=1) the singleton report row.
+func (s *Store) UpsertReplicaStatusReport(ctx context.Context, total, failed, repaired int64, summaryJSON []byte) error {
+	if len(summaryJSON) == 0 {
+		summaryJSON = []byte("{}")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO replica_status_reports (id, generated_at, total_files, failed_count, repaired_count, summary_json)
+		 VALUES (1, CURRENT_TIMESTAMP, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   generated_at   = CURRENT_TIMESTAMP,
+		   total_files    = excluded.total_files,
+		   failed_count   = excluded.failed_count,
+		   repaired_count = excluded.repaired_count,
+		   summary_json   = excluded.summary_json`,
+		total, failed, repaired, string(summaryJSON))
+	if err != nil {
+		return fmt.Errorf("sqlite: upsert replica status report: %w", err)
+	}
+	return nil
+}
+
+// GetReplicaStatusReport returns the singleton row. nil + nil err
+// when no report has been generated yet.
+func (s *Store) GetReplicaStatusReport(ctx context.Context) (*model.ReplicaStatusReport, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT generated_at, total_files, failed_count, repaired_count, summary_json
+		 FROM replica_status_reports WHERE id=1`)
+	out := &model.ReplicaStatusReport{}
+	var summaryRaw string
+	if err := row.Scan(&out.GeneratedAt, &out.TotalFiles, &out.FailedCount, &out.RepairedCount, &summaryRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sqlite: get replica status report: %w", err)
+	}
+	out.SummaryJSON = json.RawMessage(summaryRaw)
+	if len(out.SummaryJSON) == 0 {
+		out.SummaryJSON = []byte("{}")
+	}
+	return out, nil
+}
+
+// GetReplicaSettings returns the singleton row. Missing row maps to
+// defaults (mirror, no cron).
+func (s *Store) GetReplicaSettings(ctx context.Context) (*model.ReplicaSettings, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT report_cron, report_enabled, default_mode FROM replica_settings WHERE id=1`)
+	out := &model.ReplicaSettings{DefaultMode: model.ReplicaModeMirror}
+	var enabled int
+	if err := row.Scan(&out.ReportCron, &enabled, &out.DefaultMode); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("sqlite: get replica settings: %w", err)
+	}
+	out.ReportEnabled = enabled != 0
+	return out, nil
+}
+
+// UpsertReplicaSettings stores the singleton config row.
+func (s *Store) UpsertReplicaSettings(ctx context.Context, st *model.ReplicaSettings) error {
+	if st == nil {
+		return errors.New("sqlite: nil replica settings")
+	}
+	if st.DefaultMode == "" {
+		st.DefaultMode = model.ReplicaModeMirror
+	}
+	enabled := 0
+	if st.ReportEnabled {
+		enabled = 1
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO replica_settings (id, report_cron, report_enabled, default_mode, updated_at)
+		 VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(id) DO UPDATE SET
+		   report_cron    = excluded.report_cron,
+		   report_enabled = excluded.report_enabled,
+		   default_mode   = excluded.default_mode,
+		   updated_at     = CURRENT_TIMESTAMP`,
+		st.ReportCron, enabled, st.DefaultMode)
+	if err != nil {
+		return fmt.Errorf("sqlite: upsert replica settings: %w", err)
+	}
+	return nil
+}
+
+func validateReplicaRule(in *model.ReplicaRuleInput) error {
+	if in == nil {
+		return errors.New("nil rule")
+	}
+	if in.PathPattern == "" {
+		return errors.New("path_pattern required")
+	}
+	switch in.Mode {
+	case model.ReplicaModeMirror, model.ReplicaModeAppendOnly, model.ReplicaModeSkip:
+	default:
+		return fmt.Errorf("invalid mode %q (mirror | append_only | skip)", in.Mode)
+	}
+	return nil
+}
+
 // scanNotification accepts both *sql.Row and *sql.Rows (rowScanner).
 func scanNotification(rs interface {
 	Scan(...any) error

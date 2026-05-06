@@ -22,6 +22,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/queue"
+	"gitlab.com/brftech/filemanager/backend/internal/replica"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -38,11 +39,14 @@ type Deps struct {
 	Caps            *capability.Service
 	Thumbs          *thumb.Pipeline
 	Share           *share.Service
-	OnlyOffice      *onlyoffice.Service
-	Ops             *ops.Service
-	Queue           queue.Driver
-	Notify          notify.Service
-	StorageResolver func(int64) (storage.Driver, error)
+	OnlyOffice       *onlyoffice.Service
+	Ops              *ops.Service
+	Queue            queue.Driver
+	Notify           notify.Service
+	ReplicaService   *replica.Service
+	ReplicaCron      *replica.CronScheduler
+	ReplicaReloader  *replica.RulesReloader
+	StorageResolver  func(int64) (storage.Driver, error)
 	Embed           embed.FS // web/dist + admin
 	LocalAuth       auth.LoginDriver
 	OIDCAuth        auth.OIDCDriver
@@ -91,6 +95,7 @@ func BuildRouter(d *Deps) http.Handler {
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
 	queueH := handlers.NewQueue(d.Queue)
 	notifH := handlers.NewNotifications(d.Notify)
+	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -241,6 +246,25 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/test", notifH.AdminTest)
 				r.Get("/webhook-config", notifH.AdminWebhookConfig)
 				r.Patch("/webhook-config", notifH.AdminUpdateWebhookConfig)
+			})
+
+			r.Route("/replica", func(r chi.Router) {
+				r.Route("/rules", func(r chi.Router) {
+					r.Get("/", replicaH.ListRules)
+					r.Post("/", replicaH.CreateRule)
+					r.Patch("/{id}", replicaH.UpdateRule)
+					r.Delete("/{id}", replicaH.DeleteRule)
+				})
+				r.Route("/failures", func(r chi.Router) {
+					r.Get("/", replicaH.ListFailures)
+					r.Get("/count", replicaH.CountFailures)
+				})
+				r.Post("/fix", replicaH.FixAll)
+				r.Post("/fix-one", replicaH.FixOne)
+				r.Get("/report", replicaH.GetReport)
+				r.Post("/report/run-now", replicaH.RunReportNow)
+				r.Get("/settings", replicaH.GetSettings)
+				r.Patch("/settings", replicaH.UpdateSettings)
 			})
 		})
 	})

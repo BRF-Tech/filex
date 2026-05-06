@@ -28,6 +28,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/queue"
+	"gitlab.com/brftech/filemanager/backend/internal/replica"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -55,11 +56,14 @@ type Server struct {
 	sqlDB   *sql.DB
 	worker  *syncpkg.Worker
 	ops     *ops.Service
-	queue   queue.Driver
-	qpool   *queue.Pool
-	notify  notify.Service
-	srv     *http.Server
-	idx     *search.Index
+	queue           queue.Driver
+	qpool           *queue.Pool
+	notify          notify.Service
+	replicaSvc      *replica.Service
+	replicaCron     *replica.CronScheduler
+	replicaReloader *replica.RulesReloader
+	srv             *http.Server
+	idx             *search.Index
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -309,6 +313,38 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		})
 	}
 
+	// Replica orchestration. The wrapper Driver itself is created
+	// lazily by the resolver — when a primary storage with a
+	// matching replica row exists. v0.1 does not auto-discover the
+	// replica pairing; admins set storages.role + replica_of_id via
+	// SQL or the (forthcoming) admin UI. This block wires the
+	// reconcile + report Service so the queue handler is registered
+	// and the cron scheduler comes online; the rules engine runs
+	// regardless because it's also consulted by the admin handler
+	// (preview rules before saving them).
+	{
+		_, reloader := replica.NewRulesEngine(store)
+		srvObj.replicaReloader = reloader
+		// Service is wired with a nil ReplicatedDriver until the
+		// admin pairs primary+replica; the queue handler returns a
+		// "no replica configured" error in that case. We could lazily
+		// look up the wrapper from the resolver but v0.1 skips that
+		// and surfaces the missing pair via 503 in the admin UI.
+		srvObj.replicaSvc = replica.New(store, nil, srvObj.queue, srvObj.notify)
+		srvObj.replicaCron = replica.NewCronScheduler(srvObj.replicaSvc)
+
+		if srvObj.qpool != nil {
+			srvObj.qpool.Register(queue.TypeReplicaRetry, srvObj.replicaSvc.HandleRetry)
+			srvObj.qpool.Register(queue.TypeReplicaReport, func(ctx context.Context, _ queue.Op) error {
+				return srvObj.replicaSvc.GenerateReport(ctx)
+			})
+			srvObj.qpool.Register(queue.TypeReconcile, func(ctx context.Context, _ queue.Op) error {
+				_, err := srvObj.replicaSvc.ReconcileAll(ctx)
+				return err
+			})
+		}
+	}
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -319,9 +355,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Share:           shareSvc,
 		OnlyOffice:      ooSvc,
 		Ops:             opsSvc,
-		Queue:           srvObj.queue,
-		Notify:          srvObj.notify,
-		StorageResolver: resolver,
+		Queue:            srvObj.queue,
+		Notify:           srvObj.notify,
+		ReplicaService:   srvObj.replicaSvc,
+		ReplicaCron:      srvObj.replicaCron,
+		ReplicaReloader:  srvObj.replicaReloader,
+		StorageResolver:  resolver,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
 		OIDCAuth:        oidcDrv,
@@ -358,10 +397,14 @@ func (s *Server) Start(ctx context.Context) error {
 		go s.ops.Run(ctx)
 	}
 	if s.qpool != nil {
-		// Default handlers: deliberately empty in v0.1 — the legacy
-		// ops.Service still owns copy/move/delete. Replica retry,
-		// reconcile and report handlers attach in Round-B (replica).
+		// Replica retry / reconcile / report handlers are registered
+		// in New() before this point; the legacy ops.Service still
+		// owns copy/move/delete via its own goroutine.
 		s.qpool.Start(ctx)
+	}
+	if s.replicaCron != nil {
+		s.replicaCron.Start()
+		_ = s.replicaCron.Reload(ctx)
 	}
 
 	go func() {
@@ -379,6 +422,12 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.queue != nil {
 			_ = s.queue.Close()
+		}
+		if s.replicaCron != nil {
+			s.replicaCron.Stop()
+		}
+		if s.replicaSvc != nil {
+			s.replicaSvc.Stop()
 		}
 		if s.notify != nil {
 			s.notify.Stop()
