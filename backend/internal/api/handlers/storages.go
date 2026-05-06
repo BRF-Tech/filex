@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -75,7 +76,11 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Worker != nil && created.Enabled {
-		_ = h.Worker.AddStorage(r.Context(), created)
+		// Use a detached context — the initial sync run kicks off
+		// asynchronously and outlives this request. r.Context() is
+		// cancelled the moment the HTTP response is flushed, which
+		// would otherwise abort the in-flight worker.
+		_ = h.Worker.AddStorage(context.Background(), created)
 	}
 	writeJSON(w, http.StatusOK, created)
 }
