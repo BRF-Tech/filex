@@ -59,10 +59,10 @@ function gotoSearch() {
           <span
             class="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-brand-700 text-xs font-semibold dark:bg-brand-500/20 dark:text-brand-300"
           >
-            {{ (auth.user?.display_name || auth.user?.email || '?').slice(0, 1).toUpperCase() }}
+            {{ ((auth.user?.display_name || '').trim() || (auth.user?.email || '?')).slice(0, 1).toUpperCase() }}
           </span>
           <span class="hidden sm:inline truncate max-w-[12rem]">
-            {{ auth.user?.display_name || auth.user?.email || '—' }}
+            {{ (auth.user?.display_name || '').trim() || auth.user?.email || '—' }}
           </span>
           <ChevronDown class="h-4 w-4 opacity-60" />
         </MenuButton>

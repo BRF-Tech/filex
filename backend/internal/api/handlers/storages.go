@@ -49,6 +49,23 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// Get returns a single storage by id. The admin Storages list page
+// fetches /api/admin/storages/{id} when the user clicks a row to
+// open the edit view; without this route chi returned 405.
+func (h *Storages) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	st, err := h.Store.GetStorage(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
 // Create adds a new storage.
 func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 	var st model.Storage

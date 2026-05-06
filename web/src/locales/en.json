@@ -98,7 +98,7 @@
     "remember": "Stay signed in for 30 days",
     "submit": "Sign in",
     "or": "or",
-    "oidc": "Continue with single sign-on",
+    "oidc": "Sign in with SSO (Keycloak)",
     "totpHint": "Enter the 6-digit code from your authenticator app",
     "errInvalid": "Email or password is wrong",
     "errLocked": "Account is locked. Contact your administrator.",
@@ -369,10 +369,17 @@
     "empty_done": "{count} item(s) purged",
     "total_count": "Total: {n}"
   },
+  "explore": {
+    "tagline": "file manager",
+    "loading": "Loading…",
+    "noStorage": "No storages configured yet.",
+    "addStorage": "Add storage",
+    "gotoAdmin": "Admin panel"
+  },
   "demo": {
     "badge": "Live demo",
     "title": "filex — host your own file manager",
-    "subtitle": "Self-hosted, single Go binary + Vue 3 admin; multi-storage, replica + queue + notifications, multi-framework embed. The demo runs read-only against seed data — open the sign-in form for full admin.",
+    "subtitle": "Self-hosted, single Go binary + Vue 3 admin; multi-storage, replica + queue + notifications, multi-framework embed. Click \"Open the demo\" for the actual file manager; \"Admin sign-in\" goes to the operator panel.",
     "openCta": "Open the demo",
     "showSignIn": "Admin sign-in",
     "hideSignIn": "Hide admin sign-in",

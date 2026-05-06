@@ -98,7 +98,7 @@
     "remember": "30 gün boyunca beni hatırla",
     "submit": "Giriş yap",
     "or": "veya",
-    "oidc": "Tek oturum (SSO) ile devam et",
+    "oidc": "SSO ile giriş yap (Keycloak)",
     "totpHint": "Authenticator uygulamandaki 6 haneli kodu gir",
     "errInvalid": "E-posta veya şifre yanlış",
     "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
@@ -369,15 +369,22 @@
     "empty_done": "{count} öğe silindi",
     "total_count": "Toplam: {n}"
   },
+  "explore": {
+    "tagline": "dosya yöneticisi",
+    "loading": "Yükleniyor…",
+    "noStorage": "Henüz depo eklenmedi.",
+    "addStorage": "Depo ekle",
+    "gotoAdmin": "Admin paneli"
+  },
   "demo": {
     "badge": "Canlı Demo",
     "title": "filex — kendi dosya yöneticini sun",
-    "subtitle": "Self-hosted, Go binary'ı + Vue 3 paneli; çoklu storage, replica + queue + bildirim, multi-framework embed. Demo ortamı readonly seed verisiyle dolu — gerçek yönetim için altta giriş formunu aç.",
+    "subtitle": "Self-hosted, Go binary'ı + Vue 3 paneli; çoklu storage, replica + queue + bildirim, multi-framework embed. \"Filex'i göster\" tıkla, gerçek dosya yöneticisi açılsın; \"Yönetici girişi\" admin paneline gider.",
     "openCta": "Filex'i göster",
     "showSignIn": "Yönetici girişi",
     "hideSignIn": "Yönetici girişini kapat",
     "creds": "Demo hesabı: {email} · şifre: {password}",
-    "adminHint": "Demo dışı bir hesabınla manuel oturum aç.",
+    "adminHint": "Yönetici hesabınla giriş yap.",
     "features": {
       "storageTitle": "5 Storage Driver",
       "storageBody": "local, S3, FTP, SFTP, WebDAV — driver-based interface, kendi backend'ini yazabilirsin.",

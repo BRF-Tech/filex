@@ -182,6 +182,7 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/", stg.List)
 				r.Post("/", stg.Create)
 				r.Post("/test", storagesAdmH.Test)
+				r.Get("/{id}", stg.Get)
 				r.Patch("/{id}", stg.Update)
 				r.Delete("/{id}", stg.Delete)
 				r.Post("/{id}/sync", stg.TriggerSync)
@@ -274,6 +275,16 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// ────── root → admin SPA ──────
+	// Bare `/` would otherwise return chi's stock 404. The admin SPA
+	// lives at /admin/, so 302 anyone landing on the apex URL there.
+	// Demo deployments render a public landing on /admin/login;
+	// non-demo deployments render a sign-in form. Either way the SPA
+	// owns the user-facing entry.
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, "/admin/", http.StatusFound)
 	})
 
 	// ────── embedded static ──────

@@ -68,14 +68,21 @@ async function submit() {
 }
 
 async function openDemo() {
-  // Auto-submit the documented demo creds. The backend's local auth
-  // driver authenticates a regular user — there is no special "demo"
-  // session type, the seed account just happens to be called demo.
+  // Auto-submit the documented demo creds, then hand off to the
+  // standalone /explore page (FileExplorer Web Component) — NOT
+  // the admin dashboard. Demo visitors should see the actual file
+  // browser, not the operator panel.
   localError.value = null;
-  email.value = demoUser.value;
-  password.value = 'demo';
-  remember.value = true;
-  await submit();
+  const ok = await auth.login({
+    email: demoUser.value,
+    password: 'demo',
+    remember: true,
+  });
+  if (ok) {
+    router.push({ name: 'explore' });
+  } else {
+    localError.value = auth.error ?? t('login.errGeneric');
+  }
 }
 
 function startOidc() {

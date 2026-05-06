@@ -15,6 +15,16 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, layout: 'blank' },
   },
   {
+    // Demo "Filex'i göster" lands here. No admin chrome — just the
+    // FileExplorer Web Component. `public: true` lets unauthenticated
+    // visitors see the page; the explorer itself returns 401 from
+    // /api endpoints, so the demo flow auto-logs-in first.
+    path: '/explore',
+    name: 'explore',
+    component: () => import('@/views/Explore.vue'),
+    meta: { public: true, layout: 'blank' },
+  },
+  {
     path: '/',
     component: AdminLayout,
     children: [

@@ -6,7 +6,18 @@ import path from 'node:path';
 // The bundle is emitted to dist/ and consumed by the Go binary via go:embed.
 // `base` MUST stay '/admin/' — the backend mounts the SPA there.
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue({
+      template: {
+        compilerOptions: {
+          // <filex-explorer> is loaded at runtime from /embed.js;
+          // let Vue treat any filex-* tag as a custom element so the
+          // template compiler doesn't try to resolve a component.
+          isCustomElement: (tag) => tag.startsWith('filex-'),
+        },
+      },
+    }),
+  ],
   base: '/admin/',
   resolve: {
     alias: {
