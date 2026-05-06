@@ -321,27 +321,75 @@ func wireStatic(r chi.Router, fs embed.FS) {
 		return
 	}
 
-	// /embed.js (+ /embed.css + .map files) — Web Component bundle.
-	// We don't expose the whole web/ tree under a public prefix; only
-	// the canonical entry points. Each request maps the public name
-	// to the actual filename inside web/ at lookup time.
-	mountWebAsset := func(public, internal string) {
+	// Web Component bundle. /embed.js + /embed.css are aliases for
+	// the entry chunks; everything else (lazy chunks like
+	// PdfViewer-*.js, *.map, fonts, …) is served verbatim from
+	// /embed/<file>.
+	//
+	// Vite's lib build emits ES module entry as `filex.js` (not
+	// `filex.iife.js`); aliasing keeps consumer pages on the
+	// stable /embed.js URL.
+	mountWebFile := func(public, internal string) {
 		r.Get(public, func(w http.ResponseWriter, _ *http.Request) {
 			data, err := webFS.ReadFile(internal)
 			if err != nil {
 				http.NotFound(w, nil)
 				return
 			}
-			ct := contentTypeForName(internal)
-			if ct != "" {
+			if ct := contentTypeForName(internal); ct != "" {
 				w.Header().Set("Content-Type", ct)
 			}
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			_, _ = w.Write(data)
 		})
 	}
-	mountWebAsset("/embed.js", "filex.iife.js")
-	mountWebAsset("/embed.css", "style.css")
+	mountWebFile("/embed.js", "filex.js")
+	mountWebFile("/embed.css", "style.css")
+
+	// /embed/<file> — direct file lookup for code-split chunks +
+	// source maps. Chunked imports inside filex.js use the entry's
+	// own URL as the import.meta.url base, so chunks resolve to
+	// /embed/<chunk>.js when /embed.js itself lives at the root.
+	// To make that work we ALSO expose chunk basenames at /
+	// (Vite's default base; consumers can change it via
+	// `<script src="/embed/filex.js">` if they prefer namespacing).
+	r.Get("/embed/*", func(w http.ResponseWriter, req *http.Request) {
+		rel := strings.TrimPrefix(req.URL.Path, "/embed/")
+		if rel == "" || strings.Contains(rel, "..") {
+			http.NotFound(w, nil)
+			return
+		}
+		data, err := webFS.ReadFile(rel)
+		if err != nil {
+			http.NotFound(w, nil)
+			return
+		}
+		if ct := contentTypeForName(rel); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	})
+
+	// Chunk basenames at the root (e.g. /PdfViewer-B96aE3Uu.js).
+	// Vite's default `base: '/'` lib build emits chunk URLs as
+	// "/<chunk>.js" relative to the document; without these the
+	// browser fetches them from the host page's root and 404s.
+	// We only honor the hashed-filename convention so we don't
+	// shadow real routes.
+	r.Get("/{chunk:[A-Za-z0-9_]+-[A-Za-z0-9_-]+\\.(js|css)}", func(w http.ResponseWriter, req *http.Request) {
+		name := chi.URLParam(req, "chunk")
+		data, err := webFS.ReadFile(name)
+		if err != nil {
+			http.NotFound(w, nil)
+			return
+		}
+		if ct := contentTypeForName(name); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	})
 }
 
 // spaHandler serves files under root with an index.html fallback.
