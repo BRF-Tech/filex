@@ -11,7 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"gitlab.com/brftech/filemanager/backend/internal/model"
-	"gitlab.com/brftech/filemanager/backend/internal/testutil"
+	"gitlab.com/brftech/filemanager/backend/internal/testutil/dbtest"
 )
 
 // TestIsExpired covers the IsExpired contract — no expiry, expiry past,
@@ -50,7 +50,7 @@ func TestIsExpired(t *testing.T) {
 // TestPIN_BcryptRoundTrip — Service.Create stores a bcrypt hash, and the
 // hash + plaintext must compare cleanly.
 func TestPIN_BcryptRoundTrip(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
@@ -79,7 +79,7 @@ func TestPIN_BcryptRoundTrip(t *testing.T) {
 
 // TestService_Resolve_BadPIN returns ErrBadPIN.
 func TestService_Resolve_BadPIN(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
 		Name: "s", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
@@ -99,7 +99,7 @@ func TestService_Resolve_BadPIN(t *testing.T) {
 
 // TestService_Resolve_OK returns the share when pin matches.
 func TestService_Resolve_OK(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
 		Name: "s", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
@@ -120,7 +120,7 @@ func TestService_Resolve_OK(t *testing.T) {
 
 // TestService_Resolve_Expired returns ErrExpired.
 func TestService_Resolve_Expired(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
 		Name: "s", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
@@ -141,7 +141,7 @@ func TestService_Resolve_Expired(t *testing.T) {
 
 // TestService_Resolve_MaxDownloadsReached returns ErrExpired.
 func TestService_Resolve_MaxDownloadsReached(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
 		Name: "s", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
@@ -165,7 +165,7 @@ func TestService_Resolve_MaxDownloadsReached(t *testing.T) {
 
 // TestService_Token_Uniqueness — over many creates, every token differs.
 func TestService_Token_Uniqueness(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
 		Name: "s", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
@@ -193,7 +193,7 @@ func TestService_Token_Uniqueness(t *testing.T) {
 
 // TestService_Create_MissingNodeID returns an explicit error.
 func TestService_Create_MissingNodeID(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	svc := NewService(store)
 	_, err := svc.Create(context.Background(), CreateOpts{})
 	require.Error(t, err)
@@ -202,7 +202,7 @@ func TestService_Create_MissingNodeID(t *testing.T) {
 // TestService_ListAndDelete round-trips a share through ListByNode +
 // Delete.
 func TestService_ListAndDelete(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	ctx := context.Background()
 	stg, _ := store.CreateStorage(ctx, &model.Storage{
 		Name: "s", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,

@@ -14,7 +14,7 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
-	"gitlab.com/brftech/filemanager/backend/internal/testutil"
+	"gitlab.com/brftech/filemanager/backend/internal/testutil/dbtest"
 )
 
 // TestHashPassword_RoundTrip checks that HashPassword + bcrypt.Compare
@@ -41,8 +41,8 @@ func TestHashPassword_WrongPassword(t *testing.T) {
 // TestLogin_Success seeds a user and verifies Login returns a session token
 // and the matching User.
 func TestLogin_Success(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
-	email, pw := testutil.SeedAdmin(t, store)
+	_, store := dbtest.NewTestDB(t)
+	email, pw := dbtest.SeedAdmin(t, store)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -57,8 +57,8 @@ func TestLogin_Success(t *testing.T) {
 
 // TestLogin_WrongPassword returns ErrUnauthorized.
 func TestLogin_WrongPassword(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
-	email, _ := testutil.SeedAdmin(t, store)
+	_, store := dbtest.NewTestDB(t)
+	email, _ := dbtest.SeedAdmin(t, store)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -70,7 +70,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 // TestLogin_NonexistentUser returns ErrUnauthorized (same shape as
 // wrong-pw — mustn't leak whether the user exists).
 func TestLogin_NonexistentUser(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -82,8 +82,8 @@ func TestLogin_NonexistentUser(t *testing.T) {
 // TestLogin_EmailLowercased ensures Login lowercases the input — common
 // usability footgun where users type "Admin@..." but DB has "admin@...".
 func TestLogin_EmailLowercased(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
-	email, pw := testutil.SeedAdmin(t, store)
+	_, store := dbtest.NewTestDB(t)
+	email, pw := dbtest.SeedAdmin(t, store)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -111,8 +111,8 @@ func TestSessionTokenUniqueness(t *testing.T) {
 // TestAuthenticate_FromCookie posts a Login then crafts a request with the
 // cookie and expects Authenticate to resolve the same user.
 func TestAuthenticate_FromCookie(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
-	email, pw := testutil.SeedAdmin(t, store)
+	_, store := dbtest.NewTestDB(t)
+	email, pw := dbtest.SeedAdmin(t, store)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -130,8 +130,8 @@ func TestAuthenticate_FromCookie(t *testing.T) {
 // TestAuthenticate_FromBearer mirrors the cookie test but with the
 // Authorization header.
 func TestAuthenticate_FromBearer(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
-	email, pw := testutil.SeedAdmin(t, store)
+	_, store := dbtest.NewTestDB(t)
+	email, pw := dbtest.SeedAdmin(t, store)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -147,7 +147,7 @@ func TestAuthenticate_FromBearer(t *testing.T) {
 
 // TestAuthenticate_NoCredentials returns ErrUnauthorized.
 func TestAuthenticate_NoCredentials(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 
@@ -159,8 +159,8 @@ func TestAuthenticate_NoCredentials(t *testing.T) {
 
 // TestLogout deletes the session.
 func TestLogout(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
-	email, pw := testutil.SeedAdmin(t, store)
+	_, store := dbtest.NewTestDB(t)
+	email, pw := dbtest.SeedAdmin(t, store)
 	d := New(store)
 	require.NoError(t, d.Init(context.Background(), nil))
 

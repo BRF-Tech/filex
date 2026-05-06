@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"gitlab.com/brftech/filemanager/backend/internal/testutil"
+	"gitlab.com/brftech/filemanager/backend/internal/testutil/dbtest"
 )
 
 // TestHas_KnownBinary expects a process-launching binary that is present
@@ -69,7 +69,7 @@ func TestProbeHTTP_Unreachable(t *testing.T) {
 
 // TestService_Get_Caches verifies the second call hits the cache.
 func TestService_Get_Caches(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	svc := New(store)
 	first, err := svc.Get(context.Background())
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestService_Get_Caches(t *testing.T) {
 
 // TestService_Invalidate forces a refresh.
 func TestService_Invalidate(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	svc := New(store)
 	svc.cached = nil
 	svc.until = time.Time{}
@@ -101,7 +101,7 @@ func TestService_Invalidate(t *testing.T) {
 // TestService_Get_NoExternalServices — fresh DB returns the canned default
 // capabilities (Upload, Move, Copy, Delete, Mkdir all true).
 func TestService_Get_Defaults(t *testing.T) {
-	_, store := testutil.NewTestDB(t)
+	_, store := dbtest.NewTestDB(t)
 	svc := New(store)
 	caps, err := svc.Get(context.Background())
 	require.NoError(t, err)
