@@ -35,13 +35,17 @@ type AuthSelf struct {
 func NewAuthSelf(store db.Store) *AuthSelf { return &AuthSelf{Store: store} }
 
 // Me returns the authenticated user.
+//
+// Wire shape mirrors LoginResponse: `{user: {…}}`. The frontend
+// auth store reads `me.user`; without the wrapper user.value
+// stayed undefined and TopNav fell back to "? —" forever.
 func (h *AuthSelf) Me(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFrom(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
 		return
 	}
-	writeJSON(w, http.StatusOK, u)
+	writeJSON(w, http.StatusOK, map[string]any{"user": u})
 }
 
 type profileReq struct {
