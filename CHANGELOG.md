@@ -7,26 +7,141 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Initial monorepo skeleton (Go backend + npm packages + admin UI)
-- Storage driver interface with reference implementations: `local`, `s3` (Hetzner-tested), `sftp`, `webdav`
-- Auth driver interface with reference implementations: `local` (bcrypt), `oidc` (Keycloak-tested), `ldap`
-- DB driver interface with reference implementations: `sqlite` (default, modernc.org/sqlite), `mysql`, `postgres`
-- Sync worker with ETag-based diff and tombstone-false-positive guard
-- Bleve full-text search (embedded)
-- Thumbnail pipeline (image GD, video ffmpeg, PDF ghostscript, Office libreoffice; capability-aware)
-- Vue 3 admin UI (embedded into Go binary via `go:embed`)
-- `@brftech/filex-core` — Vue 3 SFC source of truth
-- `@brftech/filex` — Web Component wrapper (`<filex-explorer>`)
-- `@brftech/filex-react` — React adapter via `@lit/react`
-- First-run console banner with admin credentials + embed instructions
-- Multi-platform release matrix (Linux / macOS / Windows × amd64 / arm64) via goreleaser
-- Docker images: `brftech/filex:slim` (~40 MB) and `brftech/filex:full` (~250 MB w/ thumbnail tools)
-- GitLab CI pipeline (lint + test + build + npm publish + Docker push + release matrix)
-- Plug & play external services: OnlyOffice, Drawio (URL-configured, capability-discovered)
-- Monaco eager-load with highlight.js fallback for code preview/edit
-- MIT license
+(Nothing yet — see v0.1.0 below.)
 
-## [0.1.0] - TBD
+## [0.1.0] - 2026-05-06
 
-First public release.
+First public release. The skeleton from earlier dev cycles plus the Round B
++ Round C delta work that turns filex into a complete self-hosted file
+manager with replication, persistent queue and notifications.
+
+### Added — core (skeleton)
+
+- Standalone Go binary + monorepo (Vue / Web Component / React adapters).
+- Storage driver interface with reference implementations: `local`, `s3`
+  (Hetzner-tested), `sftp`, `webdav`, `ftp` (jlaffaye/ftp).
+- Auth driver interface with reference implementations: `local` (bcrypt),
+  `oidc` (Keycloak-tested), `ldap`, `proxy-header` (trusted CIDR enforced).
+- DB driver interface with reference implementations: `sqlite` (default,
+  modernc.org/sqlite), `mysql`, `postgres`.
+- Sync worker with ETag-based diff and tombstone-false-positive guard.
+- Bleve full-text search (embedded).
+- Thumbnail pipeline (image GD, video ffmpeg, PDF ghostscript, Office
+  libreoffice; capability-aware).
+- Vue 3 admin UI (embedded into Go binary via `go:embed`).
+- `@brftech/filex-core` — Vue 3 SFC source of truth.
+- `@brftech/filex` — Web Component wrapper (`<filex-explorer>`).
+- `@brftech/filex-react` — React adapter via `@lit/react`.
+- First-run console banner with admin credentials + embed instructions.
+- Multi-platform release matrix (Linux / macOS / Windows × amd64 / arm64).
+- Docker images: `brftech/filex:slim` (~40 MB) and `brftech/filex:full`
+  (~250 MB w/ thumbnail tools).
+- GitLab CI pipeline (lint + test + build + npm publish + Docker push +
+  release matrix).
+- Plug & play external services: OnlyOffice, Drawio (URL-configured,
+  capability-discovered).
+- Monaco eager-load with highlight.js fallback for code preview/edit.
+
+### Added — Round A (storage + auth deltas)
+
+- **FTP driver** (`internal/storage/drivers/ftp`) — full Driver +
+  Writer/Mover/Copier/Deleter/Mkdirer; FTPS (explicit AUTH TLS) and
+  passive-mode toggles.
+- **Storage root path guard** — `ValidateNonRootPath` rejects empty or
+  `"/"` storage prefixes (s3.prefix, local.path, ftp/sftp/webdav.root)
+  so filex never silently mounts at the bucket root and shadows
+  pre-existing files. Wired into Storage create + update API handlers.
+- **Proxy-header auth driver** (`internal/auth/drivers/proxyheader`) —
+  reads `X-Auth-User`/`X-Auth-Email`/`X-Auth-Roles` from a trusted
+  upstream proxy. `trusted_proxies` (CIDR list) is required; missing or
+  empty list blocks `Init`. Auto-provisions users on first sight.
+
+### Added — Round B (queue + notify + replica)
+
+- **Persistent op queue** (`internal/queue`) — driver-based
+  (`sqlite` default | `redis` | `postgres`). `ops_queue` table with
+  status / priority / attempts / max_attempts / last_error /
+  enqueued_at / started_at / finished_at / not_before. Worker pool
+  with N goroutines, type-filtered Dequeue, exponential backoff,
+  graceful Stop. Admin endpoints: `GET /admin/queue/{stats, list,
+  {id}}`, `POST /admin/queue/{id}/retry`, `DELETE /admin/queue/{id}`.
+- **Notifications subsystem** (`internal/notify`) — single
+  `Service.Send` call fans out to (a) the in-app history table and
+  (b) a configurable webhook with 3× exponential backoff retry. Per-
+  user mute matrix; admin global view + smoke test trigger; webhook
+  URL/token can be changed at runtime via the admin UI. Endpoints
+  under `/api/notifications/...` (user) and `/admin/notifications/...`
+  (admin).
+- **Replica storage layer** (`internal/storage/replicated.go` +
+  `internal/replica`) — `ReplicatedDriver` wraps a primary Driver and
+  fans writes/moves/copies/deletes asynchronously to a replica.
+  - **Read fallback**: primary errors → replica retry → emits
+    `primary_read_fail` event.
+  - **Path-glob rules** (`replica_rules` table) with priority asc;
+    modes mirror | append_only | skip. Default-on rule mirrors when
+    no rule matches (configurable via `replica_settings.default_mode`).
+  - **Failure recorder** (`replica_failures` table, UNIQUE(path, op))
+    tracks every fan-out failure; `Resolve` clears on success.
+  - **Reconciliation** — admin "Fix all" enqueues `replica_retry` ops;
+    queue handler reads from primary and writes to replica, then
+    resolves the failure row.
+  - **Cron status report** (`replica_status_reports` singleton) —
+    user-supplied cron spec generates a snapshot on schedule (full
+    payload to webhook, summary in DB + bell). Robfig/cron/v3 parses
+    the spec; Reload primitive lets the admin UI change it without
+    a restart.
+
+### Added — Round C (admin UI delta pages)
+
+- **Replica.vue** — 4-tab page (Rules / Failures / Report / Settings)
+  with per-row Fix, "Fix all", Run-now, cron preset dropdown +
+  advanced raw cron input.
+- **Notifications.vue** — admin global feed with severity + webhook
+  badges, "Send test" CTA, webhook config card (URL + bearer token).
+- **Queue.vue** — 5 stat cards + paginated op table + per-row
+  Retry/Cancel.
+- **NotificationBell.vue** — top-nav bell with unread badge, 15s
+  polling, dropdown listing the latest 15 notifications, mark-read
+  on click, "View all" deep link.
+- Sidebar entries (Replica / Queue / Notifications) and i18n keys
+  for both `tr` and `en`.
+
+### Changed
+
+- `db.Store` interface gained 21 new methods (notifications + replica
+  CRUD + counts + report singleton + settings).
+- Server bootstrap registers `replica_retry`, `replica_report`,
+  `reconcile` queue handlers; CronScheduler starts after the queue
+  pool and reloads from `replica_settings` on boot.
+
+### Fixed
+
+- `internal/testutil` was importing `auth/drivers/local`,
+  `capability` and `share` directly, so each of those packages'
+  test files (which used `testutil`) failed with `import cycle not
+  allowed in test`. Split into `internal/testutil/dbtest` (minimal,
+  db + model + bcrypt only) — three problem suites now reference
+  `dbtest` instead and `go test ./...` is green.
+
+### Demo URL
+
+- `files.brf.sh` → `demo-fm.brf.sh` rename across `deploy/`,
+  `docs/DEPLOY_BRF.md`, `docs/MIGRATION_FISHAPP.md`,
+  `deploy/keycloak-client-filex.json`, `deploy/.env.example`,
+  `deploy/README.md`. Deploy host moved from main to brkip Caddy
+  (DR-site, internal CA TLS).
+
+### Known Gaps for v0.2
+
+- Full B-plan brf-mono backend swap (filex Go binary as the sole
+  files backend; legacy `Modules/FishApp/Services/*` removed). v0.1
+  ships with the frontend-swap A-plan (filex UI + brf-mono PHP
+  backend continues to handle storage). See
+  `plan/07-integration-and-release.md` §1.
+- `replicated_driver` is wired by ad-hoc admin SQL today
+  (storages.role + replica_of_id). v0.2 will auto-discover replica
+  pairs from the `storages` table.
+- E2E Playwright suite only covers the original flows; new admin UI
+  pages (Replica, Queue, Notifications) ship with manual smoke
+  testing only.
+- Sentry SDK integration deferred to v0.2.

@@ -53,6 +53,22 @@ services:
       FILEX_SYNC_DEFAULT_INTERVAL: 15m
       FILEX_THUMBS_ENABLED: "true"
 
+      # ── Queue (persistent) ───────────────────────────────────
+      # sqlite (default) reuses the application DB file. Switch to
+      # 'postgres' when you enable the postgres service below;
+      # FILEX_QUEUE_DSN should mirror FILEX_DB_DSN in that case.
+      FILEX_QUEUE_DRIVER: sqlite
+      FILEX_QUEUE_WORKERS: "4"
+      # FILEX_QUEUE_DSN: postgres://filex:CHANGEME@postgres:5432/filex?sslmode=disable
+      # FILEX_QUEUE_DSN: redis://redis:6379/0
+
+      # ── Notifications + webhook ─────────────────────────────
+      # Generic JSON POST per event. Slack/Discord templates not
+      # supported (you map the schema yourself in your ingest).
+      FILEX_NOTIFY_ENABLED: "true"
+      # FILEX_WEBHOOK_URL: https://portal.brf.sh/api/notify/v1/ingest
+      # FILEX_WEBHOOK_TOKEN: ${BRF_NOTIFY_TOKEN}
+
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5212/healthz"]
       interval: 30s

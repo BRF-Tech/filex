@@ -114,16 +114,88 @@ before the snapshot.
 
 ## 7. Notify integration
 
-Add a notify group `filex` for capability/sync alerts and pipe the
-backend's audit log into it. Quick recipe:
+Filex ships a generic webhook channel + in-app bell — see SPEC §4.3 and
+plan/04-notify.md.
+
+### 7.1 Webhook (.env bootstrap)
+
+```dotenv
+FILEX_WEBHOOK_URL=https://portal.brf.sh/api/notify/v1/ingest
+FILEX_WEBHOOK_TOKEN=bn_your_long_token_here
+```
+
+The Authorization header is `Bearer ${FILEX_WEBHOOK_TOKEN}`. Empty URL
+disables outbound delivery without taking the bell down.
+
+The payload schema is:
+
+```json
+{
+  "event":   "replica_fail | replica_status_report | quota_full | …",
+  "severity": "info | warning | error | critical",
+  "title":   "Short headline",
+  "body":    "Human-readable detail",
+  "meta":    { "path": "...", "op": "write", "...": "..." },
+  "ts":      "2026-05-06T13:42:11Z"
+}
+```
+
+Ingest receivers map this to whatever shape they need (Slack/Discord
+templates are not built-in — your /notify ingest does the
+transformation).
+
+### 7.2 Runtime override (admin UI)
+
+`/admin/notifications` → "Webhook configuration" lets you change the
+URL/token without a restart. Useful for swapping ingest endpoints in
+production. Empty token clears the existing one (the token itself is
+never echoed back in GET responses).
+
+### 7.3 Bell (in-app)
+
+Top-nav `<NotificationBell>` polls `/api/notifications/unread-count`
+every 15s and renders the latest 15 events. Per-user mute matrix lives
+in `notification_settings` — `/api/notifications/settings` exposes the
+toggle.
+
+### 7.4 Audit fall-back
+
+If you'd rather pipe the backend's plain audit log into a notify group
+instead of the live event stream, the legacy hook still works:
 
 ```sql
 INSERT INTO settings (key, value, updated_at)
 VALUES ('audit.notify_group', 'filex', CURRENT_TIMESTAMP);
 ```
 
-Optional — `notify` HTTP webhook URL goes into the `external_services`
-table once you've created the receiver.
+But Round B's webhook is the recommended channel for replica/quota/
+queue events — the legacy hook has no severity routing.
+
+## 7b. Persistent queue
+
+`FILEX_QUEUE_DRIVER=sqlite` (default) shares the application DB. For
+HA setups switch to `postgres` (SELECT FOR UPDATE SKIP LOCKED) or
+`redis` (BRPOPLPUSH work-list).
+
+```dotenv
+FILEX_QUEUE_DRIVER=postgres
+FILEX_QUEUE_DSN=postgres://filex:${POSTGRES_PASSWORD}@postgres:5432/filex?sslmode=disable
+FILEX_QUEUE_WORKERS=4
+```
+
+Admin UI: `/admin/queue` for stats + retry/cancel actions. Use
+`/admin/replica/fix` to enqueue retries for every unresolved replica
+failure in one shot.
+
+## 7c. Replica + reconciliation
+
+Configure a primary + replica storage in `/admin/storages`, then mark
+the replica row's `role=replica` and `replica_of_id={primary.id}` (v0.1
+sets these via SQL — admin UI auto-pairing is v0.2). Visit
+`/admin/replica/settings` to enable cron status reports — pick a preset
+(hourly, daily 3 AM, weekly) or paste a raw 5-field cron expression.
+The webhook receives the full failed-paths list on each run; the bell
+shows a summary line.
 
 ## 8. Migrating from `@brftech/file-explorer`
 
