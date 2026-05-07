@@ -18,6 +18,11 @@
 
 export { default as FileExplorer } from './FileExplorer.vue';
 
+// PreviewModal is exposed so embedders can mount their own
+// fullscreen editor route (e.g. /files/edit) without re-implementing
+// the viewer dispatch logic.
+export { default as PreviewModal } from './modals/PreviewModal.vue';
+
 // ——— Phase-2 standalone components (consumers can mount these
 //      independently of the FileExplorer host, e.g. a sidebar tray).
 export { default as StarButton } from './components/StarButton.vue';

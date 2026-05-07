@@ -11,16 +11,13 @@
  * each pick the right backend (capabilities probe + onlyOfficeBase +
  * drawioUrl all flow from ExplorerConfig). Save-on-change is wired via
  * `saveText: '/api/files/save-text'`.
- *
- * The page is intentionally chrome-free — no sidebar, no breadcrumb.
- * Closing the tab returns the user to the explorer they came from.
  */
 
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
-import { PreviewModal, type ExplorerConfig, type FileNode } from '@brftech/filex-core';
+import { PreviewModal, type FileNode } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 
 const { locale } = useI18n();
@@ -29,37 +26,18 @@ const route = useRoute();
 function readBearerToken(): string | null {
   return sessionStorage.getItem('filex.bearer');
 }
-function readCsrfCookie(): string | null {
-  const prefix = 'filex_csrf=';
-  for (const part of document.cookie.split(';')) {
-    const trimmed = part.trim();
-    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
-  }
-  return null;
+
+const previewUrl = (p: string) =>
+  `/api/files/manager?action=preview&path=${encodeURIComponent(p)}`;
+const downloadUrl = (p: string) =>
+  `/api/files/manager?action=download&path=${encodeURIComponent(p)}`;
+
+function authHeaders(): Record<string, string> {
+  const token = readBearerToken();
+  if (token) return { Authorization: `Bearer ${token}` };
+  return {};
 }
 
-const config = computed<ExplorerConfig>(() => {
-  const bearer = readBearerToken();
-  const csrf = readCsrfCookie();
-  const auth: ExplorerConfig['auth'] = bearer
-    ? { kind: 'bearer', token: bearer }
-    : csrf
-      ? { kind: 'csrf', csrf }
-      : { kind: 'none' };
-  return {
-    apiBase: '',
-    endpoint: '/api/files/manager',
-    capabilities: '/api/files/capabilities',
-    saveText: '/api/files/save-text',
-    onlyOfficeConfig: '/api/files/onlyoffice/config',
-    auth,
-    locale: locale.value === 'en' ? 'en' : 'tr',
-  };
-});
-
-// Synthesise a minimal FileNode from the URL params. The PreviewModal
-// only needs `path` + `basename` + `extension` + `type` to pick a viewer;
-// the rest comes from the capabilities/preview API calls.
 const node = computed<FileNode | null>(() => {
   const rawPath = route.query.path;
   if (typeof rawPath !== 'string' || !rawPath) return null;
@@ -82,13 +60,21 @@ const node = computed<FileNode | null>(() => {
   } as unknown as FileNode;
 });
 
-const mode = computed<'edit' | 'view'>(() => (route.query.mode === 'view' ? 'view' : 'edit'));
+const mode = computed<'edit' | 'view'>(() =>
+  route.query.mode === 'view' ? 'view' : 'edit',
+);
 
 const open = ref(true);
 
+function closeWindow() {
+  try {
+    window.close();
+  } catch {
+    open.value = false;
+  }
+}
+
 onMounted(() => {
-  // Match the file's basename to the page title so the user can find
-  // the tab in their session ribbon.
   const n = node.value;
   if (n) document.title = `${n.basename} — filex`;
 });
@@ -101,15 +87,14 @@ onMounted(() => {
       :open="open"
       :file="node"
       :open-mode="mode"
-      :preview-url="(p) => `/api/files/manager?action=preview&path=${encodeURIComponent(p)}`"
-      :download-url="(p) => `/api/files/manager?action=download&path=${encodeURIComponent(p)}`"
-      :only-office-config-endpoint="config.onlyOfficeConfig ?? null"
-      :save-text-endpoint="config.saveText ?? null"
-      :auth="config.auth"
-      :locale="config.locale ?? 'tr'"
-      :show-edit-button="true"
-      :standalone="true"
-      @close="window.close()"
+      :preview-url="previewUrl"
+      :download-url="downloadUrl"
+      :only-office-config-endpoint="'/api/files/onlyoffice/config'"
+      :save-text-endpoint="'/api/files/save-text'"
+      :auth-headers="authHeaders"
+      :auth-credentials="'same-origin'"
+      :locale="locale === 'en' ? 'en' : 'tr'"
+      @close="closeWindow"
     />
     <div v-else class="empty">
       <p>Missing <code>?path=</code> query parameter.</p>
