@@ -173,13 +173,19 @@ function rowDuration(r: SyncRun): string {
   return formatDuration(ms / 1000);
 }
 
+// Defensive zero-fill so rows with missing fields render "0"
+// instead of literal "undefined".
+function num(n: number | null | undefined): string {
+  return typeof n === 'number' && Number.isFinite(n) ? String(n) : '0';
+}
+
 const runColumns = computed(() => [
-  { key: 'started_at', label: t('sync.fields.started'), format: (r: SyncRun) => formatDate(r.started_at, locale.value) },
+  { key: 'started_at', label: t('sync.fields.started'), format: (r: SyncRun) => r.started_at ? formatDate(r.started_at, locale.value) : '—' },
   { key: 'duration', label: t('sync.fields.duration'), format: rowDuration },
   { key: 'state', label: t('sync.fields.state'), cell: 'slot' as const },
-  { key: 'added', label: '+', align: 'right' as const, format: (r: SyncRun) => String(r.added) },
-  { key: 'updated', label: '~', align: 'right' as const, format: (r: SyncRun) => String(r.updated) },
-  { key: 'deleted', label: '-', align: 'right' as const, format: (r: SyncRun) => String(r.deleted) },
+  { key: 'added', label: '+', align: 'right' as const, format: (r: SyncRun) => num(r.added) },
+  { key: 'updated', label: '~', align: 'right' as const, format: (r: SyncRun) => num(r.updated) },
+  { key: 'deleted', label: '-', align: 'right' as const, format: (r: SyncRun) => num(r.deleted) },
 ]);
 
 onMounted(load);

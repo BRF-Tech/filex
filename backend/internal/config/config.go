@@ -140,6 +140,7 @@ type HeaderProxyConfig struct {
 type ExtServices struct {
 	OnlyOffice OnlyOfficeConfig `yaml:"onlyoffice"`
 	Drawio     DrawioConfig     `yaml:"drawio"`
+	Mermaid    MermaidConfig    `yaml:"mermaid"`
 }
 
 // OnlyOfficeConfig — Document Server URL + JWT secret.
@@ -150,6 +151,11 @@ type OnlyOfficeConfig struct {
 
 // DrawioConfig — embed URL.
 type DrawioConfig struct {
+	URL string `yaml:"url"`
+}
+
+// MermaidConfig — render service URL (optional).
+type MermaidConfig struct {
 	URL string `yaml:"url"`
 }
 
@@ -348,6 +354,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DRAWIO_URL"); v != "" {
 		c.ExternalServices.Drawio.URL = v
+	}
+	if v := os.Getenv("FILEX_MERMAID_URL"); v != "" {
+		c.ExternalServices.Mermaid.URL = v
 	}
 	if v := os.Getenv("FILEX_SYNC_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {

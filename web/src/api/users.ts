@@ -29,8 +29,25 @@ export interface UserListParams {
 
 export const UsersApi = {
   async list(params: UserListParams = {}): Promise<PaginatedResponse<User>> {
-    const { data } = await api.get<PaginatedResponse<User>>('/admin/users', { params });
-    return data;
+    // Backend handler currently returns a flat User[] array (other
+    // internal callers depend on that shape). Normalize to the
+    // paginated envelope the admin UI expects so views can render
+    // without checking both shapes inline.
+    const { data } = await api.get<PaginatedResponse<User> | User[]>('/admin/users', { params });
+    if (Array.isArray(data)) {
+      return {
+        items: data,
+        total: data.length,
+        page: 1,
+        page_size: data.length || 1,
+      };
+    }
+    return {
+      items: data.items ?? [],
+      total: data.total ?? 0,
+      page: data.page ?? 1,
+      page_size: data.page_size ?? 0,
+    };
   },
 
   async get(id: number): Promise<User> {

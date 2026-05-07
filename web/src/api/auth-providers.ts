@@ -42,17 +42,32 @@ export const AuthProvidersApi = {
   },
 
   async update(id: AuthProvider['id'], patch: AuthProviderUpdate): Promise<AuthProvider> {
-    const { data } = await api.patch<BackendProvider | AuthProvider>(
-      `/admin/auth-providers/${id}`,
-      patch,
-    );
-    return 'name' in data ? toAuthProvider(data) : data;
+    // Backend Update writes settings + returns `{ok, warning}` (no
+    // row). Send the patch.config map at the top level since the
+    // handler iterates the JSON body keys directly. Then re-fetch
+    // the list so the caller gets a fresh row.
+    const body: Record<string, unknown> = {
+      ...(patch.config ?? {}),
+    };
+    if (patch.enabled !== undefined) body.enabled = patch.enabled;
+    await api.patch(`/admin/auth-providers/${id}`, body);
+    const all = await AuthProvidersApi.list();
+    const found = all.find((p) => p.id === id);
+    if (found) return found;
+    return {
+      id,
+      enabled: !!patch.enabled,
+      config: patch.config ?? {},
+      config_redacted: {},
+      status: patch.enabled ? 'ok' : 'disabled',
+      last_error: null,
+    };
   },
 
   async test(id: AuthProvider['id']): Promise<{ ok: boolean; error?: string }> {
-    const { data } = await api.post<{ ok: boolean; error?: string }>(
+    const { data } = await api.post<{ ok: boolean; error?: string; note?: string }>(
       `/admin/auth-providers/${id}/test`,
     );
-    return data;
+    return { ok: !!data.ok, error: data.error ?? data.note };
   },
 };

@@ -71,19 +71,23 @@ const stateOptions = [
   { value: 'aborted', label: 'aborted' },
 ];
 
+function num(n: number | null | undefined): string {
+  return typeof n === 'number' && Number.isFinite(n) ? String(n) : '0';
+}
+
 const columns = computed<Column<SyncRun>[]>(() => [
   { key: 'storage_name', label: t('sync.fields.storage') },
   {
     key: 'started_at',
     label: t('sync.fields.started'),
-    format: (r) => formatDate(r.started_at, locale.value),
+    format: (r) => (r.started_at ? formatDate(r.started_at, locale.value) : '—'),
   },
   { key: 'duration', label: t('sync.fields.duration'), format: duration },
   { key: 'state', label: t('sync.fields.state'), cell: 'slot' },
-  { key: 'scanned', label: t('sync.fields.scanned'), align: 'right', format: (r) => String(r.scanned) },
-  { key: 'added', label: '+', align: 'right', format: (r) => String(r.added) },
-  { key: 'updated', label: '~', align: 'right', format: (r) => String(r.updated) },
-  { key: 'deleted', label: '-', align: 'right', format: (r) => String(r.deleted) },
+  { key: 'scanned', label: t('sync.fields.scanned'), align: 'right', format: (r) => num(r.scanned) },
+  { key: 'added', label: '+', align: 'right', format: (r) => num(r.added) },
+  { key: 'updated', label: '~', align: 'right', format: (r) => num(r.updated) },
+  { key: 'deleted', label: '-', align: 'right', format: (r) => num(r.deleted) },
 ]);
 
 onMounted(async () => {

@@ -383,7 +383,45 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// Seed default rows in external_services so the admin UI has
+	// editable cards for OnlyOffice/Drawio/Mermaid even on fresh
+	// installs. UpsertExternalService is no-op when the row already
+	// exists with the same shape (sqlite + postgres drivers).
+	seedExternalDefaults(ctx, store, cfg)
+
 	return srvObj, nil
+}
+
+// seedExternalDefaults inserts placeholder rows for the three known
+// external services if they're missing. We mark them disabled when
+// no URL is configured so the capability prober reports "disabled"
+// instead of "unreachable" on the next refresh.
+func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config) {
+	type defRow struct {
+		name    string
+		url     string
+		secret  string
+	}
+	defaults := []defRow{
+		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret},
+		{name: "drawio", url: cfg.ExternalServices.Drawio.URL, secret: ""},
+		{name: "mermaid", url: cfg.ExternalServices.Mermaid.URL, secret: ""},
+	}
+	for _, d := range defaults {
+		// Only seed when missing; don't clobber operator-edited rows.
+		if cur, _ := store.GetExternalService(ctx, d.name); cur != nil {
+			continue
+		}
+		enabled := d.url != ""
+		state := "unconfigured"
+		if enabled {
+			state = "unknown"
+		}
+		if err := store.UpsertExternalService(ctx, d.name, enabled, d.url, d.secret, "{}", time.Time{}, state); err != nil {
+			slog.Warn("seed external_services row", slog.String("name", d.name), slog.String("err", err.Error()))
+		}
+	}
 }
 
 // Start runs first-run, prints the banner, starts the worker, and serves
