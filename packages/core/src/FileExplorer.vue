@@ -121,6 +121,23 @@ const searchQuery = ref('');
 const trashActive = computed(() => currentPath.value.startsWith('fileman/.trash'));
 const locale = computed(() => props.config.locale || 'tr');
 
+// canGoUp/goUp — toolbar's "↑ Up one level" button. Hidden at storage
+// root because there's nothing above `<adapter>://`. The path stored
+// in `currentPath` is the bare relative form (no `<adapter>://`), so
+// 'root' means an empty string.
+const canGoUp = computed(() => {
+  const p = stripAdapter(currentPath.value).replace(/\/+$/, '');
+  return p.length > 0;
+});
+
+function goUp() {
+  const cur = stripAdapter(currentPath.value).replace(/\/+$/, '');
+  if (!cur) return;
+  const idx = cur.lastIndexOf('/');
+  const parent = idx === -1 ? '' : cur.slice(0, idx);
+  void load(parent);
+}
+
 const { t } = useLocale(locale);
 
 const selection = useSelection(() => files.value);
@@ -368,6 +385,8 @@ useKeyboardShortcuts(rootEl, {
   onCut: () => cut(),
   onCopy: () => copyToClipboard(),
   onPaste: () => paste(),
+  onGoUp: () => goUp(),
+  hasSelection: () => !selection.isEmpty.value,
 });
 
 // --------------------------------------------------------------------
@@ -1005,19 +1024,21 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :trash-active="trashActive"
       :selection-mode="selectionMode"
       :paste-enabled="!!clipboard.mode"
+      :can-go-up="canGoUp"
       :locale="locale"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
       @refresh="() => load()"
+      @go-up="goUp"
       @action="onToolbarAction"
     />
 
     <Breadcrumb
       :dirname="dirname"
       :adapter="adapter"
-      :root-label="t('breadcrumb.root')"
+      :root-label="adapter"
       :locale="locale"
       @navigate="onNavigate"
       @copy-path="onCopyPath"

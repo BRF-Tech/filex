@@ -42,6 +42,11 @@ const props = defineProps<{
   selectionMode?: SelectionMode;
   /** True when clipboard has cut/copy items, so we can enable Paste. */
   pasteEnabled?: boolean;
+  /**
+   * True when the current dir has a parent the user can step up to.
+   * Hidden at storage root because there's nothing above it.
+   */
+  canGoUp?: boolean;
   locale: LocaleCode;
 }>();
 
@@ -51,6 +56,7 @@ const emit = defineEmits<{
   (e: 'new-folder'): void;
   (e: 'upload'): void;
   (e: 'refresh'): void;
+  (e: 'go-up'): void;
   (e: 'action', key: ToolbarAction): void;
 }>();
 
@@ -128,6 +134,17 @@ function fire(key: ToolbarAction) {
 <template>
   <div class="fe-toolbar">
     <div class="fe-toolbar__primary">
+      <button
+        v-if="canGoUp"
+        type="button"
+        class="fe-btn fe-btn--icon-only"
+        :title="t('toolbar.go_up')"
+        :aria-label="t('toolbar.go_up')"
+        @click="emit('go-up')"
+      >
+        <span class="fe-icon">↑</span>
+      </button>
+
       <button
         v-if="mode === 'none' && !trashActive"
         type="button"

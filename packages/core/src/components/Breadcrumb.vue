@@ -2,12 +2,22 @@
 /**
  * Breadcrumb — adapter-aware path crumbs.
  *
- * Dirname arrives as `brf://fileman/foo/bar`. We strip the adapter and
- * root so the user sees `foo › bar`; clicking any crumb emits the full
- * adapter-qualified path back so the caller can `index()` that folder.
+ * Dirname arrives as `<adapter>://<rel>` (e.g. `s3-test://aa/bb`). The
+ * first crumb is ALWAYS the storage root — its label is the adapter
+ * name itself (`s3-test`) and clicking it lands you at `<adapter>://`,
+ * NOT at the first sub-folder you happened to be inside. The remaining
+ * crumbs walk down the path one segment at a time.
  *
- * The ✏ button swaps the crumbs for a free-form input; Enter navigates,
- * Escape cancels.
+ * Examples:
+ *   `s3-test://`           → [s3-test]
+ *   `s3-test://aa`         → [s3-test] › [aa]
+ *   `s3-test://aa/bb`      → [s3-test] › [aa] › [bb]
+ *
+ * `rootLabel` overrides the adapter name when the embedder wants a
+ * branded label ('Files', 'My Drive', etc). Defaults to the adapter.
+ *
+ * The ✏ button swaps the crumbs for a free-form input; Enter
+ * navigates, Escape cancels.
  */
 import { computed, nextTick, ref } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
@@ -41,20 +51,19 @@ const crumbs = computed<Crumb[]>(() => {
     : props.dirname;
   const parts = raw.split('/').filter(Boolean);
 
-  if (parts.length === 0) return [];
+  // Root crumb = adapter name itself (or the rootLabel override) and
+  // ALWAYS present. Clicking it lands at `<adapter>://`, never at a
+  // sub-folder. Without this the user gets stuck inside the first
+  // segment because the previous logic re-purposed crumb #0 as 'root'
+  // while still pointing at parts[0]'s path.
+  const out: Crumb[] = [
+    { label: props.rootLabel || props.adapter, adapterPath: adapterPrefix },
+  ];
 
-  const out: Crumb[] = [];
   let acc = '';
   for (const part of parts) {
     acc = acc ? `${acc}/${part}` : part;
-    let label: string;
-    if (out.length === 0) {
-      label = props.rootLabel;
-    } else if (part === '.trash') {
-      label = t('node.trash');
-    } else {
-      label = part;
-    }
+    const label = part === '.trash' ? t('node.trash') : part;
     out.push({ label, adapterPath: `${adapterPrefix}${acc}` });
   }
   return out;

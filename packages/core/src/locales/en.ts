@@ -7,6 +7,7 @@ export const en: Record<string, string> = {
   'toolbar.view.list': 'List',
   'toolbar.view.grid': 'Grid',
   'toolbar.refresh': 'Refresh',
+  'toolbar.go_up': 'Up one level',
 
   'ctx.open': 'Open',
   'ctx.preview': 'Preview',

@@ -20,6 +20,8 @@ export interface ShortcutHandlers {
   onFocusSearch?: () => void; // /
   onDuplicate?: () => void; // Ctrl+D
   onPathJump?: () => void; // Cmd+K / Ctrl+K
+  onGoUp?: () => void; // Alt+Up / Backspace (when nothing selected)
+  hasSelection?: () => boolean; // disambiguates Backspace
 }
 
 export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: ShortcutHandlers) {
@@ -44,10 +46,23 @@ export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: 
 
     switch (e.key) {
       case 'Delete':
-      case 'Backspace':
         if (handlers.onDelete) {
           e.preventDefault();
           handlers.onDelete();
+        }
+        break;
+      case 'Backspace':
+        // Backspace = delete when something is selected (file-manager
+        // convention), parent-dir navigation otherwise. Without this
+        // disambiguation Backspace was firing onDelete with an empty
+        // selection and nothing happened, leaving users wondering why
+        // the obvious 'go back' key did nothing.
+        if (handlers.hasSelection?.() && handlers.onDelete) {
+          e.preventDefault();
+          handlers.onDelete();
+        } else if (handlers.onGoUp) {
+          e.preventDefault();
+          handlers.onGoUp();
         }
         break;
       case 'F2':
@@ -112,6 +127,13 @@ export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: 
         if (ctrl && handlers.onPathJump) {
           e.preventDefault();
           handlers.onPathJump();
+        }
+        break;
+      case 'ArrowUp':
+        // Alt+Up = parent dir (matches Finder / Files / Explorer).
+        if (e.altKey && handlers.onGoUp) {
+          e.preventDefault();
+          handlers.onGoUp();
         }
         break;
     }

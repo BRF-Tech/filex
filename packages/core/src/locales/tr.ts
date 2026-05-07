@@ -7,6 +7,7 @@ export const tr: Record<string, string> = {
   'toolbar.view.list': 'Liste',
   'toolbar.view.grid': 'Izgara',
   'toolbar.refresh': 'Yenile',
+  'toolbar.go_up': 'Üst Klasör',
 
   'ctx.open': 'Aç',
   'ctx.preview': 'Önizle',
