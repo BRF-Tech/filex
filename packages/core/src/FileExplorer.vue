@@ -121,17 +121,24 @@ const searchQuery = ref('');
 const trashActive = computed(() => currentPath.value.startsWith('fileman/.trash'));
 const locale = computed(() => props.config.locale || 'tr');
 
-// canGoUp/goUp — toolbar's "↑ Up one level" button. Hidden at storage
-// root because there's nothing above `<adapter>://`. The path stored
-// in `currentPath` is the bare relative form (no `<adapter>://`), so
-// 'root' means an empty string.
+// canGoUp/goUp — toolbar's "↑ Up one level" button. In single-storage
+// mode "" means the storage root; in multi-storage mode "" means
+// the global root (storage list). Both → no parent → button hidden.
 const canGoUp = computed(() => {
-  const p = stripAdapter(currentPath.value).replace(/\/+$/, '');
+  const p = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   return p.length > 0;
 });
 
+// True when the explorer is showing the synthetic storage list and
+// there's no real backend folder to mutate. New Folder / Upload /
+// Paste are hidden in this state.
+const atVirtualRoot = computed(() => {
+  if (!multiStorageRoot.value) return false;
+  return !((currentPath.value ?? '').replace(/^\/+|\/+$/g, ''));
+});
+
 function goUp() {
-  const cur = stripAdapter(currentPath.value).replace(/\/+$/, '');
+  const cur = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   if (!cur) return;
   const idx = cur.lastIndexOf('/');
   const parent = idx === -1 ? '' : cur.slice(0, idx);
@@ -192,10 +199,79 @@ function flashToast(msg: string) {
 // Data loading
 // --------------------------------------------------------------------
 
+// multiStorageRoot — when on, "/" is a virtual folder listing every
+// configured storage as a clickable dir. Path semantics shift:
+//
+//   ""           → global root, list storages
+//   "<storage>"  → that storage's root (api: `<storage>://`)
+//   "<storage>/<rel>"  → deeper folder (api: `<storage>://<rel>`)
+//
+// `qualify()` is overridden inside this mode to translate the
+// slash-separated user path into the wire `<adapter>://<rel>` form.
+const multiStorageRoot = computed(() => props.config.multiStorageRoot === true);
+
+function splitVirtualPath(p: string): { adapter: string; rel: string } {
+  const clean = p.replace(/^\/+|\/+$/g, '');
+  if (!clean) return { adapter: '', rel: '' };
+  const slash = clean.indexOf('/');
+  if (slash === -1) return { adapter: clean, rel: '' };
+  return { adapter: clean.slice(0, slash), rel: clean.slice(slash + 1) };
+}
+
+function virtualToWire(p: string): string {
+  // Convert `s3-test/example` → `s3-test://example`. Pass-through
+  // when the input already carries `://` (legacy callers).
+  if (p.includes('://')) return p;
+  const { adapter, rel } = splitVirtualPath(p);
+  if (!adapter) return ''; // global root — no wire form
+  return rel ? `${adapter}://${rel}` : `${adapter}://`;
+}
+
+function wireToVirtual(p: string): string {
+  // Convert `s3-test://example` → `s3-test/example`.
+  const idx = p.indexOf('://');
+  if (idx === -1) return p.replace(/^\/+|\/+$/g, '');
+  const adapter = p.slice(0, idx);
+  const rel = p.slice(idx + 3).replace(/^\/+|\/+$/g, '');
+  return rel ? `${adapter}/${rel}` : adapter;
+}
+
+function virtualStorageRows(): FileNode[] {
+  // Synthesize a FileNode for every configured storage. Used as the
+  // "/" listing in multi-storage mode.
+  const list = props.config.storages ?? [];
+  return list.map((s) => ({
+    type: 'dir',
+    path: s.name, // virtual path (no adapter prefix)
+    basename: s.label || s.name,
+    extension: '',
+    storage: s.name,
+    visibility: 'private',
+    file_size: 0,
+    mime_type: 'inode/storage',
+    extra_metadata: { driver: s.driver, readOnly: s.readOnly },
+  } as unknown as FileNode));
+}
+
 async function load(path?: string) {
   loading.value = true;
   try {
-    const target = qualify(path ?? currentPath.value ?? '');
+    const requested = path ?? currentPath.value ?? '';
+
+    // Multi-storage virtual root — synthesize a list of storages
+    // instead of calling the backend.
+    if (multiStorageRoot.value && !virtualToWire(requested)) {
+      currentPath.value = '';
+      adapter.value = '';
+      dirname.value = '';
+      files.value = virtualStorageRows();
+      return;
+    }
+
+    const target = multiStorageRoot.value
+      ? virtualToWire(requested)
+      : qualify(requested);
+
     const resp = searchQuery.value
       ? await api.search(target, searchQuery.value)
       : await api.index(target);
@@ -225,7 +301,11 @@ async function load(path?: string) {
         extra_metadata: {},
       } as unknown as FileNode);
     }
-    currentPath.value = stripAdapter(resp.dirname);
+    // currentPath is the user-facing form: `s3-test/example` in
+    // multi-storage mode, the bare relative path otherwise.
+    currentPath.value = multiStorageRoot.value
+      ? wireToVirtual(resp.dirname)
+      : stripAdapter(resp.dirname);
   } catch (err) {
     const e = err instanceof Error ? err.message : String(err);
     emit('error', { message: e, context: { path } });
@@ -249,12 +329,22 @@ function stripAdapter(p: string): string {
  * multi-storage install). All API callers (rename/move/delete/
  * upload/preview/download/share/copy) must use a qualified path.
  *
+ * In multi-storage mode `currentPath` is `<storage>/<rel>` (no
+ * `://`), so qualify forwards through `virtualToWire` which
+ * splits the first segment off as the adapter. In single-storage
+ * mode the legacy bare-relative path is glued onto `adapter.value`.
+ *
  * `stripAdapter()` stays for cosmetic display logic only
  * (breadcrumb root check, inRoot computation, openPageBase).
  */
 function qualify(p: string): string {
+  if (p && p.includes('://')) return p;
+  if (multiStorageRoot.value) {
+    const wire = virtualToWire(p ?? '');
+    if (wire) return wire;
+    return adapter.value ? `${adapter.value}://` : '';
+  }
   if (!p) return `${adapter.value}://`;
-  if (p.includes('://')) return p;
   return `${adapter.value}://${p.replace(/^\/+/, '')}`;
 }
 
@@ -413,7 +503,15 @@ const TEXT_CODE_EXTS = new Set([
 
 function openNode(n: FileNode) {
   if (n.type === 'dir') {
-    void load(stripAdapter(n.path));
+    // Multi-storage virtual rows have a bare path (`s3-test`); pass
+    // them straight to load() which will treat them as the wire form
+    // for that storage's root. Real backend rows still come back as
+    // `<adapter>://<rel>` and stripAdapter turns them into the user
+    // path semantics load() expects.
+    const target = multiStorageRoot.value
+      ? wireToVirtual(n.path)
+      : stripAdapter(n.path);
+    void load(target);
     return;
   }
   const ext = (n.extension || '').toLowerCase();
@@ -980,6 +1078,16 @@ function onDismissUpload(job: UploadJob) {
 // ------- Breadcrumb -------
 
 function onNavigate(adapterPath: string) {
+  // Multi-storage emits empty string for the global "/" crumb. The
+  // load() function recognises that as the storage-list virtual root.
+  if (multiStorageRoot.value && !adapterPath) {
+    void load('');
+    return;
+  }
+  if (multiStorageRoot.value) {
+    void load(wireToVirtual(adapterPath));
+    return;
+  }
   void load(stripAdapter(adapterPath));
 }
 
@@ -1025,6 +1133,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :selection-mode="selectionMode"
       :paste-enabled="!!clipboard.mode"
       :can-go-up="canGoUp"
+      :at-virtual-root="atVirtualRoot"
       :locale="locale"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"
@@ -1040,6 +1149,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :adapter="adapter"
       :root-label="adapter"
       :locale="locale"
+      :multi-storage-root="multiStorageRoot"
       @navigate="onNavigate"
       @copy-path="onCopyPath"
       @crumb-context="onCrumbContext"

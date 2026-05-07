@@ -101,6 +101,7 @@ function cancelPress() {
 }
 
 function iconFor(n: FileNode): string {
+  if (n.mime_type === 'inode/storage') return '💾';
   if (n.type === 'dir') return '📁';
   const e = (n.extension || '').toLowerCase();
   if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'svg'].includes(e)) return '🖼';

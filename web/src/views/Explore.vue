@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // Explore page — fullscreen file browser. Renders the real
-// @brftech/filex-core <FileExplorer/> SFC against the backend's
-// `/api/files/manager?action=…` route. The slim header (logo +
-// storage tabs + Refresh + Admin paneli + dark/locale switchers)
-// is preserved; the rest of the chrome (toolbar, breadcrumb, list/
-// grid, modals) is owned by the FileExplorer component itself.
+// @brftech/filex-core <FileExplorer/> SFC with `multiStorageRoot`
+// turned on: the user lands at "/" which lists every configured
+// storage as a virtual folder. Clicking one drills into it; the
+// breadcrumb walks `/ › s3-test › example › …`.
+//
+// The old per-storage tab strip is gone — the storage list is now
+// the home screen of the explorer itself.
 
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { ChevronLeft, RefreshCcw, LayoutDashboard } from 'lucide-vue-next';
@@ -27,14 +29,6 @@ const route = useRoute();
 const auth = useAuthStore();
 const storages = useStoragesStore();
 
-const selectedStorageId = ref<number | null>(null);
-
-const selectedStorage = computed(() =>
-  selectedStorageId.value !== null
-    ? storages.items.find((s) => s.id === selectedStorageId.value) ?? null
-    : null,
-);
-
 // Bump on Refresh to remount the FileExplorer (cheapest forced
 // reload — its own data fetcher reruns on construction).
 const remountKey = ref(0);
@@ -52,42 +46,52 @@ function readBearerToken(): string | null {
   return sessionStorage.getItem('filex.bearer');
 }
 
-function buildConfig(adapterName: string): ExplorerConfig {
-  // Auth shape mirrors the admin axios client: bearer if a token is
-  // stashed in sessionStorage, otherwise CSRF + cookie session. The
-  // FileExplorer's `useFileApi` honours either.
+// `?storage=` deep links: `/admin/explore?storage=s3-test` →
+// initialPath becomes `s3-test://`. Without one the explorer opens
+// at the global root (storage list).
+const initialPathFromQuery = computed(() => {
+  const raw = route.query.storage;
+  const rawStr = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof rawStr !== 'string' || !rawStr) return '';
+  // Match by name first, then by numeric id.
+  const byName = storages.items.find((s) => s.name === rawStr);
+  if (byName) return `${byName.name}://`;
+  const numeric = Number(rawStr);
+  if (Number.isFinite(numeric)) {
+    const byId = storages.items.find((s) => s.id === numeric);
+    if (byId) return `${byId.name}://`;
+  }
+  return '';
+});
+
+const explorerConfig = computed<ExplorerConfig | null>(() => {
+  if (!storages.items.length) return null;
   const bearer = readBearerToken();
   const csrf = readCsrfCookie();
-  const auth: ExplorerConfig['auth'] = bearer
+  const authConf: ExplorerConfig['auth'] = bearer
     ? { kind: 'bearer', token: bearer }
     : csrf
       ? { kind: 'csrf', csrf }
       : { kind: 'none' };
-
   return {
     apiBase: '',
     endpoint: '/api/files/manager',
     capabilities: '/api/files/capabilities',
-    auth,
+    auth: authConf,
     locale: locale.value === 'en' ? 'en' : 'tr',
-    defaultAdapter: adapterName,
-    initialPath: `${adapterName}://`,
     pathPersist: 'localStorage',
     trashVisible: false,
     showInfoPanel: true,
+    multiStorageRoot: true,
+    storages: storages.items.map((s) => ({
+      name: s.name,
+      label: s.name,
+      driver: s.driver,
+      readOnly: s.read_only,
+    })),
+    initialPath: initialPathFromQuery.value || '',
   };
-}
-
-const explorerConfig = computed<ExplorerConfig | null>(() => {
-  if (!selectedStorage.value) return null;
-  return buildConfig(selectedStorage.value.name);
 });
-
-function pickStorage(id: number) {
-  selectedStorageId.value = id;
-  remountKey.value += 1;
-  router.replace({ query: { ...route.query, storage: id } });
-}
 
 function refresh() {
   remountKey.value += 1;
@@ -98,57 +102,9 @@ function back() {
 }
 
 function onExplorerError(err: { message: string; context?: unknown }) {
-  // Forward to console only — the FileExplorer surfaces a toast
-  // itself. Future: pipe into the toast store.
   // eslint-disable-next-line no-console
   console.warn('[explore] FileExplorer error:', err);
 }
-
-// Resolve `?storage=` against an item list.
-// Accepts EITHER the numeric id OR the storage name. Older deep links
-// using `?storage=2` keep working, newer ones use the readable name
-// (`?storage=s3-test`). Returns null if the query doesn't match.
-function resolveQueryStorage(items: Array<{ id: number; name: string }>): number | null {
-  const raw = route.query.storage;
-  const rawStr = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof rawStr !== 'string' || !rawStr) return null;
-  const numeric = Number(rawStr);
-  if (Number.isFinite(numeric)) {
-    const byId = items.find((s) => s.id === numeric);
-    if (byId) return byId.id;
-  }
-  const byName = items.find((s) => s.name === rawStr);
-  return byName ? byName.id : null;
-}
-
-watch(
-  () => storages.items,
-  (items) => {
-    if (items.length === 0) {
-      selectedStorageId.value = null;
-      return;
-    }
-
-    // The query wins over a stale selection — when the URL says
-    // `?storage=foo` we want `foo` even if `selectedStorageId` is
-    // already pointing at `main` from an earlier list. Without this
-    // the immediate-watcher fired against a cached items[] (without
-    // foo) and locked the selection to items[0]; the post-fetch
-    // re-fire then early-returned because the stale id was 'still
-    // valid'.
-    const fromQuery = resolveQueryStorage(items);
-    if (fromQuery !== null && fromQuery !== selectedStorageId.value) {
-      selectedStorageId.value = fromQuery;
-      remountKey.value += 1;
-      return;
-    }
-
-    if (selectedStorageId.value && items.some((s) => s.id === selectedStorageId.value)) return;
-    selectedStorageId.value = fromQuery ?? items[0].id;
-    remountKey.value += 1;
-  },
-  { immediate: true },
-);
 
 onMounted(async () => {
   await Promise.allSettled([auth.fetchMe(), storages.fetch()]);
@@ -171,21 +127,6 @@ onMounted(async () => {
       <LogoMark class="h-6 w-6" />
       <span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">filex</span>
       <span class="text-xs text-zinc-500 hidden sm:inline">{{ t('explore.tagline') }}</span>
-
-      <nav v-if="storages.items.length > 1" class="ml-4 flex items-center gap-1 overflow-x-auto">
-        <button
-          v-for="s in storages.items"
-          :key="s.id"
-          type="button"
-          class="px-3 py-1 rounded-md text-xs"
-          :class="s.id === selectedStorageId
-            ? 'bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200'
-            : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'"
-          @click="pickStorage(s.id)"
-        >
-          {{ s.name }}
-        </button>
-      </nav>
 
       <div class="ml-auto flex items-center gap-1.5">
         <Button size="xs" variant="ghost" @click="refresh()" :title="t('common.refresh')">
@@ -213,7 +154,7 @@ onMounted(async () => {
 
       <div v-else-if="explorerConfig" class="flex-1 min-h-0 explore-host">
         <FileExplorer
-          :key="`fx-${selectedStorageId}-${remountKey}`"
+          :key="`fx-multi-${remountKey}`"
           :config="explorerConfig"
           @error="onExplorerError"
         />

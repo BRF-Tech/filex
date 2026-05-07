@@ -224,6 +224,32 @@ export interface ExplorerConfig {
    *   'none'         — don't persist. Embedder controls path externally.
    */
   pathPersist?: 'hash' | 'localStorage' | 'none';
+
+  /**
+   * Multi-storage root mode. When true, the explorer's "/" virtual
+   * folder lists every entry in `storages` as a clickable directory.
+   * Clicking one drills into that storage's root; the breadcrumb
+   * walks `/ › <storage> › <sub> › …`.
+   *
+   * When false (default) the SFC still works against a single
+   * storage — `defaultAdapter` / `initialPath` decide which one.
+   *
+   * Pair with `storages` so the SFC has labels + driver hints to
+   * render even before the first API call.
+   */
+  multiStorageRoot?: boolean;
+
+  /**
+   * Storage list for `multiStorageRoot` mode. Provide name + driver
+   * + (optional) display label / read-only flag. The SFC mirrors
+   * each entry as a virtual `dir` row at "/".
+   */
+  storages?: Array<{
+    name: string;
+    label?: string;
+    driver?: string;
+    readOnly?: boolean;
+  }>;
 }
 
 /** Component emits — the parent listens for these events. */

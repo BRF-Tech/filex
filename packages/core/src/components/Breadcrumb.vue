@@ -28,6 +28,12 @@ const props = defineProps<{
   adapter: string;
   rootLabel: string;
   locale: LocaleCode;
+  /**
+   * Multi-storage mode — when true the breadcrumb prepends a global
+   * "/" crumb so the user can pop all the way back to the storage
+   * picker. Storage name then occupies crumb #1 instead of #0.
+   */
+  multiStorageRoot?: boolean;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -51,14 +57,25 @@ const crumbs = computed<Crumb[]>(() => {
     : props.dirname;
   const parts = raw.split('/').filter(Boolean);
 
-  // Root crumb = adapter name itself (or the rootLabel override) and
-  // ALWAYS present. Clicking it lands at `<adapter>://`, never at a
-  // sub-folder. Without this the user gets stuck inside the first
-  // segment because the previous logic re-purposed crumb #0 as 'root'
-  // while still pointing at parts[0]'s path.
-  const out: Crumb[] = [
-    { label: props.rootLabel || props.adapter, adapterPath: adapterPrefix },
-  ];
+  const out: Crumb[] = [];
+
+  if (props.multiStorageRoot) {
+    // Global "/" crumb — clicking it pops back to the storage picker
+    // (FileExplorer treats the empty string as the virtual root).
+    out.push({ label: '/', adapterPath: '' });
+    if (props.adapter) {
+      // Storage segment — wire form `<adapter>://` lands at storage
+      // root regardless of where we are now.
+      out.push({ label: props.rootLabel || props.adapter, adapterPath: adapterPrefix });
+    }
+  } else {
+    // Single-storage mode: the storage name IS the root, no "/"
+    // above it.
+    out.push({
+      label: props.rootLabel || props.adapter,
+      adapterPath: adapterPrefix,
+    });
+  }
 
   let acc = '';
   for (const part of parts) {
@@ -104,9 +121,23 @@ const pathInput = ref<HTMLInputElement | null>(null);
 
 function startEdit() {
   const adapterPrefix = `${props.adapter}://`;
-  pathDraft.value = props.dirname.startsWith(adapterPrefix)
+  const rel = props.dirname.startsWith(adapterPrefix)
     ? props.dirname.slice(adapterPrefix.length)
     : props.dirname;
+  // Multi-storage: show `/<storage>/<rel>` so the user can edit the
+  // whole tree (`/main/foo`, `/s3-test/example`, just `/` for root).
+  if (props.multiStorageRoot) {
+    if (!props.adapter) {
+      pathDraft.value = '/';
+    } else {
+      const trimmed = rel.replace(/^\/+|\/+$/g, '');
+      pathDraft.value = trimmed
+        ? `/${props.adapter}/${trimmed}`
+        : `/${props.adapter}`;
+    }
+  } else {
+    pathDraft.value = rel;
+  }
   editing.value = true;
   void nextTick(() => {
     pathInput.value?.focus();
@@ -115,8 +146,26 @@ function startEdit() {
 }
 
 function submitPath() {
-  const v = pathDraft.value.trim().replace(/^\/+|\/+$/g, '');
+  const raw = pathDraft.value.trim();
   editing.value = false;
+
+  if (props.multiStorageRoot) {
+    // Strip leading/trailing slashes. First segment = storage.
+    const clean = raw.replace(/^\/+|\/+$/g, '');
+    if (!clean) {
+      // navigate to global root by emitting empty wire path; the
+      // FileExplorer treats it as virtual storage list.
+      emit('navigate', '');
+      return;
+    }
+    const slash = clean.indexOf('/');
+    const adapter = slash === -1 ? clean : clean.slice(0, slash);
+    const rel = slash === -1 ? '' : clean.slice(slash + 1);
+    emit('navigate', rel ? `${adapter}://${rel}` : `${adapter}://`);
+    return;
+  }
+
+  const v = raw.replace(/^\/+|\/+$/g, '');
   if (!v) return;
   emit('navigate', `${props.adapter}://${v}`);
 }

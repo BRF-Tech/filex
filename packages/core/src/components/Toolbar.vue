@@ -47,6 +47,12 @@ const props = defineProps<{
    * Hidden at storage root because there's nothing above it.
    */
   canGoUp?: boolean;
+  /**
+   * Multi-storage virtual root marker — when true, mutation buttons
+   * (New Folder / Upload / Paste) are hidden because there's no real
+   * backend folder to write to.
+   */
+  atVirtualRoot?: boolean;
   locale: LocaleCode;
 }>();
 
@@ -146,7 +152,7 @@ function fire(key: ToolbarAction) {
       </button>
 
       <button
-        v-if="mode === 'none' && !trashActive"
+        v-if="mode === 'none' && !trashActive && !atVirtualRoot"
         type="button"
         class="fe-btn fe-btn--primary"
         :title="t('toolbar.new_folder')"
@@ -170,7 +176,7 @@ function fire(key: ToolbarAction) {
       </button>
 
       <button
-        v-if="pasteEnabled && mode === 'none' && !trashActive"
+        v-if="pasteEnabled && mode === 'none' && !trashActive && !atVirtualRoot"
         type="button"
         class="fe-btn"
         :title="t('ctx.paste')"
@@ -196,6 +202,7 @@ function fire(key: ToolbarAction) {
         />
       </div>
       <button
+        v-if="!atVirtualRoot"
         type="button"
         class="fe-btn fe-btn--icon-only"
         :title="t('toolbar.upload')"
