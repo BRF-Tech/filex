@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
 
@@ -29,17 +32,38 @@ func NewManager(store db.Store, resolver func(int64) (storage.Driver, error)) *M
 	return &Manager{Store: store, StorageResolver: resolver}
 }
 
-// List returns the children of a node by ID, or root if no id given.
+// List dispatches between two query shapes on the same path:
 //
-// Query: ?storage=<id>&parent=<id>
+//  1. Native (admin SPA, trash, etc.): ?storage=<id>&parent=<id>
+//     Returns {nodes:[…model.Node]} from the DB cache.
+//
+//  2. Vuefinder/FileExplorer SFC: ?action=<verb>&path=<adapter://rel>
+//     (?q=<verb> is also accepted as a legacy alias.) Returns the
+//     {adapter, storages, dirname, read_only, files:[FileNode]} shape
+//     that @brftech/filex-core expects. Only `index`, `search`,
+//     `subfolders` are wired today — other actions return 501 so the
+//     UI can still render and warn rather than 404.
+//
+// Keeping both behind one route avoids breaking the existing Explore
+// page contract while letting the SFC mount unchanged.
 func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
-	storageID, err := strconv.ParseInt(r.URL.Query().Get("storage"), 10, 64)
+	q := r.URL.Query()
+	action := q.Get("action")
+	if action == "" {
+		action = q.Get("q")
+	}
+	if action != "" {
+		h.listVuefinder(w, r, action)
+		return
+	}
+
+	storageID, err := strconv.ParseInt(q.Get("storage"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage id"})
 		return
 	}
 	var parentPtr *int64
-	if v := r.URL.Query().Get("parent"); v != "" {
+	if v := q.Get("parent"); v != "" {
 		pid, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad parent id"})
@@ -56,6 +80,171 @@ func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
 		"nodes": nodes,
 	})
 }
+
+// listVuefinder serves the @brftech/filex-core "Vuefinder-style"
+// manager response. The contract:
+//
+//	GET /api/files/manager?action=index&path=<adapter>://<relpath>
+//	    → {adapter, storages, dirname, read_only, files:[FileNode]}
+//
+// Adapter == storage name. We resolve it to a storage row, walk down
+// the requested path inside the DB cache, and project the children
+// onto the FileNode shape the SFC expects. No driver round-trip — the
+// sync worker keeps the cache fresh.
+func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action string) {
+	q := r.URL.Query()
+	pathStr := q.Get("path")
+
+	storages, err := h.Store.ListEnabledStorages(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	storageNames := make([]string, 0, len(storages))
+	for _, s := range storages {
+		storageNames = append(storageNames, s.Name)
+	}
+
+	// Pick the adapter (= storage name) from the path prefix; fall
+	// back to the first storage when the caller didn't specify one.
+	adapter, rel := splitAdapterPath(pathStr)
+	if adapter == "" {
+		if len(storages) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"adapter":   "",
+				"storages":  storageNames,
+				"dirname":   "",
+				"read_only": false,
+				"files":     []any{},
+			})
+			return
+		}
+		adapter = storages[0].Name
+	}
+
+	var current *model.Storage
+	for _, s := range storages {
+		if s.Name == adapter {
+			current = s
+			break
+		}
+	}
+	if current == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
+		return
+	}
+
+	switch action {
+	case "index", "subfolders":
+		h.vfIndex(w, r, current, rel, storageNames, action == "subfolders")
+		return
+	case "search":
+		filter := q.Get("filter")
+		if filter == "" {
+			filter = q.Get("q_filter")
+		}
+		h.vfSearch(w, r, current, rel, filter, storageNames)
+		return
+	default:
+		// Mutating actions (newfolder, rename, move, delete, upload)
+		// are intentionally not wired here — the SFC's read path is
+		// what matters for the demo Explore page. Returning 501 is
+		// surfaced to the user via the FileExplorer toast rather than
+		// a route 404.
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "action not implemented: " + action})
+	}
+}
+
+// vfIndex resolves a relative path inside a storage to a parent
+// node ID, lists children, and returns the FileNode-shaped response.
+func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool) {
+	parentID, dirname, err := h.resolveDirNode(r.Context(), s.ID, rel)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	nodes, err := h.Store.ListNodesByParent(r.Context(), s.ID, parentID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	files := projectFileNodes(s.Name, nodes, dirsOnly)
+	if dirsOnly {
+		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"adapter":   s.Name,
+		"storages":  storageNames,
+		"dirname":   joinAdapterPath(s.Name, dirname),
+		"read_only": s.ReadOnly,
+		"files":     files,
+	})
+}
+
+// vfSearch runs a LIKE search inside the storage and projects the
+// matches onto FileNode shape. The dirname stays at the requested
+// folder so the breadcrumb keeps its place.
+func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Storage, rel, filter string, storageNames []string) {
+	if filter == "" {
+		h.vfIndex(w, r, s, rel, storageNames, false)
+		return
+	}
+	nodes, err := h.Store.SearchNodes(r.Context(), s.ID, filter, 250)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	files := projectFileNodes(s.Name, nodes, false)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"adapter":   s.Name,
+		"storages":  storageNames,
+		"dirname":   joinAdapterPath(s.Name, rel),
+		"read_only": s.ReadOnly,
+		"files":     files,
+	})
+}
+
+// resolveDirNode walks `rel` (slash-separated) under the storage root
+// and returns the parent ID at which to list. An empty rel == root
+// (parentID == nil). The returned dirname is normalised (no leading/
+// trailing slashes) so callers can re-join it with the adapter.
+func (h *Manager) resolveDirNode(ctx ctxAlias, storageID int64, rel string) (*int64, string, error) {
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		return nil, "", nil
+	}
+	parts := strings.Split(rel, "/")
+	var parentPtr *int64
+	for _, segment := range parts {
+		if segment == "" {
+			continue
+		}
+		nodes, err := h.Store.ListNodesByParent(ctx, storageID, parentPtr)
+		if err != nil {
+			return nil, "", err
+		}
+		matched := false
+		for _, n := range nodes {
+			if n.Name == segment && n.Type == model.NodeTypeDirectory {
+				id := n.ID
+				parentPtr = &id
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, "", fmt.Errorf("directory not found: %s", segment)
+		}
+	}
+	return parentPtr, rel, nil
+}
+
+// ctxAlias is just context.Context — declared as an alias here so
+// resolveDirNode keeps a stable signature without dragging another
+// import alias into the file.
+type ctxAlias = context.Context
 
 // Stat returns metadata for a single node.
 //
@@ -205,4 +394,62 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// splitAdapterPath separates `adapter://relative/path` into `adapter`
+// and `relative/path`. Falls back to `("", path)` when the input is
+// already a bare relative path (FileExplorer occasionally calls back
+// with the dirname stripped).
+func splitAdapterPath(raw string) (adapter string, rel string) {
+	idx := strings.Index(raw, "://")
+	if idx < 0 {
+		return "", strings.Trim(raw, "/")
+	}
+	return raw[:idx], strings.Trim(raw[idx+3:], "/")
+}
+
+// joinAdapterPath does the reverse — `adapter://rel`. Empty rel
+// degenerates to `adapter://`.
+func joinAdapterPath(adapter, rel string) string {
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		return adapter + "://"
+	}
+	return adapter + "://" + rel
+}
+
+// projectFileNodes shapes DB nodes into the FileExplorer FileNode
+// contract. The frontend keys it cares about: path, basename, type,
+// extension, size, last_modified, mime_type. We always ship the
+// adapter-qualified `path` so deep-link routing keeps working.
+func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[string]any {
+	out := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		if n.DeletedAt != nil {
+			continue
+		}
+		isDir := n.Type == model.NodeTypeDirectory
+		if dirsOnly && !isDir {
+			continue
+		}
+		typ := "file"
+		if isDir {
+			typ = "dir"
+		}
+		ext := strings.ToLower(strings.TrimPrefix(path.Ext(n.Name), "."))
+		entry := map[string]any{
+			"path":      joinAdapterPath(adapter, n.Path),
+			"basename":  n.Name,
+			"type":      typ,
+			"extension": ext,
+			"size":      n.Size,
+			"mime_type": n.Mime,
+			"storage":   adapter,
+		}
+		if n.BackendMtime != nil {
+			entry["last_modified"] = n.BackendMtime.UnixMilli()
+		}
+		out = append(out, entry)
+	}
+	return out
 }

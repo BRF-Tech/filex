@@ -16,6 +16,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@brftech/filex-core": "workspace:*",
     "@headlessui/vue": "^1.7.23",
     "axios": "^1.7.7",
     "lucide-vue-next": "^0.453.0",
