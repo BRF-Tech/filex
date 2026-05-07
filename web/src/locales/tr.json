@@ -85,6 +85,7 @@
     "queue": "Kuyruk",
     "notifications": "Bildirimler",
     "about": "Hakkında",
+    "adminFiles": "Dosya geçmişi",
     "profile": "Profilim",
     "logout": "Çıkış yap",
     "language": "Dil",
@@ -539,5 +540,70 @@
       "daily3am": "Günlük 03:00",
       "weekly": "Pazar 03:00 (haftalık)"
     }
+  },
+  "quota": {
+    "title": "Depolama kotası",
+    "used": "Kullanılan",
+    "limit": "Limit",
+    "percent": "Kullanım %",
+    "unlimited": "Sınırsız",
+    "tooltip": "{used} / {limit} kullanıldı ({percent})",
+    "unlimitedTooltip": "{used} kullanıldı · sınırsız"
+  },
+  "adminFiles": {
+    "title": "Dosya geçmişi",
+    "subtitle": "Bir dosyanın sürüm geçmişini node ID ile aç.",
+    "nodeIdLabel": "Node ID",
+    "nodeIdPlaceholder": "örn. 1024",
+    "viewVersions": "Sürümleri gör",
+    "invalidId": "Geçerli bir pozitif tam sayı node ID gir.",
+    "hint": "İpucu: node ID gezginin dosya bilgi panelinde görünür.",
+    "helperTitle": "Node ID nasıl bulunur",
+    "helperDescription": "Gezgini aç, bir dosya seç, bilgi panelinden veya manager API yanıtından ID'yi al."
+  },
+  "versions": {
+    "title": "Sürüm geçmişi",
+    "subtitle": "Yıkıcı yazımlardan önce otomatik anlık görüntü alınır.",
+    "backToFiles": "Dosya aramaya dön",
+    "nodeLabel": "Node #{id}",
+    "loadFailed": "Sürümler yüklenemedi",
+    "badNodeId": "URL'deki node ID geçersiz.",
+    "newest": "(en yeni)",
+    "empty": "Henüz sürüm kaydedilmedi",
+    "emptyDescription": "Bir dosya düzenlenip üzerine yazıldığında burada sürümler görünür.",
+    "downloadDisabled": "Tek tek sürüm indirme henüz desteklenmiyor",
+    "purgeTooltip": "Bu sürümü kalıcı sil (yönetici)",
+    "restoreModalTitle": "Bu sürüme geri dönülsün mü?",
+    "restoreModalBody": "Canlı dosya içeriği v{n} sürümüyle değiştirilecek.",
+    "snapshotCurrent": "Önce mevcut içeriğin anlık görüntüsünü al",
+    "snapshotCurrentHint": "Önerilir — mevcut durum yeni bir sürüm olur, geri dönüş mümkün kalır.",
+    "purgeModalTitle": "Bu sürüm kalıcı silinsin mi?",
+    "purgeModalBody": "v{n} sürümü hem geçmişten hem depolamadan silinir. Bu işlem geri alınamaz.",
+    "restored": "v{n} sürümü geri yüklendi",
+    "restoreFailed": "Sürüm geri yüklenemedi",
+    "purged": "v{n} sürümü silindi",
+    "purgeFailed": "Sürüm silinemedi",
+    "download": "İndir",
+    "restore": "Geri yükle",
+    "purge": "Sil",
+    "col": {
+      "version": "Sürüm",
+      "size": "Boyut",
+      "createdAt": "Oluşturuldu",
+      "etag": "ETag"
+    }
+  },
+  "pendingOps": {
+    "title": "Aktif işlemler",
+    "verb": {
+      "copy": "Kopyalanıyor",
+      "move": "Taşınıyor",
+      "delete": "Siliniyor"
+    },
+    "progress": "{done} / {total} dosya · %{percent}",
+    "failed": "İşlem başarısız",
+    "retry": "Yeniden dene",
+    "dismiss": "Kapat",
+    "hide": "Gizle"
   }
 }

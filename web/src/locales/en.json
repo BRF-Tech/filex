@@ -85,6 +85,7 @@
     "queue": "Queue",
     "notifications": "Notifications",
     "about": "About",
+    "adminFiles": "File history",
     "profile": "My profile",
     "logout": "Sign out",
     "language": "Language",
@@ -539,5 +540,70 @@
       "daily3am": "Daily 03:00",
       "weekly": "Weekly Sunday 03:00"
     }
+  },
+  "quota": {
+    "title": "Storage quota",
+    "used": "Used",
+    "limit": "Limit",
+    "percent": "Used %",
+    "unlimited": "Unlimited",
+    "tooltip": "{used} of {limit} used ({percent})",
+    "unlimitedTooltip": "{used} used · unlimited"
+  },
+  "adminFiles": {
+    "title": "File history",
+    "subtitle": "Look up version history for a file by its node ID.",
+    "nodeIdLabel": "Node ID",
+    "nodeIdPlaceholder": "e.g. 1024",
+    "viewVersions": "View versions",
+    "invalidId": "Enter a valid positive integer node ID.",
+    "hint": "Tip: the node ID is shown in the file info panel of the explorer.",
+    "helperTitle": "How to find a node ID",
+    "helperDescription": "Open the explorer, select a file, then read its ID from the info panel or from the manager API response."
+  },
+  "versions": {
+    "title": "Version history",
+    "subtitle": "Snapshots are taken automatically before destructive writes.",
+    "backToFiles": "Back to file lookup",
+    "nodeLabel": "Node #{id}",
+    "loadFailed": "Failed to load versions",
+    "badNodeId": "Invalid node ID in URL.",
+    "newest": "(newest)",
+    "empty": "No versions recorded yet",
+    "emptyDescription": "Versions appear here once a file has been edited or overwritten.",
+    "downloadDisabled": "Download is not yet available for individual versions",
+    "purgeTooltip": "Hard delete this version (admin)",
+    "restoreModalTitle": "Restore this version?",
+    "restoreModalBody": "Replace the live file content with version v{n}.",
+    "snapshotCurrent": "Snapshot the current content first",
+    "snapshotCurrentHint": "Recommended — the current state becomes a new version, so the restore is reversible.",
+    "purgeModalTitle": "Permanently delete this version?",
+    "purgeModalBody": "Version v{n} will be removed from history and the underlying storage object will be deleted. This cannot be undone.",
+    "restored": "Restored version v{n}",
+    "restoreFailed": "Failed to restore version",
+    "purged": "Removed version v{n}",
+    "purgeFailed": "Failed to remove version",
+    "download": "Download",
+    "restore": "Restore",
+    "purge": "Delete",
+    "col": {
+      "version": "Version",
+      "size": "Size",
+      "createdAt": "Created at",
+      "etag": "ETag"
+    }
+  },
+  "pendingOps": {
+    "title": "Active operations",
+    "verb": {
+      "copy": "Copying",
+      "move": "Moving",
+      "delete": "Deleting"
+    },
+    "progress": "{done} / {total} files · {percent}%",
+    "failed": "Operation failed",
+    "retry": "Retry",
+    "dismiss": "Dismiss",
+    "hide": "Hide"
   }
 }
