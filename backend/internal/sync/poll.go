@@ -49,6 +49,9 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 			for _, n := range stale {
 				if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
 					deleted++
+					if s.index != nil {
+						_ = s.index.DeleteNode(ctx, n.ID)
+					}
 				}
 			}
 		}
@@ -104,6 +107,11 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 					_ = s.store.UpdateNodeMeta(ctx, zombie.ID, obj.Size, obj.Mime, obj.Etag, obj.Mtime)
 					*updated++
 				}
+				if s.index != nil {
+					if fresh, _ := s.store.GetNode(ctx, zombie.ID); fresh != nil {
+						_ = s.index.IndexNode(ctx, fresh)
+					}
+				}
 				count++
 				if zombie.Type == model.NodeTypeDirectory {
 					cn, err := s.walk(ctx, obj.Path, &zombie.ID, added, updated)
@@ -139,6 +147,9 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			}
 			*added++
 			count++
+			if s.index != nil {
+				_ = s.index.IndexNode(ctx, created)
+			}
 			if obj.Kind == storage.KindDirectory {
 				cn, err := s.walk(ctx, obj.Path, &created.ID, added, updated)
 				if err == nil {
@@ -147,12 +158,19 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			}
 		} else {
 			// existing — update if etag drift detected
+			drifted := false
 			if etagDrift(existing.Etag, obj.Etag) {
 				if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, obj.Mime, obj.Etag, obj.Mtime); err == nil {
 					*updated++
+					drifted = true
 				}
 			} else {
 				_ = s.store.TouchNodeSeen(ctx, existing.ID)
+			}
+			if s.index != nil && drifted {
+				if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
+					_ = s.index.IndexNode(ctx, fresh)
+				}
 			}
 			count++
 			if existing.Type == model.NodeTypeDirectory {

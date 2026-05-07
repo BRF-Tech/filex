@@ -87,12 +87,134 @@ func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int) (PurgeR
 	return s.purgeOlderThan(ctx, cutoff)
 }
 
-// Restore lifts the deleted_at flag on a node so it returns to its parent.
+// Restore lifts the deleted_at flag on a node AND moves the underlying
+// file back from the `.filex-trash/` location to its original path
+// (saved in `storage_key` at delete time).
+//
+// `path` and `path_hash` flip back to the original; `parent_id` is
+// re-resolved from the original path's parent dir so the listing
+// re-attaches the row in the right tree.
 func (s *Service) Restore(ctx context.Context, nodeID int64) error {
 	if s == nil || s.Store == nil {
 		return errors.New("trash: service not initialised")
 	}
-	return s.Store.RestoreNode(ctx, nodeID)
+	n, err := s.Store.GetNode(ctx, nodeID)
+	if err != nil {
+		return fmt.Errorf("trash: get node: %w", err)
+	}
+	if n.DeletedAt == nil {
+		return nil // already live
+	}
+	origPath := n.StorageKey
+	if origPath == "" {
+		// Pre-rename row (legacy) — just clear the flag and leave
+		// storage layout untouched.
+		return s.Store.RestoreNode(ctx, nodeID)
+	}
+	// Move the file back on disk. Best-effort: keep going even if the
+	// driver step fails (admin can recover via SQL + storage CLI).
+	if s.Resolver != nil {
+		if drv, err := s.Resolver(n.StorageID); err == nil {
+			if mv, ok := drv.(storage.Mover); ok {
+				if err := mv.Move(ctx, n.Path, origPath); err != nil &&
+					!errors.Is(err, storage.ErrNotFound) {
+					slog.Warn("trash restore move failed",
+						slog.Int64("node_id", n.ID),
+						slog.String("from", n.Path),
+						slog.String("to", origPath),
+						slog.String("err", err.Error()))
+				}
+			}
+		}
+	}
+	parent, err := s.Store.LookupParentByPath(ctx, n.StorageID, origPath)
+	if err != nil {
+		// Fall back to a root restore — better than leaving the row
+		// orphaned in trash forever.
+		parent = nil
+	}
+	return s.Store.RestoreNodeAt(ctx, nodeID, parent, origPath)
+}
+
+// List returns soft-deleted entries (the trash listing for the admin UI).
+//
+// Each entry's `Path` is the ORIGINAL path (`storage_key`) so the user
+// sees where the item lived, not the internal `.filex-trash/...` key.
+// `TTLDays` is the days remaining before automatic purge.
+func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int) ([]TrashEntry, int, error) {
+	if s == nil || s.Store == nil {
+		return nil, 0, errors.New("trash: service not initialised")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, total, err := s.Store.ListTrashed(ctx, storageID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	retention := s.RetentionDays(ctx)
+	now := time.Now()
+	storageNames := map[int64]string{}
+	if all, err := s.Store.ListStorages(ctx); err == nil {
+		for _, st := range all {
+			storageNames[st.ID] = st.Name
+		}
+	}
+	out := make([]TrashEntry, 0, len(rows))
+	for _, n := range rows {
+		entry := TrashEntry{
+			ID:        n.ID,
+			StorageID: n.StorageID,
+			Name:      n.Name,
+			Size:      n.Size,
+			Mime:      n.Mime,
+		}
+		entry.StorageName = storageNames[n.StorageID]
+		// Prefer the original path stashed in storage_key; fall back
+		// to current `path` (legacy rows pre-`.filex-trash/`).
+		if n.StorageKey != "" {
+			entry.Path = n.StorageKey
+		} else {
+			entry.Path = n.Path
+		}
+		if n.DeletedAt != nil {
+			entry.DeletedAt = *n.DeletedAt
+			elapsed := now.Sub(*n.DeletedAt) / (24 * time.Hour)
+			remaining := retention - int(elapsed)
+			if remaining < 0 {
+				remaining = 0
+			}
+			entry.TTLDays = &remaining
+		}
+		out = append(out, entry)
+	}
+	return out, total, nil
+}
+
+// PurgeOne immediately hard-deletes a single trashed node (admin / owner).
+func (s *Service) PurgeOne(ctx context.Context, nodeID int64) error {
+	if s == nil || s.Store == nil {
+		return errors.New("trash: service not initialised")
+	}
+	n, err := s.Store.GetNode(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return s.purgeOne(ctx, n)
+}
+
+// TrashEntry is the projection returned by List — flat shape the admin
+// UI consumes directly.
+type TrashEntry struct {
+	ID          int64     `json:"id"`
+	StorageID   int64     `json:"storage_id"`
+	StorageName string    `json:"storage_name,omitempty"`
+	Path        string    `json:"path"`
+	Name        string    `json:"name"`
+	Size        int64     `json:"size"`
+	Mime        string    `json:"mime,omitempty"`
+	DeletedAt   time.Time `json:"deleted_at"`
+	TTLDays     *int      `json:"ttl_days,omitempty"`
 }
 
 // RunDailyLoop ticks PurgeExpired every interval until ctx is cancelled.
@@ -170,10 +292,12 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	if s.Resolver != nil && n.Type == model.NodeTypeFile {
 		if drv, err := s.Resolver(n.StorageID); err == nil {
 			if d, ok := drv.(storage.Deleter); ok {
-				key := n.StorageKey
-				if key == "" {
-					key = n.Path
-				}
+				// `n.Path` is the actual on-disk location for trashed
+				// rows (the `.filex-trash/...` key after vfDelete's
+				// rename). storage_key carries the ORIGINAL path so
+				// Restore can put the file back — purging that would
+				// look at the wrong key, miss, and leak the trash file.
+				key := n.Path
 				if err := d.Delete(ctx, key); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					// Continue anyway — DB row removal still happens, but
 					// log the leftover-object warning.

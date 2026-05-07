@@ -15,12 +15,14 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
 
 // Worker is the top-level sync supervisor — one instance per server.
 type Worker struct {
 	store db.Store
+	index *search.Index // optional — when set, sync upserts feed Bleve
 
 	mu       sync.Mutex
 	cancels  map[int64]context.CancelFunc // storageID → cancel
@@ -36,6 +38,13 @@ func New(store db.Store) *Worker {
 		cancels: map[int64]context.CancelFunc{},
 		syncers: map[int64]*storageSyncer{},
 	}
+}
+
+// AttachIndex wires a Bleve index into the worker so each sync upsert
+// also lands as a search document. Without this, search only knows
+// about whatever the admin's `Rebuild` button has flushed.
+func (w *Worker) AttachIndex(idx *search.Index) {
+	w.index = idx
 }
 
 // Start launches one syncer per enabled storage. ctx is the parent
@@ -131,6 +140,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 	ctx, cancel := context.WithCancel(parent)
 	syncer := &storageSyncer{
 		store:   w.store,
+		index:   w.index,
 		storage: st,
 		driver:  driver,
 		ctx:     ctx,
@@ -150,6 +160,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 // storageSyncer drives a single Storage's sync loop.
 type storageSyncer struct {
 	store   db.Store
+	index   *search.Index
 	storage *model.Storage
 	driver  storage.Driver
 	ctx     context.Context

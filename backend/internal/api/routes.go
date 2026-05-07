@@ -23,12 +23,14 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/queue"
+	"gitlab.com/brftech/filemanager/backend/internal/quota"
 	"gitlab.com/brftech/filemanager/backend/internal/replica"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 	"gitlab.com/brftech/filemanager/backend/internal/thumb"
+	"gitlab.com/brftech/filemanager/backend/internal/trash"
 )
 
 // Deps is the bundle of services every handler needs.
@@ -42,6 +44,8 @@ type Deps struct {
 	Share           *share.Service
 	OnlyOffice       *onlyoffice.Service
 	Ops              *ops.Service
+	Trash            *trash.Service
+	Quota            *quota.Service
 	Queue            queue.Driver
 	Notify           notify.Service
 	ReplicaService   *replica.Service
@@ -73,7 +77,7 @@ func BuildRouter(d *Deps) http.Handler {
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
-	oh := handlers.NewOps(d.Ops)
+	oh := handlers.NewOps(d.Ops, d.Store)
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps)
@@ -97,6 +101,10 @@ func BuildRouter(d *Deps) http.Handler {
 	queueH := handlers.NewQueue(d.Queue)
 	notifH := handlers.NewNotifications(d.Notify)
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
+	trashH := handlers.NewTrash(d.Trash)
+	metaH := handlers.NewMeta(d.Store)
+	quotaH := handlers.NewQuota(d.Quota)
+	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -150,11 +158,18 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Route("/api/files", func(r chi.Router) {
 			r.Get("/manager", mh.List)
 			r.Post("/manager", mh.Mutate)
+			r.Get("/manager/trash", trashH.List)
+			r.Post("/manager/restore", trashH.Restore)
 			r.Get("/stat", mh.Stat)
 			r.Get("/read", mh.Read)
 			r.Post("/search", sxh.Search)
 			r.Post("/ops", oh.Submit)
 			r.Get("/ops/{id}", oh.Status)
+
+			// SFC's per-verb async endpoints — translate to ops.Submit.
+			r.Post("/copy", oh.SubmitCopy)
+			r.Post("/move", oh.SubmitMove)
+			r.Post("/delete", oh.SubmitDelete)
 
 			r.Post("/upload/init", uh.Init)
 			r.Post("/upload/finalize", uh.Finalize)
@@ -168,6 +183,26 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Delete("/share/{id}", sh.HandleDelete)
 
 			r.Get("/onlyoffice/config", ooh.Config)
+
+			// Plain-text save target for the SFC's code/markdown editor.
+			r.Post("/save-text", saveTextH.Save)
+
+			// Per-user metadata: tags, starred flag, recently-opened.
+			r.Route("/manager/tags", func(r chi.Router) {
+				r.Get("/", metaH.GetTags)
+				r.Post("/", metaH.SetTags)
+			})
+			r.Route("/manager/star", func(r chi.Router) {
+				r.Post("/", metaH.SetStar)
+				r.Get("/list", metaH.ListStarred)
+			})
+			r.Route("/manager/recent", func(r chi.Router) {
+				r.Get("/", metaH.ListRecent)
+				r.Post("/", metaH.SetRecent)
+			})
+
+			// Quota — current user's usage + limit.
+			r.Get("/quota/me", quotaH.Me)
 		})
 	})
 
@@ -217,6 +252,16 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/", sharesAdmH.List)
 				r.Post("/{id}/revoke", sharesAdmH.Revoke)
 				r.Delete("/{id}", sharesAdmH.Delete)
+			})
+
+			r.Route("/trash", func(r chi.Router) {
+				r.Post("/empty", trashH.AdminEmpty)
+				r.Delete("/{id}", trashH.Purge)
+			})
+
+			r.Route("/quota", func(r chi.Router) {
+				r.Post("/{user_id}", quotaH.AdminSet)
+				r.Post("/{user_id}/recompute", quotaH.AdminRecompute)
 			})
 
 			r.Route("/external", func(r chi.Router) {

@@ -43,6 +43,11 @@ type Store interface {
 	UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error
 	TouchNodeSeen(ctx context.Context, id int64) error
 	SoftDeleteNode(ctx context.Context, id int64) error
+	// SoftDeleteAndRetag flips deleted_at + rewrites path/path_hash to a
+	// trash key in one shot, while saving the original path in
+	// storage_key. Used by vfDelete after the on-disk rename so the
+	// original-path slot is freed (UNIQUE(storage_id, path_hash)).
+	SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, trashHash, origPath string) error
 	HardDeleteNode(ctx context.Context, id int64) error
 	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
 	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
@@ -161,7 +166,17 @@ type Store interface {
 
 	// Trash retention
 	ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error)
+	// ListTrashed returns soft-deleted nodes (paginated). storage filter optional.
+	ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error)
 	RestoreNode(ctx context.Context, id int64) error
+	// RestoreNodeAt restores a soft-deleted node, simultaneously reverting its
+	// path/path_hash to the supplied original-path values and re-attaching it
+	// to the resolved parent_id (nil = root). Used by trash.Service.Restore
+	// to undo the `.filex-trash/` rename.
+	RestoreNodeAt(ctx context.Context, id int64, parentID *int64, origPath string) error
+	// LookupParentByPath returns the parent_id (nil at root) for a path's
+	// parent dir, or an error if the parent dir doesn't exist in the cache.
+	LookupParentByPath(ctx context.Context, storageID int64, fullPath string) (*int64, error)
 
 	// Per-user metadata (tags, starred, last_opened)
 	SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, value string) error

@@ -2,14 +2,18 @@
 //
 // Endpoints:
 //
-//	POST /api/files/manager/restore                       (auth)  body {node_id}
-//	POST /api/admin/trash/empty?older_than_days=N         (admin) immediate purge
+//	GET  /api/files/manager/trash                          (auth)  list trashed
+//	POST /api/files/manager/restore                        (auth)  body {node_id}
+//	DELETE /api/admin/trash/{id}                           (admin) immediate single purge
+//	POST /api/admin/trash/empty?older_than_days=N          (admin) immediate batch purge
 package handlers
 
 import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
+	"github.com/go-chi/chi/v5"
 
 	"gitlab.com/brftech/filemanager/backend/internal/trash"
 )
@@ -46,8 +50,9 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 
 // AdminEmpty triggers an immediate purge.
 //
-// Optional ?older_than_days=N parameter narrows the window — older_than_days=0
-// (the default) wipes everything currently soft-deleted regardless of age.
+// `older_than_days` may also arrive in the JSON body (the admin SPA's
+// trashApi.empty posts {storage_id, older_than_days}). 0/missing wipes
+// everything currently soft-deleted.
 func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 	older := 0
 	if v := r.URL.Query().Get("older_than_days"); v != "" {
@@ -55,10 +60,81 @@ func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 			older = n
 		}
 	}
+	// Accept the same field as a JSON body too (frontend uses POST body).
+	if r.Body != nil && r.ContentLength > 0 {
+		var body struct {
+			OlderThanDays *int   `json:"older_than_days"`
+			StorageID     *int64 `json:"storage_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if body.OlderThanDays != nil && *body.OlderThanDays >= 0 {
+				older = *body.OlderThanDays
+			}
+		}
+	}
 	res, err := h.Service.EmptyOlderThan(r.Context(), older)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	// Frontend reads `purged` count.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"purged":  res.Deleted,
+		"failed":  res.Failed,
+		"scanned": res.Scanned,
+		"bytes":   res.Bytes,
+	})
+}
+
+// List returns soft-deleted nodes for the admin trash view.
+//
+// Query: ?storage_id=…&limit=…&offset=…
+func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var storagePtr *int64
+	if v := q.Get("storage_id"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			storagePtr = &n
+		}
+	}
+	limit := 50
+	offset := 0
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	entries, total, err := h.Service.List(r.Context(), storagePtr, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries": entries,
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+	})
+}
+
+// Purge hard-deletes a single trashed node by id.
+//
+// DELETE /api/admin/trash/{id}
+func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.Service.PurgeOne(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

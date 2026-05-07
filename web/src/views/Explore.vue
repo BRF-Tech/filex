@@ -90,6 +90,14 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
       readOnly: s.read_only,
     })),
     initialPath: initialPathFromQuery.value || '',
+    // "Aç" / double-click → open the standalone editor in a new tab.
+    // The route reads `?path=&type=&mode=` and mounts the right viewer
+    // (OnlyOffice for office, Monaco for code, drawio iframe for
+    // .drawio, image/PDF/3D viewers otherwise) with save-on-change.
+    openPageBase: '/files/edit',
+    viewerBaseUrl: '/files/edit',
+    saveText: '/api/files/save-text',
+    onlyOfficeConfig: '/api/files/onlyoffice/config',
   };
 });
 

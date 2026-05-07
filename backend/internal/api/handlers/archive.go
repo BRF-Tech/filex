@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,10 +66,17 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if req.StorageID == 0 || req.Path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path"})
 		return
 	}
+	storageID, rel, err := a.resolveStorage(r.Context(), req.StorageID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	req.StorageID = storageID
+	req.Path = rel
 	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -105,10 +113,17 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if req.StorageID == 0 || req.Path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path"})
 		return
 	}
+	storageID, rel, err := a.resolveStorage(r.Context(), req.StorageID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	req.StorageID = storageID
+	req.Path = rel
 	drv, err := a.StorageResolver(req.StorageID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage"})
@@ -196,9 +211,24 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if req.StorageID == 0 || req.Path == "" || len(req.Files) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+	if req.Path == "" || len(req.Files) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path or files"})
 		return
+	}
+	storageID, rel, err := a.resolveStorage(r.Context(), req.StorageID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	req.StorageID = storageID
+	req.Path = rel
+	// Source paths in `Files[].Source` may also carry adapter prefixes —
+	// strip them and assume same storage as the target archive.
+	for i := range req.Files {
+		_, srcRel := splitAdapterPath(req.Files[i].Source)
+		if srcRel != "" {
+			req.Files[i].Source = srcRel
+		}
 	}
 	drv, err := a.StorageResolver(req.StorageID)
 	if err != nil {
@@ -294,6 +324,37 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		"path": req.Path,
 		"size": stat.Size(),
 	})
+}
+
+// resolveStorage takes the SFC's `path` (which may be either a bare
+// relative path or `<adapter>://<rel>`) plus an optional `storage_id`
+// and returns the resolved (storage_id, relative_path) pair.
+//
+// Order of precedence:
+//  1. Explicit `storage_id` in the body (legacy embed.js).
+//  2. `<adapter>://` prefix on `path`.
+//  3. Fall back to storages[0].
+func (a *Archive) resolveStorage(ctx context.Context, explicitID int64, fullPath string) (int64, string, error) {
+	adapter, rel := splitAdapterPath(fullPath)
+	if explicitID > 0 {
+		return explicitID, strings.Trim(rel, "/"), nil
+	}
+	storages, err := a.Store.ListEnabledStorages(ctx)
+	if err != nil {
+		return 0, "", err
+	}
+	if len(storages) == 0 {
+		return 0, "", errors.New("no storages configured")
+	}
+	if adapter == "" {
+		adapter = storages[0].Name
+	}
+	for _, s := range storages {
+		if s.Name == adapter {
+			return s.ID, strings.Trim(rel, "/"), nil
+		}
+	}
+	return 0, "", fmt.Errorf("unknown adapter: %s", adapter)
 }
 
 // fetchToTemp pulls a remote object into a local tmp file and returns the path.

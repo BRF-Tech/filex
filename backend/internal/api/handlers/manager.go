@@ -393,6 +393,10 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 		if strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" {
 			continue
 		}
+		// Trash bucket — never expose in regular listings.
+		if o.Name == ".filex-trash" || strings.Contains(o.Path, ".filex-trash") {
+			continue
+		}
 		rel := o.Path
 		if rel == "" {
 			rel = path.Join(dir, o.Name)
@@ -651,13 +655,19 @@ func joinAdapterPath(adapter, rel string) string {
 }
 
 // projectFileNodes shapes DB nodes into the FileExplorer FileNode
-// contract. The frontend keys it cares about: path, basename, type,
-// extension, size, last_modified, mime_type. We always ship the
-// adapter-qualified `path` so deep-link routing keeps working.
+// contract. The frontend keys it cares about: id, path, basename,
+// type, extension, size, last_modified, mime_type, thumb_url. We
+// always ship the adapter-qualified `path` so deep-link routing keeps
+// working.
 func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[string]any {
 	out := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		if n.DeletedAt != nil {
+			continue
+		}
+		// Hide the trash bucket from regular listings — the dedicated
+		// /admin/trash route renders deleted rows directly.
+		if strings.HasPrefix(n.Path, "/.filex-trash") || strings.HasPrefix(n.Path, ".filex-trash") || n.Name == ".filex-trash" {
 			continue
 		}
 		isDir := n.Type == model.NodeTypeDirectory
@@ -670,6 +680,7 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[
 		}
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(n.Name), "."))
 		entry := map[string]any{
+			"id":        n.ID,
 			"path":      joinAdapterPath(adapter, n.Path),
 			"basename":  n.Name,
 			"type":      typ,
@@ -677,6 +688,14 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[
 			"size":      n.Size,
 			"mime_type": n.Mime,
 			"storage":   adapter,
+		}
+		// Thumbnail URL — populated when the pipeline rendered one.
+		// The /api/files/thumb/{id} endpoint streams it. We allow
+		// "ready" or any non-pending/non-failed state through to keep
+		// the UI optimistic; if the file isn't actually there the
+		// thumb endpoint 404s and the SFC falls back to its icon.
+		if !isDir && n.Thumb != nil && (n.Thumb.State == "ready" || n.Thumb.State == "") && n.Thumb.StorageKey != "" {
+			entry["thumb_url"] = "/api/files/thumb/" + strconv.FormatInt(n.ID, 10)
 		}
 		if n.BackendMtime != nil {
 			entry["last_modified"] = n.BackendMtime.UnixMilli()

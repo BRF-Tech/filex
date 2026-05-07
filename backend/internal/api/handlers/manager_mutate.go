@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,9 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
+
+// cryptoRead is a tiny indirection so randHex6 can be tested deterministically.
+var cryptoRead = crand.Read
 
 // Mutate handles the POST verbs the FileExplorer SFC fires from its
 // toolbar: newfolder, rename, move, delete, upload.
@@ -281,9 +285,14 @@ type vfDeleteBody struct {
 	Items []vfPathHolder `json:"items"`
 }
 
-// vfDelete soft-deletes each item from the DB cache after the driver
-// removes it. The driver call is idempotent (mirrors local FS RemoveAll
-// semantics) so a missing object isn't fatal.
+// vfDelete soft-deletes each item by RENAMING the underlying file to
+// `.filex-trash/<unix>-<rand>__<basename>` on the storage and flipping
+// the DB row's `deleted_at`. The original path is preserved in
+// `storage_key` so trash.Service.Restore can move the file back.
+//
+// Background: an earlier implementation called Driver.Delete here,
+// which made restore impossible (the file was already gone). Now
+// purge is the only thing that hard-deletes — see trash.purgeOne.
 func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 	var body vfDeleteBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -308,11 +317,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
 		return
 	}
-	del, ok := drv.(storage.Deleter)
-	if !ok {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "driver does not support delete"})
-		return
-	}
+	mover, _ := drv.(storage.Mover)
 
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
@@ -324,18 +329,75 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
-		if err := del.Delete(r.Context(), srcRel); err != nil {
-			writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
+
+		// Soft-delete inside `.filex-trash/` already? Hard delete this
+		// time (mirrors brf-mono's "delete from trash = permanent").
+		if strings.HasPrefix(srcRel, trashPrefix) {
+			if del, ok := drv.(storage.Deleter); ok {
+				if err := del.Delete(r.Context(), srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
+					return
+				}
+			}
+			origClean := normalizeDBPath(srcRel)
+			hash := managerPathHash(current.ID, origClean)
+			if existing, err := h.Store.GetNodeByPathIncludingDeleted(r.Context(), current.ID, hash); err == nil && existing != nil {
+				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
+			}
+			continue
+		}
+
+		// Soft delete: rename to `.filex-trash/<unix>-<rand>__<basename>`.
+		base := path.Base(srcRel)
+		if base == "" || base == "." || base == "/" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item base: " + it.Path})
 			return
 		}
-		clean := normalizeDBPath(srcRel)
-		hash := managerPathHash(current.ID, clean)
-		if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, hash); err == nil && existing != nil {
-			_ = h.Store.SoftDeleteNode(r.Context(), existing.ID)
+		trashRel := fmt.Sprintf("%s/%d-%s__%s", trashPrefix, time.Now().Unix(), randHex6(), base)
+
+		if mover == nil {
+			// Driver can't move — fall back to hard delete (legacy).
+			if del, ok := drv.(storage.Deleter); ok {
+				if err := del.Delete(r.Context(), srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
+					return
+				}
+			}
+		} else {
+			if err := mover.Move(r.Context(), srcRel, trashRel); err != nil {
+				writeJSON(w, mapDriverErr(err), map[string]string{"error": "trash: " + err.Error()})
+				return
+			}
+		}
+
+		// Update DB: store the original path in storage_key so Restore
+		// can find it; flip deleted_at; rewrite path/path_hash to the
+		// trash location so a fresh upload at the original path works.
+		origClean := normalizeDBPath(srcRel)
+		origHash := managerPathHash(current.ID, origClean)
+		if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
+			if mover != nil {
+				newClean := normalizeDBPath(trashRel)
+				newHash := managerPathHash(current.ID, newClean)
+				_ = h.Store.SoftDeleteAndRetag(r.Context(), existing.ID, newClean, newHash, origClean)
+			} else {
+				_ = h.Store.SoftDeleteNode(r.Context(), existing.ID)
+			}
 		}
 	}
 
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
+}
+
+// trashPrefix is the in-storage directory where soft-deleted files are
+// renamed to. Listings filter it out; trash.Service.Restore renames out.
+const trashPrefix = ".filex-trash"
+
+// randHex6 returns a 6-char lowercase hex string for trash key uniqueness.
+func randHex6() string {
+	var b [3]byte
+	_, _ = cryptoRead(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 // vfUpload accepts multipart/form-data with one or more file[] parts

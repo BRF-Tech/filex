@@ -25,6 +25,16 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, layout: 'blank' },
   },
   {
+    // Standalone editor — the SFC's "Aç" / double-click opens this in
+    // a new tab. Reads `?path=<adapter>://<rel>&type=<ext>&mode=edit`
+    // from the URL and mounts the right viewer fullscreen with
+    // save-on-change. No admin chrome.
+    path: '/files/edit',
+    name: 'files.edit',
+    component: () => import('@/views/Editor.vue'),
+    meta: { layout: 'blank' },
+  },
+  {
     path: '/',
     component: AdminLayout,
     children: [

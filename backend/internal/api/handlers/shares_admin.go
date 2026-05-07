@@ -54,9 +54,21 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Dual envelope: `items/total/page/page_size` is what the admin
+	// SPA expects (PaginatedResponse); `entries/limit/offset` keeps
+	// any older consumers happy.
+	pageSize := limit
+	if pageSize <= 0 {
+		pageSize = 1
+	}
+	page := (offset / pageSize) + 1
 	writeJSON(w, http.StatusOK, map[string]any{
+		"items":     rows,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		// Legacy aliases:
 		"entries": rows,
-		"total":   total,
 		"limit":   limit,
 		"offset":  offset,
 	})

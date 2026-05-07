@@ -514,13 +514,20 @@ function openNode(n: FileNode) {
     void load(target);
     return;
   }
-  const ext = (n.extension || '').toLowerCase();
-  if (props.config.openPageBase && (OFFICE_EXTS.has(ext) || TEXT_CODE_EXTS.has(ext))) {
-    const url = `${props.config.openPageBase}?path=${encodeURIComponent(stripAdapter(n.path))}&mode=edit`;
+  // "Aç" / double-click contract: open in a new tab against the
+  // standalone editor route, regardless of file type. The editor page
+  // picks the right viewer (OnlyOffice for office, Monaco for code/
+  // text, drawio iframe for .drawio, image/PDF/3D viewers otherwise)
+  // and wires save-on-change. This is the shape brf-mono ships and
+  // what users expect from a Files-style file manager.
+  if (props.config.openPageBase) {
+    const ext = (n.extension || '').toLowerCase();
+    const url = `${props.config.openPageBase}?path=${encodeURIComponent(n.path)}&mode=edit&type=${encodeURIComponent(ext)}`;
     window.open(url, '_blank', 'noopener');
     emit('file-opened', { path: n.path, basename: n.basename });
     return;
   }
+  // Fallback when no editor page is configured — in-page modal.
   previewMode.value = 'edit';
   previewTarget.value = n;
   showPreview.value = true;
@@ -934,8 +941,40 @@ async function chunkedUpload(file: File) {
 const dragCounter = ref(0);
 const dragOver = ref(false);
 
+/**
+ * isExternalFileDrag — `true` only when the user is dragging files
+ * INTO the page from the OS (file picker, finder, etc.). Filters out:
+ *   - internal row drags (FE_DND_MIME present)
+ *   - browser image drags (`<img draggable=true>` on this page or
+ *     across pages). HTML5 `Files` type is leaky — it appears when
+ *     dragging any image element even though no real file is moving;
+ *     `dataTransfer.items[*].kind === 'file'` is the canonical signal
+ *     for an actual OS file.
+ */
+function isExternalFileDrag(ev: DragEvent): boolean {
+  const dt = ev.dataTransfer;
+  if (!dt) return false;
+  if (dt.types && dt.types.includes(FE_DND_MIME)) return false;
+  // Some browsers expose `items` early in the drag, others only on
+  // drop. When `items` is available we use it as the authoritative
+  // signal — `kind === 'file'` means a real OS file. When unavailable
+  // (Firefox during dragover sometimes returns 0 items), fall back to
+  // the legacy `Files` type check.
+  if (dt.items && dt.items.length > 0) {
+    let hasFile = false;
+    for (const it of Array.from(dt.items)) {
+      if (it.kind === 'file') {
+        hasFile = true;
+        break;
+      }
+    }
+    return hasFile;
+  }
+  return dt.types ? dt.types.includes('Files') : false;
+}
+
 function onDragEnter(ev: DragEvent) {
-  if (!ev.dataTransfer?.types.includes('Files')) return;
+  if (!isExternalFileDrag(ev)) return;
   ev.preventDefault();
   dragCounter.value++;
   dragOver.value = true;
@@ -945,18 +984,31 @@ function onDragLeave() {
   if (dragCounter.value === 0) dragOver.value = false;
 }
 function onDragOver(ev: DragEvent) {
-  if (ev.dataTransfer?.types.includes('Files')) {
+  if (isExternalFileDrag(ev)) {
     ev.preventDefault();
   }
 }
 function onDropUpload(ev: DragEvent) {
+  // Internal row drag — nothing to do here, the row drop handler
+  // in GridView/ListView already resolved the move.
+  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
+    dragCounter.value = 0;
+    dragOver.value = false;
+    return;
+  }
+  // Browser-internal image drag without real files — bail before
+  // we accidentally synthesise an upload from a 0-length file list
+  // (some browsers populate `files` with zero-byte placeholders).
+  if (!isExternalFileDrag(ev)) {
+    dragCounter.value = 0;
+    dragOver.value = false;
+    return;
+  }
   ev.preventDefault();
   dragCounter.value = 0;
   dragOver.value = false;
-  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
-    return;
-  }
   const list = ev.dataTransfer?.files ? Array.from(ev.dataTransfer.files) : [];
+  if (list.length === 0) return;
   void uploadFiles(list);
 }
 

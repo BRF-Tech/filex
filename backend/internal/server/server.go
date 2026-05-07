@@ -28,6 +28,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 	"gitlab.com/brftech/filemanager/backend/internal/queue"
+	"gitlab.com/brftech/filemanager/backend/internal/quota"
 	"gitlab.com/brftech/filemanager/backend/internal/replica"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
@@ -35,6 +36,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/version"
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 	"gitlab.com/brftech/filemanager/backend/internal/thumb"
+	"gitlab.com/brftech/filemanager/backend/internal/trash"
 
 	// register storage and DB drivers via their init() blocks
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/mysql"
@@ -63,6 +65,8 @@ type Server struct {
 	replicaSvc      *replica.Service
 	replicaCron     *replica.CronScheduler
 	replicaReloader *replica.RulesReloader
+	trash           *trash.Service
+	quota           *quota.Service
 	srv             *http.Server
 	idx             *search.Index
 
@@ -175,8 +179,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		cfg.Demo.User,
 	)
 
-	// Sync worker.
+	// Sync worker. Bind the search index so every create/update/delete
+	// during a sync run also updates Bleve — without this, the in-toolbar
+	// search box only sees rows the admin's "Rebuild" button has touched.
 	worker := syncpkg.New(store)
+	if idx != nil {
+		worker.AttachIndex(idx)
+	}
 
 	// Thumbnail pipeline.
 	pipelineCaps := thumb.Capabilities{Image: true}
@@ -356,6 +365,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
+	// Quota service — per-user usage accounting + admin set.
+	quotaSvc := quota.New(store)
+	srvObj.quota = quotaSvc
+
+	// Trash retention service — handles soft-delete restore + scheduled
+	// purge of expired tombstones.
+	trashSvc := trash.New(store, resolver, quotaSvc)
+	srvObj.trash = trashSvc
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -366,6 +384,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Share:           shareSvc,
 		OnlyOffice:      ooSvc,
 		Ops:             opsSvc,
+		Trash:           trashSvc,
+		Quota:           quotaSvc,
 		Queue:            srvObj.queue,
 		Notify:           srvObj.notify,
 		ReplicaService:   srvObj.replicaSvc,

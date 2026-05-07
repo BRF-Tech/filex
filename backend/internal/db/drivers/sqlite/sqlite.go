@@ -4,11 +4,14 @@ package sqlite
 
 import (
 	"context"
+	"crypto/md5"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -221,6 +224,22 @@ func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, 
 
 func (s *Store) TouchNodeSeen(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET seen_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	return err
+}
+
+// SoftDeleteAndRetag is the trash-aware soft-delete: it sets deleted_at,
+// rewrites path/path_hash to the supplied trash key, and stashes the
+// original path in storage_key for later Restore. The parent_id is
+// nulled so listings of the original parent forget the row.
+func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, trashHash, origPath string) error {
+	base := path.Base(trashPath)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE nodes
+		SET deleted_at=CURRENT_TIMESTAMP,
+		    updated_at=CURRENT_TIMESTAMP,
+		    parent_id=NULL,
+		    name=?, path=?, path_hash=?, storage_key=?
+		WHERE id=?`, base, trashPath, trashHash, origPath, id)
 	return err
 }
 
@@ -1353,6 +1372,129 @@ func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, limit 
 func (s *Store) RestoreNode(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
+}
+
+// ListTrashed returns paginated soft-deleted rows, optionally narrowed to a
+// single storage. Total count returned alongside so the UI can paginate.
+func (s *Store) ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	args := []any{}
+	where := `WHERE deleted_at IS NOT NULL`
+	if storageID != nil {
+		where += ` AND storage_id = ?`
+		args = append(args, *storageID)
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx,
+		nodeSelectColumns()+` FROM nodes `+where+` ORDER BY deleted_at DESC LIMIT ? OFFSET ?`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, n)
+	}
+	return out, total, rows.Err()
+}
+
+// RestoreNodeAt flips deleted_at to NULL while reverting path/parent.
+//
+// Used by trash.Service after `vfDelete` left `storage_key` holding the
+// original path (and `path` holding the trash key). Caller resolves
+// `parentID` via `LookupParentByPath`.
+func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, origPath string) error {
+	clean := strings.TrimRight(path.Clean("/"+strings.Trim(origPath, "/")), "/")
+	if clean == "" {
+		clean = "/"
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT storage_id FROM nodes WHERE id=?`, id)
+	var sid int64
+	if err := row.Scan(&sid); err != nil {
+		return err
+	}
+	hash := nodePathHash(sid, clean)
+	name := path.Base(clean)
+	if parentID == nil {
+		_, err := s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NULL,
+			    updated_at=CURRENT_TIMESTAMP,
+			    parent_id=NULL,
+			    name=?, path=?, path_hash=?, storage_key=?
+			WHERE id=?`, name, clean, hash, clean, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE nodes
+		SET deleted_at=NULL,
+		    updated_at=CURRENT_TIMESTAMP,
+		    parent_id=?,
+		    name=?, path=?, path_hash=?, storage_key=?
+		WHERE id=?`, *parentID, name, clean, hash, clean, id)
+	return err
+}
+
+// LookupParentByPath returns parent_id (nil at root) for `fullPath`'s
+// parent dir, by walking the cache one segment at a time.
+func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPath string) (*int64, error) {
+	clean := strings.Trim(fullPath, "/")
+	dir := path.Dir(clean)
+	if dir == "" || dir == "." {
+		return nil, nil
+	}
+	parts := strings.Split(strings.Trim(dir, "/"), "/")
+	var parentPtr *int64
+	for _, seg := range parts {
+		if seg == "" {
+			continue
+		}
+		var id int64
+		if parentPtr == nil {
+			err := s.db.QueryRowContext(ctx, `
+				SELECT id FROM nodes
+				WHERE storage_id=? AND name=? AND deleted_at IS NULL
+				  AND parent_id IS NULL
+				LIMIT 1`, storageID, seg).Scan(&id)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			err := s.db.QueryRowContext(ctx, `
+				SELECT id FROM nodes
+				WHERE storage_id=? AND name=? AND deleted_at IS NULL
+				  AND parent_id=?
+				LIMIT 1`, storageID, seg, *parentPtr).Scan(&id)
+			if err != nil {
+				return nil, err
+			}
+		}
+		parentPtr = &id
+	}
+	return parentPtr, nil
+}
+
+// nodePathHash computes the same MD5 used by sync.pathHash and the
+// manager handler — see manager_mutate.go's `managerPathHash`.
+func nodePathHash(storageID int64, p string) string {
+	h := md5.New()
+	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ─────────────────── User-scoped node meta ───────────────────

@@ -1,6 +1,10 @@
 package handlers
 
 import (
+	"context"
+	cryptoRand "crypto/rand"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +20,7 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
@@ -38,38 +43,80 @@ func NewShare(svc *share.Service, store db.Store, resolver func(int64) (storage.
 	}
 }
 
+// shareCreateReq accepts both the modern `{path, password (bool), …}`
+// shape the SFC sends AND the legacy `{node_id, pin, expires_in, …}`
+// shape kept for embed.js consumers. When `password=true` we generate a
+// random 8-char PIN and return it in the response so the UI can show
+// the user the unlock code once.
 type shareCreateReq struct {
-	NodeID       int64  `json:"node_id"`
-	PIN          string `json:"pin,omitempty"`
-	ExpiresIn    int    `json:"expires_in,omitempty"`    // seconds from now
-	ExpiresAt    string `json:"expires_at,omitempty"`    // RFC3339 — overrides expires_in
+	// Modern shape (filex-core SFC).
+	Path     string `json:"path,omitempty"`     // <adapter>://<rel>
+	Password *bool  `json:"password,omitempty"` // bool: generate-PIN flag
+
+	// Legacy shape (embed.js + early integrators).
+	NodeID    int64  `json:"node_id,omitempty"`
+	PIN       string `json:"pin,omitempty"`
+	ExpiresIn int    `json:"expires_in,omitempty"` // seconds from now
+
+	// Shared.
+	ExpiresAt    string `json:"expires_at,omitempty"` // RFC3339 — overrides expires_in
 	MaxDownloads int    `json:"max_downloads,omitempty"`
 }
 
-// shareCreateResp is the JSON envelope returned on POST /api/files/share.
-//
-// We add the absolute share URL so the UI doesn't have to know the public
-// hostname — Phoenix LiveView style.
-type shareCreateResp struct {
+// shareCreateRespInner is the payload nested under `share` in the
+// response — the SFC accesses it as `body.share.*`.
+type shareCreateRespInner struct {
 	ID           int64      `json:"id"`
+	UUID         string     `json:"uuid"`     // alias for token (frontend uses uuid in delete URL)
 	Token        string     `json:"token"`
 	URL          string     `json:"url"`
+	Path         string     `json:"path,omitempty"`
+	Filename     string     `json:"filename,omitempty"`
 	HasPin       bool       `json:"has_pin"`
+	PasswordPin  string     `json:"password_pin,omitempty"` // ONLY on creation when we generated it
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	MaxDownloads *int       `json:"max_downloads,omitempty"`
 }
 
 // HandleCreate mints a new share token.
+//
+// The SFC's `useFileApi.createShare` posts:
+//
+//	{ path: "<adapter>://<rel>", password: true|false, expires_at: …, max_downloads: … }
+//
+// and reads `body.share.url` / `body.share.password_pin` afterwards.
+// The legacy embed.js posts `{ node_id, pin, expires_in, … }` and reads
+// the flat fields. We support both.
 func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req shareCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if req.NodeID == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing node_id"})
+
+	// Resolve node_id from either input shape.
+	nodeID := req.NodeID
+	if nodeID == 0 && req.Path != "" {
+		resolved, err := h.resolveNodeIDFromPath(r.Context(), req.Path)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		nodeID = resolved
+	}
+	if nodeID == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path or node_id"})
 		return
 	}
+
+	// PIN: explicit string wins; password=true generates one; otherwise empty.
+	pin := req.PIN
+	pinGenerated := ""
+	if pin == "" && req.Password != nil && *req.Password {
+		pin = randomPIN(8)
+		pinGenerated = pin
+	}
+
 	user := auth.UserFrom(r.Context())
 	var userID *int64
 	if user != nil {
@@ -77,8 +124,8 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		userID = &uid
 	}
 	opts := share.CreateOpts{
-		NodeID:    req.NodeID,
-		PIN:       req.PIN,
+		NodeID:    nodeID,
+		PIN:       pin,
 		CreatedBy: userID,
 	}
 	switch {
@@ -101,15 +148,109 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, shareCreateResp{
+
+	inner := shareCreateRespInner{
 		ID:           sh.ID,
+		UUID:         sh.Token,
 		Token:        sh.Token,
 		URL:          h.shareURL(sh.Token),
 		HasPin:       sh.PinHash != "",
+		PasswordPin:  pinGenerated,
 		ExpiresAt:    sh.ExpiresAt,
 		MaxDownloads: sh.MaxDownloads,
+	}
+	if node, _ := h.Store.GetNode(r.Context(), nodeID); node != nil {
+		inner.Filename = node.Name
+		inner.Path = node.Path
+	}
+
+	// Dual envelope: nested `share` for the SFC + flat fields at the
+	// top level for legacy embed.js. Cheap to ship both.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"share":         inner,
+		"id":            inner.ID,
+		"token":         inner.Token,
+		"url":           inner.URL,
+		"has_pin":       inner.HasPin,
+		"expires_at":    inner.ExpiresAt,
+		"max_downloads": inner.MaxDownloads,
 	})
 }
+
+// resolveNodeIDFromPath looks up a node by `<adapter>://<rel>` (or bare
+// rel against the first storage). Returns 0 + an error when no row.
+func (h *Share) resolveNodeIDFromPath(ctx context.Context, fullPath string) (int64, error) {
+	idx := strings.Index(fullPath, "://")
+	var adapter, rel string
+	if idx >= 0 {
+		adapter = fullPath[:idx]
+		rel = strings.Trim(fullPath[idx+3:], "/")
+	} else {
+		rel = strings.Trim(fullPath, "/")
+	}
+	storages, err := h.Store.ListEnabledStorages(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if len(storages) == 0 {
+		return 0, errNoStorages
+	}
+	if adapter == "" {
+		adapter = storages[0].Name
+	}
+	var st *model.Storage
+	for _, s := range storages {
+		if s.Name == adapter {
+			st = s
+			break
+		}
+	}
+	if st == nil {
+		return 0, fmt.Errorf("unknown adapter: %s", adapter)
+	}
+	clean := strings.TrimRight(path.Clean("/"+rel), "/")
+	if clean == "" {
+		return 0, fmt.Errorf("share target path is empty")
+	}
+	hash := sharePathHash(st.ID, clean)
+	node, err := h.Store.GetNodeByPath(ctx, st.ID, hash)
+	if err != nil || node == nil {
+		return 0, fmt.Errorf("file not found: %s", fullPath)
+	}
+	return node.ID, nil
+}
+
+// sharePathHash mirrors managerPathHash so the share lookup hits the
+// same cache row the manager handler created.
+func sharePathHash(storageID int64, p string) string {
+	h := md5.New()
+	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// randomPIN returns an n-char numeric PIN (digits only — easier to type
+// from a phone than a mixed-case string).
+func randomPIN(n int) string {
+	const digits = "0123456789"
+	b := make([]byte, n)
+	if _, err := cryptoRand.Read(b); err != nil {
+		// Fall back to time-based — we still want a usable PIN.
+		ts := time.Now().UnixNano()
+		for i := range b {
+			b[i] = digits[ts%10]
+			ts /= 10
+		}
+		return string(b)
+	}
+	for i := range b {
+		b[i] = digits[int(b[i])%10]
+	}
+	return string(b)
+}
+
+var errNoStorages = errors.New("no storages configured")
 
 // HandleDelete revokes a share.
 func (h *Share) HandleDelete(w http.ResponseWriter, r *http.Request) {

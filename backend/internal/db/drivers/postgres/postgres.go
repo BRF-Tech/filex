@@ -13,11 +13,14 @@ package postgres
 
 import (
 	"context"
+	"crypto/md5"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -214,6 +217,17 @@ func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, 
 
 func (s *Store) TouchNodeSeen(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET seen_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+// SoftDeleteAndRetag — see store.go interface for semantics.
+func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, trashHash, origPath string) error {
+	base := path.Base(trashPath)
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE nodes
+		SET deleted_at=NOW(), updated_at=NOW(), parent_id=NULL,
+		    name=$1, path=$2, path_hash=$3, storage_key=$4
+		WHERE id=$5`, base, trashPath, trashHash, origPath, id)
 	return err
 }
 
@@ -1311,6 +1325,121 @@ func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, limit 
 func (s *Store) RestoreNode(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET deleted_at=NULL, updated_at=NOW() WHERE id=$1`, id)
 	return err
+}
+
+// ListTrashed returns paginated soft-deleted rows (storage filter optional).
+func (s *Store) ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	args := []any{}
+	where := `WHERE deleted_at IS NOT NULL`
+	if storageID != nil {
+		where += ` AND storage_id = $1`
+		args = append(args, *storageID)
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	limPlace := fmt.Sprintf("$%d", len(args)-1)
+	offPlace := fmt.Sprintf("$%d", len(args))
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+nodeColumns()+` FROM nodes `+where+
+			` ORDER BY deleted_at DESC LIMIT `+limPlace+` OFFSET `+offPlace, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, n)
+	}
+	return out, total, rows.Err()
+}
+
+// RestoreNodeAt flips deleted_at and reverts the path/parent in one shot.
+func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, origPath string) error {
+	clean := strings.TrimRight(path.Clean("/"+strings.Trim(origPath, "/")), "/")
+	if clean == "" {
+		clean = "/"
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT storage_id FROM nodes WHERE id=$1`, id)
+	var sid int64
+	if err := row.Scan(&sid); err != nil {
+		return err
+	}
+	hash := pgNodePathHash(sid, clean)
+	name := path.Base(clean)
+	if parentID == nil {
+		_, err := s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NULL, updated_at=NOW(), parent_id=NULL,
+			    name=$1, path=$2, path_hash=$3, storage_key=$4
+			WHERE id=$5`, name, clean, hash, clean, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE nodes
+		SET deleted_at=NULL, updated_at=NOW(), parent_id=$1,
+		    name=$2, path=$3, path_hash=$4, storage_key=$5
+		WHERE id=$6`, *parentID, name, clean, hash, clean, id)
+	return err
+}
+
+// LookupParentByPath walks the cache one segment at a time to resolve the
+// parent_id (nil at root) for the dir that owns `fullPath`.
+func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPath string) (*int64, error) {
+	clean := strings.Trim(fullPath, "/")
+	dir := path.Dir(clean)
+	if dir == "" || dir == "." {
+		return nil, nil
+	}
+	parts := strings.Split(strings.Trim(dir, "/"), "/")
+	var parentPtr *int64
+	for _, seg := range parts {
+		if seg == "" {
+			continue
+		}
+		var id int64
+		if parentPtr == nil {
+			err := s.db.QueryRowContext(ctx, `
+				SELECT id FROM nodes
+				WHERE storage_id=$1 AND name=$2 AND deleted_at IS NULL
+				  AND parent_id IS NULL
+				LIMIT 1`, storageID, seg).Scan(&id)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			err := s.db.QueryRowContext(ctx, `
+				SELECT id FROM nodes
+				WHERE storage_id=$1 AND name=$2 AND deleted_at IS NULL
+				  AND parent_id=$3
+				LIMIT 1`, storageID, seg, *parentPtr).Scan(&id)
+			if err != nil {
+				return nil, err
+			}
+		}
+		parentPtr = &id
+	}
+	return parentPtr, nil
+}
+
+func pgNodePathHash(storageID int64, p string) string {
+	h := md5.New()
+	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
+	_, _ = h.Write([]byte{'\x00'})
+	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ─────────────────── User-scoped node meta ───────────────────
