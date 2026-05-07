@@ -70,6 +70,7 @@
   },
   "nav": {
     "dashboard": "Panel",
+    "files": "Dosyalar",
     "storages": "Depolar",
     "users": "Kullanıcılar",
     "settings": "Ayarlar",
