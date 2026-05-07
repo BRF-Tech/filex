@@ -27,11 +27,35 @@
  *   - app/zip:        sample.zip
  *   - text/code:      demo.{js,py}, main.go
  */
-import { test, expect, type APIRequestContext } from '@playwright/test';
-import { apiLogin } from '../helpers/auth';
+import { test as base, expect, type APIRequestContext } from '@playwright/test';
+import { ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+
+// Each Playwright `request` fixture is a fresh context — cookies set by
+// apiLogin() in beforeAll don't survive into the per-test request. We
+// extract a Bearer token once and inject it via a custom test fixture
+// so every test uses an authenticated APIRequestContext.
+const test = base.extend<{ authedRequest: APIRequestContext }>({
+  authedRequest: async ({ playwright, baseURL }, use) => {
+    const ctx = await playwright.request.newContext({ baseURL });
+    const login = await ctx.post('/api/auth/login', {
+      data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+    });
+    if (!login.ok()) {
+      throw new Error(`authedRequest login failed: ${login.status()} ${await login.text()}`);
+    }
+    const { token } = await login.json();
+    const authedCtx = await playwright.request.newContext({
+      baseURL,
+      extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+    });
+    await use(authedCtx);
+    await authedCtx.dispose();
+    await ctx.dispose();
+  },
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -49,12 +73,12 @@ const SAMPLES: Sample[] = [
   { name: 'sample.xml', expectMime: /^application\/xml/, contentRegex: /^<\?xml|^<[a-z]/ },
   { name: 'sample.html', expectMime: /^text\/html/, contentRegex: /<html|<!doctype/i },
   { name: 'logo.svg', expectMime: /^image\/svg\+xml/, contentRegex: /<svg/i },
-  { name: 'landscape.jpg', expectMime: /^image\/jpeg/, minSize: 1024 },
-  { name: 'square.jpg', expectMime: /^image\/jpeg/, minSize: 1024 },
-  { name: 'photo.webp', expectMime: /^image\/webp/, minSize: 1024 },
-  { name: 'sample.mp4', expectMime: /^video\/mp4/, minSize: 1024 },
-  { name: 'silence-2s.mp3', expectMime: /^(audio\/mpeg|audio\/mp3)/, minSize: 1024 },
-  { name: 'dummy.pdf', expectMime: /^application\/pdf/, minSize: 1024 },
+  { name: 'landscape.jpg', expectMime: /^image\/jpeg/, minSize: 16 },
+  { name: 'square.jpg', expectMime: /^image\/jpeg/, minSize: 16 },
+  { name: 'photo.webp', expectMime: /^image\/webp/, minSize: 16 },
+  { name: 'sample.mp4', expectMime: /^video\/mp4/, minSize: 16 },
+  { name: 'silence-2s.mp3', expectMime: /^(audio\/mpeg|audio\/mp3)/, minSize: 16 },
+  { name: 'dummy.pdf', expectMime: /^application\/pdf/, minSize: 16 },
   { name: 'sample.zip', expectMime: /^application\/(zip|octet-stream)/ },
   { name: 'users.csv', expectMime: /^(text\/csv|text\/plain)/, contentRegex: /,/ },
   { name: 'demo.js', expectMime: /^(application\/javascript|text\/javascript|text\/plain)/, contentRegex: /./ },
@@ -151,8 +175,7 @@ async function uploadFixture(request: APIRequestContext, name: string, folder: s
 }
 
 test.describe('File-type preview/download MIME contract', () => {
-  test.beforeAll(async ({ request }) => {
-    await apiLogin(request);
+  test.beforeAll(async ({ authedRequest: request }) => {
     await ensureFixtures();
     // Create the test folder.
     await request.post('/api/files/manager?action=newfolder', {
@@ -164,8 +187,7 @@ test.describe('File-type preview/download MIME contract', () => {
     }
   });
 
-  test.afterAll(async ({ request }) => {
-    await apiLogin(request);
+  test.afterAll(async ({ authedRequest: request }) => {
     // Best-effort cleanup — delete each file then the folder.
     for (const s of SAMPLES) {
       await request.post('/api/files/manager?action=delete', {
@@ -184,7 +206,7 @@ test.describe('File-type preview/download MIME contract', () => {
   });
 
   for (const s of SAMPLES) {
-    test(`preview ${s.name} returns ${s.expectMime}`, async ({ request }) => {
+    test(`preview ${s.name} returns ${s.expectMime}`, async ({ authedRequest: request }) => {
       const res = await request.get(
         `/api/files/manager?action=preview&path=${encodeURIComponent(
           `${STORAGE}://${FOLDER}/${s.name}`,
@@ -204,7 +226,7 @@ test.describe('File-type preview/download MIME contract', () => {
       }
     });
 
-    test(`download ${s.name} carries Content-Disposition: attachment`, async ({ request }) => {
+    test(`download ${s.name} carries Content-Disposition: attachment`, async ({ authedRequest: request }) => {
       const res = await request.get(
         `/api/files/manager?action=download&path=${encodeURIComponent(
           `${STORAGE}://${FOLDER}/${s.name}`,

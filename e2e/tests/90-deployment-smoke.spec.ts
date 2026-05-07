@@ -20,7 +20,14 @@ const DEMO_HOST = process.env.E2E_DEMO_HOST ?? '';
 const FM_HOST = process.env.E2E_FM_HOST ?? '';
 const FM_TOKEN = process.env.E2E_FM_TOKEN ?? '';
 
-async function probe(host: string, path: string, opts: { token?: string; method?: string } = {}) {
+async function probe(
+  host: string,
+  path: string,
+  opts: { token?: string; method?: string } = {},
+): Promise<{ status: number; headers: Record<string, string>; text: string; json: () => unknown }> {
+  // Helper has to read the body BEFORE disposing the context, otherwise
+  // the response handle is invalidated. Returns a thin wrapper so each
+  // test can still use a familiar shape (status/headers/text/json).
   const ctx = await pwRequest.newContext();
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
@@ -29,8 +36,16 @@ async function probe(host: string, path: string, opts: { token?: string; method?
     headers,
     maxRedirects: 0,
   });
+  const status = res.status();
+  const respHeaders = res.headers();
+  const text = await res.text();
   await ctx.dispose();
-  return res;
+  return {
+    status,
+    headers: respHeaders,
+    text,
+    json: () => JSON.parse(text),
+  };
 }
 
 test.describe('demo-fm.brf.sh smoke', () => {
@@ -38,28 +53,27 @@ test.describe('demo-fm.brf.sh smoke', () => {
 
   test('healthz responds 200', async () => {
     const res = await probe(DEMO_HOST, '/healthz');
-    expect(res.status()).toBe(200);
-    const body = await res.json();
+    expect(res.status).toBe(200);
+    const body = res.json() as { status?: string };
     expect(body.status).toBe('ok');
   });
 
   test('/ redirects into the admin SPA', async () => {
     const res = await probe(DEMO_HOST, '/');
     // Either a 302/308 to /admin or a 200 with HTML — both acceptable.
-    expect([200, 301, 302, 308]).toContain(res.status());
+    expect([200, 301, 302, 308]).toContain(res.status);
   });
 
   test('/admin/ SPA shell loads', async () => {
     const res = await probe(DEMO_HOST, '/admin/');
-    expect(res.status()).toBe(200);
-    const text = await res.text();
-    expect(text).toMatch(/<div id="app"|<filex-explorer|<!doctype html/i);
+    expect(res.status).toBe(200);
+    expect(res.text).toMatch(/<div id="app"|<filex-explorer|<!doctype html/i);
   });
 
   test('embed.js is reachable + ES module', async () => {
     const res = await probe(DEMO_HOST, '/embed.js');
-    expect(res.status()).toBe(200);
-    expect(res.headers()['content-type'] ?? '').toMatch(/javascript/);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type'] ?? '').toMatch(/javascript/);
   });
 
   test('default storage `demo` lists root via API', async () => {
@@ -92,12 +106,12 @@ test.describe('fm.brf.sh smoke', () => {
 
   test('healthz responds 200', async () => {
     const res = await probe(FM_HOST, '/healthz');
-    expect(res.status()).toBe(200);
+    expect(res.status).toBe(200);
   });
 
   test('/admin/ SPA shell loads', async () => {
     const res = await probe(FM_HOST, '/admin/');
-    expect(res.status()).toBe(200);
+    expect(res.status).toBe(200);
   });
 
   test('OIDC redirect lands at the right Keycloak realm', async () => {
@@ -119,8 +133,8 @@ test.describe('fm.brf.sh smoke', () => {
 
   test('storage list exposes both seeded adapters (main + s3-test)', async () => {
     const res = await probe(FM_HOST, '/api/admin/storages', { token: FM_TOKEN });
-    expect(res.status()).toBe(200);
-    const items: Array<{ name: string; driver: string }> = await res.json();
+    expect(res.status).toBe(200);
+    const items = res.json() as Array<{ name: string; driver: string }>;
     const names = items.map((s) => s.name);
     expect(names).toContain('main');
     expect(names).toContain('s3-test');
@@ -132,8 +146,8 @@ test.describe('fm.brf.sh smoke', () => {
       `/api/files/manager?action=index&path=${encodeURIComponent('s3-test://example')}`,
       { token: FM_TOKEN },
     );
-    expect(res.status()).toBe(200);
-    const body = await res.json();
+    expect(res.status).toBe(200);
+    const body = res.json() as { adapter: string; files: unknown[] };
     expect(body.adapter).toBe('s3-test');
     expect(body.files.length).toBeGreaterThanOrEqual(15);
   });
@@ -146,8 +160,8 @@ test.describe('fm.brf.sh smoke', () => {
       )}`,
       { token: FM_TOKEN },
     );
-    expect(res.status()).toBe(200);
-    expect(res.headers()['content-type'] ?? '').toMatch(/markdown/);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type'] ?? '').toMatch(/markdown/);
   });
 
   test('preview WITHOUT adapter prefix 404s (regression for the SFC fix)', async () => {
@@ -158,6 +172,6 @@ test.describe('fm.brf.sh smoke', () => {
     );
     // Backend falls back to storages[0] = main (local) which doesn't
     // have example/demo.md → 404 is the correct, defensive response.
-    expect(res.status()).toBe(404);
+    expect(res.status).toBe(404);
   });
 });

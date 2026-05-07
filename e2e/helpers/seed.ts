@@ -16,7 +16,9 @@ export async function seedLocalStorage(
       name,
       driver: 'local',
       mount_path: mountPath,
-      config_json: JSON.stringify({ root: mountPath }),
+      // model.Storage's JSON tag is `config` (not `config_json`) and the
+      // field is json.RawMessage — pass an object, not a string.
+      config: { root: mountPath, path: 'fileman' },
       sync_mode: 'fsnotify',
       sync_interval_s: 0,
       enabled: true,
