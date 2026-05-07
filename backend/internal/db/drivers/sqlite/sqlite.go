@@ -242,7 +242,15 @@ func (s *Store) MoveNode(ctx context.Context, id int64, parentID *int64, name, p
 }
 
 func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error) {
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL`, storageID, before)
+	// SQLite stores `CURRENT_TIMESTAMP` as `YYYY-MM-DD HH:MM:SS` (space
+	// separator, second precision, no timezone). Go's time.Time bound
+	// via `?` is formatted as RFC3339 (`YYYY-MM-DDTHH:MM:SSZ`). That
+	// makes string comparison return seen_at < before for ANY same-
+	// second touch — `' '` (0x20) < `T` (0x54) — and the tombstone
+	// pass nukes rows the walk just touched. Format `before` to match
+	// CURRENT_TIMESTAMP's wire format so the comparison is honest.
+	beforeStr := before.UTC().Format("2006-01-02 15:04:05")
+	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL`, storageID, beforeStr)
 	if err != nil {
 		return nil, err
 	}
