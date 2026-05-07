@@ -171,12 +171,19 @@ func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
 }
 
 // Stat implements storage.Driver.
+//
+// 404 from HeadObject (NotFound / NoSuchKey) is mapped to
+// storage.ErrNotFound so the manager handler can surface it as a clean
+// 404 instead of a 500. Every other error keeps its original message.
 func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 	resp, err := d.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(p)),
 	})
 	if err != nil {
+		if isS3NotFound(err) {
+			return storage.Object{}, storage.ErrNotFound
+		}
 		return storage.Object{}, fmt.Errorf("s3: head: %w", err)
 	}
 	return storage.Object{
@@ -190,6 +197,34 @@ func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 	}, nil
 }
 
+// isS3NotFound matches the various ways the SDK signals a missing key:
+//   - typed errors (NotFound, NoSuchKey)
+//   - smithy.APIError codes (NoSuchKey, NotFound)
+//   - HTTP response error wrapping a StatusCode 404
+func isS3NotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nf *s3types.NotFound
+	if errors.As(err, &nf) {
+		return true
+	}
+	var nsk *s3types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return true
+	}
+	// Generic fallback for SDK error chains where the typed errors are
+	// wrapped past errors.As reach (rare; some Hetzner responses).
+	msg := err.Error()
+	if strings.Contains(msg, "StatusCode: 404") {
+		return true
+	}
+	if strings.Contains(msg, "NotFound") || strings.Contains(msg, "NoSuchKey") {
+		return true
+	}
+	return false
+}
+
 // Read implements storage.Driver.
 func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 	resp, err := d.client.GetObject(ctx, &s3.GetObjectInput{
@@ -197,6 +232,9 @@ func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 		Key:    aws.String(d.key(p)),
 	})
 	if err != nil {
+		if isS3NotFound(err) {
+			return nil, storage.ErrNotFound
+		}
 		return nil, fmt.Errorf("s3: get: %w", err)
 	}
 	return resp.Body, nil
