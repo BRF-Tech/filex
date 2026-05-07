@@ -3,11 +3,12 @@
 // Default behavior (`filex` with no args) is to start the HTTP server.
 // All subcommands accept --config /path/to/config.yaml (or FILEX_CONFIG env).
 //
-//	filex serve                       # default
+//	filex serve                                 # default
 //	filex migrate up | down | status
 //	filex admin reset-password [--email]
 //	filex admin random-password [--email]
 //	filex storage list | add | remove
+//	filex thumb backfill [--storage <id|name>] [--limit N] [--retry-failed]
 //	filex --version
 package main
 
@@ -17,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -52,6 +54,7 @@ func main() {
 		migrateCmd(),
 		adminCmd(),
 		storageCmd(),
+		thumbCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -390,5 +393,98 @@ func storageRemoveCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&name, "name", "", "storage name")
+	return c
+}
+
+// ─────────────────── thumb ───────────────────
+
+// thumbCmd groups thumbnail-related maintenance utilities.
+func thumbCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "thumb",
+		Short: "Thumbnail maintenance (backfill, retry, …)",
+	}
+	c.AddCommand(thumbBackfillCmd())
+	return c
+}
+
+// thumbBackfillCmd walks every persisted file node and (re)dispatches the
+// thumbnail pipeline. Useful after deploying a new image with extra deps
+// (e.g. ffmpeg / ghostscript / libreoffice) so existing rows produce thumbs.
+//
+//	filex thumb backfill                      — every enabled storage
+//	filex thumb backfill --storage local      — single storage by name
+//	filex thumb backfill --storage 2          — single storage by id
+//	filex thumb backfill --limit 100          — first 100 files (across all storages)
+//	filex thumb backfill --retry-failed       — re-run rows in state=failed
+//	filex thumb backfill --concurrency 8      — wider worker pool
+func thumbBackfillCmd() *cobra.Command {
+	var (
+		storageRef    string
+		limit         int
+		retryFailed   bool
+		concurrency   int
+		progressEvery int
+	)
+	c := &cobra.Command{
+		Use:   "backfill",
+		Short: "Generate thumbnails for every existing file node",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			setupLogger(cfg)
+
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			// Spin up a full Server (boot the pipeline + storage resolver
+			// + driver init), then call BackfillThumbs synchronously.
+			// We do NOT call Start() — no HTTP server needed.
+			s, err := server.New(ctx, cfg, embedded.FS)
+			if err != nil {
+				return err
+			}
+
+			opts := server.BackfillOptions{
+				Limit:         limit,
+				RetryFailed:   retryFailed,
+				Concurrency:   concurrency,
+				ProgressEvery: progressEvery,
+				OnProgress: func(st server.BackfillStats) {
+					fmt.Fprintf(os.Stdout, "thumb backfill: processed=%d ok=%d failed=%d skipped=%d\n",
+						st.Processed, st.OK, st.Failed, st.Skipped)
+				},
+			}
+
+			// Optional --storage filter — accept ID or name.
+			if storageRef != "" {
+				store := s.Store()
+				if id, perr := strconv.ParseInt(storageRef, 10, 64); perr == nil {
+					if _, gerr := store.GetStorage(ctx, id); gerr != nil {
+						return fmt.Errorf("--storage %s: %w", storageRef, gerr)
+					}
+					opts.StorageIDs = []int64{id}
+				} else {
+					st, gerr := store.GetStorageByName(ctx, storageRef)
+					if gerr != nil {
+						return fmt.Errorf("--storage %s: %w", storageRef, gerr)
+					}
+					opts.StorageIDs = []int64{st.ID}
+				}
+			}
+
+			stats, err := s.BackfillThumbs(ctx, opts)
+			fmt.Fprintf(os.Stdout, "{processed: %d, ok: %d, failed: %d, skipped: %d}\n",
+				stats.Processed, stats.OK, stats.Failed, stats.Skipped)
+			return err
+		},
+	}
+	c.Flags().StringVar(&storageRef, "storage", "", "limit to a single storage (id or name); empty = every enabled storage")
+	c.Flags().IntVar(&limit, "limit", 0, "stop after N files (0 = unlimited)")
+	c.Flags().BoolVar(&retryFailed, "retry-failed", false, "re-run thumbnails currently in state=failed")
+	c.Flags().IntVar(&concurrency, "concurrency", 4, "worker pool size")
+	c.Flags().IntVar(&progressEvery, "progress-every", 25, "emit a progress line every N processed files (0 = silent)")
 	return c
 }

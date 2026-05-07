@@ -34,6 +34,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 	"gitlab.com/brftech/filemanager/backend/internal/version"
+	"gitlab.com/brftech/filemanager/backend/internal/versioning"
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 	"gitlab.com/brftech/filemanager/backend/internal/thumb"
 	"gitlab.com/brftech/filemanager/backend/internal/trash"
@@ -69,6 +70,8 @@ type Server struct {
 	quota           *quota.Service
 	srv             *http.Server
 	idx             *search.Index
+	pipeline        *thumb.Pipeline
+	resolver        func(int64) (storage.Driver, error)
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -206,6 +209,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		sqlDB:    sqlDB,
 		worker:   worker,
 		idx:      idx,
+		pipeline: pipeline,
 		storages: map[int64]storage.Driver{},
 	}
 
@@ -259,6 +263,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			_, _ = resolver(st.ID)
 		}
 	}
+	srvObj.resolver = resolver
 
 	// Now that resolver exists, fill in dependents that need it.
 	caps.AttachStorageResolver(resolver)
@@ -374,6 +379,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	trashSvc := trash.New(store, resolver, quotaSvc)
 	srvObj.trash = trashSvc
 
+	// Versioning service — snapshots before destructive writes; the API
+	// layer exposes list/restore/hard-delete via /api/files/versions and
+	// /api/admin/versions.
+	versionsSvc := versioning.New(store, versioning.StorageResolver(resolver))
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -386,6 +396,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Ops:             opsSvc,
 		Trash:           trashSvc,
 		Quota:           quotaSvc,
+		Versions:        versionsSvc,
 		Queue:            srvObj.queue,
 		Notify:           srvObj.notify,
 		ReplicaService:   srvObj.replicaSvc,
@@ -506,6 +517,43 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		_ = s.sqlDB.Close()
 	}()
+
+	// Optional: thumbnail backfill on boot. Useful for instances that
+	// already have nodes in the cache but were running on a binary
+	// without the right dependencies — a one-shot run paints the
+	// existing rows so the SFC GridView lights up immediately.
+	//
+	// Setting FILEX_THUMB_BACKFILL_ON_BOOT=once runs the backfill
+	// exactly once per process start, in the background, AFTER the
+	// HTTP server is listening (so the boot path stays fast). Default
+	// off — operators must opt in.
+	if mode := strings.ToLower(strings.TrimSpace(os.Getenv("FILEX_THUMB_BACKFILL_ON_BOOT"))); mode == "once" || mode == "true" || mode == "1" {
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					slog.Warn("thumb backfill (boot): panic recovered", slog.Any("recover", rec))
+				}
+			}()
+			// Brief grace so the listener has registered.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			slog.Info("thumb backfill (boot): starting one-shot backfill")
+			res, err := s.BackfillThumbs(ctx, BackfillOptions{})
+			if err != nil {
+				slog.Warn("thumb backfill (boot): aborted", slog.String("err", err.Error()))
+				return
+			}
+			slog.Info("thumb backfill (boot): done",
+				slog.Int("processed", res.Processed),
+				slog.Int("ok", res.OK),
+				slog.Int("failed", res.Failed),
+				slog.Int("skipped", res.Skipped),
+			)
+		}()
+	}
 
 	slog.Info("filex listening", slog.String("addr", s.cfg.Listen))
 	if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

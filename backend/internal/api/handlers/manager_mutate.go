@@ -133,10 +133,14 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 				Type:       model.NodeTypeDirectory,
 				SyncState:  model.SyncStateSynced,
 			}
-			if _, err := h.Store.CreateNode(r.Context(), n); err != nil {
+			if created, err := h.Store.CreateNode(r.Context(), n); err != nil {
 				slog.Warn("manager: newfolder db create",
 					slog.String("path", clean),
 					slog.String("err", err.Error()))
+			} else {
+				// Push to Bleve so the search box finds the new dir
+				// without waiting for the next sync run.
+				h.indexNode(r.Context(), created)
 			}
 		}
 	}
@@ -343,6 +347,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			hash := managerPathHash(current.ID, origClean)
 			if existing, err := h.Store.GetNodeByPathIncludingDeleted(r.Context(), current.ID, hash); err == nil && existing != nil {
 				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
+				h.removeFromIndex(r.Context(), existing.ID)
 			}
 			continue
 		}
@@ -383,6 +388,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			} else {
 				_ = h.Store.SoftDeleteNode(r.Context(), existing.ID)
 			}
+			h.removeFromIndex(r.Context(), existing.ID)
 		}
 	}
 
@@ -482,6 +488,11 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		hash := managerPathHash(current.ID, clean)
 		if existing, _ := h.Store.GetNodeByPath(r.Context(), current.ID, hash); existing != nil {
 			_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, fh.Size, mime, existing.Etag, time.Now())
+			// Refresh the row pointer so the index entry carries the
+			// new size/mime — IndexNode keys off node fields.
+			if fresh, _ := h.Store.GetNode(r.Context(), existing.ID); fresh != nil {
+				h.indexNode(r.Context(), fresh)
+			}
 			continue
 		}
 		n2 := &model.Node{
@@ -496,10 +507,12 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			Mime:       mime,
 			SyncState:  model.SyncStateSynced,
 		}
-		if _, err := h.Store.CreateNode(r.Context(), n2); err != nil {
+		if created, err := h.Store.CreateNode(r.Context(), n2); err != nil {
 			slog.Warn("manager: upload db create",
 				slog.String("path", clean),
 				slog.String("err", err.Error()))
+		} else {
+			h.indexNode(r.Context(), created)
 		}
 	}
 
@@ -627,6 +640,12 @@ func (h *Manager) applyDBMove(ctx context.Context, storageID int64, srcRel, dstR
 			slog.String("to", dstClean),
 			slog.String("err", err.Error()))
 		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
+		h.removeFromIndex(ctx, existing.ID)
+		return
+	}
+	// Refresh + re-index the moved row so search hits the new path.
+	if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
+		h.indexNode(ctx, fresh)
 	}
 }
 

@@ -31,6 +31,7 @@ import (
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 	"gitlab.com/brftech/filemanager/backend/internal/thumb"
 	"gitlab.com/brftech/filemanager/backend/internal/trash"
+	"gitlab.com/brftech/filemanager/backend/internal/versioning"
 )
 
 // Deps is the bundle of services every handler needs.
@@ -46,6 +47,7 @@ type Deps struct {
 	Ops              *ops.Service
 	Trash            *trash.Service
 	Quota            *quota.Service
+	Versions         *versioning.Service
 	Queue            queue.Driver
 	Notify           notify.Service
 	ReplicaService   *replica.Service
@@ -74,6 +76,11 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
+	if d.Index != nil {
+		// Wire Bleve so vfSearch consults the index before falling
+		// back to SQL LIKE.
+		mh.AttachSearchIndex(d.Index)
+	}
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
@@ -105,6 +112,7 @@ func BuildRouter(d *Deps) http.Handler {
 	metaH := handlers.NewMeta(d.Store)
 	quotaH := handlers.NewQuota(d.Quota)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
+	versionsH := handlers.NewVersions(d.Store, d.Versions)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -203,6 +211,15 @@ func BuildRouter(d *Deps) http.Handler {
 
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)
+
+			// Version history — list + restore. Admin-only HardDelete is
+			// mounted under /api/admin/versions/{id} below. The GET takes
+			// `?node_id=N`; POST /restore accepts {node_id, version_id,
+			// snapshot_current}.
+			r.Route("/versions", func(r chi.Router) {
+				r.Get("/", versionsH.List)
+				r.Post("/restore", versionsH.Restore)
+			})
 		})
 	})
 
@@ -262,6 +279,10 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/quota", func(r chi.Router) {
 				r.Post("/{user_id}", quotaH.AdminSet)
 				r.Post("/{user_id}/recompute", quotaH.AdminRecompute)
+			})
+
+			r.Route("/versions", func(r chi.Router) {
+				r.Delete("/{id}", versionsH.HardDelete)
 			})
 
 			r.Route("/external", func(r chi.Router) {

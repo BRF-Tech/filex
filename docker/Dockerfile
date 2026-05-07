@@ -1,13 +1,20 @@
-# filex slim image (~40 MB)
+# filex default image (~600-700 MB)
 # - Pure Go binary (CGO=0, modernc.org/sqlite)
-# - No external thumbnail tools (image still works via Go GD; ffmpeg/ghostscript/libreoffice absent)
-# - Use Dockerfile.full if you need full thumbnail support
+# - + ffmpeg (video thumbs)
+# - + ghostscript + poppler-utils (PDF → JPEG, page 1)
+# - + libreoffice (headless soffice for .doc/.xls/.ppt/.odt/.ods/.odp → PDF → JPEG)
+# - + ttf-liberation + ttf-dejavu + font-noto so libreoffice/Ghostscript don't tofu non-ASCII glyphs
+#
+# Image size grew from ~40 MB (no thumb deps) to ~600-700 MB; the bulk is libreoffice.
+# Trade-off accepted: every advertised thumbnail format actually works at runtime.
+# A truly-slim variant (frontend + Go binary only) is no longer kept — the previous
+# Dockerfile.full has been merged into this single canonical recipe.
 #
 # Build (from repo root):
-#   docker build -t brftech/filex:slim -f docker/Dockerfile .
+#   docker build -t brftech/filex:latest -f docker/Dockerfile .
 #
 # Run:
-#   docker run -p 5212:5212 -v $(pwd)/data:/data brftech/filex:slim
+#   docker run -p 5212:5212 -v $(pwd)/data:/data brftech/filex:latest
 
 # ---------------------------------------------------------------------------
 # Stage 1: Build npm packages (filex-core, webcomponent, react) + admin UI
@@ -84,13 +91,35 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/filex
 
 # ---------------------------------------------------------------------------
-# Stage 4: Slim runtime
+# Stage 4: Runtime with full thumbnail toolchain
 # ---------------------------------------------------------------------------
 FROM alpine:3.20
 
-# su-exec lets us drop privileges if the user mounts /data with a custom UID.
-RUN apk --no-cache add ca-certificates tzdata su-exec && \
-    addgroup -S filex && adduser -S -G filex filex
+# Single apk layer — keeps the Docker layer cache friendly when nothing in
+# the dep list changes between builds.
+#   ca-certificates / tzdata / su-exec — base runtime niceties.
+#   ffmpeg                              — video thumbnails (1st keyframe).
+#   ghostscript + poppler-utils         — PDF → JPEG (page 1). gs preferred,
+#                                         pdftoppm as fallback (matches
+#                                         backend/internal/thumb/pdf.go).
+#   libreoffice                         — headless `soffice --headless --convert-to pdf`
+#                                         for office docs (matches thumb/office.go).
+#                                         Pulls in writer/calc/impress/draw.
+#   font-{noto,noto-cjk} + ttf-*        — without these libreoffice and
+#                                         Ghostscript render Unicode as boxes.
+RUN apk --no-cache add \
+        ca-certificates \
+        tzdata \
+        su-exec \
+        ffmpeg \
+        ghostscript \
+        poppler-utils \
+        libreoffice \
+        ttf-liberation \
+        ttf-dejavu \
+        font-noto \
+        font-noto-cjk \
+    && addgroup -S filex && adduser -S -G filex filex
 
 COPY --from=backend-build /out/filex /usr/local/bin/filex
 
@@ -98,7 +127,8 @@ EXPOSE 5212
 VOLUME ["/data"]
 
 ENV FILEX_DATA_DIR=/data \
-    FILEX_LISTEN=0.0.0.0:5212
+    FILEX_LISTEN=0.0.0.0:5212 \
+    FILEX_THUMBS_ENABLED=true
 
 # Healthcheck — assumes /healthz is mounted unauthenticated by the server.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

@@ -152,6 +152,21 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/About.vue'),
         meta: { breadcrumb: 'nav.about' },
       },
+      {
+        // Lookup page → routes to per-node version history. See
+        // AdminFiles.vue for the rationale (SFC context menu can't be
+        // extended from the embedder).
+        path: 'files',
+        name: 'admin-files',
+        component: () => import('@/views/AdminFiles.vue'),
+        meta: { breadcrumb: 'nav.adminFiles' },
+      },
+      {
+        path: 'files/:nodeId/versions',
+        name: 'files.versions',
+        component: () => import('@/views/FileVersions.vue'),
+        meta: { breadcrumb: 'versions.title', parent: 'admin-files' },
+      },
     ],
   },
   {

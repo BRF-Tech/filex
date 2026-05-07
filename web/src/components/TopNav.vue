@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth';
 import LocaleSwitcher from './LocaleSwitcher.vue';
 import DarkModeToggle from './DarkModeToggle.vue';
 import NotificationBell from './NotificationBell.vue';
+import QuotaWidget from './QuotaWidget.vue';
 
 const emit = defineEmits<{ (e: 'toggleSidebar'): void }>();
 
@@ -48,6 +49,7 @@ function gotoSearch() {
     </button>
 
     <div class="ml-auto flex items-center gap-1.5">
+      <QuotaWidget />
       <NotificationBell />
       <DarkModeToggle />
       <LocaleSwitcher />

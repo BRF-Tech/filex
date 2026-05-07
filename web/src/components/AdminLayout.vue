@@ -4,6 +4,7 @@ import { RouterView } from 'vue-router';
 import Sidebar from './Sidebar.vue';
 import TopNav from './TopNav.vue';
 import Breadcrumbs from './Breadcrumbs.vue';
+import PendingOpsTray from './PendingOpsTray.vue';
 
 const sidebarOpen = ref(true);
 
@@ -50,6 +51,12 @@ function toggleSidebar() {
         </div>
       </footer>
     </div>
+
+    <!-- Bottom-right consolidated progress for async copy/move/delete ops.
+      Mounted at the layout level so it's visible from every admin page,
+      not just /admin/explore. See `PendingOpsTray.vue` + `pendingOps`
+      store for polling details. -->
+    <PendingOpsTray />
   </div>
 </template>
 

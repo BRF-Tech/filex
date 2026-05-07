@@ -15,6 +15,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
 
@@ -22,6 +23,9 @@ import (
 type Manager struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
+	// Index is consulted by `vfSearch` BEFORE falling back to SQL LIKE.
+	// nil is fine — search degrades to LIKE-only.
+	Index *search.Index
 }
 
 // NewManager constructs a Manager handler.
@@ -30,6 +34,29 @@ type Manager struct {
 // will return 503 in that case.
 func NewManager(store db.Store, resolver func(int64) (storage.Driver, error)) *Manager {
 	return &Manager{Store: store, StorageResolver: resolver}
+}
+
+// AttachSearchIndex wires the Bleve index into the manager. Optional —
+// without it, vfSearch falls back to SQL LIKE only.
+func (h *Manager) AttachSearchIndex(idx *search.Index) {
+	h.Index = idx
+}
+
+// indexNode is a no-op if no index is wired. Errors are swallowed —
+// search staleness is not worth failing a write.
+func (h *Manager) indexNode(ctx context.Context, n *model.Node) {
+	if h.Index == nil || n == nil {
+		return
+	}
+	_ = h.Index.IndexNode(ctx, n)
+}
+
+// removeFromIndex mirrors indexNode for soft-delete / hard-delete paths.
+func (h *Manager) removeFromIndex(ctx context.Context, id int64) {
+	if h.Index == nil {
+		return
+	}
+	_ = h.Index.DeleteNode(ctx, id)
 }
 
 // List dispatches between two query shapes on the same path:
@@ -419,19 +446,46 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 	return out
 }
 
-// vfSearch runs a LIKE search inside the storage and projects the
-// matches onto FileNode shape. The dirname stays at the requested
-// folder so the breadcrumb keeps its place.
+// vfSearch runs a search inside the storage and projects matches onto
+// the FileNode shape. The dirname stays at the requested folder so the
+// breadcrumb keeps its place.
+//
+// Strategy: try the Bleve full-text index first (handles content + name
+// matching, fuzzy, prefix). Fall back to SQL LIKE on `nodes.name` when
+// the index is missing, returns nothing, or errors.
 func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Storage, rel, filter string, storageNames []string) {
 	if filter == "" {
 		h.vfIndex(w, r, s, rel, storageNames, false)
 		return
 	}
-	nodes, err := h.Store.SearchNodes(r.Context(), s.ID, filter, 250)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+
+	var nodes []*model.Node
+
+	// 1) Bleve.
+	if h.Index != nil {
+		hits := h.Index.SafeSearch(r.Context(), filter, 250)
+		for _, hit := range hits {
+			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
+			if err != nil || n == nil || n.DeletedAt != nil {
+				continue
+			}
+			if n.StorageID != s.ID {
+				continue
+			}
+			nodes = append(nodes, n)
+		}
 	}
+
+	// 2) Fall back to SQL LIKE when the index didn't return anything.
+	if len(nodes) == 0 {
+		fallback, err := h.Store.SearchNodes(r.Context(), s.ID, search.SQLLike(filter), 250)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		nodes = fallback
+	}
+
 	files := projectFileNodes(s.Name, nodes, false)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"adapter":   s.Name,
@@ -441,6 +495,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		"files":     files,
 	})
 }
+
 
 // resolveDirNode walks `rel` (slash-separated) under the storage root
 // and returns the parent ID at which to list. An empty rel == root
