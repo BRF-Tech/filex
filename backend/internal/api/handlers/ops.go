@@ -107,8 +107,28 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 
 	dest := ""
 	if req.Target != "" {
-		_, t := splitAdapterPath(req.Target)
-		dest = strings.Trim(t, "/")
+		// SFC's per-verb endpoints model `target` as a directory
+		// (the destination FOLDER for copy/move). The unified ops
+		// worker's `joinIntoDir(dest, src)` keys off a trailing
+		// slash to choose drop-into-dir vs rename-to-literal. The
+		// SFC may or may not send the trailing slash — force one on
+		// here so the user-facing semantics match the docs.
+		// Bypass splitAdapterPath (which strips both ends) and
+		// extract the relative manually so we keep the slash.
+		raw := req.Target
+		if idx := strings.Index(raw, "://"); idx >= 0 {
+			raw = raw[idx+3:]
+		}
+		raw = strings.TrimLeft(raw, "/") // drop leading slashes
+		if raw == "" {
+			// Storage root — drop sources at the root with their
+			// own basename.
+			dest = ""
+		} else if strings.HasSuffix(raw, "/") {
+			dest = raw
+		} else {
+			dest = raw + "/"
+		}
 	}
 
 	op, err := o.Service.Submit(r.Context(), kind, storageID, sources, dest)
