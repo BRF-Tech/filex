@@ -308,6 +308,19 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Pre-sync escape hatch: brand-new storages have an empty cache
+	// even though the driver may have hundreds of objects sitting on
+	// disk/in the bucket. Trust the driver over the cache until the
+	// first sync has run — afterwards the cache is authoritative
+	// (truly-empty dirs return [] without firing an extra driver
+	// list call).
+	if len(nodes) == 0 && s.LastSyncAt == nil {
+		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly) {
+			return
+		}
+	}
+
 	files := projectFileNodes(s.Name, nodes, dirsOnly)
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
