@@ -338,13 +338,11 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 		return false
 	}
 	clean := strings.Trim(rel, "/")
-	// Verify the directory actually exists on the driver before listing.
-	if clean != "" {
-		stat, err := drv.Stat(r.Context(), clean)
-		if err != nil || stat.Kind != storage.KindDirectory {
-			return false
-		}
-	}
+	// Use List (not Stat) to verify the dir — many drivers (S3, GCS,
+	// blob stores) only know about objects, not "directories", and
+	// HeadObject on a prefix returns 404 even when listing it shows
+	// children. A successful List with no error is the canonical
+	// "this dir is browsable" signal across every driver we ship.
 	objs, err := drv.List(r.Context(), clean)
 	if err != nil {
 		return false
