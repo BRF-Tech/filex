@@ -200,13 +200,14 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	}
 	defer rc.Close()
 
-	// MIME — prefer the driver-reported value, fall back to extension
-	// lookup if Stat didn't fill it. mimeByExt is small + intentional
-	// (no net/http.DetectContentType because we don't need a 512-byte
-	// peek; the FileExplorer cares mostly about top-level types).
-	mime := stat.Mime
+	// MIME — extension lookup wins so svg/md/csv/html render the right
+	// way in the browser (DB cached + driver-reported mime is often
+	// `text/plain; charset=utf-8` after sync because Go's http.Detect
+	// doesn't know markdown/csv/svg, breaking inline preview). Driver
+	// value is the fallback for extensions we don't recognize.
+	mime := mimeByExt(rel)
 	if mime == "" {
-		mime = mimeByExt(rel)
+		mime = stat.Mime
 	}
 	if mime == "" {
 		mime = "application/octet-stream"
