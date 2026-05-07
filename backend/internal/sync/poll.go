@@ -22,7 +22,14 @@ import (
 //      but only if seen_count >= 0.7 * lastSeenCount (false-positive guard).
 //   4. Close the sync_runs row with the final status.
 func (s *storageSyncer) RunOnce(ctx context.Context) error {
-	runStart := time.Now()
+	// `runStart` is truncated to second precision to match SQLite's
+	// CURRENT_TIMESTAMP resolution. Without the truncation a sub-second
+	// runStart compares STRICTLY GREATER than every same-second seen_at
+	// touched during the run (because TouchNodeSeen + UpdateNodeMeta
+	// both write CURRENT_TIMESTAMP, which has no fractional part). The
+	// tombstone-pass would then re-delete the nodes the walk just
+	// resurrected — exactly the loop we hit on s3-test://.
+	runStart := time.Now().Truncate(time.Second)
 	prevSeen, _ := s.previousSeenCount(ctx)
 	run, err := s.store.CreateSyncRun(ctx, s.storage.ID, s.storage.LastSyncToken)
 	if err != nil {
