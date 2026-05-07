@@ -114,7 +114,10 @@ onMounted(load);
                 {{ t(`external.states.${s.last_state}` as any) }}
               </Badge>
             </h2>
-            <p v-if="s.last_checked_at" class="text-xs text-zinc-500 mt-0.5">
+            <p
+              v-if="s.last_checked_at && !s.last_checked_at.startsWith('0001-01-01') && !s.last_checked_at.startsWith('0000')"
+              class="text-xs text-zinc-500 mt-0.5"
+            >
               {{ formatRelative(s.last_checked_at, locale) }}
             </p>
             <p v-if="s.last_error" class="text-xs text-rose-600 dark:text-rose-400 font-mono mt-1">
