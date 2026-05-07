@@ -49,9 +49,21 @@ const error = ref<string | null>(null);
 const restoreTarget = ref<NodeVersion | null>(null);
 const snapshotCurrent = ref(true);
 const restoring = ref(false);
+const restoreOpen = computed({
+  get: () => restoreTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) restoreTarget.value = null;
+  },
+});
 
 const purgeTarget = ref<NodeVersion | null>(null);
 const purging = ref(false);
+const purgeOpen = computed({
+  get: () => purgeTarget.value !== null,
+  set: (v: boolean) => {
+    if (!v) purgeTarget.value = null;
+  },
+});
 
 const isAdmin = computed(() => auth.isAdmin);
 
@@ -223,8 +235,8 @@ onMounted(load);
       </table>
     </div>
 
-    <Modal v-if="restoreTarget" v-model="restoreTarget" :title="t('versions.restoreModalTitle')">
-      <p class="text-sm text-zinc-700 dark:text-zinc-300">
+    <Modal v-model="restoreOpen" :title="t('versions.restoreModalTitle')">
+      <p v-if="restoreTarget" class="text-sm text-zinc-700 dark:text-zinc-300">
         {{ t('versions.restoreModalBody', { n: restoreTarget.version_n }) }}
       </p>
       <label class="mt-3 inline-flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
@@ -246,8 +258,8 @@ onMounted(load);
       </template>
     </Modal>
 
-    <Modal v-if="purgeTarget" v-model="purgeTarget" :title="t('versions.purgeModalTitle')">
-      <p class="text-sm text-zinc-700 dark:text-zinc-300">
+    <Modal v-model="purgeOpen" :title="t('versions.purgeModalTitle')">
+      <p v-if="purgeTarget" class="text-sm text-zinc-700 dark:text-zinc-300">
         {{ t('versions.purgeModalBody', { n: purgeTarget.version_n }) }}
       </p>
       <template #footer>
