@@ -287,9 +287,19 @@ func mimeByExt(name string) string {
 
 // vfIndex resolves a relative path inside a storage to a parent
 // node ID, lists children, and returns the FileNode-shaped response.
+//
+// Cache-first, driver-fallback: when the DB cache doesn't yet know the
+// requested dir (newly created via mkdir, just renamed, external write,
+// pre-sync) we ask the backing driver directly so the SFC's reactive
+// store still re-renders. The next sync run reconciles the cache.
 func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool) {
 	parentID, dirname, err := h.resolveDirNode(r.Context(), s.ID, rel)
 	if err != nil {
+		// DB cache miss — try the driver. If the dir really doesn't
+		// exist there either, surface the original 404.
+		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly) {
+			return
+		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
@@ -310,6 +320,88 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		"read_only": s.ReadOnly,
 		"files":     files,
 	})
+}
+
+// vfIndexFromDriver lists `rel` directly via the storage driver and
+// writes the same vuefinder response shape vfIndex does. Used as a
+// fallback when DB cache is missing the dir (post-mutation, pre-sync).
+//
+// Returns true iff a response was written. False means the driver also
+// doesn't have the dir (or no resolver) — caller should write its own
+// 404 with the cache-side error message.
+func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool) bool {
+	if h.StorageResolver == nil {
+		return false
+	}
+	drv, err := h.StorageResolver(s.ID)
+	if err != nil {
+		return false
+	}
+	clean := strings.Trim(rel, "/")
+	// Verify the directory actually exists on the driver before listing.
+	if clean != "" {
+		stat, err := drv.Stat(r.Context(), clean)
+		if err != nil || stat.Kind != storage.KindDirectory {
+			return false
+		}
+	}
+	objs, err := drv.List(r.Context(), clean)
+	if err != nil {
+		return false
+	}
+	files := projectDriverObjects(s.Name, clean, objs, dirsOnly)
+	if dirsOnly {
+		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
+		return true
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"adapter":   s.Name,
+		"storages":  storageNames,
+		"dirname":   joinAdapterPath(s.Name, clean),
+		"read_only": s.ReadOnly,
+		"files":     files,
+	})
+	return true
+}
+
+// projectDriverObjects shapes storage.Object entries into the same
+// FileNode contract projectFileNodes emits from DB rows. Used by the
+// driver-fallback path in vfIndex when the cache is cold.
+func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly bool) []map[string]any {
+	out := make([]map[string]any, 0, len(objs))
+	for _, o := range objs {
+		isDir := o.Kind == storage.KindDirectory
+		if dirsOnly && !isDir {
+			continue
+		}
+		typ := "file"
+		if isDir {
+			typ = "dir"
+		}
+		// Hide the same internal entries the cache projector hides.
+		if strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" {
+			continue
+		}
+		rel := o.Path
+		if rel == "" {
+			rel = path.Join(dir, o.Name)
+		}
+		ext := strings.ToLower(strings.TrimPrefix(path.Ext(o.Name), "."))
+		entry := map[string]any{
+			"path":      joinAdapterPath(adapter, rel),
+			"basename":  o.Name,
+			"type":      typ,
+			"extension": ext,
+			"size":      o.Size,
+			"mime_type": o.Mime,
+			"storage":   adapter,
+		}
+		if !o.Mtime.IsZero() {
+			entry["last_modified"] = o.Mtime.UnixMilli()
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // vfSearch runs a LIKE search inside the storage and projects the
