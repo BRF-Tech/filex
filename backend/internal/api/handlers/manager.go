@@ -146,14 +146,142 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 		}
 		h.vfSearch(w, r, current, rel, filter, storageNames)
 		return
+	case "preview":
+		h.vfStream(w, r, current, rel, false)
+		return
+	case "download":
+		h.vfStream(w, r, current, rel, true)
+		return
 	default:
-		// Mutating actions (newfolder, rename, move, delete, upload)
-		// are intentionally not wired here — the SFC's read path is
-		// what matters for the demo Explore page. Returning 501 is
-		// surfaced to the user via the FileExplorer toast rather than
-		// a route 404.
+		// Mutating verbs (newfolder/rename/move/delete/upload) live in
+		// manager_mutate.go and are dispatched from the POST route.
+		// GET fallthrough lands here for an unknown action.
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "action not implemented: " + action})
 	}
+}
+
+// vfStream serves a file body for action=preview (inline) and
+// action=download (attachment). Path is the SFC's relative form
+// (no `<adapter>://` prefix, just `dir/file.ext`). Resolves the
+// file via the storage Driver — does NOT consult the DB cache so
+// freshly-uploaded files appear before the next sync run.
+func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, asAttachment bool) {
+	if h.StorageResolver == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage offline"})
+		return
+	}
+	rel = strings.TrimSpace(strings.TrimPrefix(rel, "/"))
+	if rel == "" || strings.Contains(rel, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	drv, err := h.StorageResolver(s.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	stat, err := drv.Stat(r.Context(), rel)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if stat.Kind == storage.KindDirectory {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "is a directory"})
+		return
+	}
+	rc, err := drv.Read(r.Context(), rel)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rc.Close()
+
+	// MIME — prefer the driver-reported value, fall back to extension
+	// lookup if Stat didn't fill it. mimeByExt is small + intentional
+	// (no net/http.DetectContentType because we don't need a 512-byte
+	// peek; the FileExplorer cares mostly about top-level types).
+	mime := stat.Mime
+	if mime == "" {
+		mime = mimeByExt(rel)
+	}
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", mime)
+	if stat.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
+	}
+	if asAttachment {
+		base := path.Base(rel)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+base+`"`)
+	} else {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	_, _ = io.Copy(w, rc)
+}
+
+// mimeByExt picks a Content-Type from the file extension. Used when
+// the storage driver's Stat doesn't carry a MIME (e.g. files written
+// outside filex). Keeps the table small — the browser handles the
+// long tail via X-Content-Type-Options=nosniff inline.
+func mimeByExt(name string) string {
+	ext := strings.ToLower(name[strings.LastIndex(name, ".")+1:])
+	switch ext {
+	case "txt", "log":
+		return "text/plain; charset=utf-8"
+	case "md":
+		return "text/markdown; charset=utf-8"
+	case "json":
+		return "application/json"
+	case "yaml", "yml":
+		return "text/yaml; charset=utf-8"
+	case "xml":
+		return "application/xml"
+	case "html", "htm":
+		return "text/html; charset=utf-8"
+	case "css":
+		return "text/css; charset=utf-8"
+	case "js", "mjs":
+		return "application/javascript; charset=utf-8"
+	case "csv":
+		return "text/csv; charset=utf-8"
+	case "go", "py", "rs", "java", "rb", "ts", "vue":
+		return "text/plain; charset=utf-8"
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	case "svg":
+		return "image/svg+xml"
+	case "pdf":
+		return "application/pdf"
+	case "mp3":
+		return "audio/mpeg"
+	case "wav":
+		return "audio/wav"
+	case "ogg":
+		return "audio/ogg"
+	case "mp4":
+		return "video/mp4"
+	case "webm":
+		return "video/webm"
+	case "zip":
+		return "application/zip"
+	case "tar":
+		return "application/x-tar"
+	case "gz":
+		return "application/gzip"
+	}
+	return ""
 }
 
 // vfIndex resolves a relative path inside a storage to a parent
