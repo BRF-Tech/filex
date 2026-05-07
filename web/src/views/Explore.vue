@@ -112,11 +112,21 @@ watch(
       return;
     }
     if (selectedStorageId.value && items.some((s) => s.id === selectedStorageId.value)) return;
-    const fromQuery = Number(route.query.storage);
-    selectedStorageId.value =
-      Number.isFinite(fromQuery) && items.some((s) => s.id === fromQuery)
-        ? fromQuery
-        : items[0].id;
+
+    // `?storage=` accepts EITHER the numeric id OR the storage name —
+    // makes deep links readable (`/admin/explore?storage=s3-test`)
+    // without breaking older bookmarks that used `?storage=2`.
+    const raw = route.query.storage;
+    const rawStr = Array.isArray(raw) ? raw[0] : raw;
+    const numeric = Number(rawStr);
+    let picked: number | null = null;
+    if (Number.isFinite(numeric) && items.some((s) => s.id === numeric)) {
+      picked = numeric;
+    } else if (typeof rawStr === 'string' && rawStr) {
+      const match = items.find((s) => s.name === rawStr);
+      if (match) picked = match.id;
+    }
+    selectedStorageId.value = picked ?? items[0].id;
     remountKey.value += 1;
   },
   { immediate: true },
