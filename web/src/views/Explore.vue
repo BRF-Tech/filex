@@ -104,6 +104,23 @@ function onExplorerError(err: { message: string; context?: unknown }) {
   console.warn('[explore] FileExplorer error:', err);
 }
 
+// Resolve `?storage=` against an item list.
+// Accepts EITHER the numeric id OR the storage name. Older deep links
+// using `?storage=2` keep working, newer ones use the readable name
+// (`?storage=s3-test`). Returns null if the query doesn't match.
+function resolveQueryStorage(items: Array<{ id: number; name: string }>): number | null {
+  const raw = route.query.storage;
+  const rawStr = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof rawStr !== 'string' || !rawStr) return null;
+  const numeric = Number(rawStr);
+  if (Number.isFinite(numeric)) {
+    const byId = items.find((s) => s.id === numeric);
+    if (byId) return byId.id;
+  }
+  const byName = items.find((s) => s.name === rawStr);
+  return byName ? byName.id : null;
+}
+
 watch(
   () => storages.items,
   (items) => {
@@ -111,22 +128,23 @@ watch(
       selectedStorageId.value = null;
       return;
     }
-    if (selectedStorageId.value && items.some((s) => s.id === selectedStorageId.value)) return;
 
-    // `?storage=` accepts EITHER the numeric id OR the storage name —
-    // makes deep links readable (`/admin/explore?storage=s3-test`)
-    // without breaking older bookmarks that used `?storage=2`.
-    const raw = route.query.storage;
-    const rawStr = Array.isArray(raw) ? raw[0] : raw;
-    const numeric = Number(rawStr);
-    let picked: number | null = null;
-    if (Number.isFinite(numeric) && items.some((s) => s.id === numeric)) {
-      picked = numeric;
-    } else if (typeof rawStr === 'string' && rawStr) {
-      const match = items.find((s) => s.name === rawStr);
-      if (match) picked = match.id;
+    // The query wins over a stale selection — when the URL says
+    // `?storage=foo` we want `foo` even if `selectedStorageId` is
+    // already pointing at `main` from an earlier list. Without this
+    // the immediate-watcher fired against a cached items[] (without
+    // foo) and locked the selection to items[0]; the post-fetch
+    // re-fire then early-returned because the stale id was 'still
+    // valid'.
+    const fromQuery = resolveQueryStorage(items);
+    if (fromQuery !== null && fromQuery !== selectedStorageId.value) {
+      selectedStorageId.value = fromQuery;
+      remountKey.value += 1;
+      return;
     }
-    selectedStorageId.value = picked ?? items[0].id;
+
+    if (selectedStorageId.value && items.some((s) => s.id === selectedStorageId.value)) return;
+    selectedStorageId.value = fromQuery ?? items[0].id;
     remountKey.value += 1;
   },
   { immediate: true },
