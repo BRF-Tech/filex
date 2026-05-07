@@ -129,6 +129,48 @@ test.describe('fm.brf.sh smoke', () => {
     await ctx.dispose();
   });
 
+  test('/api/capabilities emits flat aliases AND nested thumbs shape', async () => {
+    // Guards 87cf497 — the SFC reads `caps.ffmpeg` / `caps.onlyoffice_url`
+    // / `caps.max_chunk_mb` directly, while the admin SPA still expects
+    // the rich nested `thumbs.{image,video,pdf,office}`. The handler
+    // ships BOTH so both consumers stay happy.
+    const res = await probe(FM_HOST, '/api/capabilities');
+    expect(res.status).toBe(200);
+    const body = res.json() as {
+      // flat aliases:
+      ffmpeg?: boolean;
+      ghostscript?: boolean;
+      libreoffice?: boolean;
+      max_chunk_mb?: number;
+      upload_limit_mb?: number;
+      onlyoffice_url?: string;
+      drawio_url?: string;
+      // nested:
+      thumbs?: { image?: boolean; video?: boolean; pdf?: boolean; office?: boolean };
+    };
+
+    // Flat aliases — types matter (booleans / numbers / strings).
+    expect(typeof body.ffmpeg, '`ffmpeg` flat alias').toBe('boolean');
+    expect(typeof body.ghostscript, '`ghostscript` flat alias').toBe('boolean');
+    expect(typeof body.libreoffice, '`libreoffice` flat alias').toBe('boolean');
+    expect(typeof body.max_chunk_mb, '`max_chunk_mb` flat alias').toBe('number');
+    expect(typeof body.upload_limit_mb, '`upload_limit_mb` flat alias').toBe('number');
+    expect(typeof body.onlyoffice_url, '`onlyoffice_url` flat alias').toBe('string');
+    expect(typeof body.drawio_url, '`drawio_url` flat alias').toBe('string');
+
+    // Nested shape still present.
+    expect(body.thumbs, 'nested thumbs object').toBeTruthy();
+    expect(typeof body.thumbs!.image).toBe('boolean');
+    expect(typeof body.thumbs!.video).toBe('boolean');
+    expect(typeof body.thumbs!.pdf).toBe('boolean');
+    expect(typeof body.thumbs!.office).toBe('boolean');
+
+    // Cross-check: flat aliases reflect the nested booleans.
+    expect(body.ffmpeg).toBe(body.thumbs!.video);
+    expect(body.ghostscript).toBe(body.thumbs!.pdf);
+    expect(body.libreoffice).toBe(body.thumbs!.office);
+  });
+
   test.skip(!FM_TOKEN, 'E2E_FM_TOKEN not set');
 
   test('storage list exposes both seeded adapters (main + s3-test)', async () => {
