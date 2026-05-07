@@ -27,6 +27,11 @@ COPY web/package.json ./web/
 
 # Install all workspace deps (core/webcomponent/react/web). Use --no-frozen-lockfile
 # in dev images that don't ship a lockfile yet; CI ships a lockfile so it's frozen.
+# vue-tsc OOMs the default 1.7 GB Node heap once we pull in
+# @brftech/filex-core (workspace dep with code-split viewers). Bump
+# the budget to 4 GB for every Node process during the build.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 
 # Copy sources after install for max cache hit.
