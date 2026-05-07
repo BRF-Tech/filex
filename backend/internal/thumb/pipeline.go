@@ -62,6 +62,12 @@ func (p *Pipeline) AttachStorage(id int64, drv storage.Driver) {
 
 // GenerateThumb dispatches based on node MIME and updates the thumbnails
 // row. Idempotent — safe to call repeatedly.
+//
+// Falls back to the file extension when `node.Mime` is empty — this is
+// the common case for files discovered by sync's driver.List, where
+// most drivers don't populate the mime field. Without the fallback every
+// synced file got `state=skipped` and the pipeline never produced a
+// thumbnail for the demo fixtures.
 func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 	if node == nil || node.Type != model.NodeTypeFile {
 		return ErrSkipped
@@ -74,6 +80,9 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 	_ = p.store.UpsertThumbnail(ctx, t)
 
 	mime := strings.ToLower(node.Mime)
+	if mime == "" {
+		mime = mimeFromName(node.Name)
+	}
 	var err error
 	switch {
 	case strings.HasPrefix(mime, "image/"):
@@ -109,6 +118,75 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 // CachePath returns the disk path where a thumb is stored for node ID.
 func (p *Pipeline) CachePath(nodeID int64) string {
 	return fmt.Sprintf("%s/%d.jpg", p.cacheDir, nodeID)
+}
+
+// mimeFromName picks a thumbnail-pipeline-relevant MIME class from the
+// file extension. This is INTENTIONALLY narrow — the pipeline only
+// branches on image/* / video/* / application/pdf / office mime, so
+// other extensions can stay empty and skip cleanly.
+func mimeFromName(name string) string {
+	dot := strings.LastIndex(name, ".")
+	if dot < 0 {
+		return ""
+	}
+	ext := strings.ToLower(name[dot+1:])
+	switch ext {
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "webp":
+		return "image/webp"
+	case "gif":
+		return "image/gif"
+	case "bmp":
+		return "image/bmp"
+	case "svg":
+		return "image/svg+xml"
+	case "heic":
+		return "image/heic"
+	case "avif":
+		return "image/avif"
+	case "tiff", "tif":
+		return "image/tiff"
+	case "mp4":
+		return "video/mp4"
+	case "webm":
+		return "video/webm"
+	case "mov":
+		return "video/quicktime"
+	case "mkv":
+		return "video/x-matroska"
+	case "avi":
+		return "video/x-msvideo"
+	case "ogv":
+		return "video/ogg"
+	case "m4v":
+		return "video/mp4"
+	case "pdf":
+		return "application/pdf"
+	case "doc":
+		return "application/msword"
+	case "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "xls":
+		return "application/vnd.ms-excel"
+	case "xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case "ppt":
+		return "application/vnd.ms-powerpoint"
+	case "pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case "odt":
+		return "application/vnd.oasis.opendocument.text"
+	case "ods":
+		return "application/vnd.oasis.opendocument.spreadsheet"
+	case "odp":
+		return "application/vnd.oasis.opendocument.presentation"
+	case "rtf":
+		return "application/rtf"
+	}
+	return ""
 }
 
 func isOfficeMime(m string) bool {
