@@ -178,7 +178,7 @@ function flashToast(msg: string) {
 async function load(path?: string) {
   loading.value = true;
   try {
-    const target = path ?? currentPath.value ?? '';
+    const target = qualify(path ?? currentPath.value ?? '');
     const resp = searchQuery.value
       ? await api.search(target, searchQuery.value)
       : await api.index(target);
@@ -221,6 +221,24 @@ async function load(path?: string) {
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
   return idx === -1 ? p : p.slice(idx + 3);
+}
+
+/**
+ * qualify — return `<adapter>://<rel>` for backend calls.
+ *
+ * The backend's manager handler picks a storage by parsing the
+ * adapter prefix. Without one it falls back to `storages[0]`,
+ * which 404s on every non-default storage (S3/SFTP/WebDAV in a
+ * multi-storage install). All API callers (rename/move/delete/
+ * upload/preview/download/share/copy) must use a qualified path.
+ *
+ * `stripAdapter()` stays for cosmetic display logic only
+ * (breadcrumb root check, inRoot computation, openPageBase).
+ */
+function qualify(p: string): string {
+  if (!p) return `${adapter.value}://`;
+  if (p.includes('://')) return p;
+  return `${adapter.value}://${p.replace(/^\/+/, '')}`;
 }
 
 watch(
@@ -395,7 +413,7 @@ function openNode(n: FileNode) {
 async function restoreSelection(targets?: FileNode[]) {
   if (!api.endpoints.restore) return;
   const nodes = targets ?? selection.nodes.value;
-  const items = nodes.map((n) => stripAdapter(n.path));
+  const items = nodes.map((n) => n.path); // qualified
   if (items.length === 0) return;
   try {
     const { restored } = await api.restore(items);
@@ -598,7 +616,7 @@ async function paste() {
   const cb = clipboard.value;
   if (!cb.mode || cb.items.length === 0) return;
   try {
-    const items = cb.items.map((n) => stripAdapter(n.path));
+    const items = cb.items.map((n) => n.path); // already qualified (adapter://rel)
     const sourceDir = cb.sourcePath || '';
     const sameDir = cb.mode === 'cut' && sourceDir === currentPath.value;
     if (sameDir) {
@@ -607,11 +625,11 @@ async function paste() {
     }
 
     if (cb.mode === 'cut') {
-      const { op } = await api.moveAsync(items, currentPath.value, sourceDir || undefined);
+      const { op } = await api.moveAsync(items, qualify(currentPath.value), qualify(sourceDir) || undefined);
       pendingOps.register(op);
       flashToast('Taşıma kuyruğa alındı');
     } else {
-      const { op } = await api.copy(items, currentPath.value);
+      const { op } = await api.copy(items, qualify(currentPath.value));
       pendingOps.register(op);
       flashToast('Kopyalama kuyruğa alındı');
     }
@@ -623,7 +641,7 @@ async function paste() {
 
 async function duplicate(n: FileNode) {
   try {
-    const { op } = await api.copy([stripAdapter(n.path)], currentPath.value);
+    const { op } = await api.copy([n.path], qualify(currentPath.value));
     pendingOps.register(op);
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'duplicate' } });
@@ -631,7 +649,10 @@ async function duplicate(n: FileNode) {
 }
 
 function downloadFile(n: FileNode) {
-  const url = api.downloadUrl(stripAdapter(n.path));
+  // Keep `<adapter>://<rel>` so backend resolves the right storage
+  // (stripping it would default to the first storage, which 404s for
+  // any non-default storage like S3/SFTP/WebDAV).
+  const url = api.downloadUrl(n.path);
   window.open(url, '_blank');
 }
 
@@ -639,7 +660,7 @@ function downloadFile(n: FileNode) {
 
 async function submitNewFolder(name: string) {
   try {
-    await api.newFolder(currentPath.value, name);
+    await api.newFolder(qualify(currentPath.value), name);
     showNewFolder.value = false;
     await load();
   } catch (err) {
@@ -651,7 +672,7 @@ async function submitRename(name: string) {
   const target = renameTarget.value;
   if (!target) return;
   try {
-    await api.rename(currentPath.value, stripAdapter(target.path), name);
+    await api.rename(qualify(currentPath.value), target.path, name);
     showRename.value = false;
     renameTarget.value = null;
     await load();
@@ -661,18 +682,18 @@ async function submitRename(name: string) {
 }
 
 async function confirmDelete() {
-  const items = selection.nodes.value.map((n) => stripAdapter(n.path));
+  const items = selection.nodes.value.map((n) => n.path);
   if (items.length === 0) {
     showDelete.value = false;
     return;
   }
   try {
     if (api.endpoints.deleteAsync) {
-      const { op } = await api.deleteAsync(items, currentPath.value);
+      const { op } = await api.deleteAsync(items, qualify(currentPath.value));
       pendingOps.register(op);
       flashToast('Silme kuyruğa alındı');
     } else {
-      await api.deleteItems(currentPath.value, items);
+      await api.deleteItems(qualify(currentPath.value), items);
       await load();
     }
     showDelete.value = false;
@@ -697,7 +718,7 @@ async function submitShare(payload: {
   if (!target) return;
   try {
     const { share } = await api.createShare({
-      path: stripAdapter(target.path),
+      path: target.path, // qualified `<adapter>://<rel>`
       password: payload.password,
       expires_at: payload.expires_at,
       max_downloads: payload.max_downloads,
@@ -743,7 +764,7 @@ async function uploadFiles(list: File[]) {
 
 async function legacyUpload(file: File) {
   try {
-    await api.uploadMultipart(currentPath.value, [file]);
+    await api.uploadMultipart(qualify(currentPath.value), [file]);
   } catch (err) {
     emit('error', {
       message: (err as Error).message,
@@ -756,7 +777,7 @@ async function chunkedUpload(file: File) {
   const placeholder: UploadJob = {
     id: crypto.randomUUID(),
     file,
-    path: currentPath.value,
+    path: qualify(currentPath.value),
     totalBytes: file.size,
     uploadedBytes: 0,
     percent: 0,
@@ -767,7 +788,7 @@ async function chunkedUpload(file: File) {
 
   await chunked
     .uploadFile({
-      path: currentPath.value,
+      path: qualify(currentPath.value),
       file,
       onProgress: (job) => {
         const idx = uploadJobs.value.findIndex((j) => j.id === placeholder.id);
@@ -865,7 +886,7 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
   const items = selection.nodes.value
     .filter((n) => !clippedPaths.value.has(n.path))
     .filter((n) => n.basename !== '.trash')
-    .map((n) => ({ path: stripAdapter(n.path), basename: n.basename, type: n.type }));
+    .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
   ev.dataTransfer.setData(FE_DND_MIME, JSON.stringify(items));
   ev.dataTransfer.setData('text/plain', items.map((i) => i.path).join('\n'));
   ev.dataTransfer.effectAllowed = 'move';
@@ -874,11 +895,11 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
 async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string): Promise<void> {
   try {
     if (api.endpoints.moveAsync) {
-      const { op } = await api.moveAsync(sources, targetDir, currentPath.value);
+      const { op } = await api.moveAsync(sources, targetDir, qualify(currentPath.value));
       pendingOps.register(op);
       flashToast('Taşıma kuyruğa alındı');
     } else {
-      await api.move(currentPath.value, sources, targetDir);
+      await api.move(qualify(currentPath.value), sources, targetDir);
       await load();
     }
     selection.clear();
@@ -899,7 +920,7 @@ async function onItemDropInto(target: FileNode, ev: DragEvent) {
   }
   if (items.length === 0) return;
 
-  const targetDir = stripAdapter(target.path);
+  const targetDir = target.path; // qualified
   const sources = items
     .map((i) => i.path)
     .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/'));
@@ -921,7 +942,7 @@ async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
   }
   if (items.length === 0) return;
 
-  const targetDir = stripAdapter(adapterPath);
+  const targetDir = adapterPath; // already qualified by breadcrumb
   const sources = items
     .map((i) => i.path)
     .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/'));

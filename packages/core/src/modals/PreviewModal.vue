@@ -209,8 +209,10 @@ function openInNewTab(): void {
   window.open(url, '_blank', 'noopener');
 }
 
-const src = computed(() => (props.file ? props.previewUrl(stripAdapter(props.file.path)) : ''));
-const download = computed(() => (props.file ? props.downloadUrl(stripAdapter(props.file.path)) : ''));
+// Keep adapter prefix so backend resolves the right storage — stripping
+// it defaults to storages[0] and 404s on any non-default adapter.
+const src = computed(() => (props.file ? props.previewUrl(props.file.path) : ''));
+const download = computed(() => (props.file ? props.downloadUrl(props.file.path) : ''));
 
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
