@@ -77,6 +77,35 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 		hash := pathHash(s.storage.ID, obj.Path)
 		existing, _ := s.store.GetNodeByPath(ctx, s.storage.ID, hash)
 		if existing == nil {
+			// Maybe a soft-deleted row at the same path? UNIQUE
+			// constraint on (storage_id, path_hash) blocks a fresh
+			// insert, AND the live-row lookup excludes deleted rows.
+			// Without this branch the second sync after a stray
+			// delete left the dir invisible until manual SQL surgery.
+			if zombie, _ := s.store.GetNodeByPathIncludingDeleted(ctx, s.storage.ID, hash); zombie != nil && zombie.DeletedAt != nil {
+				if err := s.store.RestoreNode(ctx, zombie.ID); err != nil {
+					slog.Warn("sync: restore node failed",
+						slog.String("path", obj.Path),
+						slog.String("err", err.Error()))
+					continue
+				}
+				// Touch seen_at so the tombstone-pass at end of run
+				// doesn't immediately re-delete the row we just
+				// restored.
+				_ = s.store.TouchNodeSeen(ctx, zombie.ID)
+				if etagDrift(zombie.Etag, obj.Etag) {
+					_ = s.store.UpdateNodeMeta(ctx, zombie.ID, obj.Size, obj.Mime, obj.Etag, obj.Mtime)
+					*updated++
+				}
+				count++
+				if zombie.Type == model.NodeTypeDirectory {
+					cn, err := s.walk(ctx, obj.Path, &zombie.ID, added, updated)
+					if err == nil {
+						count += cn
+					}
+				}
+				continue
+			}
 			n := &model.Node{
 				StorageID:    s.storage.ID,
 				ParentID:     parent,

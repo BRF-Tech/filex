@@ -181,6 +181,11 @@ func (s *Store) GetNodeByPath(ctx context.Context, storageID int64, hash string)
 	return scanNode(row)
 }
 
+func (s *Store) GetNodeByPathIncludingDeleted(ctx context.Context, storageID int64, hash string) (*model.Node, error) {
+	row := s.db.QueryRowContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND path_hash=?`, storageID, hash)
+	return scanNode(row)
+}
+
 func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error) {
 	q := nodeSelectColumns() + ` FROM nodes WHERE storage_id=? AND deleted_at IS NULL AND parent_id `
 	args := []any{storageID}

@@ -33,6 +33,12 @@ type Store interface {
 	CreateNode(ctx context.Context, n *model.Node) (*model.Node, error)
 	GetNode(ctx context.Context, id int64) (*model.Node, error)
 	GetNodeByPath(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
+	// GetNodeByPathIncludingDeleted is used by the sync worker to detect a
+	// previously soft-deleted row at the same path so it can resurrect it
+	// (UNIQUE(storage_id, path_hash) blocks a fresh insert otherwise).
+	// `RestoreNode` (declared further down for trash recovery) flips
+	// deleted_at back to NULL.
+	GetNodeByPathIncludingDeleted(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 	UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error
 	TouchNodeSeen(ctx context.Context, id int64) error
