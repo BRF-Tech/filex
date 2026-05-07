@@ -75,6 +75,14 @@ async function ensurePdfjs(): Promise<any | null> {
   }
 }
 
+// useNativeViewer flips the renderer to <embed type="application/pdf">
+// when pdfjs.getDocument throws (worker fetch blocked, CDN
+// unreachable, or pdfjs not installed). All evergreen browsers ship a
+// built-in PDF viewer at the embed level, so this is a graceful
+// fallback rather than the "open in new tab" lifeboat the toolbar
+// already exposes.
+const useNativeViewer = ref(false);
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
@@ -96,9 +104,10 @@ async function load(): Promise<void> {
   const lib = await ensurePdfjs();
   if (myToken !== renderToken) return;
   if (!lib) {
-    error.value = props.t
-      ? props.t('viewer.peer_not_installed')
-      : 'PDF viewer requires `pdfjs-dist` — falling back to native preview.';
+    // pdfjs-dist absent → use the browser's built-in PDF viewer via
+    // <embed>. error.value stays null so the template renders the
+    // native preview without an angry banner.
+    useNativeViewer.value = true;
     loading.value = false;
     emit('fallback');
     return;
@@ -124,7 +133,14 @@ async function load(): Promise<void> {
     buildPagePlaceholders();
     setupObserver();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'PDF load failed';
+    // Worker fetch blocked (CDN/CSP), unsupported runtime, etc. —
+    // hand off to the browser's PDF viewer instead of a dead error
+    // panel. Captures the original message in case operators want
+    // it via DevTools.
+    if (typeof console !== 'undefined') {
+      console.warn('[filex/PdfViewer] pdfjs failed, using native embed:', err);
+    }
+    useNativeViewer.value = true;
   } finally {
     loading.value = false;
   }
@@ -404,7 +420,15 @@ function tt(key: string, fallback: string): string {
       </button>
     </div>
     <div class="filex-viewer-pdf__pane">
-      <div v-if="error" class="filex-viewer-fallback">
+      <!-- Browser-native PDF viewer fallback. Triggered when pdfjs
+           is missing or its worker can't load (CDN blocked / CSP). -->
+      <embed
+        v-if="useNativeViewer"
+        :src="props.url"
+        type="application/pdf"
+        class="filex-viewer-pdf__embed"
+      />
+      <div v-else-if="error" class="filex-viewer-fallback">
         <span class="filex-viewer-fallback__icon">📕</span>
         <p>{{ error }}</p>
       </div>
@@ -428,6 +452,12 @@ function tt(key: string, fallback: string): string {
   height: 100%;
   min-height: 70vh;
   background: var(--fe-bg, #fff);
+}
+.filex-viewer-pdf__embed {
+  width: 100%;
+  height: 100%;
+  min-height: 70vh;
+  border: 0;
 }
 .filex-viewer-pdf__bar {
   display: flex;
