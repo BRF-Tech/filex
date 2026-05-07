@@ -114,9 +114,13 @@ func TestRouter_AuthMe_WithCookie(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
+	// /api/auth/me wraps the user in {"user": …} (matches LoginResponse + the
+	// auth store on the frontend). See commit a494633.
 	var got map[string]any
 	testutil.ReadJSON(t, resp, &got)
-	assert.Equal(t, email, got["email"])
+	user, ok := got["user"].(map[string]any)
+	require.True(t, ok, "expected wrapped {user:…} payload, got %v", got)
+	assert.Equal(t, email, user["email"])
 }
 
 // ---------- /api/auth/whoami (public) ----------

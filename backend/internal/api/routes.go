@@ -149,6 +149,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 		r.Route("/api/files", func(r chi.Router) {
 			r.Get("/manager", mh.List)
+			r.Post("/manager", mh.Mutate)
 			r.Get("/stat", mh.Stat)
 			r.Get("/read", mh.Read)
 			r.Post("/search", sxh.Search)
