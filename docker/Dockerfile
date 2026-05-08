@@ -124,6 +124,7 @@ RUN apk --no-cache add \
         poppler-utils \
         libreoffice \
         openjdk17-jre-headless \
+        rsvg-convert \
         ttf-liberation \
         ttf-dejavu \
         font-noto \

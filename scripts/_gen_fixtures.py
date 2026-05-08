@@ -75,6 +75,12 @@ def write_docx(p: Path) -> None:
 
 
 def write_pptx(p: Path) -> None:
+    # NB: LibreOffice's Impress writer rejects pptx slides whose spTree
+    # is empty — `soffice --convert-to pdf` exits 0 but emits no PDF
+    # because there's nothing to lay out. We add a single text shape so
+    # the converter has at least one drawable object, plus the
+    # `<p:sldSz>` + `<p:notesSz>` size hints presentation.xml needs for
+    # the slide to render at the standard 16:9 aspect.
     with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -94,10 +100,79 @@ def write_pptx(p: Path) -> None:
         z.writestr("ppt/presentation.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+<p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>
+<p:notesSz cx="6858000" cy="9144000"/>
 </p:presentation>""")
         z.writestr("ppt/slides/slide1.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-<p:cSld><p:spTree/></p:cSld>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr>
+        <p:cNvPr id="1" name=""/>
+        <p:cNvGrpSpPr/>
+        <p:nvPr/>
+      </p:nvGrpSpPr>
+      <p:grpSpPr>
+        <a:xfrm>
+          <a:off x="0" y="0"/>
+          <a:ext cx="0" cy="0"/>
+          <a:chOff x="0" y="0"/>
+          <a:chExt cx="0" cy="0"/>
+        </a:xfrm>
+      </p:grpSpPr>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="2" name="Title"/>
+          <p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="685800" y="685800"/>
+            <a:ext cx="7772400" cy="1143000"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr"/>
+          <a:lstStyle/>
+          <a:p>
+            <a:pPr algn="ctr"/>
+            <a:r>
+              <a:rPr lang="en-US" sz="4400" b="1"/>
+              <a:t>Demo Presentation</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="3" name="Body"/>
+          <p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="685800" y="2286000"/>
+            <a:ext cx="7772400" cy="3429000"/>
+          </a:xfrm>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr/>
+          <a:lstStyle/>
+          <a:p>
+            <a:r>
+              <a:rPr lang="en-US" sz="2400"/>
+              <a:t>Routing fixture for filex preview viewers.</a:t>
+            </a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
 </p:sld>""")
 
 

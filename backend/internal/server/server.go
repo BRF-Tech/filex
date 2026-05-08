@@ -197,6 +197,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		pipelineCaps.Video = cap.Thumbs.Video
 		pipelineCaps.PDF = cap.Thumbs.PDF
 		pipelineCaps.Office = cap.Thumbs.Office
+		pipelineCaps.SVG = cap.Thumbs.SVG
 	}
 	pipeline := thumb.New(store, cfg.Thumbs.CacheDir, pipelineCaps)
 

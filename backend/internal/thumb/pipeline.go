@@ -42,6 +42,7 @@ type Capabilities struct {
 	Video  bool // ffmpeg present in PATH
 	PDF    bool // ghostscript or pdftoppm present
 	Office bool // libreoffice/soffice present
+	SVG    bool // rsvg-convert present (vector→raster)
 }
 
 // New constructs a Pipeline.
@@ -85,6 +86,15 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 	}
 	var err error
 	switch {
+	// SVG must come BEFORE the generic image/* branch — Go's stdlib
+	// image.Decode can't parse SVG, so the regular generateImage
+	// would fail with "unknown format". Route SVGs to rsvg-convert
+	// when it's available, otherwise skip cleanly.
+	case mime == "image/svg+xml" && p.caps.SVG:
+		err = p.generateSVG(ctx, node, drv)
+	case mime == "image/svg+xml":
+		_ = p.store.SetThumbnailState(ctx, node.ID, "skipped", "rsvg-convert not in PATH")
+		return ErrSkipped
 	case strings.HasPrefix(mime, "image/"):
 		err = p.generateImage(ctx, node, drv)
 	case strings.HasPrefix(mime, "video/") && p.caps.Video:

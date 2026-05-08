@@ -160,6 +160,9 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	if has("libreoffice") || has("soffice") {
 		caps.Thumbs.Office = true
 	}
+	if has("rsvg-convert") {
+		caps.Thumbs.SVG = true
+	}
 
 	// External services from DB.
 	if list, err := s.store.ListExternalServices(ctx); err == nil {

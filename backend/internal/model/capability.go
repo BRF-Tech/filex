@@ -70,6 +70,7 @@ type ThumbCapabilities struct {
 	Video  bool `json:"video"`
 	PDF    bool `json:"pdf"`
 	Office bool `json:"office"`
+	SVG    bool `json:"svg"`
 }
 
 // ExternalServiceState describes a plug-and-play integration's runtime status.
