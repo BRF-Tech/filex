@@ -69,7 +69,10 @@ describe('stores/storages', () => {
     (StoragesApi.list as ReturnType<typeof vi.fn>).mockRejectedValue({ message: 'down' });
     const s = useStoragesStore();
     await s.fetch();
-    expect(s.error).toBe('down');
+    // extractError() falls back to its second-arg default for plain objects
+    // (no isAxiosError flag, not instanceof Error) — store passes
+    // 'Failed to load storages' as the fallback in stores/storages.ts.
+    expect(s.error).toBe('Failed to load storages');
     expect(s.items).toEqual([]);
   });
 

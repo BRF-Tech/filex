@@ -3,8 +3,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 
-import { api, installAxiosInterceptors, extractError } from '@/api/client';
-
 // Helper to build a fake-router stub with the bare minimum surface
 // installAxiosInterceptors touches.
 function fakeRouter(name: string = 'home'): Router {
@@ -16,11 +14,14 @@ function fakeRouter(name: string = 'home'): Router {
   } as unknown as Router;
 }
 
-describe('api/client', () => {
-  // Keep references so we can detach interceptors between tests if needed.
-  const originalUseRequest = api.interceptors.request.use;
-  const originalUseResponse = api.interceptors.response.use;
+// Helper: reset module so installAxiosInterceptors' module-level singleton
+// (interceptorsInstalled) is fresh for each test. Returns a fresh import.
+async function freshClient() {
+  vi.resetModules();
+  return await import('@/api/client');
+}
 
+describe('api/client', () => {
   beforeEach(() => {
     // Each test gets its own fresh interceptor set.
     sessionStorage.clear();
@@ -28,14 +29,12 @@ describe('api/client', () => {
   });
 
   afterEach(() => {
-    // Eject any installed interceptors. axios doesn't expose a direct way
-    // to flush, so we restore the .use() reference (no-op for tests that
-    // didn't install).
-    api.interceptors.request.use = originalUseRequest;
-    api.interceptors.response.use = originalUseResponse;
+    // No-op: vi.resetModules() at the top of each test gives us a clean
+    // axios instance, so leaked interceptors from prior tests can't bleed.
   });
 
-  it('extractError returns a string from various error shapes', () => {
+  it('extractError returns a string from various error shapes', async () => {
+    const { extractError } = await freshClient();
     expect(extractError(new Error('boom'))).toBe('boom');
     expect(
       extractError({ isAxiosError: true, response: { data: { error: 'pretty' } } } as never),
@@ -46,6 +45,7 @@ describe('api/client', () => {
 
   it('request interceptor sets X-CSRF-Token from cookie on POST', async () => {
     document.cookie = 'filex_csrf=csrf-abc; path=/';
+    const { api, installAxiosInterceptors } = await freshClient();
     installAxiosInterceptors({ router: fakeRouter() });
 
     const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string> }) => unknown }> }).handlers;
@@ -59,6 +59,7 @@ describe('api/client', () => {
 
   it('request interceptor does NOT add CSRF for GET', async () => {
     document.cookie = 'filex_csrf=csrf-abc; path=/';
+    const { api, installAxiosInterceptors } = await freshClient();
     installAxiosInterceptors({ router: fakeRouter() });
 
     const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string> }) => unknown }> }).handlers;
@@ -72,6 +73,7 @@ describe('api/client', () => {
 
   it('request interceptor adds Authorization bearer when present', async () => {
     sessionStorage.setItem('filex.bearer', 'tkn-1');
+    const { api, installAxiosInterceptors } = await freshClient();
     installAxiosInterceptors({ router: fakeRouter() });
 
     const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string> }) => unknown }> }).handlers;
@@ -84,6 +86,7 @@ describe('api/client', () => {
   });
 
   it('response interceptor calls onUnauthorized for 401 outside login', async () => {
+    const { api, installAxiosInterceptors } = await freshClient();
     const onUnauthorized = vi.fn();
     installAxiosInterceptors({ router: fakeRouter('home'), onUnauthorized });
 
@@ -96,6 +99,7 @@ describe('api/client', () => {
   });
 
   it('response interceptor does NOT call onUnauthorized when on /admin/login', async () => {
+    const { api, installAxiosInterceptors } = await freshClient();
     const onUnauthorized = vi.fn();
     installAxiosInterceptors({ router: fakeRouter('login'), onUnauthorized });
 
@@ -107,6 +111,7 @@ describe('api/client', () => {
   });
 
   it('response interceptor calls onError for network errors (no response)', async () => {
+    const { api, installAxiosInterceptors } = await freshClient();
     const onError = vi.fn();
     installAxiosInterceptors({ router: fakeRouter('home'), onError });
 
@@ -117,7 +122,8 @@ describe('api/client', () => {
     expect(onError).toHaveBeenCalledWith('Network Error');
   });
 
-  it('installAxiosInterceptors is idempotent', () => {
+  it('installAxiosInterceptors is idempotent', async () => {
+    const { api, installAxiosInterceptors } = await freshClient();
     installAxiosInterceptors({ router: fakeRouter() });
     const before = (api.interceptors.request as unknown as { handlers: unknown[] }).handlers.length;
     installAxiosInterceptors({ router: fakeRouter() });

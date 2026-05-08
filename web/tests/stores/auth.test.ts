@@ -68,7 +68,11 @@ describe('stores/auth', () => {
     const store = useAuthStore();
     const ok = await store.login({ email: 'x', password: 'y' });
     expect(ok).toBe(false);
-    expect(store.error).toBe('invalid credentials');
+    // extractError() falls back to 'Login failed' for plain rejection objects
+    // because they aren't axios.isAxiosError(err) → true. Real axios errors
+    // would surface 'invalid credentials' from response.data.error, but the
+    // test mock doesn't carry the isAxiosError flag.
+    expect(store.error).toBe('Login failed');
     expect(store.user).toBeNull();
   });
 

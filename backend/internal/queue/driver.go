@@ -4,7 +4,7 @@
 //
 //	sqlite   — default, single-node; uses the existing filex DB file
 //	postgres — production HA via SELECT FOR UPDATE SKIP LOCKED
-//	redis    — work-list pattern via BRPOPLPUSH for low-latency hot paths
+//	redis    — work-list pattern via BLMOVE for low-latency hot paths
 //
 // All drivers share the same Op struct and Driver contract so callers can
 // swap them via the FILEMANAGER_QUEUE_DRIVER env var without touching

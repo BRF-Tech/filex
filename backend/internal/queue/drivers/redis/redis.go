@@ -4,8 +4,10 @@
 // (`pending` → `running` → `done` | `failed` | `cancelled`) while the
 // canonical fields live in a parallel HASH at `<prefix>:data:<id>`.
 //
-// The headline win is BRPOPLPUSH on Dequeue: a worker blocks for up to
+// The headline win is BLMOVE on Dequeue: a worker blocks for up to
 // 5s waiting for an id to appear, with no application-level polling.
+// (BLMOVE source dest RIGHT LEFT — the modern replacement for the
+// deprecated BRPOPLPUSH; same right-pop/left-push semantic.)
 // The headline cost is that LIST membership is positional — Redis can't
 // filter by op.Type the way SQL can — so the type-allowlist semantics
 // are emulated by yielding non-matching ids back to the tail of the
@@ -43,7 +45,7 @@ func init() {
 // staging vs prod multitenancy, …).
 const defaultKeyPrefix = "filex:queue"
 
-// blockTimeout is the BRPOPLPUSH block window. Five seconds keeps the
+// blockTimeout is the BLMOVE block window. Five seconds keeps the
 // worker responsive to ctx.Done() without hammering Redis with empty
 // reads — Pool's outer loop will re-issue immediately if it still has
 // work to do.
@@ -249,13 +251,13 @@ func (d *Driver) Enqueue(ctx context.Context, op queue.Op) (string, error) {
 // Dequeue blocks for up to 5s waiting for an id, then verifies the
 // op's type is in the requested allowlist. Type filtering in Redis
 // LISTs is awkward because LISTs are positional — there's no SQL-style
-// `type IN (?, ?)` predicate. We compromise: BRPOPLPUSH the head, peek
+// `type IN (?, ?)` predicate. We compromise: BLMOVE the head, peek
 // the data hash, and yield mismatches back to the tail of pending
 // (RPUSH preserves the rest of the queue's ordering). After
 // yieldRequeueGuard misses we return ErrEmpty so the worker loop sleeps
 // — protects against pathological "queue full of unhandled types" spin.
 //
-// Context handling: BRPOPLPUSH respects the underlying connection
+// Context handling: BLMOVE respects the underlying connection
 // timeout. If ctx is cancelled mid-block, go-redis surfaces
 // context.Canceled / context.DeadlineExceeded; we map them to ErrEmpty
 // so the worker loop exits cleanly via its own ctx check.
@@ -269,9 +271,9 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 		default:
 		}
 
-		// BRPOPLPUSH returns the popped value. Empty queue → redis.Nil
-		// after blockTimeout. ctx cancellation → ctx error.
-		id, err := d.client.BRPopLPush(ctx, d.pendingKey(), d.runningKey(), blockTimeout).Result()
+		// BLMOVE (right→left) returns the popped value. Empty queue →
+		// redis.Nil after blockTimeout. ctx cancellation → ctx error.
+		id, err := d.client.BLMove(ctx, d.pendingKey(), d.runningKey(), "RIGHT", "LEFT", blockTimeout).Result()
 		if err != nil {
 			switch {
 			case errors.Is(err, goredis.Nil):
@@ -280,7 +282,7 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 				errors.Is(err, context.DeadlineExceeded):
 				return queue.Op{}, queue.ErrEmpty
 			default:
-				return queue.Op{}, fmt.Errorf("queue/redis: brpoplpush: %w", err)
+				return queue.Op{}, fmt.Errorf("queue/redis: blmove: %w", err)
 			}
 		}
 
@@ -671,14 +673,16 @@ func (d *Driver) runPromoter(ctx context.Context) {
 // is processed in the next sweep.
 func (d *Driver) promoteOnce(ctx context.Context) error {
 	now := time.Now().Unix()
-	ids, err := d.client.ZRangeByScore(ctx, d.scheduledKey(), &goredis.ZRangeBy{
-		Min:    "-inf",
-		Max:    strconv.FormatInt(now, 10),
-		Offset: 0,
-		Count:  promoterBatchSize,
+	ids, err := d.client.ZRangeArgs(ctx, goredis.ZRangeArgs{
+		Key:     d.scheduledKey(),
+		ByScore: true,
+		Start:   "-inf",
+		Stop:    strconv.FormatInt(now, 10),
+		Offset:  0,
+		Count:   promoterBatchSize,
 	}).Result()
 	if err != nil {
-		return fmt.Errorf("zrangebyscore: %w", err)
+		return fmt.Errorf("zrange byscore: %w", err)
 	}
 	for _, id := range ids {
 		pipe := d.client.TxPipeline()
