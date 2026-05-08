@@ -172,6 +172,39 @@ e2e:rounds-regression:
     expire_in: 1 week
   allow_failure: false
 
+# Browser-tier regression. Mounts a real Chromium so the BUG#15+16 +
+# BUG#6 specs (Editor.vue mount lifecycle, Toolbar `Aç` action) actually
+# run instead of skipping. We pull the official Microsoft Playwright
+# image (chromium + system deps pre-baked) so we don't pay the
+# download tax inside the job. Rules limit this to main + tags so MR
+# pipelines stay fast. allow_failure starts true while we shake out
+# the inevitable browser flake; once the run is consistently green
+# we'll flip it to false.
+e2e:rounds-regression-browser:
+  image: mcr.microsoft.com/playwright:v1.48.0-noble
+  stage: e2e
+  needs: []
+  variables:
+    E2E_INCLUDE_BROWSER: "1"
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@${PNPM_VERSION} --activate
+  script:
+    - cd e2e
+    - pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+    - npx playwright test 91-rounds-4-6-regression --reporter=list
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  artifacts:
+    name: "filex-e2e-browser-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - e2e/playwright-report/
+      - e2e/test-results/
+    when: always
+    expire_in: 1 week
+  allow_failure: true
+
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
