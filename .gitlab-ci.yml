@@ -289,16 +289,21 @@ build:backend:
     - mkdir -p backend/embed/admin backend/embed/web
     - cp -r web/dist/. backend/embed/admin/
     - cp -r packages/webcomponent/dist/. backend/embed/web/
+    # Build flags assembled outside the YAML scalar — folded `>` chunks
+    # the shell command across lines, but the embedded `-ldflags="..."`
+    # double-quoted string spans multiple lines too, and the YAML
+    # folder collapses ITS newlines into spaces in a way that breaks
+    # `go build`'s argument parser ("no Go files in /builds/.../backend"
+    # was the visible symptom — the `./cmd/filex` argument was being
+    # eaten by the broken ldflags string). Building the LDFLAGS env
+    # var with a heredoc and using a single-line invocation sidesteps
+    # the whole YAML-vs-shell quoting mismatch.
     - cd backend
-    - >
-      CGO_ENABLED=0 go build
-      -trimpath
-      -ldflags="-s -w
-        -X main.version=${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}
-        -X main.commit=${CI_COMMIT_SHORT_SHA}
-        -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      -o ../bin/filex
-      ./cmd/filex
+    - export VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
+    - export COMMIT="${CI_COMMIT_SHORT_SHA}"
+    - export DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    - export LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+    - CGO_ENABLED=0 go build -trimpath -ldflags="${LDFLAGS}" -o ../bin/filex ./cmd/filex
     - ../bin/filex --version
   artifacts:
     name: "filex-bin-${CI_COMMIT_SHORT_SHA}"
