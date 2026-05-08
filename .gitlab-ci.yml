@@ -338,7 +338,13 @@ release:goreleaser:
     - mkdir -p backend/embed/admin backend/embed/web
     - cp -r web/dist/. backend/embed/admin/
     - cp -r packages/webcomponent/dist/. backend/embed/web/
-    - goreleaser release --clean
+    # `--skip=publish` keeps goreleaser local — it builds + archives
+    # the binaries into ./dist but skips the GitLab Release object
+    # creation step (which would need a maintainer-scoped GITLAB_TOKEN
+    # in CI Variables). Artifact upload below picks up dist/ so users
+    # can grab the per-arch tarballs from the pipeline page.
+    # When a GITLAB_TOKEN is wired up, drop the --skip=publish flag.
+    - goreleaser release --clean --skip=publish
   artifacts:
     name: "filex-${CI_COMMIT_TAG}"
     paths:
