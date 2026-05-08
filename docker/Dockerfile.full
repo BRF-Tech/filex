@@ -21,6 +21,13 @@ FROM node:20-alpine AS frontend-build
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /src
 
+# vue-tsc OOMs the default 1.7 GB Node heap once we pull in
+# @brftech/filex-core (workspace dep with code-split viewers). Bump
+# the budget to 4 GB for every Node process during the build.
+# Mirrors docker/Dockerfile (the slim image already had this since
+# round 8).
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 COPY package.json pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml* ./
 COPY packages/core/package.json ./packages/core/

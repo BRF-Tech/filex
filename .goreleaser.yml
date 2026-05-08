@@ -16,13 +16,14 @@ version: 2
 
 project_name: filex
 
-before:
-  hooks:
-    # Make sure embed assets are present. Build steps in CI handle the actual
-    # frontend build; here we just verify the directories exist.
-    - sh -c 'test -d backend/embed/admin || (echo "ERROR: backend/embed/admin missing - run pnpm run build:web && pnpm run sync:embed first" && exit 1)'
-    - sh -c 'test -d backend/embed/web || (echo "ERROR: backend/embed/web missing - run pnpm run build:packages && pnpm run sync:embed first" && exit 1)'
-    - sh -c 'cd backend && go mod tidy'
+# NOTE: removed `before.hooks` here because goreleaser v2's stricter
+# YAML parser refuses the `sh -c '... && ...'` string forms that v1
+# accepted ("yaml: unmarshal errors: cannot unmarshal !!map into
+# string"). The hooks were also redundant — the GitLab CI script
+# (release:goreleaser) already runs the embed mkdir+cp dance, and
+# the build:backend stage takes care of `go mod tidy` indirectly.
+# If you need a local-friendly assertion, run scripts/sync-embed.mjs
+# before invoking goreleaser.
 
 builds:
   - id: filex
