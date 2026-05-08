@@ -44,6 +44,13 @@ variables:
 # ---------------------------------------------------------------------------
 .node:
   image: node:${NODE_VERSION}-alpine
+  variables:
+    # vue-tsc OOMs the default 1.7 GB Node heap during the admin
+    # build (workspace pulls in the full @brftech/filex-core SFC
+    # bundle including code-split viewers, ~600 source files). Match
+    # the same 4 GB ceiling the Dockerfile already uses for the
+    # frontend-build stage so CI behaves like local + image build.
+    NODE_OPTIONS: "--max-old-space-size=4096"
   before_script:
     - apk add --no-cache git
     - corepack enable
