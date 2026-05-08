@@ -107,7 +107,13 @@ const actions = computed<Array<{ key: ToolbarAction; label: string; icon: string
   }
   switch (mode.value) {
     case 'single-file':
+      // `open` first because it's the canonical action — same behaviour
+      // as a double-click. The host page wires it to `/files/edit` for
+      // editor-grade types (office/drawio/mermaid/3D/etc) and falls
+      // back to the preview modal otherwise. Keep `preview` next to
+      // it so the explicit read-only path stays one click away.
       return [
+        { key: 'open', label: t('ctx.open'), icon: '↗' },
         { key: 'preview', label: t('ctx.preview'), icon: '👁' },
         { key: 'download', label: t('ctx.download'), icon: '⬇' },
         { key: 'share', label: t('ctx.share'), icon: '🔗' },

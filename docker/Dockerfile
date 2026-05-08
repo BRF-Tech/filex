@@ -105,6 +105,12 @@ FROM alpine:3.20
 #   libreoffice                         — headless `soffice --headless --convert-to pdf`
 #                                         for office docs (matches thumb/office.go).
 #                                         Pulls in writer/calc/impress/draw.
+#   openjdk17-jre-headless              — LibreOffice's xlsx/docx pipeline calls
+#                                         out to javaldx for chart/formula
+#                                         rendering. Without a JRE present
+#                                         soffice exits 1 and the pipeline rows
+#                                         the file as state=failed. Ship the
+#                                         smallest headless JRE.
 #   font-{noto,noto-cjk} + ttf-*        — without these libreoffice and
 #                                         Ghostscript render Unicode as boxes.
 RUN apk --no-cache add \
@@ -115,6 +121,7 @@ RUN apk --no-cache add \
         ghostscript \
         poppler-utils \
         libreoffice \
+        openjdk17-jre-headless \
         ttf-liberation \
         ttf-dejavu \
         font-noto \

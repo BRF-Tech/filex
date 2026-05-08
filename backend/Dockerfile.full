@@ -6,6 +6,7 @@ RUN apk --no-cache add \
     vips-tools \
     ghostscript \
     libreoffice \
+    openjdk17-jre-headless \
     poppler-utils \
     fonts-liberation \
     fonts-dejavu

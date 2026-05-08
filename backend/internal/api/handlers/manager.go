@@ -348,6 +348,19 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		}
 	}
 
+	// Hydrate Thumb so projectFileNodes can emit thumb_url. The
+	// store's ListNodesByParent doesn't JOIN thumbnails (kept lean for
+	// sync/walker callers), so we patch each file's Thumb here. N+1 at
+	// list time is fine for realistic dir sizes (≤ low thousands);
+	// switch to a batched lookup if profiles ever flag it.
+	for _, n := range nodes {
+		if n.Type != model.NodeTypeFile {
+			continue
+		}
+		if t, terr := h.Store.GetThumbnail(r.Context(), n.ID); terr == nil && t != nil {
+			n.Thumb = t
+		}
+	}
 	files := projectFileNodes(s.Name, nodes, dirsOnly)
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
@@ -30,11 +31,34 @@ type searchRequest struct {
 //
 // Strategy: try Bleve first; on miss/empty, fall back to SQL LIKE on the
 // `nodes.name` column.
+//
+// Accepts both POST {query, storage_id, limit} (canonical) and
+// GET ?q=…&storage_id=…&limit=… (admin SPA's toolbar search). The GET
+// form lets the SFC degrade gracefully when the embedder hasn't wired
+// the POST flow.
 func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	var req searchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
-		return
+	if r.Method == http.MethodGet {
+		q := r.URL.Query()
+		req.Query = q.Get("q")
+		if req.Query == "" {
+			req.Query = q.Get("query")
+		}
+		if v := q.Get("storage_id"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				req.StorageID = n
+			}
+		}
+		if v := q.Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				req.Limit = n
+			}
+		}
+	} else {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
 	}
 	if req.Limit <= 0 {
 		req.Limit = 50

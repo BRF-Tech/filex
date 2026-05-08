@@ -186,6 +186,31 @@ func (o *Ops) SubmitDelete(w http.ResponseWriter, r *http.Request) {
 	o.submitPerVerb(w, r, "delete")
 }
 
+// List returns ops filtered by ?status=… (e.g. "running"). Used by the
+// SPA's PendingOpsTray which polls every 2 s. Empty status returns the
+// most-recent rows across all statuses (capped at 200 service-side).
+//
+// Response shape mirrors what the SPA's `opsApi.list` already
+// understands: `{ "ops": [Op, …] }`. The frontend's `normalizeOp`
+// adapter then translates the backend's raw shape into the SPA's
+// `PendingOp` contract.
+func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
+	if o.Service == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ops": []any{}})
+		return
+	}
+	status := r.URL.Query().Get("status")
+	list, err := o.Service.List(r.Context(), status)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if list == nil {
+		list = []*ops.Op{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ops": list})
+}
+
 // Status returns the live or final state of a submitted op.
 func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 	if o.Service == nil {

@@ -430,6 +430,18 @@ func thumbBackfillCmd() *cobra.Command {
 		Use:   "backfill",
 		Short: "Generate thumbnails for every existing file node",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Bleve's embedded boltdb backend takes an exclusive file
+			// lock when the index is opened. A running `filex serve`
+			// instance already holds that lock, so server.New() below
+			// would block indefinitely on search.Open(). Backfill never
+			// touches the search index — disable it for this command so
+			// the spin-up stays under a second even when the server is
+			// live. Operator can override with FILEX_SEARCH_ENABLED=true
+			// if running on a stopped node.
+			if os.Getenv("FILEX_SEARCH_ENABLED") == "" {
+				_ = os.Setenv("FILEX_SEARCH_ENABLED", "false")
+			}
+
 			cfg, err := loadConfig()
 			if err != nil {
 				return err

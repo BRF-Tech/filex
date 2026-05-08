@@ -80,6 +80,7 @@ RUN apk --no-cache add \
         ghostscript \
         poppler-utils \
         libreoffice \
+        openjdk17-jre-headless \
         ttf-liberation \
         ttf-dejavu \
         font-noto \

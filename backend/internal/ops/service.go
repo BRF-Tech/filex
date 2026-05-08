@@ -147,6 +147,40 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	return scanOp(row)
 }
 
+// List returns ops, optionally filtered by status (e.g. "running").
+// Empty status returns the most-recent rows across all statuses, capped
+// at 200 to keep the polling payload small. Used by the SPA's
+// PendingOpsTray which calls GET /api/files/ops?status=running every 2s.
+func (s *Service) List(ctx context.Context, status string) ([]*Op, error) {
+	const cols = `id, kind, storage_id, sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at`
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if status != "" {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT `+cols+` FROM pending_ops WHERE status=? ORDER BY id DESC LIMIT 200`, status)
+	} else {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT `+cols+` FROM pending_ops ORDER BY id DESC LIMIT 200`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*Op, 0, 16)
+	for rows.Next() {
+		op := &Op{}
+		var srcJSON string
+		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
+		out = append(out, op)
+	}
+	return out, rows.Err()
+}
+
 // Run blocks until ctx is cancelled, draining the queue continuously.
 //
 // Spawn it in its own goroutine — typically once at server boot.

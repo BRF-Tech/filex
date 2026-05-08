@@ -136,7 +136,11 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Get("/api/files/thumb/{id}", th.Serve)
 
 	// ────── public capabilities ──────
+	// Embedders + the SPA both call /api/files/capabilities; keep the
+	// historical /api/capabilities working for older callers, but make
+	// the file-namespaced path the documented one.
 	r.Get("/api/capabilities", ch.Get)
+	r.Get("/api/files/capabilities", ch.Get)
 
 	// ────── authenticated user routes ──────
 	r.Group(func(r chi.Router) {
@@ -170,7 +174,15 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/manager/restore", trashH.Restore)
 			r.Get("/stat", mh.Stat)
 			r.Get("/read", mh.Read)
+			// Search — POST is the canonical body-carrying endpoint;
+			// GET is provided for the SPA's `?q=` polling form.
 			r.Post("/search", sxh.Search)
+			r.Get("/search", sxh.Search)
+
+			// Ops queue. POST submits a new op, GET ?status=running
+			// returns the polling tray's list. /ops/{id} is the per-row
+			// status check used by `opsApi.get`.
+			r.Get("/ops", oh.List)
 			r.Post("/ops", oh.Submit)
 			r.Get("/ops/{id}", oh.Status)
 
@@ -190,7 +202,12 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/share", sh.HandleCreate)
 			r.Delete("/share/{id}", sh.HandleDelete)
 
+			// OnlyOffice editor config. The SFC's PreviewModal posts a
+			// JSON body when it has the file context handy; the Editor
+			// route falls back to GET with `?path=…`. Accept both so the
+			// SFC's preview/Aç handoff doesn't 405.
 			r.Get("/onlyoffice/config", ooh.Config)
+			r.Post("/onlyoffice/config", ooh.Config)
 
 			// Plain-text save target for the SFC's code/markdown editor.
 			r.Post("/save-text", saveTextH.Save)
@@ -389,6 +406,14 @@ func wireStatic(r chi.Router, fs embed.FS) {
 		r.Handle("/admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
 		r.Handle("/admin/", spa)
 		r.Handle("/admin/*", spa)
+		// vue-router carves out a few "shareable" URLs outside the
+		// /admin/ prefix so the editor lives at /files/edit?path=…
+		// (FileExplorer's `openPageBase` config). These need the same
+		// SPA fallback so a fresh browser tab loads index.html and
+		// vue-router takes over.
+		filesSPA := spaHandler{root: adminFS, urlPrefix: ""}
+		r.Handle("/files/edit", filesSPA)
+		r.Handle("/files/edit/*", filesSPA)
 	}
 
 	webFS, err := stripPrefix(fs, "web")

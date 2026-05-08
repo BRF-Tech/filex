@@ -1,13 +1,18 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
@@ -27,7 +32,16 @@ func NewOnlyOffice(svc *onlyoffice.Service, store db.Store, resolver func(int64)
 
 // Config returns the editor descriptor for an iframe to render.
 //
-// GET /api/files/onlyoffice/config?id=<node-id>&lang=tr
+// Accepts both forms:
+//
+//	GET  /api/files/onlyoffice/config?id=<node-id>&lang=tr
+//	POST /api/files/onlyoffice/config  { "path": "adapter://rel", "mode": "edit"|"view" }
+//
+// The GET form is what the standalone Editor.vue route hands the SFC's
+// PreviewModal when the embedder passes a numeric node id. The POST
+// form is what the modal itself sends from inside the explore page —
+// it has the adapter-qualified path handy but not the node id, so the
+// handler must resolve path → node before continuing.
 func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	if h.Service == nil || !h.Service.Enabled() {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
@@ -38,23 +52,100 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	idStr := r.URL.Query().Get("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
-		return
+
+	var (
+		node *model.Node
+		lang string
+	)
+	q := r.URL.Query()
+	lang = q.Get("lang")
+
+	if r.Method == http.MethodPost {
+		var body struct {
+			Path   string `json:"path"`
+			NodeID int64  `json:"node_id"`
+			Mode   string `json:"mode"`
+			Lang   string `json:"lang"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+		if body.Lang != "" {
+			lang = body.Lang
+		}
+		if body.NodeID > 0 {
+			n, err := h.Store.GetNode(r.Context(), body.NodeID)
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+				return
+			}
+			node = n
+		} else if body.Path != "" {
+			n, err := h.resolveNodeByPath(r.Context(), body.Path)
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+				return
+			}
+			node = n
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path or node_id"})
+			return
+		}
+	} else {
+		idStr := q.Get("id")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+			return
+		}
+		n, err := h.Store.GetNode(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		node = n
 	}
-	node, err := h.Store.GetNode(r.Context(), id)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	cfg, err := h.Service.BuildConfigForNode(node, user, r.URL.Query().Get("lang"))
+
+	cfg, err := h.Service.BuildConfigForNode(node, user, lang)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, cfg)
+}
+
+// resolveNodeByPath looks up a node from a `<adapter>://<rel>` or bare
+// `<rel>` path. The bare form falls back to the first enabled storage,
+// matching the SFC's path-stripping convention.
+func (h *OnlyOffice) resolveNodeByPath(ctx context.Context, raw string) (*model.Node, error) {
+	adapter, rel := splitAdapterPath(raw)
+	rel = strings.Trim(path.Clean("/"+rel), "/")
+	if rel == "" {
+		return nil, errors.New("empty path")
+	}
+	storages, err := h.Store.ListEnabledStorages(ctx)
+	if err != nil || len(storages) == 0 {
+		return nil, errors.New("no storages")
+	}
+	var st *model.Storage
+	if adapter != "" {
+		for _, s := range storages {
+			if s.Name == adapter {
+				st = s
+				break
+			}
+		}
+	}
+	if st == nil {
+		st = storages[0]
+	}
+	hash := managerPathHash(st.ID, rel)
+	node, err := h.Store.GetNodeByPath(ctx, st.ID, hash)
+	if err != nil || node == nil {
+		return nil, errors.New("not found")
+	}
+	return node, nil
 }
 
 // Fetch streams document bytes back to the OnlyOffice document server.

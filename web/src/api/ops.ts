@@ -100,9 +100,12 @@ export const opsApi = {
       const arr = Array.isArray((data as OpsListResponse).ops) ? (data as OpsListResponse).ops : [];
       return arr.map((row) => normalizeOp(row as unknown as Record<string, unknown>));
     } catch (e: unknown) {
-      // 404/501 — backend hasn't wired the list yet. Silent fallback.
+      // 404/405/501 — backend hasn't wired the list yet OR is on an
+      // older release where chi answers "method not allowed" because
+      // only POST /ops is registered. Silent fallback in all three
+      // cases so the tray polls forever without spamming the console.
       const status = (e as { response?: { status?: number } }).response?.status;
-      if (status === 404 || status === 501) return [];
+      if (status === 404 || status === 405 || status === 501) return [];
       throw e;
     }
   },
