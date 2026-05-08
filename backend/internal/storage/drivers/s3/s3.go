@@ -46,7 +46,8 @@ func (d *Driver) Name() string { return "s3" }
 //
 // Required: bucket, region, access_key, secret_key.
 // Optional: endpoint (Hetzner: https://nbg1.your-objectstorage.com),
-//           path_style (Hetzner needs true), prefix (storage root prefix).
+//
+//	path_style (Hetzner needs true), prefix (storage root prefix).
 func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 	d.bucket, _ = cfg["bucket"].(string)
 	d.prefix, _ = cfg["prefix"].(string)

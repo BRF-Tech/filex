@@ -16,11 +16,11 @@ import (
 )
 
 // RunOnce performs one full sync pass for the storage:
-//   1. Open a sync_runs row (status=running)
-//   2. Recursively walk the backend, upserting nodes and updating seen_at
-//   3. Tombstone-pass: any node whose seen_at < runStart is soft-deleted —
-//      but only if seen_count >= 0.7 * lastSeenCount (false-positive guard).
-//   4. Close the sync_runs row with the final status.
+//  1. Open a sync_runs row (status=running)
+//  2. Recursively walk the backend, upserting nodes and updating seen_at
+//  3. Tombstone-pass: any node whose seen_at < runStart is soft-deleted —
+//     but only if seen_count >= 0.7 * lastSeenCount (false-positive guard).
+//  4. Close the sync_runs row with the final status.
 func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	// `runStart` is truncated to second precision to match SQLite's
 	// CURRENT_TIMESTAMP resolution. Without the truncation a sub-second

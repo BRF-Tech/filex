@@ -34,15 +34,15 @@ const stateCookieName = "filex_oidc_state"
 
 // Driver is the OIDC auth driver.
 type Driver struct {
-	store        db.Store
-	mu           sync.RWMutex
-	provider     *oidc.Provider
-	verifier     *oidc.IDTokenVerifier
-	oauth        *oauth2.Config
-	issuer       string
-	roleClaim    string // metadata field name containing role
-	adminGroup   string // group/role string that elevates user to admin
-	defaultRole  string
+	store       db.Store
+	mu          sync.RWMutex
+	provider    *oidc.Provider
+	verifier    *oidc.IDTokenVerifier
+	oauth       *oauth2.Config
+	issuer      string
+	roleClaim   string // metadata field name containing role
+	adminGroup  string // group/role string that elevates user to admin
+	defaultRole string
 }
 
 // New constructs an empty OIDC driver — Init must be called.

@@ -125,14 +125,14 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 
 func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps := &model.Capabilities{
-		Upload:        true,
-		Move:          true,
-		Copy:          true,
-		Delete:        true,
-		Mkdir:         true,
-		Search:        true,
-		Versions:      true,
-		Presign:       false,
+		Upload:   true,
+		Move:     true,
+		Copy:     true,
+		Delete:   true,
+		Mkdir:    true,
+		Search:   true,
+		Versions: true,
+		Presign:  false,
 		Thumbs: model.ThumbCapabilities{
 			Image: true,
 		},

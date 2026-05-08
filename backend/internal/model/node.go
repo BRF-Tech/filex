@@ -45,8 +45,8 @@ type Node struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 
 	// Optional joined data — populated by API layer, never persisted.
-	Thumb        *Thumbnail        `json:"thumb,omitempty"`
-	Meta         map[string]string `json:"meta,omitempty"`
+	Thumb *Thumbnail        `json:"thumb,omitempty"`
+	Meta  map[string]string `json:"meta,omitempty"`
 }
 
 // Thumbnail references a generated thumbnail asset.

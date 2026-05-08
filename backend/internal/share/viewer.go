@@ -38,8 +38,8 @@ func (v *Viewer) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]any{
-		"has_pin":      sh.PinHash != "",
-		"expires_at":   sh.ExpiresAt,
+		"has_pin":        sh.PinHash != "",
+		"expires_at":     sh.ExpiresAt,
 		"download_count": sh.DownloadCount,
 		"max_downloads":  sh.MaxDownloads,
 	}

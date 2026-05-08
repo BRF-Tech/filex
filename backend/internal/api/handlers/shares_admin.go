@@ -2,9 +2,9 @@
 //
 // Admin views/actions over all shares (every user, not just current user).
 //
-//   GET    /api/admin/shares
-//   POST   /api/admin/shares/{id}/revoke
-//   DELETE /api/admin/shares/{id}
+//	GET    /api/admin/shares
+//	POST   /api/admin/shares/{id}/revoke
+//	DELETE /api/admin/shares/{id}
 package handlers
 
 import (

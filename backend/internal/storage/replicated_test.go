@@ -50,9 +50,11 @@ func newFakeDriver(name string) *fakeDriver {
 	}
 }
 
-func (f *fakeDriver) Name() string                                       { return f.name }
-func (f *fakeDriver) Init(_ context.Context, _ map[string]any) error    { return nil }
-func (f *fakeDriver) Capabilities() Capabilities                        { return Capabilities{Read: true, Write: true, Move: true, Copy: true, Delete: true, Mkdir: true} }
+func (f *fakeDriver) Name() string                                   { return f.name }
+func (f *fakeDriver) Init(_ context.Context, _ map[string]any) error { return nil }
+func (f *fakeDriver) Capabilities() Capabilities {
+	return Capabilities{Read: true, Write: true, Move: true, Copy: true, Delete: true, Mkdir: true}
+}
 func (f *fakeDriver) List(_ context.Context, _ string) ([]Object, error) {
 	if f.listErr != nil {
 		return nil, f.listErr

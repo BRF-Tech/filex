@@ -35,10 +35,10 @@ func NewArchive(store db.Store, resolver func(int64) (storage.Driver, error)) *A
 
 // archiveRequest is the union body for /api/files/archive/{list,extract,add}.
 type archiveRequest struct {
-	StorageID int64    `json:"storage_id"`
-	Path      string   `json:"path"`
-	Members   []string `json:"members,omitempty"`
-	DestDir   string   `json:"dest,omitempty"`
+	StorageID int64      `json:"storage_id"`
+	Path      string     `json:"path"`
+	Members   []string   `json:"members,omitempty"`
+	DestDir   string     `json:"dest,omitempty"`
 	Files     []addEntry `json:"files,omitempty"`
 }
 

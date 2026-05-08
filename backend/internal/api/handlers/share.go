@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	cryptoRand "crypto/rand"
 	"crypto/md5"
+	cryptoRand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -67,7 +67,7 @@ type shareCreateReq struct {
 // response — the SFC accesses it as `body.share.*`.
 type shareCreateRespInner struct {
 	ID           int64      `json:"id"`
-	UUID         string     `json:"uuid"`     // alias for token (frontend uses uuid in delete URL)
+	UUID         string     `json:"uuid"` // alias for token (frontend uses uuid in delete URL)
 	Token        string     `json:"token"`
 	URL          string     `json:"url"`
 	Path         string     `json:"path,omitempty"`

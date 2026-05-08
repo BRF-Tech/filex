@@ -59,12 +59,12 @@ const (
 
 // initRequest is the body of POST /api/files/upload/init.
 type initRequest struct {
-	StorageID int64  `json:"storage_id"`
-	Path      string `json:"path"`
-	Filename  string `json:"filename,omitempty"`
-	Size      int64  `json:"size"`
-	Mime      string `json:"mime,omitempty"`
-	ChunkBytes int64 `json:"chunk_bytes,omitempty"`
+	StorageID  int64  `json:"storage_id"`
+	Path       string `json:"path"`
+	Filename   string `json:"filename,omitempty"`
+	Size       int64  `json:"size"`
+	Mime       string `json:"mime,omitempty"`
+	ChunkBytes int64  `json:"chunk_bytes,omitempty"`
 }
 
 // initResponse is returned to the browser.

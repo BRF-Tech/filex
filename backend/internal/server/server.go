@@ -33,11 +33,11 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/search"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
-	"gitlab.com/brftech/filemanager/backend/internal/version"
-	"gitlab.com/brftech/filemanager/backend/internal/versioning"
 	syncpkg "gitlab.com/brftech/filemanager/backend/internal/sync"
 	"gitlab.com/brftech/filemanager/backend/internal/thumb"
 	"gitlab.com/brftech/filemanager/backend/internal/trash"
+	"gitlab.com/brftech/filemanager/backend/internal/version"
+	"gitlab.com/brftech/filemanager/backend/internal/versioning"
 
 	// register storage and DB drivers via their init() blocks
 	_ "gitlab.com/brftech/filemanager/backend/internal/db/drivers/mysql"
@@ -55,11 +55,11 @@ import (
 
 // Server is the high-level wrapper around HTTP + workers.
 type Server struct {
-	cfg     config.Config
-	store   db.Store
-	sqlDB   *sql.DB
-	worker  *syncpkg.Worker
-	ops     *ops.Service
+	cfg             config.Config
+	store           db.Store
+	sqlDB           *sql.DB
+	worker          *syncpkg.Worker
+	ops             *ops.Service
 	queue           queue.Driver
 	qpool           *queue.Pool
 	notify          notify.Service
@@ -398,12 +398,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Trash:           trashSvc,
 		Quota:           quotaSvc,
 		Versions:        versionsSvc,
-		Queue:            srvObj.queue,
-		Notify:           srvObj.notify,
-		ReplicaService:   srvObj.replicaSvc,
-		ReplicaCron:      srvObj.replicaCron,
-		ReplicaReloader:  srvObj.replicaReloader,
-		StorageResolver:  resolver,
+		Queue:           srvObj.queue,
+		Notify:          srvObj.notify,
+		ReplicaService:  srvObj.replicaSvc,
+		ReplicaCron:     srvObj.replicaCron,
+		ReplicaReloader: srvObj.replicaReloader,
+		StorageResolver: resolver,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
 		OIDCAuth:        oidcDrv,
@@ -431,9 +431,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 // instead of "unreachable" on the next refresh.
 func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config) {
 	type defRow struct {
-		name    string
-		url     string
-		secret  string
+		name   string
+		url    string
+		secret string
 	}
 	defaults := []defRow{
 		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret},

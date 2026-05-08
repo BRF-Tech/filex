@@ -40,17 +40,17 @@ const (
 
 // Op is a queued file operation row.
 type Op struct {
-	ID         int64     `json:"id"`
-	Kind       string    `json:"kind"`
-	StorageID  int64     `json:"storage_id"`
-	Sources    []string  `json:"sources"`
-	Dest       string    `json:"dest,omitempty"`
-	Total      int       `json:"total"`
-	Done       int       `json:"done"`
-	Failed     int       `json:"failed"`
-	Status     string    `json:"status"`
-	Error      string    `json:"error,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         int64      `json:"id"`
+	Kind       string     `json:"kind"`
+	StorageID  int64      `json:"storage_id"`
+	Sources    []string   `json:"sources"`
+	Dest       string     `json:"dest,omitempty"`
+	Total      int        `json:"total"`
+	Done       int        `json:"done"`
+	Failed     int        `json:"failed"`
+	Status     string     `json:"status"`
+	Error      string     `json:"error,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }

@@ -2,9 +2,9 @@
 //
 // Admin CRUD for auth driver configuration.
 //
-//   GET    /api/admin/auth-providers
-//   PATCH  /api/admin/auth-providers/{name}
-//   POST   /api/admin/auth-providers/{name}/test
+//	GET    /api/admin/auth-providers
+//	PATCH  /api/admin/auth-providers/{name}
+//	POST   /api/admin/auth-providers/{name}/test
 //
 // V0.1: configuration is stored in the `settings` table under keys with the
 // prefix `auth.<name>.<field>`. The UI sends a complete JSON config and we

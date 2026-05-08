@@ -90,13 +90,13 @@ type service struct {
 	store db.Store
 	http  *http.Client
 
-	mu          sync.RWMutex
-	webhookURL  string
-	bearer      string
-	backoffs    []time.Duration
-	stopOnce    sync.Once
-	stopCh      chan struct{}
-	inflightWG  sync.WaitGroup
+	mu         sync.RWMutex
+	webhookURL string
+	bearer     string
+	backoffs   []time.Duration
+	stopOnce   sync.Once
+	stopCh     chan struct{}
+	inflightWG sync.WaitGroup
 }
 
 // Send persists then async-delivers.

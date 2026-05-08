@@ -179,7 +179,7 @@ func (s *Server) BackfillThumbs(ctx context.Context, opts BackfillOptions) (Back
 // single producer goroutine, so the methods are not goroutine-safe — they
 // don't need to be.
 type backfillWalker struct {
-	store       interface {
+	store interface {
 		ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 		GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error)
 	}

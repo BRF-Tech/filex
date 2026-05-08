@@ -43,7 +43,7 @@ func (e errsString) Error() string { return string(e) }
 
 // opsRequest is the body of POST /api/files/ops.
 type opsRequest struct {
-	Kind      string   `json:"kind"`       // copy, move, delete
+	Kind      string   `json:"kind"` // copy, move, delete
 	StorageID int64    `json:"storage_id"`
 	Sources   []string `json:"sources"`
 	Dest      string   `json:"dest,omitempty"`

@@ -60,11 +60,11 @@ func (i *Index) Close() error {
 
 // docFromNode extracts indexable fields from a Node.
 type doc struct {
-	StorageID int64    `json:"storage_id"`
-	Name      string   `json:"name"`
-	Path      string   `json:"path"`
-	Mime      string   `json:"mime,omitempty"`
-	Type      string   `json:"type"`
+	StorageID int64  `json:"storage_id"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Mime      string `json:"mime,omitempty"`
+	Type      string `json:"type"`
 }
 
 // IndexNode adds or updates a node entry.

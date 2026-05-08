@@ -33,11 +33,11 @@ func NewService(store db.Store) *Service { return &Service{store: store} }
 
 // CreateOpts is the set of fields a caller may supply when minting a share.
 type CreateOpts struct {
-	NodeID        int64
-	PIN           string     // optional, hashed before persist
-	ExpiresAt     *time.Time // optional
-	MaxDownloads  *int       // optional
-	CreatedBy     *int64     // user ID
+	NodeID       int64
+	PIN          string     // optional, hashed before persist
+	ExpiresAt    *time.Time // optional
+	MaxDownloads *int       // optional
+	CreatedBy    *int64     // user ID
 }
 
 // Create issues a fresh share token.

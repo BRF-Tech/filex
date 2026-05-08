@@ -195,12 +195,12 @@ type CallbackPayload struct {
 
 // Status codes per OnlyOffice callback spec.
 const (
-	StatusBeingEdited      = 1
-	StatusReadyForSaving   = 2
-	StatusSavingError      = 3
-	StatusClosedNoChange   = 4
-	StatusForceSave        = 6
-	StatusForceSaveError   = 7
+	StatusBeingEdited    = 1
+	StatusReadyForSaving = 2
+	StatusSavingError    = 3
+	StatusClosedNoChange = 4
+	StatusForceSave      = 6
+	StatusForceSaveError = 7
 )
 
 // HandleCallback validates the JWT, downloads the saved version, and writes

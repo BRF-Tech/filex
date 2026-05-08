@@ -1030,7 +1030,6 @@ func btoi(b bool) int {
 	return 0
 }
 
-
 // ─────────────────── Sync conflicts (admin) ───────────────────
 
 const conflictColumns = `id, node_id, storage_id, storage_key, db_etag, backend_etag, db_mtime, backend_mtime, detected_at, resolved_at, resolution`

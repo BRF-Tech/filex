@@ -2,7 +2,7 @@
 //
 // Admin-only extra actions on users.
 //
-//   POST /api/admin/users/{id}/reset-password
+//	POST /api/admin/users/{id}/reset-password
 package handlers
 
 import (

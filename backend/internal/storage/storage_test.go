@@ -19,7 +19,7 @@ func TestComputeCapabilities(t *testing.T) {
 
 type noOpDriver struct{ caps Capabilities }
 
-func (n *noOpDriver) Init(_ context.Context, _ map[string]any) error    { return nil }
+func (n *noOpDriver) Init(_ context.Context, _ map[string]any) error     { return nil }
 func (n *noOpDriver) Name() string                                       { return "noop" }
 func (n *noOpDriver) List(_ context.Context, _ string) ([]Object, error) { return nil, nil }
 func (n *noOpDriver) Stat(_ context.Context, _ string) (Object, error)   { return Object{}, nil }

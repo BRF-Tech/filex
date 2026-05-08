@@ -12,11 +12,11 @@ import (
 // model.ReplicaRule but lives here so the storage package doesn't
 // import model.
 type RuleSpec struct {
-	ID          int64
-	Pattern     string
-	Mode        ReplicaMode
-	Priority    int
-	Enabled     bool
+	ID       int64
+	Pattern  string
+	Mode     ReplicaMode
+	Priority int
+	Enabled  bool
 }
 
 // rulesEngine implements RuleEngine over an in-memory slice. Rules

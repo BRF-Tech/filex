@@ -2,9 +2,9 @@
 //
 // Admin CRUD for external services (OnlyOffice, Drawio, Mermaid, …).
 //
-//   GET    /api/admin/external
-//   PATCH  /api/admin/external/{name}
-//   POST   /api/admin/external/{name}/test
+//	GET    /api/admin/external
+//	PATCH  /api/admin/external/{name}
+//	POST   /api/admin/external/{name}/test
 package handlers
 
 import (
@@ -48,8 +48,8 @@ func (h *ExternalAdmin) List(w http.ResponseWriter, r *http.Request) {
 type extPatchReq struct {
 	Enabled     *bool   `json:"enabled,omitempty"`
 	URL         *string `json:"url,omitempty"`
-	Secret      *string `json:"secret,omitempty"`        // plaintext from UI; will be encrypted server-side
-	OptionsJSON *string `json:"options_json,omitempty"`  // raw JSON blob
+	Secret      *string `json:"secret,omitempty"`       // plaintext from UI; will be encrypted server-side
+	OptionsJSON *string `json:"options_json,omitempty"` // raw JSON blob
 }
 
 // Update upserts a row and re-runs the health probe.

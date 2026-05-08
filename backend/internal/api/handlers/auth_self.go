@@ -3,12 +3,12 @@
 // Self-service auth endpoints (current user). All routes require an
 // authenticated session and act on the principal in the request context.
 //
-//   GET    /api/auth/me              — current user
-//   PATCH  /api/auth/profile         — update email/locale/timezone
-//   POST   /api/auth/password        — change password (requires old)
-//   POST   /api/auth/totp/enroll     — start TOTP enrollment
-//   POST   /api/auth/totp/verify     — confirm TOTP enrollment with code
-//   POST   /api/auth/totp/disable    — turn TOTP off (password + code)
+//	GET    /api/auth/me              — current user
+//	PATCH  /api/auth/profile         — update email/locale/timezone
+//	POST   /api/auth/password        — change password (requires old)
+//	POST   /api/auth/totp/enroll     — start TOTP enrollment
+//	POST   /api/auth/totp/verify     — confirm TOTP enrollment with code
+//	POST   /api/auth/totp/disable    — turn TOTP off (password + code)
 package handlers
 
 import (
@@ -156,10 +156,10 @@ func (h *AuthSelf) TotpEnroll(w http.ResponseWriter, r *http.Request) {
 		u.Email, secret,
 	)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"secret":          secret,
-		"otpauth_url":     otpURL,
-		"qr_svg":          renderQRPlaceholderSVG(otpURL),
-		"recovery_codes":  codes,
+		"secret":         secret,
+		"otpauth_url":    otpURL,
+		"qr_svg":         renderQRPlaceholderSVG(otpURL),
+		"recovery_codes": codes,
 	})
 }
 

@@ -2,9 +2,9 @@
 //
 // Extra admin actions on storages beyond plain CRUD:
 //
-//   POST /api/admin/storages/test            — try a connection without saving
-//   GET  /api/admin/storages/{id}/sync-runs  — recent runs for one storage
-//   GET  /api/admin/storages/{id}/drift      — recent sync conflicts
+//	POST /api/admin/storages/test            — try a connection without saving
+//	GET  /api/admin/storages/{id}/sync-runs  — recent runs for one storage
+//	GET  /api/admin/storages/{id}/drift      — recent sync conflicts
 package handlers
 
 import (
@@ -68,9 +68,9 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		preview = preview[:10]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
-		"sample_listing":  preview,
-		"object_count":    len(objects),
+		"ok":             true,
+		"sample_listing": preview,
+		"object_count":   len(objects),
 	})
 }
 

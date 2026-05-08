@@ -24,11 +24,11 @@ type Worker struct {
 	store db.Store
 	index *search.Index // optional — when set, sync upserts feed Bleve
 
-	mu       sync.Mutex
-	cancels  map[int64]context.CancelFunc // storageID → cancel
-	syncers  map[int64]*storageSyncer
-	stopWg   sync.WaitGroup
-	stopped  bool
+	mu      sync.Mutex
+	cancels map[int64]context.CancelFunc // storageID → cancel
+	syncers map[int64]*storageSyncer
+	stopWg  sync.WaitGroup
+	stopped bool
 }
 
 // New constructs a new Worker. Call Start to spawn syncers.

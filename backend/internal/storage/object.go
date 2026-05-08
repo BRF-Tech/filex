@@ -13,13 +13,13 @@ const (
 
 // Object is a backend-agnostic representation of a single FS entry.
 type Object struct {
-	Path     string     `json:"path"`     // logical path within storage (POSIX-style)
-	Name     string     `json:"name"`     // basename
-	Size     int64      `json:"size"`
-	Kind     ObjectKind `json:"kind"`
-	Mime     string     `json:"mime,omitempty"`
-	Etag     string     `json:"etag,omitempty"`
-	Mtime    time.Time  `json:"mtime,omitempty"`
+	Path     string            `json:"path"` // logical path within storage (POSIX-style)
+	Name     string            `json:"name"` // basename
+	Size     int64             `json:"size"`
+	Kind     ObjectKind        `json:"kind"`
+	Mime     string            `json:"mime,omitempty"`
+	Etag     string            `json:"etag,omitempty"`
+	Mtime    time.Time         `json:"mtime,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
@@ -35,7 +35,7 @@ type PresignedUpload struct {
 	URL       string            `json:"url"`
 	Method    string            `json:"method"`
 	Headers   map[string]string `json:"headers,omitempty"`
-	UploadID  string            `json:"upload_id,omitempty"`  // for multipart
+	UploadID  string            `json:"upload_id,omitempty"` // for multipart
 	PartSize  int64             `json:"part_size,omitempty"`
 	PartCount int               `json:"part_count,omitempty"`
 	PartURLs  []string          `json:"part_urls,omitempty"`

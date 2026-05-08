@@ -2,8 +2,8 @@
 //
 // Admin views over sync runs (cross-storage list + per-run detail).
 //
-//   GET  /api/admin/sync-runs
-//   GET  /api/admin/sync-runs/{id}
+//	GET  /api/admin/sync-runs
+//	GET  /api/admin/sync-runs/{id}
 package handlers
 
 import (

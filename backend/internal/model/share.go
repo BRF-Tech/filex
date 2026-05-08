@@ -7,8 +7,8 @@ type Share struct {
 	ID            int64      `json:"id"`
 	NodeID        int64      `json:"node_id"`
 	Token         string     `json:"token"`
-	PinHash       string     `json:"-"`              // never serialized
-	HasPin        bool       `json:"has_pin"`        // computed
+	PinHash       string     `json:"-"`       // never serialized
+	HasPin        bool       `json:"has_pin"` // computed
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	MaxDownloads  *int       `json:"max_downloads,omitempty"`
 	DownloadCount int        `json:"download_count"`
@@ -32,13 +32,13 @@ func (s *Share) IsExpired(now time.Time) bool {
 
 // ChunkedUpload tracks an in-flight multipart upload.
 type ChunkedUpload struct {
-	ID         string    `json:"id"`
-	StorageID  int64     `json:"storage_id"`
-	StorageKey string    `json:"storage_key"`
-	UploadID   string    `json:"upload_id"`
-	TotalSize  int64     `json:"total_size"`
+	ID         string       `json:"id"`
+	StorageID  int64        `json:"storage_id"`
+	StorageKey string       `json:"storage_key"`
+	UploadID   string       `json:"upload_id"`
+	TotalSize  int64        `json:"total_size"`
 	Parts      []UploadPart `json:"parts"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	ExpiresAt  time.Time    `json:"expires_at"`
 }
 
 // UploadPart represents one chunk of a multipart upload.

@@ -44,10 +44,10 @@ func newMutateFixture(t *testing.T) (*handlers.Manager, db.Store, *local.Driver,
 	require.NoError(t, drv.Init(context.Background(), map[string]any{"root": dir}))
 
 	st, err := store.CreateStorage(context.Background(), &model.Storage{
-		Name:      "main",
-		Driver:    "local",
-		MountPath: "/data",
-		Enabled:   true,
+		Name:       "main",
+		Driver:     "local",
+		MountPath:  "/data",
+		Enabled:    true,
 		ConfigJSON: json.RawMessage(`{"root":"` + escapeJSON(dir) + `"}`),
 	})
 	require.NoError(t, err)

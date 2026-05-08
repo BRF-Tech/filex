@@ -509,7 +509,6 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	})
 }
 
-
 // resolveDirNode walks `rel` (slash-separated) under the storage root
 // and returns the parent ID at which to list. An empty rel == root
 // (parentID == nil). The returned dirname is normalised (no leading/

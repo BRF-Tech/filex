@@ -10,19 +10,19 @@ const (
 
 // User represents an authenticated principal.
 type User struct {
-	ID                 int64      `json:"id"`
-	Email              string     `json:"email"`
-	PasswordHash       string     `json:"-"`
-	Role               string     `json:"role"`
-	TOTPSecret         string     `json:"-"`
-	TOTPPendingSecret  string     `json:"-"`
-	TOTPEnabled        bool       `json:"totp_enabled"`
-	TOTPRecoveryCodes  []string   `json:"-"`
-	Locale             string     `json:"locale"`
-	Timezone           string     `json:"timezone"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	LastLoginAt        *time.Time `json:"last_login_at,omitempty"`
+	ID                int64      `json:"id"`
+	Email             string     `json:"email"`
+	PasswordHash      string     `json:"-"`
+	Role              string     `json:"role"`
+	TOTPSecret        string     `json:"-"`
+	TOTPPendingSecret string     `json:"-"`
+	TOTPEnabled       bool       `json:"totp_enabled"`
+	TOTPRecoveryCodes []string   `json:"-"`
+	Locale            string     `json:"locale"`
+	Timezone          string     `json:"timezone"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	LastLoginAt       *time.Time `json:"last_login_at,omitempty"`
 }
 
 // IsAdmin returns true if the user has the admin role.

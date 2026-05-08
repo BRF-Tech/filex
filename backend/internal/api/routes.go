@@ -43,17 +43,17 @@ type Deps struct {
 	Caps            *capability.Service
 	Thumbs          *thumb.Pipeline
 	Share           *share.Service
-	OnlyOffice       *onlyoffice.Service
-	Ops              *ops.Service
-	Trash            *trash.Service
-	Quota            *quota.Service
-	Versions         *versioning.Service
-	Queue            queue.Driver
-	Notify           notify.Service
-	ReplicaService   *replica.Service
-	ReplicaCron      *replica.CronScheduler
-	ReplicaReloader  *replica.RulesReloader
-	StorageResolver  func(int64) (storage.Driver, error)
+	OnlyOffice      *onlyoffice.Service
+	Ops             *ops.Service
+	Trash           *trash.Service
+	Quota           *quota.Service
+	Versions        *versioning.Service
+	Queue           queue.Driver
+	Notify          notify.Service
+	ReplicaService  *replica.Service
+	ReplicaCron     *replica.CronScheduler
+	ReplicaReloader *replica.RulesReloader
+	StorageResolver func(int64) (storage.Driver, error)
 	Embed           embed.FS // web/dist + admin
 	LocalAuth       auth.LoginDriver
 	OIDCAuth        auth.OIDCDriver

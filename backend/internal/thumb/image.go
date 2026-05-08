@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"image"
+	_ "image/gif" // register GIF decoder
 	"image/jpeg"
-	_ "image/png"  // register PNG decoder
-	_ "image/gif"  // register GIF decoder
+	_ "image/png" // register PNG decoder
 	"io"
 	"os"
 	"path/filepath"
@@ -85,4 +85,3 @@ func scaleDown(src image.Image, maxW, maxH int) image.Image {
 	}
 	return dst
 }
-

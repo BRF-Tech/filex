@@ -2,8 +2,8 @@
 //
 // Admin endpoints for the embedded Bleve full-text index.
 //
-//   GET  /api/admin/search/stats     — index stats
-//   POST /api/admin/search/rebuild   — drop and rebuild the index from nodes
+//	GET  /api/admin/search/stats     — index stats
+//	POST /api/admin/search/rebuild   — drop and rebuild the index from nodes
 package handlers
 
 import (
@@ -34,8 +34,8 @@ func NewSearchAdmin(idx *search.Index, store db.Store) *SearchAdmin {
 func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 	if h.Index == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled":         false,
-			"document_count":  0,
+			"enabled":          false,
+			"document_count":   0,
 			"index_size_bytes": 0,
 		})
 		return

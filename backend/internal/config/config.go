@@ -2,9 +2,9 @@
 // environment variable overrides (FILEX_*).
 //
 // Precedence (highest first):
-//   1. Environment variables (FILEX_LISTEN, FILEX_DB_DRIVER, …)
-//   2. config.yaml (path passed via --config or default ~/.filex/config.yaml)
-//   3. Hard-coded defaults
+//  1. Environment variables (FILEX_LISTEN, FILEX_DB_DRIVER, …)
+//  2. config.yaml (path passed via --config or default ~/.filex/config.yaml)
+//  3. Hard-coded defaults
 //
 // Some settings live in the DB (settings table) instead of config.yaml —
 // e.g. instance branding, default thumbnail policy. Those are read by
@@ -25,20 +25,20 @@ import (
 
 // Config is the top-level runtime configuration object.
 type Config struct {
-	Listen           string         `yaml:"listen"`
-	PublicURL        string         `yaml:"public_url"`
-	DataDir          string         `yaml:"data_dir"`
-	Log              LogConfig      `yaml:"log"`
-	DB               DBConfig       `yaml:"db"`
-	Auth             AuthConfig     `yaml:"auth"`
-	ExternalServices ExtServices    `yaml:"external_services"`
-	Sync             SyncConfig     `yaml:"sync"`
-	Thumbs           ThumbsConfig   `yaml:"thumbs"`
-	Search           SearchConfig   `yaml:"search"`
-	CORS             CORSConfig     `yaml:"cors"`
-	Queue            QueueConfig    `yaml:"queue"`
-	Notify           NotifyConfig   `yaml:"notify"`
-	Demo             DemoConfig     `yaml:"demo"`
+	Listen           string       `yaml:"listen"`
+	PublicURL        string       `yaml:"public_url"`
+	DataDir          string       `yaml:"data_dir"`
+	Log              LogConfig    `yaml:"log"`
+	DB               DBConfig     `yaml:"db"`
+	Auth             AuthConfig   `yaml:"auth"`
+	ExternalServices ExtServices  `yaml:"external_services"`
+	Sync             SyncConfig   `yaml:"sync"`
+	Thumbs           ThumbsConfig `yaml:"thumbs"`
+	Search           SearchConfig `yaml:"search"`
+	CORS             CORSConfig   `yaml:"cors"`
+	Queue            QueueConfig  `yaml:"queue"`
+	Notify           NotifyConfig `yaml:"notify"`
+	Demo             DemoConfig   `yaml:"demo"`
 }
 
 // DemoConfig — public-demo affordances. When Mode=true the login page
@@ -101,10 +101,10 @@ type DBConfig struct {
 
 // AuthConfig — enabled drivers and per-driver options.
 type AuthConfig struct {
-	Drivers []string             `yaml:"drivers"`
-	OIDC    OIDCConfig           `yaml:"oidc"`
-	LDAP    LDAPConfig           `yaml:"ldap"`
-	Header  HeaderProxyConfig    `yaml:"header_proxy"`
+	Drivers []string          `yaml:"drivers"`
+	OIDC    OIDCConfig        `yaml:"oidc"`
+	LDAP    LDAPConfig        `yaml:"ldap"`
+	Header  HeaderProxyConfig `yaml:"header_proxy"`
 }
 
 // OIDCConfig — Keycloak/Auth0/etc.
