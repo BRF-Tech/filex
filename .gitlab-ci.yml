@@ -22,14 +22,16 @@
 stages:
   - lint
   - test
+  - e2e
   - build
   - release
 
 variables:
-  # Bumped to 1.24 because go-redis/v9 (Round B persistent queue) requires
-  # it. The toolchain directive in backend/go.mod auto-downloads 1.24 even
-  # on a 1.23 image, but using a 1.24 image avoids an extra download in CI.
-  GO_VERSION: "1.24"
+  # Bumped to 1.25 because golang.org/x/image v0.39+ (round-5 thumb
+  # decoders for BMP/TIFF/WebP) declares `go 1.25` in its go.mod. The
+  # toolchain directive in backend/go.mod auto-downloads 1.25 even on a
+  # 1.24 image, but using a 1.25 image avoids an extra download in CI.
+  GO_VERSION: "1.25"
   NODE_VERSION: "20"
   PNPM_VERSION: "9.12.0"
   PNPM_HOME: "/root/.local/share/pnpm"
@@ -132,6 +134,43 @@ test:web:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
+
+# ---------------------------------------------------------------------------
+# E2E
+# ---------------------------------------------------------------------------
+# Pins the rounds-4-6 regression suite to every push so the SPA-vs-backend
+# bugs found across 2026-05-08 don't sneak back in. Browser-driven tests
+# are gated behind E2E_INCLUDE_BROWSER (which CI deliberately doesn't set)
+# because Chromium + a full filex container are too pricey for every
+# branch push; they still run in the local recipe.
+#
+# Required CI/CD variables (set in Settings > CI/CD):
+#   E2E_BASE_URL         e.g. https://fm.brf.sh (production smoke)
+#   E2E_ADMIN_EMAIL      e.g. admin@local
+#   E2E_ADMIN_PASSWORD   live admin password (mark Masked + Protected)
+#
+# When any of those are missing the job no-ops (test.skip) — we surface
+# a clean "skipped" rather than a noisy auth failure.
+e2e:rounds-regression:
+  extends: .node
+  stage: e2e
+  needs: []
+  script:
+    - cd e2e
+    - pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+    - npx playwright test 91-rounds-4-6-regression --reporter=list
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  artifacts:
+    name: "filex-e2e-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - e2e/playwright-report/
+      - e2e/test-results/
+    when: always
+    expire_in: 1 week
+  allow_failure: false
 
 # ---------------------------------------------------------------------------
 # Build

@@ -58,9 +58,24 @@ func (p *Pipeline) generateOffice(ctx context.Context, node *model.Node, drv sto
 
 	cmd := exec.CommandContext(ctx, bin,
 		"--headless",
+		"--norestore",
+		"--nologo",
+		"--nofirststartwizard",
+		"-env:UserInstallation=file://"+tmpDir+"/lo-profile",
 		"--convert-to", "pdf",
 		"--outdir", tmpDir,
 		srcPath,
+	)
+	// Confine LibreOffice's per-user state to the per-call tmp dir so
+	// concurrent backfill workers don't collide on the shared
+	// /root/.config/libreoffice/4/user lock and so the "Warning:
+	// failed to read path from javaldx" stderr line stops hitting
+	// process logs on first invocation.
+	cmd.Env = append(append([]string(nil), os.Environ()...),
+		"HOME="+tmpDir,
+		"XDG_CACHE_HOME="+tmpDir+"/cache",
+		"XDG_CONFIG_HOME="+tmpDir+"/config",
+		"XDG_DATA_HOME="+tmpDir+"/data",
 	)
 	combined, err := cmd.CombinedOutput()
 	if err != nil {
