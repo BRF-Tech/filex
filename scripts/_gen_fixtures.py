@@ -75,12 +75,47 @@ def write_docx(p: Path) -> None:
 
 
 def write_pptx(p: Path) -> None:
+    """Generate a PowerPoint fixture.
+
+    The first attempt uses python-pptx, which produces a fully-formed
+    archive (slideLayouts/, slideMasters/, theme/, app/core props…) —
+    the kind of pptx LibreOffice Impress's writer can re-export to PDF
+    via `soffice --convert-to pdf`. We use this path in production
+    seeding (`scripts/seed-example-fixtures.sh` runs on `main`, where
+    `pip install python-pptx` is already done) so the thumb pipeline
+    actually has a working fixture.
+
+    The fallback below is a hand-rolled minimal pptx — kept around so
+    a developer running `python3 _gen_fixtures.py` on a vanilla machine
+    without python-pptx installed still gets some bytes on disk. The
+    frontend viewer tests open the fixture as an opaque blob and don't
+    care whether it round-trips through Impress; only the thumbnail
+    pipeline needs the richer form.
+    """
+    try:
+        from pptx import Presentation  # type: ignore[import-not-found]
+
+        prs = Presentation()
+        title_layout = prs.slide_layouts[0]  # "Title Slide"
+        slide = prs.slides.add_slide(title_layout)
+        slide.shapes.title.text = "Demo Presentation"
+        if len(slide.placeholders) > 1:
+            slide.placeholders[1].text = "Routing fixture for filex preview viewers."
+        prs.save(str(p))
+        return
+    except ImportError:
+        pass
+
+    # ---- Fallback: hand-rolled minimal pptx (no python-pptx on PATH) ----
     # NB: LibreOffice's Impress writer rejects pptx slides whose spTree
     # is empty — `soffice --convert-to pdf` exits 0 but emits no PDF
     # because there's nothing to lay out. We add a single text shape so
     # the converter has at least one drawable object, plus the
     # `<p:sldSz>` + `<p:notesSz>` size hints presentation.xml needs for
-    # the slide to render at the standard 16:9 aspect.
+    # the slide to render at the standard 16:9 aspect. This still
+    # doesn't satisfy Impress (no slideLayout/slideMaster references),
+    # so on a python-pptx-less host the slides.pptx thumb stays in
+    # state="failed" — re-seed from `main` to pick up the proper form.
     with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
