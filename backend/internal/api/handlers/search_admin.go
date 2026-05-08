@@ -7,6 +7,8 @@
 package handlers
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 
@@ -57,9 +59,18 @@ func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "rebuild already in progress"})
 		return
 	}
+	// Detach from r.Context — chi cancels it the moment we return from
+	// this handler, which would kill the background reindex before it
+	// processes a single row. Use context.Background so the goroutine
+	// runs to completion (or until container shutdown).
 	go func() {
 		defer h.rebuilding.Store(false)
-		_ = h.Index.RebuildAll(r.Context(), h.Store)
+		ctx := context.Background()
+		if err := h.Index.RebuildAll(ctx, h.Store); err != nil {
+			slog.Warn("search: rebuild failed", slog.String("err", err.Error()))
+			return
+		}
+		slog.Info("search: rebuild done")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"ok":   true,

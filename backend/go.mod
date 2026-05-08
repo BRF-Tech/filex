@@ -1,6 +1,9 @@
 module gitlab.com/brftech/filemanager/backend
 
-go 1.24
+// Bumped from 1.24 to support golang.org/x/image v0.39+ which we use
+// for BMP/TIFF/WebP thumbnail decoding (internal/thumb/image.go).
+// docker/Dockerfile uses golang:1.25-alpine to match.
+go 1.25
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.30.3
@@ -25,6 +28,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/crypto v0.25.0
+	golang.org/x/image v0.39.0
 	golang.org/x/oauth2 v0.21.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.30.2

@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
-	_ "image/png" // register PNG decoder
-	_ "image/gif" // register GIF decoder
+	_ "image/png"  // register PNG decoder
+	_ "image/gif"  // register GIF decoder
 	"io"
 	"os"
 	"path/filepath"
+
+	// Register additional image formats used by the SFC's example
+	// fixtures + real-world S3 storage. Without these the pipeline
+	// flags rows as state="failed" and the GridView falls back to
+	// the file-type emoji forever.
+	_ "golang.org/x/image/bmp"  // bmp
+	_ "golang.org/x/image/tiff" // tiff (scan.tiff fixture)
+	_ "golang.org/x/image/webp" // webp (photo.webp fixture)
 
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"

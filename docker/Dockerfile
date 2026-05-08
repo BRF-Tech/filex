@@ -61,7 +61,9 @@ RUN mkdir -p /tmp/embed/admin /tmp/embed/web && \
 # ---------------------------------------------------------------------------
 # Stage 3: Build the Go binary with embedded assets
 # ---------------------------------------------------------------------------
-FROM golang:1.24-alpine AS backend-build
+# Bumped to 1.25 for golang.org/x/image v0.39+ (BMP/TIFF/WebP decoders we
+# import in internal/thumb/image.go register Go 1.25 toolchain features).
+FROM golang:1.25-alpine AS backend-build
 RUN apk --no-cache add git ca-certificates
 WORKDIR /src
 

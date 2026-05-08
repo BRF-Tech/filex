@@ -20,7 +20,7 @@
  * not yet loaded we render the highlight.js read-only view immediately,
  * then upgrade to Monaco once the import resolves.
  */
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { Component } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
@@ -512,59 +512,76 @@ async function saveCode(): Promise<void> {
 
 // --- Orchestration: fetch + render when modal opens ---
 
-watch(
-  () => [props.open, src.value, kind.value, props.openMode] as const,
-  async ([open, url, k]) => {
-    rawText.value = '';
-    markdownHtml.value = '';
-    codeHtml.value = '';
-    fetchError.value = null;
-    officeError.value = null;
-    viewerCmp.value = null;
-    viewerLoadError.value = null;
-    pdfFallbackToNative.value = false;
-    disposeOnlyOfficeEditor();
-    disposeMonaco();
-    if (!open || !url) return;
-    if (k === 'viewer') {
-      await loadViewerFor(ext(props.file));
+async function runOrchestration(open: boolean, url: string, k: string): Promise<void> {
+  rawText.value = '';
+  markdownHtml.value = '';
+  codeHtml.value = '';
+  fetchError.value = null;
+  officeError.value = null;
+  viewerCmp.value = null;
+  viewerLoadError.value = null;
+  pdfFallbackToNative.value = false;
+  disposeOnlyOfficeEditor();
+  disposeMonaco();
+  if (!open || !url) return;
+  if (k === 'viewer') {
+    await loadViewerFor(ext(props.file));
+    return;
+  }
+  if (k === 'markdown' || k === 'code' || k === 'text') {
+    await fetchText(url);
+    if (tooLarge.value) return;
+    if (k === 'markdown') {
+      await renderMarkdown(rawText.value);
       return;
     }
-    if (k === 'markdown' || k === 'code' || k === 'text') {
-      await fetchText(url);
-      if (tooLarge.value) return;
-      if (k === 'markdown') {
-        await renderMarkdown(rawText.value);
-        return;
-      }
-      // For code/text — try Monaco first when the cached module is
-      // already in memory. If not, render the highlight.js placeholder
-      // immediately, then attempt to upgrade to Monaco when the import
-      // settles.
-      const lang = CODE_LANGS[ext(props.file)] || '';
-      const monacoCached = getMonaco();
-      if (monacoCached) {
-        await new Promise<void>((r) => setTimeout(r, 0));
-        const ok = await tryMountMonaco(rawText.value, ext(props.file));
-        if (!ok) await highlightCode(rawText.value, lang);
-      } else {
-        // Render highlight.js immediately for read-only colour. Then
-        // kick off the Monaco load and swap it in once ready.
-        if (k === 'code') await highlightCode(rawText.value, lang);
-        ensureMonaco().then(async (m) => {
-          if (!m) return;
-          if (!props.open) return;
-          // Wait one tick so the placeholder DOM exists before swapping.
-          await new Promise<void>((r) => setTimeout(r, 0));
-          await tryMountMonaco(rawText.value, ext(props.file));
-        });
-      }
-    } else if (k === 'office') {
+    // For code/text — try Monaco first when the cached module is
+    // already in memory. If not, render the highlight.js placeholder
+    // immediately, then attempt to upgrade to Monaco when the import
+    // settles.
+    const lang = CODE_LANGS[ext(props.file)] || '';
+    const monacoCached = getMonaco();
+    if (monacoCached) {
       await new Promise<void>((r) => setTimeout(r, 0));
-      await mountOnlyOfficeEditor();
+      const ok = await tryMountMonaco(rawText.value, ext(props.file));
+      if (!ok) await highlightCode(rawText.value, lang);
+    } else {
+      // Render highlight.js immediately for read-only colour. Then
+      // kick off the Monaco load and swap it in once ready.
+      if (k === 'code') await highlightCode(rawText.value, lang);
+      ensureMonaco().then(async (m) => {
+        if (!m) return;
+        if (!props.open) return;
+        // Wait one tick so the placeholder DOM exists before swapping.
+        await new Promise<void>((r) => setTimeout(r, 0));
+        await tryMountMonaco(rawText.value, ext(props.file));
+      });
     }
+  } else if (k === 'office') {
+    await new Promise<void>((r) => setTimeout(r, 0));
+    await mountOnlyOfficeEditor();
+  }
+}
+
+watch(
+  () => [props.open, src.value, kind.value, props.openMode] as const,
+  ([open, url, k]) => {
+    void runOrchestration(open, url, k);
   },
 );
+
+// Hand-fire on mount so the standalone Editor.vue route (which mounts
+// us with `open` already true) actually runs the orchestration. The
+// watcher itself is non-immediate because `immediate: true` would fire
+// before the rest of <script setup> finishes, hitting the TDZ on
+// `officeEditor`/Monaco state below. Doing this in onMounted+nextTick
+// guarantees every `let`/`function` in the file has been hoisted.
+onMounted(() => {
+  void nextTick(() => {
+    if (!props.open) return;
+    void runOrchestration(props.open, src.value, kind.value);
+  });
+});
 
 const codeLanguage = computed(() => CODE_LANGS[ext(props.file)] || 'plaintext');
 
@@ -591,7 +608,11 @@ async function mountOnlyOfficeEditor(): Promise<void> {
       headers,
       credentials: props.authCredentials || 'same-origin',
       body: JSON.stringify({
-        path: stripAdapter(props.file.path),
+        // Send the FULL adapter-qualified path. The backend resolves
+        // `<adapter>://<rel>` against ListEnabledStorages; passing the
+        // bare relative path falls back to storages[0] which 404s for
+        // anything sitting on a non-primary storage (e.g. s3-test).
+        path: props.file.path,
         mode: props.openMode || 'edit',
       }),
     });

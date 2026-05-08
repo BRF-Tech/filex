@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/blevesearch/bleve/v2"
@@ -106,6 +107,20 @@ type Hit struct {
 //
 // Falls back to nil result + nil error when index is disabled — callers
 // should treat that as "no search engine, do a SQL LIKE instead".
+//
+// Default mapping uses the standard analyzer, which tokenises filenames
+// like "square.jpg" as a single token because the dot isn't a word
+// boundary. To make partial matches like "squ" or "jpg" find rows we
+// run TWO queries together via a disjunction:
+//
+//   - Match (name): exact-token hits, ranks well for full filenames
+//     ("square.jpg") and word-prefix hits when there's a delimiter.
+//   - Wildcard (name): catches mid-string substrings like "squ" → finds
+//     "square.jpg" because the wildcard is anchored on both sides.
+//
+// Either query alone produced gaps in browser smoke (Match misses
+// substrings; Wildcard misses tokenised matches when the user types the
+// full name). Disjunction is fast at the index sizes we care about.
 func (i *Index) Search(_ context.Context, query string, limit int) ([]Hit, error) {
 	if limit <= 0 {
 		limit = 50
@@ -116,9 +131,24 @@ func (i *Index) Search(_ context.Context, query string, limit int) ([]Hit, error
 	if bx == nil || query == "" {
 		return nil, nil
 	}
-	q := bleve.NewMatchQuery(query)
-	q.SetField("name")
-	req := bleve.NewSearchRequest(q)
+
+	// Lower-case for the wildcard side: Bleve stores tokens lower-cased
+	// by default but wildcard queries are NOT analysed, so an upper-case
+	// term in the user's input would miss every row.
+	wcTerm := "*" + strings.ToLower(query) + "*"
+
+	matchQ := bleve.NewMatchQuery(query)
+	matchQ.SetField("name")
+
+	wildQ := bleve.NewWildcardQuery(wcTerm)
+	wildQ.SetField("name")
+
+	pathQ := bleve.NewWildcardQuery(wcTerm)
+	pathQ.SetField("path")
+
+	disj := bleve.NewDisjunctionQuery(matchQ, wildQ, pathQ)
+
+	req := bleve.NewSearchRequest(disj)
 	req.Size = limit
 	res, err := bx.Search(req)
 	if err != nil {

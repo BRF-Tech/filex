@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,15 +62,42 @@ func (p *Pipeline) generateOffice(ctx context.Context, node *model.Node, drv sto
 		"--outdir", tmpDir,
 		srcPath,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("thumb: libreoffice: %w (%s)", err, string(out))
+	combined, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("thumb: libreoffice: %w (%s)", err, strings.TrimSpace(string(combined)))
 	}
 
 	pdfName := strings.TrimSuffix(srcName, filepath.Ext(srcName)) + ".pdf"
 	pdfPath := filepath.Join(tmpDir, pdfName)
-	if _, err := os.Stat(pdfPath); err != nil {
-		return fmt.Errorf("thumb: libreoffice produced no PDF: %s", pdfPath)
+	if _, statErr := os.Stat(pdfPath); statErr != nil {
+		// soffice exit 0 ama PDF yok — bu genelde kaynak dosyanın
+		// soffice'in beklediği şemaya uymadığı (truncated pptx, vs.)
+		// veya output adının convention'umuzla uyuşmadığı durumlarda
+		// olur. soffice'in kendi stdout/stderr'ini ekleyerek root
+		// cause'u görünür yap.
+		entries, _ := os.ReadDir(tmpDir)
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		slog.Warn("thumb: libreoffice produced no PDF",
+			slog.String("src", srcName),
+			slog.String("expected", pdfPath),
+			slog.String("tmp_dir_listing", strings.Join(names, ",")),
+			slog.String("soffice_output", strings.TrimSpace(string(combined))),
+		)
+		// Fallback: scan tmpDir for ANY .pdf — soffice occasionally
+		// names the file after the embedded document title rather
+		// than the source filename.
+		for _, e := range entries {
+			if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".pdf") {
+				pdfPath = filepath.Join(tmpDir, e.Name())
+				goto pdfFound
+			}
+		}
+		return fmt.Errorf("thumb: libreoffice produced no PDF: %s (cmd output: %s)", pdfPath, strings.TrimSpace(string(combined)))
 	}
+pdfFound:
 
 	// Now reuse the gs/pdftoppm path.
 	if err := os.MkdirAll(p.cacheDir, 0o755); err != nil {
