@@ -39,6 +39,18 @@ const FIXTURE_DIR = `${FIXTURE_STORAGE}://example`;
 let api: APIRequestContext;
 
 test.beforeAll(async ({ playwright, baseURL }) => {
+  // Hard requirement: a live filex deployment to point the regression
+  // suite at. CI sets these via Settings > CI/CD > Variables; locally
+  // export them in the shell. If they're missing we skip the whole
+  // describe block with a loud message rather than letting Playwright
+  // grind through 30-second timeouts to a non-existent localhost
+  // listener.
+  test.skip(
+    !process.env.E2E_BASE_URL || process.env.E2E_BASE_URL.includes('localhost:5212'),
+    'set E2E_BASE_URL to a live filex deployment (e.g. https://fm.brf.sh) ' +
+      'plus E2E_ADMIN_EMAIL + E2E_ADMIN_PASSWORD; suite skipped',
+  );
+
   // Bearer-token context — round-4 ops + onlyoffice + capabilities
   // endpoints all sit behind the admin auth middleware, so an authed
   // request is the minimum viable harness.

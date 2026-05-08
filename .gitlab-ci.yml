@@ -81,6 +81,15 @@ lint:go:
   extends: .go
   stage: lint
   script:
+    # backend/embed/{admin,web} are .gitignore'd because the real
+    # bytes come from the frontend build artifact in build:backend.
+    # `//go:embed all:admin all:web` in embed.go fails the lint with
+    # "pattern all:admin: no matching files found" if the dirs are
+    # empty at vet time. Drop a single placeholder so the embed
+    # pattern resolves; the real content still flows through the
+    # build:backend stage's COPY step.
+    - mkdir -p backend/embed/admin backend/embed/web
+    - touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
     - cd backend
     - go vet ./...
     - go install honnef.co/go/tools/cmd/staticcheck@latest
