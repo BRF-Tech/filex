@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.1 below.)
+(Nothing yet — see v0.1.2 below.)
+
+## [0.1.2] - 2026-05-09
+
+Patch closing the two follow-up bugs that surfaced after v0.1.1 went out
+the door (sweep-2026-05-09 #21 fully + #25). Both are runtime-only
+fixes; no schema changes, no breaking API.
+
+### Fixed
+
+- **Copy with collision now auto-suffixes** (sweep bug 25). The async
+  copy worker used to ship `joinIntoDir(dest, src)` straight to the
+  storage driver; when the user picked "Kopyasını Oluştur" / "Make a
+  copy" the destination resolved to the **same key** as the source and
+  S3 rejected the request as `InvalidRequest: trying to copy an object
+  to itself ...`. The worker now probes the destination with `Stat`
+  and falls back to `<base>-copy<ext>`, `<base>-copy-2<ext>`, … (up to
+  100) until it finds a free slot, mirroring Finder/Nautilus/Explorer
+  behaviour. Also handles the cross-directory paste-into-occupied
+  variant (no silent overwrite). (`backend/internal/ops/service.go`)
+- **3D viewer host now fully renders real GLB files** (bug 21
+  follow-up). The v0.1.1 inline-style fix gave the `<model-viewer>`
+  host a layout box (1048×685 instead of 0×0) — but the e2e fixture
+  shipped at 104 bytes was a header-only glTF placeholder with no
+  mesh data, so model-viewer's poster canvas stayed at 0×0 and emitted
+  WebGL framebuffer warnings. Replaced the fixture with the Khronos
+  Box.glb sample (~1.6 KB, real cube mesh) — re-verify on
+  `https://fm.brf.sh/admin/files/edit?path=s3-test%3A%2F%2Fexample%2Fcube.glb&type=glb`
+  now shows zero console warnings and a properly rendered cube. The
+  v0.1.1 inline-style code change is what made the fixture-fix possible
+  — both layers were needed.
 
 ## [0.1.1] - 2026-05-09
 

@@ -351,9 +351,81 @@ func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src st
 		if !ok {
 			return errors.New("driver not copyable")
 		}
-		return c.Copy(ctx, src, joinIntoDir(op.Dest, src))
+		dst := uniqueCopyDest(ctx, drv, src, joinIntoDir(op.Dest, src))
+		return c.Copy(ctx, src, dst)
 	}
 	return fmt.Errorf("unknown kind: %s", op.Kind)
+}
+
+// uniqueCopyDest resolves a non-colliding destination for a copy op.
+//
+// Two cases force a rename:
+//
+//   1. Self-copy: `dst == src`. Hetzner / S3 / most object stores reject
+//      a CopyObject where the source and destination keys match (it
+//      would be a no-op metadata-only edit and AWS rejects it as
+//      `InvalidRequest: trying to copy an object to itself ...`). The
+//      most common trigger is a "Duplicate" / "Make a copy" UI gesture
+//      that drops the duplicate into the source's own directory.
+//
+//   2. Destination already exists: a paste into a directory that
+//      already contains a file with that basename should not silently
+//      overwrite — Finder/Nautilus/Explorer all auto-suffix instead.
+//
+// We probe with `Stat` and fall back to `<base>-copy<ext>`,
+// `<base>-copy-2<ext>`, … up to a small bounded number of attempts so a
+// pathological directory full of `-copy-N` siblings doesn't loop
+// forever. If we somehow can't find a free name, we return the last
+// candidate and let the underlying driver decide what to do.
+//
+// (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" was sending source ==
+// destination and the S3 driver was 400ing the self-copy.)
+func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) string {
+	if dst != src && !pathExists(ctx, drv, dst) {
+		return dst
+	}
+	// Split base + ext for `<base>-copy<ext>` pattern. We rename the
+	// *destination* basename rather than the parent dir, so a paste of
+	// `users.csv` into `example/` becomes `example/users-copy.csv`,
+	// not `example-copy/users.csv`.
+	dir := ""
+	base := dst
+	if idx := strings.LastIndex(dst, "/"); idx >= 0 {
+		dir = dst[:idx+1] // keep trailing slash
+		base = dst[idx+1:]
+	}
+	stem := base
+	ext := ""
+	if dotIdx := strings.LastIndex(base, "."); dotIdx > 0 {
+		stem = base[:dotIdx]
+		ext = base[dotIdx:]
+	}
+	for i := 1; i <= 100; i++ {
+		var candidate string
+		if i == 1 {
+			candidate = dir + stem + "-copy" + ext
+		} else {
+			candidate = fmt.Sprintf("%s%s-copy-%d%s", dir, stem, i, ext)
+		}
+		if candidate != src && !pathExists(ctx, drv, candidate) {
+			return candidate
+		}
+	}
+	// Saturated — let the driver surface the collision/self-copy error
+	// instead of looping forever. Caller's error-message path will
+	// surface this to the user via the failed-step log.
+	return dst
+}
+
+// pathExists returns true if Stat resolves the path to anything other
+// than ErrNotFound. Any other error is treated as "exists" out of an
+// abundance of caution: better to pick the next candidate than to
+// stomp a file we couldn't probe.
+func pathExists(ctx context.Context, drv storage.Driver, p string) bool {
+	if _, err := drv.Stat(ctx, p); err != nil {
+		return !errors.Is(err, storage.ErrNotFound)
+	}
+	return true
 }
 
 func (s *Service) fail(ctx context.Context, op *Op, msg string) {
