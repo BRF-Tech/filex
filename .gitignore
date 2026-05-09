@@ -67,6 +67,10 @@ config.local.yaml
 .Trashes
 ehthumbs.db
 Thumbs.db
+# Windows reserved name — bash on Windows occasionally creates a file
+# called "NUL" when scripts redirect to /dev/null via mistyped paths;
+# git-on-Windows refuses to delete it cleanly so we just ignore it.
+NUL
 
 # --- Misc ---
 *.pid
