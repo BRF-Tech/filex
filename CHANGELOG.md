@@ -7,7 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.0 below.)
+(Nothing yet — see v0.1.1 below.)
+
+## [0.1.1] - 2026-05-09
+
+Patch release closing six bugs surfaced by the post-v0.1.0 production
+sweep against `https://fm.brf.sh` (see `sweep-2026-05-09/sweep-report.md`
+for the full matrix). No breaking changes; existing storages continue to
+work, three previously dead-end UI features are now usable.
+
+### Fixed
+
+- **Frontend `apiBase: ''` (empty string) was silently dropped**
+  (sweep bugs 22, 24). `useFileApi.resolveEndpoints` treated falsy
+  `apiBase` as "no apiBase, legacy mode" — boolean-coerced empty strings
+  collapsed to `null` for every derived endpoint. The relative-root
+  variant is now treated as a valid prefix, so admin SPA mounts that pass
+  `apiBase: ''` get a fully wired endpoint map (share, copy, move,
+  restore, archive, ops). The error message that exposed this — "*XYZ*
+  endpoint not configured" — should no longer surface for a legitimate
+  relative-root config. (`packages/core/src/composables/useFileApi.ts`)
+- **3D viewer JSON-parse crash on unsupported formats** (bugs 19, 20).
+  `Viewer3D.vue` previously fed STL/OBJ/FBX/3DS files to
+  `<model-viewer>`, which only understands glTF JSON; ASCII STL files
+  starting with `solid <name>` triggered `JSON.parse(<solid …>)` →
+  uncaught `SyntaxError`. The viewer now guards on extension, mounts
+  `<model-viewer>` only for `glb` / `gltf` / `usdz`, and renders a
+  download-fallback message (locale-aware
+  `viewer.format_unsupported_3d`) for other 3D formats.
+- **`<model-viewer>` host element collapsed to 0×0** (bug 21). The
+  ancestor flexbox wasn't always granting a height to the viewer, so
+  WebGL initialised with a zero-size framebuffer and emitted
+  `GL_INVALID_FRAMEBUFFER_OPERATION: Attachment has zero size`. Pinned
+  explicit `width: 100%; height: 100%; min-height: 480px; display:
+  block` inline on the `<model-viewer>` host so the layout is stable
+  regardless of parent context.
+- **S3 driver default `path_style` for custom endpoints** (bug 23, part
+  1). Hetzner Object Storage / MinIO / Backblaze B2 / Cloudflare R2 all
+  serve path-style URLs; AWS S3 itself never sets a custom endpoint.
+  When the operator does not explicitly set `path_style` and `endpoint`
+  is non-empty, default to `path_style: true`. Existing storages that
+  explicitly set `path_style: false` are unchanged.
+- **Configurable `disable_presign` for S3 driver** (bug 23, part 2).
+  Hetzner Ceph RGW emits `SignatureDoesNotMatch` for AWS SDK v2
+  SigV4-presigned URLs (the canonical-string drift is non-trivial to
+  unwind on the SDK side). New storage config flag `disable_presign:
+  true` makes the driver advertise no-presign capability so the share
+  download handler streams the bytes through the backend instead of
+  redirecting to a presigned URL the bucket would reject.
+- **Share handler honors `Capabilities().Presign` runtime flag.** The
+  type-assertion `drv.(storage.Presigner)` always succeeds for drivers
+  that implement the interface, even when the operator wants presign
+  off. The handler now also checks `drv.Capabilities().Presign` and
+  falls through to backend-stream when it's false.
+
+### Notes
+
+- The live `s3-test` storage on `fm.brf.sh` was retrofitted with
+  `path_style: true` + `disable_presign: true` in addition to this
+  release. Operators on Hetzner Object Storage should set both flags
+  on existing storages (no migration provided since storage configs
+  are operator-edited JSON; `path_style` will only auto-flip to true
+  on newly-created storages).
+- A seventh bug (#25 — duplicate-in-place sends `source == destination`
+  to the S3 backend, which 400s as illegal self-copy) was discovered
+  during v0.1.1 verification but is out of scope for this patch. See
+  `sweep-2026-05-09/bugs.md`.
 
 ## [0.1.0] - 2026-05-06
 

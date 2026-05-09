@@ -88,6 +88,7 @@ export const tr: Record<string, string> = {
   'viewer.loading': 'Yükleniyor…',
   'viewer.failed_to_load': 'Dosya yüklenemedi',
   'viewer.peer_not_installed': 'Bu dosya tipi için opsiyonel kütüphane kurulu değil. Peer dependency yükle veya İndir düğmesini kullan.',
+  'viewer.format_unsupported_3d': 'Bu 3B format tarayıcı önizlemesinde desteklenmiyor (model-viewer yalnızca .glb / .gltf / .usdz okur). Lütfen indirip yerel bir araçta açın.',
   'viewer.zoom_in': 'Yakınlaştır',
   'viewer.zoom_out': 'Uzaklaştır',
   'viewer.fit_width': 'Sayfa genişliğine sığdır',

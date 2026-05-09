@@ -88,6 +88,7 @@ export const en: Record<string, string> = {
   'viewer.loading': 'Loading…',
   'viewer.failed_to_load': 'Failed to load file',
   'viewer.peer_not_installed': 'Optional viewer library is not installed. Install the peer dependency or use the download button.',
+  'viewer.format_unsupported_3d': 'This 3D format is not supported in the browser preview (model-viewer only reads .glb / .gltf / .usdz). Please download and open with a local tool.',
   'viewer.zoom_in': 'Zoom in',
   'viewer.zoom_out': 'Zoom out',
   'viewer.fit_width': 'Fit width',

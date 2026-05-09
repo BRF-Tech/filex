@@ -368,9 +368,14 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use a presigned URL when the driver supports it — saves us from
-	// proxying the bytes.
-	if pres, ok := drv.(storage.Presigner); ok {
+	// Use a presigned URL when the driver supports it AND the operator
+	// hasn't opted out via `disable_presign: true` in storage config.
+	// Honor `Capabilities().Presign` so drivers can advertise no-presign
+	// at runtime (e.g. Hetzner Object Storage / Ceph RGW which produces
+	// SignatureDoesNotMatch on AWS SDK v2 SigV4 — sweep-2026-05-09 bug 23).
+	// When presign is disabled, fall through to the backend-stream path
+	// below.
+	if pres, ok := drv.(storage.Presigner); ok && drv.Capabilities().Presign {
 		if u, err := pres.PresignDownload(r.Context(), node.Path, 5*time.Minute); err == nil && u != "" {
 			_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
 			http.Redirect(w, r, u, http.StatusFound)

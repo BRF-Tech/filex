@@ -37,6 +37,14 @@ type Driver struct {
 	region    string
 	endpoint  string
 	pathStyle bool
+	// disablePresign forces the driver to advertise no presign support
+	// even though the S3 SDK can produce signed URLs. Set this when the
+	// upstream object store doesn't fully implement AWS SigV4 — Hetzner
+	// Object Storage / Ceph RGW reject some SDK-generated signatures
+	// with `SignatureDoesNotMatch` (sweep-2026-05-09 bug 23). Falling back
+	// to backend-stream is the safe path until the SigV4 quirks are
+	// understood. Toggle via storage config `disable_presign: true`.
+	disablePresign bool
 }
 
 // Name implements storage.Driver.
@@ -54,6 +62,19 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 	d.region, _ = cfg["region"].(string)
 	d.endpoint, _ = cfg["endpoint"].(string)
 	d.pathStyle, _ = cfg["path_style"].(bool)
+	d.disablePresign, _ = cfg["disable_presign"].(bool)
+	// Custom endpoints almost always mean a non-AWS S3-compatible
+	// service (Hetzner Object Storage, MinIO, Backblaze B2 S3-compat,
+	// Cloudflare R2 — all of which serve path-style and reject
+	// virtual-host-style). When the operator didn't *explicitly*
+	// set `path_style`, we default to true for any custom endpoint.
+	// AWS S3 itself never sets `endpoint`, so the default-false path
+	// (virtual-host-style) is preserved for it. (sweep-2026-05-09 bug 23
+	// — Hetzner presigned URLs returned `SignatureDoesNotMatch` because
+	// the SDK signed virtual-host but Hetzner reads path-style.)
+	if _, explicit := cfg["path_style"]; !explicit && d.endpoint != "" {
+		d.pathStyle = true
+	}
 	accessKey, _ := cfg["access_key"].(string)
 	secretKey, _ := cfg["secret_key"].(string)
 
@@ -97,7 +118,7 @@ func (d *Driver) Capabilities() storage.Capabilities {
 		Copy:    true,
 		Delete:  true,
 		Mkdir:   true,
-		Presign: true,
+		Presign: !d.disablePresign,
 	}
 }
 

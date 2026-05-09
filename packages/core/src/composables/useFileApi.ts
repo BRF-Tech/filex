@@ -61,11 +61,17 @@ export interface ManagerResponse {
  * trump the derived URL.
  */
 export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
-  const base = (config.apiBase ?? '').replace(/\/+$/, '');
+  // `apiBase: ''` (empty string) is a *valid* relative-root prefix —
+  // it produces URLs like `/api/files/copy`. Treat only `undefined`
+  // as "no apiBase, legacy explicit-only mode". Falsy boolean checks
+  // would silently drop relative-root callers and leave every derived
+  // endpoint null → "endpoint not configured" UI dead-ends.
+  const base =
+    config.apiBase != null ? config.apiBase.replace(/\/+$/, '') : null;
 
   function derive(path: string | undefined, autoSegment: string): string | null {
     if (path) return path;
-    if (!base) return null;
+    if (base === null) return null;
     return `${base}${autoSegment}`;
   }
 
@@ -73,7 +79,7 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
   // fall back to `${apiBase}/api/files/manager`.
   const manager =
     config.endpoint ??
-    (base ? `${base}/api/files/manager` : null);
+    (base !== null ? `${base}/api/files/manager` : null);
 
   if (!manager) {
     throw new Error(
