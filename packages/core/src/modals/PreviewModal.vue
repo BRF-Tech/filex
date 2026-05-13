@@ -70,6 +70,8 @@ const VIDEO = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'ogv'];
 const AUDIO = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];
 
 const CODE_LANGS: Record<string, string> = {
+  md: 'markdown', markdown: 'markdown',
+  txt: 'plaintext', log: 'plaintext',
   js: 'javascript', mjs: 'javascript', cjs: 'javascript',
   ts: 'typescript', tsx: 'typescript', jsx: 'javascript',
   vue: 'xml', svelte: 'xml', html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml',
@@ -139,11 +141,15 @@ const kind = computed<PreviewKind>(() => {
   // PDF: try the rich viewer first, but fall back to native <object>
   // when pdfjs-dist isn't installed (the PdfViewer emits 'fallback').
   if (e === 'pdf') return pdfFallbackToNative.value ? 'pdf' : 'viewer';
-  if (e === 'md' || e === 'markdown') return 'markdown';
+  // Edit mode swaps markdown + plain text into the code editor (CodeMirror)
+  // so the user can actually write. View mode keeps the rendered-HTML
+  // markdown viewer + the raw <pre> for plain text.
+  const wantEdit = props.openMode !== 'view';
+  if (e === 'md' || e === 'markdown') return wantEdit ? 'code' : 'markdown';
   if (e in CODE_LANGS) return 'code';
   if (e in VIEWER_MAP) return 'viewer';
   if (OFFICE.includes(e)) return 'office';
-  if (TEXT_PLAIN.includes(e)) return 'text';
+  if (TEXT_PLAIN.includes(e)) return wantEdit ? 'code' : 'text';
   return 'other';
 });
 
