@@ -240,12 +240,19 @@ const tooLarge = ref(false);
 const mdDirty = ref(false);
 const mdSaving = ref(false);
 let mdReRenderTimer: ReturnType<typeof setTimeout> | undefined;
+let mdAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 function onMdInput() {
   mdDirty.value = true;
   if (mdReRenderTimer) clearTimeout(mdReRenderTimer);
   mdReRenderTimer = setTimeout(() => {
     renderMarkdown(rawText.value);
   }, 250);
+  // Autosave 1.5s after last keystroke — manual Kaydet button + Ctrl+S
+  // still work; saveMarkdown() guards against overlap.
+  if (mdAutosaveTimer) clearTimeout(mdAutosaveTimer);
+  mdAutosaveTimer = setTimeout(() => {
+    void saveMarkdown();
+  }, 1500);
 }
 async function saveMarkdown() {
   if (!props.saveTextEndpoint || !props.file || mdSaving.value) return;
@@ -450,6 +457,7 @@ async function highlightCode(text: string, language: string): Promise<void> {
 
 const monacoEl = ref<HTMLDivElement | null>(null);
 let monacoEditor: any = null;
+let codeAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 const monacoReady = ref(false);
 const saving = ref(false);
 const saveOk = ref(false);
@@ -514,6 +522,16 @@ async function tryMountMonaco(text: string, extension: string): Promise<boolean>
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
         () => void saveCode(),
       );
+      // Autosave: 1.5s after the last keystroke we POST the buffer.
+      // Ctrl+S still works for the impatient — saveCode() guards against
+      // overlap, so a manual save during the debounce window just wins
+      // and the queued autosave becomes a no-op.
+      monacoEditor.onDidChangeModelContent(() => {
+        if (codeAutosaveTimer) clearTimeout(codeAutosaveTimer);
+        codeAutosaveTimer = setTimeout(() => {
+          void saveCode();
+        }, 1500);
+      });
     }
     monacoReady.value = true;
     return true;
