@@ -705,6 +705,26 @@
 .fe-modal__card--lg { max-width: 800px; }
 .fe-modal__card--xl { max-width: 1080px; height: calc(100vh - 64px); }
 
+/* Chromeless — used by the standalone /files/edit route. Drops the
+ * dialog frame entirely so the viewport belongs to the viewer. */
+.fe-modal__backdrop--chromeless {
+  background: transparent;
+  padding: 0;
+}
+.fe-modal__card--chromeless {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  box-shadow: none;
+}
+.fe-modal__card--chromeless .fe-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+}
+
 .fe-modal__head {
   display: flex;
   align-items: center;

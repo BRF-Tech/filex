@@ -94,6 +94,7 @@ onMounted(() => {
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
       :locale="locale === 'en' ? 'en' : 'tr'"
+      chromeless
       @close="closeWindow"
     />
     <div v-else class="empty">

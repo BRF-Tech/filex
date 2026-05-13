@@ -46,6 +46,11 @@ const props = defineProps<{
   pdfSaveUrl?: string | null;
   /** Standalone full-screen viewer route — `?path=…&storage=…&type=…`. */
   viewerBaseUrl?: string | null;
+  /** Drop the dialog chrome (backdrop tint, header bar, footer actions)
+   *  so the viewer fills the full viewport. Used by the standalone
+   *  /files/edit route where the browser tab IS the container — a
+   *  modal frame on top of the editor just steals real estate. */
+  chromeless?: boolean;
   /** When the dynamic-viewer chunk fails to load, fall back to the
    *  legacy native renderer (e.g. native `<object>` for PDFs). */
 }>();
@@ -685,7 +690,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
 </script>
 
 <template>
-  <Modal :open="open" size="xl" :title="file?.basename || ''" @close="emit('close')">
+  <Modal :open="open" size="xl" :title="file?.basename || ''" :chromeless="chromeless" @close="emit('close')">
     <div v-if="file" class="fe-preview">
       <template v-if="kind === 'image'">
         <img :src="src" :alt="file.basename" class="fe-preview__image" />

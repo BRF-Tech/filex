@@ -9,6 +9,13 @@ const props = defineProps<{
   title?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   closeOnBackdrop?: boolean;
+  /** When true, drop the dialog chrome (backdrop tint, header, footer,
+   *  centered card with border-radius) and render the slot full-bleed.
+   *  Used by the standalone /files/edit route where the browser tab IS
+   *  the container — a modal frame on top of it just steals real estate
+   *  from the editor. ESC + emit('close') still wire through so the
+   *  parent route can window.close() the tab. */
+  chromeless?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -50,18 +57,22 @@ function onBackdrop() {
     <div
       v-if="open"
       class="fe-modal__backdrop"
+      :class="{ 'fe-modal__backdrop--chromeless': chromeless }"
       role="presentation"
       @click="onBackdrop"
     >
       <div
         ref="cardEl"
         class="fe-modal__card"
-        :class="`fe-modal__card--${size || 'md'}`"
+        :class="[
+          `fe-modal__card--${size || 'md'}`,
+          chromeless && 'fe-modal__card--chromeless',
+        ]"
         role="dialog"
         aria-modal="true"
         @click.stop
       >
-        <header v-if="title" class="fe-modal__head">
+        <header v-if="title && !chromeless" class="fe-modal__head">
           <h2 class="fe-modal__title">{{ title }}</h2>
           <button
             type="button"
@@ -73,7 +84,7 @@ function onBackdrop() {
         <div class="fe-modal__body">
           <slot />
         </div>
-        <footer v-if="$slots.actions" class="fe-modal__actions">
+        <footer v-if="$slots.actions && !chromeless" class="fe-modal__actions">
           <slot name="actions" />
         </footer>
       </div>
