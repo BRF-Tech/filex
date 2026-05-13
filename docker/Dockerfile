@@ -86,9 +86,18 @@ RUN go mod tidy
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
+# ldflag symbol path must match the package var declarations in
+# internal/version/version.go — `-X main.version=...` is silently a no-op
+# because cmd/filex/main.go has no `version` symbol; the linker just skips
+# unknown -X targets, so the banner/footer falls back to "0.1.0-dev (unknown,
+# unknown)" even on tagged release builds. Use the fully-qualified package
+# path instead.
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -ldflags="-s -w \
+        -X gitlab.com/brftech/filemanager/backend/internal/version.Version=${VERSION} \
+        -X gitlab.com/brftech/filemanager/backend/internal/version.Commit=${COMMIT} \
+        -X gitlab.com/brftech/filemanager/backend/internal/version.Date=${DATE}" \
     -o /out/filex \
     ./cmd/filex
 

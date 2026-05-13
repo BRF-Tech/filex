@@ -35,10 +35,14 @@ builds:
     flags:
       - -trimpath
     ldflags:
+      # Must match the package var declarations in internal/version/version.go.
+      # `-X main.version=...` silently no-ops because cmd/filex/main.go has no
+      # `version` symbol; the linker skips unknown -X targets, so binaries
+      # ship as "0.1.0-dev (unknown, unknown)" even on tagged release builds.
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.ShortCommit}}
-      - -X main.date={{.Date}}
+      - -X gitlab.com/brftech/filemanager/backend/internal/version.Version={{.Version}}
+      - -X gitlab.com/brftech/filemanager/backend/internal/version.Commit={{.ShortCommit}}
+      - -X gitlab.com/brftech/filemanager/backend/internal/version.Date={{.Date}}
     goos:
       - linux
       - darwin

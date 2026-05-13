@@ -291,7 +291,13 @@ build:backend:
     - export VERSION="${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}"
     - export COMMIT="${CI_COMMIT_SHORT_SHA}"
     - export DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    - export LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+    # ldflag symbol path must match the package var declarations in
+    # internal/version/version.go. `-X main.version=...` is silently a no-op
+    # because cmd/filex/main.go has no `version` symbol; the linker skips
+    # unknown -X targets, so the banner/footer stays "0.1.0-dev (unknown,
+    # unknown)" on tagged builds. Use the fully-qualified package path.
+    - export VERSION_PKG="gitlab.com/brftech/filemanager/backend/internal/version"
+    - export LDFLAGS="-s -w -X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.Date=${DATE}"
     - CGO_ENABLED=0 go build -trimpath -ldflags="${LDFLAGS}" -o ../bin/filex ./cmd/filex
     - ../bin/filex --version
   artifacts:
