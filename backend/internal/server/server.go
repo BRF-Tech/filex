@@ -112,15 +112,24 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			localDrv = d
 		case "oidc":
 			d := authoidc.New(store)
-			if err := d.Init(ctx, map[string]any{
+			oidcCfg := map[string]any{
 				"issuer":        cfg.Auth.OIDC.Issuer,
 				"client_id":     cfg.Auth.OIDC.ClientID,
 				"client_secret": cfg.Auth.OIDC.ClientSecret,
 				"redirect_url":  cfg.Auth.OIDC.RedirectURL,
 				"role_claim":    cfg.Auth.OIDC.RoleClaim,
 				"admin_group":   cfg.Auth.OIDC.AdminGroup,
-			}); err != nil {
-				slog.Warn("oidc driver init failed", slog.String("err", err.Error()))
+			}
+			// OIDC discovery often fails transiently when filex and the IdP
+			// boot together (compose restart, host reboot). One 502 used to
+			// leave SSO offline until a manual `docker restart` — this loop
+			// gives the IdP ~60s to come up before we give up.
+			oidcErr := initWithBackoff(ctx, "oidc", func(c context.Context) error {
+				return d.Init(c, oidcCfg)
+			}, []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second})
+			if oidcErr != nil {
+				slog.Warn("oidc driver init failed after retries; SSO disabled until restart",
+					slog.String("err", oidcErr.Error()))
 				continue
 			}
 			enabled = append(enabled, d)
@@ -570,4 +579,34 @@ func (s *Server) Store() db.Store { return s.store }
 // jsonDecode is a tiny wrapper to avoid importing encoding/json everywhere.
 func jsonDecode(b []byte, out any) error {
 	return json.Unmarshal(b, out)
+}
+
+// initWithBackoff retries init() through the given delay slots until it
+// succeeds, ctx is cancelled, or every slot has been tried. A 0 first slot
+// means "try once immediately, then wait before each retry".
+func initWithBackoff(ctx context.Context, driver string, init func(context.Context) error, backoffs []time.Duration) error {
+	var err error
+	for i, delay := range backoffs {
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if err = init(ctx); err == nil {
+			if i > 0 {
+				slog.Info("driver init succeeded after retries",
+					slog.String("driver", driver),
+					slog.Int("attempts", i+1))
+			}
+			return nil
+		}
+		slog.Warn("driver init attempt failed",
+			slog.String("driver", driver),
+			slog.Int("attempt", i+1),
+			slog.Int("remaining", len(backoffs)-i-1),
+			slog.String("err", err.Error()))
+	}
+	return err
 }
