@@ -30,11 +30,19 @@ type Driver struct {
 // Name implements storage.Driver.
 func (d *Driver) Name() string { return "local" }
 
-// Init validates and stores the root directory from config["root"].
+// Init validates and stores the root directory from config["path"]
+// (preferred) or config["root"] (legacy). Matches storage.ValidateNonRootPath's
+// own preference order — without this fallback an operator could create a
+// storage with {path: "/data"} via the admin API, pass validate.go cleanly,
+// and then watch the driver init silently with an empty root because it
+// only looked at config["root"].
 func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
-	root, _ := cfg["root"].(string)
+	root, _ := cfg["path"].(string)
 	if root == "" {
-		return errors.New("local: config.root is required")
+		root, _ = cfg["root"].(string)
+	}
+	if root == "" {
+		return errors.New("local: config.path (or config.root) is required")
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
