@@ -23,6 +23,7 @@ import type {
   ClipboardState,
   Capabilities,
 } from './types/FileNode';
+import { isExternalUsable } from './types/FileNode';
 import { useFileApi } from './composables/useFileApi';
 import { useUploadChunked, type UploadJob } from './composables/useUploadChunked';
 import { useSelection } from './composables/useSelection';
@@ -161,9 +162,32 @@ watch(
 const clipboard = ref<ClipboardState>({ mode: null, items: [], sourcePath: null });
 
 const capabilitiesData = ref<Capabilities | null>(null);
-const effectiveOnlyOfficeBase = computed<string | null>(
-  () => props.config.onlyOfficeBase ?? capabilitiesData.value?.onlyoffice_url ?? null,
-);
+
+// Resolution order for each external viewer: explicit config override → live
+// backend probe. The probe is the source of truth: an operator can flip the
+// service "on" but if last_check failed (state='error') we still hide the
+// entry so users don't get 503s on click. Explicit config wins because
+// embedders sometimes terminate TLS in front of filex and the backend can't
+// see the public URL.
+const effectiveOnlyOfficeBase = computed<string | null>(() => {
+  if (props.config.onlyOfficeBase) return props.config.onlyOfficeBase;
+  const ext = capabilitiesData.value?.external?.onlyoffice;
+  if (ext && !isExternalUsable(ext)) return null;
+  return capabilitiesData.value?.onlyoffice_url || null;
+});
+
+const effectiveOnlyOfficeConfigEndpoint = computed<string | null>(() => {
+  if (!effectiveOnlyOfficeBase.value) return null;
+  return api.endpoints.onlyOfficeConfig || null;
+});
+
+const effectiveDrawioUrl = computed<string | null>(() => {
+  const override = props.config.drawioUrl || props.config.drawioBase;
+  if (override) return override;
+  const ext = capabilitiesData.value?.external?.drawio;
+  if (ext && !isExternalUsable(ext)) return null;
+  return capabilitiesData.value?.drawio_url || null;
+});
 
 // Upload
 const uploadJobs = ref<UploadJob[]>([]);
@@ -520,14 +544,23 @@ function openNode(n: FileNode) {
   // text, drawio iframe for .drawio, image/PDF/3D viewers otherwise)
   // and wires save-on-change. This is the shape brf-mono ships and
   // what users expect from a Files-style file manager.
-  if (props.config.openPageBase) {
-    const ext = (n.extension || '').toLowerCase();
+  //
+  // Capability gate: if we already know the required backend is offline
+  // (OnlyOffice for office docs, drawio for diagrams), don't launch a
+  // new tab that we'd just render a "service not configured" fallback
+  // inside — drop into the in-page preview instead, which is the same
+  // dead-end UI but without the tab-switching whiplash.
+  const ext = (n.extension || '').toLowerCase();
+  const officeBlocked = OFFICE_EXTS.has(ext) && !effectiveOnlyOfficeBase.value;
+  const drawioBlocked = (ext === 'drawio' || ext === 'dio') && !effectiveDrawioUrl.value;
+  if (props.config.openPageBase && !officeBlocked && !drawioBlocked) {
     const url = `${props.config.openPageBase}?path=${encodeURIComponent(n.path)}&mode=edit&type=${encodeURIComponent(ext)}`;
     window.open(url, '_blank', 'noopener');
     emit('file-opened', { path: n.path, basename: n.basename });
     return;
   }
-  // Fallback when no editor page is configured — in-page modal.
+  // Fallback when no editor page is configured, or the editor would
+  // hit an offline backend — in-page modal.
   previewMode.value = 'edit';
   previewTarget.value = n;
   showPreview.value = true;
@@ -1302,12 +1335,12 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :preview-url="(p) => api.previewUrl(p)"
       :download-url="(p) => api.downloadUrl(p)"
       :only-office-base="effectiveOnlyOfficeBase"
-      :only-office-config-endpoint="api.endpoints.onlyOfficeConfig || null"
+      :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
       :save-text-endpoint="api.endpoints.saveText || null"
       :open-mode="previewMode"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"
-      :drawio-url="props.config.drawioUrl || props.config.drawioBase || null"
+      :drawio-url="effectiveDrawioUrl"
       :pdf-worker-url="props.config.pdfWorkerUrl || null"
       :pdf-save-url="props.config.pdfSaveUrl || null"
       :viewer-base-url="props.config.viewerBaseUrl || null"

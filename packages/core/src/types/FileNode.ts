@@ -51,6 +51,16 @@ export interface UploadLimits {
   max_upload_mb: number;
 }
 
+export type ExternalServiceState = 'ok' | 'error' | 'disabled' | 'unknown';
+
+export interface ExternalServiceStatus {
+  enabled: boolean;
+  state: ExternalServiceState;
+  url?: string;
+  last_check?: string;
+  detail?: string;
+}
+
 export interface Capabilities {
   ffmpeg?: boolean;
   ghostscript?: boolean;
@@ -59,6 +69,20 @@ export interface Capabilities {
   drawio_url?: string | null;
   max_chunk_mb?: number;
   upload_limit_mb?: number;
+  external?: {
+    onlyoffice?: ExternalServiceStatus;
+    drawio?: ExternalServiceStatus;
+    mermaid?: ExternalServiceStatus;
+  };
+}
+
+/** Single source of truth for "is the IdP/editor/diagram service ready?".
+ *  A capability is usable only when both flags say so — `enabled=true` but
+ *  `state='error'` means an operator turned it on but a probe just failed,
+ *  and we'd rather hide the entry than offer a button that 500s on click.
+ */
+export function isExternalUsable(s: ExternalServiceStatus | undefined): boolean {
+  return !!s && s.enabled && s.state === 'ok';
 }
 
 export interface UploadInitResponse {

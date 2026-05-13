@@ -35,7 +35,12 @@ const error = ref<string | null>(null);
 const status = ref<'loading' | 'ready' | 'saving' | 'saved' | 'error'>('loading');
 const readOnly = ref(!!props.readOnly || !props.saveUrl);
 
-const drawioBase = (props.drawioUrl || 'https://embed.diagrams.net').replace(/\/$/, '');
+// drawioUrl=null is the operator's "off" signal — FileExplorer wipes it
+// when the capabilities probe reports drawio offline. Don't silently fall
+// back to the public embed.diagrams.net iframe, that defeats the point of
+// gating: render a "not configured" pane instead so the user understands
+// why the editor isn't loading.
+const drawioBase = props.drawioUrl ? props.drawioUrl.replace(/\/$/, '') : null;
 const params = new URLSearchParams({
   embed: '1',
   proto: 'json',
@@ -46,7 +51,7 @@ const params = new URLSearchParams({
   ui: 'kennedy',
   modified: 'unsavedChanges',
 });
-const iframeSrc = `${drawioBase}/?${params.toString()}`;
+const iframeSrc = drawioBase ? `${drawioBase}/?${params.toString()}` : '';
 
 let pendingXml: string = '';
 
@@ -137,6 +142,11 @@ function onMessage(ev: MessageEvent): void {
 }
 
 onMounted(() => {
+  if (!drawioBase) {
+    error.value = tt('viewer.drawio.disabled', 'Drawio (diagrams.net) yapılandırılmamış.');
+    status.value = 'error';
+    return;
+  }
   window.addEventListener('message', onMessage);
   loadXml();
 });

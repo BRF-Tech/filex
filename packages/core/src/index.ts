@@ -44,12 +44,15 @@ export type {
   ShareInfo,
   UploadLimits,
   Capabilities,
+  ExternalServiceState,
+  ExternalServiceStatus,
   UploadInitResponse,
   UploadFinalizeResponse,
   ArchiveEntry,
   ViewMode,
   ClipboardState,
 } from './types/FileNode';
+export { isExternalUsable } from './types/FileNode';
 
 // ——— Composables (consumers can roll their own UI on top) ———
 export { useFileApi, resolveEndpoints } from './composables/useFileApi';
