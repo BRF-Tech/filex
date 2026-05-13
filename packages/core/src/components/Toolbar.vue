@@ -64,6 +64,7 @@ const emit = defineEmits<{
   (e: 'refresh'): void;
   (e: 'go-up'): void;
   (e: 'action', key: ToolbarAction): void;
+  (e: 'open-recents'): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -223,6 +224,14 @@ function fire(key: ToolbarAction) {
         @click="emit('refresh')"
       >
         <span class="fe-icon">↻</span>
+      </button>
+      <button
+        type="button"
+        class="fe-btn fe-btn--icon-only"
+        :title="locale === 'en' ? 'Recently opened' : 'Son açılanlar'"
+        @click="emit('open-recents')"
+      >
+        <span class="fe-icon">🕒</span>
       </button>
     </div>
 

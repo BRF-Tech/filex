@@ -141,11 +141,10 @@ const kind = computed<PreviewKind>(() => {
   // PDF: try the rich viewer first, but fall back to native <object>
   // when pdfjs-dist isn't installed (the PdfViewer emits 'fallback').
   if (e === 'pdf') return pdfFallbackToNative.value ? 'pdf' : 'viewer';
-  // Edit mode swaps markdown + plain text into the code editor (CodeMirror)
-  // so the user can actually write. View mode keeps the rendered-HTML
-  // markdown viewer + the raw <pre> for plain text.
+  // Markdown stays in its own branch (gets the split view in edit mode);
+  // plain text → code editor in edit mode, raw <pre> in view mode.
   const wantEdit = props.openMode !== 'view';
-  if (e === 'md' || e === 'markdown') return wantEdit ? 'code' : 'markdown';
+  if (e === 'md' || e === 'markdown') return 'markdown';
   if (e in CODE_LANGS) return 'code';
   if (e in VIEWER_MAP) return 'viewer';
   if (OFFICE.includes(e)) return 'office';
@@ -235,6 +234,44 @@ const fetchError = ref<string | null>(null);
 const rawText = ref<string>('');
 const MAX_TEXT_BYTES = 1_000_000;
 const tooLarge = ref(false);
+
+// Markdown split-edit state — drives the side-by-side textarea+preview
+// layout inside the `kind === 'markdown'` template when openMode='edit'.
+const mdDirty = ref(false);
+const mdSaving = ref(false);
+let mdReRenderTimer: ReturnType<typeof setTimeout> | undefined;
+function onMdInput() {
+  mdDirty.value = true;
+  if (mdReRenderTimer) clearTimeout(mdReRenderTimer);
+  mdReRenderTimer = setTimeout(() => {
+    renderMarkdown(rawText.value);
+  }, 250);
+}
+async function saveMarkdown() {
+  if (!props.saveTextEndpoint || !props.file || mdSaving.value) return;
+  mdSaving.value = true;
+  fetchError.value = null;
+  try {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(await (props.authHeaders ?? (() => ({})))()),
+    };
+    const res = await fetch(props.saveTextEndpoint, {
+      method: 'POST',
+      headers,
+      credentials: props.authCredentials || 'same-origin',
+      body: JSON.stringify({ path: stripAdapter(props.file.path), content: rawText.value }),
+    });
+    if (!res.ok) {
+      throw new Error(`save failed: ${res.status} ${await res.text()}`);
+    }
+    mdDirty.value = false;
+  } catch (err) {
+    fetchError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    mdSaving.value = false;
+  }
+}
 
 async function fetchText(url: string): Promise<void> {
   loading.value = true;
@@ -721,6 +758,39 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
         <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
         <div v-else-if="tooLarge" class="fe-preview__fallback">
           Dosya çok büyük (>1 MB). <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
+        </div>
+        <div
+          v-else-if="openMode === 'edit' && saveTextEndpoint"
+          class="fe-preview__md-split"
+        >
+          <div class="fe-preview__md-split-bar">
+            <span class="fe-preview__md-split-label">MARKDOWN</span>
+            <span v-if="fetchError" class="fe-preview__md-split-error">{{ fetchError }}</span>
+            <button
+              type="button"
+              class="fe-btn fe-btn--primary"
+              :disabled="!mdDirty || mdSaving"
+              @click="saveMarkdown"
+            >
+              {{ mdSaving ? 'Kaydediliyor…' : (mdDirty ? 'Kaydet (Ctrl+S)' : 'Kaydedildi') }}
+            </button>
+          </div>
+          <div class="fe-preview__md-split-body">
+            <textarea
+              class="fe-preview__md-split-input"
+              v-model="rawText"
+              @input="onMdInput"
+              @keydown.ctrl.s.prevent="saveMarkdown"
+              @keydown.meta.s.prevent="saveMarkdown"
+              spellcheck="false"
+              placeholder="# Markdown buraya…"
+            />
+            <div
+              ref="markdownEl"
+              class="fe-preview__md-split-output fe-preview__md"
+              v-html="markdownHtml"
+            ></div>
+          </div>
         </div>
         <div v-else-if="fetchError" class="fe-preview__fallback">
           <p>{{ fetchError }}</p>

@@ -10,6 +10,7 @@ import { computed } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import StarButton from './StarButton.vue';
 
 const props = defineProps<{
   files: FileNode[];
@@ -25,6 +26,15 @@ const props = defineProps<{
   showParentPath?: boolean;
   locale: LocaleCode;
   loading?: boolean;
+  /** Set of node IDs flagged starred by the user — render an inline
+   *  filled star indicator and let the user toggle it from the row. */
+  starredIds?: Set<number>;
+  /** Backend base URL + auth header builder forwarded to StarButton
+   *  so it can POST /api/files/manager/star on click. Optional —
+   *  embedders without auth wire-up pass nothing and the star column
+   *  hides itself. */
+  apiBase?: string;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +43,7 @@ const emit = defineEmits<{
   (e: 'context-row', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
   (e: 'item-drop-into', target: FileNode, ev: DragEvent): void;
+  (e: 'star-change', node: FileNode, value: boolean): void;
 }>();
 
 const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
@@ -133,8 +144,9 @@ const rows = computed(() => props.files);
 </script>
 
 <template>
-  <div class="fe-list" :class="{ 'is-loading': loading }">
+  <div class="fe-list" :class="{ 'is-loading': loading, 'has-star-col': !!apiBase || apiBase === '' }">
     <div class="fe-list__head" role="row">
+      <div class="fe-list__col fe-list__col--star" role="columnheader" aria-label="Star"></div>
       <div class="fe-list__col fe-list__col--name" role="columnheader">{{ t('col.name') }}</div>
       <div class="fe-list__col fe-list__col--size" role="columnheader">{{ t('col.size') }}</div>
       <div class="fe-list__col fe-list__col--mod" role="columnheader">{{ t('col.modified') }}</div>
@@ -163,6 +175,17 @@ const rows = computed(() => props.files);
         @touchend="cancelPress"
         @touchmove="cancelPress"
       >
+        <div class="fe-list__col fe-list__col--star" @click.stop>
+          <StarButton
+            v-if="typeof n.id === 'number' && n.type === 'file'"
+            :starred="!!starredIds?.has(n.id)"
+            :node-id="n.id"
+            :api-base="apiBase"
+            :auth-headers="authHeaders"
+            compact
+            @change="(val: boolean) => emit('star-change', n, val)"
+          />
+        </div>
         <div class="fe-list__col fe-list__col--name">
           <span class="fe-list__icon" aria-hidden="true">{{ iconFor(n) }}</span>
           <div class="fe-list__name-wrap">

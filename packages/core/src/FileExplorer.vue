@@ -33,6 +33,9 @@ import { usePendingOps, type PendingOp } from './composables/usePendingOps';
 import { preloadEditor } from './composables/useMonacoLoader';
 
 import Toolbar, { type SelectionMode, type ToolbarAction } from './components/Toolbar.vue';
+import StarButton from './components/StarButton.vue';
+import TagPicker from './components/TagPicker.vue';
+import RecentlyOpened from './components/RecentlyOpened.vue';
 import Breadcrumb from './components/Breadcrumb.vue';
 import ListView from './components/ListView.vue';
 import GridView from './components/GridView.vue';
@@ -162,6 +165,83 @@ watch(
 const clipboard = ref<ClipboardState>({ mode: null, items: [], sourcePath: null });
 
 const capabilitiesData = ref<Capabilities | null>(null);
+
+// Creative UI state: starred / tags / recently-opened. The component
+// helpers (StarButton, TagPicker, RecentlyOpened) handle their own
+// API calls — the explorer just tracks the cross-row state needed to
+// render inline stars and keep the recents tray in sync.
+const starredIds = ref(new Set<number>());
+const showRecents = ref(false);
+const showTagPicker = ref(false);
+const tagPickerNode = ref<FileNode | null>(null);
+const recentRefreshKey = ref(0);
+
+async function loadStarred() {
+  try {
+    const headers = await buildAuthHeaders();
+    const base = props.config.apiBase ?? '';
+    const res = await fetch(`${base}/api/files/manager/starred?limit=500`, {
+      headers,
+      credentials: 'include',
+    });
+    if (!res.ok) return;
+    const body = await res.json();
+    const rows: { id?: number }[] = Array.isArray(body)
+      ? body
+      : Array.isArray(body?.entries)
+        ? body.entries
+        : Array.isArray(body?.nodes)
+          ? body.nodes
+          : [];
+    starredIds.value = new Set(rows.map((n) => n.id).filter((id): id is number => typeof id === 'number'));
+  } catch {
+    // Silent — backend may be older without the meta routes.
+  }
+}
+
+function onStarChange(n: FileNode, value: boolean) {
+  if (typeof n.id !== 'number') return;
+  const next = new Set(starredIds.value);
+  if (value) next.add(n.id);
+  else next.delete(n.id);
+  starredIds.value = next;
+}
+
+async function markRecent(n: FileNode) {
+  if (typeof n.id !== 'number') return;
+  try {
+    const base = props.config.apiBase ?? '';
+    await fetch(`${base}/api/files/manager/recent`, {
+      method: 'POST',
+      headers: await buildAuthHeaders({ 'Content-Type': 'application/json' }),
+      credentials: 'include',
+      body: JSON.stringify({ node_id: n.id }),
+    });
+    recentRefreshKey.value += 1;
+  } catch {
+    // Silent — the open succeeds, recent tracking is best-effort.
+  }
+}
+
+function openTagPickerFor(n: FileNode) {
+  if (typeof n.id !== 'number') return;
+  tagPickerNode.value = n;
+  showTagPicker.value = true;
+}
+
+function onRecentOpen(entry: { id: number; storage_id?: number; path: string; name: string }) {
+  // RecentlyOpened emits the bare row — synthesize a FileNode shaped
+  // enough for openNode to route into the editor / preview.
+  const node = {
+    type: 'file',
+    path: entry.path,
+    basename: entry.name,
+    extension: (entry.name.split('.').pop() || '').toLowerCase(),
+    id: entry.id,
+  } as unknown as FileNode;
+  showRecents.value = false;
+  openNode(node);
+}
 
 // Resolution order for each external viewer: explicit config override → live
 // backend probe. The probe is the source of truth: an operator can flip the
@@ -450,6 +530,10 @@ onMounted(async () => {
   await load(fromPersist || undefined);
   await nextTick();
   rootEl.value?.focus();
+  // Best-effort initial fetch — silent if the older backend doesn't
+  // expose /api/files/manager/starred. Without this stars never light
+  // up on first render even when the row IS starred server-side.
+  void loadStarred();
   if (persistMode() === 'hash') {
     window.addEventListener('hashchange', onHashChange);
   }
@@ -557,6 +641,7 @@ function openNode(n: FileNode) {
     const url = `${props.config.openPageBase}?path=${encodeURIComponent(n.path)}&mode=edit&type=${encodeURIComponent(ext)}`;
     window.open(url, '_blank', 'noopener');
     emit('file-opened', { path: n.path, basename: n.basename });
+    void markRecent(n);
     return;
   }
   // Fallback when no editor page is configured, or the editor would
@@ -565,6 +650,7 @@ function openNode(n: FileNode) {
   previewTarget.value = n;
   showPreview.value = true;
   emit('file-opened', { path: n.path, basename: n.basename });
+  void markRecent(n);
 }
 
 async function restoreSelection(targets?: FileNode[]) {
@@ -586,6 +672,7 @@ function previewNode(n: FileNode) {
   previewMode.value = 'view';
   previewTarget.value = n;
   showPreview.value = true;
+  void markRecent(n);
 }
 
 type ContextMode = 'selection' | 'breadcrumb';
@@ -684,6 +771,8 @@ const contextActions = computed<ContextAction[]>(() => {
     ];
   }
 
+  const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
+  const singleHasId = single && typeof sel[0]?.id === 'number';
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
@@ -695,6 +784,8 @@ const contextActions = computed<ContextAction[]>(() => {
     { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any, disabled: !any },
     { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any, disabled: !any },
     { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+    { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId },
+    { key: 'tags', label: tagsLabel, icon: '🏷', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep2', label: '' },
     { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true, hidden: !any, disabled: !any },
     { divider: true, key: 'sep3', label: '', hidden: any },
@@ -724,6 +815,9 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
       break;
     case 'share':
       if (targets[0]) openShare(targets[0]);
+      break;
+    case 'tags':
+      if (targets[0]) openTagPickerFor(targets[0]);
       break;
     case 'rename':
       if (targets[0]) {
@@ -1227,6 +1321,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       @refresh="() => load()"
       @go-up="goUp"
       @action="onToolbarAction"
+      @open-recents="showRecents = true"
     />
 
     <Breadcrumb
@@ -1250,11 +1345,15 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
         :show-parent-path="!!searchQuery"
         :locale="locale"
         :loading="loading"
+        :starred-ids="starredIds"
+        :api-base="props.config.apiBase ?? ''"
+        :auth-headers="() => buildAuthHeaders()"
         @click-row="(n, m) => selection.click(n.path, m)"
         @dbl-row="openNode"
         @context-row="onContextTarget"
         @item-drag-start="onItemDragStart"
         @item-drop-into="onItemDropInto"
+        @star-change="onStarChange"
       />
       <GridView
         v-else
@@ -1346,6 +1445,57 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :viewer-base-url="props.config.viewerBaseUrl || null"
       @close="showPreview = false"
     />
+
+    <!-- Recently-opened tray. Anchored to the toolbar trigger via fixed
+         position; click the backdrop or any entry to dismiss. -->
+    <transition name="fe-modal">
+      <div
+        v-if="showRecents"
+        class="fe-modal__backdrop fe-recents__backdrop"
+        @click="showRecents = false"
+      >
+        <div class="fe-recents__panel" @click.stop>
+          <div class="fe-recents__header">
+            <strong>{{ locale === 'en' ? 'Recently opened' : 'Son açılanlar' }}</strong>
+            <button class="fe-recents__close" aria-label="Close" @click="showRecents = false">×</button>
+          </div>
+          <RecentlyOpened
+            :api-base="props.config.apiBase ?? ''"
+            :auth-headers="() => buildAuthHeaders()"
+            :limit="20"
+            :refresh-key="recentRefreshKey"
+            @open="onRecentOpen"
+            @error="(msg: string) => emit('error', { message: msg, context: { op: 'recents' } })"
+          />
+        </div>
+      </div>
+    </transition>
+
+    <!-- Tag editor — opened from the context menu via Etiketler. -->
+    <transition name="fe-modal">
+      <div
+        v-if="showTagPicker && tagPickerNode && typeof tagPickerNode.id === 'number'"
+        class="fe-modal__backdrop"
+        @click="showTagPicker = false"
+      >
+        <div class="fe-modal__card fe-modal__card--md" @click.stop>
+          <header class="fe-modal__head">
+            <h2 class="fe-modal__title">
+              {{ locale === 'en' ? 'Tags' : 'Etiketler' }} — {{ tagPickerNode.basename }}
+            </h2>
+            <button class="fe-modal__close" aria-label="Close" @click="showTagPicker = false">×</button>
+          </header>
+          <div class="fe-modal__body">
+            <TagPicker
+              :node-id="tagPickerNode.id"
+              :api-base="props.config.apiBase ?? ''"
+              :auth-headers="() => buildAuthHeaders()"
+              @error="(msg: string) => emit('error', { message: msg, context: { op: 'tags' } })"
+            />
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <input
       ref="fileInputEl"

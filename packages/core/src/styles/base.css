@@ -245,7 +245,7 @@
 }
 .fe-list__head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px 180px;
+  grid-template-columns: 32px minmax(0, 1fr) 120px 180px;
   gap: 8px;
   padding: 8px 12px;
   font-weight: 600;
@@ -262,7 +262,7 @@
 }
 .fe-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px 180px;
+  grid-template-columns: 32px minmax(0, 1fr) 120px 180px;
   gap: 8px;
   padding: 8px 12px;
   align-items: center;
@@ -288,6 +288,21 @@
 .fe-list__row:focus-visible {
   outline: 2px solid var(--fe-primary);
   outline-offset: -2px;
+}
+.fe-list__col--star {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.fe-list__row:hover .fe-list__col--star,
+.fe-list__row:focus-within .fe-list__col--star,
+.fe-list__col--star:has(.is-starred) {
+  opacity: 1;
+}
+.fe-list__col--star .filex-star-btn.is-starred {
+  color: var(--fe-warning, #f59e0b);
 }
 .fe-list__col--name {
   display: flex;
@@ -705,6 +720,111 @@
 .fe-modal__card--lg { max-width: 800px; }
 .fe-modal__card--xl { max-width: 1080px; height: calc(100vh - 64px); }
 
+/* Recently-opened tray — anchored modal that drops down from the
+ * toolbar. Re-uses fe-modal__backdrop, just pins the panel to the top. */
+.fe-recents__backdrop {
+  align-items: flex-start !important;
+  padding-top: 60px;
+}
+.fe-recents__panel {
+  background: var(--fe-bg, #fff);
+  border-radius: var(--fe-radius, 8px);
+  box-shadow: var(--fe-shadow, 0 6px 24px rgba(0, 0, 0, 0.18));
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fe-recents__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--fe-border, #e2e6ed);
+}
+.fe-recents__close {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--fe-text-muted, #6b7280);
+  padding: 0 4px;
+}
+.fe-recents__close:hover {
+  color: var(--fe-text, #111);
+}
+
+/* Markdown split editor — textarea (raw) | rendered HTML preview.
+ * The chromeless modal's full viewport makes the side-by-side feasible;
+ * on narrower screens it collapses to a vertical stack. */
+.fe-preview__md-split {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+}
+.fe-preview__md-split-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--fe-bg-elev, #f6f7f9);
+  border-bottom: 1px solid var(--fe-border, #e2e6ed);
+  flex: 0 0 auto;
+}
+.fe-preview__md-split-label {
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fe-text-muted, #6b7280);
+}
+.fe-preview__md-split-error {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--fe-danger, #dc2626);
+  text-align: center;
+}
+.fe-preview__md-split-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.fe-preview__md-split-input {
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 16px 20px;
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--fe-bg, #fff);
+  color: var(--fe-text, #111);
+  border-right: 1px solid var(--fe-border, #e2e6ed);
+  overflow: auto;
+  tab-size: 2;
+}
+.fe-preview__md-split-output {
+  overflow: auto;
+  padding: 16px 24px;
+  background: var(--fe-bg, #fff);
+}
+@media (max-width: 900px) {
+  .fe-preview__md-split-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .fe-preview__md-split-input {
+    border-right: 0;
+    border-bottom: 1px solid var(--fe-border, #e2e6ed);
+  }
+}
+
 /* Chromeless — used by the standalone /files/edit route. Drops the
  * dialog frame entirely so the viewport belongs to the viewer. */
 .fe-modal__backdrop--chromeless {
@@ -723,6 +843,18 @@
   flex: 1 1 auto;
   min-height: 0;
   padding: 0;
+}
+.fe-modal__card--chromeless .fe-preview {
+  /* Override center-alignment so split editors + iframes fill the
+   * full chromeless viewport instead of floating in the middle. */
+  align-items: stretch;
+  justify-content: stretch;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.fe-modal__card--chromeless .fe-preview > * {
+  width: 100%;
+  height: 100%;
 }
 
 .fe-modal__head {
@@ -1038,7 +1170,7 @@
 @media (max-width: 640px) {
   .fe-list__head,
   .fe-list__row {
-    grid-template-columns: minmax(0, 1fr) 90px;
+    grid-template-columns: 28px minmax(0, 1fr) 90px;
   }
   .fe-list__col--mod {
     display: none;

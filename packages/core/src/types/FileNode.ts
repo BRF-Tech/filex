@@ -5,6 +5,11 @@
  *   { adapter, storages, dirname, files: FileNode[] }
  */
 export interface FileNode {
+  /** DB node ID — needed by the per-user meta routes (starred, tags,
+   *  recently-opened). Backend's projectFileNodes() emits it for every
+   *  row; only client-synthesized rows (e.g. multi-storage virtual
+   *  folders) lack one. */
+  id?: number;
   /** Full adapter-qualified path: `local://receipts/2024/invoice.pdf` */
   path: string;
   /** Relative basename: `invoice.pdf` */
