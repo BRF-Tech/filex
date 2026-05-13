@@ -30,6 +30,13 @@
 .fe--theme-dark,
 :root[data-theme='dark'] .fe,
 .fe.fe--theme-dark,
+/* Tailwind dark-mode class shipped by the host admin shell —
+ * web/src/lib/theme.ts toggles document.documentElement.classList
+ * .toggle('dark', dark), so we adopt the same hook here. Without
+ * this selector the embedded explorer stayed on the :root light
+ * defaults even when the rest of the admin UI flipped dark. */
+:root.dark .fe,
+.dark .fe,
 /* Teleported context menu lives outside the `.fe` parent, so we have
  * to apply the same dark-mode variable overrides on its backdrop too —
  * otherwise it stays on the :root light defaults and the menu renders
