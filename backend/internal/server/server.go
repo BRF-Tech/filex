@@ -204,6 +204,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	cap, _ := caps.Get(ctx)
 	if cap != nil {
 		pipelineCaps.Video = cap.Thumbs.Video
+		pipelineCaps.Audio = cap.Thumbs.Audio
 		pipelineCaps.PDF = cap.Thumbs.PDF
 		pipelineCaps.Office = cap.Thumbs.Office
 		pipelineCaps.SVG = cap.Thumbs.SVG

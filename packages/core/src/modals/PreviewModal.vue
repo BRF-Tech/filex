@@ -120,12 +120,17 @@ const VIEWER_MAP: Record<string, () => Promise<Component>> = {
 
   psd: () => import('../viewers/PsdViewer.vue'),
 
-  pdf: () => import('../viewers/PdfViewer.vue'),
+  // PDF deliberately uses the native browser viewer (`kind === 'pdf'`
+  // branch in the template). PdfViewer.vue still exists for callers
+  // that want the rich custom UI but the SFC default keeps things
+  // minimal — the browser already paints search/zoom/page UI for free.
 
   ipynb: () => import('../viewers/IpynbViewer.vue'),
 
   csv: () => import('../viewers/CsvViewer.vue'),
   tsv: () => import('../viewers/CsvViewer.vue'),
+
+  zip: () => import('../viewers/ArchiveViewer.vue'),
 };
 
 type PreviewKind =
@@ -138,9 +143,12 @@ const kind = computed<PreviewKind>(() => {
   if (IMAGE.includes(e)) return 'image';
   if (VIDEO.includes(e)) return 'video';
   if (AUDIO.includes(e)) return 'audio';
-  // PDF: try the rich viewer first, but fall back to native <object>
-  // when pdfjs-dist isn't installed (the PdfViewer emits 'fallback').
-  if (e === 'pdf') return pdfFallbackToNative.value ? 'pdf' : 'viewer';
+  // PDF always uses the native browser <object> renderer. The
+  // PdfViewer SFC is no longer wired into the default map — the
+  // browser-bundled toolbar is enough and removes a 600 KB pdfjs
+  // worker chunk + a custom toolbar layer for parity with the rest
+  // of the read-only viewers.
+  if (e === 'pdf') return 'pdf';
   // Markdown stays in its own branch (gets the split view in edit mode);
   // plain text → code editor in edit mode, raw <pre> in view mode.
   const wantEdit = props.openMode !== 'view';
@@ -206,18 +214,56 @@ const viewerProps = computed(() => {
 });
 
 function openInNewTab(): void {
+  buildAndOpenStandalone(props.openMode || 'edit');
+}
+
+function openEditInNewTab(): void {
+  buildAndOpenStandalone('edit');
+}
+
+function buildAndOpenStandalone(mode: 'view' | 'edit'): void {
   if (!props.file) return;
   const e = ext(props.file);
-  const path = stripAdapter(props.file.path);
-  const storage = (props.file as { storage_id?: string | number }).storage_id ?? '';
-  const base = props.viewerBaseUrl || '/files/viewer';
+  // Keep the adapter-qualified path intact so the editor route
+  // resolves the storage from the URL (stripping it falls back to
+  // storages[0] and 404s for any non-default adapter). Default base
+  // is the SFC's standalone /files/edit route; embedders override via
+  // viewerBaseUrl when they mount us elsewhere.
+  const base = props.viewerBaseUrl || '/files/edit';
   const sep = base.includes('?') ? '&' : '?';
   const url =
-    `${base}${sep}path=${encodeURIComponent(path)}` +
-    `&storage=${encodeURIComponent(String(storage))}` +
-    `&type=${encodeURIComponent(e)}`;
+    `${base}${sep}path=${encodeURIComponent(props.file.path)}` +
+    `&type=${encodeURIComponent(e)}` +
+    `&mode=${encodeURIComponent(mode)}`;
   window.open(url, '_blank', 'noopener');
 }
+
+/**
+ * Extensions that have a meaningful "edit" surface. Read-only kinds
+ * (image/video/audio/3D/archive) don't surface a "Düzenle" button.
+ */
+const EDITABLE_EXTS = new Set([
+  // OnlyOffice — open the in-page office editor (or new tab) with
+  // edit permissions.
+  'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt',
+  'odt', 'ods', 'odp', 'rtf',
+  // Drawio / mermaid round-trip via the new-tab route.
+  'drawio', 'dio', 'mmd', 'mermaid',
+  // Code / text / markdown — Monaco / split editor.
+  'md', 'markdown', 'txt', 'log',
+  'json', 'jsonc', 'yaml', 'yml', 'xml', 'svg', 'html', 'htm',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'svelte',
+  'css', 'scss', 'sass', 'less',
+  'php', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift',
+  'cpp', 'c', 'h', 'hpp', 'cs', 'dart',
+  'sh', 'bash', 'sql',
+  'toml', 'ini', 'conf', 'cfg', 'env',
+  'dockerfile', 'graphql', 'gql',
+]);
+
+const canEditKind = computed<boolean>(() =>
+  !!props.file && EDITABLE_EXTS.has(ext(props.file)),
+);
 
 // Keep adapter prefix so backend resolves the right storage — stripping
 // it defaults to storages[0] and 404s on any non-default adapter.
@@ -923,7 +969,13 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
     </div>
     <template #actions>
       <button
-        v-if="file && (kind === 'viewer' || kind === 'pdf')"
+        v-if="file && openMode === 'view' && canEditKind"
+        type="button"
+        class="fe-btn fe-btn--primary"
+        @click="openEditInNewTab"
+      >✏ Düzenle</button>
+      <button
+        v-if="file"
         type="button"
         class="fe-btn"
         @click="openInNewTab"

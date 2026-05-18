@@ -79,8 +79,11 @@ type EditorConfig struct {
 }
 
 // BuildConfigForNode resolves the node, presigns the fetch URL, and signs
-// the JSON descriptor with HS256.
-func (s *Service) BuildConfigForNode(node *model.Node, user *model.User, lang string) (*EditorConfig, error) {
+// the JSON descriptor with HS256. `mode` selects "edit" or "view"; any
+// value other than "edit" is treated as read-only and toggles the
+// permissions block so OnlyOffice renders the document with toolbars
+// disabled.
+func (s *Service) BuildConfigForNode(node *model.Node, user *model.User, lang, mode string) (*EditorConfig, error) {
 	if !s.Enabled() {
 		return nil, errors.New("onlyoffice: not configured")
 	}
@@ -115,6 +118,11 @@ func (s *Service) BuildConfigForNode(node *model.Node, user *model.User, lang st
 		userName = user.Email
 	}
 
+	effectiveMode := "edit"
+	if mode != "" && mode != "edit" {
+		effectiveMode = "view"
+	}
+	canEdit := effectiveMode == "edit"
 	body := map[string]any{
 		"document": map[string]any{
 			"key":      key,
@@ -122,11 +130,11 @@ func (s *Service) BuildConfigForNode(node *model.Node, user *model.User, lang st
 			"url":      fetchURL,
 			"fileType": fileType,
 			"permissions": map[string]any{
-				"edit":     true,
+				"edit":     canEdit,
 				"download": true,
 				"print":    true,
-				"comment":  true,
-				"review":   true,
+				"comment":  canEdit,
+				"review":   canEdit,
 			},
 		},
 		"documentType": docType,
@@ -137,7 +145,7 @@ func (s *Service) BuildConfigForNode(node *model.Node, user *model.User, lang st
 				"name": userName,
 			},
 			"lang": fallback(lang, "en"),
-			"mode": "edit",
+			"mode": effectiveMode,
 		},
 	}
 

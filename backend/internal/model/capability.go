@@ -68,6 +68,7 @@ type StorageCapabilities struct {
 type ThumbCapabilities struct {
 	Image  bool `json:"image"`
 	Video  bool `json:"video"`
+	Audio  bool `json:"audio"`
 	PDF    bool `json:"pdf"`
 	Office bool `json:"office"`
 	SVG    bool `json:"svg"`

@@ -1,3 +1,7 @@
-id,name,email
-1,Burak,burak@brf.sh
-2,Test,test@example.com
+id,name,email,role,joined
+1,Burak,burak@brf.sh,admin,2026-04-01
+2,Gokcil,gokcil@brf.sh,admin,2026-04-03
+3,Arda,arda@brf.sh,operator,2026-04-10
+4,Demo,demo@demo.com,demo,2026-04-15
+5,Test,test@example.com,user,2026-05-01
+6,Sample,sample@example.com,user,2026-05-08

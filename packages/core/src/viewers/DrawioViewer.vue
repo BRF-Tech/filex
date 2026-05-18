@@ -162,17 +162,6 @@ function tt(key: string, fallback: string): string {
 
 <template>
   <div class="filex-viewer-drawio">
-    <div class="filex-viewer-drawio__bar">
-      <span class="filex-viewer-drawio__status" :data-state="status">
-        <template v-if="status === 'loading'">{{ tt('viewer.loading', 'Loading…') }}</template>
-        <template v-else-if="status === 'saving'">⏳</template>
-        <template v-else-if="status === 'saved'">✓</template>
-        <template v-else-if="status === 'error'">✗</template>
-      </span>
-      <span v-if="readOnly" class="filex-viewer-drawio__readonly">
-        {{ tt('viewer.read_only', 'Read only') }}
-      </span>
-    </div>
     <div v-if="error" class="filex-viewer-fallback">
       <span class="filex-viewer-fallback__icon">📐</span>
       <p>{{ error }}</p>

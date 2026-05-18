@@ -147,30 +147,6 @@ function tt(key: string, fallback: string): string {
 
 <template>
   <div class="filex-viewer-tiff">
-    <div class="filex-viewer-tiff__bar">
-      <button
-        type="button"
-        class="filex-viewer-btn"
-        :disabled="pageIndex === 0"
-        :title="tt('viewer.prev_page', 'Previous page')"
-        @click="prev"
-      >‹</button>
-      <span class="filex-viewer-tiff__pages">
-        {{ pageCount > 0 ? pageLabel : '' }}
-      </span>
-      <button
-        type="button"
-        class="filex-viewer-btn"
-        :disabled="pageIndex >= pageCount - 1"
-        :title="tt('viewer.next_page', 'Next page')"
-        @click="next"
-      >›</button>
-      <span class="filex-viewer-spacer" />
-      <button type="button" class="filex-viewer-btn" :title="tt('viewer.zoom_out', 'Zoom out')" @click="zoomOut">−</button>
-      <span class="filex-viewer-tiff__zoom">{{ Math.round(scale * 100) }}%</span>
-      <button type="button" class="filex-viewer-btn" :title="tt('viewer.zoom_in', 'Zoom in')" @click="zoomIn">+</button>
-      <button type="button" class="filex-viewer-btn" @click="reset">↺</button>
-    </div>
     <div class="filex-viewer-tiff__pane">
       <div v-if="error" class="filex-viewer-fallback">
         <span class="filex-viewer-fallback__icon">🖼️</span>
@@ -183,17 +159,46 @@ function tt(key: string, fallback: string): string {
       <canvas
         v-show="!loading && !error"
         ref="canvasEl"
-        :style="{
-          transform: `scale(${scale})`,
-          transformOrigin: 'top left',
-          imageRendering: 'pixelated',
-        }"
+        :style="{ imageRendering: 'pixelated' }"
       />
+      <div v-if="!loading && !error && pageCount > 1" class="filex-viewer-tiff__pager">
+        <button
+          type="button"
+          class="filex-viewer-btn"
+          :disabled="pageIndex === 0"
+          @click="prev"
+        >‹</button>
+        <span class="filex-viewer-tiff__pages">{{ pageLabel }}</span>
+        <button
+          type="button"
+          class="filex-viewer-btn"
+          :disabled="pageIndex >= pageCount - 1"
+          @click="next"
+        >›</button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.filex-viewer-tiff__pager {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--fe-bg-elev, rgba(255, 255, 255, 0.9));
+  border: 1px solid var(--fe-border, #e2e6ed);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+}
+.filex-viewer-tiff__pages {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .filex-viewer-tiff {
   display: flex;
   flex-direction: column;

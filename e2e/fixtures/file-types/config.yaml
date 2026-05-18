@@ -1,5 +1,25 @@
-version: 1
-demo: true
-items:
-  - 1
-  - 2
+# filex example config — drop in /etc/filex/config.yaml
+listen: 0.0.0.0:5212
+public_url: https://fm.example.com
+
+auth:
+  drivers: [local, oidc]
+  oidc:
+    issuer: https://auth.example.com/realms/main
+    client_id: filex
+    admin_group: filex-admin
+
+storages:
+  - name: local
+    driver: local
+    config:
+      root: /var/lib/filex/storage
+  - name: s3
+    driver: s3
+    config:
+      bucket: example-data
+      region: eu-central-1
+
+thumbs:
+  enabled: true
+  formats: [image, video, audio, pdf, office]

@@ -110,4 +110,10 @@ export const en: Record<string, string> = {
   'viewer.csv_filter': 'Filter rows…',
   'viewer.epub_prev': 'Previous',
   'viewer.epub_next': 'Next',
+  'viewer.drawio.disabled': 'diagrams.net embed is not configured for this filex instance — operator must wire FILEX_DRAWIO_URL to enable the editor.',
+  'viewer.archive.entries': '{n} files',
+  'viewer.archive.empty': 'Archive is empty.',
+  'viewer.archive.error': 'Could not read archive contents.',
+  'viewer.name': 'Name',
+  'viewer.size': 'Size',
 };

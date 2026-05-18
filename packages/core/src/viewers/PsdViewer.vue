@@ -137,54 +137,19 @@ function tt(key: string, fallback: string): string {
 
 <template>
   <div class="filex-viewer-psd">
-    <div class="filex-viewer-psd__bar">
-      <button
-        v-if="layers.length"
-        type="button"
-        class="filex-viewer-btn"
-        @click="showLayerPanel = !showLayerPanel"
-        :class="{ 'is-active': showLayerPanel }"
-      >
-        {{ tt('viewer.layers', 'Layers') }} ({{ layers.length }})
-      </button>
-      <span class="filex-viewer-spacer" />
-      <span v-if="dims.width" class="filex-viewer-psd__dim">
-        {{ dims.width }} × {{ dims.height }}
-      </span>
-      <button type="button" class="filex-viewer-btn" :title="tt('viewer.zoom_out', 'Zoom out')" @click="zoomOut">−</button>
-      <span class="filex-viewer-psd__zoom">{{ Math.round(scale * 100) }}%</span>
-      <button type="button" class="filex-viewer-btn" :title="tt('viewer.zoom_in', 'Zoom in')" @click="zoomIn">+</button>
-      <button type="button" class="filex-viewer-btn" @click="reset">↺</button>
-    </div>
-    <div class="filex-viewer-psd__main">
-      <aside v-if="showLayerPanel && layers.length" class="filex-viewer-psd__layers">
-        <ul>
-          <li v-for="layer in layers" :key="layer.index">
-            <span class="filex-viewer-psd__layer-vis" :data-hidden="layer.hidden ? '1' : '0'">
-              {{ layer.hidden ? '○' : '●' }}
-            </span>
-            <span class="filex-viewer-psd__layer-name">{{ layer.name }}</span>
-          </li>
-        </ul>
-      </aside>
-      <div class="filex-viewer-psd__pane">
-        <div v-if="error" class="filex-viewer-fallback">
-          <span class="filex-viewer-fallback__icon">🎨</span>
-          <p>{{ error }}</p>
-        </div>
-        <div v-else-if="loading" class="filex-viewer-fallback">
-          <span class="filex-viewer-fallback__icon">⏳</span>
-          <p>{{ tt('viewer.loading', 'Loading…') }}</p>
-        </div>
-        <canvas
-          v-show="!loading && !error"
-          ref="canvasEl"
-          :style="{
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-          }"
-        />
+    <div class="filex-viewer-psd__pane">
+      <div v-if="error" class="filex-viewer-fallback">
+        <span class="filex-viewer-fallback__icon">🎨</span>
+        <p>{{ error }}</p>
       </div>
+      <div v-else-if="loading" class="filex-viewer-fallback">
+        <span class="filex-viewer-fallback__icon">⏳</span>
+        <p>{{ tt('viewer.loading', 'Loading…') }}</p>
+      </div>
+      <canvas
+        v-show="!loading && !error"
+        ref="canvasEl"
+      />
     </div>
   </div>
 </template>

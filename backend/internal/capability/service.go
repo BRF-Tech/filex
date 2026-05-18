@@ -153,6 +153,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	s.mu.RUnlock()
 	if has("ffmpeg") {
 		caps.Thumbs.Video = true
+		caps.Thumbs.Audio = true
 	}
 	if has("gs") || has("pdftoppm") {
 		caps.Thumbs.PDF = true

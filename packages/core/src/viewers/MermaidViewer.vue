@@ -146,12 +146,6 @@ function tt(key: string, fallback: string): string {
 
 <template>
   <div class="filex-viewer-mermaid">
-    <div class="filex-viewer-mermaid__bar">
-      <button type="button" class="filex-viewer-btn" @click="zoomOut" :title="tt('viewer.zoom_out', 'Zoom out')">−</button>
-      <span class="filex-viewer-mermaid__zoom">{{ Math.round(scale * 100) }}%</span>
-      <button type="button" class="filex-viewer-btn" @click="zoomIn" :title="tt('viewer.zoom_in', 'Zoom in')">+</button>
-      <button type="button" class="filex-viewer-btn" @click="reset">↺</button>
-    </div>
     <div
       class="filex-viewer-mermaid__pane"
       @wheel="onWheel"

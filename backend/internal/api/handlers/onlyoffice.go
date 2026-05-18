@@ -56,9 +56,11 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	var (
 		node *model.Node
 		lang string
+		mode string
 	)
 	q := r.URL.Query()
 	lang = q.Get("lang")
+	mode = q.Get("mode")
 
 	if r.Method == http.MethodPost {
 		var body struct {
@@ -73,6 +75,9 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Lang != "" {
 			lang = body.Lang
+		}
+		if body.Mode != "" {
+			mode = body.Mode
 		}
 		if body.NodeID > 0 {
 			n, err := h.Store.GetNode(r.Context(), body.NodeID)
@@ -107,7 +112,7 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		node = n
 	}
 
-	cfg, err := h.Service.BuildConfigForNode(node, user, lang)
+	cfg, err := h.Service.BuildConfigForNode(node, user, lang, mode)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

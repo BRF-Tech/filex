@@ -174,43 +174,10 @@ function tt(key: string, fallback: string): string {
       <p>{{ error }}</p>
     </div>
     <template v-else>
-      <div class="filex-viewer-epub__bar">
-        <button type="button" class="filex-viewer-btn" @click="tocOpen = !tocOpen">
-          ☰ {{ tt('viewer.toc', 'Contents') }}
-        </button>
-        <button type="button" class="filex-viewer-btn" @click="prev" :disabled="!ready">
-          ‹ {{ tt('viewer.epub_prev', 'Prev') }}
-        </button>
-        <button type="button" class="filex-viewer-btn" @click="next" :disabled="!ready">
-          {{ tt('viewer.epub_next', 'Next') }} ›
-        </button>
-        <span class="filex-viewer-spacer" />
-        <button type="button" class="filex-viewer-btn" @click="smaller" :title="tt('viewer.font_smaller', 'Smaller text')">
-          A-
-        </button>
-        <span class="filex-viewer-epub__fs">{{ fontSize }}%</span>
-        <button type="button" class="filex-viewer-btn" @click="bigger" :title="tt('viewer.font_larger', 'Larger text')">
-          A+
-        </button>
-      </div>
-      <div class="filex-viewer-epub__main">
-        <aside v-if="tocOpen" class="filex-viewer-epub__toc">
-          <ul>
-            <li v-for="(node, i) in toc" :key="i">
-              <button type="button" class="filex-viewer-epub__toc-link" @click="gotoHref(node.href)">
-                {{ node.label }}
-              </button>
-              <ul v-if="node.subitems && node.subitems.length">
-                <li v-for="(child, j) in node.subitems" :key="j">
-                  <button type="button" class="filex-viewer-epub__toc-link is-child" @click="gotoHref(child.href)">
-                    {{ child.label }}
-                  </button>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        </aside>
-        <div ref="containerRef" class="filex-viewer-epub__rendition" />
+      <div ref="containerRef" class="filex-viewer-epub__rendition" />
+      <div v-if="ready" class="filex-viewer-epub__nav">
+        <button type="button" class="filex-viewer-btn" @click="prev" :disabled="!ready">‹</button>
+        <button type="button" class="filex-viewer-btn" @click="next" :disabled="!ready">›</button>
       </div>
       <div v-if="loading" class="filex-viewer-epub__loading">
         {{ tt('viewer.loading', 'Loading…') }}
@@ -220,6 +187,19 @@ function tt(key: string, fallback: string): string {
 </template>
 
 <style scoped>
+.filex-viewer-epub__nav {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--fe-bg-elev, rgba(255, 255, 255, 0.9));
+  border: 1px solid var(--fe-border, #e2e6ed);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+}
 .filex-viewer-epub {
   display: flex;
   flex-direction: column;

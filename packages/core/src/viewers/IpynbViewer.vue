@@ -196,12 +196,6 @@ function tt(key: string, fallback: string): string {
 
 <template>
   <div class="filex-viewer-ipynb">
-    <div class="filex-viewer-ipynb__bar">
-      <span class="filex-viewer-ipynb__lang">{{ language }}</span>
-      <span class="filex-viewer-ipynb__counts">
-        {{ stats.total }} cells · {{ stats.code }} code · {{ stats.md }} md
-      </span>
-    </div>
     <div class="filex-viewer-ipynb__pane">
       <div v-if="error" class="filex-viewer-fallback">
         <span class="filex-viewer-fallback__icon">📓</span>

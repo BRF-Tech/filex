@@ -1,1 +1,23 @@
-<?xml version="1.0"?><root><a>1</a><b>2</b></root>
+<?xml version="1.0" encoding="UTF-8"?>
+<filex-manifest version="1.0">
+  <storages>
+    <storage name="local" driver="local">
+      <config>
+        <root>/var/lib/filex/storage</root>
+      </config>
+    </storage>
+    <storage name="s3" driver="s3">
+      <config>
+        <bucket>example-data</bucket>
+        <region>eu-central-1</region>
+      </config>
+    </storage>
+  </storages>
+  <thumbs enabled="true">
+    <format>image</format>
+    <format>video</format>
+    <format>audio</format>
+    <format>pdf</format>
+    <format>office</format>
+  </thumbs>
+</filex-manifest>

@@ -1,6 +1,11 @@
-graph TD
-    A[Start] --> B{Decision}
-    B -->|yes| C[Do thing]
-    B -->|no| D[Skip]
-    C --> E[End]
-    D --> E
+flowchart LR
+    A[Client] -->|POST /upload| B(filex API)
+    B --> C{Storage Driver}
+    C -->|local| D[Disk]
+    C -->|s3| E[Hetzner S3]
+    C -->|webdav| F[Pasbolt]
+    B -->|fanout| G[Replica Worker]
+    G --> H[(brkip mirror)]
+    B -->|index| I[Bleve]
+    H --> J{DR Watcher}
+    J -->|new snapshot| K[Auto-restore]

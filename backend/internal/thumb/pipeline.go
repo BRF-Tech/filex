@@ -40,6 +40,7 @@ type Pipeline struct {
 type Capabilities struct {
 	Image  bool // always true (Go stdlib + bundled imaging)
 	Video  bool // ffmpeg present in PATH
+	Audio  bool // ffmpeg present (same binary handles audio waveform)
 	PDF    bool // ghostscript or pdftoppm present
 	Office bool // libreoffice/soffice present
 	SVG    bool // rsvg-convert present (vector→raster)
@@ -99,13 +100,18 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 		err = p.generateImage(ctx, node, drv)
 	case strings.HasPrefix(mime, "video/") && p.caps.Video:
 		err = p.generateVideo(ctx, node, drv)
+	case strings.HasPrefix(mime, "audio/") && p.caps.Audio:
+		err = p.generateAudio(ctx, node, drv)
 	case mime == "application/pdf" && p.caps.PDF:
 		err = p.generatePDF(ctx, node, drv)
 	case isOfficeMime(mime) && p.caps.Office:
 		err = p.generateOffice(ctx, node, drv)
 	default:
-		_ = p.store.SetThumbnailState(ctx, node.ID, "skipped", "")
-		return ErrSkipped
+		// Everything else (3D models, archives, code, markdown, raw
+		// docs, etc) gets a deterministic placeholder card so grid
+		// views still show *something* legible. Cheap to render —
+		// pure Go image stdlib, no external binary.
+		err = p.generateGeneric(ctx, node)
 	}
 	if err != nil {
 		_ = p.store.SetThumbnailState(ctx, node.ID, "failed", err.Error())
@@ -159,6 +165,20 @@ func mimeFromName(name string) string {
 		return "image/avif"
 	case "tiff", "tif":
 		return "image/tiff"
+	case "mp3":
+		return "audio/mpeg"
+	case "wav":
+		return "audio/wav"
+	case "ogg":
+		return "audio/ogg"
+	case "flac":
+		return "audio/flac"
+	case "m4a":
+		return "audio/mp4"
+	case "aac":
+		return "audio/aac"
+	case "opus":
+		return "audio/opus"
 	case "mp4":
 		return "video/mp4"
 	case "webm":

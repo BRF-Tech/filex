@@ -43,8 +43,10 @@ export const VIEWER_MATRIX: Record<string, ExtMatch> = {
   wav: { primary: '.fe-preview__audio' },
   ogg: { primary: '.fe-preview__audio' },
 
-  // PDF — rich PdfViewer; native <object> when pdfjs worker 404s.
-  pdf: { primary: '.filex-viewer-pdf', fallback: 'object[type="application/pdf"]' },
+  // PDF — native browser <object> renderer (PdfViewer SFC removed from
+  // the default map in v0.1.7). Wraps Chrome/Firefox's built-in pdf
+  // engine; no custom toolbar.
+  pdf: { primary: 'object[type="application/pdf"]', fallback: '.fe-preview__fallback' },
 
   // Markdown — split editor in edit mode (the audit always uses edit).
   md: { primary: '.fe-preview__md-split-input' },
@@ -105,10 +107,10 @@ export const VIEWER_MATRIX: Record<string, ExtMatch> = {
   csv: { primary: '.filex-viewer-csv__table', fallback: '.filex-viewer-csv' },
   tsv: { primary: '.filex-viewer-csv__table', fallback: '.filex-viewer-csv' },
 
-  // Archives — no rich viewer in v0.1.5; PreviewModal falls back to
-  // "Bu dosya tipi için önizleme henüz yok." with an İndir button. The
-  // audit accepts the fallback as a documented gap.
-  zip: { primary: '.fe-preview__fallback' },
+  // Archives — ArchiveViewer (v0.1.7+) renders the member list via
+  // /api/files/archive/list. Empty archives still mount the viewer
+  // shell; corrupt archives drop into the fallback path.
+  zip: { primary: '.filex-viewer-archive', fallback: '.fe-preview__fallback' },
 };
 
 /**

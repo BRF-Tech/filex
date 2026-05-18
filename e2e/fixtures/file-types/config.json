@@ -1,9 +1,38 @@
 {
-  "version": 1,
-  "demo": true,
-  "items": [
-    1,
-    2,
-    3
-  ]
+  "version": "v0.1.6",
+  "listen": "0.0.0.0:5212",
+  "public_url": "https://fm.example.com",
+  "auth": {
+    "drivers": [
+      "local",
+      "oidc"
+    ]
+  },
+  "storages": [
+    {
+      "name": "local",
+      "driver": "local",
+      "config": {
+        "root": "/var/lib/filex/storage"
+      }
+    },
+    {
+      "name": "s3",
+      "driver": "s3",
+      "config": {
+        "bucket": "example-data",
+        "region": "eu-central-1"
+      }
+    }
+  ],
+  "thumbs": {
+    "enabled": true,
+    "formats": [
+      "image",
+      "video",
+      "audio",
+      "pdf",
+      "office"
+    ]
+  }
 }

@@ -1,11 +1,30 @@
-<mxfile host="app.diagrams.net" modified="2026-05-07T00:00:00.000Z" agent="filemanager-fixture" version="22.0.0">
-  <diagram name="Page-1" id="demo">
-    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-05-18T09:00:00.000Z" agent="filex-fixture" version="22.0.0" type="device">
+  <diagram id="filex-demo" name="filex sequence">
+    <mxGraphModel dx="640" dy="480" grid="1" gridSize="10" arrows="1" connect="1">
       <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-        <mxCell id="2" value="Hello" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="160" y="120" width="120" height="60" as="geometry" />
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="u" value="User" style="shape=actor;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="40" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="a" value="filex API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="180" y="50" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s" value="Storage Driver" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="360" y="50" width="140" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="r" value="Replica Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
+          <mxGeometry x="360" y="150" width="140" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="endArrow=classic;html=1;" edge="1" parent="1" source="u" target="a">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=classic;html=1;" edge="1" parent="1" source="a" target="s">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="endArrow=classic;html=1;" edge="1" parent="1" source="a" target="r">
+          <mxGeometry relative="1" as="geometry"/>
         </mxCell>
       </root>
     </mxGraphModel>

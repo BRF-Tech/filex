@@ -151,28 +151,6 @@ function tt(key: string, fallback: string): string {
 
 <template>
   <div class="filex-viewer-csv">
-    <div class="filex-viewer-csv__bar">
-      <label class="filex-viewer-csv__check">
-        <input v-model="firstRowHeader" type="checkbox" />
-        {{ tt('viewer.csv_first_row_header', 'First row as header') }}
-      </label>
-      <select v-model="userDelim" class="filex-viewer-csv__select" title="Delimiter">
-        <option value="auto">auto ({{ detectedDelim === '\t' ? 'tab' : detectedDelim }})</option>
-        <option value=",">,</option>
-        <option value="	">tab</option>
-        <option value=";">;</option>
-      </select>
-      <input
-        v-model="filter"
-        type="search"
-        :placeholder="tt('viewer.csv_filter', 'Filter rows…')"
-        class="filex-viewer-csv__filter"
-      />
-      <span class="filex-viewer-spacer" />
-      <span class="filex-viewer-csv__count">
-        {{ filtered.length }} / {{ dataRows.length }}
-      </span>
-    </div>
     <div class="filex-viewer-csv__pane">
       <div v-if="error" class="filex-viewer-fallback">
         <span class="filex-viewer-fallback__icon">📊</span>
@@ -204,7 +182,7 @@ function tt(key: string, fallback: string): string {
         :disabled="page <= 1"
         @click="page--"
       >‹</button>
-      <span class="filex-viewer-csv__pageno">{{ page }} / {{ totalPages }}</span>
+      <span class="filex-viewer-csv__pageno">{{ page }} / {{ totalPages }} ({{ filtered.length }} satır)</span>
       <button
         type="button"
         class="filex-viewer-btn"

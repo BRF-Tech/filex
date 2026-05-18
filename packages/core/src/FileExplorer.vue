@@ -634,23 +634,35 @@ function openNode(n: FileNode) {
   // new tab that we'd just render a "service not configured" fallback
   // inside — drop into the in-page preview instead, which is the same
   // dead-end UI but without the tab-switching whiplash.
+  // Double-click contract: in-page modal preview. Office docs and
+  // other read-only kinds open in view mode so a quick peek doesn't
+  // mount an editing surface on top of the content. Code/markdown
+  // open in edit so the user gets the fast "open, tweak, Ctrl+S"
+  // loop. Modal's "Yeni sekmede aç" button still launches the
+  // standalone fullscreen editor route when richer editing is wanted.
   const ext = (n.extension || '').toLowerCase();
-  const officeBlocked = OFFICE_EXTS.has(ext) && !effectiveOnlyOfficeBase.value;
-  const drawioBlocked = (ext === 'drawio' || ext === 'dio') && !effectiveDrawioUrl.value;
-  if (props.config.openPageBase && !officeBlocked && !drawioBlocked) {
-    const url = `${props.config.openPageBase}?path=${encodeURIComponent(n.path)}&mode=edit&type=${encodeURIComponent(ext)}`;
-    window.open(url, '_blank', 'noopener');
-    emit('file-opened', { path: n.path, basename: n.basename });
-    void markRecent(n);
-    return;
-  }
-  // Fallback when no editor page is configured, or the editor would
-  // hit an offline backend — in-page modal.
-  previewMode.value = 'edit';
+  previewMode.value = previewModeForExt(ext);
   previewTarget.value = n;
   showPreview.value = true;
   emit('file-opened', { path: n.path, basename: n.basename });
   void markRecent(n);
+}
+
+const VIEW_DEFAULT_EXTS = new Set<string>([
+  ...OFFICE_EXTS,
+  'drawio', 'dio',
+  'pdf', 'epub', 'ipynb', 'tiff', 'tif', 'psd',
+  'mmd', 'mermaid',
+  'glb', 'gltf', 'obj', 'stl', 'fbx', '3ds',
+  'zip', 'rar', '7z', 'tar', 'gz', 'tgz',
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'svg', 'heic',
+  'mp4', 'webm', 'mov', 'mkv', 'm4v', 'ogv',
+  'mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus',
+]);
+
+function previewModeForExt(ext: string): 'view' | 'edit' {
+  if (VIEW_DEFAULT_EXTS.has(ext)) return 'view';
+  return 'edit';
 }
 
 async function restoreSelection(targets?: FileNode[]) {

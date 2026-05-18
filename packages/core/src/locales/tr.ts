@@ -110,4 +110,10 @@ export const tr: Record<string, string> = {
   'viewer.csv_filter': 'Satır filtrele…',
   'viewer.epub_prev': 'Önceki',
   'viewer.epub_next': 'Sonraki',
+  'viewer.drawio.disabled': 'diagrams.net editörü bu filex kurulumunda yapılandırılmamış — yönetici FILEX_DRAWIO_URL\'yi ayarlamalı.',
+  'viewer.archive.entries': '{n} dosya',
+  'viewer.archive.empty': 'Arşiv boş.',
+  'viewer.archive.error': 'Arşiv okunamadı.',
+  'viewer.name': 'Ad',
+  'viewer.size': 'Boyut',
 };
