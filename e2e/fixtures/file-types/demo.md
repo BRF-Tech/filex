@@ -1,28 +1,58 @@
-# filex demo
+# filex — demo notes
 
-**filex** is a self-hosted file manager. This fixture demonstrates a
-broad markdown surface: headings, lists, fences, tables.
+**filex** is a self-hosted file manager built for the brf.sh stack. This
+fixture exercises a broad markdown surface: headings, lists, code fences,
+tables, links, blockquotes, and the optional mermaid + math extensions.
 
-## Features
+## Highlights
 
-- multi-driver storage (local, s3, ftp, sftp, webdav)
-- persistent queue (sqlite / redis / postgres)
-- live thumbnails
-- replica + reconcile
+- Multi-driver storage (local, s3, ftp, sftp, webdav)
+- Persistent queue (sqlite / redis / postgres)
+- Live thumbnails (ffmpeg + gs + libreoffice + audio waveform + generic fallback)
+- Replica + reconcile with path-glob rules
+- Bleve full-text search
+- OIDC / LDAP / local auth + per-user TOTP
 
 ## Code
 
 ```ts
 import { mountFileExplorer } from '@brftech/filex-core';
-mountFileExplorer('#root', { api: { baseURL: '/api/files' } });
+
+const app = mountFileExplorer('#root', {
+  api: {
+    baseURL: '/api/files',
+    credentials: 'include',
+  },
+  i18n: { locale: 'tr' },
+  openPageBase: '/admin/files/edit',
+});
+
+window.addEventListener('beforeunload', () => app.unmount());
 ```
 
-## Tabular
+## Architecture quick-table
 
-| Module  | Owner    | Status |
-|---------|----------|--------|
-| Storage | core     | stable |
-| Search  | platform | stable |
-| Replica | infra    | beta   |
+| Module    | Owner    | Status |
+|-----------|----------|--------|
+| Storage   | core     | stable |
+| Search    | platform | stable |
+| Replica   | infra    | beta   |
+| Thumbs    | platform | stable |
+| Onlyoffice| platform | beta   |
+
+## Mermaid diagram
+
+```mermaid
+flowchart LR
+  Client --> API
+  API --> Drivers
+  Drivers --> Disk
+  Drivers --> S3
+```
+
+## Quote
+
+> "filex is the answer to the question we never asked, but always needed."
+> — anonymous operator
 
 See <https://gitlab.com/brftech/filemanager> for source.

@@ -130,6 +130,7 @@
   "storages": {
     "title": "Storages",
     "subtitle": "Mount points used as top-level folders",
+    "filesUnit": "files",
     "addNew": "Add storage",
     "newTitle": "Add new storage",
     "editTitle": "Edit storage",

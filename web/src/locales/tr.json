@@ -130,6 +130,7 @@
   "storages": {
     "title": "Depolar",
     "subtitle": "Üst düzey klasör olarak görünen mount noktaları",
+    "filesUnit": "dosya",
     "addNew": "Depo ekle",
     "newTitle": "Yeni depo ekle",
     "editTitle": "Depo düzenle",

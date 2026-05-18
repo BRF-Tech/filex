@@ -52,6 +52,11 @@ type Store interface {
 	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
 	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
 	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
+	// StorageStats returns (file_count, total_size_bytes) for a storage,
+	// excluding directories and soft-deleted nodes. Used by the admin
+	// storages list page so each row can show "N files, 1.2 GB" without
+	// the SPA looping every node row.
+	StorageStats(ctx context.Context, storageID int64) (fileCount int64, totalBytes int64, err error)
 	SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error)
 
 	// Users

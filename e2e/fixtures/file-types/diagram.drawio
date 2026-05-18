@@ -1,29 +1,47 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="app.diagrams.net" modified="2026-05-18T09:00:00.000Z" agent="filex-fixture" version="22.0.0" type="device">
-  <diagram id="filex-demo" name="filex sequence">
-    <mxGraphModel dx="640" dy="480" grid="1" gridSize="10" arrows="1" connect="1">
+<mxfile host="app.diagrams.net" modified="2026-05-18T13:30:00.000Z" agent="filex-fixture" version="22.0.0" type="device">
+  <diagram id="filex-deploy" name="filex deployment">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" arrows="1" connect="1">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="u" value="User" style="shape=actor;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="40" height="60" as="geometry"/>
+        <mxCell id="cf" value="Cloudflare Tunnel" style="shape=ellipse;fillColor=#f59e0b;fontColor=#fff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="160" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="a" value="filex API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
-          <mxGeometry x="180" y="50" width="120" height="40" as="geometry"/>
+        <mxCell id="hetz" value="Hetzner main\n167.235.143.222" style="rounded=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="320" y="40" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="s" value="Storage Driver" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
-          <mxGeometry x="360" y="50" width="140" height="40" as="geometry"/>
+        <mxCell id="fm" value="fm.brf.sh\n(filex prod)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="180" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="r" value="Replica Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
-          <mxGeometry x="360" y="150" width="140" height="40" as="geometry"/>
+        <mxCell id="demo" value="demo-fm.brf.sh\n(filex demo)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="260" width="200" height="60" as="geometry"/>
         </mxCell>
-        <mxCell id="e1" style="endArrow=classic;html=1;" edge="1" parent="1" source="u" target="a">
+        <mxCell id="s3" value="Hetzner Object Storage\nnbg1.your-objectstorage.com" style="rounded=1;fillColor=#fff2cc;" vertex="1" parent="1">
+          <mxGeometry x="600" y="180" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="docs" value="docs.brf.sh\n(OnlyOffice)" style="rounded=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="600" y="40" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="brkip" value="brkip mirror\n88.228.71.208" style="rounded=1;fillColor=#f8cecc;" vertex="1" parent="1">
+          <mxGeometry x="320" y="360" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="endArrow=classic;" edge="1" parent="1" source="cf" target="hetz">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e2" style="endArrow=classic;html=1;" edge="1" parent="1" source="a" target="s">
+        <mxCell id="e2" style="endArrow=classic;" edge="1" parent="1" source="hetz" target="fm">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="e3" style="endArrow=classic;html=1;" edge="1" parent="1" source="a" target="r">
+        <mxCell id="e3" style="endArrow=classic;" edge="1" parent="1" source="hetz" target="demo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" style="endArrow=classic;" edge="1" parent="1" source="fm" target="s3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="docs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="brkip">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
       </root>

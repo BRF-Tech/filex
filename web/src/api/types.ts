@@ -48,6 +48,14 @@ export interface StorageRef {
   // Cached stats (filled by backend, may be null right after creation)
   file_count?: number;
   total_bytes?: number;
+  /** Live aggregate from the backend storages list endpoint (v0.1.10+).
+   *  Backend computes COUNT(*) and SUM(size) per storage on every list
+   *  call so the admin grid shows real "12 files, 4.2 MB" labels
+   *  instead of the static `0` placeholder the SPA started with. */
+  stats?: {
+    file_count: number;
+    total_size_bytes: number;
+  };
   last_sync_at?: string | null;
   last_sync_state?: 'ok' | 'error' | 'running' | 'pending';
   last_sync_error?: string | null;

@@ -126,8 +126,9 @@ onMounted(load);
               <Badge v-if="!s.enabled" size="xs" tone="rose">{{ t('common.disabled') }}</Badge>
             </div>
             <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-              {{ formatBytes(s.total_bytes ?? 0, locale) }} ·
-              {{ formatNumber(s.file_count ?? 0, locale) }}
+              {{ formatBytes(s.stats?.total_size_bytes ?? s.total_bytes ?? 0, locale) }} ·
+              {{ formatNumber(s.stats?.file_count ?? s.file_count ?? 0, locale) }}
+              {{ t('storages.filesUnit') }}
             </p>
           </div>
           <Badge :tone="syncTone(s.last_sync_state)" dot>

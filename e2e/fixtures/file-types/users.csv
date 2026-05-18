@@ -1,7 +1,11 @@
-id,name,email,role,joined
-1,Burak,burak@brf.sh,admin,2026-04-01
-2,Gokcil,gokcil@brf.sh,admin,2026-04-03
-3,Arda,arda@brf.sh,operator,2026-04-10
-4,Demo,demo@demo.com,demo,2026-04-15
-5,Test,test@example.com,user,2026-05-01
-6,Sample,sample@example.com,user,2026-05-08
+id,name,email,role,department,joined,monthly_ops,last_login
+1,Burak Ihtiyaroglu,burak@brf.sh,admin,platform,2026-04-01,1240,2026-05-18 11:42
+2,Gokcil Yilmaz,gokcil@brf.sh,admin,platform,2026-04-03,980,2026-05-18 09:11
+3,Arda Demir,arda@brf.sh,operator,infra,2026-04-10,620,2026-05-17 22:30
+4,Demo User,demo@demo.com,demo,external,2026-04-15,14,2026-05-18 12:00
+5,Test Account,test@example.com,user,external,2026-05-01,88,2026-05-16 08:14
+6,Sample User,sample@example.com,user,external,2026-05-08,22,2026-05-15 19:00
+7,Alice Johnson,alice@example.com,user,marketing,2026-04-20,145,2026-05-18 10:22
+8,Bob Wilson,bob@example.com,user,sales,2026-04-25,89,2026-05-17 16:08
+9,Carol Davis,carol@example.com,user,support,2026-05-02,312,2026-05-18 11:55
+10,David Brown,david@example.com,operator,infra,2026-04-18,540,2026-05-18 07:20

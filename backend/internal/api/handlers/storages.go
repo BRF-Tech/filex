@@ -39,14 +39,33 @@ func NewStorages(store db.Store, worker *syncpkg.Worker) *Storages {
 	return &Storages{Store: store, Worker: worker}
 }
 
-// List returns all configured storages.
+// List returns all configured storages. Each entry carries a `stats`
+// blob with the file count + total byte sum so the admin Storages list
+// page can render real "12 files, 4.2 MB" labels instead of static
+// placeholders.
 func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 	out, err := h.Store.ListStorages(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	type storageWithStats struct {
+		*model.Storage
+		Stats struct {
+			FileCount int64 `json:"file_count"`
+			TotalSize int64 `json:"total_size_bytes"`
+		} `json:"stats"`
+	}
+	enriched := make([]storageWithStats, 0, len(out))
+	for _, st := range out {
+		row := storageWithStats{Storage: st}
+		if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
+			row.Stats.FileCount = c
+			row.Stats.TotalSize = sz
+		}
+		enriched = append(enriched, row)
+	}
+	writeJSON(w, http.StatusOK, enriched)
 }
 
 // Get returns a single storage by id. The admin Storages list page

@@ -291,6 +291,22 @@ func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64
 	return n, err
 }
 
+func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64, error) {
+	var (
+		count int64
+		size  sql.NullInt64
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM nodes
+		   WHERE storage_id=? AND type='file' AND deleted_at IS NULL`,
+		storageID,
+	).Scan(&count, &size)
+	if err != nil {
+		return 0, 0, err
+	}
+	return count, size.Int64, nil
+}
+
 func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error) {
 	if limit <= 0 {
 		limit = 100

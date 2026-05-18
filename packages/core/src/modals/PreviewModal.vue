@@ -200,6 +200,13 @@ const viewerProps = computed(() => {
   };
   if (props.file) {
     base.filePath = stripAdapter(props.file.path);
+    // Archive viewer needs the adapter-qualified path because the
+    // /api/files/archive/list handler falls back to storages[0] when
+    // no adapter prefix is present — on multi-storage instances that
+    // 500s for every non-default storage (sample.zip on fm s3-test).
+    if (e === 'zip' || e === 'rar' || e === '7z' || e === 'tar' || e === 'gz' || e === 'tgz') {
+      base.filePath = props.file.path;
+    }
   }
   if (e === 'drawio' || e === 'dio') {
     base.drawioUrl = props.drawioUrl ?? undefined;
