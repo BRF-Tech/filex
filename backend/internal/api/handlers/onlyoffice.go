@@ -198,6 +198,12 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
+	// Belt-and-suspenders: legacy rows scanned before the sniff fix
+	// still carry "application/zip" for office files. OnlyOffice DS
+	// rejects pptx with that Content-Type even when fileType matches
+	// in the JWT config — refine on the way out so existing demos
+	// don't need a full rescan after the deploy.
+	mime = storage.RefineOfficeMime(mime, node.Name)
 	w.Header().Set("Content-Type", mime)
 	if node.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(node.Size, 10))

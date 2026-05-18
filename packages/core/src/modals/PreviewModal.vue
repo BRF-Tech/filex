@@ -698,7 +698,7 @@ async function mountOnlyOfficeEditor(): Promise<void> {
 
     config.events = {
       onError: (err: any) => {
-        officeError.value = String(err?.data ?? err?.message ?? err);
+        officeError.value = formatOnlyOfficeError(err);
       },
     };
 
@@ -725,6 +725,32 @@ onBeforeUnmount(() => {
   disposeOnlyOfficeEditor();
   disposeMonaco();
 });
+
+/**
+ * OnlyOffice fires onError with an event-like object:
+ *   { type:'error', data:{ errorCode, errorDescription, ... } }
+ * The legacy stringification produced "[object Object]" for objects
+ * whose `data` was itself an object. Walk one level deeper so the
+ * user sees the actual error description instead of a useless cast.
+ */
+function formatOnlyOfficeError(err: unknown): string {
+  if (typeof err === 'string') return err;
+  const e = err as { data?: unknown; message?: unknown; errorDescription?: unknown };
+  if (e?.data && typeof e.data === 'object') {
+    const d = e.data as { errorDescription?: unknown; errorCode?: unknown; message?: unknown };
+    if (typeof d.errorDescription === 'string') return d.errorDescription;
+    if (typeof d.message === 'string') return d.message;
+    if (d.errorCode !== undefined) return `OnlyOffice error ${d.errorCode}`;
+  }
+  if (typeof e?.data === 'string') return e.data;
+  if (typeof e?.errorDescription === 'string') return e.errorDescription;
+  if (typeof e?.message === 'string') return e.message;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return 'OnlyOffice error';
+  }
+}
 
 const ONLYOFFICE_SCRIPT_ID = 'fe-onlyoffice-api-js';
 function loadOnlyOfficeScript(base: string): Promise<void> {

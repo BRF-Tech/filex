@@ -465,12 +465,15 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Sniff the first 512 bytes for mime detection, then prepend
-		// them back so the driver receives the full payload.
+		// them back so the driver receives the full payload. ZIP-based
+		// office formats get refined via storage.RefineOfficeMime so
+		// pptx/docx/odt don't end up tagged "application/zip" — see
+		// internal/storage/mime.go for the OnlyOffice mismatch story.
 		var sniff [512]byte
 		n, _ := io.ReadFull(src, sniff[:])
 		mime := ""
 		if n > 0 {
-			mime = http.DetectContentType(sniff[:n])
+			mime = storage.RefineOfficeMime(http.DetectContentType(sniff[:n]), name)
 		}
 		merged := io.MultiReader(bytes.NewReader(sniff[:n]), src)
 

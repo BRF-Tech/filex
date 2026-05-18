@@ -273,7 +273,18 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// sniffMime peeks the first 512 bytes for magic-byte detection.
+// sniffMime peeks the first 512 bytes for magic-byte detection, then
+// refines ZIP-based formats via storage.RefineOfficeMime.
+//
+// http.DetectContentType returns "application/zip" for every ZIP
+// container, including the OOXML/ODF office formats which are just
+// ZIPs with a manifest. OnlyOffice Document Server fetches the source
+// bytes from filex and inspects Content-Type for sanity: when fileType
+// in the JWT-signed config says "pptx" but the fetch response says
+// "application/zip" the converter aborts with "Download failed."
+// xlsx works only because OnlyOffice's xlsx pipeline accepts ZIP MIME
+// — pptx/docx/odt do not. Setting the correct office MIME at sniff
+// time keeps the downstream contract consistent for ALL office types.
 func sniffMime(abs string) string {
 	f, err := os.Open(abs)
 	if err != nil {
@@ -282,5 +293,5 @@ func sniffMime(abs string) string {
 	defer f.Close()
 	var buf [512]byte
 	n, _ := f.Read(buf[:])
-	return http.DetectContentType(buf[:n])
+	return storage.RefineOfficeMime(http.DetectContentType(buf[:n]), abs)
 }
