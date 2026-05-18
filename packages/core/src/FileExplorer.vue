@@ -687,6 +687,43 @@ function previewNode(n: FileNode) {
   void markRecent(n);
 }
 
+/**
+ * openNodeInNewTab — launches the standalone /files/edit route in a
+ * fresh tab. Used by the context-menu "Aç" action; double-click stays
+ * on the in-page modal path. Dirs still navigate inline (no editor for
+ * directories). Falls back to the modal if no `openPageBase` is wired
+ * by the embedder.
+ */
+function openNodeInNewTab(n: FileNode) {
+  if (n.type === 'dir') {
+    const target = multiStorageRoot.value
+      ? wireToVirtual(n.path)
+      : stripAdapter(n.path);
+    void load(target);
+    return;
+  }
+  const ext = (n.extension || '').toLowerCase();
+  const base = props.config.openPageBase;
+  if (!base) {
+    // Embedder didn't supply a standalone editor route — keep the
+    // in-page modal as the only available affordance.
+    openNode(n);
+    return;
+  }
+  // Context-menu "Aç" is the intent-to-edit action — request edit
+  // mode so OnlyOffice / Monaco mount with write permissions.
+  // Read-only inspection lives on the "Önizle" entry + the dbl-click
+  // in-page modal.
+  const sep = base.includes('?') ? '&' : '?';
+  const url =
+    `${base}${sep}path=${encodeURIComponent(n.path)}` +
+    `&type=${encodeURIComponent(ext)}` +
+    `&mode=edit`;
+  window.open(url, '_blank', 'noopener');
+  emit('file-opened', { path: n.path, basename: n.basename });
+  void markRecent(n);
+}
+
 type ContextMode = 'selection' | 'breadcrumb';
 const ctxMode = ref<ContextMode>('selection');
 const breadcrumbCtxPath = ref<string>('');
@@ -783,6 +820,19 @@ const contextActions = computed<ContextAction[]>(() => {
     ];
   }
 
+  // Storage roots (the virtual rows shown at the multi-storage "/"
+  // overview) aren't real filesystem entries — they're mount points.
+  // Hide every mutation entry (rename/delete/share/cut/copy/new-folder/
+  // paste) and only offer "Aç" so the menu doesn't surface actions
+  // that would 4xx on the backend.
+  const inStorageRoot = multiStorageRoot.value && currentPath.value === '/';
+  if (inStorageRoot) {
+    if (!single) return [];
+    return [
+      { key: 'open', label: t('ctx.open'), icon: '↗' },
+    ];
+  }
+
   const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
   const singleHasId = single && typeof sel[0]?.id === 'number';
   return [
@@ -817,7 +867,11 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
 
   switch (action.key) {
     case 'open':
-      if (targets[0]) openNode(targets[0]);
+      // Context-menu "Aç" launches the standalone fullscreen route
+      // in a new tab. Double-click (openNode) opens the in-page
+      // modal — two distinct affordances on purpose: quick peek vs
+      // dedicated editing surface.
+      if (targets[0]) openNodeInNewTab(targets[0]);
       break;
     case 'preview':
       if (targets[0]) previewNode(targets[0]);
