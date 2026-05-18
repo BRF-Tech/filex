@@ -16,6 +16,13 @@ const props = defineProps<{
    *  from the editor. ESC + emit('close') still wire through so the
    *  parent route can window.close() the tab. */
   chromeless?: boolean;
+  /** Explicit theme. When set the modal stamps the appropriate
+   *  `.fe--theme-{light,dark}` class on its `.fe` backdrop so the CSS
+   *  variable cascade matches the host shell regardless of OS
+   *  preference (Modal is a portal-shaped descendant of `<body>`
+   *  rather than a child of the parent component, so plain DOM
+   *  inheritance isn't always enough). */
+  theme?: 'light' | 'dark' | 'auto';
 }>();
 
 const emit = defineEmits<{
@@ -57,7 +64,11 @@ function onBackdrop() {
     <div
       v-if="open"
       class="fe fe-modal__backdrop"
-      :class="{ 'fe-modal__backdrop--chromeless': chromeless }"
+      :class="[
+        { 'fe-modal__backdrop--chromeless': chromeless },
+        theme === 'light' ? 'fe--theme-light' : '',
+        theme === 'dark' ? 'fe--theme-dark' : '',
+      ]"
       role="presentation"
       @click="onBackdrop"
     >

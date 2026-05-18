@@ -53,6 +53,12 @@ const props = defineProps<{
   chromeless?: boolean;
   /** When the dynamic-viewer chunk fails to load, fall back to the
    *  legacy native renderer (e.g. native `<object>` for PDFs). */
+  /** Explicit theme. Forwarded to the underlying Modal (which tags
+   *  its backdrop with `.fe--theme-{light,dark}` so the CSS variable
+   *  override matches the host admin shell) and to Monaco (vs vs
+   *  vs-dark). When unset Monaco falls back to `prefers-color-scheme`
+   *  and the modal cascade follows whatever `.fe` parent it gets. */
+  theme?: 'light' | 'dark' | 'auto';
 }>();
 
 const emit = defineEmits<{
@@ -560,7 +566,16 @@ async function tryMountMonaco(text: string, extension: string): Promise<boolean>
   try {
     disposeMonaco();
     const editable = !!props.saveTextEndpoint && props.openMode !== 'view';
-    const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    // Honour the explicit theme prop when set; fall back to the OS
+    // preference otherwise. Without this the Monaco editor stays on
+    // vs-dark on OS-dark systems even when the host admin shell is
+    // light, producing a jarring light-card + dark-code combo inside
+    // the in-page preview modal.
+    const dark = props.theme === 'dark'
+      ? true
+      : props.theme === 'light'
+        ? false
+        : window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     monacoEditor = monaco.editor.create(monacoEl.value, {
       value: text,
       language: monacoLanguageFor(extension),
@@ -830,7 +845,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
 </script>
 
 <template>
-  <Modal :open="open" size="xl" :title="file?.basename || ''" :chromeless="chromeless" @close="emit('close')">
+  <Modal :open="open" size="xl" :title="file?.basename || ''" :chromeless="chromeless" :theme="theme" @close="emit('close')">
     <div v-if="file" class="fe-preview">
       <template v-if="kind === 'image'">
         <img :src="src" :alt="file.basename" class="fe-preview__image" />

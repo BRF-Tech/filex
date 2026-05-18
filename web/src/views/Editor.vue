@@ -143,6 +143,7 @@ onBeforeUnmount(() => {
       :open="open"
       :file="node"
       :open-mode="mode"
+      :theme="currentTheme"
       :preview-url="previewUrl"
       :download-url="downloadUrl"
       :only-office-base="onlyOfficeBase"
@@ -165,8 +166,18 @@ onBeforeUnmount(() => {
 .editor-host {
   position: fixed;
   inset: 0;
-  background: var(--fe-bg, #0b0d12);
-  color: var(--fe-fg, #e6eaf0);
+  /* Use filex-core's CSS variables (`--fe-bg` + `--fe-text`) so the
+   * surface follows the host shell's dark/light state. The previous
+   * fallback referenced `--fe-fg` (which doesn't exist) and hard-
+   * coded a dark colour — leaving every standalone editor tab dark
+   * for a brief flash before the SFC stylesheet finished loading,
+   * and permanently dark on the light theme because of a typo. */
+  background: var(--fe-bg, #ffffff);
+  color: var(--fe-text, #1a1e27);
+}
+:global(html.dark) .editor-host {
+  background: var(--fe-bg, #0f1419);
+  color: var(--fe-text, #e5e9f0);
 }
 .empty {
   display: grid;

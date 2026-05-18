@@ -1497,6 +1497,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :open="showPreview"
       :locale="locale"
       :file="previewTarget"
+      :theme="config.theme || 'auto'"
       :preview-url="(p) => api.previewUrl(p)"
       :download-url="(p) => api.downloadUrl(p)"
       :only-office-base="effectiveOnlyOfficeBase"
