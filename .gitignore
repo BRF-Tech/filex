@@ -72,6 +72,11 @@ Thumbs.db
 # git-on-Windows refuses to delete it cleanly so we just ignore it.
 NUL
 
+# --- Cypress artefacts ---
+/web/cypress/videos/
+/web/cypress/screenshots/
+/web/cypress/downloads/
+
 # --- Misc ---
 *.pid
 *.seed
