@@ -59,8 +59,10 @@ function toSyncRun(b: BackendSyncRun): SyncRun {
 }
 
 export const StoragesApi = {
-  async list(): Promise<StorageRef[]> {
-    const { data } = await api.get<StorageRef[]>('/admin/storages');
+  async list(opts: { role?: 'primary' | 'replica' } = {}): Promise<StorageRef[]> {
+    const { data } = await api.get<StorageRef[]>('/admin/storages', {
+      params: opts.role ? { role: opts.role } : {},
+    });
     return data;
   },
 

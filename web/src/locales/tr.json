@@ -477,14 +477,22 @@
       "settings": "Ayarlar"
     },
     "pair": {
-      "title": "Primary → replica eşleştirme",
+      "title": "Eşleştirmeler",
       "primary": "Birincil depo (kaynak)",
       "replica": "Replika depo (hedef)",
+      "targetLabel": "Hedef replika",
       "current": "Şu anki çift",
       "none": "Henüz çift kurulmadı.",
       "save": "Eşleştirmeyi kaydet",
       "savedOk": "Eşleştirme kaydedildi.",
       "noStorages": "Önce depo ekleyin (Depolar sayfası)."
+    },
+    "targets": {
+      "title": "Replika depoları",
+      "add": "Replika depo ekle",
+      "empty": "Henüz replika depo eklenmedi. Replikasyon yapacaksan önce buradan bir hedef tanımla.",
+      "deleted": "Replika depo silindi.",
+      "confirmDelete": "{name} replika deposunu silmek istiyor musun?"
     },
     "mode": {
       "mirror": "Aynala",

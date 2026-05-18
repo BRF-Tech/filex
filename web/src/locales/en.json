@@ -477,14 +477,22 @@
       "settings": "Settings"
     },
     "pair": {
-      "title": "Primary → replica pairing",
+      "title": "Pairings",
       "primary": "Primary storage (source)",
       "replica": "Replica storage (target)",
+      "targetLabel": "Replica target",
       "current": "Current pair",
       "none": "No pair configured yet.",
       "save": "Save pairing",
       "savedOk": "Pairing saved.",
       "noStorages": "Add a storage first (Storages page)."
+    },
+    "targets": {
+      "title": "Replica storages",
+      "add": "Add replica storage",
+      "empty": "No replica storages added yet. Define a backup target here before pairing.",
+      "deleted": "Replica storage deleted.",
+      "confirmDelete": "Delete the {name} replica storage?"
     },
     "mode": {
       "mirror": "Mirror",

@@ -43,7 +43,12 @@ func NewStorages(store db.Store, worker *syncpkg.Worker) *Storages {
 // blob with the file count + total byte sum so the admin Storages list
 // page can render real "12 files, 4.2 MB" labels instead of static
 // placeholders.
+//
+// Accepts `?role=primary` / `?role=replica` so the Depolar page can
+// hide replica targets (operators never write to them directly) and
+// the Replikasyon page can list replica candidates separately.
 func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
+	roleFilter := r.URL.Query().Get("role")
 	out, err := h.Store.ListStorages(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -58,6 +63,13 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 	}
 	enriched := make([]storageWithStats, 0, len(out))
 	for _, st := range out {
+		role := st.Role
+		if role == "" {
+			role = "primary"
+		}
+		if roleFilter != "" && role != roleFilter {
+			continue
+		}
 		row := storageWithStats{Storage: st}
 		if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 			row.Stats.FileCount = c

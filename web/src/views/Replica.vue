@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { GitBranch, RefreshCcw, Wrench, Plus, Save, Trash2, FileText, Settings as SettingsIcon, ListTree, ArrowRightLeft } from 'lucide-vue-next';
+import { GitBranch, RefreshCcw, Wrench, Plus, Save, Trash2, FileText, Settings as SettingsIcon, ListTree, ArrowRightLeft, Database } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
 
 import { useReplicaStore } from '@/stores/replica';
 import { useStoragesStore } from '@/stores/storages';
 import { useToastStore } from '@/stores/toast';
 import { StoragesApi } from '@/api/storages';
+import type { StorageRef } from '@/api/types';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
 import type { ReplicaMode, ReplicaRule, ReplicaRuleInput, ReplicaSettings } from '@/api/types';
@@ -26,50 +28,48 @@ const toast = useToastStore();
 const activeTab = ref<Tab>('rules');
 const refreshing = ref(false);
 
-// Pairing state — primary/replica selection
+// Replica targets + pairing — replica storages are a separate entity
+// (Burak: "replika bir depo değil"). They're filtered out of the
+// Depolar page; this page is where operators add/remove them and
+// link primaries to one.
+const router = useRouter();
 const storages = useStoragesStore();
-const pairPrimaryId = ref<number>(0);
-const pairReplicaId = ref<number>(0);
 
-const primaryOptions = computed(() =>
-  [{ value: 0, label: '—' }, ...storages.items.map((s) => ({ value: s.id, label: s.name }))],
+const primaryStorages = computed(() =>
+  storages.items.filter((s) => (s.role || 'primary') === 'primary'),
 );
-const replicaOptions = computed(() => {
-  const primary = storages.items.find((s) => s.id === pairPrimaryId.value);
-  return [
-    { value: 0, label: '—' },
-    ...storages.items
-      .filter((s) => s.id !== pairPrimaryId.value)
-      .map((s) => ({ value: s.id, label: s.name + (s.replica_of_id && primary && s.replica_of_id !== primary.id ? ' (zaten ' + (storages.items.find((p) => p.id === s.replica_of_id)?.name || '?') + ' replikası)' : '') })),
-  ];
-});
+const replicaTargets = computed(() =>
+  storages.items.filter((s) => s.role === 'replica'),
+);
+function replicaNameById(id: number): string | undefined {
+  return replicaTargets.value.find((r) => r.id === id)?.name;
+}
 
-interface StoragePair { primary: string; replica: string; primaryId: number; replicaId: number; }
-const currentPair = computed<StoragePair | null>(() => {
-  const rep = storages.items.find((s) => s.role === 'replica' && s.replica_of_id);
-  if (!rep || !rep.replica_of_id) return null;
-  const prim = storages.items.find((s) => s.id === rep.replica_of_id);
-  if (!prim) return null;
-  return { primary: prim.name, replica: rep.name, primaryId: prim.id, replicaId: rep.id };
-});
-
-const canSavePair = computed(() => pairPrimaryId.value > 0 && pairReplicaId.value > 0 && pairPrimaryId.value !== pairReplicaId.value);
-
-async function savePair() {
-  if (!canSavePair.value) return;
+async function setPrimaryTarget(prim: StorageRef, replicaId: number) {
   try {
-    // Demote any storages that are currently replicas (so we don't
-    // end up with stale fan-out targets).
-    for (const s of storages.items) {
-      if (s.role === 'replica' && s.id !== pairReplicaId.value) {
-        await StoragesApi.update(s.id, { ...s, role: 'primary', replica_of_id: null });
+    await StoragesApi.update(prim.id, {
+      ...prim,
+      replica_of_id: replicaId > 0 ? replicaId : null,
+    });
+    toast.success(t('replica.pair.savedOk'));
+    await storages.fetch();
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  }
+}
+
+async function removeReplica(target: StorageRef) {
+  if (!confirm(t('replica.targets.confirmDelete', { name: target.name }))) return;
+  try {
+    // Clear every primary that pointed at this target so the
+    // pairing UI doesn't show a stale link.
+    for (const p of primaryStorages.value) {
+      if (p.replica_of_id === target.id) {
+        await StoragesApi.update(p.id, { ...p, replica_of_id: null });
       }
     }
-    const prim = storages.items.find((s) => s.id === pairPrimaryId.value);
-    const rep = storages.items.find((s) => s.id === pairReplicaId.value);
-    if (prim) await StoragesApi.update(prim.id, { ...prim, role: 'primary', replica_of_id: null });
-    if (rep) await StoragesApi.update(rep.id, { ...rep, role: 'replica', replica_of_id: pairPrimaryId.value, replica_mode: rep.replica_mode || 'async' });
-    toast.success(t('replica.pair.savedOk'));
+    await StoragesApi.remove(target.id);
+    toast.success(t('replica.targets.deleted'));
     await storages.fetch();
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -108,11 +108,8 @@ async function loadAll() {
     settingsDraft.value = { ...replica.settings };
     const matchPreset = cronPresets.value.find((p) => p.value === settingsDraft.value.report_cron);
     cronPreset.value = matchPreset ? matchPreset.value : 'custom';
-    // Seed pair selects from current state.
-    if (currentPair.value) {
-      pairPrimaryId.value = currentPair.value.primaryId;
-      pairReplicaId.value = currentPair.value.replicaId;
-    }
+    // primaryStorages / replicaTargets are computed from
+    // storages.items, no extra seeding needed.
   } finally {
     refreshing.value = false;
   }
@@ -260,43 +257,77 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
 
     <!-- ── Rules ──────────────────────────────────────── -->
     <div v-show="activeTab === 'rules'" class="space-y-3">
-      <!-- Primary → replica pairing — pick a primary storage and the
-           replica that mirrors it. Saved via PATCH /admin/storages/{id}
-           with role + replica_of_id. -->
+      <!-- Replika Depoları — dedicated entity. Operators add one or
+           more storages here that act as backup-only targets; they
+           never appear in the Depolar page (those are write-side
+           primaries). -->
+      <div class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="flex items-center gap-2 text-sm font-semibold">
+            <Database class="h-4 w-4" />
+            {{ t('replica.targets.title') }}
+          </h2>
+          <Button size="xs" variant="primary" @click="router.push({ name: 'storages.new', query: { role: 'replica' } })">
+            <Plus class="h-3.5 w-3.5" />
+            {{ t('replica.targets.add') }}
+          </Button>
+        </div>
+        <div v-if="!replicaTargets.length" class="text-xs text-zinc-500">
+          {{ t('replica.targets.empty') }}
+        </div>
+        <ul v-else class="divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
+          <li v-for="t_ in replicaTargets" :key="t_.id" class="flex items-center justify-between py-2">
+            <div class="flex items-center gap-2">
+              <Badge size="xs" tone="violet">replica</Badge>
+              <strong>{{ t_.name }}</strong>
+              <span class="text-zinc-500">{{ t_.driver }}</span>
+            </div>
+            <Button size="xs" variant="ghost" @click="removeReplica(t_)">
+              <Trash2 class="h-3.5 w-3.5 text-rose-500" />
+            </Button>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Eşleştirmeler — each primary storage points at one replica
+           target. PATCH /admin/storages/{primary-id} with
+           replica_of_id sets the link. -->
       <div class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 class="flex items-center gap-2 text-sm font-semibold mb-3">
           <ArrowRightLeft class="h-4 w-4" />
           {{ t('replica.pair.title') }}
         </h2>
-        <div v-if="!storages.items.length" class="text-xs text-zinc-500">
+        <div v-if="!primaryStorages.length" class="text-xs text-zinc-500">
           {{ t('replica.pair.noStorages') }}
         </div>
-        <div v-else class="grid gap-3 sm:grid-cols-2">
-          <Select
-            v-model.number="pairPrimaryId"
-            :label="t('replica.pair.primary')"
-            :options="primaryOptions"
-          />
-          <Select
-            v-model.number="pairReplicaId"
-            :label="t('replica.pair.replica')"
-            :options="replicaOptions"
-          />
-        </div>
-        <div class="mt-3 flex items-center justify-between gap-2">
-          <p class="text-xs text-zinc-500 dark:text-zinc-400" v-if="currentPair">
-            {{ t('replica.pair.current') }}:
-            <strong>{{ currentPair.primary }}</strong>
-            →
-            <strong>{{ currentPair.replica }}</strong>
-          </p>
-          <p class="text-xs text-zinc-500 dark:text-zinc-400" v-else>
-            {{ t('replica.pair.none') }}
-          </p>
-          <Button size="sm" variant="primary" :disabled="!canSavePair" @click="savePair">
-            {{ t('replica.pair.save') }}
-          </Button>
-        </div>
+        <ul v-else class="space-y-2">
+          <li
+            v-for="prim in primaryStorages"
+            :key="prim.id"
+            class="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <div class="flex-1 min-w-[160px]">
+              <div class="flex items-center gap-2">
+                <strong class="text-sm">{{ prim.name }}</strong>
+                <span class="text-xs text-zinc-500">{{ prim.driver }}</span>
+              </div>
+              <p class="text-[11px] text-zinc-500 mt-0.5">
+                {{ t('replica.pair.targetLabel') }}:
+                <strong v-if="prim.replica_of_id">
+                  {{ replicaNameById(prim.replica_of_id) || '#' + prim.replica_of_id }}
+                </strong>
+                <span v-else>—</span>
+              </p>
+            </div>
+            <Select
+              :model-value="prim.replica_of_id ?? 0"
+              :options="[{ value: 0, label: '—' }, ...replicaTargets.map((rt) => ({ value: rt.id, label: rt.name }))]"
+              size="sm"
+              class="min-w-[180px]"
+              @update:model-value="(v) => setPrimaryTarget(prim, Number(v))"
+            />
+          </li>
+        </ul>
       </div>
 
       <div class="flex items-center justify-between">
