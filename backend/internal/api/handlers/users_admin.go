@@ -34,6 +34,14 @@ func (h *UsersAdmin) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	// Existence check — without this the handler happily generates a
+	// password + updates 0 rows + returns 200, leaking the cleartext
+	// password into the caller's response for a user that does not
+	// exist. (Found by Cypress 41-users-crud sweep, 2026-05-18.)
+	if _, gerr := h.Store.GetUser(r.Context(), id); gerr != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
 	pw, err := generateRandomPassword(16)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

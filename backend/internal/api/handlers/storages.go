@@ -183,6 +183,14 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	// Existence check before destructive work (DeleteStorage swallows
+	// "no rows" for some drivers + RemoveStorage silently no-ops on
+	// unknown ids). Without this, DELETE on a bogus id returns
+	// {ok:true} which is misleading.
+	if _, gerr := h.Store.GetStorage(r.Context(), id); gerr != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
+		return
+	}
 	if h.Worker != nil {
 		h.Worker.RemoveStorage(id)
 	}
