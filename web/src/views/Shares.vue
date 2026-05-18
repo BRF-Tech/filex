@@ -34,6 +34,20 @@ const showRevoke = ref<Share | null>(null);
 const showDelete = ref<Share | null>(null);
 const busyId = ref<number | null>(null);
 
+// Admin list rows come back as { share: Share, creator_email, node_path }
+// from the backend's `ShareWithMeta` envelope. Helper unwraps either
+// shape so the template can stay terse.
+interface ShareRow {
+  share?: Share;
+  creator_email?: string;
+  node_path?: string;
+  [k: string]: unknown;
+}
+function shareOf(row: unknown): Share {
+  const r = row as ShareRow & Share;
+  return (r.share ?? (r as unknown as Share));
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -133,24 +147,30 @@ onMounted(load);
       <template #cell-token="{ row }">
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-zinc-700 dark:text-zinc-300">
-            {{ (row as Share).token.slice(0, 10) }}…
+            {{ shareOf(row).token.slice(0, 10) }}…
           </code>
-          <CopyButton :value="(row as Share).token" size="xs" />
-          <Badge v-if="(row as Share).pin_set" tone="amber" size="xs">PIN</Badge>
-          <Badge v-if="(row as Share).revoked" tone="rose" size="xs">revoked</Badge>
+          <CopyButton :value="shareOf(row).token" size="xs" />
+          <Badge v-if="shareOf(row).has_pin || shareOf(row).pin_set" tone="amber" size="xs">PIN</Badge>
+          <Badge v-if="shareOf(row).revoked_at || shareOf(row).revoked" tone="rose" size="xs">revoked</Badge>
         </div>
       </template>
 
       <template #cell-path="{ row }">
         <span class="text-xs font-mono text-zinc-500 truncate max-w-xs inline-block">
-          {{ (row as Share).path }}
+          {{ (row as ShareRow).node_path || shareOf(row).path }}
+        </span>
+      </template>
+
+      <template #cell-creator="{ row }">
+        <span class="text-xs text-zinc-500 dark:text-zinc-400">
+          {{ (row as ShareRow).creator_email || '—' }}
         </span>
       </template>
 
       <template #cell-expires_at="{ row }">
         <span class="text-xs">
-          <template v-if="(row as Share).expires_at">
-            {{ formatRelative((row as Share).expires_at, locale) }}
+          <template v-if="shareOf(row).expires_at">
+            {{ formatRelative(shareOf(row).expires_at, locale) }}
           </template>
           <template v-else>—</template>
         </span>
@@ -159,11 +179,11 @@ onMounted(load);
       <template #cell-actions="{ row }">
         <div class="flex items-center justify-end gap-1">
           <Button
-            v-if="!(row as Share).revoked"
+            v-if="!shareOf(row).revoked_at && !shareOf(row).revoked"
             size="xs"
             variant="ghost"
             :title="t('shares.revokedOk')"
-            @click="showRevoke = row as Share"
+            @click="showRevoke = shareOf(row)"
           >
             <Ban class="h-3.5 w-3.5 text-amber-500" />
           </Button>
@@ -171,7 +191,7 @@ onMounted(load);
             size="xs"
             variant="ghost"
             :title="t('common.delete')"
-            @click="showDelete = row as Share"
+            @click="showDelete = shareOf(row)"
           >
             <Trash2 class="h-3.5 w-3.5 text-rose-500" />
           </Button>

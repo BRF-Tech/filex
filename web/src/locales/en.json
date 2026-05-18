@@ -476,9 +476,15 @@
       "report": "Report",
       "settings": "Settings"
     },
-    "pairingBanner": {
-      "title": "Primary → replica pairing is not in the UI yet",
-      "body": "The path-glob rules below decide WHICH files get replicated. WHERE they go (primary + replica storage pair) is still wired via SQL on storages.role + storages.replica_of_id. The pairing UI lands in v0.2; for now use the SQL below (find the storage ids on the Storages page)."
+    "pair": {
+      "title": "Primary → replica pairing",
+      "primary": "Primary storage (source)",
+      "replica": "Replica storage (target)",
+      "current": "Current pair",
+      "none": "No pair configured yet.",
+      "save": "Save pairing",
+      "savedOk": "Pairing saved.",
+      "noStorages": "Add a storage first (Storages page)."
     },
     "mode": {
       "mirror": "Mirror",

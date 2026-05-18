@@ -16,25 +16,43 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"path"
 	"strings"
 	"time"
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
+
+// VersionSnapshotter is the narrow surface save-text needs to capture
+// a snapshot before a destructive write.
+type VersionSnapshotter interface {
+	Snapshot(ctx context.Context, nodeID int64) (*model.NodeVersion, error)
+}
 
 // SaveText handles plain-text edits from the SFC's code/markdown viewer.
 type SaveText struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
+	Versions        VersionSnapshotter
 }
 
 // NewSaveText constructs the handler.
 func NewSaveText(store db.Store, resolver func(int64) (storage.Driver, error)) *SaveText {
 	return &SaveText{Store: store, StorageResolver: resolver}
+}
+
+// AttachVersions wires the versioning service so save-text snapshots
+// the previous content before writing. Without it edits silently
+// overwrite history (the SFC's "Sürüm geçmişi" / Versions page would
+// show no entries even after multiple saves).
+func (h *SaveText) AttachVersions(v VersionSnapshotter) {
+	h.Versions = v
 }
 
 type saveTextReq struct {
@@ -111,6 +129,24 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "driver does not support write"})
 		return
 	}
+	// Look up the existing node FIRST so we can snapshot the
+	// pre-edit bytes into the version history before the destructive
+	// write. The cache row's `clean`/`hash` derivation also feeds the
+	// post-write metadata refresh below.
+	clean := strings.TrimRight(path.Clean("/"+rel), "/")
+	hash := managerPathHash(storageID, clean)
+	var existing *model.Node
+	if n, err := h.Store.GetNodeByPath(r.Context(), storageID, hash); err == nil {
+		existing = n
+	}
+	if existing != nil && h.Versions != nil {
+		if _, snapErr := h.Versions.Snapshot(r.Context(), existing.ID); snapErr != nil {
+			slog.Warn("save-text: snapshot failed (continuing with write)",
+				slog.Int64("node", existing.ID),
+				slog.String("err", snapErr.Error()))
+		}
+	}
+
 	body := []byte(req.Content)
 	if err := wr.Write(r.Context(), rel, bytes.NewReader(body), int64(len(body))); err != nil {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
@@ -118,9 +154,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Refresh cache metadata so the next listing carries the new size.
-	clean := strings.TrimRight(path.Clean("/"+rel), "/")
-	hash := managerPathHash(storageID, clean)
-	if existing, err := h.Store.GetNodeByPath(r.Context(), storageID, hash); err == nil && existing != nil {
+	if existing != nil {
 		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, int64(len(body)), existing.Mime, existing.Etag, time.Now())
 	}
 

@@ -328,11 +328,15 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		h.renderErrorPage(w, http.StatusNotFound,
+			"Not found",
+			"This share link does not exist or has been removed.")
 		return
 	}
 	if sh.IsExpired(time.Now()) {
-		http.Error(w, "expired", http.StatusGone)
+		h.renderErrorPage(w, http.StatusNotFound,
+			"Share expired",
+			"This share link has expired or reached its download limit.")
 		return
 	}
 
@@ -346,14 +350,30 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	resolved, err := h.Service.Resolve(r.Context(), tok, pin)
 	switch {
 	case errors.Is(err, share.ErrExpired):
-		http.Error(w, "expired", http.StatusGone)
+		h.renderErrorPage(w, http.StatusNotFound,
+			"Share expired",
+			"This share link has expired or reached its download limit.")
 		return
 	case errors.Is(err, share.ErrBadPIN):
 		// Re-render with a friendly error rather than a flat 401.
 		h.renderPINForm(w, tok, "Wrong PIN — try again.")
 		return
 	case err != nil:
-		http.Error(w, "not found", http.StatusNotFound)
+		h.renderErrorPage(w, http.StatusNotFound,
+			"Not found",
+			"This share link does not exist or has been removed.")
+		return
+	}
+
+	// Confirmed download step — when a PIN-protected share's POST
+	// successfully resolved and the client hasn't yet seen the
+	// "PIN accepted" page, render the success screen and let it
+	// auto-submit a hidden form to itself with ?confirmed=1 so the
+	// stream comes second. This gives the user clear feedback that
+	// the PIN matched before the browser hijacks the page with an
+	// `attachment` Content-Disposition.
+	if sh.PinHash != "" && r.URL.Query().Get("confirmed") != "1" && r.Method == http.MethodPost {
+		h.renderUnlockedPage(w, tok, pin)
 		return
 	}
 
@@ -483,3 +503,81 @@ func (h *Share) renderPINForm(w http.ResponseWriter, token, errMsg string) {
 		"Error":  errMsg,
 	})
 }
+
+// renderUnlockedPage tells the user the PIN matched and auto-posts a
+// confirmed download to the same URL after a brief delay. Without
+// this the browser jumps straight from the PIN form to a streamed
+// attachment and the user has no indication of whether their PIN
+// was accepted.
+func (h *Share) renderUnlockedPage(w http.ResponseWriter, token, pin string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = unlockedTemplate.Execute(w, map[string]any{
+		"Action": shareURLPath(token) + "?confirmed=1",
+		"PIN":    pin,
+	})
+}
+
+// renderErrorPage shows a styled HTML error page (404 / expired)
+// instead of plain text.
+func (h *Share) renderErrorPage(w http.ResponseWriter, status int, title, body string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_ = errorPageTemplate.Execute(w, map[string]any{
+		"Title": title,
+		"Body":  body,
+		"Code":  status,
+	})
+}
+
+var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PIN accepted</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
+@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
+.card { width: 360px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); text-align: center; }
+@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
+.check { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%; background: #22c55e; display: grid; place-items: center; color: white; font-size: 28px; }
+h1 { font-size: 1.25rem; margin: 0 0 8px; }
+p { margin: 0 0 16px; opacity: 0.7; font-size: 0.9rem; }
+.spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; vertical-align: middle; animation: spin 0.8s linear infinite; opacity: 0.4; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head><body>
+<div class="card">
+<div class="check">✓</div>
+<h1>PIN doğru</h1>
+<p><span class="spinner"></span>İndirme birazdan başlayacak…</p>
+<form id="f" method="post" action="{{.Action}}" style="display:none">
+<input type="hidden" name="pin" value="{{.PIN}}">
+</form>
+<script>setTimeout(function(){document.getElementById('f').submit();}, 700);</script>
+</div>
+</body></html>`))
+
+var errorPageTemplate = template.Must(template.New("err").Parse(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}}</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
+@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
+.card { width: 420px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); text-align: center; }
+@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
+.code { font-size: 3rem; font-weight: 800; color: #dc2626; margin-bottom: 8px; }
+h1 { font-size: 1.4rem; margin: 0 0 12px; }
+p { margin: 0; opacity: 0.7; font-size: 0.95rem; line-height: 1.5; }
+</style>
+</head><body>
+<div class="card">
+<div class="code">{{.Code}}</div>
+<h1>{{.Title}}</h1>
+<p>{{.Body}}</p>
+</div>
+</body></html>`))

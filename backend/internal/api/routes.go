@@ -118,6 +118,13 @@ func BuildRouter(d *Deps) http.Handler {
 	metaH := handlers.NewMeta(d.Store)
 	quotaH := handlers.NewQuota(d.Quota)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
+	if d.Versions != nil {
+		// Snapshot the pre-edit bytes into version history before
+		// every save-text write (Burak: "değişiklik sonrası sürüm
+		// geçmişine bir bok gelmedi" — handler never tapped the
+		// versioning service).
+		saveTextH.AttachVersions(d.Versions)
+	}
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
 
 	// ────── public viewer ──────

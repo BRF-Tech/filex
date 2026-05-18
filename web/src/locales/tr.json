@@ -476,9 +476,15 @@
       "report": "Rapor",
       "settings": "Ayarlar"
     },
-    "pairingBanner": {
-      "title": "Primary → replica çifti henüz UI'dan ayarlanamıyor",
-      "body": "Aşağıdaki path-glob kuralları sadece HANGİ dosyaların replike edileceğini belirler. NEREYE replike edileceğini (primary + replica storage çifti) hala SQL ile storages.role + storages.replica_of_id alanlarına yazıyoruz. Bu UI v0.2'de gelecek; bu sürümde çifti aşağıdaki SQL ile kurabilirsin (id'leri Depolar sayfasından al)."
+    "pair": {
+      "title": "Primary → replica eşleştirme",
+      "primary": "Birincil depo (kaynak)",
+      "replica": "Replika depo (hedef)",
+      "current": "Şu anki çift",
+      "none": "Henüz çift kurulmadı.",
+      "save": "Eşleştirmeyi kaydet",
+      "savedOk": "Eşleştirme kaydedildi.",
+      "noStorages": "Önce depo ekleyin (Depolar sayfası)."
     },
     "mode": {
       "mirror": "Aynala",

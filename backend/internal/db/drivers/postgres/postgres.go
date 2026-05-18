@@ -1141,7 +1141,8 @@ func (s *Store) ListSyncRunsAcrossAll(ctx context.Context, storageID int64, stat
 	if limit <= 0 {
 		limit = 50
 	}
-	conds := []string{"1=1"}
+	// 5-day window — see SQLite ListSyncRunsAcrossAll comment.
+	conds := []string{"started_at >= NOW() - INTERVAL '5 days'"}
 	args := []any{}
 	idx := 1
 	if storageID > 0 {

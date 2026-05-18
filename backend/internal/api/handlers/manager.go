@@ -508,6 +508,10 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		return
 	}
 
+	// Cross-storage mode — when the SPA is showing the multi-storage
+	// virtual root (rel == "") and more than one storage is enabled,
+	// search every storage. Otherwise scope to the current storage.
+	crossStorage := rel == "" && len(storageNames) > 1
 	var nodes []*model.Node
 
 	// 1) Bleve.
@@ -518,7 +522,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			if err != nil || n == nil || n.DeletedAt != nil {
 				continue
 			}
-			if n.StorageID != s.ID {
+			if !crossStorage && n.StorageID != s.ID {
 				continue
 			}
 			nodes = append(nodes, n)
@@ -527,12 +531,37 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 
 	// 2) Fall back to SQL LIKE when the index didn't return anything.
 	if len(nodes) == 0 {
-		fallback, err := h.Store.SearchNodes(r.Context(), s.ID, search.SQLLike(filter), 250)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+		if crossStorage {
+			// Walk every enabled storage with the LIKE fallback.
+			storages, err := h.Store.ListEnabledStorages(r.Context())
+			if err == nil {
+				for _, st := range storages {
+					rows, err := h.Store.SearchNodes(r.Context(), st.ID, search.SQLLike(filter), 100)
+					if err != nil {
+						continue
+					}
+					nodes = append(nodes, rows...)
+				}
+			}
+		} else {
+			fallback, err := h.Store.SearchNodes(r.Context(), s.ID, search.SQLLike(filter), 250)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			nodes = fallback
 		}
-		nodes = fallback
+	}
+
+	// Hydrate thumb metadata so search results carry the same
+	// thumb_url as the index listing (was always empty pre-v0.1.16).
+	for _, n := range nodes {
+		if n.Type != model.NodeTypeFile {
+			continue
+		}
+		if t, terr := h.Store.GetThumbnail(r.Context(), n.ID); terr == nil && t != nil {
+			n.Thumb = t
+		}
 	}
 
 	files := projectFileNodes(s.Name, nodes, false)

@@ -678,11 +678,15 @@ func (s *Store) GetSyncRun(ctx context.Context, id int64) (*model.SyncRun, error
 
 // ListSyncRunsAcrossAll returns paginated runs across every storage,
 // optionally filtered by storageID (0=all) and status (""=all).
+//
+// Runs older than 5 days are filtered out — the admin Sync history
+// page only cares about recent activity, and older runs clutter the
+// list (a busy storage produces hundreds per day).
 func (s *Store) ListSyncRunsAcrossAll(ctx context.Context, storageID int64, status string, limit, offset int) ([]*model.SyncRun, int64, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	where := []string{"1=1"}
+	where := []string{"started_at >= datetime('now', '-5 days')"}
 	args := []any{}
 	if storageID > 0 {
 		where = append(where, `storage_id=?`)

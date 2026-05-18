@@ -1527,11 +1527,18 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
     />
 
     <!-- Recently-opened tray. Anchored to the toolbar trigger via fixed
-         position; click the backdrop or any entry to dismiss. -->
+         position; click the backdrop or any entry to dismiss.
+         `.fe` + theme class keeps the dark/light cascade matching the
+         host shell — without them the popup floats outside the
+         FileExplorer root and falls back to :root light defaults. -->
     <transition name="fe-modal">
       <div
         v-if="showRecents"
-        class="fe-modal__backdrop fe-recents__backdrop"
+        class="fe fe-modal__backdrop fe-recents__backdrop"
+        :class="{
+          'fe--theme-light': config.theme === 'light',
+          'fe--theme-dark': config.theme === 'dark',
+        }"
         @click="showRecents = false"
       >
         <div class="fe-recents__panel" @click.stop>

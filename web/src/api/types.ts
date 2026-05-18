@@ -60,6 +60,14 @@ export interface StorageRef {
   last_sync_at?: string | null;
   last_sync_state?: 'ok' | 'error' | 'running' | 'pending';
   last_sync_error?: string | null;
+  /** Replica pairing (v0.1.16+).
+   *  - role:           'primary' (default) | 'replica'
+   *  - replica_of_id:  id of the primary this row mirrors (only when role=replica)
+   *  - replica_mode:   'async' (default) | 'sync'
+   */
+  role?: 'primary' | 'replica';
+  replica_of_id?: number | null;
+  replica_mode?: 'async' | 'sync';
 }
 
 export interface StorageCreateRequest {
@@ -74,6 +82,9 @@ export interface StorageUpdateRequest {
   config?: Record<string, unknown>;
   enabled?: boolean;
   read_only?: boolean;
+  role?: 'primary' | 'replica';
+  replica_of_id?: number | null;
+  replica_mode?: 'async' | 'sync';
 }
 
 export interface SyncRun {
@@ -170,16 +181,23 @@ export interface AuditEntry {
 export interface Share {
   id: number;
   token: string;
-  storage_id: number;
-  storage_name: string;
-  path: string;
-  pin_set: boolean;
-  expires_at: string | null;
-  max_downloads: number | null;
-  download_count: number;
-  created_by: string;
-  created_at: string;
-  revoked: boolean;
+  node_id?: number;
+  storage_id?: number;
+  storage_name?: string;
+  path?: string;
+  /** Legacy boolean — older callers still set this. */
+  pin_set?: boolean;
+  /** Current backend field. */
+  has_pin?: boolean;
+  expires_at?: string | null;
+  max_downloads?: number | null;
+  download_count?: number;
+  created_by?: string | number;
+  created_at?: string;
+  /** Legacy boolean — older callers. */
+  revoked?: boolean;
+  /** Current backend timestamp; truthy = revoked. */
+  revoked_at?: string | null;
 }
 
 export interface DashboardStats {
