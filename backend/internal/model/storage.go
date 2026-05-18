@@ -29,6 +29,14 @@ type Storage struct {
 	Enabled       bool            `json:"enabled"`
 	ReadOnly      bool            `json:"read_only"`
 	CreatedAt     time.Time       `json:"created_at"`
+	// Replica pairing — `role` is "primary" or "replica" (default
+	// "primary"); `replica_of_id` points a replica row at its source;
+	// `replica_mode` is "async" (default) or "sync". The admin
+	// Replikasyon page lets operators pair storages without touching
+	// SQL.
+	Role         string `json:"role,omitempty"`
+	ReplicaOfID  *int64 `json:"replica_of_id,omitempty"`
+	ReplicaMode  string `json:"replica_mode,omitempty"`
 }
 
 // SyncRun is a row in sync_runs.

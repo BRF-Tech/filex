@@ -96,17 +96,17 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 }
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages WHERE id=?`, id)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages WHERE name=?`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages WHERE name=?`, name)
 	return scanStorage(row)
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at FROM storages WHERE enabled=1 ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages WHERE enabled=1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -144,9 +144,20 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
 	}
+	role := st.Role
+	if role == "" {
+		role = "primary"
+	}
+	repMode := st.ReplicaMode
+	if repMode == "" {
+		repMode = "async"
+	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE storages SET name=?, driver=?, mount_path=?, config_json=?, sync_mode=?, sync_interval_s=?, enabled=?, read_only=? WHERE id=?`,
-		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), st.ID)
+		`UPDATE storages SET name=?, driver=?, mount_path=?, config_json=?, sync_mode=?, sync_interval_s=?, enabled=?, read_only=?, role=?, replica_of_id=?, replica_mode=? WHERE id=?`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS,
+		btoi(st.Enabled), btoi(st.ReadOnly),
+		role, st.ReplicaOfID, repMode,
+		st.ID)
 	return err
 }
 
@@ -986,11 +997,28 @@ func scanNode(r rowScanner) (*model.Node, error) {
 func scanStorage(r rowScanner) (*model.Storage, error) {
 	st := &model.Storage{}
 	var cfg string
-	err := r.Scan(&st.ID, &st.Name, &st.Driver, &st.MountPath, &cfg, &st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken, &st.Enabled, &st.ReadOnly, &st.CreatedAt)
+	var role, replicaMode sql.NullString
+	var replicaOf sql.NullInt64
+	err := r.Scan(
+		&st.ID, &st.Name, &st.Driver, &st.MountPath, &cfg,
+		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
+		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
+		&role, &replicaOf, &replicaMode,
+	)
 	if err != nil {
 		return nil, err
 	}
 	st.ConfigJSON = []byte(cfg)
+	if role.Valid {
+		st.Role = role.String
+	}
+	if replicaOf.Valid {
+		v := replicaOf.Int64
+		st.ReplicaOfID = &v
+	}
+	if replicaMode.Valid {
+		st.ReplicaMode = replicaMode.String
+	}
 	return st, nil
 }
 

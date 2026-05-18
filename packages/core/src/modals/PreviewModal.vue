@@ -394,13 +394,18 @@ async function renderMarkdown(text: string): Promise<void> {
       return;
     }
     const Md = (mod as { default: any }).default ?? (mod as any);
+    // html: true so inline HTML in README.md / docs renders (the
+    // GitHub / GitLab contract — operators expect `<img>`, tables,
+    // `<details>`, etc. to work). We sanitize the output below to
+    // strip scripts / event handlers before injecting via v-html.
     const md = new Md({
-      html: false,
+      html: true,
       linkify: true,
       breaks: true,
       typographer: true,
     });
-    markdownHtml.value = md.render(text);
+    const raw = md.render(text);
+    markdownHtml.value = sanitizeHtml(raw);
     // Wait for Vue to flush the v-html into the DOM before walking it.
     await new Promise<void>((r) => setTimeout(r, 0));
     await enrichMarkdown();
@@ -408,6 +413,30 @@ async function renderMarkdown(text: string): Promise<void> {
     markdownHtml.value = '';
     fetchError.value = err instanceof Error ? err.message : String(err);
   }
+}
+
+/**
+ * Sanitize the markdown-it output before v-html injection.
+ *
+ * GitHub / GitLab let README authors embed inline HTML (img, table,
+ * details, kbd …) so the viewer ships with `html: true`. This filter
+ * strips the executable surface: `<script>`, `<iframe>`, `<object>`,
+ * `<embed>`, any `on*` event-handler attribute, and `javascript:`
+ * URLs. Conservative — README content with inline handlers is
+ * exceptional and silent over-removal beats silent XSS.
+ *
+ * No external dep — keeping the package install-free is the trade
+ * we want. Integrators who need a heavier sanitizer can run their
+ * own DOMPurify pass on the rendered output before showing it.
+ */
+function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<\s*script\b[^<]*(?:(?!<\s*\/\s*script\s*>)<[^<]*)*<\s*\/\s*script\s*>/gi, '')
+    .replace(/<\s*iframe\b[\s\S]*?<\s*\/\s*iframe\s*>/gi, '')
+    .replace(/<\s*object\b[\s\S]*?<\s*\/\s*object\s*>/gi, '')
+    .replace(/<\s*embed\b[^>]*>/gi, '')
+    .replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/(href|src|action|formaction|xlink:href)\s*=\s*(?:"\s*javascript:[^"]*"|'\s*javascript:[^']*')/gi, '$1="#"');
 }
 
 async function enrichMarkdown(): Promise<void> {
