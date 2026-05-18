@@ -269,6 +269,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/", ush.List)
 				r.Post("/", ush.Create)
+				r.Get("/{id}", ush.Get)
 				r.Patch("/{id}", ush.Update)
 				r.Delete("/{id}", ush.Delete)
 				r.Post("/{id}/reset-password", usersAdmH.ResetPassword)

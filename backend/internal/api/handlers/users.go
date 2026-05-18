@@ -31,6 +31,23 @@ func (h *Users) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, users)
 }
 
+// Get returns a single user by id. The admin UI's UserEdit page
+// hits this when the row is clicked; without it chi returned 405
+// (only PATCH/DELETE were wired).
+func (h *Users) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	u, err := h.Store.GetUser(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
 type userCreateReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
