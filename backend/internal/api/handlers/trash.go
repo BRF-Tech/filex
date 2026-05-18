@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -133,7 +134,12 @@ func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Service.PurgeOne(r.Context(), id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		msg := err.Error()
+		if strings.Contains(msg, "no rows in result set") || strings.Contains(msg, "not found") {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

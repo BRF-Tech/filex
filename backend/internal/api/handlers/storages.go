@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -204,7 +205,16 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Worker.Trigger(r.Context(), id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		// Worker.Trigger errors with "no syncer for storage" when the
+		// id doesn't match any registered driver — that's a 404, not
+		// an internal error.
+		msg := err.Error()
+		if strings.Contains(msg, "no syncer") || strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "no rows in result set") {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

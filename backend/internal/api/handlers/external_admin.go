@@ -10,6 +10,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -111,6 +112,16 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := h.Caps.ProbeExternal(r.Context(), name)
 	if err != nil {
+		// "no rows in result set" → unknown service, not a probe
+		// failure. Surface that as 404 so callers (and Cypress) can
+		// distinguish "service down" from "you misspelled the name".
+		if strings.Contains(err.Error(), "no rows in result set") || strings.Contains(err.Error(), "not found") {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "unknown external service: " + name,
+				"name":  name,
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":        false,
 			"reachable": false,
