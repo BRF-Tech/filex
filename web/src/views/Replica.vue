@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { GitBranch, RefreshCcw, Wrench, Plus, Save, Trash2, FileText, Settings as SettingsIcon, ListTree, ArrowRightLeft, Database } from 'lucide-vue-next';
-import { useRouter } from 'vue-router';
+import { GitBranch, RefreshCcw, Wrench, Plus, Save, Trash2, FileText, Settings as SettingsIcon, ListTree, ArrowRightLeft, Database, X } from 'lucide-vue-next';
 
 import { useReplicaStore } from '@/stores/replica';
 import { useStoragesStore } from '@/stores/storages';
 import { useToastStore } from '@/stores/toast';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { StoragesApi } from '@/api/storages';
-import type { StorageRef } from '@/api/types';
+import { ReplicationTargetsApi } from '@/api/replicationTargets';
+import type { StorageRef, ReplicationTarget, StorageDriver } from '@/api/types';
+import Modal from '@/components/ui/Modal.vue';
+import StorageDriverFields from '@/components/StorageDriverFields.vue';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
 import type { ReplicaMode, ReplicaRule, ReplicaRuleInput, ReplicaSettings } from '@/api/types';
@@ -28,19 +31,24 @@ const toast = useToastStore();
 const activeTab = ref<Tab>('rules');
 const refreshing = ref(false);
 
-// Replica targets + pairing — replica storages are a separate entity
-// (Burak: "replika bir depo değil"). They're filtered out of the
-// Depolar page; this page is where operators add/remove them and
-// link primaries to one.
-const router = useRouter();
+// Replica targets — separate entity in the new `replication_targets`
+// table. NOT a regular storage (Burak: "replika bir depo değil"):
+// no Depolar page entry, no file-explorer presence, no write API.
+// Primaries link to one via `storages.replica_target_id`.
 const storages = useStoragesStore();
+const caps = useCapabilitiesStore();
+const replicaTargets = ref<ReplicationTarget[]>([]);
 
-const primaryStorages = computed(() =>
-  storages.items.filter((s) => (s.role || 'primary') === 'primary'),
-);
-const replicaTargets = computed(() =>
-  storages.items.filter((s) => s.role === 'replica'),
-);
+const primaryStorages = computed(() => storages.items);
+
+async function loadReplicaTargets() {
+  try {
+    replicaTargets.value = await ReplicationTargetsApi.list();
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  }
+}
+
 function replicaNameById(id: number): string | undefined {
   return replicaTargets.value.find((r) => r.id === id)?.name;
 }
@@ -49,7 +57,7 @@ async function setPrimaryTarget(prim: StorageRef, replicaId: number) {
   try {
     await StoragesApi.update(prim.id, {
       ...prim,
-      replica_of_id: replicaId > 0 ? replicaId : null,
+      replica_target_id: replicaId > 0 ? replicaId : null,
     });
     toast.success(t('replica.pair.savedOk'));
     await storages.fetch();
@@ -58,21 +66,70 @@ async function setPrimaryTarget(prim: StorageRef, replicaId: number) {
   }
 }
 
-async function removeReplica(target: StorageRef) {
+async function removeReplica(target: ReplicationTarget) {
   if (!confirm(t('replica.targets.confirmDelete', { name: target.name }))) return;
   try {
-    // Clear every primary that pointed at this target so the
-    // pairing UI doesn't show a stale link.
-    for (const p of primaryStorages.value) {
-      if (p.replica_of_id === target.id) {
-        await StoragesApi.update(p.id, { ...p, replica_of_id: null });
-      }
-    }
-    await StoragesApi.remove(target.id);
+    await ReplicationTargetsApi.remove(target.id);
     toast.success(t('replica.targets.deleted'));
-    await storages.fetch();
+    await Promise.all([loadReplicaTargets(), storages.fetch()]);
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
+  }
+}
+
+// ── New target dialog ────────────────────────────────────────────
+const showTargetForm = ref(false);
+const targetDraftName = ref('');
+const targetDraftDriver = ref<StorageDriver>('s3');
+const targetDraftConfig = ref<Record<string, unknown>>({
+  bucket: '', region: '', endpoint: '', access_key: '', secret_key: '',
+});
+const targetDraftMode = ref<'async' | 'sync'>('async');
+const targetSaving = ref(false);
+
+const targetDriverOptions = computed(() =>
+  (['s3', 'local', 'sftp', 'webdav'] as StorageDriver[])
+    .filter((d) => caps.data.storage_drivers.length === 0 || caps.data.storage_drivers.includes(d))
+    .map((d) => ({ value: d, label: t(`storages.driver.${d}`) })),
+);
+
+function openNewTargetForm() {
+  targetDraftName.value = '';
+  targetDraftDriver.value = 's3';
+  targetDraftConfig.value = { bucket: '', region: '', endpoint: '', access_key: '', secret_key: '' };
+  targetDraftMode.value = 'async';
+  showTargetForm.value = true;
+}
+
+function onDraftDriverChange(d: StorageDriver) {
+  targetDraftDriver.value = d;
+  switch (d) {
+    case 'local': targetDraftConfig.value = { path: '' }; break;
+    case 's3':    targetDraftConfig.value = { bucket: '', region: '', endpoint: '', access_key: '', secret_key: '' }; break;
+    case 'sftp':  targetDraftConfig.value = { host: '', port: 22, username: '', password: '', root: '/' }; break;
+    case 'webdav':targetDraftConfig.value = { url: '', username: '', password: '' }; break;
+    default:      targetDraftConfig.value = {};
+  }
+}
+
+async function submitNewTarget() {
+  if (!targetDraftName.value.trim()) return;
+  targetSaving.value = true;
+  try {
+    await ReplicationTargetsApi.create({
+      name: targetDraftName.value.trim(),
+      driver: targetDraftDriver.value,
+      config: targetDraftConfig.value,
+      mode: targetDraftMode.value,
+      enabled: true,
+    });
+    toast.success(t('replica.targets.createdOk'));
+    showTargetForm.value = false;
+    await loadReplicaTargets();
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    targetSaving.value = false;
   }
 }
 
@@ -104,6 +161,8 @@ async function loadAll() {
     await Promise.all([
       replica.fetchRules(), replica.fetchFailures(), replica.fetchReport(), replica.fetchSettings(),
       storages.fetch(),
+      loadReplicaTargets(),
+      caps.fetch(),
     ]);
     settingsDraft.value = { ...replica.settings };
     const matchPreset = cronPresets.value.find((p) => p.value === settingsDraft.value.report_cron);
@@ -267,7 +326,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
             <Database class="h-4 w-4" />
             {{ t('replica.targets.title') }}
           </h2>
-          <Button size="xs" variant="primary" @click="router.push({ name: 'storages.new', query: { role: 'replica' } })">
+          <Button size="xs" variant="primary" @click="openNewTargetForm">
             <Plus class="h-3.5 w-3.5" />
             {{ t('replica.targets.add') }}
           </Button>
@@ -313,14 +372,14 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
               </div>
               <p class="text-[11px] text-zinc-500 mt-0.5">
                 {{ t('replica.pair.targetLabel') }}:
-                <strong v-if="prim.replica_of_id">
-                  {{ replicaNameById(prim.replica_of_id) || '#' + prim.replica_of_id }}
+                <strong v-if="prim.replica_target_id">
+                  {{ replicaNameById(prim.replica_target_id) || '#' + prim.replica_target_id }}
                 </strong>
                 <span v-else>—</span>
               </p>
             </div>
             <Select
-              :model-value="prim.replica_of_id ?? 0"
+              :model-value="prim.replica_target_id ?? 0"
               :options="[{ value: 0, label: '—' }, ...replicaTargets.map((rt) => ({ value: rt.id, label: rt.name }))]"
               size="sm"
               class="min-w-[180px]"
@@ -527,5 +586,28 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
         </div>
       </form>
     </div>
+
+    <!-- Replica target create modal — its own form, NOT the Storage
+         form. Operators never mix this with the Depolar flow. -->
+    <Modal v-model="showTargetForm" size="lg" :title="t('replica.targets.newTitle')">
+      <form class="space-y-3" @submit.prevent="submitNewTarget">
+        <Input v-model="targetDraftName" :label="t('replica.targets.fields.name')" placeholder="dr-backup" required />
+        <Select
+          :model-value="targetDraftDriver"
+          :label="t('replica.targets.fields.driver')"
+          :options="targetDriverOptions"
+          @update:model-value="(v) => onDraftDriverChange(String(v) as StorageDriver)"
+        />
+        <StorageDriverFields v-model="targetDraftConfig" :driver="targetDraftDriver" />
+        <Select v-model="targetDraftMode" :label="t('replica.targets.fields.mode')" :options="[
+          { value: 'async', label: t('replica.targets.modeAsync') },
+          { value: 'sync',  label: t('replica.targets.modeSync')  },
+        ]" />
+        <div class="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" @click="showTargetForm = false">{{ t('common.cancel') }}</Button>
+          <Button type="submit" variant="primary" :loading="targetSaving">{{ t('common.save') }}</Button>
+        </div>
+      </form>
+    </Modal>
   </section>
 </template>

@@ -273,6 +273,17 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/{id}/drift", storagesAdmH.Drift)
 			})
 
+			// Replication targets — separate entity (backup-only sinks).
+			// See handlers/replication_targets.go for the rationale.
+			repTargetsH := handlers.NewReplicationTargets(d.Store)
+			r.Route("/replication-targets", func(r chi.Router) {
+				r.Get("/", repTargetsH.List)
+				r.Post("/", repTargetsH.Create)
+				r.Get("/{id}", repTargetsH.Get)
+				r.Patch("/{id}", repTargetsH.Update)
+				r.Delete("/{id}", repTargetsH.Delete)
+			})
+
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/", ush.List)
 				r.Post("/", ush.Create)

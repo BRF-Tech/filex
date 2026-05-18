@@ -488,11 +488,20 @@
       "noStorages": "Add a storage first (Storages page)."
     },
     "targets": {
-      "title": "Replica storages",
-      "add": "Add replica storage",
-      "empty": "No replica storages added yet. Define a backup target here before pairing.",
-      "deleted": "Replica storage deleted.",
-      "confirmDelete": "Delete the {name} replica storage?"
+      "title": "Replication targets",
+      "add": "Add replication target",
+      "newTitle": "New replication target",
+      "empty": "No replication targets yet. Define a backup target here before pairing.",
+      "deleted": "Replication target deleted.",
+      "createdOk": "Replication target added.",
+      "confirmDelete": "Delete the {name} replication target?",
+      "modeAsync": "Async (ack on primary write, queue replica)",
+      "modeSync": "Sync (don't ack until replica write commits)",
+      "fields": {
+        "name": "Target name",
+        "driver": "Driver",
+        "mode": "Mode"
+      }
     },
     "mode": {
       "mirror": "Mirror",

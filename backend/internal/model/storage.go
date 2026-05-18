@@ -29,14 +29,31 @@ type Storage struct {
 	Enabled       bool            `json:"enabled"`
 	ReadOnly      bool            `json:"read_only"`
 	CreatedAt     time.Time       `json:"created_at"`
-	// Replica pairing — `role` is "primary" or "replica" (default
-	// "primary"); `replica_of_id` points a replica row at its source;
-	// `replica_mode` is "async" (default) or "sync". The admin
-	// Replikasyon page lets operators pair storages without touching
-	// SQL.
-	Role         string `json:"role,omitempty"`
-	ReplicaOfID  *int64 `json:"replica_of_id,omitempty"`
-	ReplicaMode  string `json:"replica_mode,omitempty"`
+	// Replica pairing — `role` and `replica_of_id` are LEGACY columns
+	// retained for backwards compatibility with v0.1.16 deployments
+	// (SQLite can't DROP COLUMN cleanly). The current model lives in
+	// `replica_target_id` — a foreign key into the new
+	// `replication_targets` table. Set it via the Replikasyon page;
+	// the wrapper Driver fan-outs writes to the linked target.
+	Role            string `json:"role,omitempty"`
+	ReplicaOfID     *int64 `json:"replica_of_id,omitempty"`
+	ReplicaMode     string `json:"replica_mode,omitempty"`
+	ReplicaTargetID *int64 `json:"replica_target_id,omitempty"`
+}
+
+// ReplicationTarget is a backup-only sink that the replica engine
+// fans writes out to. It is NOT a regular storage — operators never
+// write to it directly, and it never appears in the Depolar list or
+// the file explorer. Defined in v0.1.18 (migration 00009).
+type ReplicationTarget struct {
+	ID         int64           `json:"id"`
+	Name       string          `json:"name"`
+	Driver     string          `json:"driver"`
+	ConfigJSON json.RawMessage `json:"config"`
+	Mode       string          `json:"mode"` // "async" | "sync"
+	Enabled    bool            `json:"enabled"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 // SyncRun is a row in sync_runs.

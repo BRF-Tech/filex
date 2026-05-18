@@ -60,14 +60,36 @@ export interface StorageRef {
   last_sync_at?: string | null;
   last_sync_state?: 'ok' | 'error' | 'running' | 'pending';
   last_sync_error?: string | null;
-  /** Replica pairing (v0.1.16+).
-   *  - role:           'primary' (default) | 'replica'
-   *  - replica_of_id:  id of the primary this row mirrors (only when role=replica)
-   *  - replica_mode:   'async' (default) | 'sync'
-   */
+  /** Replica fields. v0.1.18+: the canonical link is
+   *  `replica_target_id` — a foreign key into the new
+   *  `replication_targets` table. `role` / `replica_of_id` /
+   *  `replica_mode` are LEGACY columns retained for backward
+   *  compatibility; do not write them from new code. */
   role?: 'primary' | 'replica';
   replica_of_id?: number | null;
   replica_mode?: 'async' | 'sync';
+  replica_target_id?: number | null;
+}
+
+/** Replication target — backup-only sink (NOT a regular storage).
+ *  Lives in its own table; managed from the Replikasyon page. */
+export interface ReplicationTarget {
+  id: number;
+  name: string;
+  driver: StorageDriver;
+  config: Record<string, unknown>;
+  mode: 'async' | 'sync';
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReplicationTargetInput {
+  name: string;
+  driver: StorageDriver;
+  config: Record<string, unknown>;
+  mode?: 'async' | 'sync';
+  enabled?: boolean;
 }
 
 export interface StorageCreateRequest {
@@ -85,6 +107,7 @@ export interface StorageUpdateRequest {
   role?: 'primary' | 'replica';
   replica_of_id?: number | null;
   replica_mode?: 'async' | 'sync';
+  replica_target_id?: number | null;
 }
 
 export interface SyncRun {

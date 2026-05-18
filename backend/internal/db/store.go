@@ -52,6 +52,14 @@ type Store interface {
 	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
 	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
 	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
+
+	// Replication targets — separate entity. Storages.replica_target_id
+	// is the FK linking a primary to one of these.
+	ListReplicationTargets(ctx context.Context) ([]*model.ReplicationTarget, error)
+	GetReplicationTarget(ctx context.Context, id int64) (*model.ReplicationTarget, error)
+	CreateReplicationTarget(ctx context.Context, rt *model.ReplicationTarget) (*model.ReplicationTarget, error)
+	UpdateReplicationTarget(ctx context.Context, rt *model.ReplicationTarget) error
+	DeleteReplicationTarget(ctx context.Context, id int64) error
 	// StorageStats returns (file_count, total_size_bytes) for a storage,
 	// excluding directories and soft-deleted nodes. Used by the admin
 	// storages list page so each row can show "N files, 1.2 GB" without

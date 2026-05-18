@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { Save, ArrowLeft, Activity } from 'lucide-vue-next';
 
@@ -20,19 +20,9 @@ import StorageDriverFields from '@/components/StorageDriverFields.vue';
 
 const { t } = useI18n();
 const router = useRouter();
-const route = useRoute();
 const storages = useStoragesStore();
 const toast = useToastStore();
 const caps = useCapabilitiesStore();
-
-// `?role=replica` switches the form into replica-target mode — the
-// created storage is hidden from the main Depolar list and only
-// appears as a pairing target on the Replikasyon page. Operators
-// reach this URL via the "+ Replika depo ekle" button.
-const role = computed<'primary' | 'replica'>(() =>
-  route.query.role === 'replica' ? 'replica' : 'primary',
-);
-const isReplica = computed(() => role.value === 'replica');
 
 const driver = ref<StorageDriver>('local');
 const name = ref('');
@@ -110,21 +100,8 @@ async function submit() {
       config: config.value,
       read_only: readOnly.value,
     });
-    // Replica-target mode: after the row exists, PATCH its role so
-    // it disappears from the main Depolar list (filtered to
-    // `role=primary`) and becomes a Replikasyon target.
-    if (isReplica.value) {
-      await StoragesApi.update(created.id, {
-        ...created,
-        role: 'replica',
-      });
-    }
     toast.success(t('storages.createdOk'));
-    if (isReplica.value) {
-      router.push({ name: 'replica' });
-    } else {
-      router.push({ name: 'storages.edit', params: { id: created.id } });
-    }
+    router.push({ name: 'storages.edit', params: { id: created.id } });
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {

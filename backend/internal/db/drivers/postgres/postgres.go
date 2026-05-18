@@ -97,17 +97,17 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 }
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages WHERE id=$1`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE id=$1`, id)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages WHERE name=$1`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE name=$1`, name)
 	return scanStorage(row)
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async') FROM storages WHERE enabled=true ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE enabled=true ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -154,10 +154,10 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 		repMode = "async"
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE storages SET name=$1, driver=$2, mount_path=$3, config_json=$4::jsonb, sync_mode=$5, sync_interval_s=$6, enabled=$7, read_only=$8, role=$9, replica_of_id=$10, replica_mode=$11 WHERE id=$12`,
+		`UPDATE storages SET name=$1, driver=$2, mount_path=$3, config_json=$4::jsonb, sync_mode=$5, sync_interval_s=$6, enabled=$7, read_only=$8, role=$9, replica_of_id=$10, replica_mode=$11, replica_target_id=$12 WHERE id=$13`,
 		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS,
 		st.Enabled, st.ReadOnly,
-		role, st.ReplicaOfID, repMode,
+		role, st.ReplicaOfID, repMode, st.ReplicaTargetID,
 		st.ID)
 	return err
 }
@@ -169,6 +169,87 @@ func (s *Store) UpdateStorageSyncCursor(ctx context.Context, id int64, at time.T
 
 func (s *Store) DeleteStorage(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM storages WHERE id=$1`, id)
+	return err
+}
+
+// ──────── ReplicationTarget (v0.1.18+) ────────
+
+func scanReplicationTarget(r rowScanner) (*model.ReplicationTarget, error) {
+	rt := &model.ReplicationTarget{}
+	var cfg string
+	if err := r.Scan(&rt.ID, &rt.Name, &rt.Driver, &cfg, &rt.Mode, &rt.Enabled, &rt.CreatedAt, &rt.UpdatedAt); err != nil {
+		return nil, err
+	}
+	rt.ConfigJSON = []byte(cfg)
+	return rt, nil
+}
+
+func (s *Store) ListReplicationTargets(ctx context.Context) ([]*model.ReplicationTarget, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, driver, config_json::text, mode, enabled, created_at, updated_at
+		   FROM replication_targets ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.ReplicationTarget
+	for rows.Next() {
+		rt, err := scanReplicationTarget(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rt)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetReplicationTarget(ctx context.Context, id int64) (*model.ReplicationTarget, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, driver, config_json::text, mode, enabled, created_at, updated_at
+		   FROM replication_targets WHERE id=$1`, id)
+	return scanReplicationTarget(row)
+}
+
+func (s *Store) CreateReplicationTarget(ctx context.Context, rt *model.ReplicationTarget) (*model.ReplicationTarget, error) {
+	cfg := rt.ConfigJSON
+	if len(cfg) == 0 {
+		cfg = []byte("{}")
+	}
+	mode := rt.Mode
+	if mode == "" {
+		mode = "async"
+	}
+	row := s.db.QueryRowContext(ctx,
+		`INSERT INTO replication_targets (name, driver, config_json, mode, enabled)
+		 VALUES ($1, $2, $3::jsonb, $4, $5)
+		 RETURNING id, name, driver, config_json::text, mode, enabled, created_at, updated_at`,
+		rt.Name, rt.Driver, string(cfg), mode, rt.Enabled,
+	)
+	return scanReplicationTarget(row)
+}
+
+func (s *Store) UpdateReplicationTarget(ctx context.Context, rt *model.ReplicationTarget) error {
+	cfg := rt.ConfigJSON
+	if len(cfg) == 0 {
+		cfg = []byte("{}")
+	}
+	mode := rt.Mode
+	if mode == "" {
+		mode = "async"
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE replication_targets
+		    SET name=$1, driver=$2, config_json=$3::jsonb, mode=$4, enabled=$5, updated_at=NOW()
+		  WHERE id=$6`,
+		rt.Name, rt.Driver, string(cfg), mode, rt.Enabled, rt.ID)
+	return err
+}
+
+func (s *Store) DeleteReplicationTarget(ctx context.Context, id int64) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE storages SET replica_target_id=NULL WHERE replica_target_id=$1`, id); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM replication_targets WHERE id=$1`, id)
 	return err
 }
 
@@ -753,12 +834,12 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 	st := &model.Storage{}
 	var cfg string
 	var role, replicaMode sql.NullString
-	var replicaOf sql.NullInt64
+	var replicaOf, replicaTarget sql.NullInt64
 	err := r.Scan(
 		&st.ID, &st.Name, &st.Driver, &st.MountPath, &cfg,
 		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
 		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
-		&role, &replicaOf, &replicaMode,
+		&role, &replicaOf, &replicaMode, &replicaTarget,
 	)
 	if err != nil {
 		return nil, err
@@ -770,6 +851,10 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 	if replicaOf.Valid {
 		v := replicaOf.Int64
 		st.ReplicaOfID = &v
+	}
+	if replicaTarget.Valid {
+		v := replicaTarget.Int64
+		st.ReplicaTargetID = &v
 	}
 	if replicaMode.Valid {
 		st.ReplicaMode = replicaMode.String

@@ -25,13 +25,9 @@ const syncingId = ref<number | null>(null);
 const deleteTarget = ref<StorageRef | null>(null);
 const deleting = ref(false);
 
-// Depolar page only lists primary storages. Replica targets are
-// managed from the Replikasyon page — they're not directly writable
-// by operators and showing them here was confusing operators (Burak
-// "replika bir depo değil").
-const primaryStorages = computed(() =>
-  storages.items.filter((s) => (s.role || 'primary') === 'primary'),
-);
+// Replica targets live in their own `replication_targets` table now
+// (v0.1.18+). `storages.items` only contains primaries; no client-side
+// filtering needed.
 
 async function load() {
   await storages.fetch();
@@ -119,7 +115,7 @@ onMounted(load);
     </EmptyState>
 
     <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      <div v-for="s in primaryStorages" :key="s.id" class="card card-body">
+      <div v-for="s in storages.items" :key="s.id" class="card card-body">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="flex items-center gap-2">

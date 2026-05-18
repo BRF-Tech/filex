@@ -488,11 +488,20 @@
       "noStorages": "Önce depo ekleyin (Depolar sayfası)."
     },
     "targets": {
-      "title": "Replika depoları",
-      "add": "Replika depo ekle",
-      "empty": "Henüz replika depo eklenmedi. Replikasyon yapacaksan önce buradan bir hedef tanımla.",
-      "deleted": "Replika depo silindi.",
-      "confirmDelete": "{name} replika deposunu silmek istiyor musun?"
+      "title": "Replika hedefleri",
+      "add": "Replika hedefi ekle",
+      "newTitle": "Yeni replika hedefi",
+      "empty": "Henüz replika hedefi eklenmedi. Replikasyon yapacaksan önce buradan bir hedef tanımla.",
+      "deleted": "Replika hedefi silindi.",
+      "createdOk": "Replika hedefi eklendi.",
+      "confirmDelete": "{name} replika hedefini silmek istiyor musun?",
+      "modeAsync": "Asenkron (önce yazımı doğrula, replikayı kuyruğa al)",
+      "modeSync": "Senkron (replika yazımı doğrulanmadan başarı sayma)",
+      "fields": {
+        "name": "Hedef adı",
+        "driver": "Sürücü",
+        "mode": "Mod"
+      }
     },
     "mode": {
       "mirror": "Aynala",
