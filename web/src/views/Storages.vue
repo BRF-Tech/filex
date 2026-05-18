@@ -135,14 +135,14 @@ onMounted(load);
             {{
               s.last_sync_state === 'running'
                 ? t('common.running')
-                : s.last_sync_state ?? t('common.neverRan')
+                : s.last_sync_state ?? t('storages.modeLabel.' + (s.sync_mode || 'ondemand'))
             }}
           </Badge>
         </div>
 
         <p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
           {{ t('dashboard.lastSync') }}:
-          {{ s.last_sync_at ? formatRelative(s.last_sync_at, locale) : t('common.neverRan') }}
+          {{ s.last_sync_at ? formatRelative(s.last_sync_at, locale) : t('storages.notYetSynced') }}
         </p>
         <p
           v-if="s.last_sync_error"

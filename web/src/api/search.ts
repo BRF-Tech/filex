@@ -18,7 +18,12 @@ export interface SearchIndexStats {
 
 export const SearchApi = {
   async query(params: SearchParams): Promise<PaginatedResponse<SearchHit>> {
-    const { data } = await api.get<PaginatedResponse<SearchHit>>('/admin/search', { params });
+    // The backend exposes search at `/api/files/search` (admin route
+    // `/admin/search` only carries stats + rebuild). The SPA used to
+    // point at `/admin/search` and 404'd every query. Wire the
+    // canonical endpoint here so SearchTest.vue can actually issue
+    // queries.
+    const { data } = await api.get<PaginatedResponse<SearchHit>>('/files/search', { params });
     return data;
   },
 

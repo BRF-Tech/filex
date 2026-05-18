@@ -131,6 +131,12 @@
     "title": "Depolar",
     "subtitle": "Üst düzey klasör olarak görünen mount noktaları",
     "filesUnit": "dosya",
+    "notYetSynced": "Henüz senkron çalışmadı",
+    "modeLabel": {
+      "fsnotify": "Canlı izleme",
+      "poll": "Periyodik tarama",
+      "ondemand": "İstek üzerine"
+    },
     "addNew": "Depo ekle",
     "newTitle": "Yeni depo ekle",
     "editTitle": "Depo düzenle",
@@ -469,6 +475,10 @@
       "failures": "Hatalar",
       "report": "Rapor",
       "settings": "Ayarlar"
+    },
+    "pairingBanner": {
+      "title": "Primary → replica çifti henüz UI'dan ayarlanamıyor",
+      "body": "Aşağıdaki path-glob kuralları sadece HANGİ dosyaların replike edileceğini belirler. NEREYE replike edileceğini (primary + replica storage çifti) hala SQL ile storages.role + storages.replica_of_id alanlarına yazıyoruz. Bu UI v0.2'de gelecek; bu sürümde çifti aşağıdaki SQL ile kurabilirsin (id'leri Depolar sayfasından al)."
     },
     "mode": {
       "mirror": "Aynala",

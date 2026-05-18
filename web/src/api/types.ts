@@ -45,6 +45,7 @@ export interface StorageRef {
   read_only: boolean;
   created_at: string;
   updated_at: string;
+  sync_mode?: 'poll' | 'fsnotify' | 'push' | 'ondemand';
   // Cached stats (filled by backend, may be null right after creation)
   file_count?: number;
   total_bytes?: number;

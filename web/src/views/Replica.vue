@@ -200,6 +200,20 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
 
     <!-- ── Rules ──────────────────────────────────────── -->
     <div v-show="activeTab === 'rules'" class="space-y-3">
+      <!-- Storage pairing banner — primary→replica selection is a v0.1
+           scope gap; the rule engine matches path globs but the
+           primary/replica storage pair itself is still wired via SQL
+           (storages.role + storages.replica_of_id). Flag it loudly so
+           operators don't think the rules already do the routing. -->
+      <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        <p class="font-semibold">⚠ {{ t('replica.pairingBanner.title') }}</p>
+        <p class="mt-1">{{ t('replica.pairingBanner.body') }}</p>
+        <p class="mt-1 font-mono text-[11px] opacity-80">
+          UPDATE storages SET role='primary' WHERE id=&lt;id&gt;;<br>
+          UPDATE storages SET role='replica', replica_of_id=&lt;primary-id&gt; WHERE id=&lt;id&gt;;
+        </p>
+      </div>
+
       <div class="flex items-center justify-between">
         <h2 class="flex items-center gap-2 text-sm font-semibold">
           <ListTree class="h-4 w-4" />

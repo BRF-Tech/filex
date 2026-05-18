@@ -180,7 +180,7 @@ async function loadStarred() {
   try {
     const headers = await buildAuthHeaders();
     const base = props.config.apiBase ?? '';
-    const res = await fetch(`${base}/api/files/manager/starred?limit=500`, {
+    const res = await fetch(`${base}/api/files/manager/star/list?limit=500`, {
       headers,
       credentials: 'include',
     });
@@ -835,11 +835,15 @@ const contextActions = computed<ContextAction[]>(() => {
 
   const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
   const singleHasId = single && typeof sel[0]?.id === 'number';
+  const copyIdLabel = locale.value === 'en'
+    ? `Copy node id (${sel[0]?.id ?? ''})`
+    : `Node id'yi kopyala (${sel[0]?.id ?? ''})`;
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
     { key: 'share', label: t('ctx.share'), icon: '🔗', hidden: !single, disabled: !single },
+    { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '' },
     { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single, disabled: !single },
     { key: 'duplicate', label: t('ctx.duplicate'), icon: '⎘', hidden: !any, disabled: !any },
@@ -881,6 +885,15 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
       break;
     case 'share':
       if (targets[0]) openShare(targets[0]);
+      break;
+    case 'copy-id':
+      if (targets[0] && typeof targets[0].id === 'number') {
+        const id = targets[0].id;
+        navigator.clipboard?.writeText(String(id)).then(
+          () => flashToast(locale.value === 'en' ? `Node id ${id} copied` : `Node id ${id} kopyalandı`),
+          () => flashToast(`#${id}`),
+        );
+      }
       break;
     case 'tags':
       if (targets[0]) openTagPickerFor(targets[0]);

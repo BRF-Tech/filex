@@ -201,8 +201,9 @@ onMounted(load);
           <Badge size="xs">{{ item.driver }}</Badge>
         </h1>
         <p class="text-sm text-zinc-500 dark:text-zinc-400">
-          {{ formatBytes(item.total_bytes ?? 0, locale) }} ·
-          {{ formatNumber(item.file_count ?? 0, locale) }}
+          {{ formatBytes(item.stats?.total_size_bytes ?? item.total_bytes ?? 0, locale) }} ·
+          {{ formatNumber(item.stats?.file_count ?? item.file_count ?? 0, locale) }}
+          {{ t('storages.filesUnit') }}
         </p>
       </div>
       <div class="flex items-center gap-2">

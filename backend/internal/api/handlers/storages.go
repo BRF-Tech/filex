@@ -82,7 +82,21 @@ func (h *Storages) Get(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	// Mirror List's stats blob so the detail page header can show the
+	// same "N files, M bytes" label without a second roundtrip.
+	type storageWithStats struct {
+		*model.Storage
+		Stats struct {
+			FileCount int64 `json:"file_count"`
+			TotalSize int64 `json:"total_size_bytes"`
+		} `json:"stats"`
+	}
+	out := storageWithStats{Storage: st}
+	if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
+		out.Stats.FileCount = c
+		out.Stats.TotalSize = sz
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Create adds a new storage.
