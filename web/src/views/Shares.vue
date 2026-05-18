@@ -99,6 +99,14 @@ async function remove() {
   }
 }
 
+// Build the public share URL the recipient would actually use. We
+// hit `/s/<token>` on the same origin as the panel — that's how
+// nginx is configured + the backend's share viewer is mounted.
+function shareUrl(s: Share): string {
+  if (typeof window === 'undefined') return `/s/${s.token}`;
+  return `${window.location.origin}/s/${s.token}`;
+}
+
 const columns = computed<Column<Share>[]>(() => [
   { key: 'token', label: t('shares.fields.token'), cell: 'slot' },
   {
@@ -107,6 +115,7 @@ const columns = computed<Column<Share>[]>(() => [
     format: (r) => (r as unknown as ShareRow).storage_name || '—',
   },
   { key: 'path', label: t('shares.fields.path'), cell: 'slot' },
+  { key: 'created_at', label: t('shares.fields.created'), cell: 'slot' },
   { key: 'expires_at', label: t('shares.fields.expires'), cell: 'slot' },
   {
     key: 'download_count',
@@ -120,7 +129,7 @@ const columns = computed<Column<Share>[]>(() => [
     },
   },
   { key: 'creator', label: t('shares.fields.creator'), cell: 'slot' },
-  { key: 'actions', label: t('common.actions'), cell: 'slot', align: 'right', width: '120px' },
+  { key: 'actions', label: t('common.actions'), cell: 'slot', align: 'right', width: '160px' },
 ]);
 
 onMounted(load);
@@ -159,10 +168,26 @@ onMounted(load);
           <code class="text-xs font-mono text-zinc-700 dark:text-zinc-300">
             {{ shareOf(row).token.slice(0, 10) }}…
           </code>
-          <CopyButton :value="shareOf(row).token" size="xs" />
+          <CopyButton
+            :value="shareUrl(shareOf(row))"
+            size="xs"
+            :title="t('shares.copyLink')"
+          />
+          <CopyButton
+            :value="shareOf(row).token"
+            size="xs"
+            :title="t('shares.copyToken')"
+            variant="ghost"
+          />
           <Badge v-if="shareOf(row).has_pin || shareOf(row).pin_set" tone="amber" size="xs">PIN</Badge>
           <Badge v-if="shareOf(row).revoked_at || shareOf(row).revoked" tone="rose" size="xs">revoked</Badge>
         </div>
+      </template>
+
+      <template #cell-created_at="{ row }">
+        <span class="text-xs whitespace-nowrap" :title="formatDate(shareOf(row).created_at, locale)">
+          {{ formatDate(shareOf(row).created_at, locale) }}
+        </span>
       </template>
 
       <template #cell-path="{ row }">
@@ -178,11 +203,13 @@ onMounted(load);
       </template>
 
       <template #cell-expires_at="{ row }">
-        <span class="text-xs">
+        <span class="text-xs whitespace-nowrap" :title="shareOf(row).expires_at ? formatDate(shareOf(row).expires_at, locale) : ''">
           <template v-if="shareOf(row).expires_at">
+            {{ formatDate(shareOf(row).expires_at, locale) }}
+            <span class="text-zinc-400">·</span>
             {{ formatRelative(shareOf(row).expires_at, locale) }}
           </template>
-          <template v-else>—</template>
+          <template v-else>{{ t('shares.neverExpires') }}</template>
         </span>
       </template>
 

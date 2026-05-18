@@ -825,8 +825,17 @@ const contextActions = computed<ContextAction[]>(() => {
   // Hide every mutation entry (rename/delete/share/cut/copy/new-folder/
   // paste) and only offer "Aç" so the menu doesn't surface actions
   // that would 4xx on the backend.
-  const inStorageRoot = multiStorageRoot.value && currentPath.value === '/';
+  //
+  // PRIOR BUG: this used `currentPath === '/'` but the load() branch
+  // for the virtual root sets currentPath to EMPTY string, not '/'.
+  // So the guard never fired and every mutation action leaked into
+  // the menu at the depo listing — including new-folder + paste,
+  // which Burak called out in the most direct possible terms. Use
+  // the same empty-after-trim test as `atVirtualRoot` above.
+  const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
+  const inStorageRoot = multiStorageRoot.value && trimmedPath === '';
   if (inStorageRoot) {
+    if (!any) return [];
     if (!single) return [];
     return [
       { key: 'open', label: t('ctx.open'), icon: '↗' },

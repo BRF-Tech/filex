@@ -90,8 +90,8 @@ watch(() => props.refreshKey, load);
 
 <style scoped>
 .filex-recent {
-  background: var(--filex-bg-card, #ffffff);
-  border: 1px solid var(--filex-border, #e5e7eb);
+  background: var(--fe-bg-elev, var(--filex-bg-card, #ffffff));
+  border: 1px solid var(--fe-border, var(--filex-border, #e5e7eb));
   border-radius: 8px;
   padding: 12px;
   font-size: 13px;
@@ -106,12 +106,12 @@ watch(() => props.refreshKey, load);
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--filex-text, #111827);
+  color: var(--fe-text, var(--filex-text, #111827));
 }
 .filex-recent-refresh {
   background: transparent;
   border: none;
-  color: var(--filex-text-muted, #9ca3af);
+  color: var(--fe-text-muted, var(--filex-text-muted, #9ca3af));
   cursor: pointer;
   font-size: 14px;
   padding: 2px 6px;
@@ -134,22 +134,22 @@ watch(() => props.refreshKey, load);
   text-align: left;
 }
 .filex-recent-item:hover {
-  background: var(--filex-bg-soft, #f3f4f6);
+  background: var(--fe-bg-hover, var(--filex-bg-soft, #f3f4f6));
 }
 .filex-recent-name {
-  color: var(--filex-text, #111827);
+  color: var(--fe-text, var(--filex-text, #111827));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .filex-recent-meta {
-  color: var(--filex-text-muted, #9ca3af);
+  color: var(--fe-text-muted, var(--filex-text-muted, #9ca3af));
   font-size: 11px;
   margin-left: 8px;
   flex-shrink: 0;
 }
 .filex-recent-empty {
-  color: var(--filex-text-muted, #9ca3af);
+  color: var(--fe-text-muted, var(--filex-text-muted, #9ca3af));
   margin: 4px 0 0;
 }
 </style>
