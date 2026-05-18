@@ -56,7 +56,7 @@ function onBackdrop() {
   <transition name="fe-modal">
     <div
       v-if="open"
-      class="fe-modal__backdrop"
+      class="fe fe-modal__backdrop"
       :class="{ 'fe-modal__backdrop--chromeless': chromeless }"
       role="presentation"
       @click="onBackdrop"

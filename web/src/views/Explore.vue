@@ -8,7 +8,7 @@
 // The old per-storage tab strip is gone — the storage list is now
 // the home screen of the explorer itself.
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { ChevronLeft, RefreshCcw, LayoutDashboard } from 'lucide-vue-next';
@@ -22,6 +22,7 @@ import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue';
 import DarkModeToggle from '@/components/DarkModeToggle.vue';
+import { effectiveTheme } from '@/lib/theme';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -32,6 +33,29 @@ const storages = useStoragesStore();
 // Bump on Refresh to remount the FileExplorer (cheapest forced
 // reload — its own data fetcher reruns on construction).
 const remountKey = ref(0);
+
+// Reactive theme passthrough — without this the SFC's CSS variable
+// cascade falls back to `prefers-color-scheme: dark` on OS dark
+// systems even when the admin shell is on light, leaving the
+// explorer pane locked to dark after the user flips the panel.
+// MutationObserver watches `<html>` class changes; localStorage
+// `storage` events keep cross-tab toggles in sync.
+const currentTheme = ref<'light' | 'dark'>(effectiveTheme());
+let htmlObserver: MutationObserver | null = null;
+const onStorage = (e: StorageEvent) => {
+  if (e.key === 'filex.theme') currentTheme.value = effectiveTheme();
+};
+onMounted(() => {
+  htmlObserver = new MutationObserver(() => {
+    currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  });
+  htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('storage', onStorage);
+});
+onBeforeUnmount(() => {
+  htmlObserver?.disconnect();
+  window.removeEventListener('storage', onStorage);
+});
 
 function readCsrfCookie(): string | null {
   const prefix = 'filex_csrf=';
@@ -78,6 +102,7 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     endpoint: '/api/files/manager',
     capabilities: '/api/files/capabilities',
     auth: authConf,
+    theme: currentTheme.value,
     locale: locale.value === 'en' ? 'en' : 'tr',
     pathPersist: 'localStorage',
     trashVisible: false,

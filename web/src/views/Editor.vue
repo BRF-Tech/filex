@@ -13,12 +13,13 @@
  * `saveText: '/api/files/save-text'`.
  */
 
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
 import { PreviewModal, isExternalUsable, type FileNode, type ExternalServiceStatus } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
+import { effectiveTheme } from '@/lib/theme';
 
 const { locale } = useI18n();
 const route = useRoute();
@@ -109,10 +110,29 @@ function closeWindow() {
   }
 }
 
+// Reactive theme passthrough — feeds the PreviewModal so the
+// embedded viewer follows the host admin's dark/light state. Without
+// this the SFC's `prefers-color-scheme` media-query fallback locks
+// the standalone editor to OS-dark when the admin shell is light.
+const currentTheme = ref<'light' | 'dark'>(effectiveTheme());
+let htmlObserver: MutationObserver | null = null;
+const onStorage = (e: StorageEvent) => {
+  if (e.key === 'filex.theme') currentTheme.value = effectiveTheme();
+};
+
 onMounted(() => {
   const n = node.value;
   if (n) document.title = `${n.basename} — filex`;
   void loadCapabilities();
+  htmlObserver = new MutationObserver(() => {
+    currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  });
+  htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('storage', onStorage);
+});
+onBeforeUnmount(() => {
+  htmlObserver?.disconnect();
+  window.removeEventListener('storage', onStorage);
 });
 </script>
 

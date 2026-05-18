@@ -34,7 +34,16 @@
  * web/src/lib/theme.ts toggles document.documentElement.classList
  * .toggle('dark', dark), so we adopt the same hook here. Without
  * this selector the embedded explorer stayed on the :root light
- * defaults even when the rest of the admin UI flipped dark. */
+ * defaults even when the rest of the admin UI flipped dark.
+ *
+ * The bare `:root.dark` / `.dark` selectors (no `.fe` descendant)
+ * also publish the variables at the html-level so non-SFC consumers —
+ * the standalone /files/edit Editor.vue route, which doesn't wrap its
+ * host div in `.fe` — pick up the dark palette via CSS-variable
+ * cascade. v0.1.11 added the bare selectors after operators reported
+ * the new tab opening light when the admin panel was dark. */
+:root.dark,
+.dark,
 :root.dark .fe,
 .dark .fe,
 /* Teleported context menu lives outside the `.fe` parent, so we have
