@@ -495,6 +495,10 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			// new size/mime — IndexNode keys off node fields.
 			if fresh, _ := h.Store.GetNode(r.Context(), existing.ID); fresh != nil {
 				h.indexNode(r.Context(), fresh)
+				// Re-upload of an existing node — the bytes changed so
+				// the stored thumb is stale. Mark it pending and let
+				// the pipeline regenerate.
+				h.dispatchThumb(fresh)
 			}
 			continue
 		}
@@ -516,6 +520,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 				slog.String("err", err.Error()))
 		} else {
 			h.indexNode(r.Context(), created)
+			h.dispatchThumb(created)
 		}
 	}
 

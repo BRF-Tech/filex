@@ -81,6 +81,12 @@ func BuildRouter(d *Deps) http.Handler {
 		// back to SQL LIKE.
 		mh.AttachSearchIndex(d.Index)
 	}
+	if d.Thumbs != nil {
+		// Async thumb generation after vfUpload commits — without
+		// this every new upload starts with no preview and a
+		// `filex thumb backfill` is required to fill the grid.
+		mh.AttachThumbPipeline(d.Thumbs)
+	}
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)

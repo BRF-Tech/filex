@@ -14,7 +14,7 @@
  * `save` events back to the configured `pdfSaveUrl`-style endpoint
  * (drawio uses the same shape: POST `{path, content}` body).
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fetchViewerText } from '../composables/useViewerFetch';
 
 const props = defineProps<{
@@ -40,18 +40,28 @@ const readOnly = ref(!!props.readOnly || !props.saveUrl);
 // back to the public embed.diagrams.net iframe, that defeats the point of
 // gating: render a "not configured" pane instead so the user understands
 // why the editor isn't loading.
-const drawioBase = props.drawioUrl ? props.drawioUrl.replace(/\/$/, '') : null;
-const params = new URLSearchParams({
-  embed: '1',
-  proto: 'json',
-  spin: '1',
-  saveAndExit: '0',
-  noSaveBtn: readOnly.value ? '1' : '0',
-  noExitBtn: '1',
-  ui: 'kennedy',
-  modified: 'unsavedChanges',
+//
+// `drawioBase` MUST be a computed (not a const), otherwise a stale null
+// at mount time (capabilities probe still inflight) gets cached for the
+// component's lifetime — leading to the spurious
+// "viewer.drawio.disabled" fallback after the capability flips to "ok".
+const drawioBase = computed<string | null>(() =>
+  props.drawioUrl ? props.drawioUrl.replace(/\/$/, '') : null,
+);
+const iframeSrc = computed<string>(() => {
+  if (!drawioBase.value) return '';
+  const params = new URLSearchParams({
+    embed: '1',
+    proto: 'json',
+    spin: '1',
+    saveAndExit: '0',
+    noSaveBtn: readOnly.value ? '1' : '0',
+    noExitBtn: '1',
+    ui: 'kennedy',
+    modified: 'unsavedChanges',
+  });
+  return `${drawioBase.value}/?${params.toString()}`;
 });
-const iframeSrc = drawioBase ? `${drawioBase}/?${params.toString()}` : '';
 
 let pendingXml: string = '';
 
@@ -141,15 +151,27 @@ function onMessage(ev: MessageEvent): void {
   }
 }
 
-onMounted(() => {
-  if (!drawioBase) {
+function bootIfReady(): void {
+  if (!drawioBase.value) {
     error.value = tt('viewer.drawio.disabled', 'Drawio (diagrams.net) yapılandırılmamış.');
     status.value = 'error';
     return;
   }
-  window.addEventListener('message', onMessage);
+  // Clear a previous "disabled" error in case the prop just became
+  // available (capability probe finished after mount).
+  if (error.value === tt('viewer.drawio.disabled', 'Drawio (diagrams.net) yapılandırılmamış.')) {
+    error.value = null;
+    status.value = 'loading';
+  }
   loadXml();
+}
+
+onMounted(() => {
+  window.addEventListener('message', onMessage);
+  bootIfReady();
 });
+
+watch(() => props.drawioUrl, bootIfReady);
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', onMessage);

@@ -34,6 +34,11 @@ type BackfillOptions struct {
 	// state="failed". Without this, failed rows are skipped (so a flaky
 	// office doc doesn't block every subsequent run).
 	RetryFailed bool
+	// RetrySkipped includes nodes whose existing thumbnails row is in
+	// state="skipped". Use when the pipeline has gained coverage for
+	// kinds that previously skipped (e.g. v0.1.7 generic fallback /
+	// audio waveform) — without this, old rows freeze the pipeline.
+	RetrySkipped bool
 	// Concurrency controls the worker pool size. <=0 → 4.
 	Concurrency int
 	// ProgressEvery determines how many processed nodes between an
@@ -138,10 +143,11 @@ func (s *Server) BackfillThumbs(ctx context.Context, opts BackfillOptions) (Back
 	// no atomics needed.
 	emitted := 0
 	walker := &backfillWalker{
-		store:       s.store,
-		retryFailed: opts.RetryFailed,
-		limit:       opts.Limit,
-		emitted:     &emitted,
+		store:        s.store,
+		retryFailed:  opts.RetryFailed,
+		retrySkipped: opts.RetrySkipped,
+		limit:        opts.Limit,
+		emitted:      &emitted,
 	}
 	walkErr := func() error {
 		for _, st := range targets {
@@ -183,9 +189,10 @@ type backfillWalker struct {
 		ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 		GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error)
 	}
-	retryFailed bool
-	limit       int  // 0 = unlimited
-	emitted     *int // pointer so we can mutate across recursive calls
+	retryFailed  bool
+	retrySkipped bool
+	limit        int  // 0 = unlimited
+	emitted      *int // pointer so we can mutate across recursive calls
 }
 
 // errLimitReached is the sentinel that aborts the walk once limit is hit.
@@ -251,8 +258,10 @@ func (w *backfillWalker) shouldProcess(ctx context.Context, n *model.Node) bool 
 		return true
 	}
 	switch existing.State {
-	case "ready", "skipped":
+	case "ready":
 		return false
+	case "skipped":
+		return w.retrySkipped
 	case "failed":
 		return w.retryFailed
 	default:

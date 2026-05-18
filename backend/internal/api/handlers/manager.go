@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
@@ -26,6 +27,24 @@ type Manager struct {
 	// Index is consulted by `vfSearch` BEFORE falling back to SQL LIKE.
 	// nil is fine — search degrades to LIKE-only.
 	Index *search.Index
+	// Thumbs, when wired, generates a thumbnail asynchronously after a
+	// successful upload. nil is fine — uploads still succeed, callers
+	// just don't get an automatic preview in the grid view.
+	Thumbs ThumbPipeline
+}
+
+// ThumbPipeline is the narrow surface manager_mutate needs to fire a
+// thumbnail job after upload. Kept as an interface so the package
+// doesn't have to import `internal/thumb` (which would create an
+// import cycle through the storage resolver wiring).
+type ThumbPipeline interface {
+	GenerateThumb(ctx context.Context, node *model.Node) error
+}
+
+// AttachThumbPipeline wires the pipeline so vfUpload can dispatch a
+// generation job per uploaded file.
+func (h *Manager) AttachThumbPipeline(p ThumbPipeline) {
+	h.Thumbs = p
 }
 
 // NewManager constructs a Manager handler.
@@ -57,6 +76,23 @@ func (h *Manager) removeFromIndex(ctx context.Context, id int64) {
 		return
 	}
 	_ = h.Index.DeleteNode(ctx, id)
+}
+
+// dispatchThumb fires the thumbnail pipeline asynchronously after an
+// upload commits. Detached context: the HTTP request returns before
+// the generation finishes, so we don't want a client disconnect to
+// abort an office→PDF conversion mid-flight. Errors are swallowed —
+// the pipeline already logs internally and the grid view falls back
+// to the generic icon when no thumb is ready.
+func (h *Manager) dispatchThumb(n *model.Node) {
+	if h.Thumbs == nil || n == nil {
+		return
+	}
+	go func(node *model.Node) {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+		_ = h.Thumbs.GenerateThumb(ctx, node)
+	}(n)
 }
 
 // List dispatches between two query shapes on the same path:

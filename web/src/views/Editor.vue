@@ -17,7 +17,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
-import { PreviewModal, type FileNode } from '@brftech/filex-core';
+import { PreviewModal, isExternalUsable, type FileNode, type ExternalServiceStatus } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 
 const { locale } = useI18n();
@@ -36,6 +36,41 @@ function authHeaders(): Record<string, string> {
   const token = readBearerToken();
   if (token) return { Authorization: `Bearer ${token}` };
   return {};
+}
+
+// Capability probe — drives drawio + onlyoffice prop wiring. Without
+// this fetch the standalone editor route would mount PreviewModal with
+// drawioUrl=undefined and the "viewer.drawio.disabled" fallback would
+// fire on every diagram open even when the operator has configured
+// FILEX_DRAWIO_URL. The FileExplorer SFC already does this dance; the
+// standalone editor route needs its own copy because it doesn't host
+// the explorer's capability store.
+const onlyOfficeBase = ref<string | null>(null);
+const drawioUrl = ref<string | null>(null);
+async function loadCapabilities(): Promise<void> {
+  try {
+    const res = await fetch('/api/files/capabilities', {
+      credentials: 'same-origin',
+      headers: authHeaders(),
+    });
+    if (!res.ok) return;
+    const caps = (await res.json()) as {
+      onlyoffice_url?: string;
+      drawio_url?: string;
+      external?: {
+        onlyoffice?: ExternalServiceStatus;
+        drawio?: ExternalServiceStatus;
+      };
+    };
+    if (caps.external?.onlyoffice && isExternalUsable(caps.external.onlyoffice)) {
+      onlyOfficeBase.value = caps.onlyoffice_url || null;
+    }
+    if (caps.external?.drawio && isExternalUsable(caps.external.drawio)) {
+      drawioUrl.value = caps.drawio_url || null;
+    }
+  } catch {
+    /* keep both null — viewers will surface a "not configured" fallback */
+  }
 }
 
 const node = computed<FileNode | null>(() => {
@@ -77,6 +112,7 @@ function closeWindow() {
 onMounted(() => {
   const n = node.value;
   if (n) document.title = `${n.basename} — filex`;
+  void loadCapabilities();
 });
 </script>
 
@@ -89,7 +125,9 @@ onMounted(() => {
       :open-mode="mode"
       :preview-url="previewUrl"
       :download-url="downloadUrl"
+      :only-office-base="onlyOfficeBase"
       :only-office-config-endpoint="'/api/files/onlyoffice/config'"
+      :drawio-url="drawioUrl"
       :save-text-endpoint="'/api/files/save-text'"
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
