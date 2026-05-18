@@ -247,11 +247,13 @@ type ExternalService struct {
 }
 
 // ShareWithMeta is the admin-list row that joins shares + creator email +
-// node path so the admin UI doesn't have to issue N follow-up queries.
+// node path + storage name so the admin UI doesn't have to issue N
+// follow-up queries.
 type ShareWithMeta struct {
 	Share        *model.Share `json:"share"`
 	CreatorEmail string       `json:"creator_email,omitempty"`
 	NodePath     string       `json:"node_path,omitempty"`
+	StorageName  string       `json:"storage_name,omitempty"`
 }
 
 // AuditEntryWithUser is an audit row joined with the user.email column

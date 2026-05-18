@@ -632,10 +632,11 @@ func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly 
 	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT s.id, s.node_id, s.token, COALESCE(s.pin_hash,''), s.expires_at, s.max_downloads, s.download_count, s.created_by, s.created_at,
-		        COALESCE(u.email,''), COALESCE(n.path,'')
+		        COALESCE(u.email,''), COALESCE(n.path,''), COALESCE(st.name,'')
 		 FROM shares s
-		 LEFT JOIN users u ON u.id=s.created_by
-		 LEFT JOIN nodes n ON n.id=s.node_id
+		 LEFT JOIN users u    ON u.id=s.created_by
+		 LEFT JOIN nodes n    ON n.id=s.node_id
+		 LEFT JOIN storages st ON st.id=n.storage_id
 		 WHERE `+whereSQL+` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
@@ -644,12 +645,12 @@ func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly 
 	var out []*db.ShareWithMeta
 	for rows.Next() {
 		sh := &model.Share{}
-		var creatorEmail, nodePath string
-		if err := rows.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt, &creatorEmail, &nodePath); err != nil {
+		var creatorEmail, nodePath, storageName string
+		if err := rows.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt, &creatorEmail, &nodePath, &storageName); err != nil {
 			return nil, 0, err
 		}
 		sh.HasPin = sh.PinHash != ""
-		out = append(out, &db.ShareWithMeta{Share: sh, CreatorEmail: creatorEmail, NodePath: nodePath})
+		out = append(out, &db.ShareWithMeta{Share: sh, CreatorEmail: creatorEmail, NodePath: nodePath, StorageName: storageName})
 	}
 	return out, total, rows.Err()
 }

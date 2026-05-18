@@ -34,13 +34,14 @@ const showRevoke = ref<Share | null>(null);
 const showDelete = ref<Share | null>(null);
 const busyId = ref<number | null>(null);
 
-// Admin list rows come back as { share: Share, creator_email, node_path }
-// from the backend's `ShareWithMeta` envelope. Helper unwraps either
-// shape so the template can stay terse.
+// Admin list rows come back as { share: Share, creator_email, node_path,
+// storage_name } from the backend's `ShareWithMeta` envelope. Helper
+// unwraps either shape so the template can stay terse.
 interface ShareRow {
   share?: Share;
   creator_email?: string;
   node_path?: string;
+  storage_name?: string;
   [k: string]: unknown;
 }
 function shareOf(row: unknown): Share {
@@ -100,16 +101,25 @@ async function remove() {
 
 const columns = computed<Column<Share>[]>(() => [
   { key: 'token', label: t('shares.fields.token'), cell: 'slot' },
-  { key: 'storage_name', label: t('shares.fields.storage') },
+  {
+    key: 'storage_name',
+    label: t('shares.fields.storage'),
+    format: (r) => (r as unknown as ShareRow).storage_name || '—',
+  },
   { key: 'path', label: t('shares.fields.path'), cell: 'slot' },
   { key: 'expires_at', label: t('shares.fields.expires'), cell: 'slot' },
   {
     key: 'download_count',
     label: t('shares.fields.downloads'),
     align: 'right',
-    format: (r) => String(r.download_count),
+    format: (r) => {
+      const s = shareOf(r);
+      const max = s.max_downloads ?? null;
+      const cur = s.download_count ?? 0;
+      return max ? `${cur} / ${max}` : String(cur);
+    },
   },
-  { key: 'created_by', label: t('shares.fields.creator') },
+  { key: 'creator', label: t('shares.fields.creator'), cell: 'slot' },
   { key: 'actions', label: t('common.actions'), cell: 'slot', align: 'right', width: '120px' },
 ]);
 
@@ -163,7 +173,7 @@ onMounted(load);
 
       <template #cell-creator="{ row }">
         <span class="text-xs text-zinc-500 dark:text-zinc-400">
-          {{ (row as ShareRow).creator_email || '—' }}
+          {{ (row as ShareRow).creator_email || ('#' + (shareOf(row).created_by ?? '?')) }}
         </span>
       </template>
 

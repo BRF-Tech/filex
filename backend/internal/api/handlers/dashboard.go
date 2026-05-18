@@ -34,6 +34,7 @@ type StorageSummary struct {
 	MountPath      string `json:"mount_path"`
 	Enabled        bool   `json:"enabled"`
 	TotalFiles     int64  `json:"total_files"`
+	TotalBytes     int64  `json:"total_bytes"`
 	LastSyncAt     any    `json:"last_sync_at,omitempty"`
 	LastSyncStatus string `json:"last_sync_status,omitempty"`
 	State          string `json:"state"` // ok | stale | error | running
@@ -54,6 +55,8 @@ type Response struct {
 	TotalUsers     int64               `json:"total_users"`
 	ActiveSessions int64               `json:"active_sessions"`
 	QueueDepth     int                 `json:"queue_depth"`
+	TotalFiles     int64               `json:"total_files"`
+	TotalBytes     int64               `json:"total_bytes"`
 	RecentActivity []*model.AuditEntry `json:"recent_activity"`
 	Capabilities   CapabilitiesShort   `json:"capabilities"`
 }
@@ -68,8 +71,11 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := make([]StorageSummary, 0, len(storages))
+	var aggFiles, aggBytes int64
 	for _, st := range storages {
-		count, _ := h.Store.CountNodesByStorage(ctx, st.ID)
+		count, size, _ := h.Store.StorageStats(ctx, st.ID)
+		aggFiles += count
+		aggBytes += size
 		row := StorageSummary{
 			ID:         st.ID,
 			Name:       st.Name,
@@ -77,6 +83,7 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 			MountPath:  st.MountPath,
 			Enabled:    st.Enabled,
 			TotalFiles: count,
+			TotalBytes: size,
 			State:      "ok",
 		}
 		if last, err := h.Store.GetLastSyncRun(ctx, st.ID); err == nil && last != nil {
@@ -123,6 +130,8 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		TotalUsers:     totalUsers,
 		ActiveSessions: activeSessions,
 		QueueDepth:     queueDepth,
+		TotalFiles:     aggFiles,
+		TotalBytes:     aggBytes,
 		RecentActivity: recent,
 		Capabilities:   capShort,
 	})
