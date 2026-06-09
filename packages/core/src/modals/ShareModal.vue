@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { ShareInfo } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
@@ -50,6 +50,28 @@ async function copy(value: string, toast: string) {
     /* no-op */
   }
 }
+
+// Wrap a value in single quotes for safe paste into a POSIX shell —
+// embedded single quotes become the standard '\'' dance.
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+// One-line curl that downloads the shared file straight onto a server.
+// The PIN (if any) rides in the querystring — HandleDownload accepts
+// ?pin=, and -L follows the 302 to the presigned URL for S3 storages.
+const cliCommand = computed(() => {
+  const sh = props.share;
+  if (!sh) return '';
+  let url = sh.url;
+  if (sh.password_pin) {
+    url += (url.includes('?') ? '&' : '?') + 'pin=' + encodeURIComponent(sh.password_pin);
+  }
+  // Prefer an explicit output name; fall back to the server's
+  // Content-Disposition filename (-OJ) when we don't know it.
+  const target = sh.filename ? `-o ${shQuote(sh.filename)} ` : '-OJ ';
+  return `curl -fSL ${target}${shQuote(url)}`;
+});
 </script>
 
 <template>
@@ -86,6 +108,15 @@ async function copy(value: string, toast: string) {
           <div class="fe-share-result__copy">
             <input :value="share.password_pin" readonly class="fe-input fe-input--mono" />
             <button type="button" class="fe-btn" @click="copy(share.password_pin, t('modal.share.pin_copied'))">
+              {{ t('modal.share.copy') }}
+            </button>
+          </div>
+        </div>
+        <div class="fe-share-result__row">
+          <label>CLI</label>
+          <div class="fe-share-result__copy">
+            <input :value="cliCommand" readonly class="fe-input fe-input--mono" />
+            <button type="button" class="fe-btn" @click="copy(cliCommand, t('modal.share.cli_copied'))">
               {{ t('modal.share.copy') }}
             </button>
           </div>

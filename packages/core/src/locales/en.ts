@@ -48,6 +48,7 @@ export const en: Record<string, string> = {
   'modal.share.copy': 'Copy',
   'modal.share.url_copied': 'Link copied',
   'modal.share.pin_copied': 'PIN copied',
+  'modal.share.cli_copied': 'CLI command copied',
 
   'upload.progress': 'Uploading',
   'upload.done': 'Done',

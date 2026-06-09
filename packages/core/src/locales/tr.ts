@@ -48,6 +48,7 @@ export const tr: Record<string, string> = {
   'modal.share.copy': 'Kopyala',
   'modal.share.url_copied': 'Link kopyalandı',
   'modal.share.pin_copied': 'PIN kopyalandı',
+  'modal.share.cli_copied': 'CLI komutu kopyalandı',
 
   'upload.progress': 'Yükleniyor',
   'upload.done': 'Tamamlandı',
