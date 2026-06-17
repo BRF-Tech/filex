@@ -141,6 +141,7 @@ type ExtServices struct {
 	OnlyOffice OnlyOfficeConfig `yaml:"onlyoffice"`
 	Drawio     DrawioConfig     `yaml:"drawio"`
 	Mermaid    MermaidConfig    `yaml:"mermaid"`
+	Convert    ConvertConfig    `yaml:"convert"`
 }
 
 // OnlyOfficeConfig — Document Server URL + JWT secret.
@@ -151,6 +152,11 @@ type OnlyOfficeConfig struct {
 
 // DrawioConfig — embed URL.
 type DrawioConfig struct {
+	URL string `yaml:"url"`
+}
+
+// ConvertConfig — universal converter (p2r3/convert fork) embed URL.
+type ConvertConfig struct {
 	URL string `yaml:"url"`
 }
 
@@ -354,6 +360,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DRAWIO_URL"); v != "" {
 		c.ExternalServices.Drawio.URL = v
+	}
+	if v := os.Getenv("FILEX_CONVERT_URL"); v != "" {
+		c.ExternalServices.Convert.URL = v
 	}
 	if v := os.Getenv("FILEX_MERMAID_URL"); v != "" {
 		c.ExternalServices.Mermaid.URL = v

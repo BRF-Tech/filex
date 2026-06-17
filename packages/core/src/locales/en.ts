@@ -12,6 +12,7 @@ export const en: Record<string, string> = {
   'ctx.open': 'Open',
   'ctx.preview': 'Preview',
   'ctx.download': 'Download',
+  'ctx.convert': 'Convert',
   'ctx.rename': 'Rename',
   'ctx.delete': 'Delete',
   'ctx.delete_perm': 'Delete Permanently',

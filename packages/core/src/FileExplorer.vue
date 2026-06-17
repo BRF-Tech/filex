@@ -48,6 +48,7 @@ import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import ShareModal from './modals/ShareModal.vue';
 import PreviewModal from './modals/PreviewModal.vue';
+import ConvertModal from './modals/ConvertModal.vue';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -269,6 +270,13 @@ const effectiveDrawioUrl = computed<string | null>(() => {
   return capabilitiesData.value?.drawio_url || null;
 });
 
+// Universal converter (p2r3/convert fork). convert_url is only populated by
+// the backend when the "convert" external service is enabled, so a simple
+// presence check is enough gating.
+const effectiveConvertUrl = computed<string | null>(
+  () => props.config.convertBase || capabilitiesData.value?.convert_url || null,
+);
+
 // Upload
 const uploadJobs = ref<UploadJob[]>([]);
 const fileInputEl = ref<HTMLInputElement | null>(null);
@@ -284,6 +292,8 @@ const shareTarget = ref<FileNode | null>(null);
 const activeShare = ref<(ShareInfo & { url: string; filename?: string }) | null>(null);
 const previewTarget = ref<FileNode | null>(null);
 const previewMode = ref<'edit' | 'view'>('edit');
+const showConvert = ref(false);
+const convertTarget = ref<FileNode | null>(null);
 
 // Context menu
 const ctxRef = ref<InstanceType<typeof ContextMenu> | null>(null);
@@ -851,6 +861,7 @@ const contextActions = computed<ContextAction[]>(() => {
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
+    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value, disabled: !isFile },
     { key: 'share', label: t('ctx.share'), icon: '🔗', hidden: !single, disabled: !single },
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '' },
@@ -891,6 +902,9 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
       break;
     case 'download':
       if (targets[0]) downloadFile(targets[0]);
+      break;
+    case 'convert':
+      if (targets[0]) openConvert(targets[0]);
       break;
     case 'share':
       if (targets[0]) openShare(targets[0]);
@@ -1048,6 +1062,16 @@ function openShare(n: FileNode) {
   showShare.value = true;
 }
 
+function openConvert(n: FileNode) {
+  convertTarget.value = n;
+  showConvert.value = true;
+}
+
+function onConvertDone(name: string) {
+  flashToast(locale.value === 'en' ? `Converted → ${name}` : `Dönüştürüldü → ${name}`);
+  void load();
+}
+
 async function submitShare(payload: {
   password: boolean;
   expires_at: string | null;
@@ -1092,11 +1116,14 @@ async function uploadFiles(list: File[]) {
   if (list.length === 0) return;
   const canChunk = !!(api.endpoints.uploadInit && api.endpoints.uploadFinalize);
   for (const f of list) {
-    if (!canChunk || f.size < 10 * 1024 * 1024) {
-      await legacyUpload(f);
-      continue;
+    // Chunked (S3 multipart) only when the endpoints exist AND the file is
+    // large. If chunked isn't viable (storage has no multipart support —
+    // e.g. the local driver — or init errors out) fall back to the legacy
+    // single-POST upload, which works for any storage / file size.
+    if (canChunk && f.size >= 10 * 1024 * 1024) {
+      if (await chunkedUpload(f)) continue;
     }
-    await chunkedUpload(f);
+    await legacyUpload(f);
   }
   await load();
 }
@@ -1112,7 +1139,14 @@ async function legacyUpload(file: File) {
   }
 }
 
-async function chunkedUpload(file: File) {
+/**
+ * Attempt an S3 multipart (chunked) upload. Returns `true` on success,
+ * `false` when the storage can't do multipart (local driver, init 4xx/5xx)
+ * so the caller can transparently fall back to the legacy single-POST
+ * upload. On failure the progress placeholder is removed — no stuck error
+ * row, no error toast, because the fallback path will report any real error.
+ */
+async function chunkedUpload(file: File): Promise<boolean> {
   const placeholder: UploadJob = {
     id: crypto.randomUUID(),
     file,
@@ -1125,8 +1159,8 @@ async function chunkedUpload(file: File) {
   };
   uploadJobs.value = [...uploadJobs.value, placeholder];
 
-  await chunked
-    .uploadFile({
+  try {
+    await chunked.uploadFile({
       path: qualify(currentPath.value),
       file,
       onProgress: (job) => {
@@ -1142,15 +1176,12 @@ async function chunkedUpload(file: File) {
           });
         }
       },
-      onError: (job, err) => {
-        void job;
-        emit('error', {
-          message: err.message,
-          context: { op: 'upload', file: file.name },
-        });
-      },
-    })
-    .catch(() => {});
+    });
+    return true;
+  } catch {
+    uploadJobs.value = uploadJobs.value.filter((j) => j.id !== placeholder.id);
+    return false;
+  }
 }
 
 const dragCounter = ref(0);
@@ -1533,6 +1564,15 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :pdf-save-url="props.config.pdfSaveUrl || null"
       :viewer-base-url="props.config.viewerBaseUrl || null"
       @close="showPreview = false"
+    />
+    <ConvertModal
+      v-if="showConvert && convertTarget && effectiveConvertUrl"
+      :convert-url="effectiveConvertUrl"
+      :file-name="convertTarget?.basename || convertTarget?.path || ''"
+      :fetch-bytes="() => api.fetchArrayBuffer(convertTarget?.path ?? '')"
+      :upload="(f) => api.uploadMultipart(qualify(currentPath), [f]).then(() => {})"
+      @close="showConvert = false"
+      @done="onConvertDone"
     />
 
     <!-- Recently-opened tray. Anchored to the toolbar trigger via fixed

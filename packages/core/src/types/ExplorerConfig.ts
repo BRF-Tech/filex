@@ -157,6 +157,9 @@ export interface ExplorerConfig {
   /** Drawio iframe base. */
   drawioBase?: string;
 
+  /** Universal converter (p2r3/convert fork) iframe base, e.g. `https://fm.brf.sh/convert`. */
+  convertBase?: string;
+
   /**
    * Drawio embed URL (full URL to the embed endpoint). Defaults to
    * `https://embed.diagrams.net`. The DrawioViewer iframes this with

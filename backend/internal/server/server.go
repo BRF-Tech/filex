@@ -449,6 +449,7 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret},
 		{name: "drawio", url: cfg.ExternalServices.Drawio.URL, secret: ""},
 		{name: "mermaid", url: cfg.ExternalServices.Mermaid.URL, secret: ""},
+		{name: "convert", url: cfg.ExternalServices.Convert.URL, secret: ""},
 	}
 	for _, d := range defaults {
 		// Only seed when missing; don't clobber operator-edited rows.

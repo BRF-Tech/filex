@@ -425,6 +425,7 @@ export function useFileApi(config: ExplorerConfig) {
         upload_limit_mb: 1024,
         onlyoffice_url: config.onlyOfficeBase ?? null,
         drawio_url: config.drawioBase ?? null,
+        convert_url: config.convertBase ?? null,
       };
     }
     return jsonFetch<Capabilities>(endpoints.capabilities);

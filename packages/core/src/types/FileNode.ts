@@ -72,6 +72,7 @@ export interface Capabilities {
   libreoffice?: boolean;
   onlyoffice_url?: string | null;
   drawio_url?: string | null;
+  convert_url?: string | null;
   max_chunk_mb?: number;
   upload_limit_mb?: number;
   external?: {

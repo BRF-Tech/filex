@@ -12,6 +12,7 @@ export const tr: Record<string, string> = {
   'ctx.open': 'Aç',
   'ctx.preview': 'Önizle',
   'ctx.download': 'İndir',
+  'ctx.convert': 'Dönüştür',
   'ctx.rename': 'Yeniden Adlandır',
   'ctx.delete': 'Sil',
   'ctx.delete_perm': 'Kalıcı Olarak Sil',

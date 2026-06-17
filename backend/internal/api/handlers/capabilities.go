@@ -46,6 +46,7 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		}(),
 		"onlyoffice_url": "",
 		"drawio_url":     "",
+		"convert_url":    "",
 	}
 	if c.ChunkSize > 0 {
 		flat["max_chunk_mb"] = c.ChunkSize / mb
@@ -55,6 +56,9 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	if dr, ok := c.External["drawio"]; ok && dr.Enabled {
 		flat["drawio_url"] = dr.URL
+	}
+	if cv, ok := c.External["convert"]; ok && cv.Enabled {
+		flat["convert_url"] = cv.URL
 	}
 
 	// Marshal the rich snapshot to a generic map so we can layer the
