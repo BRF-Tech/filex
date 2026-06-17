@@ -758,6 +758,9 @@ async function onToolbarAction(key: ToolbarAction) {
     case 'download':
       if (sel[0] && sel[0].type === 'file') downloadFile(sel[0]);
       break;
+    case 'convert':
+      if (sel[0] && sel[0].type === 'file') openConvert(sel[0]);
+      break;
     case 'share':
       if (sel[0]) openShare(sel[0]);
       break;
@@ -1430,6 +1433,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :trash-active="trashActive"
       :selection-mode="selectionMode"
       :paste-enabled="!!clipboard.mode"
+      :convert-enabled="!!effectiveConvertUrl"
       :can-go-up="canGoUp"
       :at-virtual-root="atVirtualRoot"
       :locale="locale"

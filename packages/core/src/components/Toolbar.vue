@@ -22,6 +22,7 @@ export type ToolbarAction =
   | 'open'
   | 'preview'
   | 'download'
+  | 'convert'
   | 'share'
   | 'rename'
   | 'delete'
@@ -42,6 +43,8 @@ const props = defineProps<{
   selectionMode?: SelectionMode;
   /** True when clipboard has cut/copy items, so we can enable Paste. */
   pasteEnabled?: boolean;
+  /** True when the universal converter (FILEX_CONVERT_URL) is available. */
+  convertEnabled?: boolean;
   /**
    * True when the current dir has a parent the user can step up to.
    * Hidden at storage root because there's nothing above it.
@@ -117,6 +120,9 @@ const actions = computed<Array<{ key: ToolbarAction; label: string; icon: string
         { key: 'open', label: t('ctx.open'), icon: '↗' },
         { key: 'preview', label: t('ctx.preview'), icon: '👁' },
         { key: 'download', label: t('ctx.download'), icon: '⬇' },
+        ...(props.convertEnabled
+          ? [{ key: 'convert' as ToolbarAction, label: t('ctx.convert'), icon: '🔄' }]
+          : []),
         { key: 'share', label: t('ctx.share'), icon: '🔗' },
         { key: 'rename', label: t('ctx.rename'), icon: '✎' },
         { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true },
