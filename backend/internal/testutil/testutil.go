@@ -92,6 +92,22 @@ func SeedAdmin(t *testing.T, store db.Store) (string, string) {
 	return email, password
 }
 
+// SeedAdminUser creates an admin user and returns its (id, email). Useful
+// for tests that need the user_id to bind an API token.
+func SeedAdminUser(t *testing.T, store db.Store) (int64, string) {
+	t.Helper()
+	email := "admin2@test.local"
+	hash, err := authlocal.HashPassword("TestAdminPass!1")
+	if err != nil {
+		t.Fatalf("testutil: hash: %v", err)
+	}
+	u, err := store.CreateUser(context.Background(), email, hash, model.RoleAdmin, "en", "UTC")
+	if err != nil {
+		t.Fatalf("testutil: create admin: %v", err)
+	}
+	return u.ID, email
+}
+
 // SeedRegularUser creates a non-admin user and returns its credentials.
 func SeedRegularUser(t *testing.T, store db.Store, email, password string) {
 	t.Helper()

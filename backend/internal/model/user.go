@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Role names — also stored in DB roles table.
 const (
@@ -56,6 +59,39 @@ type Session struct {
 	IP        string    `json:"ip,omitempty"`
 	UserAgent string    `json:"user_agent,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// APIToken is a long-lived bearer credential for non-interactive callers
+// (AI agents, the work.brf.sh FilexClient, the MCP server). It is bound to
+// a user so every authenticated call inherits that user's role. The
+// plaintext value is shown only once at creation; only TokenHash (sha256
+// hex) is persisted.
+type APIToken struct {
+	ID         int64      `json:"id"`
+	UserID     int64      `json:"user_id"`
+	Label      string     `json:"label"`
+	TokenHash  string     `json:"-"`
+	Scopes     string     `json:"scopes"` // comma-separated allow-list; "" == all
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// HasScope reports whether the token grants `want`. An empty Scopes field
+// means "all scopes" (full access for the bound user's role).
+func (t *APIToken) HasScope(want string) bool {
+	if t == nil {
+		return false
+	}
+	if strings.TrimSpace(t.Scopes) == "" {
+		return true
+	}
+	for _, s := range strings.Split(t.Scopes, ",") {
+		if strings.TrimSpace(s) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Role definition (DB row).

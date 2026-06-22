@@ -298,6 +298,15 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Put("/{key}", seth.Set)
 			})
 
+			// AI / MCP / FilexClient bearer tokens. POST returns the
+			// plaintext token ONCE; only its sha256 hash is stored.
+			aiTokensH := handlers.NewAITokens(d.Store)
+			r.Route("/ai-tokens", func(r chi.Router) {
+				r.Get("/", aiTokensH.List)
+				r.Post("/", aiTokensH.Create)
+				r.Delete("/{id}", aiTokensH.Delete)
+			})
+
 			r.Route("/audit", func(r chi.Router) {
 				r.Get("/", auditH.List)
 			})
@@ -378,6 +387,34 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/settings", replicaH.UpdateSettings)
 			})
 		})
+	})
+
+	// ────── AI / MCP (token-authenticated) ──────
+	// Token-only namespace consumed by AI agents, the work.brf.sh
+	// FilexClient, and MCP clients. auth.APITokenMiddleware validates
+	// X-Filex-Token / Bearer and attaches the bound principal + token;
+	// RequireScope gates verbs (read/write/delete/mcp). A token with no
+	// scopes set grants everything.
+	aiH := handlers.NewAI(d.Store, d.StorageResolver)
+	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver)
+	r.Route("/api/ai", func(r chi.Router) {
+		r.Use(auth.APITokenMiddleware(d.Store))
+
+		// Read surface.
+		r.With(auth.RequireScope("read")).Get("/files", aiH.List)
+		r.With(auth.RequireScope("read")).Get("/info", aiH.Info)
+		r.With(auth.RequireScope("read")).Get("/download", aiH.Download)
+		r.With(auth.RequireScope("read")).Get("/search", aiH.Search)
+
+		// Write surface.
+		r.With(auth.RequireScope("write")).Post("/upload", aiH.Upload)
+		r.With(auth.RequireScope("write")).Post("/mkdir", aiH.Mkdir)
+		r.With(auth.RequireScope("write")).Post("/move", aiH.Move)
+		r.With(auth.RequireScope("delete")).Post("/delete", aiH.Delete)
+
+		// MCP streamable HTTP (JSON-RPC). Both POST (requests) and GET
+		// (SSE stream open) are part of the transport contract.
+		r.With(auth.RequireScope("mcp")).Handle("/mcp", aiMCP)
 	})
 
 	// ────── healthz ──────

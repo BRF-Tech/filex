@@ -16,6 +16,7 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/api"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
+	authapitoken "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/apitoken"
 	authldap "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/ldap"
 	authlocal "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/local"
 	authoidc "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/oidc"
@@ -165,6 +166,18 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		default:
 			slog.Warn("unknown auth driver", slog.String("name", name))
 		}
+	}
+
+	// API-token driver is always enabled (independent of cfg.Auth.Drivers)
+	// so AI agents / the work.brf.sh FilexClient / MCP clients can
+	// authenticate against /api/files and /api/ai with X-Filex-Token or a
+	// Bearer token. Tokens are minted from /api/admin/ai-tokens.
+	{
+		atDrv := authapitoken.New(store)
+		if err := atDrv.Init(ctx, nil); err != nil {
+			return nil, fmt.Errorf("auth init api-token: %w", err)
+		}
+		enabled = append(enabled, atDrv)
 	}
 	auth.SetEnabled(enabled)
 

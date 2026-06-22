@@ -581,6 +581,73 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 	return err
 }
 
+// ─────────────────── API tokens ───────────────────
+
+func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, expires_at) VALUES (?,?,?,?,?)`,
+		t.UserID, t.Label, t.TokenHash, t.Scopes, t.ExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	t.ID = id
+	t.CreatedAt = time.Now()
+	return t, nil
+}
+
+func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=?`,
+		tokenHash)
+	return scanAPIToken(row)
+}
+
+func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.APIToken
+	for rows.Next() {
+		t, err := scanAPIToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id=?`, id)
+	return err
+}
+
+// scanAPIToken reads one api_tokens row. Accepts both *sql.Row and *sql.Rows
+// via the rowScanner interface.
+func scanAPIToken(row rowScanner) (*model.APIToken, error) {
+	t := &model.APIToken{}
+	var lastUsed, expires sql.NullTime
+	if err := row.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &lastUsed, &expires, &t.CreatedAt); err != nil {
+		return nil, err
+	}
+	if lastUsed.Valid {
+		t.LastUsedAt = &lastUsed.Time
+	}
+	if expires.Valid {
+		t.ExpiresAt = &expires.Time
+	}
+	return t, nil
+}
+
 // ─────────────────── Shares ───────────────────
 
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {

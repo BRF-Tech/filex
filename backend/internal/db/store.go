@@ -93,6 +93,13 @@ type Store interface {
 	CountActiveSessions(ctx context.Context) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
 
+	// API tokens — long-lived bearer credentials for AI / MCP / FilexClient.
+	CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error)
+	GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error)
+	ListAPITokens(ctx context.Context) ([]*model.APIToken, error)
+	TouchAPIToken(ctx context.Context, id int64) error
+	DeleteAPIToken(ctx context.Context, id int64) error
+
 	// Shares
 	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)
 	GetShareByID(ctx context.Context, id int64) (*model.Share, error)
