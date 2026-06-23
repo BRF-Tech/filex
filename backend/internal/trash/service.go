@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"strconv"
 	"time"
 
@@ -171,9 +172,12 @@ func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int)
 		}
 		entry.StorageName = storageNames[n.StorageID]
 		// Prefer the original path stashed in storage_key; fall back
-		// to current `path` (legacy rows pre-`.filex-trash/`).
+		// to current `path` (legacy rows pre-`.filex-trash/`). Show the
+		// ORIGINAL basename, not the `<unix>-<rand>__name` trash-key the
+		// node was renamed to on soft-delete.
 		if n.StorageKey != "" {
 			entry.Path = n.StorageKey
+			entry.Name = path.Base(n.StorageKey)
 		} else {
 			entry.Path = n.Path
 		}
