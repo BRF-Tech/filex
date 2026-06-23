@@ -28,6 +28,7 @@ import type {
   UploadLimits,
   Capabilities,
   ArchiveEntry,
+  TrashEntry,
 } from '../types/FileNode';
 
 /** Server-side PendingOp DTO (mirror of Modules\FishApp\Models\PendingOp::toApiArray). */
@@ -108,6 +109,9 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     onlyOfficeConfig: derive(config.onlyOfficeConfig, '/api/files/onlyoffice/config'),
     saveText: derive(config.saveText, '/api/files/save-text'),
     restore: derive(config.restore, '/api/files/restore'),
+    // filex trash: list soft-deleted nodes + restore one by node id.
+    trashList: derive(config.trashList, '/api/files/manager/trash'),
+    trashRestore: derive(config.trashRestore, '/api/files/manager/restore'),
   };
 }
 
@@ -301,6 +305,38 @@ export function useFileApi(config: ExplorerConfig) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source }),
     });
+  }
+
+  /** filex trash listing — soft-deleted nodes across (or within) storages. */
+  async function listTrash(storageName?: string): Promise<{ entries: TrashEntry[]; total: number }> {
+    if (!endpoints.trashList) throw new Error('trashList endpoint not configured');
+    const base = endpoints.trashList;
+    const sep = base.includes('?') ? '&' : '?';
+    const url = storageName ? `${base}${sep}storage=${encodeURIComponent(storageName)}` : base;
+    return jsonFetch<{ entries: TrashEntry[]; total: number }>(url);
+  }
+
+  /**
+   * Restore soft-deleted nodes by their node id. The filex backend restores
+   * one node per call (`POST {node_id}`), so we fan out and tally successes.
+   */
+  async function restoreIds(ids: number[]): Promise<{ restored: number }> {
+    const url = endpoints.trashRestore;
+    if (!url) throw new Error('trashRestore endpoint not configured');
+    let restored = 0;
+    for (const id of ids) {
+      try {
+        await jsonFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ node_id: id }),
+        });
+        restored++;
+      } catch {
+        /* skip individual failures; report the count that succeeded */
+      }
+    }
+    return { restored };
   }
 
   /**
@@ -508,6 +544,8 @@ export function useFileApi(config: ExplorerConfig) {
     deleteAsync,
     deleteItems,
     restore,
+    listTrash,
+    restoreIds,
     uploadMultipart,
     downloadUrl,
     previewUrl,

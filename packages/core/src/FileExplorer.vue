@@ -123,7 +123,13 @@ const viewMode = customRef<ViewMode>((track, trigger) => {
   };
 });
 const searchQuery = ref('');
-const trashActive = computed(() => currentPath.value.startsWith('fileman/.trash'));
+// trashMode — true while viewing the filex trash (soft-deleted nodes from the
+// backend trash endpoint), entered by opening the virtual `.trash` row and
+// exited by any normal navigation (load() resets it). Replaces a brittle
+// `currentPath.startsWith('fileman/.trash')` check that never matched the
+// filex backend's storage layout, so trash always looked empty.
+const trashMode = ref(false);
+const trashActive = computed(() => trashMode.value);
 const locale = computed(() => props.config.locale || 'tr');
 
 // canGoUp/goUp — toolbar's "↑ Up one level" button. In single-storage
@@ -369,6 +375,9 @@ function virtualStorageRows(): FileNode[] {
 
 async function load(path?: string) {
   loading.value = true;
+  // Any normal navigation exits trash mode (the trash view is entered only
+  // by opening the virtual `.trash` row, which calls loadTrash()).
+  trashMode.value = false;
   try {
     const requested = path ?? currentPath.value ?? '';
 
@@ -432,6 +441,42 @@ async function load(path?: string) {
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
   return idx === -1 ? p : p.slice(idx + 3);
+}
+
+// loadTrash — show the backend trash (soft-deleted nodes) as a flat listing.
+// Entered by opening the virtual `.trash` row. Each row keeps its node `id`
+// so restore can target it. Permanent delete is admin-only / auto-purge, so
+// the only mutation offered here is Restore.
+async function loadTrash() {
+  loading.value = true;
+  trashMode.value = true;
+  selection.clear();
+  try {
+    const { entries } = await api.listTrash();
+    files.value = entries.map(
+      (e) =>
+        ({
+          type: 'file',
+          id: e.id,
+          path: e.storage_name ? `${e.storage_name}://${e.path}` : e.path,
+          basename: e.name,
+          extension: e.name.includes('.') ? e.name.split('.').pop() || '' : '',
+          storage: e.storage_name || '',
+          visibility: 'private',
+          file_size: e.size,
+          mime_type: e.mime || '',
+          extra_metadata: { deleted_at: e.deleted_at, ttl_days: e.ttl_days ?? null },
+        }) as unknown as FileNode,
+    );
+    dirname.value = '.trash';
+    currentPath.value = '.trash';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    emit('error', { message: msg, context: { op: 'trash-list' } });
+    flashToast(msg);
+  } finally {
+    loading.value = false;
+  }
 }
 
 /**
@@ -620,6 +665,11 @@ const TEXT_CODE_EXTS = new Set([
 ]);
 
 function openNode(n: FileNode) {
+  // The virtual `.trash` row opens the backend trash listing, not a real dir.
+  if (n.basename === '.trash') {
+    void loadTrash();
+    return;
+  }
   if (n.type === 'dir') {
     // Multi-storage virtual rows have a bare path (`s3-test`); pass
     // them straight to load() which will treat them as the wire form
@@ -676,11 +726,23 @@ function previewModeForExt(ext: string): 'view' | 'edit' {
 }
 
 async function restoreSelection(targets?: FileNode[]) {
-  if (!api.endpoints.restore) return;
   const nodes = targets ?? selection.nodes.value;
-  const items = nodes.map((n) => n.path); // qualified
-  if (items.length === 0) return;
+  if (nodes.length === 0) return;
   try {
+    // filex trash: restore by node id, then refresh the trash listing.
+    if (trashMode.value) {
+      const ids = nodes
+        .map((n) => (n as { id?: number }).id)
+        .filter((x): x is number => typeof x === 'number');
+      const { restored } = await api.restoreIds(ids);
+      flashToast(`${restored} öğe geri getirildi`);
+      selection.clear();
+      await loadTrash();
+      return;
+    }
+    // Legacy path-based restore (brf-mono `.trash/` convention).
+    if (!api.endpoints.restore) return;
+    const items = nodes.map((n) => n.path); // qualified
     const { restored } = await api.restore(items);
     flashToast(`${restored} öğe geri getirildi`);
     selection.clear();
@@ -1038,6 +1100,14 @@ async function submitRename(name: string) {
 }
 
 async function confirmDelete() {
+  // In the trash view, items are already soft-deleted. Permanent removal is
+  // admin-only (and the backend auto-purges after the retention window), so
+  // offer Restore here rather than a delete that would just re-trash a path.
+  if (trashMode.value) {
+    showDelete.value = false;
+    flashToast('Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.');
+    return;
+  }
   const items = selection.nodes.value.map((n) => n.path);
   if (items.length === 0) {
     showDelete.value = false;

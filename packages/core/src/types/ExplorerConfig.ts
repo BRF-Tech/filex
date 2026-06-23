@@ -66,6 +66,8 @@ export interface EndpointMap {
   onlyOfficeConfig: string | null;
   saveText: string | null;
   restore: string | null;
+  trashList: string | null;
+  trashRestore: string | null;
 }
 
 export interface ExplorerConfig {
@@ -138,6 +140,11 @@ export interface ExplorerConfig {
    * "Geri Getir" action shows up in `.trash/` listings.
    */
   restore?: string;
+
+  /** filex trash listing endpoint — `GET → { entries: TrashEntry[] }`. */
+  trashList?: string;
+  /** filex trash restore endpoint — `POST { node_id }`. */
+  trashRestore?: string;
 
   /** Public share base URL — `${shareBase}/${uuid}` */
   shareBase?: string;

@@ -109,6 +109,17 @@ const actions = computed<Array<{ key: ToolbarAction; label: string; icon: string
       { key: 'delete', label: t('ctx.delete_perm'), icon: '🗑', danger: true },
     ];
   }
+  // At the multi-storage virtual root the selectable rows are storage mounts,
+  // not real files — rename/delete/share/etc. would 4xx on the backend. Only
+  // "open" is valid. This MUST mirror FileExplorer's contextActions
+  // `inStorageRoot` branch so the toolbar and the right-click menu never show
+  // a different action set for the same selection. (Bug: the toolbar used to
+  // ignore atVirtualRoot and offered delete/rename/share on a drive.)
+  if (props.atVirtualRoot) {
+    return mode.value === 'single-dir' || mode.value === 'single-file'
+      ? [{ key: 'open', label: t('ctx.open'), icon: '↗' }]
+      : [];
+  }
   switch (mode.value) {
     case 'single-file':
       // `open` first because it's the canonical action — same behaviour

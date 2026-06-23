@@ -117,3 +117,16 @@ export interface ClipboardState {
   items: FileNode[];
   sourcePath: string | null;
 }
+
+/** A soft-deleted node as returned by the filex trash listing endpoint. */
+export interface TrashEntry {
+  id: number;
+  storage_id: number;
+  storage_name?: string;
+  path: string;
+  name: string;
+  size: number;
+  mime?: string;
+  deleted_at: string;
+  ttl_days?: number | null;
+}

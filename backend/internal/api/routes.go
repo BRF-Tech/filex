@@ -91,6 +91,13 @@ func BuildRouter(d *Deps) http.Handler {
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
 	oh := handlers.NewOps(d.Ops, d.Store)
+	if d.Ops != nil {
+		// The async ops worker must mirror its filesystem moves/deletes/copies
+		// into the DB node index (listings read the DB). The manager handler
+		// owns that DB logic, so inject it as the worker's DBSync hook —
+		// without this, async move/delete/copy don't reflect in the UI.
+		d.Ops.SetSync(mh)
+	}
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps)

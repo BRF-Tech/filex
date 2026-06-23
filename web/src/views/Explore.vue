@@ -105,7 +105,7 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     theme: currentTheme.value,
     locale: locale.value === 'en' ? 'en' : 'tr',
     pathPersist: 'localStorage',
-    trashVisible: false,
+    trashVisible: true,
     showInfoPanel: true,
     multiStorageRoot: true,
     storages: storages.items.map((s) => ({

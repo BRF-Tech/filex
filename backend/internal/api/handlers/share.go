@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/md5"
 	cryptoRand "crypto/rand"
@@ -388,6 +389,18 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Folder share → stream every file under it as a ZIP ("download all").
+	// The single-file presign/Read path below can't open a directory as a
+	// byte stream — a shared folder used to 500 here ("read error").
+	if node.Type == model.NodeTypeDirectory {
+		if err := h.streamFolderZip(r.Context(), w, drv, node.Path, node.Name); err != nil {
+			// Mid-stream: headers/bytes may already be sent, so just stop.
+			return
+		}
+		_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
+		return
+	}
+
 	// Use a presigned URL when the driver supports it AND the operator
 	// hasn't opted out via `disable_presign: true` in storage config.
 	// Honor `Capabilities().Presign` so drivers can advertise no-presign
@@ -429,6 +442,54 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
+}
+
+// streamFolderZip walks `root` on the driver and writes every file under it
+// into a ZIP streamed to w. Entry names are relative to `root`, so the archive
+// unpacks into a clean tree. Internal dirs (trash, thumbnails) are skipped, and
+// individually unreadable files are skipped rather than aborting the whole
+// download. The write is streaming — no full buffer — so large folders are fine.
+func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, root, name string) error {
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(name)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	var walk func(dir, prefix string) error
+	walk = func(dir, prefix string) error {
+		objs, err := drv.List(ctx, dir)
+		if err != nil {
+			return err
+		}
+		for _, o := range objs {
+			if o.Name == ".filex-trash" || o.Name == ".thumbs" || o.Name == ".keepdir" {
+				continue
+			}
+			entry := prefix + o.Name
+			switch o.Kind {
+			case storage.KindDirectory:
+				if err := walk(o.Path, entry+"/"); err != nil {
+					return err
+				}
+			case storage.KindFile:
+				rc, err := drv.Read(ctx, o.Path)
+				if err != nil {
+					continue
+				}
+				fw, err := zw.Create(entry)
+				if err != nil {
+					_ = rc.Close()
+					return err
+				}
+				_, _ = io.Copy(fw, rc)
+				_ = rc.Close()
+			}
+		}
+		return nil
+	}
+	return walk(root, "")
 }
 
 // extractPIN returns the PIN from query, header, or POST form.

@@ -10,7 +10,9 @@ package ops
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,11 +61,60 @@ type Op struct {
 type Service struct {
 	db              *sql.DB
 	storageResolver func(int64) (storage.Driver, error)
+	dbsync          DBSync
 
 	wakeup chan struct{}
 	stopMu sync.Mutex
 	stop   chan struct{}
 	stopWg sync.WaitGroup
+}
+
+// DBSync mirrors a completed filesystem operation into the DB node index.
+// Implemented by the manager HTTP handler and injected via SetSync once both
+// are constructed.
+//
+// Without it the worker moves/deletes bytes on disk but leaves the DB cache
+// stale. Directory listings read the DB (Store.ListNodesByParent), so a move
+// would keep showing the file in its old folder and a delete would keep
+// showing the file at all — the exact "move/delete doesn't work" bug. It also
+// lets delete go through the trash (soft-delete) instead of hard-deleting.
+type DBSync interface {
+	// SyncMove updates the moved node's path/parent in the DB.
+	SyncMove(ctx context.Context, storageID int64, src, dst string)
+	// SyncSoftDelete flags the node deleted and retags it to the trash path
+	// (storage_key keeps the original path so Restore works).
+	SyncSoftDelete(ctx context.Context, storageID int64, src, trashRel string)
+	// SyncHardDelete flags the node deleted when the driver could not move it
+	// to trash and had to delete the bytes outright.
+	SyncHardDelete(ctx context.Context, storageID int64, src string)
+	// SyncCopy inserts a DB node for the freshly written copy.
+	SyncCopy(ctx context.Context, storageID int64, src, dst string)
+}
+
+// SetSync wires the DB-sync hook. Call once at boot, before Run.
+func (s *Service) SetSync(d DBSync) { s.dbsync = d }
+
+// TrashPrefix is the in-storage dir soft-deleted files are moved into. It must
+// match the manager handler's const so listings hide it and trash.Service can
+// enumerate/restore. (A single shared const would be ideal, but the handler
+// package imports ops — not the other way round — so we mirror the literal.)
+const TrashPrefix = ".filex-trash"
+
+func randHex6() string {
+	var b [3]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// trashRelFor builds `.filex-trash/<unix>-<rand>__<basename>` for `src`,
+// matching the sync manager handler's trash-key format exactly.
+func trashRelFor(src string) string {
+	s := strings.TrimRight(src, "/")
+	base := s
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		base = s[i+1:]
+	}
+	return fmt.Sprintf("%s/%d-%s__%s", TrashPrefix, time.Now().Unix(), randHex6(), base)
 }
 
 // New returns a Service that talks to the given *sql.DB.
@@ -335,24 +386,58 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src string) error {
 	switch op.Kind {
 	case OpDelete:
+		// Soft-delete: rename the file into `.filex-trash/` and flag the DB
+		// row so it's restorable AND leaves the listing. The async worker
+		// used to hard-delete and never touch the DB, which left the file
+		// both un-trashable and still visible (the listing reads the DB).
+		if mover, ok := drv.(storage.Mover); ok {
+			trashRel := trashRelFor(src)
+			if err := mover.Move(ctx, src, trashRel); err != nil {
+				return err
+			}
+			if s.dbsync != nil {
+				s.dbsync.SyncSoftDelete(ctx, op.StorageID, src, trashRel)
+			}
+			return nil
+		}
+		// Driver can't move — hard delete and just flag the DB row deleted.
 		d, ok := drv.(storage.Deleter)
 		if !ok {
 			return errors.New("driver not deletable")
 		}
-		return d.Delete(ctx, src)
+		if err := d.Delete(ctx, src); err != nil {
+			return err
+		}
+		if s.dbsync != nil {
+			s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
+		}
+		return nil
 	case OpMove:
 		m, ok := drv.(storage.Mover)
 		if !ok {
 			return errors.New("driver not movable")
 		}
-		return m.Move(ctx, src, joinIntoDir(op.Dest, src))
+		dst := joinIntoDir(op.Dest, src)
+		if err := m.Move(ctx, src, dst); err != nil {
+			return err
+		}
+		if s.dbsync != nil {
+			s.dbsync.SyncMove(ctx, op.StorageID, src, dst)
+		}
+		return nil
 	case OpCopy:
 		c, ok := drv.(storage.Copier)
 		if !ok {
 			return errors.New("driver not copyable")
 		}
 		dst := uniqueCopyDest(ctx, drv, src, joinIntoDir(op.Dest, src))
-		return c.Copy(ctx, src, dst)
+		if err := c.Copy(ctx, src, dst); err != nil {
+			return err
+		}
+		if s.dbsync != nil {
+			s.dbsync.SyncCopy(ctx, op.StorageID, src, dst)
+		}
+		return nil
 	}
 	return fmt.Errorf("unknown kind: %s", op.Kind)
 }
