@@ -94,7 +94,8 @@ const loading = ref(false);
 // above it. Security is enforced server-side (X-Filex-Root / token root scope);
 // this is purely the clean-embed presentation. `rootFloor` is the virtual form
 // (`<storage>/<rel>`) used for path comparisons in multi-storage mode.
-const rootFloor = ((props.config.rootPath || '').trim()).replace('://', '/').replace(/^\/+|\/+$/g, '');
+const rootPathProp = (props.config.rootPath || '').trim(); // qualified `<adapter>://<rel>`
+const rootFloor = rootPathProp.replace('://', '/').replace(/^\/+|\/+$/g, '');
 const initialFloorPath = rootFloor || props.config.initialPath || '';
 const currentPath = ref<string>(initialFloorPath);
 const adapter = ref<string>(props.config.defaultAdapter || 'brf');
@@ -1540,6 +1541,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :root-label="adapter"
       :locale="locale"
       :multi-storage-root="multiStorageRoot"
+      :root-path="rootPathProp"
       @navigate="onNavigate"
       @copy-path="onCopyPath"
       @crumb-context="onCrumbContext"

@@ -242,14 +242,6 @@ function fire(key: ToolbarAction) {
       >
         <span class="fe-icon">↻</span>
       </button>
-      <button
-        type="button"
-        class="fe-btn fe-btn--icon-only"
-        :title="locale === 'en' ? 'Recently opened' : 'Son açılanlar'"
-        @click="emit('open-recents')"
-      >
-        <span class="fe-icon">🕒</span>
-      </button>
     </div>
 
     <div class="fe-toolbar__view" role="tablist" aria-label="View">

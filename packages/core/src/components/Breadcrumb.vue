@@ -34,7 +34,29 @@ const props = defineProps<{
    * picker. Storage name then occupies crumb #1 instead of #0.
    */
   multiStorageRoot?: boolean;
+  /**
+   * Root confinement (qualified `<adapter>://<rel>`). When set the breadcrumb
+   * treats this folder as `/`: crumbs above it are hidden, the root crumb is
+   * the confined folder's own name, and the ✏ path editor shows/accepts paths
+   * relative to it (`/`, `/sub`). Pairs with FileExplorer's rootPath clamp.
+   */
+  rootPath?: string;
 }>();
+
+// Confined root parsed into its adapter-relative form ("projeler/acme") and
+// the trailing folder name used as the "/" crumb label.
+const confinedRel = computed(() => {
+  if (!props.rootPath) return '';
+  const r = props.rootPath;
+  const i = r.indexOf('://');
+  return (i >= 0 ? r.slice(i + 3) : r).replace(/^\/+|\/+$/g, '');
+});
+const floorLabel = computed(() => {
+  const rel = confinedRel.value;
+  if (!rel) return props.rootLabel || props.adapter;
+  const parts = rel.split('/');
+  return parts[parts.length - 1] || (props.rootLabel || props.adapter);
+});
 
 const { t } = useLocale(() => props.locale);
 
@@ -58,6 +80,23 @@ const crumbs = computed<Crumb[]>(() => {
   const parts = raw.split('/').filter(Boolean);
 
   const out: Crumb[] = [];
+
+  // Confined: the root folder is the top crumb (its own name), and only the
+  // path BELOW it is walked — segments above the confinement are never shown.
+  if (props.rootPath) {
+    const floor = confinedRel.value;
+    const cur = raw.replace(/^\/+|\/+$/g, '');
+    const below = floor && (cur === floor || cur.startsWith(floor + '/'))
+      ? cur.slice(floor.length).replace(/^\/+/, '')
+      : '';
+    out.push({ label: floorLabel.value, adapterPath: props.rootPath });
+    let acc = floor;
+    for (const part of below.split('/').filter(Boolean)) {
+      acc = acc ? `${acc}/${part}` : part;
+      out.push({ label: part === '.trash' ? t('node.trash') : part, adapterPath: `${adapterPrefix}${acc}` });
+    }
+    return out;
+  }
 
   if (props.multiStorageRoot) {
     // Global "/" crumb — clicking it pops back to the storage picker
@@ -124,6 +163,21 @@ function startEdit() {
   const rel = props.dirname.startsWith(adapterPrefix)
     ? props.dirname.slice(adapterPrefix.length)
     : props.dirname;
+  // Confined: edit relative to the root folder — `/` is the root, `/sub` below.
+  if (props.rootPath) {
+    const floor = confinedRel.value;
+    const cur = rel.replace(/^\/+|\/+$/g, '');
+    const below = floor && (cur === floor || cur.startsWith(floor + '/'))
+      ? cur.slice(floor.length).replace(/^\/+/, '')
+      : '';
+    pathDraft.value = below ? `/${below}` : '/';
+    editing.value = true;
+    void nextTick(() => {
+      pathInput.value?.focus();
+      pathInput.value?.select();
+    });
+    return;
+  }
   // Multi-storage: show `/<storage>/<rel>` so the user can edit the
   // whole tree (`/main/foo`, `/s3-test/example`, just `/` for root).
   if (props.multiStorageRoot) {
@@ -148,6 +202,15 @@ function startEdit() {
 function submitPath() {
   const raw = pathDraft.value.trim();
   editing.value = false;
+
+  // Confined: the typed path is relative to the root folder; prepend the floor.
+  if (props.rootPath) {
+    const sub = raw.replace(/^\/+|\/+$/g, '');
+    const floor = confinedRel.value;
+    const rel = sub ? (floor ? `${floor}/${sub}` : sub) : floor;
+    emit('navigate', rel ? `${props.adapter}://${rel}` : `${props.adapter}://`);
+    return;
+  }
 
   if (props.multiStorageRoot) {
     // Strip leading/trailing slashes. First segment = storage.
