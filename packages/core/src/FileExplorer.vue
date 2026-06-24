@@ -32,7 +32,7 @@ import { useLocale } from './composables/useLocale';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
 import { preloadEditor } from './composables/useMonacoLoader';
 
-import Toolbar, { type SelectionMode, type ToolbarAction } from './components/Toolbar.vue';
+import Toolbar, { type SelectionMode } from './components/Toolbar.vue';
 import StarButton from './components/StarButton.vue';
 import TagPicker from './components/TagPicker.vue';
 import RecentlyOpened from './components/RecentlyOpened.vue';
@@ -826,46 +826,16 @@ const selectionMode = computed<SelectionMode>(() => {
   return 'multi';
 });
 
-async function onToolbarAction(key: ToolbarAction) {
+async function onToolbarAction(key: string) {
   const sel = selection.nodes.value;
-  switch (key) {
-    case 'open':
-      if (sel[0]) openNode(sel[0]);
-      break;
-    case 'preview':
-      if (sel[0] && sel[0].type === 'file') previewNode(sel[0]);
-      break;
-    case 'download':
-      if (sel[0] && sel[0].type === 'file') downloadFile(sel[0]);
-      break;
-    case 'convert':
-      if (sel[0] && sel[0].type === 'file') openConvert(sel[0]);
-      break;
-    case 'share':
-      if (sel[0]) openShare(sel[0]);
-      break;
-    case 'rename':
-      if (sel.length === 1) {
-        renameTarget.value = sel[0];
-        showRename.value = true;
-      }
-      break;
-    case 'delete':
-      if (sel.length > 0) showDelete.value = true;
-      break;
-    case 'restore':
-      if (sel.length > 0) await restoreSelection();
-      break;
-    case 'cut':
-      cut();
-      break;
-    case 'copy':
-      copyToClipboard();
-      break;
-    case 'paste':
-      await paste();
-      break;
+  // The toolbar's "Aç" opens the in-page preview/editor modal (quick peek);
+  // everything else shares dispatchItemAction with the context menu so the two
+  // identical menus also behave identically.
+  if (key === 'open') {
+    if (sel[0]) openNode(sel[0]);
+    return;
   }
+  await dispatchItemAction(key, sel);
 }
 
 async function onContextTarget(node: FileNode, ev: MouseEvent) {
@@ -902,7 +872,6 @@ const contextActions = computed<ContextAction[]>(() => {
   const sel = selection.nodes.value;
   const any = sel.length > 0;
   const single = sel.length === 1;
-  const isFile = single && sel[0]?.type === 'file';
 
   if (trashActive.value) {
     if (!any) return [];
@@ -935,6 +904,26 @@ const contextActions = computed<ContextAction[]>(() => {
     ];
   }
 
+  // Empty background right-click: folder-level actions only.
+  if (!any) {
+    return [
+      { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
+      { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+    ];
+  }
+
+  return selectionActionList(sel);
+});
+
+// selectionActionList — the SINGLE source of truth for the actions offered on a
+// selection. BOTH the right-click context menu AND the top toolbar render this
+// exact list so they can never drift apart (Burak: "sağ klik menüyle üst menü
+// tutmuyor"). The toolbar filters out dividers/hidden; the context menu shows
+// them. Action handling is unified in dispatchItemAction().
+function selectionActionList(sel: FileNode[]): ContextAction[] {
+  const any = sel.length > 0;
+  const single = sel.length === 1;
+  const isFile = single && sel[0]?.type === 'file';
   const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
   const singleHasId = single && typeof sel[0]?.id === 'number';
   const copyIdLabel = locale.value === 'en'
@@ -957,9 +946,27 @@ const contextActions = computed<ContextAction[]>(() => {
     { key: 'tags', label: tagsLabel, icon: '🏷', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep2', label: '' },
     { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true, hidden: !any, disabled: !any },
-    { divider: true, key: 'sep3', label: '', hidden: any },
-    { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁', hidden: any },
   ];
+}
+
+// toolbarActions — what the top toolbar shows. Mirrors the context menu so the
+// two stay identical for a selection; the empty/trash/virtual-root cases match
+// the context menu's special branches.
+const toolbarActions = computed<ContextAction[]>(() => {
+  const sel = selection.nodes.value;
+  if (trashActive.value) {
+    if (sel.length === 0) return [];
+    return [
+      { key: 'restore', label: t('ctx.restore'), icon: '↩' },
+      { key: 'delete', label: t('ctx.delete_perm'), icon: '🗑', danger: true },
+    ];
+  }
+  const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
+  if (multiStorageRoot.value && trimmedPath === '') {
+    return sel.length === 1 ? [{ key: 'open', label: t('ctx.open'), icon: '↗' }] : [];
+  }
+  if (sel.length === 0) return [];
+  return selectionActionList(sel);
 });
 
 async function onContextAction(action: ContextAction, targets: FileNode[]) {
@@ -971,8 +978,15 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
     }
     return;
   }
+  await dispatchItemAction(action.key, targets);
+}
 
-  switch (action.key) {
+// dispatchItemAction — unified handler for an action key on a target set. Both
+// the right-click menu (onContextAction) and the toolbar (onToolbarAction)
+// route here, so the two menus that now render the SAME list also behave the
+// same. (Toolbar "Aç" is the one deliberate exception — see onToolbarAction.)
+async function dispatchItemAction(key: string, targets: FileNode[]) {
+  switch (key) {
     case 'open':
       // Context-menu "Aç" launches the standalone fullscreen route
       // in a new tab. Double-click (openNode) opens the in-page
@@ -1519,6 +1533,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :view-mode="viewMode"
       :search-query="searchQuery"
       :trash-active="trashActive"
+      :actions="toolbarActions"
       :selection-mode="selectionMode"
       :paste-enabled="!!clipboard.mode"
       :convert-enabled="!!effectiveConvertUrl"

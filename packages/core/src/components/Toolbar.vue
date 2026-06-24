@@ -14,22 +14,10 @@
 import { computed, ref, watch } from 'vue';
 import type { ViewMode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
+import type { ContextAction } from './ContextMenu.vue';
 import { useLocale } from '../composables/useLocale';
 
 export type SelectionMode = 'none' | 'single-file' | 'single-dir' | 'multi';
-
-export type ToolbarAction =
-  | 'open'
-  | 'preview'
-  | 'download'
-  | 'convert'
-  | 'share'
-  | 'rename'
-  | 'delete'
-  | 'restore'
-  | 'cut'
-  | 'copy'
-  | 'paste';
 
 const props = defineProps<{
   viewMode: ViewMode;
@@ -39,6 +27,13 @@ const props = defineProps<{
    * gets a restore-only menu instead of cut/copy/etc).
    */
   trashActive: boolean;
+  /**
+   * The action list to render, supplied by FileExplorer. This is the SAME
+   * list the right-click context menu renders for the current selection, so
+   * the two menus can never drift apart. Dividers/hidden entries are filtered
+   * out here (the toolbar is a flat row).
+   */
+  actions: ContextAction[];
   /** Current selection metadata — toolbar uses this to pick its mode. */
   selectionMode?: SelectionMode;
   /** True when clipboard has cut/copy items, so we can enable Paste. */
@@ -66,7 +61,7 @@ const emit = defineEmits<{
   (e: 'upload'): void;
   (e: 'refresh'): void;
   (e: 'go-up'): void;
-  (e: 'action', key: ToolbarAction): void;
+  (e: 'action', key: string): void;
   (e: 'open-recents'): void;
 }>();
 
@@ -96,67 +91,13 @@ defineExpose({ focusSearch });
 
 const mode = computed<SelectionMode>(() => props.selectionMode ?? 'none');
 
-// What action buttons appear left of the search box. Keep ordering stable
-// so muscle memory survives selection changes (e.g. delete is always
-// last in the cluster). Trash listings hide cut/copy/move because the
-// backend rejects them — we *only* allow restore + hard-delete from
-// inside `.trash/`.
-const actions = computed<Array<{ key: ToolbarAction; label: string; icon: string; danger?: boolean }>>(() => {
-  if (props.trashActive) {
-    if (mode.value === 'none') return [];
-    return [
-      { key: 'restore', label: t('ctx.restore'), icon: '↩' },
-      { key: 'delete', label: t('ctx.delete_perm'), icon: '🗑', danger: true },
-    ];
-  }
-  // At the multi-storage virtual root the selectable rows are storage mounts,
-  // not real files — rename/delete/share/etc. would 4xx on the backend. Only
-  // "open" is valid. This MUST mirror FileExplorer's contextActions
-  // `inStorageRoot` branch so the toolbar and the right-click menu never show
-  // a different action set for the same selection. (Bug: the toolbar used to
-  // ignore atVirtualRoot and offered delete/rename/share on a drive.)
-  if (props.atVirtualRoot) {
-    return mode.value === 'single-dir' || mode.value === 'single-file'
-      ? [{ key: 'open', label: t('ctx.open'), icon: '↗' }]
-      : [];
-  }
-  switch (mode.value) {
-    case 'single-file':
-      // `open` first because it's the canonical action — same behaviour
-      // as a double-click. The host page wires it to `/files/edit` for
-      // editor-grade types (office/drawio/mermaid/3D/etc) and falls
-      // back to the preview modal otherwise. Keep `preview` next to
-      // it so the explicit read-only path stays one click away.
-      return [
-        { key: 'open', label: t('ctx.open'), icon: '↗' },
-        { key: 'preview', label: t('ctx.preview'), icon: '👁' },
-        { key: 'download', label: t('ctx.download'), icon: '⬇' },
-        ...(props.convertEnabled
-          ? [{ key: 'convert' as ToolbarAction, label: t('ctx.convert'), icon: '🔄' }]
-          : []),
-        { key: 'share', label: t('ctx.share'), icon: '🔗' },
-        { key: 'rename', label: t('ctx.rename'), icon: '✎' },
-        { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true },
-      ];
-    case 'single-dir':
-      return [
-        { key: 'open', label: t('ctx.open'), icon: '↗' },
-        { key: 'share', label: t('ctx.share'), icon: '🔗' },
-        { key: 'rename', label: t('ctx.rename'), icon: '✎' },
-        { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true },
-      ];
-    case 'multi':
-      return [
-        { key: 'cut', label: t('ctx.cut'), icon: '✂' },
-        { key: 'copy', label: t('ctx.copy'), icon: '❐' },
-        { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true },
-      ];
-    default:
-      return [];
-  }
-});
+// The visible action buttons = the shared list from FileExplorer, minus
+// dividers and hidden entries (the toolbar is a flat row, not a dropdown).
+// Disabled entries render greyed-out. Because this is the SAME list the
+// context menu uses, the two menus are guaranteed to match.
+const toolbarItems = computed(() => props.actions.filter((a) => !a.divider && !a.hidden));
 
-function fire(key: ToolbarAction) {
+function fire(key: string) {
   emit('action', key);
 }
 </script>
@@ -187,11 +128,12 @@ function fire(key: ToolbarAction) {
       </button>
 
       <button
-        v-for="a in actions"
+        v-for="a in toolbarItems"
         :key="a.key"
         type="button"
         class="fe-btn"
-        :class="{ 'fe-btn--danger': a.danger }"
+        :class="{ 'fe-btn--danger': a.danger, 'is-disabled': a.disabled }"
+        :disabled="a.disabled"
         :title="a.label"
         @click="fire(a.key)"
       >
