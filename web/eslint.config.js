@@ -59,4 +59,16 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn', // some api/* surfaces
     },
   },
+  {
+    // Cypress e2e specs assert with chai getter-properties
+    // (`expect(x).to.exist`, `.to.be.true`), which are bare member
+    // expressions — precisely what no-unused-expressions flags. They ARE
+    // the assertion, not dead code, so turn the rule off for the spec tree
+    // (covers existing + future chai getters without per-line disables).
+    files: ['cypress/**/*.cy.ts'],
+    rules: {
+      '@typescript-eslint/no-unused-expressions': 'off',
+      'no-unused-expressions': 'off',
+    },
+  },
 );

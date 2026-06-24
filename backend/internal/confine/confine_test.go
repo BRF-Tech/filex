@@ -24,12 +24,12 @@ func TestRoot_Enforce(t *testing.T) {
 		{"main://projeler/acme/foo.txt", "main://projeler/acme/foo.txt", false},
 		{"main://projeler/acme/sub/x", "main://projeler/acme/sub/x", false},
 		{"main://projeler/acme", "main://projeler/acme", false},
-		{"main://", "main://projeler/acme", false},             // root → confined folder
+		{"main://", "main://projeler/acme", false},               // root → confined folder
 		{"projeler/acme/foo", "main://projeler/acme/foo", false}, // adapter omitted → assumed
-		{"main://projeler/other", "", true},                    // sibling tenant → blocked
-		{"main://projeler/acme/../other", "", true},            // traversal → blocked
-		{"other://projeler/acme", "", true},                    // wrong storage → blocked
-		{"main://baba", "", true},                              // outside prefix → blocked
+		{"main://projeler/other", "", true},                      // sibling tenant → blocked
+		{"main://projeler/acme/../other", "", true},              // traversal → blocked
+		{"other://projeler/acme", "", true},                      // wrong storage → blocked
+		{"main://baba", "", true},                                // outside prefix → blocked
 	}
 	for _, c := range cases {
 		got, err := root.enforce(c.in)

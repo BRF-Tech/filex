@@ -16,9 +16,9 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/api/handlers"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
-	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
+	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/notify"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"

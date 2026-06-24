@@ -5,13 +5,13 @@
 //
 // The confinement root comes from two trusted sources, combined narrowest-wins:
 //
-//   1. An API token's `root:<adapter>://<rel>` scope — the HARD ceiling. The
-//      browser never holds the token (the host injects it server-side), so a
-//      token-confined caller cannot escape its root.
-//   2. The `X-Filex-Root: <adapter>://<rel>` request header — narrows further
-//      within the token root (or, absent a token root, sets the root). Set by
-//      the host's trusted proxy per request; a stray client header can only
-//      narrow, never widen past the token root.
+//  1. An API token's `root:<adapter>://<rel>` scope — the HARD ceiling. The
+//     browser never holds the token (the host injects it server-side), so a
+//     token-confined caller cannot escape its root.
+//  2. The `X-Filex-Root: <adapter>://<rel>` request header — narrows further
+//     within the token root (or, absent a token root, sets the root). Set by
+//     the host's trusted proxy per request; a stray client header can only
+//     narrow, never widen past the token root.
 //
 // Enforcement is a single chi middleware that rewrites/validates every
 // path-bearing field of the request (query `?path=` and the JSON body

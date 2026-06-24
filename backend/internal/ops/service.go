@@ -446,16 +446,16 @@ func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src st
 //
 // Two cases force a rename:
 //
-//   1. Self-copy: `dst == src`. Hetzner / S3 / most object stores reject
-//      a CopyObject where the source and destination keys match (it
-//      would be a no-op metadata-only edit and AWS rejects it as
-//      `InvalidRequest: trying to copy an object to itself ...`). The
-//      most common trigger is a "Duplicate" / "Make a copy" UI gesture
-//      that drops the duplicate into the source's own directory.
+//  1. Self-copy: `dst == src`. Hetzner / S3 / most object stores reject
+//     a CopyObject where the source and destination keys match (it
+//     would be a no-op metadata-only edit and AWS rejects it as
+//     `InvalidRequest: trying to copy an object to itself ...`). The
+//     most common trigger is a "Duplicate" / "Make a copy" UI gesture
+//     that drops the duplicate into the source's own directory.
 //
-//   2. Destination already exists: a paste into a directory that
-//      already contains a file with that basename should not silently
-//      overwrite — Finder/Nautilus/Explorer all auto-suffix instead.
+//  2. Destination already exists: a paste into a directory that
+//     already contains a file with that basename should not silently
+//     overwrite — Finder/Nautilus/Explorer all auto-suffix instead.
 //
 // We probe with `Stat` and fall back to `<base>-copy<ext>`,
 // `<base>-copy-2<ext>`, … up to a small bounded number of attempts so a
