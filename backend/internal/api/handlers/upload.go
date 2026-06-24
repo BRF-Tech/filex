@@ -95,17 +95,22 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 			storageID = st.ID
 		}
 	}
-	if storageID == 0 || rel == "" || req.Size <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
-		return
-	}
+	// Fold the filename into the path BEFORE validating: an upload to a storage
+	// root arrives as path="adapter://" (rel empty) + a separate filename, which
+	// is perfectly valid — the old `rel == ""` guard wrongly 400'd it as "missing
+	// fields", so every root-dir (and confined-root embed) upload fell back to the
+	// legacy path. The real requirement is a non-empty *target*.
 	target := rel
 	if req.Filename != "" {
 		// Treat the path as parent dir when both are supplied.
 		target = path.Join(rel, req.Filename)
 	}
 	target = strings.TrimLeft(path.Clean("/"+target), "/")
-	if target == "" || strings.Contains(target, "..") {
+	if storageID == 0 || target == "" || req.Size <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		return
+	}
+	if strings.Contains(target, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
 	}
