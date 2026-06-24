@@ -35,6 +35,50 @@ export interface PendingOp {
 const POLL_MS = 2000;
 const RETAIN_MS = 8000;
 
+/**
+ * normalizeOp maps the backend ops row (`{kind,total,done,failed,error,dest,
+ * status:'ok'|'failed'|'partial'|…}`) onto the PendingOp contract the tray
+ * renders (`{op_type,progress_total,progress_done,error_message,status:'done'|
+ * 'error'|…}`). Without this the tray showed "undefined/undefined" for a
+ * running op (progress_* were undefined) and never treated an 'ok'/'failed'
+ * row as terminal. Tolerant of an already-normalized shape (idempotent).
+ */
+function normalizeOp(raw: Record<string, unknown>): PendingOp {
+  const num = (...vals: unknown[]): number => {
+    for (const v of vals) if (typeof v === 'number') return v;
+    return 0;
+  };
+  const str = (...vals: unknown[]): string | null => {
+    for (const v of vals) if (typeof v === 'string' && v !== '') return v;
+    return null;
+  };
+  const rawStatus = String(raw.status ?? 'pending');
+  const status: PendingOp['status'] =
+    rawStatus === 'ok' || rawStatus === 'done'
+      ? 'done'
+      : rawStatus === 'failed' || rawStatus === 'partial' || rawStatus === 'error'
+        ? 'error'
+        : rawStatus === 'running'
+          ? 'running'
+          : 'pending';
+  const sources = Array.isArray(raw.sources) ? raw.sources : [];
+  const opType = str(raw.op_type, raw.kind) ?? 'delete';
+  return {
+    id: num(raw.id),
+    op_type: (opType === 'copy' || opType === 'move' ? opType : 'delete') as PendingOp['op_type'],
+    status,
+    progress_total: num(raw.progress_total, raw.total, sources.length),
+    progress_done: num(raw.progress_done, raw.done),
+    target_path: str(raw.target_path, raw.dest),
+    source_dir: str(raw.source_dir),
+    source_count: num(raw.source_count, sources.length),
+    error_message: str(raw.error_message, raw.error),
+    started_at: str(raw.started_at),
+    finished_at: str(raw.finished_at),
+    created_at: str(raw.created_at),
+  };
+}
+
 export interface UsePendingOpsOptions {
   /** Called once an op flips into a terminal state (done|error). */
   onSettled?: (op: PendingOp) => void;
@@ -80,8 +124,8 @@ export function usePendingOps(
   async function poll(): Promise<void> {
     if (!api.endpoints.opsList) return;
     try {
-      const res = await api.jsonFetch<{ ops: PendingOp[] }>(api.endpoints.opsList);
-      const incoming = res.ops || [];
+      const res = await api.jsonFetch<{ ops: Record<string, unknown>[] }>(api.endpoints.opsList);
+      const incoming = (res.ops || []).map(normalizeOp);
 
       for (const op of incoming) {
         if ((op.status === 'done' || op.status === 'error') && !announced.has(op.id)) {
@@ -126,7 +170,8 @@ export function usePendingOps(
     }
   }
 
-  function register(op: PendingOp): void {
+  function register(raw: PendingOp | Record<string, unknown>): void {
+    const op = normalizeOp(raw as Record<string, unknown>);
     const exists = ops.value.some((o) => o.id === op.id);
     if (!exists) {
       ops.value = [op, ...ops.value];
