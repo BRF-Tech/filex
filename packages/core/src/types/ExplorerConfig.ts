@@ -210,6 +210,14 @@ export interface ExplorerConfig {
   /** Initial path (storage-prefix included: `local://`). Default: root. */
   initialPath?: string;
 
+  /**
+   * Confine the explorer to this folder (qualified: `main://projeler/acme`).
+   * The UI opens here, hides the multi-storage drives root, and blocks
+   * navigation above it. SECURITY IS NOT THIS — enforce it server-side with an
+   * X-Filex-Root header / root-scoped API token; this is the clean-embed UX.
+   */
+  rootPath?: string;
+
   /** Whether the info panel toggle is visible. */
   showInfoPanel?: boolean;
 

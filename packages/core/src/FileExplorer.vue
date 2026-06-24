@@ -89,9 +89,16 @@ const pendingOps = usePendingOps(props.config, api, {
 });
 
 const loading = ref(false);
-const currentPath = ref<string>(props.config.initialPath || '');
+// rootPath confinement (UX): when set, the explorer treats this folder as its
+// floor — it opens there, never lists the drives root, and can't navigate
+// above it. Security is enforced server-side (X-Filex-Root / token root scope);
+// this is purely the clean-embed presentation. `rootFloor` is the virtual form
+// (`<storage>/<rel>`) used for path comparisons in multi-storage mode.
+const rootFloor = ((props.config.rootPath || '').trim()).replace('://', '/').replace(/^\/+|\/+$/g, '');
+const initialFloorPath = rootFloor || props.config.initialPath || '';
+const currentPath = ref<string>(initialFloorPath);
 const adapter = ref<string>(props.config.defaultAdapter || 'brf');
-const dirname = ref<string>(props.config.initialPath || '');
+const dirname = ref<string>(initialFloorPath);
 const files = ref<FileNode[]>([]);
 
 const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
@@ -137,6 +144,7 @@ const locale = computed(() => props.config.locale || 'tr');
 // the global root (storage list). Both → no parent → button hidden.
 const canGoUp = computed(() => {
   const p = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
+  if (rootFloor && p === rootFloor) return false; // at the confined floor — nowhere above
   return p.length > 0;
 });
 
@@ -150,9 +158,11 @@ const atVirtualRoot = computed(() => {
 
 function goUp() {
   const cur = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
-  if (!cur) return;
+  if (!cur || cur === rootFloor) return;
   const idx = cur.lastIndexOf('/');
-  const parent = idx === -1 ? '' : cur.slice(0, idx);
+  let parent = idx === -1 ? '' : cur.slice(0, idx);
+  // Never step above the confined floor.
+  if (rootFloor && !(parent === rootFloor || parent.startsWith(rootFloor + '/'))) parent = rootFloor;
   void load(parent);
 }
 
@@ -379,7 +389,14 @@ async function load(path?: string) {
   // by opening the virtual `.trash` row, which calls loadTrash()).
   trashMode.value = false;
   try {
-    const requested = path ?? currentPath.value ?? '';
+    let requested = path ?? currentPath.value ?? '';
+    // Clamp to the confined floor: an empty/above-floor request (incl. a stale
+    // persisted path or the drives root) snaps back to rootPath. This both
+    // suppresses the multi-storage drives list and blocks up-navigation.
+    if (rootFloor) {
+      const p = String(requested).replace(/^\/+|\/+$/g, '');
+      if (!p || !(p === rootFloor || p.startsWith(rootFloor + '/'))) requested = rootFloor;
+    }
 
     // Multi-storage virtual root — synthesize a list of storages
     // instead of calling the backend.

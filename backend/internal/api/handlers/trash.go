@@ -9,6 +9,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -16,16 +17,34 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitlab.com/brftech/filemanager/backend/internal/confine"
+	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/trash"
 )
 
 // Trash wires trash retention HTTP routes.
 type Trash struct {
 	Service *trash.Service
+	Store   db.Store
 }
 
 // NewTrash constructs the handler.
-func NewTrash(svc *trash.Service) *Trash { return &Trash{Service: svc} }
+func NewTrash(svc *trash.Service, store db.Store) *Trash { return &Trash{Service: svc, Store: store} }
+
+// storageName resolves a storage id → its adapter name (for confinement checks).
+func (h *Trash) storageName(ctx context.Context, id int64) string {
+	if h.Store == nil {
+		return ""
+	}
+	if all, err := h.Store.ListStorages(ctx); err == nil {
+		for _, st := range all {
+			if st.ID == id {
+				return st.Name
+			}
+		}
+	}
+	return ""
+}
 
 type restoreNodeReq struct {
 	NodeID int64 `json:"node_id"`
@@ -41,6 +60,23 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 	if req.NodeID <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing node_id"})
 		return
+	}
+	// Confinement: a root-locked caller may only restore nodes whose original
+	// path lives inside its root (else it could resurrect another tenant's file).
+	if root, ok := confine.RootFrom(r.Context()); ok {
+		node, err := h.Store.GetNode(r.Context(), req.NodeID)
+		if err != nil || node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
+		orig := node.StorageKey
+		if orig == "" {
+			orig = node.Path
+		}
+		if !root.Within(h.storageName(r.Context(), node.StorageID), orig) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path outside confined root"})
+			return
+		}
 	}
 	if err := h.Service.Restore(r.Context(), req.NodeID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -115,6 +151,18 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	// Confinement: only surface trashed nodes whose original path is inside
+	// the caller's root, so a tenant never sees another tenant's deleted files.
+	if root, ok := confine.RootFrom(r.Context()); ok {
+		kept := entries[:0]
+		for _, e := range entries {
+			if root.Within(e.StorageName, e.Path) {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+		total = len(kept)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,

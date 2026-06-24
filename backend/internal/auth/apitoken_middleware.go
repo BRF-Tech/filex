@@ -73,6 +73,37 @@ func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 	}
 }
 
+// MiddlewareWithToken authenticates EITHER via an API token (X-Filex-Token /
+// Bearer) OR, failing that, the regular user-session driver chain. It powers
+// the /api/files surface so a host app can proxy with a root-confined API
+// token (see package confine) while the native admin panel keeps using its
+// cookie/JWT session. An API-token bearer and a session JWT never collide:
+// the token's sha256 simply won't match a JWT, so we fall through cleanly.
+func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.Handler {
+	userChain := Middleware(required)
+	return func(next http.Handler) http.Handler {
+		fallthroughHandler := userChain(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if raw := extractAPIToken(r); raw != "" {
+				ctx := r.Context()
+				if tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw)); err == nil && tok != nil {
+					if tok.ExpiresAt == nil || tok.ExpiresAt.After(time.Now()) {
+						if user, err := store.GetUser(ctx, tok.UserID); err == nil && user != nil {
+							_ = store.TouchAPIToken(ctx, tok.ID)
+							ctx = WithUser(ctx, user)
+							ctx = WithToken(ctx, tok)
+							next.ServeHTTP(w, r.WithContext(ctx))
+							return
+						}
+					}
+				}
+			}
+			// Not a valid API token — defer to cookie/JWT/proxy-header auth.
+			fallthroughHandler.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RequireScope rejects requests whose token does not grant `scope`. A token
 // with an empty Scopes field grants everything. Must run after
 // APITokenMiddleware.

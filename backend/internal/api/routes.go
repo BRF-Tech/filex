@@ -16,6 +16,7 @@ import (
 
 	"gitlab.com/brftech/filemanager/backend/internal/api/handlers"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
+	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
@@ -121,7 +122,7 @@ func BuildRouter(d *Deps) http.Handler {
 	queueH := handlers.NewQueue(d.Queue)
 	notifH := handlers.NewNotifications(d.Notify)
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
-	trashH := handlers.NewTrash(d.Trash)
+	trashH := handlers.NewTrash(d.Trash, d.Store)
 	metaH := handlers.NewMeta(d.Store)
 	quotaH := handlers.NewQuota(d.Quota)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
@@ -164,7 +165,10 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// ────── authenticated user routes ──────
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(true))
+		// Accept EITHER a cookie/JWT session (native panel) OR a root-confined
+		// API token (host apps proxying the embedded explorer). Token absent →
+		// falls through to the session chain, so existing auth is unchanged.
+		r.Use(auth.MiddlewareWithToken(d.Store, true))
 
 		// Self-service profile/password/TOTP.
 		// Avoid `r.Route("/api/auth", …)` here because chi forbids
@@ -188,6 +192,10 @@ func BuildRouter(d *Deps) http.Handler {
 		})
 
 		r.Route("/api/files", func(r chi.Router) {
+			// Root confinement: a token's `root:` scope / X-Filex-Root header
+			// locks every path-bearing request to one sub-folder (multi-tenant
+			// isolation). No-op for unconfined (admin/native) callers.
+			r.Use(confine.Middleware)
 			r.Get("/manager", mh.List)
 			r.Post("/manager", mh.Mutate)
 			r.Get("/manager/trash", trashH.List)
