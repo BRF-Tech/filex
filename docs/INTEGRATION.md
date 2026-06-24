@@ -115,13 +115,55 @@ Any request touching a path outside the root → `403`. A root/empty path snaps 
 the confined folder, so listings open there. This covers manager / move / copy /
 delete / upload / download / share / archive / trash.
 
-Recommended for `work.brf.sh`: one root-scoped token **per project** (or a
-service token + per-request `X-Filex-Root`), injected by the work proxy.
+Recommended: one root-scoped token **per tenant/folder** (or a single service
+token + a per-request `X-Filex-Root`), injected by your proxy.
 
 **Frontend `rootPath` (clean UX, optional):** set `config.rootPath:
 'main://projeler/acme'` so the explorer opens there, hides the drives root, and
 can't navigate above it. This is presentation only — keep the backend
 confinement above regardless.
+
+## 4c. Recommended production pattern — host-proxied + confined
+
+The robust, secure way to embed filex (any host app — a project workspace, a
+customer portal, a per-team drive). The browser only ever talks to YOUR app;
+your app proxies to filex and owns auth + confinement, so it can never be
+bypassed from the client.
+
+```
+Browser ── /your/files/* ──▶  Your app (proxy)  ── /api/files/* ──▶  filex
+   (your session, no                │ injects, server-side:
+    filex creds at all)             │   Authorization: Bearer <filex token>
+                                     │   X-Filex-Root: main://<tenant-root>
+                                     │ strips any client-sent Authorization
+                                     │   and X-Filex-Root (never trust them)
+```
+
+1. **Vendor the web component** (no build): copy `packages/webcomponent/dist/`
+   into your app's assets and load `filex.js`. Or `import '@brftech/filex'`.
+2. **Add a proxy route** in your backend, `"/your/files/*" → "<filex>/api/files/*"`.
+   On every request it MUST:
+   - add the filex auth (a Bearer API token — ideally root-scoped per §4b, or a
+     filex session) so the browser never holds filex credentials;
+   - add `X-Filex-Root: <adapter>://<tenant-root>` for the current tenant;
+   - **strip** any incoming `Authorization` / `X-Filex-Root` from the browser.
+3. **Mount the component** against the proxy:
+   ```js
+   el.config = {
+     apiBase: '/your/files',          // your proxy, NOT filex directly
+     auth: { kind: 'none' },          // auth is injected by the proxy
+     rootPath: 'main://projeler/acme',// clean UI floor (cosmetic)
+     locale: 'tr', theme: 'auto',
+   };
+   ```
+4. **Verify isolation:** while scoped to tenant A, a request for tenant B's path
+   must return `403`. Because the browser can't set the token or the header
+   (the proxy controls both), a tenant cannot reach another's files — even by
+   crafting requests by hand.
+
+Pick the confinement strength in §4b: the `X-Filex-Root` header alone is enough
+when filex is reachable ONLY through your proxy; a root-scoped token adds
+defense-in-depth (the token itself can't escape its folder).
 
 ## 5. Backend side (what the host must provide)
 
