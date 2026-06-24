@@ -813,6 +813,14 @@
   overflow: auto;
   padding: 16px 24px;
   background: var(--fe-bg, #fff);
+  /* The shared `.fe-preview__md` base caps height at 70vh (right for the
+   * standalone modal preview, wrong here): in the split grid that cap
+   * stops the rendered pane stretching to the row, leaving a dead gap
+   * below the content. Drop the cap so the grid cell fills full height
+   * and tall docs scroll inside the pane instead. */
+  max-height: none;
+  min-height: 0;
+  height: 100%;
 }
 @media (max-width: 900px) {
   .fe-preview__md-split-body {

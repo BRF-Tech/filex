@@ -83,14 +83,26 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if req.StorageID == 0 || req.Path == "" || req.Size <= 0 {
+	// Resolve the storage from the path's adapter prefix when the caller sent
+	// no numeric storage_id (embedders / the SFC speak adapter names), and
+	// strip the prefix so the target is storage-relative. Previously Init hard-
+	// required storage_id and used the qualified path verbatim, so every SFC
+	// init 400'd "missing fields" and always fell back to the legacy upload.
+	adapter, rel := splitAdapterPath(req.Path)
+	storageID := req.StorageID
+	if storageID == 0 && adapter != "" {
+		if st, err := u.Store.GetStorageByName(r.Context(), adapter); err == nil && st != nil {
+			storageID = st.ID
+		}
+	}
+	if storageID == 0 || rel == "" || req.Size <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
 		return
 	}
-	target := req.Path
+	target := rel
 	if req.Filename != "" {
-		// Treat req.Path as parent dir when both are supplied.
-		target = path.Join(req.Path, req.Filename)
+		// Treat the path as parent dir when both are supplied.
+		target = path.Join(rel, req.Filename)
 	}
 	target = strings.TrimLeft(path.Clean("/"+target), "/")
 	if target == "" || strings.Contains(target, "..") {
@@ -118,7 +130,7 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 		partCount = 1
 	}
 
-	drv, err := u.StorageResolver(req.StorageID)
+	drv, err := u.StorageResolver(storageID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage: " + err.Error()})
 		return
@@ -139,7 +151,7 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 	expires := time.Now().Add(24 * time.Hour)
 	cu := &model.ChunkedUpload{
 		ID:         id,
-		StorageID:  req.StorageID,
+		StorageID:  storageID,
 		StorageKey: target,
 		UploadID:   uploadID,
 		TotalSize:  req.Size,

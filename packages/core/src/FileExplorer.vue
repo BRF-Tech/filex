@@ -1234,9 +1234,32 @@ async function uploadFiles(list: File[]) {
 }
 
 async function legacyUpload(file: File) {
+  // Register a progress row so the corner badge tracks the upload — large files
+  // fall back here from the chunked path, and previously showed no progress at
+  // all (the chunked placeholder was removed on init failure and the legacy
+  // POST tracked nothing, so the badge vanished mid-upload).
+  const id = crypto.randomUUID();
+  const target = qualify(currentPath.value);
+  uploadJobs.value = [
+    ...uploadJobs.value,
+    { id, file, path: target, totalBytes: file.size, uploadedBytes: 0, percent: 0, status: 'uploading', cancel() {} },
+  ];
+  const patch = (p: Partial<UploadJob>) => {
+    const idx = uploadJobs.value.findIndex((j) => j.id === id);
+    if (idx === -1) return;
+    const next = [...uploadJobs.value];
+    next[idx] = { ...next[idx], ...p };
+    uploadJobs.value = next;
+  };
   try {
-    await api.uploadMultipart(qualify(currentPath.value), [file]);
+    await api.uploadMultipart(target, [file], (percent) => {
+      patch({ percent, uploadedBytes: Math.round((percent / 100) * file.size) });
+      emit('upload-progress', { uploadId: id, percent, done: percent >= 100 });
+    });
+    patch({ percent: 100, uploadedBytes: file.size, status: 'done' });
+    emit('upload-progress', { uploadId: id, percent: 100, done: true });
   } catch (err) {
+    patch({ status: 'error' });
     emit('error', {
       message: (err as Error).message,
       context: { op: 'upload', file: file.name },
@@ -1252,39 +1275,39 @@ async function legacyUpload(file: File) {
  * row, no error toast, because the fallback path will report any real error.
  */
 async function chunkedUpload(file: File): Promise<boolean> {
-  const placeholder: UploadJob = {
-    id: crypto.randomUUID(),
-    file,
-    path: qualify(currentPath.value),
-    totalBytes: file.size,
-    uploadedBytes: 0,
-    percent: 0,
-    status: 'pending',
-    cancel() {},
-  };
-  uploadJobs.value = [...uploadJobs.value, placeholder];
-
+  // Register the progress row LAZILY — only once init succeeded and bytes are
+  // actually moving. A doomed init (local driver / 4xx) then shows no badge at
+  // all, so the legacy fallback's own badge is the only one the user sees (no
+  // appear-then-vanish flicker).
+  const id = crypto.randomUUID();
+  let registered = false;
   try {
     await chunked.uploadFile({
       path: qualify(currentPath.value),
       file,
       onProgress: (job) => {
-        const idx = uploadJobs.value.findIndex((j) => j.id === placeholder.id);
-        if (idx !== -1) {
-          const next = [...uploadJobs.value];
-          next[idx] = { ...job, id: placeholder.id } as UploadJob;
-          uploadJobs.value = next;
-          emit('upload-progress', {
-            uploadId: job.uploadId ?? placeholder.id,
-            percent: job.percent,
-            done: job.status === 'done',
-          });
+        if (!registered) {
+          if (job.status !== 'uploading' && job.uploadedBytes <= 0) return;
+          uploadJobs.value = [...uploadJobs.value, { ...job, id } as UploadJob];
+          registered = true;
+        } else {
+          const idx = uploadJobs.value.findIndex((j) => j.id === id);
+          if (idx !== -1) {
+            const next = [...uploadJobs.value];
+            next[idx] = { ...job, id } as UploadJob;
+            uploadJobs.value = next;
+          }
         }
+        emit('upload-progress', {
+          uploadId: job.uploadId ?? id,
+          percent: job.percent,
+          done: job.status === 'done',
+        });
       },
     });
     return true;
   } catch {
-    uploadJobs.value = uploadJobs.value.filter((j) => j.id !== placeholder.id);
+    if (registered) uploadJobs.value = uploadJobs.value.filter((j) => j.id !== id);
     return false;
   }
 }
