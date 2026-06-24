@@ -96,6 +96,33 @@ const config = { apiBase: 'https://files.example.com',
 
 `error`, `file-opened`, `share-created`, `upload-progress`, `selection-change`.
 
+## 4b. Multi-tenant root confinement (lock to a sub-folder)
+
+For multi-tenant hosts (e.g. one explorer per project) you must confine each
+caller to its own folder. **Do it server-side — the frontend `rootPath` below is
+only cosmetic.** filex enforces confinement on `/api/files` from two sources
+(narrowest wins):
+
+1. **Root-scoped API token** (hard ceiling, un-bypassable). Create a filex API
+   token whose `scopes` include `root:<adapter>://<rel>`, e.g.
+   `read,write,delete,root:main://projeler/acme`. Proxy `/api/files/*` with it
+   as `Authorization: Bearer <token>` (server-side — the browser never sees it).
+2. **`X-Filex-Root` header** (per-request, narrows within the token root). Your
+   proxy sets `X-Filex-Root: main://projeler/acme` per request. A stray client
+   header can only narrow, never escape the token root.
+
+Any request touching a path outside the root → `403`. A root/empty path snaps to
+the confined folder, so listings open there. This covers manager / move / copy /
+delete / upload / download / share / archive / trash.
+
+Recommended for `work.brf.sh`: one root-scoped token **per project** (or a
+service token + per-request `X-Filex-Root`), injected by the work proxy.
+
+**Frontend `rootPath` (clean UX, optional):** set `config.rootPath:
+'main://projeler/acme'` so the explorer opens there, hides the drives root, and
+can't navigate above it. This is presentation only — keep the backend
+confinement above regardless.
+
 ## 5. Backend side (what the host must provide)
 
 - A reachable filex backend (the Go binary) with the storages you want exposed.
