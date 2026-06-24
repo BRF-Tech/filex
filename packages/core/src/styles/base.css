@@ -813,11 +813,16 @@
   overflow: auto;
   padding: 16px 24px;
   background: var(--fe-bg, #fff);
-  /* The shared `.fe-preview__md` base caps height at 70vh (right for the
-   * standalone modal preview, wrong here): in the split grid that cap
-   * stops the rendered pane stretching to the row, leaving a dead gap
-   * below the content. Drop the cap so the grid cell fills full height
-   * and tall docs scroll inside the pane instead. */
+}
+/* The split-output element carries BOTH `fe-preview__md-split-output` and
+ * `fe-preview__md`. The shared `.fe-preview__md` rule caps height at 70vh
+ * (right for the standalone modal preview, wrong here) and — being later in
+ * source order at equal specificity — wins over a plain
+ * `.fe-preview__md-split-output { max-height: none }`. The compound selector
+ * below raises specificity so the cap is dropped regardless of order, letting
+ * the rendered pane fill the grid row (tall docs scroll inside it) instead of
+ * leaving a dead gap below the content. */
+.fe-preview__md-split-output.fe-preview__md {
   max-height: none;
   min-height: 0;
   height: 100%;
