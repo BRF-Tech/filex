@@ -6,7 +6,7 @@
  * transformed flex containers, panel sidebars, …) can shift the
  * `position: fixed` backdrop off-window.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
@@ -43,12 +43,33 @@ const open = ref(false);
 const x = ref(0);
 const y = ref(0);
 const targetNodes = ref<FileNode[]>([]);
+const menuEl = ref<HTMLElement | null>(null);
 
-function show(ev: { clientX: number; clientY: number }, nodes: FileNode[]) {
+async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[]) {
   open.value = true;
   x.value = ev.clientX;
   y.value = ev.clientY;
   targetNodes.value = nodes;
+  // After the menu renders, clamp it inside the viewport so a click near the
+  // bottom/right edge doesn't push the menu off-screen (it opens down-right
+  // from the cursor by default).
+  await nextTick();
+  clampToViewport();
+}
+
+function clampToViewport() {
+  const el = menuEl.value;
+  if (!el || typeof window === 'undefined') return;
+  const rect = el.getBoundingClientRect();
+  const margin = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (y.value + rect.height > vh - margin) {
+    y.value = Math.max(margin, vh - rect.height - margin);
+  }
+  if (x.value + rect.width > vw - margin) {
+    x.value = Math.max(margin, vw - rect.width - margin);
+  }
 }
 
 function hide() {
@@ -103,6 +124,7 @@ defineExpose({ show, hide });
         @keydown="onKey"
       >
         <div
+          ref="menuEl"
           class="fe-ctx"
           role="menu"
           :style="{ top: y + 'px', left: x + 'px' }"
