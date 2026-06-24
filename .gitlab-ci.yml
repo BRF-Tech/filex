@@ -39,6 +39,16 @@ variables:
   GOPATH: "$CI_PROJECT_DIR/.gocache/go"
   GOCACHE: "$CI_PROJECT_DIR/.gocache/build"
 
+# Route every job to our self-hosted brkgpu runner (docker executor). It's
+# tagged `brkgpu` with run_untagged=false, so without this default the jobs
+# fall through to GitLab's shared runners — which the namespace has no compute
+# minutes for (ci_quota_exceeded). The brkgpu runner doesn't consume shared
+# minutes. Jobs that need something the runner can't provide (privileged dind)
+# opt out / allow_failure individually.
+default:
+  tags:
+    - brkgpu
+
 # ---------------------------------------------------------------------------
 # Reusable templates
 # ---------------------------------------------------------------------------
@@ -365,6 +375,11 @@ release:docker:
   image: docker:25
   services:
     - docker:25-dind
+  # The brkgpu runner is a docker executor; privileged dind may not be enabled
+  # on it. The canonical image is built+deployed manually on main, so a failed
+  # registry push here must not red the release pipeline (npm publish is the
+  # job that matters for embedders).
+  allow_failure: true
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
   variables:
