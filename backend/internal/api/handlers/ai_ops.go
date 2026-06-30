@@ -340,9 +340,13 @@ func (a *aiOps) Write(ctx context.Context, p string, data []byte) (*aiEntry, err
 	}, nil
 }
 
-// Delete soft-deletes a file/dir (rename into .filex-trash, flip the cache
-// row's deleted_at) mirroring the SFC's vfDelete contract — so AI deletes
+// Delete soft-deletes a file or folder (rename into .filex-trash, flip the
+// cache row's deleted_at) mirroring the SFC's vfDelete contract — so AI deletes
 // land in the same trash the UI restores from.
+//
+// Object stores (S3) have no real object at a folder prefix, so a plain
+// Move/Copy of the folder path 404s ("CopyObject 404"). For folders we walk the
+// prefix and trash each file individually, preserving sub-structure.
 func (a *aiOps) Delete(ctx context.Context, p string) error {
 	s, rel, err := a.resolveStorage(ctx, p)
 	if err != nil {
@@ -360,27 +364,66 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	}
 	base := path.Base(rel)
 	trashRel := fmt.Sprintf("%s/%d-%s__%s", trashPrefix, time.Now().Unix(), randHex6(), base)
+	mover, hasMover := drv.(storage.Mover)
+	deleter, hasDeleter := drv.(storage.Deleter)
 
-	if mover, ok := drv.(storage.Mover); ok {
+	// Folder path → trash every file under the prefix (Move per-object works on
+	// S3; a single Move of the prefix does not).
+	if children, _ := a.listAllFiles(ctx, drv, rel); len(children) > 0 {
+		prefix := strings.TrimRight(rel, "/") + "/"
+		for _, child := range children {
+			dst := trashRel + "/" + strings.TrimPrefix(child, prefix)
+			switch {
+			case hasMover:
+				if err := mover.Move(ctx, child, dst); err != nil {
+					return fmt.Errorf("trash %q: %w", child, err)
+				}
+			case hasDeleter:
+				if err := deleter.Delete(ctx, child); err != nil && !errors.Is(err, storage.ErrNotFound) {
+					return err
+				}
+			default:
+				return storage.ErrUnsupported
+			}
+		}
+		// Best-effort: drop any leftover folder-marker objects (filex Mkdir
+		// writes a "<prefix>/" marker on S3).
+		if hasDeleter {
+			_ = deleter.Delete(ctx, rel)
+			_ = deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/")
+		}
+		a.trashRetagCache(ctx, s.ID, rel, trashRel)
+		return nil
+	}
+
+	// Single file (or an empty folder marker).
+	if hasMover {
 		if err := mover.Move(ctx, rel, trashRel); err != nil {
-			return err
+			// No object at `rel` (e.g. an empty folder marker) → the Move/Copy
+			// 404s. Best-effort delete the marker variants; only surface the
+			// error if nothing could be removed.
+			cleaned := false
+			if hasDeleter {
+				if e := deleter.Delete(ctx, rel); e == nil {
+					cleaned = true
+				}
+				if e := deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/"); e == nil {
+					cleaned = true
+				}
+			}
+			if !cleaned {
+				return err
+			}
 		}
-		origClean := normalizeDBPath(rel)
-		origHash := managerPathHash(s.ID, origClean)
-		if existing, gerr := a.store.GetNodeByPath(ctx, s.ID, origHash); gerr == nil && existing != nil {
-			newClean := normalizeDBPath(trashRel)
-			newHash := managerPathHash(s.ID, newClean)
-			_ = a.store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
-		}
+		a.trashRetagCache(ctx, s.ID, rel, trashRel)
 		return nil
 	}
 
 	// No move support — hard delete (legacy drivers).
-	del, ok := drv.(storage.Deleter)
-	if !ok {
+	if !hasDeleter {
 		return storage.ErrUnsupported
 	}
-	if err := del.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+	if err := deleter.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return err
 	}
 	origHash := managerPathHash(s.ID, normalizeDBPath(rel))
@@ -388,6 +431,49 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 		_ = a.store.SoftDeleteNode(ctx, existing.ID)
 	}
 	return nil
+}
+
+// listAllFiles recursively returns every FILE object path under root (skipping
+// trash / thumbnail internals). Empty when root is a file or has no children.
+func (a *aiOps) listAllFiles(ctx context.Context, drv storage.Driver, root string) ([]string, error) {
+	var out []string
+	var walk func(dir string) error
+	walk = func(dir string) error {
+		objs, err := drv.List(ctx, dir)
+		if err != nil {
+			return err
+		}
+		for _, o := range objs {
+			if o.Name == ".filex-trash" || o.Name == ".thumbs" {
+				continue
+			}
+			switch o.Kind {
+			case storage.KindDirectory:
+				if err := walk(o.Path); err != nil {
+					return err
+				}
+			case storage.KindFile:
+				out = append(out, o.Path)
+			}
+		}
+		return nil
+	}
+	if err := walk(root); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// trashRetagCache soft-deletes the cache node at rel and retags it to its trash
+// location so Restore can find it and a fresh write at the original path works.
+func (a *aiOps) trashRetagCache(ctx context.Context, storageID int64, rel, trashRel string) {
+	origClean := normalizeDBPath(rel)
+	origHash := managerPathHash(storageID, origClean)
+	if existing, gerr := a.store.GetNodeByPath(ctx, storageID, origHash); gerr == nil && existing != nil {
+		newClean := normalizeDBPath(trashRel)
+		newHash := managerPathHash(storageID, newClean)
+		_ = a.store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
+	}
 }
 
 // Move renames/moves src to dst within the same storage.
