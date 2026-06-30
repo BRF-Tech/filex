@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { ExternalLink, Heart, FileText, Github } from 'lucide-vue-next';
+import { ExternalLink, FileText, Github } from 'lucide-vue-next';
 
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import LogoMark from '@/components/LogoMark.vue';
@@ -130,18 +130,6 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
           >
             <FileText class="h-4 w-4" />
             {{ t('about.documentation') }}
-            <ExternalLink class="h-3 w-3 opacity-60" />
-          </a>
-        </li>
-        <li>
-          <a
-            href="https://github.com/sponsors/brftech"
-            target="_blank"
-            rel="noopener"
-            class="inline-flex items-center gap-2 text-rose-600 dark:text-rose-400 hover:underline"
-          >
-            <Heart class="h-4 w-4" />
-            {{ t('about.donate') }}
             <ExternalLink class="h-3 w-3 opacity-60" />
           </a>
         </li>

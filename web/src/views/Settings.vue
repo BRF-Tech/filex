@@ -32,7 +32,18 @@ watchEffect(() => {
 
 async function save() {
   try {
-    await settings.update({ ...form });
+    // Send only the keys this page owns. `form` is hydrated from the full
+    // settings map (watchEffect → Object.assign), so spreading it would
+    // echo every unrelated key — including auth.* secrets — back to the
+    // store on every save. Patch the managed subset explicitly instead.
+    await settings.update({
+      site_name: form.site_name,
+      public_url: form.public_url,
+      sync_interval_seconds: form.sync_interval_seconds,
+      log_level: form.log_level,
+      default_locale: form.default_locale,
+      default_timezone: form.default_timezone,
+    });
     toast.success(t('settings.savedOk'));
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
