@@ -75,6 +75,7 @@ type Store interface {
 	CountUsers(ctx context.Context) (int64, error)
 	UpdateUserPassword(ctx context.Context, id int64, hash string) error
 	UpdateUserEmail(ctx context.Context, id int64, email string) error
+	UpdateUserDisplayName(ctx context.Context, id int64, displayName string) error
 	UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error
 	UpdateUserRole(ctx context.Context, id int64, role string) error
 	TouchLastLogin(ctx context.Context, id int64) error

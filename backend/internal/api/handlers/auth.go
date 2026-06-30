@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
@@ -26,9 +27,20 @@ func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publi
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// TOTP is the second-factor code. The SPA's Login.vue sends it under
+	// this key; it is only consulted when the resolved user has TOTP
+	// enabled.
+	TOTP string `json:"totp"`
 }
 
 // Login authenticates email + password and sets the session cookie.
+//
+// When the resolved user has TOTP enabled, a valid second-factor code is
+// mandatory: password success alone does NOT grant a session. The session
+// is minted by LocalAuth.Login (which owns the password check), so on a
+// missing/invalid TOTP code we revoke that just-created session before
+// returning — no usable cookie is ever handed out and no orphan session
+// lingers.
 func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	if h.LocalAuth == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local login disabled"})
@@ -43,6 +55,24 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
+	}
+	if user.TOTPEnabled {
+		if strings.TrimSpace(req.TOTP) == "" {
+			_ = h.Store.DeleteSession(r.Context(), token)
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error":         "two-factor code required",
+				"totp_required": true,
+			})
+			return
+		}
+		if !verifyTOTP(user.TOTPSecret, req.TOTP) {
+			_ = h.Store.DeleteSession(r.Context(), token)
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error":         "invalid two-factor code",
+				"totp_required": true,
+			})
+			return
+		}
 	}
 	setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, map[string]any{

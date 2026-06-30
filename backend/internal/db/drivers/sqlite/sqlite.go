@@ -481,6 +481,11 @@ func (s *Store) UpdateUserEmail(ctx context.Context, id int64, email string) err
 	return err
 }
 
+func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET display_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, displayName, id)
+	return err
+}
+
 // SetTotpPendingSecret stores a freshly-enrolled TOTP secret + recovery
 // codes prior to the user verifying with a one-time code.
 func (s *Store) SetTotpPendingSecret(ctx context.Context, id int64, secret string, recoveryCodes []string) error {
@@ -1185,14 +1190,14 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var totpEnabled int
 	var recoveryJSON string
-	if err := r.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1

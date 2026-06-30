@@ -11,10 +11,24 @@ const (
 	RoleUser  = "user"
 )
 
+// ValidRole reports whether name is one of the known, seeded roles. The
+// roles table only ships `admin` and `user` (see 00001_init.sql) and there
+// is no dynamic role-creation surface, so anything else is rejected at the
+// API boundary rather than silently writing an unresolvable role.
+func ValidRole(name string) bool {
+	switch name {
+	case RoleAdmin, RoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // User represents an authenticated principal.
 type User struct {
 	ID                int64      `json:"id"`
 	Email             string     `json:"email"`
+	DisplayName       string     `json:"display_name"`
 	PasswordHash      string     `json:"-"`
 	Role              string     `json:"role"`
 	TOTPSecret        string     `json:"-"`

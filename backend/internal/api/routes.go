@@ -169,6 +169,9 @@ func BuildRouter(d *Deps) http.Handler {
 		// API token (host apps proxying the embedded explorer). Token absent →
 		// falls through to the session chain, so existing auth is unchanged.
 		r.Use(auth.MiddlewareWithToken(d.Store, true))
+		// Audit curated self-service + file mutations (profile, password,
+		// TOTP, shares, file deletes — shouldAudit() filters the rest).
+		r.Use(auth.AuditMiddleware(d.Store))
 
 		// Self-service profile/password/TOTP.
 		// Avoid `r.Route("/api/auth", …)` here because chi forbids
@@ -272,6 +275,10 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(true))
 		r.Use(auth.RequireAdmin)
+		// Record every successful mutating admin action. The middleware is
+		// otherwise defined but never installed anywhere, which left the
+		// Audit page empty even after real changes.
+		r.Use(auth.AuditMiddleware(d.Store))
 
 		r.Route("/api/admin", func(r chi.Router) {
 			r.Get("/dashboard", dashH.Get)

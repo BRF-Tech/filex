@@ -244,6 +244,28 @@ func actionFor(r *http.Request) (string, string, string) {
 	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/sync-runs/"):
 		return "sync.action", "sync_run", id
 	}
+
+	// Generic fallback: any other mutating /api/admin/* request still gets a
+	// recognizable audit entry instead of silently vanishing (replica,
+	// replication-targets, ai-tokens, notifications, …).
+	if strings.HasPrefix(p, "/api/admin/") {
+		seg := strings.TrimPrefix(p, "/api/admin/")
+		if i := strings.IndexByte(seg, '/'); i >= 0 {
+			seg = seg[:i]
+		}
+		if seg != "" {
+			verb := "action"
+			switch method {
+			case http.MethodPost:
+				verb = "create"
+			case http.MethodPatch, http.MethodPut:
+				verb = "update"
+			case http.MethodDelete:
+				verb = "delete"
+			}
+			return seg + "." + verb, seg, id
+		}
+	}
 	return "", "", ""
 }
 

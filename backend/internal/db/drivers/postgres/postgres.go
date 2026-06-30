@@ -403,24 +403,33 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 // 1:1 with $N placeholders and NOW()/CURRENT_TIMESTAMP swaps. They are
 // intentionally lightweight — no fancy Postgres-specific optimization yet.
 
+// userCols is the canonical user column projection shared by every user
+// read path so scanUser always receives the same shape. It includes the
+// full TOTP state (enabled flag + pending/active secret + recovery codes)
+// — earlier this projection omitted totp_enabled, which silently disabled
+// the login second-factor check on Postgres.
+const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, ` +
+	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
+	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at`
+
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	row := s.db.QueryRowContext(ctx,
 		`INSERT INTO users (email, password_hash, role, locale, timezone) VALUES ($1,$2,$3,$4,$5)
-		 RETURNING id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at`,
+		 RETURNING `+userCols,
 		email, hash, role, locale, tz)
 	return scanUser(row)
 }
 
 func (s *Store) GetUser(ctx context.Context, id int64) (*model.User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at FROM users WHERE id=$1`, id))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id=$1`, id))
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at FROM users WHERE email=$1`, email))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE email=$1`, email))
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]*model.User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, email, COALESCE(password_hash,''), role, COALESCE(totp_secret,''), locale, timezone, created_at, updated_at, last_login_at FROM users ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+userCols+` FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -928,8 +937,12 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 
 func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
-	if err := r.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
+	var recoveryJSON string
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
 		return nil, err
+	}
+	if recoveryJSON != "" {
+		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
 	}
 	return u, nil
 }
@@ -1205,6 +1218,12 @@ func (s *Store) DeleteSessionsForUser(ctx context.Context, userID int64, exceptT
 // UpdateUserEmail changes a user's email address.
 func (s *Store) UpdateUserEmail(ctx context.Context, id int64, email string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE users SET email=$1, updated_at=NOW() WHERE id=$2`, email, id)
+	return err
+}
+
+// UpdateUserDisplayName sets the user's human-friendly display name.
+func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET display_name=$1, updated_at=NOW() WHERE id=$2`, displayName, id)
 	return err
 }
 

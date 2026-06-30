@@ -13,12 +13,14 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
@@ -35,6 +37,17 @@ type Driver struct {
 	password string
 	keyPEM   string
 	root     string
+
+	// Host-key verification config (see Init):
+	//   known_hosts            — path to an OpenSSH known_hosts file (strict).
+	//   host_key               — a single pinned public key (authorized_keys
+	//                            or known_hosts line form) → FixedHostKey.
+	//   insecure_skip_host_key — explicit opt-out (legacy behaviour).
+	// When none are set the driver defaults to trust-on-first-use against
+	// ~/.filex/known_hosts.
+	knownHostsPath  string
+	hostKeyPin      string
+	insecureHostKey bool
 
 	mu     sync.Mutex
 	ssh    *ssh.Client
@@ -58,6 +71,9 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	d.password, _ = cfg["password"].(string)
 	d.keyPEM, _ = cfg["private_key"].(string)
 	d.root, _ = cfg["root"].(string)
+	d.knownHostsPath, _ = cfg["known_hosts"].(string)
+	d.hostKeyPin, _ = cfg["host_key"].(string)
+	d.insecureHostKey, _ = cfg["insecure_skip_host_key"].(bool)
 	if d.root == "" {
 		d.root = "/"
 	}
@@ -88,9 +104,13 @@ func (d *Driver) connect() (*sftp.Client, error) {
 	if d.client != nil {
 		return d.client, nil
 	}
+	hostKeyCB, err := d.hostKeyCallback()
+	if err != nil {
+		return nil, fmt.Errorf("sftp: host key: %w", err)
+	}
 	cfg := &ssh.ClientConfig{
 		User:            d.user,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: known_hosts
+		HostKeyCallback: hostKeyCB,
 		Timeout:         10 * time.Second,
 	}
 	if d.password != "" {
@@ -116,6 +136,99 @@ func (d *Driver) connect() (*sftp.Client, error) {
 	d.ssh = conn
 	d.client = cl
 	return cl, nil
+}
+
+// hostKeyCallback picks the SSH host-key verification strategy from config.
+//
+// Precedence: explicit insecure opt-out → pinned single key → known_hosts
+// file (strict) → trust-on-first-use against ~/.filex/known_hosts. The TOFU
+// default means a brand-new storage records the server's key on the first
+// connection and rejects any later key change (the classic MITM signal),
+// replacing the previous blanket ssh.InsecureIgnoreHostKey().
+func (d *Driver) hostKeyCallback() (ssh.HostKeyCallback, error) {
+	if d.insecureHostKey {
+		return ssh.InsecureIgnoreHostKey(), nil
+	}
+	if strings.TrimSpace(d.hostKeyPin) != "" {
+		pk, err := parsePinnedKey(d.hostKeyPin)
+		if err != nil {
+			return nil, fmt.Errorf("parse host_key: %w", err)
+		}
+		return ssh.FixedHostKey(pk), nil
+	}
+	khPath := d.knownHostsPath
+	if khPath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve home for known_hosts: %w", err)
+		}
+		khPath = filepath.Join(home, ".filex", "known_hosts")
+	}
+	return tofuHostKeyCallback(khPath)
+}
+
+// parsePinnedKey accepts either an authorized_keys line ("ssh-ed25519 AAAA…")
+// or a known_hosts line ("host ssh-ed25519 AAAA…") and returns the key.
+func parsePinnedKey(s string) (ssh.PublicKey, error) {
+	if pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s)); err == nil {
+		return pk, nil
+	}
+	_, _, pk, _, _, err := ssh.ParseKnownHosts([]byte(s))
+	if err != nil {
+		return nil, err
+	}
+	return pk, nil
+}
+
+// tofuHostKeyCallback verifies against khPath, learning unknown hosts on
+// first contact and persisting them. A key that exists but differs is
+// rejected (the file is never silently overwritten).
+func tofuHostKeyCallback(khPath string) (ssh.HostKeyCallback, error) {
+	if err := os.MkdirAll(filepath.Dir(khPath), 0o700); err != nil {
+		return nil, err
+	}
+	// Ensure the file exists so knownhosts.New can parse it.
+	if f, err := os.OpenFile(khPath, os.O_CREATE, 0o600); err == nil {
+		_ = f.Close()
+	} else if !errors.Is(err, os.ErrExist) {
+		return nil, err
+	}
+	verify, err := knownhosts.New(khPath)
+	if err != nil {
+		return nil, err
+	}
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := verify(hostname, remote, key)
+		if err == nil {
+			return nil
+		}
+		var keyErr *knownhosts.KeyError
+		// len(Want)==0 → host not in the file yet → trust on first use.
+		if errors.As(err, &keyErr) && len(keyErr.Want) == 0 {
+			return appendKnownHost(khPath, hostname, remote, key)
+		}
+		// Mismatch (possible MITM) or other error → reject the connection.
+		return err
+	}, nil
+}
+
+// appendKnownHost writes a learned host key to the known_hosts file.
+func appendKnownHost(khPath, hostname string, remote net.Addr, key ssh.PublicKey) error {
+	f, err := os.OpenFile(khPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	addrs := []string{knownhosts.Normalize(hostname)}
+	if remote != nil {
+		if rn := knownhosts.Normalize(remote.String()); rn != addrs[0] {
+			addrs = append(addrs, rn)
+		}
+	}
+	if _, err := f.WriteString(knownhosts.Line(addrs, key) + "\n"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (d *Driver) join(p string) string {

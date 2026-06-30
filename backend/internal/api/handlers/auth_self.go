@@ -19,7 +19,10 @@ import (
 	"net/http"
 	"strings"
 
+	qrcode "github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/pquerna/otp/totp"
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	authlocal "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/local"
@@ -49,9 +52,10 @@ func (h *AuthSelf) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 type profileReq struct {
-	Email    *string `json:"email,omitempty"`
-	Locale   *string `json:"locale,omitempty"`
-	Timezone *string `json:"timezone,omitempty"`
+	Email       *string `json:"email,omitempty"`
+	DisplayName *string `json:"display_name,omitempty"`
+	Locale      *string `json:"locale,omitempty"`
+	Timezone    *string `json:"timezone,omitempty"`
 }
 
 // UpdateProfile patches the current user's profile fields.
@@ -69,6 +73,9 @@ func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if req.Email != nil && *req.Email != "" {
 		_ = h.Store.UpdateUserEmail(r.Context(), u.ID, strings.ToLower(strings.TrimSpace(*req.Email)))
 	}
+	if req.DisplayName != nil {
+		_ = h.Store.UpdateUserDisplayName(r.Context(), u.ID, strings.TrimSpace(*req.DisplayName))
+	}
 	if req.Locale != nil || req.Timezone != nil {
 		l := u.Locale
 		tz := u.Timezone
@@ -85,8 +92,13 @@ func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type passwordReq struct {
-	OldPassword string `json:"old_password"`
-	NewPassword string `json:"new_password"`
+	// OldPassword is the documented field. CurrentPassword is a defensive
+	// alias — different frontends (and earlier builds of this SPA) posted
+	// `current_password`; accept either so a field-name mismatch can never
+	// silently turn the old-password check into a no-op.
+	OldPassword     string `json:"old_password"`
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 // ChangePassword verifies the old password then writes a new bcrypt hash
@@ -106,12 +118,16 @@ func (h *AuthSelf) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new password too short (min 8)"})
 		return
 	}
+	oldPassword := req.OldPassword
+	if oldPassword == "" {
+		oldPassword = req.CurrentPassword
+	}
 	cur, err := h.Store.GetUser(r.Context(), u.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(cur.PasswordHash), []byte(req.OldPassword)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(cur.PasswordHash), []byte(oldPassword)); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "old password incorrect"})
 		return
 	}
@@ -158,7 +174,7 @@ func (h *AuthSelf) TotpEnroll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"secret":         secret,
 		"otpauth_url":    otpURL,
-		"qr_svg":         renderQRPlaceholderSVG(otpURL),
+		"qr_svg":         renderQRSVG(otpURL),
 		"recovery_codes": codes,
 	})
 }
@@ -261,38 +277,43 @@ func generateRecoveryCodes(n int) []string {
 	return out
 }
 
-// verifyTOTP is a placeholder — in V0.1 we'd integrate pquerna/otp/totp here.
-// For now it accepts any 6-digit numeric code so the UI flow can be exercised
-// end-to-end.
-//
-// TODO: replace with `totp.Validate(code, secret)` from github.com/pquerna/otp.
-func verifyTOTP(_secret, code string) bool {
-	if len(code) != 6 {
+// verifyTOTP validates a user-supplied one-time code against the stored
+// base32 secret using RFC 6238 (SHA1, 6 digits, 30s period). pquerna's
+// totp.Validate applies a ±1 period skew to tolerate clock drift and
+// decodes no-padding base32 secrets (matching generateTotpSecret above).
+func verifyTOTP(secret, code string) bool {
+	code = strings.TrimSpace(code)
+	if secret == "" || code == "" {
 		return false
 	}
-	for _, c := range code {
-		if c < '0' || c > '9' {
-			return false
+	return totp.Validate(code, secret)
+}
+
+// renderQRSVG renders the otpauth:// URI as a self-contained SVG QR code so
+// the admin SPA (which v-html's the response) can display it without an
+// extra request. Modules are drawn as 1×1 rects in a viewBox sized to the
+// matrix; the SVG scales crisply to any width. On encode failure we fall
+// back to a tiny notice SVG rather than failing enrollment outright — the
+// caller also returns secret + otpauth_url so the user can still proceed.
+func renderQRSVG(payload string) string {
+	qr, err := qrcode.New(payload, qrcode.Medium)
+	if err != nil {
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">` +
+			`<rect width="180" height="180" fill="#fff"/>` +
+			`<text x="90" y="92" text-anchor="middle" font-family="monospace" font-size="9" fill="#900">QR encode error</text></svg>`
+	}
+	bitmap := qr.Bitmap()
+	n := len(bitmap)
+	var b strings.Builder
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" shape-rendering="crispEdges" viewBox="0 0 %d %d">`, n, n)
+	b.WriteString(`<rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="`)
+	for y, row := range bitmap {
+		for x, dark := range row {
+			if dark {
+				fmt.Fprintf(&b, "M%d %dh1v1h-1z", x, y)
+			}
 		}
 	}
-	return true
-}
-
-// renderQRPlaceholderSVG returns a minimal placeholder SVG. Real QR encoding
-// is left to a small dependency such as `skip2/go-qrcode` or `boombuler/barcode`
-// — both pure Go, but we don't pull them in V0.1.
-//
-// TODO: replace with proper QR SVG generation.
-func renderQRPlaceholderSVG(payload string) string {
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180" viewBox="0 0 180 180">` +
-		`<rect width="180" height="180" fill="#fff"/>` +
-		`<text x="90" y="86" text-anchor="middle" font-family="monospace" font-size="10" fill="#555">QR placeholder</text>` +
-		`<text x="90" y="100" text-anchor="middle" font-family="monospace" font-size="6" fill="#999">` +
-		htmlEscape(payload[:min(60, len(payload))]) +
-		`</text></svg>`
-}
-
-func htmlEscape(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
-	return r.Replace(s)
+	b.WriteString(`"/></svg>`)
+	return b.String()
 }
