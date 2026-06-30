@@ -200,6 +200,12 @@ func (h *AI) Search(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
 
+// Root → GET /api/ai/root. Reports the caller's confinement root + reachable
+// storages so a confined agent knows how to address paths instead of guessing.
+func (h *AI) Root(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.ops.RootInfo(r.Context()))
+}
+
 // aiStatus maps an aiOps error to an HTTP status code, reusing the driver
 // error mapping for storage-level failures.
 func aiStatus(err error) int {

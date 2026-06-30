@@ -88,6 +88,9 @@ type mcpEntriesOut struct {
 	Entries []aiEntry `json:"entries"`
 }
 
+// mcpRootIn is the (empty) input for file_root.
+type mcpRootIn struct{}
+
 type mcpReadIn struct {
 	Path string `json:"path" jsonschema:"adapter://file path to read"`
 }
@@ -126,6 +129,13 @@ type mcpSearchIn struct {
 
 // registerFilexTools wires every MCP tool onto srv, bound to ops.
 func registerFilexTools(srv *mcp.Server, ops *aiOps) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "file_root",
+		Description: "Report your access scope FIRST: the confinement root you're locked to (if any) and the storage adapter names you can address. If confined, address files with bare relative paths (they resolve UNDER your root) or full adapter://root/... paths — never guess adapter names.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpRootIn) (*mcp.CallToolResult, aiRootInfo, error) {
+		return nil, ops.RootInfo(ctx), nil
+	})
+
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_list",
 		Description: "List files and folders in a directory. Path is adapter://dir (adapter = storage name); empty path lists the first storage's root.",

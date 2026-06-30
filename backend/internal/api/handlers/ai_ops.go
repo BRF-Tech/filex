@@ -51,12 +51,28 @@ var errAINoStorage = errors.New("no storage configured")
 func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, string, error) {
 	// Honor a token's `root:` confinement ceiling. The AI surface bypasses
 	// confine.Middleware, so enforce it here — the single chokepoint every op
-	// routes through. Out-of-root paths are rejected; an empty path resolves
-	// to the confined folder itself.
+	// routes through.
 	if root, ok := confine.RootFromToken(ctx); ok {
+		// A confined caller treats its root as "/": an adapter-less (bare) path
+		// is interpreted relative to the root, so mkdir("sub") lands INSIDE the
+		// root — not the storage root. Fully-qualified adapter://… paths are
+		// validated as-is. (Empty path → the root itself.)
+		if !strings.Contains(p, "://") {
+			rel := strings.Trim(strings.TrimSpace(p), "/")
+			base := root.Adapter + "://" + root.Rel
+			if root.Rel == "" {
+				base = root.Adapter + "://"
+			}
+			if rel == "" {
+				p = base
+			} else {
+				p = strings.TrimRight(base, "/") + "/" + rel
+			}
+		}
 		np, err := root.EnforcePath(p)
 		if err != nil {
-			return nil, "", err
+			q := root.Adapter + "://" + root.Rel
+			return nil, "", fmt.Errorf("%q is outside your confined root %s — use a bare relative path (e.g. \"sub/file.txt\") or a path under %s (call file_root to see your root)", p, q, q)
 		}
 		p = np
 	}
@@ -80,6 +96,42 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 		}
 	}
 	return nil, "", fmt.Errorf("unknown storage: %s", adapter)
+}
+
+// aiRootInfo describes a token's effective access scope — its confinement root
+// (if any) and the storage adapters it can address. The AI surface exposes it
+// (GET /api/ai/root + the file_root MCP tool) so a confined agent learns where
+// it is instead of guessing adapter names and paths.
+type aiRootInfo struct {
+	Confined bool     `json:"confined"`
+	Root     string   `json:"root,omitempty"` // qualified adapter://rel
+	Adapter  string   `json:"adapter,omitempty"`
+	Storages []string `json:"storages"` // addressable adapter names
+	Hint     string   `json:"hint"`
+}
+
+// RootInfo reports the caller's confinement root + reachable storages.
+func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
+	info := aiRootInfo{Storages: []string{}}
+	if storages, err := a.store.ListEnabledStorages(ctx); err == nil {
+		for _, s := range storages {
+			info.Storages = append(info.Storages, s.Name)
+		}
+	}
+	if root, ok := confine.RootFromToken(ctx); ok {
+		info.Confined = true
+		info.Adapter = root.Adapter
+		info.Root = root.Adapter + "://" + root.Rel
+		info.Storages = []string{root.Adapter}
+		info.Hint = "You are confined to " + info.Root + ". Use bare relative paths (e.g. \"sub/file.txt\") — they resolve UNDER this root — or full \"" + info.Root + "/...\" paths. Anything outside is rejected; an empty path = your root."
+	} else {
+		first := ""
+		if len(info.Storages) > 0 {
+			first = info.Storages[0]
+		}
+		info.Hint = "Full access. Address files as \"<adapter>://<path>\" using a storage listed above; an empty path uses the first storage (" + first + ")."
+	}
+	return info
 }
 
 // List returns the directory entries under `p`. Driver-direct (not cache)

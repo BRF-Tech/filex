@@ -439,6 +439,10 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 
+		// Discovery: any valid token may learn its confinement root + reachable
+		// storages (no verb scope needed) so a confined agent stops guessing.
+		r.Get("/root", aiH.Root)
+
 		// Read surface.
 		r.With(auth.RequireScope("read")).Get("/files", aiH.List)
 		r.With(auth.RequireScope("read")).Get("/info", aiH.Info)
