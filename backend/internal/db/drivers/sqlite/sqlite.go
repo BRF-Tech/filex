@@ -1863,6 +1863,56 @@ func (s *Store) ListAllTagsForStorage(ctx context.Context, storageID int64) ([]s
 	return out, rows.Err()
 }
 
+// ListAllTags returns every distinct tag across all storages (alphabetical).
+func (s *Store) ListAllTags(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT m.key
+		 FROM node_meta m
+		 INNER JOIN nodes n ON n.id = m.node_id
+		 WHERE n.deleted_at IS NULL AND m.key LIKE ?
+		 ORDER BY m.key`, tagPrefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, strings.TrimPrefix(k, tagPrefix))
+	}
+	return out, rows.Err()
+}
+
+// ListNodesByTag returns non-deleted nodes carrying the given tag, newest-first.
+func (s *Store) ListNodesByTag(ctx context.Context, tag string, limit int) ([]*model.Node, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		 FROM node_meta m
+		 INNER JOIN nodes n ON n.id = m.node_id
+		 WHERE m.key=? AND n.deleted_at IS NULL
+		 ORDER BY n.updated_at DESC
+		 LIMIT ?`, tagPrefix+tag, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // ─────────────────── Notifications ───────────────────
 
 // InsertNotification persists a new in-app notification row. Webhook

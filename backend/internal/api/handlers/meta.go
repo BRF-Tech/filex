@@ -108,6 +108,34 @@ func (h *Meta) GetTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node_id or storage_id required"})
 }
 
+// ListAllTags lists every distinct tag across all storages (alphabetical).
+// Powers the "Tagged files" page's tag-chip list.
+func (h *Meta) ListAllTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := h.Store.ListAllTags(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
+}
+
+// TaggedNodes lists non-deleted nodes carrying the given tag (?tag=…),
+// newest-first, capped by an optional ?limit=. Empty tag → 400.
+func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
+	tag := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	if tag == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tag required"})
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 500, 1000)
+	nodes, err := h.Store.ListNodesByTag(r.Context(), tag, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "tag": tag})
+}
+
 // ─────────────────── Starred ───────────────────
 
 type starReq struct {

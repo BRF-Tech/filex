@@ -247,7 +247,11 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/manager/tags", func(r chi.Router) {
 				r.Get("/", metaH.GetTags)
 				r.Post("/", metaH.SetTags)
+				// All distinct tags across every storage (Tagged files page).
+				r.Get("/all", metaH.ListAllTags)
 			})
+			// Nodes carrying a given tag (?tag=…&limit=…).
+			r.Get("/manager/tagged", metaH.TaggedNodes)
 			r.Route("/manager/star", func(r chi.Router) {
 				r.Post("/", metaH.SetStar)
 				r.Get("/list", metaH.ListStarred)

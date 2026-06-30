@@ -82,6 +82,7 @@
     "shares": "Shares",
     "trash": "Trash",
     "search": "Search",
+    "tagged": "Tagged files",
     "replica": "Replica",
     "queue": "Queue",
     "notifications": "Notifications",
@@ -406,6 +407,15 @@
     "rebuildStarted": "Rebuild started",
     "queryPlaceholder": "Search files…",
     "noResults": "No matches"
+  },
+  "tagged": {
+    "title": "Tagged files",
+    "subtitle": "Browse files by tag",
+    "noTags": "No tags yet",
+    "noTagsHint": "Tag files from the explorer to see them grouped here.",
+    "selectTag": "Pick a tag to list its files",
+    "resultsFor": "Files tagged \"{tag}\"",
+    "noResults": "No files with this tag"
   },
   "about": {
     "title": "About",

@@ -135,6 +135,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.search' },
       },
       {
+        path: 'tagged',
+        name: 'tagged',
+        component: () => import('@/views/TaggedFiles.vue'),
+        meta: { breadcrumb: 'nav.tagged' },
+      },
+      {
         path: 'replica',
         name: 'replica',
         component: () => import('@/views/Replica.vue'),

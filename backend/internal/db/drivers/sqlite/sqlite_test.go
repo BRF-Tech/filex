@@ -505,3 +505,68 @@ func sprintf04x(i int) string {
 	}
 	return string(out)
 }
+
+// ---------- Tags: cross-storage listing + tagged-node lookup ----------
+
+func TestStore_Tags_AllAndByTag(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	stgA, _ := store.CreateStorage(ctx, &model.Storage{
+		Name: "a", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
+	})
+	stgB, _ := store.CreateStorage(ctx, &model.Storage{
+		Name: "b", Driver: "local", MountPath: "/", SyncMode: model.SyncModePoll, SyncIntervalS: 900, Enabled: true,
+	})
+
+	mk := func(stgID int64, name, hash string) int64 {
+		n, err := store.CreateNode(ctx, &model.Node{
+			StorageID: stgID, Name: name, Path: "/" + name, PathHash: hash,
+			Type: model.NodeTypeFile, SyncState: model.SyncStateSynced,
+		})
+		require.NoError(t, err)
+		return n.ID
+	}
+
+	n1 := mk(stgA.ID, "f1.txt", "h-tag-1") // tags: report, draft
+	n2 := mk(stgB.ID, "f2.txt", "h-tag-2") // tags: report   (other storage)
+	n3 := mk(stgA.ID, "f3.txt", "h-tag-3") // tags: archive
+	nDel := mk(stgA.ID, "del.txt", "h-tag-4")
+
+	require.NoError(t, store.SetNodeTags(ctx, n1, []string{"report", "draft"}))
+	require.NoError(t, store.SetNodeTags(ctx, n2, []string{"report"}))
+	require.NoError(t, store.SetNodeTags(ctx, n3, []string{"archive"}))
+	require.NoError(t, store.SetNodeTags(ctx, nDel, []string{"report"}))
+
+	// Soft-deleted nodes/tags must not surface.
+	require.NoError(t, store.SoftDeleteNode(ctx, nDel))
+
+	// ListAllTags → distinct across both storages, alphabetical, no dupes,
+	// excludes the soft-deleted node's tags (here "report" still exists via
+	// live nodes, so it stays; the deleted-only case is covered below).
+	all, err := store.ListAllTags(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"archive", "draft", "report"}, all)
+
+	// ListNodesByTag("report") → n1 (storage A) + n2 (storage B), not nDel.
+	rep, err := store.ListNodesByTag(ctx, "report", 100)
+	require.NoError(t, err)
+	require.Len(t, rep, 2)
+	ids := map[int64]bool{}
+	for _, n := range rep {
+		ids[n.ID] = true
+	}
+	assert.True(t, ids[n1] && ids[n2])
+	assert.False(t, ids[nDel], "soft-deleted node must be excluded")
+
+	// A tag that exists only on a soft-deleted node disappears from ListAllTags.
+	require.NoError(t, store.SetNodeTags(ctx, n3, []string{}))
+	all2, err := store.ListAllTags(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"draft", "report"}, all2)
+
+	// Unknown tag → empty slice, no error.
+	none, err := store.ListNodesByTag(ctx, "no-such-tag", 100)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}

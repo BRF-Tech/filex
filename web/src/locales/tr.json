@@ -82,6 +82,7 @@
     "shares": "Paylaşımlar",
     "trash": "Çöp kutusu",
     "search": "Arama",
+    "tagged": "Etiketli dosyalar",
     "replica": "Replikasyon",
     "queue": "Kuyruk",
     "notifications": "Bildirimler",
@@ -406,6 +407,15 @@
     "rebuildStarted": "Yeniden oluşturma başladı",
     "queryPlaceholder": "Dosya ara…",
     "noResults": "Eşleşme yok"
+  },
+  "tagged": {
+    "title": "Etiketli dosyalar",
+    "subtitle": "Dosyaları etikete göre gör",
+    "noTags": "Henüz etiket yok",
+    "noTagsHint": "Gezginden dosyaları etiketle, burada gruplanmış olarak görünsünler.",
+    "selectTag": "Dosyalarını listelemek için bir etiket seç",
+    "resultsFor": "\"{tag}\" etiketli dosyalar",
+    "noResults": "Bu etikete sahip dosya yok"
   },
   "about": {
     "title": "Hakkında",

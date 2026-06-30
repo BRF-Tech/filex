@@ -210,6 +210,11 @@ type Store interface {
 	SetNodeTags(ctx context.Context, nodeID int64, tags []string) error
 	GetNodeTags(ctx context.Context, nodeID int64) ([]string, error)
 	ListAllTagsForStorage(ctx context.Context, storageID int64) ([]string, error)
+	// ListAllTags returns every distinct tag across all storages (alphabetical).
+	ListAllTags(ctx context.Context) ([]string, error)
+	// ListNodesByTag returns non-deleted nodes carrying the given tag,
+	// newest-first (by node updated_at), capped at limit.
+	ListNodesByTag(ctx context.Context, tag string, limit int) ([]*model.Node, error)
 
 	// Notifications (in-app bell + webhook delivery audit)
 	InsertNotification(ctx context.Context, n *model.NotificationInput) (int64, error)
