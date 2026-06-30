@@ -20,6 +20,7 @@ import {
   GitBranch,
   FolderOpen,
   History,
+  KeyRound,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -58,6 +59,7 @@ const items = computed<NavItem[]>(() => [
     icon: ShieldCheck,
     group: 'access',
   },
+  { to: { name: 'api-mcp' }, label: t('nav.apiMcp'), icon: KeyRound, group: 'access' },
 
   { to: { name: 'settings' }, label: t('nav.settings'), icon: Settings, group: 'ops' },
   { to: { name: 'external' }, label: t('nav.external'), icon: PlugZap, group: 'ops' },

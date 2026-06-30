@@ -76,6 +76,7 @@
     "settings": "Ayarlar",
     "external": "Dış servisler",
     "authProviders": "Kimlik sağlayıcılar",
+    "apiMcp": "API / MCP",
     "audit": "Denetim kaydı",
     "sync": "Senkron çalışmaları",
     "shares": "Paylaşımlar",
@@ -295,6 +296,45 @@
     "savedOk": "Sağlayıcı güncellendi",
     "testOk": "Sağlayıcı tamam",
     "testFail": "Sağlayıcı kontrolü başarısız"
+  },
+  "apiMcp": {
+    "title": "API / MCP",
+    "subtitle": "AI ajanları için erişim token'ları + MCP bağlantısı",
+    "newToken": "Yeni token",
+    "connectTitle": "MCP bağlantısı",
+    "connectHint": "Aşağıdaki uçlara, oluşturduğun token'ı X-Filex-Token (ya da Authorization: Bearer) header'ı ile gönder.",
+    "mcpEndpoint": "MCP endpoint (streamable HTTP)",
+    "restBase": "REST taban URL",
+    "addToClaude": "Claude'a ekle",
+    "tokenCreated": "Token oluşturuldu",
+    "tokenOnce": "Bu token yalnızca bir kez gösterilir — kopyala ve güvenli sakla.",
+    "createdOk": "Token oluşturuldu",
+    "deletedOk": "Token silindi",
+    "deleteConfirm": "\"{label}\" token'ı silinsin mi? Bu token'ı kullanan entegrasyonlar erişimini kaybeder.",
+    "empty": "Henüz token yok. AI/MCP erişimi için bir tane oluştur.",
+    "never": "süresiz",
+    "cols": {
+      "label": "Etiket",
+      "scopes": "Yetkiler",
+      "lastUsed": "Son kullanım",
+      "expires": "Bitiş",
+      "created": "Oluşturuldu"
+    },
+    "fields": {
+      "label": "Etiket",
+      "labelPlaceholder": "ör. claude-ajan",
+      "scopes": "Yetkiler (scope)",
+      "scopesHint": "Hiçbiri seçilmezse tüm yetkiler verilir. Dosya MCP'si için 'mcp', admin paneli için 'admin' gerekir.",
+      "expiry": "Geçerlilik (gün)",
+      "expiryHint": "0 veya boş = süresiz"
+    },
+    "scopeDesc": {
+      "read": "Dosya listele/oku/ara/indir",
+      "write": "Dosya yükle/oluştur/taşı",
+      "delete": "Dosya sil",
+      "mcp": "MCP endpoint'ine bağlan (dosya tool'ları)",
+      "admin": "Admin paneli API + admin MCP tool'ları"
+    }
   },
   "audit": {
     "title": "Denetim kaydı",

@@ -99,6 +99,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.authProviders' },
       },
       {
+        path: 'api-mcp',
+        name: 'api-mcp',
+        component: () => import('@/views/ApiMcp.vue'),
+        meta: { breadcrumb: 'nav.apiMcp' },
+      },
+      {
         path: 'audit',
         name: 'audit',
         component: () => import('@/views/Audit.vue'),

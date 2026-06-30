@@ -76,6 +76,7 @@
     "settings": "Settings",
     "external": "External services",
     "authProviders": "Auth providers",
+    "apiMcp": "API / MCP",
     "audit": "Audit log",
     "sync": "Sync runs",
     "shares": "Shares",
@@ -295,6 +296,45 @@
     "savedOk": "Provider updated",
     "testOk": "Provider OK",
     "testFail": "Provider check failed"
+  },
+  "apiMcp": {
+    "title": "API / MCP",
+    "subtitle": "Access tokens for AI agents + MCP connection",
+    "newToken": "New token",
+    "connectTitle": "MCP connection",
+    "connectHint": "Send your token to the endpoints below via the X-Filex-Token (or Authorization: Bearer) header.",
+    "mcpEndpoint": "MCP endpoint (streamable HTTP)",
+    "restBase": "REST base URL",
+    "addToClaude": "Add to Claude",
+    "tokenCreated": "Token created",
+    "tokenOnce": "This token is shown only once — copy it and store it safely.",
+    "createdOk": "Token created",
+    "deletedOk": "Token deleted",
+    "deleteConfirm": "Delete token \"{label}\"? Integrations using it will lose access.",
+    "empty": "No tokens yet. Create one for AI/MCP access.",
+    "never": "never",
+    "cols": {
+      "label": "Label",
+      "scopes": "Scopes",
+      "lastUsed": "Last used",
+      "expires": "Expires",
+      "created": "Created"
+    },
+    "fields": {
+      "label": "Label",
+      "labelPlaceholder": "e.g. claude-agent",
+      "scopes": "Scopes",
+      "scopesHint": "If none are selected, all scopes are granted. File MCP needs 'mcp'; admin panel needs 'admin'.",
+      "expiry": "Validity (days)",
+      "expiryHint": "0 or empty = never"
+    },
+    "scopeDesc": {
+      "read": "List/read/search/download files",
+      "write": "Upload/create/move files",
+      "delete": "Delete files",
+      "mcp": "Connect to the MCP endpoint (file tools)",
+      "admin": "Admin panel API + admin MCP tools"
+    }
   },
   "audit": {
     "title": "Audit log",
