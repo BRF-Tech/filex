@@ -12,6 +12,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	apitoken "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/apitoken"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 	"gitlab.com/brftech/filemanager/backend/internal/version"
 )
@@ -33,17 +34,20 @@ import (
 // absent (should never happen behind the middleware) getServer returns nil
 // and the SDK serves 400.
 type AIMCP struct {
-	store    db.Store
-	resolver func(int64) (storage.Driver, error)
-	admin    *AIAdmin
-	handler  http.Handler
+	store     db.Store
+	resolver  func(int64) (storage.Driver, error)
+	admin     *AIAdmin
+	share     *share.Service
+	publicURL string
+	handler   http.Handler
 }
 
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
-// to disable the admin tool surface entirely.
-func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin) *AIMCP {
-	h := &AIMCP{store: store, resolver: resolver, admin: admin}
+// to disable the admin tool surface entirely. shareSvc + publicURL power the
+// file_share / file_unshare tools.
+func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL string) *AIMCP {
+	h := &AIMCP{store: store, resolver: resolver, admin: admin, share: shareSvc, publicURL: publicURL}
 	h.handler = mcp.NewStreamableHTTPHandler(h.getServer, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
 		JSONResponse: true,
@@ -62,7 +66,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	if auth.UserFrom(r.Context()) == nil {
 		return nil
 	}
-	ops := newAIOps(h.store, h.resolver)
+	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL)
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",
@@ -125,6 +129,17 @@ type mcpMoveIn struct {
 type mcpSearchIn struct {
 	Path  string `json:"path,omitempty" jsonschema:"adapter:// scope for the search; empty = first storage"`
 	Query string `json:"query" jsonschema:"substring to match against file/dir names"`
+}
+
+type mcpShareIn struct {
+	Path          string `json:"path" jsonschema:"adapter://file-or-folder to share (folders download as a zip)"`
+	Pin           bool   `json:"pin,omitempty" jsonschema:"generate a random PIN to protect the link"`
+	ExpiresInDays int    `json:"expires_in_days,omitempty" jsonschema:"link expiry in days (0 = never)"`
+	MaxDownloads  int    `json:"max_downloads,omitempty" jsonschema:"max downloads (0 = unlimited)"`
+}
+
+type mcpUnshareIn struct {
+	Token string `json:"token" jsonschema:"the share token to revoke"`
 }
 
 // registerFilexTools wires every MCP tool onto srv, bound to ops.
@@ -239,6 +254,27 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps) {
 			return toolErr[mcpEntriesOut](err)
 		}
 		return nil, mcpEntriesOut{Entries: entries}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "file_share",
+		Description: "Create a public share link for a file or folder (folders download as a ZIP). Returns the URL + a one-time PIN if pin=true. Use this to hand a file to someone without filex access — do NOT stream large files back through file_read.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpShareIn) (*mcp.CallToolResult, aiShareResult, error) {
+		res, err := ops.CreateShare(ctx, in.Path, in.Pin, in.ExpiresInDays, in.MaxDownloads)
+		if err != nil {
+			return toolErr[aiShareResult](err)
+		}
+		return nil, *res, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "file_unshare",
+		Description: "Revoke a share link by its token (returned from file_share).",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUnshareIn) (*mcp.CallToolResult, mcpOKOut, error) {
+		if err := ops.RevokeShare(ctx, in.Token); err != nil {
+			return toolErr[mcpOKOut](err)
+		}
+		return nil, mcpOKOut{OK: true}, nil
 	})
 }
 

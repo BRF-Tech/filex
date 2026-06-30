@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
 
@@ -30,9 +31,10 @@ type AI struct {
 	ops *aiOps
 }
 
-// NewAI constructs the AI REST handler.
-func NewAI(store db.Store, resolver func(int64) (storage.Driver, error)) *AI {
-	return &AI{ops: newAIOps(store, resolver)}
+// NewAI constructs the AI REST handler. shareSvc + publicURL power the share
+// endpoints (pass nil shareSvc to disable sharing).
+func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *AI {
+	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL)}
 }
 
 // List → GET /api/ai/files?path=<adapter://dir>
@@ -204,6 +206,46 @@ func (h *AI) Search(w http.ResponseWriter, r *http.Request) {
 // storages so a confined agent knows how to address paths instead of guessing.
 func (h *AI) Root(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.ops.RootInfo(r.Context()))
+}
+
+// aiShareBody is the body for POST /api/ai/share.
+type aiShareBody struct {
+	Path          string `json:"path"`
+	Pin           bool   `json:"pin,omitempty"`
+	ExpiresInDays int    `json:"expires_in_days,omitempty"`
+	MaxDownloads  int    `json:"max_downloads,omitempty"`
+}
+
+// Share → POST /api/ai/share. Mints a public /s/<token> link for a file/folder
+// (folders download as a ZIP). Returns the URL + a one-time PIN if requested.
+func (h *AI) Share(w http.ResponseWriter, r *http.Request) {
+	var body aiShareBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	res, err := h.ops.CreateShare(r.Context(), body.Path, body.Pin, body.ExpiresInDays, body.MaxDownloads)
+	if err != nil {
+		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// Unshare → POST /api/ai/unshare {"token":"…"}. Revokes a share by token.
+func (h *AI) Unshare(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if err := h.ops.RevokeShare(r.Context(), body.Token); err != nil {
+		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // aiStatus maps an aiOps error to an HTTP status code, reusing the driver

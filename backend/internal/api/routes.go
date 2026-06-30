@@ -422,7 +422,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// X-Filex-Token / Bearer and attaches the bound principal + token;
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
 	// scopes set grants everything.
-	aiH := handlers.NewAI(d.Store, d.StorageResolver)
+	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
 	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
 		Store:           d.Store,
 		Caps:            d.Caps,
@@ -435,7 +435,7 @@ func BuildRouter(d *Deps) http.Handler {
 		ReplicaCron:     d.ReplicaCron,
 		ReplicaReloader: d.ReplicaReloader,
 	})
-	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin)
+	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 
@@ -454,6 +454,10 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("write")).Post("/mkdir", aiH.Mkdir)
 		r.With(auth.RequireScope("write")).Post("/move", aiH.Move)
 		r.With(auth.RequireScope("delete")).Post("/delete", aiH.Delete)
+
+		// Share surface — public /s/<token> links (folders zip on download).
+		r.With(auth.RequireScope("write")).Post("/share", aiH.Share)
+		r.With(auth.RequireScope("write")).Post("/unshare", aiH.Unshare)
 
 		// MCP streamable HTTP (JSON-RPC). Both POST (requests) and GET
 		// (SSE stream open) are part of the transport contract.

@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
 
@@ -25,12 +27,14 @@ import (
 // filex (adapter == storage name). An empty/relative path defaults to the
 // first enabled storage at its root.
 type aiOps struct {
-	store    db.Store
-	resolver func(int64) (storage.Driver, error)
+	store     db.Store
+	resolver  func(int64) (storage.Driver, error)
+	share     *share.Service // optional — nil disables file_share/unshare
+	publicURL string         // base for /s/<token> links
 }
 
-func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error)) *aiOps {
-	return &aiOps{store: store, resolver: resolver}
+func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *aiOps {
+	return &aiOps{store: store, resolver: resolver, share: shareSvc, publicURL: publicURL}
 }
 
 // aiEntry is the JSON-shaped directory/file row returned to AI callers.
@@ -478,6 +482,90 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// aiShareResult is the AI-surface share payload: a public link (+ optional PIN
+// shown once) for a file or folder.
+type aiShareResult struct {
+	URL          string     `json:"url"`
+	Token        string     `json:"token"`
+	Path         string     `json:"path"`
+	HasPin       bool       `json:"has_pin"`
+	Pin          string     `json:"pin,omitempty"` // present ONLY when generated now
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	MaxDownloads *int       `json:"max_downloads,omitempty"`
+}
+
+// CreateShare mints a public share link for a file/folder. Honors the token's
+// confinement root (the path is validated via resolveStorage). pin=true
+// generates a random unlock PIN (returned ONCE); expiresInDays / maxDownloads
+// are optional (0 = none). The target must be indexed (write or list it first).
+func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDays, maxDownloads int) (*aiShareResult, error) {
+	if a.share == nil {
+		return nil, errors.New("sharing is not enabled on this server")
+	}
+	s, rel, err := a.resolveStorage(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	if rel == "" {
+		return nil, errors.New("share target path required (cannot share a storage root)")
+	}
+	node, err := a.store.GetNodeByPath(ctx, s.ID, sharePathHash(s.ID, rel))
+	if err != nil || node == nil {
+		return nil, fmt.Errorf("not indexed yet: %s — write or list it first so filex caches the entry", joinAdapterPath(s.Name, rel))
+	}
+	pinVal, pinGen := "", ""
+	if pin {
+		pinVal = randomPIN(8)
+		pinGen = pinVal
+	}
+	var userID *int64
+	if u := auth.UserFrom(ctx); u != nil {
+		uid := u.ID
+		userID = &uid
+	}
+	opts := share.CreateOpts{NodeID: node.ID, PIN: pinVal, CreatedBy: userID}
+	if expiresInDays > 0 {
+		t := time.Now().AddDate(0, 0, expiresInDays)
+		opts.ExpiresAt = &t
+	}
+	if maxDownloads > 0 {
+		opts.MaxDownloads = &maxDownloads
+	}
+	sh, err := a.share.Create(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	url := "/s/" + sh.Token
+	if base := strings.TrimRight(a.publicURL, "/"); base != "" {
+		url = base + url
+	}
+	return &aiShareResult{
+		URL:          url,
+		Token:        sh.Token,
+		Path:         joinAdapterPath(s.Name, node.Path),
+		HasPin:       sh.PinHash != "",
+		Pin:          pinGen,
+		ExpiresAt:    sh.ExpiresAt,
+		MaxDownloads: sh.MaxDownloads,
+	}, nil
+}
+
+// RevokeShare revokes a share by its token. Only the share's creator (or an
+// admin) may revoke it.
+func (a *aiOps) RevokeShare(ctx context.Context, token string) error {
+	if a.share == nil {
+		return errors.New("sharing is not enabled on this server")
+	}
+	sh, err := a.store.GetShareByToken(ctx, token)
+	if err != nil {
+		return errors.New("share not found")
+	}
+	if u := auth.UserFrom(ctx); u != nil && !u.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != u.ID) {
+		return errors.New("forbidden: not your share")
+	}
+	return a.store.RevokeShare(ctx, sh.ID)
 }
 
 // ───── cache mirror helpers (best-effort; sync reconciles later) ─────
