@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -297,7 +299,53 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 
 	rec := newBufRecorder()
 	h(rec, req)
+	a.auditInvoke(principal, method, path, urlParams, rec.status)
 	return rec.status, rec.buf.Bytes()
+}
+
+// auditInvoke records a best-effort audit_log entry for a successful, mutating
+// MCP admin tool call. The admin_* MCP tools run their handler in-process via
+// invoke, bypassing the HTTP AuditMiddleware that covers the /api/ai/admin REST
+// surface — so we replicate its (mutating-verb + 2xx-only) audit write here.
+// GET reads and non-2xx responses are skipped; failures never affect the tool
+// result. The action mirrors the REST path's name (prefixed "ai." via
+// auth.AIAdminAction) so panel / AI-REST / AI-MCP writes are indistinguishable
+// in the Audit page beyond that single "ai." marker.
+func (a *AIAdmin) auditInvoke(principal *model.User, method, path string, urlParams map[string]string, status int) {
+	if a.store == nil {
+		return
+	}
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+	default:
+		return // reads are never audited
+	}
+	if status < 200 || status >= 300 {
+		return // only successful writes
+	}
+	action, targetType, targetID := auth.AIAdminAction(method, path, urlParams["id"], urlParams["name"])
+	if action == "" {
+		return
+	}
+	entry := &model.AuditEntry{
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		CreatedAt:  time.Now(),
+	}
+	// elevatedPrincipal preserves the bound user's real ID (only the role is
+	// lifted to admin), so the audit row attributes the change correctly.
+	if principal != nil && principal.ID > 0 {
+		uid := principal.ID
+		entry.UserID = &uid
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.store.InsertAuditEntry(ctx, entry); err != nil {
+		slog.Warn("ai admin mcp audit insert failed",
+			slog.String("action", action),
+			slog.String("err", err.Error()))
+	}
 }
 
 // bufRecorder is a minimal in-memory http.ResponseWriter (we avoid importing

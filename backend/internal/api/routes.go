@@ -454,7 +454,10 @@ func BuildRouter(d *Deps) http.Handler {
 		// Admin surface — the full admin panel as token-auth REST endpoints.
 		// Gated by the `admin` scope; the bound user is then elevated to an
 		// admin principal so the reused admin handler logic runs authorized.
-		r.With(auth.RequireScope("admin")).Route("/admin", aiAdmin.Register)
+		// AuditMiddleware runs AFTER apitoken + RequireScope("admin") so the
+		// bound principal is on the context — every successful mutating
+		// /api/ai/admin/* write lands in the audit log (action prefixed "ai.").
+		r.With(auth.RequireScope("admin"), auth.AuditMiddleware(d.Store)).Route("/admin", aiAdmin.Register)
 	})
 
 	// ────── healthz ──────

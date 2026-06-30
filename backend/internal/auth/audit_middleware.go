@@ -106,6 +106,10 @@ func shouldAudit(r *http.Request) bool {
 	switch {
 	case strings.HasPrefix(p, "/api/admin/"):
 		return true
+	case strings.HasPrefix(p, "/api/ai/admin/"):
+		// AI-surface admin REST mirror (/api/ai/admin/*). Same admin write
+		// ops as the native panel, just behind a token instead of a session.
+		return true
 	case strings.HasPrefix(p, "/api/auth/"):
 		// Skip noisy auth endpoints (login/logout get their own dedicated
 		// trail; whoami is GET only).
@@ -132,17 +136,49 @@ func shouldAudit(r *http.Request) bool {
 	return false
 }
 
-// actionFor maps a (method, path) pair to (action, target_type, target_id).
+// actionFor maps the request to (action, target_type, target_id), reading the
+// chi URL params off the context. It dispatches to ActionForPath, normalizing
+// + tagging the AI-surface admin mirror (/api/ai/admin/*) via AIAdminAction so
+// those writes are distinguishable from native-panel ones in the audit log.
+func actionFor(r *http.Request) (string, string, string) {
+	id := chi.URLParam(r, "id")
+	name := chi.URLParam(r, "name")
+	if strings.HasPrefix(r.URL.Path, "/api/ai/admin") {
+		return AIAdminAction(r.Method, r.URL.Path, id, name)
+	}
+	return ActionForPath(r.Method, r.URL.Path, id, name)
+}
+
+// AIAdminAction derives the audit (action, targetType, targetID) for a request
+// on the AI admin surface (/api/ai/admin/*). It normalizes the path down to the
+// native /api/admin/* form, reuses ActionForPath's mapping, and prefixes the
+// resulting action with "ai." so AI-token-driven admin writes are clearly
+// distinguishable from native-panel ones in the Audit page. id/name are the
+// corresponding chi URL params ("" when absent). Returns an empty action when
+// the call isn't an auditable mutating admin op.
+//
+// Used both by the HTTP AuditMiddleware (for /api/ai/admin REST calls) and by
+// the MCP admin tools (which bypass HTTP middleware and audit in-process).
+func AIAdminAction(method, path, id, name string) (string, string, string) {
+	norm := path
+	if strings.HasPrefix(norm, "/api/ai/admin") {
+		norm = "/api/admin" + strings.TrimPrefix(norm, "/api/ai/admin")
+	}
+	action, targetType, targetID := ActionForPath(method, norm, id, name)
+	if action != "" {
+		action = "ai." + action
+	}
+	return action, targetType, targetID
+}
+
+// ActionForPath maps a (method, path) pair to (action, target_type, target_id).
 //
 // The path matching uses strings.HasPrefix on /api/admin/storages/ etc. so
 // trailing slashes / IDs are handled uniformly. We intentionally don't try
-// to read JSON bodies — only URL-derivable identifiers.
-func actionFor(r *http.Request) (string, string, string) {
-	p := r.URL.Path
-	method := r.Method
-	id := chi.URLParam(r, "id")
-	name := chi.URLParam(r, "name")
-
+// to read JSON bodies — only URL-derivable identifiers. id/name are the
+// already-resolved chi URL params (passed in so this function is reusable
+// outside an *http.Request context, e.g. from the in-process MCP invoker).
+func ActionForPath(method, p, id, name string) (string, string, string) {
 	switch {
 	// ── storages ──
 	case method == http.MethodPost && p == "/api/admin/storages/":

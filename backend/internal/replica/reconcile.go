@@ -197,24 +197,34 @@ func (s *Service) GenerateReport(ctx context.Context) error {
 		return err
 	}
 
+	// The report row above is upserted on every run so the latest counts are
+	// always available. The *notification*, however, is only worth emitting
+	// when it's actionable — otherwise an N-minute cron with "0 failures, 0
+	// repaired" and no webhook just floods the in-app bell with hundreds of
+	// unread no-op reports. Notify only when there's something to say
+	// (failed/repaired > 0) OR a webhook URL is configured (the operator has
+	// opted in to receive every cron report at their own endpoint).
 	if s.notifier != nil {
-		// Webhook gets the full list (paginated via the same store
-		// helper) — caller has already opted-in by configuring
-		// FILEX_WEBHOOK_URL. In-app body stays terse.
-		full, _, _ := s.store.ListReplicaFailures(ctx, true, 100000, 0)
-		body := fmt.Sprintf("Cron report: %d unresolved failures, %d repaired in last 24h", failed, repaired)
-		_, _ = s.notifier.Send(ctx, notify.Event{
-			Event:    notify.EventReplicaStatusReport,
-			Severity: notify.SeverityInfo,
-			Title:    "Replica status report",
-			Body:     body,
-			Meta: map[string]any{
-				"failed_count":   failed,
-				"repaired_count": repaired,
-				"total_files":    total,
-				"failed_paths":   full,
-			},
-		})
+		webhookURL, _ := s.notifier.WebhookConfig()
+		if failed > 0 || repaired > 0 || webhookURL != "" {
+			// Webhook gets the full list (paginated via the same store
+			// helper) — caller has already opted-in by configuring
+			// FILEX_WEBHOOK_URL. In-app body stays terse.
+			full, _, _ := s.store.ListReplicaFailures(ctx, true, 100000, 0)
+			body := fmt.Sprintf("Cron report: %d unresolved failures, %d repaired in last 24h", failed, repaired)
+			_, _ = s.notifier.Send(ctx, notify.Event{
+				Event:    notify.EventReplicaStatusReport,
+				Severity: notify.SeverityInfo,
+				Title:    "Replica status report",
+				Body:     body,
+				Meta: map[string]any{
+					"failed_count":   failed,
+					"repaired_count": repaired,
+					"total_files":    total,
+					"failed_paths":   full,
+				},
+			})
+		}
 	}
 	return nil
 }
