@@ -310,6 +310,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 			r.Route("/settings", func(r chi.Router) {
 				r.Get("/", seth.List)
+				r.Patch("/", seth.Update)
 				r.Put("/{key}", seth.Set)
 			})
 

@@ -219,6 +219,8 @@ func actionFor(r *http.Request) (string, string, string) {
 		return "version.delete", "version", id
 
 	// ── settings / external / auth providers ──
+	case method == http.MethodPatch && p == "/api/admin/settings":
+		return "settings.update", "setting", ""
 	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/settings/"):
 		return "settings.update", "setting", ""
 	case method == http.MethodPatch && strings.HasPrefix(p, "/api/admin/external/") && name != "":
