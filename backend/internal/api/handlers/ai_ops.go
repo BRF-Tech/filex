@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -27,14 +30,15 @@ import (
 // filex (adapter == storage name). An empty/relative path defaults to the
 // first enabled storage at its root.
 type aiOps struct {
-	store     db.Store
-	resolver  func(int64) (storage.Driver, error)
-	share     *share.Service // optional — nil disables file_share/unshare
-	publicURL string         // base for /s/<token> links
+	store      db.Store
+	resolver   func(int64) (storage.Driver, error)
+	share      *share.Service // optional — nil disables file_share/unshare
+	publicURL  string         // base for /s/<token> links
+	convertURL string         // external converter URL (empty = not configured)
 }
 
-func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *aiOps {
-	return &aiOps{store: store, resolver: resolver, share: shareSvc, publicURL: publicURL}
+func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *aiOps {
+	return &aiOps{store: store, resolver: resolver, share: shareSvc, publicURL: publicURL, convertURL: convertURL}
 }
 
 // aiEntry is the JSON-shaped directory/file row returned to AI callers.
@@ -110,7 +114,8 @@ type aiRootInfo struct {
 	Confined bool     `json:"confined"`
 	Root     string   `json:"root,omitempty"` // qualified adapter://rel
 	Adapter  string   `json:"adapter,omitempty"`
-	Storages []string `json:"storages"` // addressable adapter names
+	Storages []string `json:"storages"`          // addressable adapter names
+	Convert  string   `json:"convert,omitempty"` // external converter URL (empty = unavailable)
 	Hint     string   `json:"hint"`
 }
 
@@ -134,6 +139,15 @@ func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 			first = info.Storages[0]
 		}
 		info.Hint = "Full access. Address files as \"<adapter>://<path>\" using a storage listed above; an empty path uses the first storage (" + first + ")."
+	}
+	// Conversion is NOT a server-side MCP operation — it runs in an external
+	// converter. Surface the URL (when configured) so the agent points the user
+	// there instead of trying a non-existent file_convert tool.
+	if a.convertURL != "" {
+		info.Convert = a.convertURL
+		info.Hint += " File conversion is not a server-side MCP operation: it runs in the external converter at " + a.convertURL + " (use the filex UI's Convert action)."
+	} else {
+		info.Hint += " File conversion is not a server-side MCP operation; it runs in an external converter (admin → External services / Dış servisler) — none is configured here."
 	}
 	return info
 }
@@ -566,6 +580,261 @@ func (a *aiOps) RevokeShare(ctx context.Context, token string) error {
 		return errors.New("forbidden: not your share")
 	}
 	return a.store.RevokeShare(ctx, sh.ID)
+}
+
+// ───── server-side zip / unzip ─────
+//
+// Both operations are SERVER-SIDE: the archive is assembled / extracted into
+// the configured storage and only metadata (the dest entry / a file count)
+// crosses the AI surface. Large archives never travel as a base64 blob over
+// MCP — to hand a zip to someone, call CreateShare on the result.
+
+// Zip packs one or more source paths (files or folders) into a new zip at dest.
+// Every source AND the dest pass resolveStorage, so a confined token's root
+// ceiling is enforced on each path. Folders are walked recursively via the
+// driver's List/Read. All sources must live on the same storage as dest.
+func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntry, error) {
+	if len(sources) == 0 {
+		return nil, errors.New("at least one source path required")
+	}
+	sDest, relDest, err := a.resolveStorage(ctx, dest)
+	if err != nil {
+		return nil, err
+	}
+	if relDest == "" {
+		return nil, errors.New("dest path required")
+	}
+	if sDest.ReadOnly {
+		return nil, storage.ErrReadOnly
+	}
+	drvDest, err := a.resolver(sDest.ID)
+	if err != nil {
+		return nil, err
+	}
+	wr, ok := drvDest.(storage.Writer)
+	if !ok {
+		return nil, storage.ErrUnsupported
+	}
+
+	// archive/zip writes forward-only, so build into a tmp file then stream
+	// the finished archive back into storage (archive.go Add pattern).
+	tmp, err := os.CreateTemp("", "filex-ai-zip-*.zip")
+	if err != nil {
+		return nil, err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	defer tmp.Close()
+
+	zw := zip.NewWriter(tmp)
+	seen := map[string]bool{}
+	for _, src := range sources {
+		sSrc, relSrc, rerr := a.resolveStorage(ctx, src)
+		if rerr != nil {
+			_ = zw.Close()
+			return nil, rerr
+		}
+		if relSrc == "" {
+			_ = zw.Close()
+			return nil, errors.New("source path required (cannot zip a storage root)")
+		}
+		if sSrc.ID != sDest.ID {
+			_ = zw.Close()
+			return nil, errors.New("zip sources must be on the same storage as dest")
+		}
+		drvSrc, derr := a.resolver(sSrc.ID)
+		if derr != nil {
+			_ = zw.Close()
+			return nil, derr
+		}
+		if aerr := a.zipAdd(ctx, zw, drvSrc, relSrc, path.Base(relSrc), seen); aerr != nil {
+			_ = zw.Close()
+			return nil, aerr
+		}
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	if _, err := tmp.Seek(0, 0); err != nil {
+		return nil, err
+	}
+	stat, err := tmp.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := stat.Size()
+	if err := wr.Write(ctx, relDest, tmp, size); err != nil {
+		return nil, err
+	}
+	mime := mimeByExt(relDest)
+	if mime == "" {
+		mime = "application/zip"
+	}
+	a.cacheUpsertFile(ctx, sDest, relDest, size, mime)
+	return &aiEntry{
+		Path:         joinAdapterPath(sDest.Name, relDest),
+		Name:         path.Base(relDest),
+		Type:         "file",
+		Size:         size,
+		Mime:         mime,
+		LastModified: time.Now().UnixMilli(),
+	}, nil
+}
+
+// zipAdd writes rel (a file or directory) into zw under the zip-internal path
+// `base`. Directories recurse via the driver's List. `base` is composed from
+// already-cleaned basenames, so it is zip-slip-safe by construction; the file
+// branch still routes through sanitizeZipPath as defense in depth. `seen`
+// dedups member names (first writer wins) so colliding sources don't error.
+func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, rel, base string, seen map[string]bool) error {
+	st, err := drv.Stat(ctx, rel)
+	if err != nil {
+		return err
+	}
+	if st.Kind == storage.KindDirectory {
+		objs, lerr := drv.List(ctx, rel)
+		if lerr != nil {
+			return lerr
+		}
+		if len(objs) == 0 {
+			// Preserve the empty directory as a zip dir entry.
+			if marker := strings.Trim(base, "/"); marker != "" {
+				_, _ = zw.Create(marker + "/")
+			}
+			return nil
+		}
+		for _, o := range objs {
+			if o.Name == ".filex-trash" || strings.Contains(o.Path, ".filex-trash") ||
+				strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" {
+				continue
+			}
+			childRel := o.Path
+			if childRel == "" {
+				childRel = path.Join(rel, o.Name)
+			}
+			if aerr := a.zipAdd(ctx, zw, drv, childRel, path.Join(base, o.Name), seen); aerr != nil {
+				return aerr
+			}
+		}
+		return nil
+	}
+	safe, err := sanitizeZipPath(base)
+	if err != nil {
+		return err
+	}
+	if seen[safe] {
+		return nil
+	}
+	rc, err := drv.Read(ctx, rel)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	fw, err := zw.Create(safe)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(fw, rc); err != nil {
+		return err
+	}
+	seen[safe] = true
+	return nil
+}
+
+// Unzip extracts the zip at src into destDir. Both pass resolveStorage (the
+// confinement ceiling is enforced up front), and every member is zip-slip
+// sanitized + re-checked to stay under destDir. Returns the count of files
+// written. src and destDir must be on the same storage.
+func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
+	sSrc, relSrc, err := a.resolveStorage(ctx, src)
+	if err != nil {
+		return 0, err
+	}
+	if relSrc == "" {
+		return 0, errors.New("src path required")
+	}
+	sDst, relDst, err := a.resolveStorage(ctx, destDir)
+	if err != nil {
+		return 0, err
+	}
+	if sSrc.ID != sDst.ID {
+		return 0, errors.New("unzip dest must be on the same storage as src")
+	}
+	if sDst.ReadOnly {
+		return 0, storage.ErrReadOnly
+	}
+	drv, err := a.resolver(sSrc.ID)
+	if err != nil {
+		return 0, err
+	}
+	wr, ok := drv.(storage.Writer)
+	if !ok {
+		return 0, storage.ErrUnsupported
+	}
+
+	// archive/zip needs a ReaderAt+Seeker — materialize to a tmp file first.
+	rc, err := drv.Read(ctx, relSrc)
+	if err != nil {
+		return 0, err
+	}
+	tmp, err := os.CreateTemp("", "filex-ai-unzip-*.zip")
+	if err != nil {
+		_ = rc.Close()
+		return 0, err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	_, cerr := io.Copy(tmp, rc)
+	_ = rc.Close()
+	_ = tmp.Close()
+	if cerr != nil {
+		return 0, cerr
+	}
+
+	zr, err := zip.OpenReader(tmpName)
+	if err != nil {
+		return 0, fmt.Errorf("not a zip: %w", err)
+	}
+	defer zr.Close()
+
+	dest := strings.Trim(relDst, "/")
+	mkdirer, _ := drv.(storage.Mkdirer)
+	count := 0
+	for _, f := range zr.File {
+		safeRel, serr := sanitizeZipPath(f.Name)
+		if serr != nil {
+			slog.Warn("ai unzip: skipped zip-slip entry", slog.String("name", f.Name), slog.String("err", serr.Error()))
+			continue
+		}
+		target := strings.Trim(path.Join(dest, safeRel), "/")
+		// Defense in depth: the joined target must stay under destDir (which is
+		// itself within the confinement root, validated above).
+		if dest != "" && !strings.HasPrefix(target+"/", dest+"/") {
+			slog.Warn("ai unzip: target escapes dest after join", slog.String("target", target))
+			continue
+		}
+		if strings.HasSuffix(f.Name, "/") {
+			if mkdirer != nil {
+				_ = mkdirer.Mkdir(ctx, target)
+				a.cacheUpsertDir(ctx, sDst, target)
+			}
+			continue
+		}
+		frc, oerr := f.Open()
+		if oerr != nil {
+			slog.Warn("ai unzip: member open", slog.String("name", f.Name), slog.String("err", oerr.Error()))
+			continue
+		}
+		werr := wr.Write(ctx, target, frc, int64(f.UncompressedSize64))
+		_ = frc.Close()
+		if werr != nil {
+			slog.Warn("ai unzip: write", slog.String("target", target), slog.String("err", werr.Error()))
+			continue
+		}
+		a.cacheUpsertFile(ctx, sDst, target, int64(f.UncompressedSize64), mimeByExt(target))
+		count++
+	}
+	return count, nil
 }
 
 // ───── cache mirror helpers (best-effort; sync reconciles later) ─────

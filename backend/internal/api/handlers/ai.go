@@ -27,14 +27,17 @@ import (
 //	POST   /api/ai/mkdir   {"path":"…"}           → {entry:{…}}
 //	POST   /api/ai/move    {"src":"…","dst":"…"}  → {entry:{…}}
 //	GET    /api/ai/search?path=<adapter://>&q=…   → {entries:[…]}
+//	POST   /api/ai/zip     {"sources":[…],"dest":"…"} → {entry:{…}}  (server-side)
+//	POST   /api/ai/unzip   {"src":"…","dest":"…"}     → {ok,extracted}
 type AI struct {
 	ops *aiOps
 }
 
 // NewAI constructs the AI REST handler. shareSvc + publicURL power the share
-// endpoints (pass nil shareSvc to disable sharing).
-func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *AI {
-	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL)}
+// endpoints (pass nil shareSvc to disable sharing); convertURL is surfaced via
+// /api/ai/root so agents learn conversion is an external (non-API) operation.
+func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *AI {
+	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL, convertURL)}
 }
 
 // List → GET /api/ai/files?path=<adapter://dir>
@@ -246,6 +249,51 @@ func (h *AI) Unshare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// aiZipBody is the body for POST /api/ai/zip.
+type aiZipBody struct {
+	Sources []string `json:"sources"`
+	Dest    string   `json:"dest"`
+}
+
+// Zip → POST /api/ai/zip {"sources":[…],"dest":"…"}. Packs the sources into a
+// .zip ON THE SERVER (folders recurse); the bytes never travel over the wire.
+// To download the result, mint a share link for `dest`.
+func (h *AI) Zip(w http.ResponseWriter, r *http.Request) {
+	var body aiZipBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	e, err := h.ops.Zip(r.Context(), body.Sources, body.Dest)
+	if err != nil {
+		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
+}
+
+// aiUnzipBody is the body for POST /api/ai/unzip.
+type aiUnzipBody struct {
+	Src  string `json:"src"`
+	Dest string `json:"dest"`
+}
+
+// Unzip → POST /api/ai/unzip {"src":"…","dest":"…"}. Extracts a stored zip into
+// the dest dir ON THE SERVER (zip-slip protected, confined to the token root).
+func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
+	var body aiUnzipBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	n, err := h.ops.Unzip(r.Context(), body.Src, body.Dest)
+	if err != nil {
+		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "extracted": n})
 }
 
 // aiStatus maps an aiOps error to an HTTP status code, reusing the driver

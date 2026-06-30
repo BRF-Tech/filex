@@ -34,20 +34,21 @@ import (
 // absent (should never happen behind the middleware) getServer returns nil
 // and the SDK serves 400.
 type AIMCP struct {
-	store     db.Store
-	resolver  func(int64) (storage.Driver, error)
-	admin     *AIAdmin
-	share     *share.Service
-	publicURL string
-	handler   http.Handler
+	store      db.Store
+	resolver   func(int64) (storage.Driver, error)
+	admin      *AIAdmin
+	share      *share.Service
+	publicURL  string
+	convertURL string
+	handler    http.Handler
 }
 
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
 // to disable the admin tool surface entirely. shareSvc + publicURL power the
-// file_share / file_unshare tools.
-func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL string) *AIMCP {
-	h := &AIMCP{store: store, resolver: resolver, admin: admin, share: shareSvc, publicURL: publicURL}
+// file_share / file_unshare tools; convertURL is surfaced via file_root.
+func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL, convertURL string) *AIMCP {
+	h := &AIMCP{store: store, resolver: resolver, admin: admin, share: shareSvc, publicURL: publicURL, convertURL: convertURL}
 	h.handler = mcp.NewStreamableHTTPHandler(h.getServer, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
 		JSONResponse: true,
@@ -66,7 +67,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	if auth.UserFrom(r.Context()) == nil {
 		return nil
 	}
-	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL)
+	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",
@@ -140,6 +141,19 @@ type mcpShareIn struct {
 
 type mcpUnshareIn struct {
 	Token string `json:"token" jsonschema:"the share token to revoke"`
+}
+
+type mcpZipIn struct {
+	Sources []string `json:"sources" jsonschema:"adapter:// paths to pack (files and/or folders; folders are zipped recursively)"`
+	Dest    string   `json:"dest" jsonschema:"adapter:// path of the .zip to create (same storage as the sources)"`
+}
+
+type mcpUnzipIn struct {
+	Src     string `json:"src" jsonschema:"adapter:// path of the .zip to extract"`
+	DestDir string `json:"dest_dir" jsonschema:"adapter:// directory to extract into (same storage as src)"`
+}
+type mcpUnzipOut struct {
+	Extracted int `json:"extracted"` // number of files written
 }
 
 // registerFilexTools wires every MCP tool onto srv, bound to ops.
@@ -275,6 +289,28 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps) {
 			return toolErr[mcpOKOut](err)
 		}
 		return nil, mcpOKOut{OK: true}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "file_zip",
+		Description: "Pack one or more files/folders into a .zip ON THE SERVER (folders recurse). The archive is written to storage at `dest` — the bytes never travel over MCP. To let someone download a big zip, call file_share on `dest`; do NOT file_read it.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZipIn) (*mcp.CallToolResult, mcpEntryOut, error) {
+		e, err := ops.Zip(ctx, in.Sources, in.Dest)
+		if err != nil {
+			return toolErr[mcpEntryOut](err)
+		}
+		return nil, mcpEntryOut{Entry: e}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "file_unzip",
+		Description: "Extract a .zip already in storage into dest_dir ON THE SERVER (zip-slip protected; every entry stays within your confinement root). Returns the number of files written.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUnzipIn) (*mcp.CallToolResult, mcpUnzipOut, error) {
+		n, err := ops.Unzip(ctx, in.Src, in.DestDir)
+		if err != nil {
+			return toolErr[mcpUnzipOut](err)
+		}
+		return nil, mcpUnzipOut{Extracted: n}, nil
 	})
 }
 
