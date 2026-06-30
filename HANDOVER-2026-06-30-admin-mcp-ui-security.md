@@ -88,3 +88,22 @@ Dosya tool'ları için `mcp`, admin tool'ları için ek `admin` scope gerekir. `
 - Backend: `go build ./...` ✓, `go vet ./...` ✓, `go test ./internal/api/... ./internal/auth/... ./internal/db/drivers/sqlite/...` ✓ (yeni: TOTP, login-enforcement, users-admin, ai-admin testleri).
 - Frontend: `vue-tsc --noEmit` ✓, `vite build` ✓.
 - (gofmt -l working-tree'de CRLF nedeniyle bazı dosyaları işaretliyor — git LF normalize ediyor, committed blob temiz.)
+
+---
+
+## 8) v0.1.36 → v0.1.40 follow-up'ları (2026-06-30, hepsi CANLI + test edildi)
+
+Yukarısı v0.1.35. Sonraki sürümler (her biri demo-fm + fm'e deploy + canlı smoke):
+
+- **v0.1.36** — Arama sayfası çökmesi fix (backend `{results:Node[]}` ↔ frontend `{items:SearchHit[]}` uyumsuzluğu → `api/search.ts` adapter); AI-admin mutasyonları audit'e düşüyor (REST middleware + MCP in-process `auditInvoke`, `ai.*` action); replica cron bildirim spam'i kesildi (yalnız failure/repaired/webhook'ta üretilir) + birikmiş 1021 bildirim silindi.
+- **v0.1.37** — **Token kök-kısıtı**: token oluştururken storage+yol → `root:<storage>://<path>` scope; filex `confine` AI yüzeyine de uygulandı (`aiOps.resolveStorage` tek-nokta + Search filtresi). **"Etiketli dosyalar"** admin sayfası (`ListAllTags`/`ListNodesByTag` + `/api/files/manager/tags/all`+`/tagged` + `TaggedFiles.vue`).
+- **v0.1.38** — **AI kök keşfi**: `file_root` MCP tool + `GET /api/ai/root` (`{confined,root,adapter,storages,convert,hint}`); confined'da **bare yollar kök'e göre** çözülür (chroot gibi); net out-of-root hata mesajı. `.mcp.json`'a filex HTTP MCP eklendi (`${FILEX_MCP_TOKEN}`).
+- **v0.1.39** — **AI share**: `file_share`/`file_unshare` + `POST /api/ai/share|unshare` (`/s/<token>` + PIN/expiry/max-dl, klasör=zip). **AI zip/unzip**: `file_zip`/`file_unzip` + REST — **sunucu-tarafı** (binary MCP'den geçmez; indirme için share-link). **Convert**: server-side API yok (harici embed) → `file_root` cevabında convert URL + yönlendirme.
+- **v0.1.40** — **fix: AI `file_delete` klasörde 500** — S3'te klasör prefix'inde tek obje yok, eski tek-obje Move CopyObject 404 veriyordu → `aiOps.Delete` artık recursive (alt dosyaları tek tek trash'e taşır) + marker temizler. ⚠ Aynı sınıf bug manager UI `vfDelete`'inde de olabilir (kontrol edilmedi).
+
+**Güncel sürüm: v0.1.40** (main `987b1b4`). Rollback: ilgili compose `image: filex:v0.1.40` → bir önceki, `docker compose up -d`. Memory: `~/.claude/.../filex_admin_mcp_security.md` (v0.1.40'a kadar detaylı).
+
+### AI/MCP token kullanımı (özet)
+1. Panel → **API / MCP** → Yeni token (scope: read/write/delete/mcp/admin; opsiyonel storage+yol = kök-kısıt).
+2. `claude mcp add --transport http filex https://fm.brf.sh/api/ai/mcp --header "X-Filex-Token: <token>"`.
+3. Confined token ile ajan **önce `file_root`** çağırır → kök'ü öğrenir → bare göreli yolla çalışır (`file_write`/`file_zip`/`file_share`).
