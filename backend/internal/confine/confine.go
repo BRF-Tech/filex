@@ -129,6 +129,26 @@ func FromRequest(r *http.Request) (Root, bool, error) {
 	return hdrRoot, true, nil
 }
 
+// RootFromToken derives a confinement Root from the API token on ctx alone
+// (its `root:` scope), without an *http.Request. The AI surface (/api/ai) does
+// not pass through Middleware, so aiOps calls this to honor a token's path
+// ceiling. Returns ok=false for unconfined tokens / cookie sessions.
+func RootFromToken(ctx context.Context) (Root, bool) {
+	tok := auth.TokenFrom(ctx)
+	if tok == nil {
+		return Root{}, false
+	}
+	for _, s := range strings.Split(tok.Scopes, ",") {
+		s = strings.TrimSpace(s)
+		if strings.HasPrefix(s, scopePrefix) {
+			if rt, ok := parseRoot(strings.TrimPrefix(s, scopePrefix)); ok {
+				return rt, true
+			}
+		}
+	}
+	return Root{}, false
+}
+
 // enforce validates a single client path against the root and returns the
 // qualified, normalized form. Empty / storage-root paths resolve to the root
 // itself so a "list root" request opens the confined folder.
@@ -152,6 +172,11 @@ func (r Root) enforce(p string) (string, error) {
 	}
 	return a + "://" + rel, nil
 }
+
+// EnforcePath is the exported form of enforce: validate/normalize a client path
+// against the root, returning the qualified path or ErrOutOfRoot. The AI
+// surface (aiOps) uses it directly since it bypasses Middleware.
+func (r Root) EnforcePath(p string) (string, error) { return r.enforce(p) }
 
 // Middleware enforces the effective root on every /api/files request. Mount it
 // AFTER the auth middleware so the token is on the context.

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -48,6 +49,17 @@ var errAINoStorage = errors.New("no storage configured")
 // resolveStorage maps an adapter://path to (storage, relativePath). When the
 // path carries no adapter prefix the first enabled storage is used.
 func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, string, error) {
+	// Honor a token's `root:` confinement ceiling. The AI surface bypasses
+	// confine.Middleware, so enforce it here — the single chokepoint every op
+	// routes through. Out-of-root paths are rejected; an empty path resolves
+	// to the confined folder itself.
+	if root, ok := confine.RootFromToken(ctx); ok {
+		np, err := root.EnforcePath(p)
+		if err != nil {
+			return nil, "", err
+		}
+		p = np
+	}
 	storages, err := a.store.ListEnabledStorages(ctx)
 	if err != nil {
 		return nil, "", err
@@ -384,6 +396,7 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 	if err != nil {
 		return nil, err
 	}
+	root, confined := confine.RootFromToken(ctx)
 	rows, err := a.store.SearchNodes(ctx, s.ID, "%"+query+"%", 200)
 	if err != nil {
 		return nil, err
@@ -392,6 +405,9 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 	for _, n := range rows {
 		if n.DeletedAt != nil {
 			continue
+		}
+		if confined && !root.Within(s.Name, n.Path) {
+			continue // outside the token's confinement root
 		}
 		typ := "file"
 		if n.Type == model.NodeTypeDirectory {

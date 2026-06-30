@@ -4,12 +4,14 @@ import { useI18n } from 'vue-i18n';
 import { Plus, Trash2, RefreshCcw, KeyRound } from 'lucide-vue-next';
 
 import { AITokensApi, type AIToken } from '@/api/ai-tokens';
+import { StoragesApi } from '@/api/storages';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
@@ -38,7 +40,15 @@ const newScopes = ref<Record<Scope, boolean>>({
   admin: false,
 });
 const newExpiry = ref<number | null>(null);
+const newRootStorage = ref('');
+const newRootPath = ref('');
 const createdToken = ref<string | null>(null);
+
+const storages = ref<{ value: string; label: string }[]>([]);
+const storageOptions = computed(() => [
+  { value: '', label: t('apiMcp.fields.rootNone') },
+  ...storages.value,
+]);
 
 const origin = window.location.origin;
 const mcpUrl = `${origin}/api/ai/mcp`;
@@ -56,6 +66,16 @@ function scopeList(s: string): string[] {
   return v ? v.split(',') : [];
 }
 
+// A token's scope string mixes verb scopes (read/write/…) with at most one
+// `root:<adapter>://<rel>` confinement scope. Split them for display.
+function verbScopes(s: string): string[] {
+  return scopeList(s).filter((x) => !x.startsWith('root:'));
+}
+function rootScope(s: string): string | null {
+  const r = scopeList(s).find((x) => x.startsWith('root:'));
+  return r ? r.slice('root:'.length) : null;
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -67,10 +87,21 @@ async function load() {
   }
 }
 
+async function loadStorages() {
+  try {
+    const list = await StoragesApi.list();
+    storages.value = list.map((s) => ({ value: s.name, label: `${s.name} (${s.driver})` }));
+  } catch {
+    /* tolerated — root selection simply stays empty (full disk) */
+  }
+}
+
 function openCreate() {
   newLabel.value = '';
   newScopes.value = { read: true, write: true, delete: false, mcp: true, admin: false };
   newExpiry.value = null;
+  newRootStorage.value = '';
+  newRootPath.value = '';
   createdToken.value = null;
   showCreate.value = true;
 }
@@ -78,10 +109,14 @@ function openCreate() {
 async function submitCreate() {
   creating.value = true;
   try {
-    const scopes = SCOPES.filter((s) => newScopes.value[s]).join(',');
+    const parts: string[] = SCOPES.filter((s) => newScopes.value[s]);
+    if (newRootStorage.value) {
+      const rel = newRootPath.value.trim().replace(/^\/+|\/+$/g, '');
+      parts.push(`root:${newRootStorage.value}://${rel}`);
+    }
     const res = await AITokensApi.create({
       label: newLabel.value.trim(),
-      scopes,
+      scopes: parts.join(','),
       expires_in_days: newExpiry.value && newExpiry.value > 0 ? newExpiry.value : undefined,
     });
     createdToken.value = res.token;
@@ -114,7 +149,10 @@ async function confirmDelete() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadStorages();
+});
 </script>
 
 <template>
@@ -173,6 +211,7 @@ onMounted(load);
           <tr>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.label') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.scopes') }}</th>
+            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.root') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.lastUsed') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.expires') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.created') }}</th>
@@ -186,12 +225,18 @@ onMounted(load);
               <div class="flex flex-wrap gap-1">
                 <Badge v-if="!scopeList(tok.scopes).length" tone="amber" size="xs">all</Badge>
                 <Badge
-                  v-for="s in scopeList(tok.scopes)"
+                  v-for="s in verbScopes(tok.scopes)"
                   :key="s"
                   :tone="s === 'admin' ? 'rose' : 'zinc'"
                   size="xs"
                 >{{ s }}</Badge>
               </div>
+            </td>
+            <td class="px-4 py-2 text-xs">
+              <span v-if="rootScope(tok.scopes)" class="font-mono text-violet-600 dark:text-violet-400 break-all">
+                📁 {{ rootScope(tok.scopes) }}
+              </span>
+              <span v-else class="text-zinc-400">{{ t('apiMcp.fullDisk') }}</span>
             </td>
             <td class="px-4 py-2 text-xs text-zinc-500">
               {{ tok.last_used_at ? formatRelative(tok.last_used_at, locale) : '—' }}
@@ -209,7 +254,7 @@ onMounted(load);
             </td>
           </tr>
           <tr v-if="!tokens.length">
-            <td colspan="6" class="px-4 py-8 text-center text-zinc-500 text-sm">
+            <td colspan="7" class="px-4 py-8 text-center text-zinc-500 text-sm">
               {{ t('apiMcp.empty') }}
             </td>
           </tr>
@@ -245,6 +290,22 @@ onMounted(load);
           </div>
           <p class="help-text mt-1">{{ t('apiMcp.fields.scopesHint') }}</p>
         </div>
+
+        <!-- Root confinement (optional) -->
+        <div>
+          <p class="label-base mb-1">{{ t('apiMcp.fields.root') }}</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Select v-model="newRootStorage" :options="storageOptions" />
+            <Input
+              v-model="newRootPath"
+              :placeholder="t('apiMcp.fields.rootPathPlaceholder')"
+              :disabled="!newRootStorage"
+              monospace
+            />
+          </div>
+          <p class="help-text mt-1">{{ t('apiMcp.fields.rootHint') }}</p>
+        </div>
+
         <Input
           v-model.number="newExpiry"
           type="number"

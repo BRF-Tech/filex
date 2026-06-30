@@ -61,17 +61,27 @@ const (
 	ScopeAdmin  = "admin"
 )
 
-// ValidScopes is the canonical, ordered set of issuable scopes.
+// ScopeRootPrefix marks a path-confinement scope: `root:<adapter>://<rel>`.
+// Unlike the verb scopes it carries a value and is enforced by package confine
+// as a hard path ceiling — across both /api/files and the AI surface. A token
+// may combine verb scopes with at most one root scope.
+const ScopeRootPrefix = "root:"
+
+// ValidScopes is the canonical, ordered set of issuable VERB scopes. The
+// `root:` confinement scope is validated separately (see IsValidScope).
 var ValidScopes = []string{ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAdmin}
 
-// IsValidScope reports whether s is a known issuable scope.
+// IsValidScope reports whether s is a known issuable scope — a verb scope or a
+// well-formed `root:<adapter>://<rel>` confinement scope.
 func IsValidScope(s string) bool {
 	switch s {
 	case ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAdmin:
 		return true
-	default:
-		return false
 	}
+	if strings.HasPrefix(s, ScopeRootPrefix) {
+		return strings.TrimSpace(strings.TrimPrefix(s, ScopeRootPrefix)) != ""
+	}
+	return false
 }
 
 // Driver is the API-token auth driver.

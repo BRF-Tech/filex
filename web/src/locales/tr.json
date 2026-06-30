@@ -313,9 +313,11 @@
     "deleteConfirm": "\"{label}\" token'ı silinsin mi? Bu token'ı kullanan entegrasyonlar erişimini kaybeder.",
     "empty": "Henüz token yok. AI/MCP erişimi için bir tane oluştur.",
     "never": "süresiz",
+    "fullDisk": "tüm disk",
     "cols": {
       "label": "Etiket",
       "scopes": "Yetkiler",
+      "root": "Kök dizin",
       "lastUsed": "Son kullanım",
       "expires": "Bitiş",
       "created": "Oluşturuldu"
@@ -325,6 +327,10 @@
       "labelPlaceholder": "ör. claude-ajan",
       "scopes": "Yetkiler (scope)",
       "scopesHint": "Hiçbiri seçilmezse tüm yetkiler verilir. Dosya MCP'si için 'mcp', admin paneli için 'admin' gerekir.",
+      "root": "Kök dizin kısıtı (opsiyonel)",
+      "rootNone": "— Tüm disk —",
+      "rootPathPlaceholder": "alt/klasör (boş = depo kökü)",
+      "rootHint": "Bir depo + yol seçersen token yalnız o alt-ağacı görür/yazar; üstüne çıkamaz. Boş = tüm diske erişim.",
       "expiry": "Geçerlilik (gün)",
       "expiryHint": "0 veya boş = süresiz"
     },

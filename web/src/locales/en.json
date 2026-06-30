@@ -313,9 +313,11 @@
     "deleteConfirm": "Delete token \"{label}\"? Integrations using it will lose access.",
     "empty": "No tokens yet. Create one for AI/MCP access.",
     "never": "never",
+    "fullDisk": "full disk",
     "cols": {
       "label": "Label",
       "scopes": "Scopes",
+      "root": "Root",
       "lastUsed": "Last used",
       "expires": "Expires",
       "created": "Created"
@@ -325,6 +327,10 @@
       "labelPlaceholder": "e.g. claude-agent",
       "scopes": "Scopes",
       "scopesHint": "If none are selected, all scopes are granted. File MCP needs 'mcp'; admin panel needs 'admin'.",
+      "root": "Root confinement (optional)",
+      "rootNone": "— Full disk —",
+      "rootPathPlaceholder": "sub/folder (empty = storage root)",
+      "rootHint": "Pick a storage + path to lock the token to that subtree — it can't escape upward. Empty = full disk access.",
       "expiry": "Validity (days)",
       "expiryHint": "0 or empty = never"
     },
