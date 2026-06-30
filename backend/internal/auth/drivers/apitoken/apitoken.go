@@ -41,6 +41,39 @@ const HeaderName = "X-Filex-Token"
 // bearerPrefix detects `Authorization: Bearer <token>`.
 const bearerPrefix = "Bearer "
 
+// Issuable token scopes. A token with an empty Scopes field grants every
+// scope (full access for the bound user's role). RequireScope gates each
+// verb against these; the admin token-issuer rejects anything not in the
+// set so an operator can't mint a token carrying a typo'd scope that
+// silently grants nothing.
+//
+//	read   — list / info / download / search (REST) — read-only file ops
+//	write  — upload / mkdir / move (REST)            — file mutations
+//	delete — delete (REST)                            — soft-delete files
+//	mcp    — the streamable-HTTP MCP server at /api/ai/mcp
+//	admin  — the full admin surface at /api/ai/admin/* and the admin_*
+//	         MCP tools (users, storages, settings, replica, queue, …)
+const (
+	ScopeRead   = "read"
+	ScopeWrite  = "write"
+	ScopeDelete = "delete"
+	ScopeMCP    = "mcp"
+	ScopeAdmin  = "admin"
+)
+
+// ValidScopes is the canonical, ordered set of issuable scopes.
+var ValidScopes = []string{ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAdmin}
+
+// IsValidScope reports whether s is a known issuable scope.
+func IsValidScope(s string) bool {
+	switch s {
+	case ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
 // Driver is the API-token auth driver.
 type Driver struct {
 	store db.Store

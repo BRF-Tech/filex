@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,6 +80,12 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scopes, serr := normalizeScopes(body.Scopes)
+	if serr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": serr.Error()})
+		return
+	}
+
 	plain, err := generateToken()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -89,7 +96,7 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 		UserID:    userID,
 		Label:     strings.TrimSpace(body.Label),
 		TokenHash: apitoken.HashToken(plain),
-		Scopes:    normalizeScopes(body.Scopes),
+		Scopes:    scopes,
 	}
 	if body.ExpiresInDays > 0 {
 		exp := time.Now().AddDate(0, 0, body.ExpiresInDays)
@@ -130,18 +137,24 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// normalizeScopes trims whitespace around each comma-separated scope and
-// drops empties.
-func normalizeScopes(raw string) string {
+// normalizeScopes trims whitespace around each comma-separated scope, drops
+// empties, and rejects any scope outside the canonical apitoken.ValidScopes
+// allow-list. An empty/blank input stays empty (== all scopes).
+func normalizeScopes(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
-		return ""
+		return "", nil
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
 		}
+		if !apitoken.IsValidScope(p) {
+			return "", fmt.Errorf("unknown scope %q (valid: %s)", p, strings.Join(apitoken.ValidScopes, ", "))
+		}
+		out = append(out, p)
 	}
-	return strings.Join(out, ",")
+	return strings.Join(out, ","), nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
+	apitoken "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/apitoken"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 	"gitlab.com/brftech/filemanager/backend/internal/version"
@@ -34,12 +35,15 @@ import (
 type AIMCP struct {
 	store    db.Store
 	resolver func(int64) (storage.Driver, error)
+	admin    *AIAdmin
 	handler  http.Handler
 }
 
-// NewAIMCP builds the MCP HTTP handler.
-func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error)) *AIMCP {
-	h := &AIMCP{store: store, resolver: resolver}
+// NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
+// which are only registered for tokens carrying the `admin` scope; pass nil
+// to disable the admin tool surface entirely.
+func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin) *AIMCP {
+	h := &AIMCP{store: store, resolver: resolver, admin: admin}
 	h.handler = mcp.NewStreamableHTTPHandler(h.getServer, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
 		JSONResponse: true,
@@ -65,6 +69,13 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		Version: version.String(),
 	}, nil)
 	registerFilexTools(srv, ops)
+
+	// Admin tools are gated by the `admin` token scope (on top of the route's
+	// `mcp` scope). A token without `admin` never sees admin_* in tools/list.
+	if tok := auth.TokenFrom(r.Context()); h.admin != nil && tok != nil && tok.HasScope(apitoken.ScopeAdmin) {
+		principal := h.admin.elevatedPrincipal(auth.UserFrom(r.Context()))
+		registerAdminTools(srv, h.admin, principal)
+	}
 	return srv
 }
 

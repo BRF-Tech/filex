@@ -419,7 +419,19 @@ func BuildRouter(d *Deps) http.Handler {
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
 	// scopes set grants everything.
 	aiH := handlers.NewAI(d.Store, d.StorageResolver)
-	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver)
+	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
+		Store:           d.Store,
+		Caps:            d.Caps,
+		Worker:          d.Worker,
+		Queue:           d.Queue,
+		Notify:          d.Notify,
+		Trash:           d.Trash,
+		Index:           d.Index,
+		ReplicaService:  d.ReplicaService,
+		ReplicaCron:     d.ReplicaCron,
+		ReplicaReloader: d.ReplicaReloader,
+	})
+	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 
@@ -438,6 +450,11 @@ func BuildRouter(d *Deps) http.Handler {
 		// MCP streamable HTTP (JSON-RPC). Both POST (requests) and GET
 		// (SSE stream open) are part of the transport contract.
 		r.With(auth.RequireScope("mcp")).Handle("/mcp", aiMCP)
+
+		// Admin surface — the full admin panel as token-auth REST endpoints.
+		// Gated by the `admin` scope; the bound user is then elevated to an
+		// admin principal so the reused admin handler logic runs authorized.
+		r.With(auth.RequireScope("admin")).Route("/admin", aiAdmin.Register)
 	})
 
 	// ────── healthz ──────
