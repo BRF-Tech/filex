@@ -322,7 +322,10 @@ const permTarget = ref<FileNode | null>(null);
 // (the pre-RBAC default). Otherwise 'editor'/'owner' may write; only 'owner'
 // manages permissions. Enforcement is server-side; this just shapes the menu.
 function permCanEdit(p: string | undefined): boolean {
-  return p === '' || p === undefined || p === 'editor' || p === 'owner';
+  // undefined = ACL not enforced (dev / unwired) → full access. In production
+  // the backend always sends a level; 'none'/'viewer' cannot write, only
+  // 'editor'/'owner' can.
+  return p === undefined || p === 'editor' || p === 'owner';
 }
 function permIsOwner(p: string | undefined): boolean {
   return p === 'owner';
@@ -333,6 +336,9 @@ function selPerm(sel: FileNode[]): string {
   if (sel.length === 1 && typeof sel[0]?.perm === 'string') return sel[0].perm as string;
   return dirPerm.value;
 }
+// Can the current user write into the directory being viewed? Gates the
+// toolbar New Folder / Upload / Paste + drag-drop upload.
+const canWriteHere = computed(() => permCanEdit(dirPerm.value));
 
 // Context menu
 const ctxRef = ref<InstanceType<typeof ContextMenu> | null>(null);
@@ -1255,6 +1261,10 @@ function closeShare() {
 // ------- Upload -------
 
 function triggerUpload() {
+  if (!canWriteHere.value) {
+    flashToast(locale.value === 'en' ? 'Read-only here' : 'Burada yazma yetkiniz yok');
+    return;
+  }
   fileInputEl.value?.click();
 }
 
@@ -1429,6 +1439,11 @@ function onDropUpload(ev: DragEvent) {
   ev.preventDefault();
   dragCounter.value = 0;
   dragOver.value = false;
+  // RBAC: block drag-drop upload where the user can't write.
+  if (!canWriteHere.value) {
+    flashToast(locale.value === 'en' ? 'Read-only here' : 'Burada yazma yetkiniz yok');
+    return;
+  }
   const list = ev.dataTransfer?.files ? Array.from(ev.dataTransfer.files) : [];
   if (list.length === 0) return;
   void uploadFiles(list);
@@ -1610,6 +1625,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :convert-enabled="!!effectiveConvertUrl"
       :can-go-up="canGoUp"
       :at-virtual-root="atVirtualRoot"
+      :can-write="canWriteHere"
       :locale="locale"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"

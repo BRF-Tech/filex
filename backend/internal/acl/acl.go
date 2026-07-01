@@ -51,7 +51,9 @@ func ParseLevel(s string) Level {
 	}
 }
 
-// String returns the grant-level string ("" for LevelNone).
+// String returns the level string. LevelNone → "none" (NOT "") so the frontend
+// can distinguish "no access" (none) from "ACL not enforced" (field absent);
+// an empty string would be ambiguous with the unwired/dev case.
 func (l Level) String() string {
 	switch l {
 	case LevelViewer:
@@ -61,7 +63,7 @@ func (l Level) String() string {
 	case LevelOwner:
 		return model.GrantOwner
 	default:
-		return ""
+		return "none"
 	}
 }
 

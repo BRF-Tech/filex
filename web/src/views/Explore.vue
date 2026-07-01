@@ -77,6 +77,41 @@ function readBearerToken(): string | null {
   return sessionStorage.getItem('filex.bearer');
 }
 
+// Visible storages for the explorer root. Admins get the rich admin-store
+// list; non-admins (user/viewer) can't hit /api/admin/storages, so we discover
+// their visible storages from the manager root (StorageVisible-filtered) —
+// otherwise the explorer would show "no storages" for every non-admin.
+type RootEntry = { name: string; label: string; driver?: string; readOnly?: boolean };
+const roots = ref<RootEntry[]>([]);
+
+async function fetchVisibleStorages(): Promise<RootEntry[]> {
+  if (storages.items.length) {
+    return storages.items.map((s) => ({
+      name: s.name,
+      label: s.name,
+      driver: s.driver,
+      readOnly: s.read_only,
+    }));
+  }
+  try {
+    const headers: Record<string, string> = {};
+    const bearer = readBearerToken();
+    const csrf = readCsrfCookie();
+    if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
+    else if (csrf) headers['X-CSRF-TOKEN'] = csrf;
+    const res = await fetch('/api/files/manager?action=index&path=', {
+      headers,
+      credentials: 'include',
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const names: string[] = Array.isArray(body?.storages) ? body.storages : [];
+    return names.map((n) => ({ name: n, label: n }));
+  } catch {
+    return [];
+  }
+}
+
 // `?storage=` deep links: `/admin/explore?storage=s3-test` →
 // initialPath becomes `s3-test://`. Without one the explorer opens
 // at the global root (storage list).
@@ -84,19 +119,13 @@ const initialPathFromQuery = computed(() => {
   const raw = route.query.storage;
   const rawStr = Array.isArray(raw) ? raw[0] : raw;
   if (typeof rawStr !== 'string' || !rawStr) return '';
-  // Match by name first, then by numeric id.
-  const byName = storages.items.find((s) => s.name === rawStr);
+  const byName = roots.value.find((s) => s.name === rawStr);
   if (byName) return `${byName.name}://`;
-  const numeric = Number(rawStr);
-  if (Number.isFinite(numeric)) {
-    const byId = storages.items.find((s) => s.id === numeric);
-    if (byId) return `${byId.name}://`;
-  }
   return '';
 });
 
 const explorerConfig = computed<ExplorerConfig | null>(() => {
-  if (!storages.items.length) return null;
+  if (!roots.value.length) return null;
   const bearer = readBearerToken();
   const csrf = readCsrfCookie();
   const authConf: ExplorerConfig['auth'] = bearer
@@ -115,12 +144,7 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     trashVisible: true,
     showInfoPanel: true,
     multiStorageRoot: true,
-    storages: storages.items.map((s) => ({
-      name: s.name,
-      label: s.name,
-      driver: s.driver,
-      readOnly: s.read_only,
-    })),
+    storages: roots.value,
     initialPath: initialPathFromQuery.value || '',
     // "Aç" / double-click → open the standalone editor in a new tab.
     // The route reads `?path=&type=&mode=` and mounts the right viewer
@@ -133,7 +157,8 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
   };
 });
 
-function refresh() {
+async function refresh() {
+  roots.value = await fetchVisibleStorages();
   remountKey.value += 1;
 }
 
@@ -147,7 +172,11 @@ function onExplorerError(err: { message: string; context?: unknown }) {
 }
 
 onMounted(async () => {
-  await Promise.allSettled([auth.fetchMe(), storages.fetch()]);
+  await auth.fetchMe();
+  // Admin store fetch is best-effort (403s for non-admins) — roots then fall
+  // back to manager-root discovery inside fetchVisibleStorages().
+  await storages.fetch().catch(() => {});
+  roots.value = await fetchVisibleStorages();
 });
 </script>
 
@@ -190,11 +219,11 @@ onMounted(async () => {
 
     <main class="flex-1 flex flex-col min-h-0">
       <div
-        v-if="!storages.items.length"
+        v-if="!roots.length"
         class="flex flex-col items-center justify-center gap-3 mt-16 text-sm text-zinc-500"
       >
         <p>{{ t('explore.noStorage') }}</p>
-        <Button v-if="auth.isAuthenticated" size="sm" variant="primary" @click="router.push({ name: 'storages.new' })">
+        <Button v-if="auth.isAdmin" size="sm" variant="primary" @click="router.push({ name: 'storages.new' })">
           {{ t('explore.addStorage') }}
         </Button>
       </div>
