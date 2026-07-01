@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
@@ -31,6 +32,9 @@ type Manager struct {
 	// successful upload. nil is fine — uploads still succeed, callers
 	// just don't get an automatic preview in the grid view.
 	Thumbs ThumbPipeline
+	// ACL enforces per-user/per-item access control. nil disables
+	// enforcement (tests / list-only environments) → legacy all-access.
+	ACL *acl.Resolver
 }
 
 // ThumbPipeline is the narrow surface manager_mutate needs to fire a
@@ -59,6 +63,59 @@ func NewManager(store db.Store, resolver func(int64) (storage.Driver, error)) *M
 // without it, vfSearch falls back to SQL LIKE only.
 func (h *Manager) AttachSearchIndex(idx *search.Index) {
 	h.Index = idx
+}
+
+// AttachACL wires the RBAC/ACL resolver so listings are filtered and reads
+// are gated by the caller's grants. Optional — nil means no enforcement.
+func (h *Manager) AttachACL(r *acl.Resolver) { h.ACL = r }
+
+// aclSet loads the caller's ACL set for storage s (nil when ACL is unwired).
+func (h *Manager) aclSet(ctx context.Context, s *model.Storage) (*acl.Set, error) {
+	if h.ACL == nil {
+		return nil, nil
+	}
+	return h.ACL.LoadSet(ctx, auth.UserFrom(ctx), s)
+}
+
+// aclSetByID resolves storageID to its row then loads the caller's ACL set.
+func (h *Manager) aclSetByID(ctx context.Context, storageID int64) (*acl.Set, error) {
+	if h.ACL == nil {
+		return nil, nil
+	}
+	st, err := h.Store.GetStorage(ctx, storageID)
+	if err != nil {
+		return nil, err
+	}
+	return h.ACL.LoadSet(ctx, auth.UserFrom(ctx), st)
+}
+
+// allowed reports whether the caller has at least `need` on rel within s.
+// Unwired ACL (tests) allows; a load error denies.
+func (h *Manager) allowed(ctx context.Context, s *model.Storage, rel string, need acl.Level) bool {
+	if h.ACL == nil {
+		return true
+	}
+	set, err := h.ACL.LoadSet(ctx, auth.UserFrom(ctx), s)
+	if err != nil || set == nil {
+		return false
+	}
+	return set.Effective(rel) >= need
+}
+
+// allowedByID is allowed() keyed by storage id (for id-based read/stat).
+func (h *Manager) allowedByID(ctx context.Context, storageID int64, rel string, need acl.Level) bool {
+	if h.ACL == nil {
+		return true
+	}
+	st, err := h.Store.GetStorage(ctx, storageID)
+	if err != nil {
+		return false
+	}
+	set, err := h.ACL.LoadSet(ctx, auth.UserFrom(ctx), st)
+	if err != nil || set == nil {
+		return false
+	}
+	return set.Effective(rel) >= need
 }
 
 // indexNode is a no-op if no index is wired. Errors are swallowed —
@@ -139,6 +196,21 @@ func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// RBAC: hide the whole storage / individual entries the caller wasn't
+	// granted. Admin + RBAC-off storages keep the full list.
+	if set, serr := h.aclSetByID(r.Context(), storageID); serr == nil && set != nil {
+		if !set.StorageVisible() {
+			writeJSON(w, http.StatusOK, map[string]any{"nodes": []any{}})
+			return
+		}
+		kept := nodes[:0]
+		for _, n := range nodes {
+			if set.CanSee(n.Path) {
+				kept = append(kept, n)
+			}
+		}
+		nodes = kept
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"nodes": nodes,
 	})
@@ -162,6 +234,24 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+
+	// RBAC: drop storages the caller can't see (admin + RBAC-off keep all).
+	// A non-admin sees an RBAC-on storage only if they hold ≥1 grant there.
+	if h.ACL != nil {
+		user := auth.UserFrom(r.Context())
+		vis := storages[:0]
+		for _, s := range storages {
+			set, err := h.ACL.LoadSet(r.Context(), user, s)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			if set.StorageVisible() {
+				vis = append(vis, s)
+			}
+		}
+		storages = vis
 	}
 
 	storageNames := make([]string, 0, len(storages))
@@ -236,6 +326,11 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	rel = strings.TrimSpace(strings.TrimPrefix(rel, "/"))
 	if rel == "" || strings.Contains(rel, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	// RBAC: previewing/downloading a file needs ≥viewer on it.
+	if !h.allowed(r.Context(), s, rel, acl.LevelViewer) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
 	drv, err := h.StorageResolver(s.ID)
@@ -356,11 +451,24 @@ func mimeByExt(name string) string {
 // pre-sync) we ask the backing driver directly so the SFC's reactive
 // store still re-renders. The next sync run reconciles the cache.
 func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool) {
+	// RBAC: the caller must be able to see this directory (either they have
+	// ≥viewer on it, or it's an ancestor folder on the way to a grant). The
+	// child projector then filters entries to just the visible ones.
+	set, aerr := h.aclSet(r.Context(), s)
+	if aerr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": aerr.Error()})
+		return
+	}
+	if set != nil && !set.CanSee(rel) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+
 	parentID, dirname, err := h.resolveDirNode(r.Context(), s.ID, rel)
 	if err != nil {
 		// DB cache miss — try the driver. If the dir really doesn't
 		// exist there either, surface the original 404.
-		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly) {
+		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly, set) {
 			return
 		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -379,7 +487,7 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 	// (truly-empty dirs return [] without firing an extra driver
 	// list call).
 	if len(nodes) == 0 && s.LastSyncAt == nil {
-		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly) {
+		if h.vfIndexFromDriver(w, r, s, rel, storageNames, dirsOnly, set) {
 			return
 		}
 	}
@@ -397,7 +505,7 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 			n.Thumb = t
 		}
 	}
-	files := projectFileNodes(s.Name, nodes, dirsOnly)
+	files := projectFileNodes(s.Name, nodes, dirsOnly, set)
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
@@ -407,8 +515,19 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		"storages":  storageNames,
 		"dirname":   joinAdapterPath(s.Name, dirname),
 		"read_only": s.ReadOnly,
+		"perm":      permString(set, rel),
 		"files":     files,
 	})
+}
+
+// permString is the caller's effective level on rel as a string ("" when ACL
+// is unwired). Fed to the FileExplorer SFC so it can gate edit/convert/manage
+// affordances client-side (backend still enforces).
+func permString(set *acl.Set, rel string) string {
+	if set == nil {
+		return ""
+	}
+	return set.Effective(rel).String()
 }
 
 // vfIndexFromDriver lists `rel` directly via the storage driver and
@@ -418,7 +537,7 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 // Returns true iff a response was written. False means the driver also
 // doesn't have the dir (or no resolver) — caller should write its own
 // 404 with the cache-side error message.
-func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool) bool {
+func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, storageNames []string, dirsOnly bool, set *acl.Set) bool {
 	if h.StorageResolver == nil {
 		return false
 	}
@@ -436,7 +555,7 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 	if err != nil {
 		return false
 	}
-	files := projectDriverObjects(s.Name, clean, objs, dirsOnly)
+	files := projectDriverObjects(s.Name, clean, objs, dirsOnly, set)
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return true
@@ -446,6 +565,7 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 		"storages":  storageNames,
 		"dirname":   joinAdapterPath(s.Name, clean),
 		"read_only": s.ReadOnly,
+		"perm":      permString(set, clean),
 		"files":     files,
 	})
 	return true
@@ -454,7 +574,7 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 // projectDriverObjects shapes storage.Object entries into the same
 // FileNode contract projectFileNodes emits from DB rows. Used by the
 // driver-fallback path in vfIndex when the cache is cold.
-func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly bool) []map[string]any {
+func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly bool, set *acl.Set) []map[string]any {
 	out := make([]map[string]any, 0, len(objs))
 	for _, o := range objs {
 		isDir := o.Kind == storage.KindDirectory
@@ -477,6 +597,10 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 		if rel == "" {
 			rel = path.Join(dir, o.Name)
 		}
+		// RBAC: drop entries the caller isn't allowed to see.
+		if set != nil && !set.CanSee(rel) {
+			continue
+		}
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(o.Name), "."))
 		entry := map[string]any{
 			"path":      joinAdapterPath(adapter, rel),
@@ -486,6 +610,9 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 			"size":      o.Size,
 			"mime_type": o.Mime,
 			"storage":   adapter,
+		}
+		if set != nil {
+			entry["perm"] = set.Effective(acl.CleanRel(rel)).String()
 		}
 		if !o.Mtime.IsZero() {
 			entry["last_modified"] = o.Mtime.UnixMilli()
@@ -553,6 +680,30 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 	}
 
+	// RBAC: drop hits the caller isn't allowed to see. Search can be
+	// cross-storage, so resolve a per-storage ACL set (cached) and test
+	// each hit against its own storage's grants.
+	if h.ACL != nil {
+		user := auth.UserFrom(r.Context())
+		cache := map[int64]*acl.Set{}
+		filtered := nodes[:0]
+		for _, n := range nodes {
+			set, ok := cache[n.StorageID]
+			if !ok {
+				st := s
+				if n.StorageID != s.ID {
+					st, _ = h.Store.GetStorage(r.Context(), n.StorageID)
+				}
+				set, _ = h.ACL.LoadSet(r.Context(), user, st)
+				cache[n.StorageID] = set
+			}
+			if set == nil || set.CanSee(n.Path) {
+				filtered = append(filtered, n)
+			}
+		}
+		nodes = filtered
+	}
+
 	// Hydrate thumb metadata so search results carry the same
 	// thumb_url as the index listing (was always empty pre-v0.1.16).
 	for _, n := range nodes {
@@ -564,7 +715,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 	}
 
-	files := projectFileNodes(s.Name, nodes, false)
+	files := projectFileNodes(s.Name, nodes, false, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"adapter":   s.Name,
 		"storages":  storageNames,
@@ -628,6 +779,11 @@ func (h *Manager) Stat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// RBAC: metadata is a read — needs ≥viewer on the node's path.
+	if !h.allowedByID(r.Context(), node.StorageID, node.Path, acl.LevelViewer) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	writeJSON(w, http.StatusOK, node)
 }
 
@@ -655,6 +811,7 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 	var (
 		storageID int64
 		filePath  string
+		aclRel    string // logical rel path for the ACL check (not StorageKey)
 		nodeName  string
 		nodeMime  string
 		nodeSize  int64
@@ -672,6 +829,7 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		}
 		storageID = node.StorageID
 		filePath = node.Path
+		aclRel = node.Path
 		if node.StorageKey != "" {
 			filePath = node.StorageKey
 		}
@@ -690,7 +848,15 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		storageID = sid
+		aclRel = filePath
 		nodeName = path.Base(filePath)
+	}
+
+	// RBAC: reading file bytes needs ≥viewer on the logical path. This is
+	// where the session-user gap finally closes for direct byte access.
+	if !h.allowedByID(r.Context(), storageID, aclRel, acl.LevelViewer) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
 	}
 
 	drv, err := h.StorageResolver(storageID)
@@ -791,7 +957,7 @@ func joinAdapterPath(adapter, rel string) string {
 // type, extension, size, last_modified, mime_type, thumb_url. We
 // always ship the adapter-qualified `path` so deep-link routing keeps
 // working.
-func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[string]any {
+func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *acl.Set) []map[string]any {
 	out := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		if n.DeletedAt != nil {
@@ -800,6 +966,10 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[
 		// Hide the trash bucket from regular listings — the dedicated
 		// /admin/trash route renders deleted rows directly.
 		if strings.HasPrefix(n.Path, "/.filex-trash") || strings.HasPrefix(n.Path, ".filex-trash") || n.Name == ".filex-trash" {
+			continue
+		}
+		// RBAC: drop entries the caller isn't allowed to see.
+		if set != nil && !set.CanSee(n.Path) {
 			continue
 		}
 		isDir := n.Type == model.NodeTypeDirectory
@@ -820,6 +990,9 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool) []map[
 			"size":      n.Size,
 			"mime_type": n.Mime,
 			"storage":   adapter,
+		}
+		if set != nil {
+			entry["perm"] = set.Effective(acl.CleanRel(n.Path)).String()
 		}
 		// Thumbnail URL — populated when the pipeline rendered one.
 		// The /api/files/thumb/{id} endpoint streams it. We allow

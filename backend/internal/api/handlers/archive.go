@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
@@ -26,12 +27,17 @@ import (
 type Archive struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
+	ACL             *acl.Resolver
 }
 
 // NewArchive constructs an Archive handler.
 func NewArchive(store db.Store, resolver func(int64) (storage.Driver, error)) *Archive {
 	return &Archive{Store: store, StorageResolver: resolver}
 }
+
+// AttachACL wires the RBAC resolver: list needs ≥viewer on the archive,
+// extract/add need ≥editor on the write target (+ ≥viewer on sources read).
+func (a *Archive) AttachACL(r *acl.Resolver) { a.ACL = r }
 
 // archiveRequest is the union body for /api/files/archive/{list,extract,add}.
 type archiveRequest struct {
@@ -77,6 +83,10 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 	}
 	req.StorageID = storageID
 	req.Path = rel
+	if !aclAllowID(r.Context(), a.ACL, a.Store, storageID, rel, acl.LevelViewer) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
 	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -159,6 +169,13 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 	dest = "/" + strings.TrimLeft(path.Clean("/"+dest), "/")
 
+	// RBAC: reading the archive needs ≥viewer; extracting writes into dest → ≥editor.
+	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelViewer) ||
+		!aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
+
 	mkdirer, _ := drv.(storage.Mkdirer)
 	keys := make([]string, 0)
 	for _, f := range zr.File {
@@ -228,6 +245,17 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		_, srcRel := splitAdapterPath(req.Files[i].Source)
 		if srcRel != "" {
 			req.Files[i].Source = srcRel
+		}
+	}
+	// RBAC: writing the archive needs ≥editor on the target; each source ≥viewer.
+	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
+	for _, f := range req.Files {
+		if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(f.Source, "/"), acl.LevelViewer) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + f.Source})
+			return
 		}
 	}
 	drv, err := a.StorageResolver(req.StorageID)

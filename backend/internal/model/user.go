@@ -9,15 +9,20 @@ import (
 const (
 	RoleAdmin = "admin"
 	RoleUser  = "user"
+	// RoleViewer is a read-only account: it may only ever hold viewer-level
+	// item grants and can view/download but never mutate (convert/edit/upload/
+	// delete). Added with the RBAC/ACL feature (migration 00012).
+	RoleViewer = "viewer"
 )
 
 // ValidRole reports whether name is one of the known, seeded roles. The
-// roles table only ships `admin` and `user` (see 00001_init.sql) and there
-// is no dynamic role-creation surface, so anything else is rejected at the
-// API boundary rather than silently writing an unresolvable role.
+// roles table ships `admin`, `user` and `viewer` (see 00001_init.sql +
+// 00012_rbac_acl.sql) and there is no dynamic role-creation surface, so
+// anything else is rejected at the API boundary rather than silently writing
+// an unresolvable role.
 func ValidRole(name string) bool {
 	switch name {
-	case RoleAdmin, RoleUser:
+	case RoleAdmin, RoleUser, RoleViewer:
 		return true
 	default:
 		return false
@@ -48,6 +53,14 @@ func (u *User) IsAdmin() bool {
 		return false
 	}
 	return u.Role == RoleAdmin
+}
+
+// IsViewer returns true if the user has the read-only viewer role.
+func (u *User) IsViewer() bool {
+	if u == nil {
+		return false
+	}
+	return u.Role == RoleViewer
 }
 
 // HasPermission checks whether the user's role permits an action.

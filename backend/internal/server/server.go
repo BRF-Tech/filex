@@ -24,6 +24,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/mailer"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/notify"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
@@ -73,6 +74,7 @@ type Server struct {
 	idx             *search.Index
 	pipeline        *thumb.Pipeline
 	resolver        func(int64) (storage.Driver, error)
+	mailer          *mailer.Service
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -408,6 +410,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// /api/admin/versions.
 	versionsSvc := versioning.New(store, versioning.StorageResolver(resolver))
 
+	// Mailer for invite/share notices — verified periodically in Start().
+	srvObj.mailer = mailer.New(store)
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           store,
@@ -430,6 +435,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
 		OIDCAuth:        oidcDrv,
+		Mailer:          srvObj.mailer,
 	}
 	router := api.BuildRouter(deps)
 
@@ -510,6 +516,34 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.replicaCron != nil {
 		s.replicaCron.Start()
 		_ = s.replicaCron.Reload(ctx)
+	}
+
+	// SMTP config verification — run once on boot, then every 5 minutes. The
+	// invite/share flow only sends mail while the last verification succeeded;
+	// otherwise the UI shows the link / temp password on-screen.
+	if s.mailer != nil {
+		go func() {
+			verify := func() {
+				vctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+				defer cancel()
+				if err := s.mailer.Verify(vctx); err != nil {
+					slog.Debug("smtp verify", slog.String("result", err.Error()))
+				} else {
+					slog.Debug("smtp verify: ok")
+				}
+			}
+			verify()
+			t := time.NewTicker(5 * time.Minute)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					verify()
+				}
+			}
+		}()
 	}
 
 	go func() {

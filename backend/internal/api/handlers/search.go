@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
+	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/search"
@@ -14,12 +16,17 @@ import (
 type Search struct {
 	Index *search.Index
 	Store db.Store
+	ACL   *acl.Resolver
 }
 
 // NewSearch constructs a Search handler.
 func NewSearch(idx *search.Index, store db.Store) *Search {
 	return &Search{Index: idx, Store: store}
 }
+
+// AttachACL wires the RBAC resolver so search results are filtered to the
+// paths the caller may see (prevents cross-user enumeration via search).
+func (h *Search) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 type searchRequest struct {
 	StorageID int64  `json:"storage_id"`
@@ -78,6 +85,24 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			results = fallback
 		}
+	}
+	// RBAC: drop hits the caller can't see (per-storage grants; cached).
+	if h.ACL != nil {
+		user := auth.UserFrom(r.Context())
+		cache := map[int64]*acl.Set{}
+		kept := results[:0]
+		for _, n := range results {
+			set, ok := cache[n.StorageID]
+			if !ok {
+				st, _ := h.Store.GetStorage(r.Context(), n.StorageID)
+				set, _ = h.ACL.LoadSet(r.Context(), user, st)
+				cache[n.StorageID] = set
+			}
+			if set == nil || set.CanSee(n.Path) {
+				kept = append(kept, n)
+			}
+		}
+		results = kept
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }

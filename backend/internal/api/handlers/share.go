@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
@@ -32,7 +33,12 @@ type Share struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
 	PublicURL       string
+	ACL             *acl.Resolver
 }
+
+// AttachACL wires the RBAC resolver so minting a public share link requires
+// ≥editor on the target node (sharing grants outside access — a write action).
+func (h *Share) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // NewShare constructs a Share handler.
 func NewShare(svc *share.Service, store db.Store, resolver func(int64) (storage.Driver, error), publicURL string) *Share {
@@ -108,6 +114,19 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if nodeID == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path or node_id"})
 		return
+	}
+
+	// RBAC: creating a public share is an outbound-access grant → ≥editor.
+	if h.ACL != nil {
+		node, err := h.Store.GetNode(r.Context(), nodeID)
+		if err != nil || node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return
+		}
 	}
 
 	// PIN: explicit string wins; password=true generates one; otherwise empty.

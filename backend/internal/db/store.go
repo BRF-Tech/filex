@@ -98,8 +98,17 @@ type Store interface {
 	CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error)
 	ListAPITokens(ctx context.Context) ([]*model.APIToken, error)
+	ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	TouchAPIToken(ctx context.Context, id int64) error
 	DeleteAPIToken(ctx context.Context, id int64) error
+
+	// File grants — per-user/per-folder ACL (RBAC feature, migration 00012).
+	ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
+	ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error)
+	GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, error)
+	CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error)
+	UpdateFileGrantLevel(ctx context.Context, id int64, level string) error
+	DeleteFileGrant(ctx context.Context, id int64) error
 
 	// Shares
 	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)

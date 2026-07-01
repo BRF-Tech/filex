@@ -49,6 +49,7 @@ import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
 import ShareModal from './modals/ShareModal.vue';
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
+import PermissionsModal from './modals/PermissionsModal.vue';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -101,6 +102,9 @@ const currentPath = ref<string>(initialFloorPath);
 const adapter = ref<string>(props.config.defaultAdapter || 'brf');
 const dirname = ref<string>(initialFloorPath);
 const files = ref<FileNode[]>([]);
+// RBAC effective level for the current directory ('' = ACL not enforced on
+// this storage → no gating). Drives which write/manage actions are offered.
+const dirPerm = ref<string>('');
 
 const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
 const viewMode = customRef<ViewMode>((track, trigger) => {
@@ -311,6 +315,24 @@ const previewTarget = ref<FileNode | null>(null);
 const previewMode = ref<'edit' | 'view'>('edit');
 const showConvert = ref(false);
 const convertTarget = ref<FileNode | null>(null);
+const showPerm = ref(false);
+const permTarget = ref<FileNode | null>(null);
+
+// RBAC helpers. '' means ACL is not enforced on this storage → full access
+// (the pre-RBAC default). Otherwise 'editor'/'owner' may write; only 'owner'
+// manages permissions. Enforcement is server-side; this just shapes the menu.
+function permCanEdit(p: string | undefined): boolean {
+  return p === '' || p === undefined || p === 'editor' || p === 'owner';
+}
+function permIsOwner(p: string | undefined): boolean {
+  return p === 'owner';
+}
+// Effective perm for a selection: a single entry's own perm (falls back to the
+// directory perm), else the directory perm for multi-select / background.
+function selPerm(sel: FileNode[]): string {
+  if (sel.length === 1 && typeof sel[0]?.perm === 'string') return sel[0].perm as string;
+  return dirPerm.value;
+}
 
 // Context menu
 const ctxRef = ref<InstanceType<typeof ContextMenu> | null>(null);
@@ -418,6 +440,7 @@ async function load(path?: string) {
       : await api.index(target);
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
+    dirPerm.value = (resp.perm as string) || '';
     files.value = (resp.files || []).filter((f) => {
       if (f.path.includes('.thumbs')) return false;
       if (f.basename === '.trash') return false;
@@ -719,7 +742,11 @@ function openNode(n: FileNode) {
   // loop. Modal's "Yeni sekmede aç" button still launches the
   // standalone fullscreen editor route when richer editing is wanted.
   const ext = (n.extension || '').toLowerCase();
-  previewMode.value = previewModeForExt(ext);
+  // RBAC: viewers (no edit on this item) always get the read-only preview
+  // modal — never the editable surface. This is the "view vs edit" split.
+  previewMode.value = permCanEdit((n.perm as string) ?? dirPerm.value)
+    ? previewModeForExt(ext)
+    : 'view';
   previewTarget.value = n;
   showPreview.value = true;
   emit('file-opened', { path: n.path, basename: n.basename });
@@ -790,6 +817,12 @@ function openNodeInNewTab(n: FileNode) {
       ? wireToVirtual(n.path)
       : stripAdapter(n.path);
     void load(target);
+    return;
+  }
+  // RBAC: a viewer (no edit on this item) can't use the editable "Aç"
+  // surface — drop to the read-only in-page preview instead.
+  if (!permCanEdit((n.perm as string) ?? dirPerm.value)) {
+    previewNode(n);
     return;
   }
   const ext = (n.extension || '').toLowerCase();
@@ -904,8 +937,10 @@ const contextActions = computed<ContextAction[]>(() => {
     ];
   }
 
-  // Empty background right-click: folder-level actions only.
+  // Empty background right-click: folder-level actions only. Viewers (no edit
+  // on this dir) get nothing here.
   if (!any) {
+    if (!permCanEdit(dirPerm.value)) return [];
     return [
       { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
       { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
@@ -929,23 +964,30 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   const copyIdLabel = locale.value === 'en'
     ? `Copy node id (${sel[0]?.id ?? ''})`
     : `Node id'yi kopyala (${sel[0]?.id ?? ''})`;
+  // RBAC: gate mutating actions when the caller lacks edit on the target. The
+  // "İzinler" (permissions) action shows only for owners on RBAC-on storages.
+  const p = selPerm(sel);
+  const w = permCanEdit(p); // may write here
+  const owner = permIsOwner(p);
+  const permLabel = locale.value === 'en' ? 'Permissions…' : 'İzinler…';
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
-    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value, disabled: !isFile },
-    { key: 'share', label: t('ctx.share'), icon: '🔗', hidden: !single, disabled: !single },
+    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w, disabled: !isFile },
+    { key: 'share', label: t('ctx.share'), icon: '🔗', hidden: !single || !w, disabled: !single },
+    { key: 'perm', label: permLabel, icon: '🔐', hidden: !single || !owner },
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
-    { divider: true, key: 'sep1', label: '' },
-    { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single, disabled: !single },
-    { key: 'duplicate', label: t('ctx.duplicate'), icon: '⎘', hidden: !any, disabled: !any },
-    { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any, disabled: !any },
+    { divider: true, key: 'sep1', label: '', hidden: !w },
+    { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single || !w, disabled: !single },
+    { key: 'duplicate', label: t('ctx.duplicate'), icon: '⎘', hidden: !any || !w, disabled: !any },
+    { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any || !w, disabled: !any },
     { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any, disabled: !any },
-    { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+    { key: 'paste', label: t('ctx.paste'), icon: '📋', hidden: !w, disabled: !clipboard.value.mode },
     { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId },
     { key: 'tags', label: tagsLabel, icon: '🏷', hidden: !singleHasId, disabled: !singleHasId },
-    { divider: true, key: 'sep2', label: '' },
-    { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true, hidden: !any, disabled: !any },
+    { divider: true, key: 'sep2', label: '', hidden: !w },
+    { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true, hidden: !any || !w, disabled: !any },
   ];
 }
 
@@ -1005,6 +1047,12 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       break;
     case 'share':
       if (targets[0]) openShare(targets[0]);
+      break;
+    case 'perm':
+      if (targets[0]) {
+        permTarget.value = targets[0];
+        showPerm.value = true;
+      }
       break;
     case 'copy-id':
       if (targets[0] && typeof targets[0].id === 'number') {
@@ -1704,6 +1752,13 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :upload="(f) => api.uploadMultipart(qualify(currentPath), [f]).then(() => {})"
       @close="showConvert = false"
       @done="onConvertDone"
+    />
+    <PermissionsModal
+      v-if="showPerm && permTarget"
+      :api="api"
+      :path="permTarget.path"
+      :locale="locale === 'en' ? 'en' : 'tr'"
+      @close="showPerm = false"
     />
 
     <!-- Recently-opened tray. Anchored to the toolbar trigger via fixed

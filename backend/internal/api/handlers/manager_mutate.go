@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
 )
@@ -187,6 +188,10 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path"})
 		return
 	}
+	if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
 
 	drv, err := h.StorageResolver(current.ID)
 	if err != nil {
@@ -269,6 +274,10 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
+		if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
+			return
+		}
 		dstRel := path.Join(destRel, path.Base(srcRel))
 		if dstRel == srcRel {
 			continue
@@ -331,6 +340,10 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		if srcRel == "" || strings.Contains(srcRel, "..") {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
+			return
+		}
+		if !h.allowed(r.Context(), current, srcRel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
 			return
 		}
 
@@ -564,6 +577,13 @@ func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, path
 	}
 	if strings.Contains(rel, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return nil, "", nil, false
+	}
+	// RBAC: every mutation writes into this base dir (create/upload/move-dest
+	// /rename-parent/delete-parent) → require ≥editor on it. Viewer accounts
+	// (ceiling=viewer) are thus read-only even on RBAC-off storages.
+	if !h.allowed(r.Context(), current, rel, acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return nil, "", nil, false
 	}
 	return current, rel, storageNames, true

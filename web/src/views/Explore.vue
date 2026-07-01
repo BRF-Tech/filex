@@ -11,7 +11,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ChevronLeft, RefreshCcw, LayoutDashboard } from 'lucide-vue-next';
+import { ChevronLeft, RefreshCcw, LayoutDashboard, KeyRound, LogOut } from 'lucide-vue-next';
 
 import { FileExplorer, type ExplorerConfig } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
@@ -22,6 +22,7 @@ import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue';
 import DarkModeToggle from '@/components/DarkModeToggle.vue';
+import SelfTokensModal from '@/components/SelfTokensModal.vue';
 import { effectiveTheme } from '@/lib/theme';
 
 const { t, locale } = useI18n();
@@ -29,6 +30,12 @@ const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 const storages = useStoragesStore();
+
+const showTokens = ref(false);
+async function doLogout() {
+  await auth.logout();
+  router.push({ name: 'login' });
+}
 
 // Bump on Refresh to remount the FileExplorer (cheapest forced
 // reload — its own data fetcher reruns on construction).
@@ -165,14 +172,21 @@ onMounted(async () => {
         <Button size="xs" variant="ghost" @click="refresh()" :title="t('common.refresh')">
           <RefreshCcw class="h-4 w-4" />
         </Button>
-        <Button v-if="auth.isAuthenticated" size="xs" variant="outline" @click="router.push({ name: 'dashboard' })">
+        <Button v-if="auth.isAdmin" size="xs" variant="outline" @click="router.push({ name: 'dashboard' })">
           <LayoutDashboard class="h-4 w-4" />
           {{ t('explore.gotoAdmin') }}
+        </Button>
+        <Button v-if="auth.isAuthenticated && !auth.isAdmin" size="xs" variant="ghost" @click="showTokens = true" :title="t('explore.apiKeys')">
+          <KeyRound class="h-4 w-4" />
+        </Button>
+        <Button v-if="auth.isAuthenticated" size="xs" variant="ghost" @click="doLogout" :title="t('explore.logout')">
+          <LogOut class="h-4 w-4" />
         </Button>
         <DarkModeToggle />
         <LocaleSwitcher />
       </div>
     </header>
+    <SelfTokensModal v-if="showTokens" @close="showTokens = false" />
 
     <main class="flex-1 flex flex-col min-h-0">
       <div

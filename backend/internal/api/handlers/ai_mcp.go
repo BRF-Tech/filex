@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	apitoken "gitlab.com/brftech/filemanager/backend/internal/auth/drivers/apitoken"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
@@ -40,8 +41,13 @@ type AIMCP struct {
 	share      *share.Service
 	publicURL  string
 	convertURL string
+	acl        *acl.Resolver
 	handler    http.Handler
 }
+
+// AttachACL wires the RBAC resolver so every per-request MCP tool op is gated
+// by the bound user's grants + role ceiling (same enforcement as the REST AI).
+func (h *AIMCP) AttachACL(r *acl.Resolver) { h.acl = r }
 
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
@@ -68,6 +74,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		return nil
 	}
 	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
+	ops.acl = h.acl
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",

@@ -153,6 +153,8 @@
       "name": "Display name",
       "namePlaceholder": "Personal photos",
       "readOnly": "Read-only mount",
+      "rbac": "Per-item access control (RBAC)",
+      "rbacHint": "When on, non-admins see only files/folders explicitly granted to them via the permissions panel. When off, the storage is open to all users (capability by role).",
       "path": "Filesystem path",
       "endpoint": "Endpoint",
       "region": "Region",
@@ -194,7 +196,7 @@
     },
     "roles": {
       "admin": "Administrator",
-      "editor": "Editor",
+      "user": "User",
       "viewer": "Viewer"
     },
     "deleteConfirm": "Delete user \"{email}\"?",
@@ -474,7 +476,22 @@
     "root": "Root",
     "empty": "This folder is empty.",
     "download": "Download",
-    "cols": { "name": "Name", "size": "Size", "mime": "Type", "modified": "Modified" }
+    "cols": { "name": "Name", "size": "Size", "mime": "Type", "modified": "Modified" },
+    "myAccount": "My account",
+    "apiKeys": "API keys",
+    "logout": "Log out"
+  },
+  "selfTokens": {
+    "title": "My API keys",
+    "viewerNote": "Your account is read-only — keys can only read.",
+    "label": "Label (e.g. my laptop)",
+    "rootPath": "Confine to path (optional, e.g. main://projects/acme)",
+    "expiry": "Expires (days)",
+    "create": "Create key",
+    "copyOnce": "Copy this token now — it is shown only once.",
+    "copy": "Copy",
+    "empty": "No keys yet.",
+    "keyword": "key"
   },
   "demo": {
     "badge": "Live demo",

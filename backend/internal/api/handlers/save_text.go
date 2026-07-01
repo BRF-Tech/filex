@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -40,12 +41,16 @@ type SaveText struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
 	Versions        VersionSnapshotter
+	ACL             *acl.Resolver
 }
 
 // NewSaveText constructs the handler.
 func NewSaveText(store db.Store, resolver func(int64) (storage.Driver, error)) *SaveText {
 	return &SaveText{Store: store, StorageResolver: resolver}
 }
+
+// AttachACL wires the RBAC resolver so save-text requires ≥editor on the file.
+func (h *SaveText) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // AttachVersions wires the versioning service so save-text snapshots
 // the previous content before writing. Without it edits silently
@@ -111,6 +116,11 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if readOnly {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		return
+	}
+	// RBAC: editing file content needs ≥editor.
+	if !aclAllowID(r.Context(), h.ACL, h.Store, storageID, rel, acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return
 	}
 

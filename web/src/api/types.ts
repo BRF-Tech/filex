@@ -1,7 +1,11 @@
 // Shared API DTOs. Mirrors the planned Go structs; treat as authoritative for
 // the admin UI. Backend Go handlers should marshal these names exactly.
 
-export type UserRole = 'admin' | 'editor' | 'viewer';
+// Account roles (mirror backend model.Role*):
+//   admin  — full admin panel + all files (exempt from RBAC/ACL)
+//   user   — explorer only; read+write within granted paths (owner-capable)
+//   viewer — explorer only; read-only (view+download; no edit/convert/mutate)
+export type UserRole = 'admin' | 'user' | 'viewer';
 
 export interface User {
   id: number;
@@ -43,6 +47,10 @@ export interface StorageRef {
   enabled: boolean;
   config: Record<string, unknown>;
   read_only: boolean;
+  /** Per-storage RBAC toggle. When true, non-admins see only paths granted
+   *  to them (via the permissions panel); when false the storage is open to
+   *  every authenticated user (capability by account role). Default false. */
+  rbac_enabled?: boolean;
   created_at: string;
   updated_at: string;
   sync_mode?: 'poll' | 'fsnotify' | 'push' | 'ondemand';
@@ -100,6 +108,7 @@ export interface StorageCreateRequest {
   driver: StorageDriver;
   config: Record<string, unknown>;
   read_only?: boolean;
+  rbac_enabled?: boolean;
 }
 
 export interface StorageUpdateRequest {
@@ -107,6 +116,7 @@ export interface StorageUpdateRequest {
   config?: Record<string, unknown>;
   enabled?: boolean;
   read_only?: boolean;
+  rbac_enabled?: boolean;
   role?: 'primary' | 'replica';
   replica_of_id?: number | null;
   replica_mode?: 'async' | 'sync';

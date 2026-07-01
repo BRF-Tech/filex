@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/share"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -39,6 +40,10 @@ type AI struct {
 func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *AI {
 	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL, convertURL)}
 }
+
+// AttachACL wires the RBAC resolver into the AI REST surface's ops core so
+// every /api/ai file op is gated by the bound user's grants + role ceiling.
+func (h *AI) AttachACL(r *acl.Resolver) { h.ops.acl = r }
 
 // List → GET /api/ai/files?path=<adapter://dir>
 func (h *AI) List(w http.ResponseWriter, r *http.Request) {

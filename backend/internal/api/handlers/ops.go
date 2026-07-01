@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
 )
@@ -22,12 +23,18 @@ import (
 type Ops struct {
 	Service *ops.Service
 	Store   db.Store // for path → storage_id resolution in the per-verb endpoints
+	ACL     *acl.Resolver
 }
 
 // NewOps constructs an Ops handler.
 func NewOps(svc *ops.Service, store db.Store) *Ops {
 	return &Ops{Service: svc, Store: store}
 }
+
+// AttachACL wires the RBAC resolver so async copy/move/delete require ≥editor
+// on their sources (and destination) at submit time — the async worker itself
+// runs without a user, so authorization is a submit-time gate.
+func (o *Ops) AttachACL(r *acl.Resolver) { o.ACL = r }
 
 // errors used by the per-verb wrappers.
 var (
@@ -60,6 +67,28 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	// RBAC: require ≥editor on each source (and, for copy/move, the dest).
+	for _, s := range req.Sources {
+		_, rel := splitAdapterPath(s)
+		if rel == "" {
+			rel = strings.Trim(s, "/")
+		}
+		if !aclAllowID(r.Context(), o.ACL, o.Store, req.StorageID, rel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + s})
+			return
+		}
+	}
+	if req.Kind != "delete" && req.Dest != "" {
+		_, drel := splitAdapterPath(req.Dest)
+		if drel == "" {
+			drel = strings.Trim(req.Dest, "/")
+		}
+		if !aclAllowID(r.Context(), o.ACL, o.Store, req.StorageID, drel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
+			return
+		}
+	}
+
 	op, err := o.Service.Submit(r.Context(), req.Kind, req.StorageID, req.Sources, req.Dest)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -105,6 +134,15 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		return
 	}
 
+	// RBAC: require ≥editor on every source (the async worker runs userless,
+	// so authorize here at submit time).
+	for _, rel := range sources {
+		if !aclAllowID(r.Context(), o.ACL, o.Store, storageID, rel, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + rel})
+			return
+		}
+	}
+
 	dest := ""
 	if req.Target != "" {
 		// SFC's per-verb endpoints model `target` as a directory
@@ -128,6 +166,14 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 			dest = raw
 		} else {
 			dest = raw + "/"
+		}
+	}
+
+	// RBAC: copy/move write into the destination dir — require ≥editor there.
+	if kind != "delete" && dest != "" {
+		if !aclAllowID(r.Context(), o.ACL, o.Store, storageID, strings.Trim(dest, "/"), acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
+			return
 		}
 	}
 

@@ -153,6 +153,8 @@
       "name": "Görünen isim",
       "namePlaceholder": "Kişisel fotoğraflar",
       "readOnly": "Salt okunur mount",
+      "rbac": "Öğe bazlı erişim denetimi (RBAC)",
+      "rbacHint": "Açıkken admin olmayanlar yalnızca izin panelinden kendilerine verilen dosya/klasörleri görür. Kapalıyken depo tüm kullanıcılara açıktır (yetki role göre).",
       "path": "Dizin yolu",
       "endpoint": "Endpoint",
       "region": "Bölge",
@@ -194,7 +196,7 @@
     },
     "roles": {
       "admin": "Yönetici",
-      "editor": "Düzenleyici",
+      "user": "Kullanıcı",
       "viewer": "İzleyici"
     },
     "deleteConfirm": "\"{email}\" kullanıcısını sil?",
@@ -474,7 +476,22 @@
     "root": "Kök",
     "empty": "Bu klasör boş.",
     "download": "İndir",
-    "cols": { "name": "Ad", "size": "Boyut", "mime": "Tür", "modified": "Değiştirildi" }
+    "cols": { "name": "Ad", "size": "Boyut", "mime": "Tür", "modified": "Değiştirildi" },
+    "myAccount": "Hesabım",
+    "apiKeys": "API anahtarları",
+    "logout": "Çıkış yap"
+  },
+  "selfTokens": {
+    "title": "API anahtarlarım",
+    "viewerNote": "Hesabınız salt-okuma — anahtarlar yalnızca okuyabilir.",
+    "label": "Etiket (ör. dizüstüm)",
+    "rootPath": "Yola kısıtla (opsiyonel, ör. main://projeler/acme)",
+    "expiry": "Süre (gün)",
+    "create": "Anahtar oluştur",
+    "copyOnce": "Bu token'ı şimdi kopyalayın — yalnızca bir kez gösterilir.",
+    "copy": "Kopyala",
+    "empty": "Henüz anahtar yok.",
+    "keyword": "anahtar"
   },
   "demo": {
     "badge": "Canlı Demo",

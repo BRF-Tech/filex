@@ -104,7 +104,7 @@ async function confirmDelete() {
 
 const roleOptions = [
   { value: 'admin', label: t('users.roles.admin') },
-  { value: 'editor', label: t('users.roles.editor') },
+  { value: 'user', label: t('users.roles.user') },
   { value: 'viewer', label: t('users.roles.viewer') },
 ];
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/trash"
@@ -26,10 +27,15 @@ import (
 type Trash struct {
 	Service *trash.Service
 	Store   db.Store
+	ACL     *acl.Resolver
 }
 
 // NewTrash constructs the handler.
 func NewTrash(svc *trash.Service, store db.Store) *Trash { return &Trash{Service: svc, Store: store} }
+
+// AttachACL wires the RBAC resolver so the trash list is filtered to nodes the
+// caller may see and restore requires ≥editor on the node's original path.
+func (h *Trash) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // storageName resolves a storage id → its adapter name (for confinement checks).
 func (h *Trash) storageName(ctx context.Context, id int64) string {
@@ -75,6 +81,22 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 		}
 		if !root.Within(h.storageName(r.Context(), node.StorageID), orig) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path outside confined root"})
+			return
+		}
+	}
+	// RBAC: restoring writes the file back → require ≥editor on its original path.
+	if h.ACL != nil {
+		node, err := h.Store.GetNode(r.Context(), req.NodeID)
+		if err != nil || node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
+			return
+		}
+		orig := node.StorageKey
+		if orig == "" {
+			orig = node.Path
+		}
+		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, orig, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return
 		}
 	}
@@ -158,6 +180,17 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 		kept := entries[:0]
 		for _, e := range entries {
 			if root.Within(e.StorageName, e.Path) {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+		total = len(kept)
+	}
+	// RBAC: only surface trashed nodes the caller may see.
+	if h.ACL != nil {
+		kept := entries[:0]
+		for _, e := range entries {
+			if aclAllowName(r.Context(), h.ACL, h.Store, e.StorageName, e.Path, acl.LevelViewer) {
 				kept = append(kept, e)
 			}
 		}

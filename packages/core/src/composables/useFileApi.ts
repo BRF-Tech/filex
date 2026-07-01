@@ -52,7 +52,43 @@ export interface ManagerResponse {
   storages: string[];
   dirname: string;
   read_only: boolean;
+  /** RBAC effective level for the current user on this directory ('' when ACL
+   *  is not enforced on the storage). Gates the folder-level write actions. */
+  perm?: 'viewer' | 'editor' | 'owner' | '';
   files: FileNode[];
+}
+
+/** A single ACL grant row (RBAC permissions panel). */
+export interface Grant {
+  id: number;
+  storage_id: number;
+  path_prefix: string;
+  user_id: number;
+  level: 'viewer' | 'editor' | 'owner';
+  user_email?: string;
+  user_display_name?: string;
+  inherited?: boolean;
+}
+
+export interface PermissionsResponse {
+  path: string;
+  storage_rbac: boolean;
+  direct: Grant[];
+  inherited: Grant[];
+  effective: string;
+}
+
+export interface ResolveEmailResponse {
+  found: boolean;
+  user?: { id: number; email: string; display_name: string; role: string };
+}
+
+export interface InviteResponse {
+  mode: 'granted' | 'user_created' | 'shared';
+  user_id?: number;
+  url?: string;
+  temp_password?: string;
+  emailed: boolean;
 }
 
 /**
@@ -204,6 +240,33 @@ export function useFileApi(config: ExplorerConfig) {
       throw new Error(`${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`);
     }
     return res.json() as Promise<T>;
+  }
+
+  // --------------------------------------------------------------------
+  // Permissions (RBAC) — derived from the manager endpoint by swapping the
+  // trailing `/manager` for `/permissions`. Owner/admin only (backend gated).
+  // --------------------------------------------------------------------
+  function permissionsUrl(sub = ''): string {
+    const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/permissions');
+    return base + sub;
+  }
+  async function listPermissions(path: string): Promise<PermissionsResponse> {
+    return jsonFetch<PermissionsResponse>(permissionsUrl() + '?path=' + encodeURIComponent(path));
+  }
+  async function resolveEmail(email: string): Promise<ResolveEmailResponse> {
+    return jsonFetch<ResolveEmailResponse>(permissionsUrl('/resolve') + '?email=' + encodeURIComponent(email));
+  }
+  async function addPermission(body: { path: string; user_id: number; level: string; is_dir?: boolean }): Promise<unknown> {
+    return jsonFetch(permissionsUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+  async function updatePermission(id: number, level: string): Promise<unknown> {
+    return jsonFetch(permissionsUrl('/' + id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level }) });
+  }
+  async function deletePermission(id: number): Promise<unknown> {
+    return jsonFetch(permissionsUrl('/' + id), { method: 'DELETE' });
+  }
+  async function invitePermission(body: { path: string; email: string; level: string; create_user?: boolean; role?: string }): Promise<InviteResponse> {
+    return jsonFetch<InviteResponse>(permissionsUrl('/invite'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
 
   // --------------------------------------------------------------------
@@ -560,6 +623,13 @@ export function useFileApi(config: ExplorerConfig) {
     archiveList,
     archiveExtract,
     archiveAdd,
+    // Permissions (RBAC panel)
+    listPermissions,
+    resolveEmail,
+    addPermission,
+    updatePermission,
+    deletePermission,
+    invitePermission,
     // Internals (exposed for useUploadChunked + PreviewModal)
     endpoints,
     authHeaders,

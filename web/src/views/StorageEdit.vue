@@ -40,6 +40,7 @@ const loading = ref(true);
 const name = ref('');
 const enabled = ref(true);
 const readOnly = ref(false);
+const rbacEnabled = ref(false);
 const config = ref<Record<string, unknown>>({});
 
 const saving = ref(false);
@@ -62,6 +63,7 @@ async function load() {
     name.value = s.name;
     enabled.value = s.enabled;
     readOnly.value = s.read_only;
+    rbacEnabled.value = s.rbac_enabled ?? false;
     config.value = { ...(s.config ?? {}) };
     await Promise.allSettled([loadRuns(), loadDrift()]);
   } catch (e: unknown) {
@@ -99,6 +101,7 @@ async function save() {
       name: name.value.trim(),
       enabled: enabled.value,
       read_only: readOnly.value,
+      rbac_enabled: rbacEnabled.value,
       config: config.value,
     });
     item.value = updated;
@@ -223,6 +226,10 @@ onMounted(load);
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Toggle v-model="enabled" :label="t('common.enabled')" />
         <Toggle v-model="readOnly" :label="t('storages.fields.readOnly')" />
+        <Toggle v-model="rbacEnabled" :label="t('storages.fields.rbac')" />
+        <p class="text-xs text-zinc-500 dark:text-zinc-400 -mt-1">
+          {{ t('storages.fields.rbacHint') }}
+        </p>
       </div>
       <hr class="divider" />
       <StorageDriverFields v-model="config" :driver="item.driver" />
