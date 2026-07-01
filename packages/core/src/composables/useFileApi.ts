@@ -54,7 +54,7 @@ export interface ManagerResponse {
   read_only: boolean;
   /** RBAC effective level for the current user on this directory ('' when ACL
    *  is not enforced on the storage). Gates the folder-level write actions. */
-  perm?: 'viewer' | 'editor' | 'owner' | '';
+  perm?: 'none' | 'viewer' | 'editor' | 'owner';
   files: FileNode[];
 }
 

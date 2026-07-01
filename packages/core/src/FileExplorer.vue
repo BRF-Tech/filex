@@ -322,7 +322,10 @@ const permTarget = ref<FileNode | null>(null);
 // (the pre-RBAC default). Otherwise 'editor'/'owner' may write; only 'owner'
 // manages permissions. Enforcement is server-side; this just shapes the menu.
 function permCanEdit(p: string | undefined): boolean {
-  return p === '' || p === undefined || p === 'editor' || p === 'owner';
+  // undefined = ACL not enforced (dev / unwired) → full access. In production
+  // the backend always sends a level; 'none'/'viewer' cannot write, only
+  // 'editor'/'owner' can.
+  return p === undefined || p === 'editor' || p === 'owner';
 }
 function permIsOwner(p: string | undefined): boolean {
   return p === 'owner';

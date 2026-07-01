@@ -41,7 +41,7 @@ export interface FileNode {
   /** RBAC effective level for the current user on this entry (backend
    *  projectFileNodes emits it when a storage has RBAC on). '' / undefined =
    *  ACL not enforced. Used to gate edit/manage affordances client-side. */
-  perm?: 'viewer' | 'editor' | 'owner' | '';
+  perm?: 'none' | 'viewer' | 'editor' | 'owner';
   /** Generic — any additional fields the backend wants to inline. */
   [k: string]: unknown;
 }
