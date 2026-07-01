@@ -16,6 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
@@ -67,6 +68,7 @@ type AIAdmin struct {
 	queue       *Queue
 	notif       *Notifications
 	audit       *Audit
+	grants      *Grants
 }
 
 // AIAdminDeps carries the shared services the wrapped admin handlers need.
@@ -108,6 +110,7 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		queue:       NewQueue(d.Queue),
 		notif:       NewNotifications(d.Notify),
 		audit:       NewAudit(d.Store),
+		grants:      NewGrants(d.Store, acl.New(d.Store)),
 	}
 }
 
@@ -256,6 +259,14 @@ func (a *AIAdmin) Register(r chi.Router) {
 
 	r.Route("/audit", func(r chi.Router) {
 		r.Get("/", a.audit.List)
+	})
+
+	// RBAC grants — the elevated admin principal is owner-exempt, so Create's
+	// requireOwner passes and it can set any grant.
+	r.Route("/grants", func(r chi.Router) {
+		r.Get("/", a.grants.AdminList)
+		r.Post("/", a.grants.Create)
+		r.Delete("/{id}", a.grants.AdminDelete)
 	})
 }
 
@@ -765,6 +776,21 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 	regAdminTool(r, "admin_audit_list", "List audit log entries. filters: {user_id, action, from, to, limit, offset}.",
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.audit.List, method: http.MethodGet, path: "/api/ai/admin/audit", query: filtersToQuery(in.Filters)}
+		})
+
+	// ── RBAC grants (per-file/folder permissions) ──
+	regAdminTool(r, "admin_grants_list", "List every per-file/folder RBAC grant (who has what level, on which path, in which storage).",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.grants.AdminList, method: http.MethodGet, path: "/api/ai/admin/grants"}
+		})
+	regAdminTool(r, "admin_grant_set", "Grant a user access to a path. body: {path:\"<adapter>://<rel>\", user_id, level: viewer|editor|owner}. The storage must have RBAC enabled; a viewer account may only be granted viewer.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.grants.Create, method: http.MethodPost, path: "/api/ai/admin/grants", body: in.Body}
+		})
+	regAdminTool(r, "admin_grant_revoke", "Revoke a grant by its id (from admin_grants_list).",
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.grants.AdminDelete, method: http.MethodDelete, path: "/api/ai/admin/grants/" + itoa(in.ID),
+				urlParams: idParam(in.ID)}
 		})
 }
 
