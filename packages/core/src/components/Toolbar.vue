@@ -51,6 +51,12 @@ const props = defineProps<{
    * backend folder to write to.
    */
   atVirtualRoot?: boolean;
+  /**
+   * RBAC: false hides the write affordances (New Folder / Upload / Paste) when
+   * the current user lacks edit on this directory. Undefined = no RBAC gating
+   * (backward-compatible for embedders that don't pass it).
+   */
+  canWrite?: boolean;
   locale: LocaleCode;
 }>();
 
@@ -117,7 +123,7 @@ function fire(key: string) {
       </button>
 
       <button
-        v-if="mode === 'none' && !trashActive && !atVirtualRoot"
+        v-if="mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn fe-btn--primary"
         :title="t('toolbar.new_folder')"
@@ -142,7 +148,7 @@ function fire(key: string) {
       </button>
 
       <button
-        v-if="pasteEnabled && mode === 'none' && !trashActive && !atVirtualRoot"
+        v-if="pasteEnabled && mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn"
         :title="t('ctx.paste')"
@@ -168,7 +174,7 @@ function fire(key: string) {
         />
       </div>
       <button
-        v-if="!atVirtualRoot"
+        v-if="!atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn fe-btn--icon-only"
         :title="t('toolbar.upload')"
