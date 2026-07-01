@@ -73,6 +73,20 @@ func (s *Service) Verified() bool {
 	return s.verified
 }
 
+// PrimeFromStore optimistically restores the verified flag from the persisted
+// smtp.verified_at setting. The in-memory flag resets to false on every
+// process restart (deploy), which would make sends fall back to "show the
+// link" until the next verification tick — priming from last-known-good closes
+// that window instantly; the boot verify then refreshes/corrects it.
+func (s *Service) PrimeFromStore(ctx context.Context) {
+	v, _ := s.store.GetSetting(ctx, KeyVerifiedAt)
+	if strings.TrimSpace(v) != "" {
+		s.mu.Lock()
+		s.verified = true
+		s.mu.Unlock()
+	}
+}
+
 // Verify performs an SMTP handshake (+ auth when credentials are set) and
 // records the result. Called on boot and every 5 minutes by server.Start.
 func (s *Service) Verify(ctx context.Context) error {
@@ -113,22 +127,39 @@ func (s *Service) Send(ctx context.Context, to, subject, body string) error {
 	return sendMail(cfg, to, buildMessage(cfg.From, to, subject, body))
 }
 
+// dialTimeout bounds the TCP+TLS connect; connDeadline bounds the whole SMTP
+// transaction (EHLO/AUTH/MAIL/RCPT/DATA/QUIT). Without these net/smtp blocks on
+// the OS TCP timeout (minutes) if the server is briefly unreachable — which
+// showed up as the "Test" button spinning forever and share-mail hanging.
+const (
+	dialTimeout  = 10 * time.Second
+	connDeadline = 30 * time.Second
+)
+
 // smtpClient opens a client honoring the TLS mode: implicit TLS ("tls",
-// port 465), STARTTLS ("starttls"/default, 587), or plaintext ("none").
+// port 465), STARTTLS ("starttls"/default, 587), or plaintext ("none"). Both
+// the connect and the whole transaction are time-bounded so a call can never
+// hang indefinitely.
 func smtpClient(cfg Config) (*smtp.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	var conn net.Conn
+	var err error
 	if cfg.TLS == "tls" {
-		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.Host})
-		if err != nil {
-			return nil, err
-		}
-		return smtp.NewClient(conn, cfg.Host)
+		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: cfg.Host})
+	} else {
+		conn, err = dialer.Dial("tcp", addr)
 	}
-	c, err := smtp.Dial(addr)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.TLS == "starttls" || cfg.TLS == "" {
+	_ = conn.SetDeadline(time.Now().Add(connDeadline))
+	c, err := smtp.NewClient(conn, cfg.Host)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if cfg.TLS != "tls" && (cfg.TLS == "starttls" || cfg.TLS == "") {
 		if ok, _ := c.Extension("STARTTLS"); ok {
 			if err := c.StartTLS(&tls.Config{ServerName: cfg.Host}); err != nil {
 				_ = c.Close()

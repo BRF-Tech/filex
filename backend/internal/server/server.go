@@ -523,6 +523,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// otherwise the UI shows the link / temp password on-screen.
 	if s.mailer != nil {
 		go func() {
+			// Optimistically trust the last-known-good state so sends work
+			// immediately after a deploy, before the (slower) re-verify below.
+			s.mailer.PrimeFromStore(ctx)
 			verify := func() {
 				vctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 				defer cancel()

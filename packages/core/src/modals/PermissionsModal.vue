@@ -271,10 +271,14 @@ async function sendShareMail() {
     await props.api.shareMail({ path: props.path, email: addr, url: shareResult.value.url });
     shareMailNotice.value = L('E-posta gönderildi ✓', 'Email sent ✓');
   } catch (e) {
-    const detail = (e as { detail?: string }).detail;
-    shareMailNotice.value = detail?.includes('mail not configured')
-      ? L('SMTP yapılandırılmamış — linki elle iletin.', 'SMTP not configured — share the link manually.')
-      : (e instanceof Error ? e.message : String(e));
+    const detail = (e as { detail?: string }).detail ?? '';
+    if (detail.includes('not_configured')) {
+      shareMailNotice.value = L('SMTP ayarlı/doğrulanmış değil — linki elle iletin.', 'SMTP not set up/verified — share the link manually.');
+    } else if (detail.includes('send_failed')) {
+      shareMailNotice.value = L('Gönderilemedi (geçici hata) — tekrar deneyin.', 'Send failed (temporary) — please retry.');
+    } else {
+      shareMailNotice.value = e instanceof Error ? e.message : String(e);
+    }
   } finally {
     shareMailBusy.value = false;
   }

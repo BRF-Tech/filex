@@ -90,10 +90,20 @@ async function testSmtp() {
   smtpTesting.value = true;
   smtpTestMsg.value = '';
   try {
-    const { data } = await api.post<{ ok: boolean; error?: string }>('/admin/settings/smtp-test', {});
-    smtpTestMsg.value = data.ok
-      ? t('settings.smtp.testOk')
-      : `${t('settings.smtp.testFail')}: ${data.error ?? ''}`;
+    // Send a real end-to-end test to the configured sender (a real mailbox the
+    // admin owns) so the send path is exercised, not just the auth handshake.
+    // Client-side timeout as a backstop — the backend also bounds the dial.
+    const to = smtp.from.trim();
+    const { data } = await api.post<{ ok: boolean; sent?: boolean; stage?: string; error?: string }>(
+      '/admin/settings/smtp-test', to ? { to } : {}, { timeout: 45000 },
+    );
+    if (data.ok && data.sent) {
+      smtpTestMsg.value = `${t('settings.smtp.testOk')} → ${to}`;
+    } else if (data.ok) {
+      smtpTestMsg.value = t('settings.smtp.testOk');
+    } else {
+      smtpTestMsg.value = `${t('settings.smtp.testFail')}: ${data.error ?? ''}`;
+    }
     await settings.fetch();
   } catch (e: unknown) {
     smtpTestMsg.value = extractError(e, t('errors.generic'));

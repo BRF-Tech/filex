@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -635,10 +636,19 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing url"})
 		return
 	}
-	emailed := h.tryMail(r.Context(), email, "Bir dosya sizinle paylaşıldı",
-		"Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n"+link)
-	if !emailed {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": "mail not configured"})
+	if h.Mailer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": "not_configured"})
+		return
+	}
+	if err := h.Mailer.Send(r.Context(), email, "Bir dosya sizinle paylaşıldı",
+		"Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n"+link); err != nil {
+		// Distinguish "SMTP not set up / not verified" (show the link) from a
+		// transient send failure (worth retrying) so the UI can say which.
+		reason := "send_failed"
+		if errors.Is(err, mailer.ErrNotConfigured) || errors.Is(err, mailer.ErrNotVerified) {
+			reason = "not_configured"
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": reason, "detail": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"emailed": true})
