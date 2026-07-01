@@ -186,6 +186,7 @@ onMounted(async () => {
       class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur px-4 sm:px-6"
     >
       <button
+        v-if="auth.isAdmin"
         type="button"
         class="rounded p-1.5 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         :title="t('common.back')"

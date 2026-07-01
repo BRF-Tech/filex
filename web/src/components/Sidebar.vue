@@ -55,6 +55,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'tagged' }, label: t('nav.tagged'), icon: Tag, group: 'main' },
 
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },
+  { to: { name: 'grants' }, label: t('nav.grants'), icon: ShieldCheck, group: 'access' },
   {
     to: { name: 'auth-providers' },
     label: t('nav.authProviders'),

@@ -646,6 +646,23 @@ func (s *Store) GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, e
 	return scanFileGrant(s.db.QueryRowContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE id=$1`, id))
 }
 
+func (s *Store) ListAllFileGrants(ctx context.Context) ([]*model.FileGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants ORDER BY storage_id, path_prefix, user_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.FileGrant
+	for rows.Next() {
+		g, err := scanFileGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error) {
 	return scanFileGrant(s.db.QueryRowContext(ctx,
 		`INSERT INTO file_grants (storage_id, path_prefix, is_dir, user_id, level, created_by)

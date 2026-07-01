@@ -129,6 +129,7 @@ RUN apk --no-cache add \
         tzdata \
         su-exec \
         ffmpeg \
+        imagemagick \
         ghostscript \
         poppler-utils \
         libreoffice \

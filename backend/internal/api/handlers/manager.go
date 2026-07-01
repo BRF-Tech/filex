@@ -586,7 +586,8 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 			typ = "dir"
 		}
 		// Hide the same internal entries the cache projector hides.
-		if strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" {
+		if strings.Contains(o.Path, ".thumbs") || o.Name == ".keepdir" ||
+			o.Name == ".versions" || strings.Contains(o.Path, ".versions") {
 			continue
 		}
 		// Trash bucket — never expose in regular listings.
@@ -963,9 +964,14 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		if n.DeletedAt != nil {
 			continue
 		}
-		// Hide the trash bucket from regular listings — the dedicated
-		// /admin/trash route renders deleted rows directly.
+		// Hide internal buckets (trash, version history, thumbnails) from
+		// regular listings — they have dedicated surfaces / are implementation
+		// detail. The trash bucket lists via /admin/trash.
 		if strings.HasPrefix(n.Path, "/.filex-trash") || strings.HasPrefix(n.Path, ".filex-trash") || n.Name == ".filex-trash" {
+			continue
+		}
+		if n.Name == ".versions" || n.Name == ".thumbs" ||
+			strings.Contains(n.Path, "/.versions") || strings.Contains(n.Path, "/.thumbs") {
 			continue
 		}
 		// RBAC: drop entries the caller isn't allowed to see.

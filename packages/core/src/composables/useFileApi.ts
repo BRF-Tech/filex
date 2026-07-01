@@ -83,6 +83,16 @@ export interface ResolveEmailResponse {
   user?: { id: number; email: string; display_name: string; role: string };
 }
 
+export interface UserSuggestion {
+  id: number;
+  email: string;
+  display_name: string;
+  role: string;
+}
+export interface UserSearchResponse {
+  users: UserSuggestion[];
+}
+
 export interface InviteResponse {
   mode: 'granted' | 'user_created' | 'shared';
   user_id?: number;
@@ -225,6 +235,30 @@ export function useFileApi(config: ExplorerConfig) {
     return authConf.kind === 'csrf' ? 'include' : 'same-origin';
   }
 
+  // Map an HTTP status to a short, human-readable message in the explorer's
+  // locale. The raw JSON body is attached as `.detail` for debugging but never
+  // shown in the toast (Burak: "404/403 falan verince ham json görüyorum").
+  function statusMessage(status: number): string {
+    const tr = (config.locale ?? 'tr') !== 'en';
+    const m: Record<number, [string, string]> = {
+      400: ['Geçersiz istek', 'Bad request'],
+      401: ['Oturum gerekli, tekrar giriş yapın', 'Sign-in required'],
+      403: ['Bu işlem için yetkiniz yok', 'You are not allowed to do this'],
+      404: ['Bulunamadı', 'Not found'],
+      409: ['Zaten var / çakışma', 'Already exists / conflict'],
+      413: ['Dosya çok büyük', 'File too large'],
+      415: ['Bu dosya türü desteklenmiyor', 'Unsupported file type'],
+      422: ['Geçersiz veri', 'Invalid data'],
+      429: ['Çok fazla istek, biraz bekleyin', 'Too many requests'],
+      500: ['Sunucu hatası', 'Server error'],
+      501: ['Bu işlem desteklenmiyor', 'Not supported'],
+      503: ['Servis şu an kullanılamıyor', 'Service unavailable'],
+    };
+    const e = m[status];
+    if (e) return tr ? e[0] : e[1];
+    return tr ? `Hata (${status})` : `Error (${status})`;
+  }
+
   async function jsonFetch<T>(url: string, init: RequestInit = {}): Promise<T> {
     const headers = {
       ...(await authHeaders()),
@@ -237,7 +271,10 @@ export function useFileApi(config: ExplorerConfig) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`${res.status} ${res.statusText}${text ? ' — ' + text.slice(0, 200) : ''}`);
+      const err = new Error(statusMessage(res.status)) as Error & { status?: number; detail?: string };
+      err.status = res.status;
+      err.detail = text.slice(0, 300);
+      throw err;
     }
     return res.json() as Promise<T>;
   }
@@ -255,6 +292,9 @@ export function useFileApi(config: ExplorerConfig) {
   }
   async function resolveEmail(email: string): Promise<ResolveEmailResponse> {
     return jsonFetch<ResolveEmailResponse>(permissionsUrl('/resolve') + '?email=' + encodeURIComponent(email));
+  }
+  async function searchUsers(q: string): Promise<UserSearchResponse> {
+    return jsonFetch<UserSearchResponse>(permissionsUrl('/users') + '?q=' + encodeURIComponent(q));
   }
   async function addPermission(body: { path: string; user_id: number; level: string; is_dir?: boolean }): Promise<unknown> {
     return jsonFetch(permissionsUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -626,6 +666,7 @@ export function useFileApi(config: ExplorerConfig) {
     // Permissions (RBAC panel)
     listPermissions,
     resolveEmail,
+    searchUsers,
     addPermission,
     updatePermission,
     deletePermission,

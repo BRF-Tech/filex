@@ -66,12 +66,13 @@ type StorageCapabilities struct {
 
 // ThumbCapabilities indicates which media types can be thumbnailed.
 type ThumbCapabilities struct {
-	Image  bool `json:"image"`
-	Video  bool `json:"video"`
-	Audio  bool `json:"audio"`
-	PDF    bool `json:"pdf"`
-	Office bool `json:"office"`
-	SVG    bool `json:"svg"`
+	Image       bool `json:"image"`
+	ImageMagick bool `json:"imagemagick"` // `magick`/`convert` binary present
+	Video       bool `json:"video"`
+	Audio       bool `json:"audio"`
+	PDF         bool `json:"pdf"`
+	Office      bool `json:"office"`
+	SVG         bool `json:"svg"`
 }
 
 // ExternalServiceState describes a plug-and-play integration's runtime status.

@@ -8,15 +8,49 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/mailer"
 )
 
 // Settings handles /api/admin/settings.
 type Settings struct {
-	Store db.Store
+	Store  db.Store
+	Mailer *mailer.Service
 }
 
 // NewSettings constructs a Settings handler.
 func NewSettings(store db.Store) *Settings { return &Settings{Store: store} }
+
+// AttachMailer wires the mailer so the SMTP "Test" button can verify / send.
+func (h *Settings) AttachMailer(m *mailer.Service) { h.Mailer = m }
+
+// SMTPTest verifies the SMTP config (auth handshake) and, when a `to` address
+// is given, sends a real test message end-to-end.
+//
+//	POST /api/admin/settings/smtp-test  { "to": "you@example.com" }  (to optional)
+func (h *Settings) SMTPTest(w http.ResponseWriter, r *http.Request) {
+	if h.Mailer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "mailer not configured"})
+		return
+	}
+	var req struct {
+		To string `json:"to"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := h.Mailer.Verify(r.Context()); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "verify", "error": err.Error()})
+		return
+	}
+	to := strings.TrimSpace(req.To)
+	if to != "" {
+		if err := h.Mailer.Send(r.Context(), to, "filex SMTP test", "Bu bir filex SMTP test e-postasıdır.\n\nThis is a filex SMTP test email."); err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "send", "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sent": false})
+}
 
 // List returns all key/value pairs.
 func (h *Settings) List(w http.ResponseWriter, r *http.Request) {

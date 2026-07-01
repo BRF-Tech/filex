@@ -77,6 +77,7 @@
     "external": "Dış servisler",
     "authProviders": "Kimlik sağlayıcılar",
     "apiMcp": "API / MCP",
+    "grants": "İzinler",
     "audit": "Denetim kaydı",
     "sync": "Senkron çalışmaları",
     "shares": "Paylaşımlar",
@@ -240,7 +241,24 @@
     "logLevel": "Log seviyesi",
     "defaultLocale": "Varsayılan dil",
     "defaultTimezone": "Varsayılan zaman dilimi",
-    "savedOk": "Ayarlar kaydedildi"
+    "savedOk": "Ayarlar kaydedildi",
+    "smtp": {
+      "title": "E-posta (SMTP)",
+      "help": "Davet / paylaşım bildirimleri buradan gönderilir. Doğrulanmadıysa linkler ekranda gösterilir.",
+      "host": "Sunucu",
+      "port": "Port",
+      "tls": "Şifreleme",
+      "from": "Gönderen adresi",
+      "username": "Kullanıcı adı",
+      "usernameHelp": "Kimlik doğrulamasız gönderim için boş bırakın.",
+      "password": "Parola",
+      "passwordHelp": "Mevcut parolayı korumak için boş bırakın.",
+      "test": "Test et",
+      "verified": "Doğrulandı",
+      "unverified": "Doğrulanmadı",
+      "testOk": "SMTP tamam",
+      "testFail": "SMTP hatası"
+    }
   },
   "external": {
     "title": "Dış servisler",
@@ -299,6 +317,19 @@
     "savedOk": "Sağlayıcı güncellendi",
     "testOk": "Sağlayıcı tamam",
     "testFail": "Sağlayıcı kontrolü başarısız"
+  },
+  "grants": {
+    "title": "İzinler",
+    "subtitle": "Dosya/klasör bazlı tüm yetkiler — kime, nerede, ne. İstediğini geri al.",
+    "search": "Kullanıcı, yol, depo ara…",
+    "user": "Kullanıcı",
+    "storage": "Depo",
+    "path": "Yol",
+    "level": "Seviye",
+    "revoke": "Geri al",
+    "revokeConfirm": "{email} kullanıcısının {path} erişimi geri alınsın mı?",
+    "revokedOk": "Yetki geri alındı",
+    "empty": "Henüz izin yok."
   },
   "apiMcp": {
     "title": "API / MCP",

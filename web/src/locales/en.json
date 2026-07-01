@@ -77,6 +77,7 @@
     "external": "External services",
     "authProviders": "Auth providers",
     "apiMcp": "API / MCP",
+    "grants": "Permissions",
     "audit": "Audit log",
     "sync": "Sync runs",
     "shares": "Shares",
@@ -240,7 +241,24 @@
     "logLevel": "Log level",
     "defaultLocale": "Default locale",
     "defaultTimezone": "Default timezone",
-    "savedOk": "Settings saved"
+    "savedOk": "Settings saved",
+    "smtp": {
+      "title": "Email (SMTP)",
+      "help": "Used to send invite / share notices. When unverified, links are shown on-screen instead.",
+      "host": "Host",
+      "port": "Port",
+      "tls": "Encryption",
+      "from": "From address",
+      "username": "Username",
+      "usernameHelp": "Leave empty for unauthenticated relay.",
+      "password": "Password",
+      "passwordHelp": "Leave empty to keep the current password.",
+      "test": "Test",
+      "verified": "Verified",
+      "unverified": "Not verified",
+      "testOk": "SMTP OK",
+      "testFail": "SMTP failed"
+    }
   },
   "external": {
     "title": "External services",
@@ -299,6 +317,19 @@
     "savedOk": "Provider updated",
     "testOk": "Provider OK",
     "testFail": "Provider check failed"
+  },
+  "grants": {
+    "title": "Permissions",
+    "subtitle": "Every per-file/folder grant — who has what, where. Revoke any.",
+    "search": "Search user, path, storage…",
+    "user": "User",
+    "storage": "Storage",
+    "path": "Path",
+    "level": "Level",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke {email}'s access to {path}?",
+    "revokedOk": "Grant revoked",
+    "empty": "No grants yet."
   },
   "apiMcp": {
     "title": "API / MCP",

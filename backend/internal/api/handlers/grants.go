@@ -314,6 +314,95 @@ func (h *Grants) authorizeGrant(w http.ResponseWriter, r *http.Request, g *model
 	return st, true
 }
 
+// AdminList returns every grant across all storages, enriched with storage
+// name + user email, for the admin panel's global "İzinler" overview (who has
+// what, where). Admin-only via the /api/admin route group.
+//
+//	GET /api/admin/grants → {grants:[{id, storage_name, path_prefix, user_email, level, …}]}
+func (h *Grants) AdminList(w http.ResponseWriter, r *http.Request) {
+	all, err := h.Store.ListAllFileGrants(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	storageName := map[int64]string{}
+	userEmail := map[int64]string{}
+	out := make([]map[string]any, 0, len(all))
+	for _, g := range all {
+		if _, ok := storageName[g.StorageID]; !ok {
+			if st, e := h.Store.GetStorage(r.Context(), g.StorageID); e == nil && st != nil {
+				storageName[g.StorageID] = st.Name
+			}
+		}
+		if _, ok := userEmail[g.UserID]; !ok {
+			if u, e := h.Store.GetUser(r.Context(), g.UserID); e == nil && u != nil {
+				userEmail[g.UserID] = u.Email
+			}
+		}
+		out = append(out, map[string]any{
+			"id":           g.ID,
+			"storage_id":   g.StorageID,
+			"storage_name": storageName[g.StorageID],
+			"path":         storageName[g.StorageID] + "://" + g.PathPrefix,
+			"path_prefix":  g.PathPrefix,
+			"is_dir":       g.IsDir,
+			"user_id":      g.UserID,
+			"user_email":   userEmail[g.UserID],
+			"level":        g.Level,
+			"created_at":   g.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"grants": out})
+}
+
+// AdminDelete revokes any grant (admin override).
+//
+//	DELETE /api/admin/grants/{id}
+func (h *Grants) AdminDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := h.Store.DeleteFileGrant(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// SearchUsers returns existing accounts matching q (email or display name) so
+// the permissions panel can autocomplete as the owner types. Any authenticated
+// user may call it (the panel itself is owner-gated); results are capped and
+// carry no secrets.
+//
+//	GET /api/files/permissions/users?q=<substr>
+func (h *Grants) SearchUsers(w http.ResponseWriter, r *http.Request) {
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	users, err := h.Store.ListUsers(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]map[string]any, 0, 10)
+	for _, u := range users {
+		if q != "" && !strings.Contains(strings.ToLower(u.Email), q) &&
+			!strings.Contains(strings.ToLower(u.DisplayName), q) {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":           u.ID,
+			"email":        u.Email,
+			"display_name": u.DisplayName,
+			"role":         u.Role,
+		})
+		if len(out) >= 10 {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
 // Resolve looks up a user by email so the panel can decide between a direct
 // grant (existing account) and the invite flow (no account).
 //

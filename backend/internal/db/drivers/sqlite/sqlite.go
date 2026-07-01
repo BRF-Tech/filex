@@ -727,6 +727,23 @@ func (s *Store) GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, e
 	return scanFileGrant(s.db.QueryRowContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE id=?`, id))
 }
 
+func (s *Store) ListAllFileGrants(ctx context.Context) ([]*model.FileGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants ORDER BY storage_id, path_prefix, user_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.FileGrant
+	for rows.Next() {
+		g, err := scanFileGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // CreateFileGrant upserts a grant on the (storage_id, path_prefix, user_id)
 // unique key. Uses a portable check-then-write (UPDATE, else INSERT) so the
 // same code path works for the MySQL driver that wraps this Store — MySQL does

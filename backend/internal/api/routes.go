@@ -125,6 +125,7 @@ func BuildRouter(d *Deps) http.Handler {
 	stg := handlers.NewStorages(d.Store, d.Worker)
 	ush := handlers.NewUsers(d.Store)
 	seth := handlers.NewSettings(d.Store)
+	seth.AttachMailer(d.Mailer)
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL)
 	sxh := handlers.NewSearch(d.Index, d.Store)
 	sxh.AttachACL(d.ACL)
@@ -283,6 +284,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Patch("/permissions/{id}", grantsH.Update)
 			r.Delete("/permissions/{id}", grantsH.Delete)
 			r.Get("/permissions/resolve", grantsH.Resolve)
+			r.Get("/permissions/users", grantsH.SearchUsers)
 			r.Post("/permissions/invite", grantsH.Invite)
 
 			// Per-user metadata: tags, starred flag, recently-opened.
@@ -364,6 +366,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/settings", func(r chi.Router) {
 				r.Get("/", seth.List)
 				r.Patch("/", seth.Update)
+				r.Post("/smtp-test", seth.SMTPTest)
 				r.Put("/{key}", seth.Set)
 			})
 
@@ -375,6 +378,10 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/", aiTokensH.Create)
 				r.Delete("/{id}", aiTokensH.Delete)
 			})
+
+			// Global RBAC permissions overview — who has what, where.
+			r.Get("/grants", grantsH.AdminList)
+			r.Delete("/grants/{id}", grantsH.AdminDelete)
 
 			r.Route("/audit", func(r chi.Router) {
 				r.Get("/", auditH.List)

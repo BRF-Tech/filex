@@ -35,6 +35,7 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	const mb = int64(1024 * 1024)
 	flat := map[string]any{
 		"ffmpeg":       c.Thumbs.Video,
+		"imagemagick":  c.Thumbs.ImageMagick,
 		"ghostscript":  c.Thumbs.PDF,
 		"libreoffice":  c.Thumbs.Office,
 		"max_chunk_mb": int64(0),

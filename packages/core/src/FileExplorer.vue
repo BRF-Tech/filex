@@ -141,6 +141,9 @@ const searchQuery = ref('');
 // `currentPath.startsWith('fileman/.trash')` check that never matched the
 // filex backend's storage layout, so trash always looked empty.
 const trashMode = ref(false);
+// The storage the trash view was entered from, so "up" returns there (not the
+// global root). Set in loadTrash().
+const trashOrigin = ref<string>('');
 const trashActive = computed(() => trashMode.value);
 const locale = computed(() => props.config.locale || 'tr');
 
@@ -162,6 +165,12 @@ const atVirtualRoot = computed(() => {
 });
 
 function goUp() {
+  // Leaving the trash view returns to the storage it was opened from, not the
+  // global storage-list root.
+  if (trashMode.value) {
+    void load(trashOrigin.value);
+    return;
+  }
   const cur = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   if (!cur || cur === rootFloor) return;
   const idx = cur.lastIndexOf('/');
@@ -449,6 +458,7 @@ async function load(path?: string) {
     dirPerm.value = (resp.perm as string) || '';
     files.value = (resp.files || []).filter((f) => {
       if (f.path.includes('.thumbs')) return false;
+      if (f.path.includes('.versions') || f.basename === '.versions') return false;
       if (f.basename === '.trash') return false;
       if (f.basename === '.keepdir') return false;
       return true;
@@ -496,6 +506,7 @@ function stripAdapter(p: string): string {
 // the only mutation offered here is Restore.
 async function loadTrash() {
   loading.value = true;
+  trashOrigin.value = adapter.value || '';
   trashMode.value = true;
   selection.clear();
   try {
@@ -967,26 +978,23 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   const isFile = single && sel[0]?.type === 'file';
   const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
   const singleHasId = single && typeof sel[0]?.id === 'number';
-  const copyIdLabel = locale.value === 'en'
-    ? `Copy node id (${sel[0]?.id ?? ''})`
-    : `Node id'yi kopyala (${sel[0]?.id ?? ''})`;
+  const copyIdLabel = locale.value === 'en' ? 'Copy node id' : "Node id'yi kopyala";
   // RBAC: gate mutating actions when the caller lacks edit on the target. The
   // "İzinler" (permissions) action shows only for owners on RBAC-on storages.
   const p = selPerm(sel);
   const w = permCanEdit(p); // may write here
-  const owner = permIsOwner(p);
-  const permLabel = locale.value === 'en' ? 'Permissions…' : 'İzinler…';
+  // Unified "Paylaş / İzinler" popup: public share link (editor+) + per-user
+  // permissions (owner-only, decided inside the modal).
+  const accessLabel = locale.value === 'en' ? 'Share / Permissions' : 'Paylaş / İzinler';
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
     { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w, disabled: !isFile },
-    { key: 'share', label: t('ctx.share'), icon: '🔗', hidden: !single || !w, disabled: !single },
-    { key: 'perm', label: permLabel, icon: '🔐', hidden: !single || !owner },
+    { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w },
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '', hidden: !w },
     { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single || !w, disabled: !single },
-    { key: 'duplicate', label: t('ctx.duplicate'), icon: '⎘', hidden: !any || !w, disabled: !any },
     { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any || !w, disabled: !any },
     { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any, disabled: !any },
     { key: 'paste', label: t('ctx.paste'), icon: '📋', hidden: !w, disabled: !clipboard.value.mode },
@@ -1054,7 +1062,7 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'share':
       if (targets[0]) openShare(targets[0]);
       break;
-    case 'perm':
+    case 'access':
       if (targets[0]) {
         permTarget.value = targets[0];
         showPerm.value = true;

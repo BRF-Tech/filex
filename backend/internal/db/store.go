@@ -105,6 +105,7 @@ type Store interface {
 	// File grants — per-user/per-folder ACL (RBAC feature, migration 00012).
 	ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
 	ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error)
+	ListAllFileGrants(ctx context.Context) ([]*model.FileGrant, error)
 	GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, error)
 	CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error)
 	UpdateFileGrantLevel(ctx context.Context, id int64, level string) error

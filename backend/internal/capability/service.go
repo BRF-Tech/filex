@@ -151,6 +151,9 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.DemoMode = s.demoMode
 	caps.DemoUser = s.demoUser
 	s.mu.RUnlock()
+	if has("magick") || has("convert") {
+		caps.Thumbs.ImageMagick = true
+	}
 	if has("ffmpeg") {
 		caps.Thumbs.Video = true
 		caps.Thumbs.Audio = true
