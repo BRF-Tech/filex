@@ -286,6 +286,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Get("/permissions/resolve", grantsH.Resolve)
 			r.Get("/permissions/users", grantsH.SearchUsers)
 			r.Post("/permissions/invite", grantsH.Invite)
+			r.Post("/permissions/share-mail", grantsH.ShareMail)
 
 			// Per-user metadata: tags, starred flag, recently-opened.
 			r.Route("/manager/tags", func(r chi.Router) {

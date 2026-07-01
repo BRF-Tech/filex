@@ -89,6 +89,30 @@ func (h *Grants) resolvePath(w http.ResponseWriter, r *http.Request, raw string)
 	return st, acl.CleanRel(rel), true
 }
 
+// requireEditor reports whether the caller may write/share at (st, rel):
+// admin, or acl.LevelEditor effective there. Used by the share-by-email action
+// (same capability that created the link). Writes 403 + returns false if not.
+func (h *Grants) requireEditor(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string) bool {
+	u := auth.UserFrom(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return false
+	}
+	if u.IsAdmin() {
+		return true
+	}
+	if h.ACL == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return false
+	}
+	set, err := h.ACL.LoadSet(r.Context(), u, st)
+	if err != nil || set == nil || set.Effective(rel) < acl.LevelEditor {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return false
+	}
+	return true
+}
+
 // requireOwner reports whether the caller may manage permissions on (st, rel):
 // admin, or acl.LevelOwner effective there. Writes 403 + returns false if not.
 func (h *Grants) requireOwner(w http.ResponseWriter, r *http.Request, st *model.Storage, rel string) bool {
@@ -435,6 +459,7 @@ type inviteReq struct {
 	Level      string `json:"level"`
 	CreateUser bool   `json:"create_user,omitempty"`
 	Role       string `json:"role,omitempty"` // new-user role when CreateUser (default "user")
+	IsDir      *bool  `json:"is_dir,omitempty"`
 }
 
 // Invite grants access to an email address. Three outcomes (owner/admin only):
@@ -475,6 +500,10 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		id := caller.ID
 		createdBy = &id
 	}
+	isDir := true
+	if req.IsDir != nil {
+		isDir = *req.IsDir
+	}
 
 	// ── Existing account → direct grant. ──
 	if u, err := h.Store.GetUserByEmail(r.Context(), email); err == nil && u != nil {
@@ -487,7 +516,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, gerr := h.Store.CreateFileGrant(r.Context(), &model.FileGrant{
-			StorageID: st.ID, PathPrefix: rel, IsDir: true, UserID: u.ID, Level: req.Level, CreatedBy: createdBy,
+			StorageID: st.ID, PathPrefix: rel, IsDir: isDir, UserID: u.ID, Level: req.Level, CreatedBy: createdBy,
 		}); gerr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
@@ -532,7 +561,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, gerr := h.Store.CreateFileGrant(r.Context(), &model.FileGrant{
-			StorageID: st.ID, PathPrefix: rel, IsDir: true, UserID: newU.ID, Level: req.Level, CreatedBy: createdBy,
+			StorageID: st.ID, PathPrefix: rel, IsDir: isDir, UserID: newU.ID, Level: req.Level, CreatedBy: createdBy,
 		}); gerr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
@@ -568,4 +597,49 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 	emailed := h.tryMail(r.Context(), email, "Bir dosya sizinle paylaşıldı",
 		"Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n"+url)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
+}
+
+type shareMailReq struct {
+	Path  string `json:"path"`
+	Email string `json:"email"`
+	URL   string `json:"url"`
+}
+
+// ShareMail emails an already-created public share link to an address. It does
+// NOT create a share — it delivers a link the caller just made (with their
+// chosen expiry/PIN) in the share tab. Gated editor+ on the path, the same
+// capability that created the link. Best-effort: returns {emailed:false} when
+// SMTP isn't verified so the UI keeps showing the link for manual delivery.
+//
+//	POST /api/files/permissions/share-mail {path, email, url}
+func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
+	var req shareMailReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	st, rel, ok := h.resolvePath(w, r, req.Path)
+	if !ok {
+		return
+	}
+	if !h.requireEditor(w, r, st, rel) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" || !strings.Contains(email, "@") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "valid email required"})
+		return
+	}
+	link := strings.TrimSpace(req.URL)
+	if link == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing url"})
+		return
+	}
+	emailed := h.tryMail(r.Context(), email, "Bir dosya sizinle paylaşıldı",
+		"Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n"+link)
+	if !emailed {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": "mail not configured"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"emailed": true})
 }

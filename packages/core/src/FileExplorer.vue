@@ -1781,6 +1781,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       v-if="showPerm && permTarget"
       :api="api"
       :path="permTarget.path"
+      :is-dir="permTarget.type === 'dir'"
       :locale="locale === 'en' ? 'en' : 'tr'"
       @close="showPerm = false"
     />

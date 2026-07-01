@@ -97,7 +97,7 @@ async function revoke(g: AdminGrant) {
           >
             <td class="px-4 py-2">{{ g.user_email || '#' + g.user_id }}</td>
             <td class="px-4 py-2">{{ g.storage_name }}</td>
-            <td class="px-4 py-2 font-mono text-xs">{{ g.path_prefix || '/' }}<span v-if="g.is_dir" class="text-zinc-400"> /…</span></td>
+            <td class="px-4 py-2 font-mono text-xs">{{ g.path_prefix || '/' }}<span v-if="g.is_dir && g.path_prefix" class="text-zinc-400">/…</span></td>
             <td class="px-4 py-2"><Badge :tone="levelTone(g.level)">{{ g.level }}</Badge></td>
             <td class="px-4 py-2 text-right">
               <button

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Access modal — a single popup combining "İzinler" (per-user RBAC grants,
-// owner-only) and "Paylaş" (public share link, editor+). Opened from the
-// explorer's unified "Paylaş / İzinler" action. Styling uses the SFC's --fe-*
-// theme variables so it matches light/dark.
+// Access modal — one popup combining "İzinler" (per-user RBAC grants,
+// owner-only) and "Bağlantı ile paylaş" (public share link, editor+). Opened
+// from the explorer's unified "Paylaş / İzinler" action. The layout is a fixed
+// header/tabs with a single scrollable body so the popup never grows into one
+// long scroll. Styling uses the SFC's --fe-* theme variables (light/dark).
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
@@ -10,6 +11,7 @@ import type { ShareInfo } from '../types/FileNode';
 const props = defineProps<{
   api: FileApi;
   path: string; // adapter://rel of the target item
+  isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
   locale?: 'tr' | 'en';
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -18,6 +20,15 @@ const tr = computed(() => (props.locale ?? 'tr') !== 'en');
 function L(t: string, e: string): string {
   return tr.value ? t : e;
 }
+
+// Split adapter://rel for a friendlier path chip.
+const pathParts = computed(() => {
+  const m = /^([^:]+):\/\/(.*)$/.exec(props.path);
+  const adapter = m ? m[1] : '';
+  const rel = m ? m[2] : props.path;
+  const segs = rel.split('/').filter(Boolean);
+  return { adapter, name: segs.length ? segs[segs.length - 1] : adapter, rel };
+});
 
 type Tab = 'perms' | 'share';
 const tab = ref<Tab>('perms');
@@ -35,23 +46,39 @@ const busy = ref(false);
 const notice = ref('');
 const noAccount = ref(false);
 const createRole = ref<'user' | 'viewer'>('user');
-const inviteResult = ref<{ link?: string; tempPassword?: string } | null>(null);
+const inviteResult = ref<{ tempPassword?: string } | null>(null);
 const suggestions = ref<UserSuggestion[]>([]);
 const showSuggest = ref(false);
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-const levels: Array<{ v: 'viewer' | 'editor' | 'owner'; l: string }> = [
-  { v: 'viewer', l: L('Görüntüleyen', 'Viewer') },
-  { v: 'editor', l: L('Düzenleyen', 'Editor') },
-  { v: 'owner', l: L('Sahip', 'Owner') },
+const levels: Array<{ v: 'viewer' | 'editor' | 'owner'; l: string; d: string }> = [
+  { v: 'viewer', l: L('Görüntüleyen', 'Viewer'), d: L('görüntüle + indir', 'view + download') },
+  { v: 'editor', l: L('Düzenleyen', 'Editor'), d: L('oku + yaz + sil', 'read + write + delete') },
+  { v: 'owner', l: L('Sahip', 'Owner'), d: L('düzenle + izin yönet', 'edit + manage access') },
 ];
+function levelLabel(v: string): string {
+  return levels.find((o) => o.v === v)?.l ?? v;
+}
 
 // ── share state ──
 const shares = ref<ShareInfo[]>([]);
 const shareBusy = ref(false);
 const sharePwd = ref(false);
+const shareExpiry = ref(0); // days; 0 = never
 const shareResult = ref<{ url: string; pin?: string | null } | null>(null);
 const shareErr = ref('');
+const copied = ref('');
+// prefilled recipient when the owner chose "share link" for a no-account email
+const shareMailTo = ref('');
+const shareMailBusy = ref(false);
+const shareMailNotice = ref('');
+
+const expiryOptions = [
+  { v: 0, l: L('Süresiz', 'Never') },
+  { v: 1, l: L('1 gün', '1 day') },
+  { v: 7, l: L('7 gün', '7 days') },
+  { v: 30, l: L('30 gün', '30 days') },
+];
 
 async function reload() {
   loading.value = true;
@@ -120,7 +147,7 @@ async function pickUser(u: UserSuggestion) {
   busy.value = true;
   notice.value = '';
   try {
-    await props.api.addPermission({ path: props.path, user_id: u.id, level: lvl });
+    await props.api.addPermission({ path: props.path, user_id: u.id, level: lvl, is_dir: !!props.isDir });
     email.value = '';
     suggestions.value = [];
     await reload();
@@ -146,7 +173,7 @@ async function submitEmail() {
     if (res.found && res.user) {
       let lvl = level.value;
       if (res.user.role === 'viewer' && lvl !== 'viewer') lvl = 'viewer';
-      await props.api.addPermission({ path: props.path, user_id: res.user.id, level: lvl });
+      await props.api.addPermission({ path: props.path, user_id: res.user.id, level: lvl, is_dir: !!props.isDir });
       email.value = '';
       await reload();
       notice.value = L('Yetki verildi.', 'Access granted.');
@@ -165,7 +192,7 @@ async function inviteCreateUser() {
   try {
     const r = await props.api.invitePermission({
       path: props.path, email: email.value.trim().toLowerCase(),
-      level: level.value, create_user: true, role: createRole.value,
+      level: level.value, create_user: true, role: createRole.value, is_dir: !!props.isDir,
     });
     inviteResult.value = { tempPassword: r.temp_password };
     notice.value = r.emailed
@@ -179,23 +206,13 @@ async function inviteCreateUser() {
     busy.value = false;
   }
 }
-async function inviteShare() {
-  busy.value = true;
+// "Sadece paylaş" → jump to the share tab with the address prefilled so the
+// owner creates a link (with their chosen expiry/PIN) and mails it there.
+function gotoShareWithMail() {
+  shareMailTo.value = email.value.trim().toLowerCase();
+  noAccount.value = false;
   notice.value = '';
-  try {
-    const r = await props.api.invitePermission({
-      path: props.path, email: email.value.trim().toLowerCase(), level: level.value,
-    });
-    inviteResult.value = { link: r.url };
-    notice.value = r.emailed
-      ? L('Paylaşım linki e-postayla gönderildi.', 'Share link emailed.')
-      : L('Paylaşım linki oluşturuldu.', 'Share link created.');
-    noAccount.value = false;
-  } catch (e) {
-    notice.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    busy.value = false;
-  }
+  tab.value = 'share';
 }
 async function changeLevel(g: Grant, newLevel: string) {
   if (newLevel === g.level) return;
@@ -213,14 +230,26 @@ async function removeGrant(g: Grant) {
 function glabel(g: Grant): string {
   return g.user_display_name || g.user_email || `#${g.user_id}`;
 }
+function ginitial(g: Grant): string {
+  return (g.user_display_name || g.user_email || '?').charAt(0).toUpperCase();
+}
 
 // ── share actions ──
+function expiresAtISO(): string | null {
+  if (!shareExpiry.value) return null;
+  return new Date(Date.now() + shareExpiry.value * 86400000).toISOString();
+}
 async function createLink() {
   shareBusy.value = true;
   shareErr.value = '';
   shareResult.value = null;
+  shareMailNotice.value = '';
   try {
-    const r = await props.api.createShare({ path: props.path, password: sharePwd.value });
+    const r = await props.api.createShare({
+      path: props.path,
+      password: sharePwd.value,
+      expires_at: expiresAtISO(),
+    });
     shareResult.value = { url: r.share.url, pin: r.share.password_pin ?? null };
     await reloadShares();
   } catch (e) {
@@ -229,14 +258,37 @@ async function createLink() {
     shareBusy.value = false;
   }
 }
+async function sendShareMail() {
+  const addr = shareMailTo.value.trim().toLowerCase();
+  if (!addr || !addr.includes('@')) {
+    shareMailNotice.value = L('Geçerli bir e-posta girin.', 'Enter a valid email.');
+    return;
+  }
+  if (!shareResult.value?.url) return;
+  shareMailBusy.value = true;
+  shareMailNotice.value = '';
+  try {
+    await props.api.shareMail({ path: props.path, email: addr, url: shareResult.value.url });
+    shareMailNotice.value = L('E-posta gönderildi ✓', 'Email sent ✓');
+  } catch (e) {
+    const detail = (e as { detail?: string }).detail;
+    shareMailNotice.value = detail?.includes('mail not configured')
+      ? L('SMTP yapılandırılmamış — linki elle iletin.', 'SMTP not configured — share the link manually.')
+      : (e instanceof Error ? e.message : String(e));
+  } finally {
+    shareMailBusy.value = false;
+  }
+}
 async function revoke(s: ShareInfo) {
   shareBusy.value = true;
   try { await props.api.revokeShare(s.uuid); await reloadShares(); }
   catch (e) { shareErr.value = e instanceof Error ? e.message : String(e); }
   finally { shareBusy.value = false; }
 }
-function copy(text: string) {
+function copy(text: string, tag = 'url') {
   navigator.clipboard?.writeText(text);
+  copied.value = tag;
+  setTimeout(() => { if (copied.value === tag) copied.value = ''; }, 1400);
 }
 </script>
 
@@ -244,10 +296,15 @@ function copy(text: string) {
   <div class="fx-perm-overlay" @click.self="emit('close')">
     <div class="fx-perm-modal">
       <header class="fx-perm-head">
-        <h3>{{ L('Paylaş / İzinler', 'Share / Permissions') }}</h3>
+        <div class="fx-perm-title">
+          <span class="fx-perm-ico" aria-hidden="true">{{ isDir ? '📁' : '📄' }}</span>
+          <div class="fx-perm-titletext">
+            <h3>{{ L('Paylaş / İzinler', 'Share / Permissions') }}</h3>
+            <span class="fx-perm-sub" :title="path">{{ pathParts.name }}<span class="fx-perm-subdim"> · {{ pathParts.adapter }}</span></span>
+          </div>
+        </div>
         <button class="fx-perm-x" @click="emit('close')" aria-label="close">✕</button>
       </header>
-      <p class="fx-perm-path">{{ path }}</p>
 
       <div class="fx-perm-tabs">
         <button
@@ -255,116 +312,157 @@ function copy(text: string) {
           class="fx-perm-tab"
           :class="{ 'is-active': tab === 'perms' }"
           @click="tab = 'perms'"
-        >{{ L('İzinler', 'Permissions') }}</button>
+        >{{ L('Kişiler', 'People') }}</button>
         <button
           class="fx-perm-tab"
           :class="{ 'is-active': tab === 'share' }"
           @click="tab = 'share'"
-        >{{ L('Bağlantı ile paylaş', 'Share link') }}</button>
+        >{{ L('Bağlantı', 'Link') }}</button>
       </div>
 
-      <!-- ───────── Permissions tab ───────── -->
-      <template v-if="tab === 'perms' && canManage">
-        <div v-if="!storageRbac" class="fx-perm-warn">
-          {{ L('Bu diskte RBAC kapalı — izinler yalnızca RBAC açık disklerde geçerli.', 'RBAC is off on this storage.') }}
-        </div>
-        <div v-if="err" class="fx-perm-warn">{{ err }}</div>
-        <div v-if="loading" class="fx-perm-muted">{{ L('Yükleniyor…', 'Loading…') }}</div>
-        <template v-else>
-          <div class="fx-perm-section">
-            <h4>{{ L('Doğrudan verilenler', 'Direct') }}</h4>
-            <div v-if="!direct.length" class="fx-perm-muted">{{ L('Yok', 'None') }}</div>
-            <div v-for="g in direct" :key="g.id" class="fx-perm-row">
-              <span class="fx-perm-user">{{ glabel(g) }}</span>
-              <select class="fx-perm-sel" :value="g.level"
-                @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
-                <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
-              </select>
-              <button class="fx-perm-del" :disabled="busy" @click="removeGrant(g)">✕</button>
-            </div>
+      <div class="fx-perm-body">
+        <!-- ───────── Permissions tab ───────── -->
+        <template v-if="tab === 'perms' && canManage">
+          <div v-if="!storageRbac" class="fx-perm-warn">
+            {{ L('Bu diskte RBAC kapalı — izinler yalnızca RBAC açık disklerde geçerli.', 'RBAC is off on this storage — grants only apply when RBAC is enabled.') }}
           </div>
-          <div v-if="inherited.length" class="fx-perm-section">
-            <h4>{{ L('Üst klasörden gelen', 'Inherited') }}</h4>
-            <div v-for="g in inherited" :key="g.id" class="fx-perm-row fx-perm-inh">
-              <span class="fx-perm-user">{{ glabel(g) }}</span>
-              <span class="fx-perm-badge">{{ g.level }}</span>
-              <span class="fx-perm-from" :title="g.path_prefix">↳ {{ g.path_prefix || '/' }}</span>
-            </div>
-          </div>
-          <div class="fx-perm-section">
-            <h4>{{ L('Kişi ekle', 'Add person') }}</h4>
-            <div class="fx-perm-add">
-              <div class="fx-perm-emailwrap">
-                <input v-model="email" type="email" class="fx-perm-input" autocomplete="off"
-                  :placeholder="L('e-posta adresi', 'email address')"
-                  @input="onEmailInput" @keyup.enter="submitEmail" @focus="onEmailInput" />
-                <ul v-if="showSuggest" class="fx-perm-suggest">
-                  <li v-for="u in suggestions" :key="u.id" @mousedown.prevent="pickUser(u)">
-                    <span class="fx-perm-suggest-name">{{ u.display_name || u.email }}</span>
-                    <span class="fx-perm-suggest-meta">{{ u.email }} · {{ u.role }}</span>
-                  </li>
-                </ul>
+          <div v-if="err" class="fx-perm-warn">{{ err }}</div>
+          <div v-if="loading" class="fx-perm-muted">{{ L('Yükleniyor…', 'Loading…') }}</div>
+          <template v-else>
+            <!-- Add person (primary action, on top) -->
+            <div class="fx-perm-addcard">
+              <div class="fx-perm-add">
+                <div class="fx-perm-emailwrap">
+                  <input v-model="email" type="email" class="fx-perm-input" autocomplete="off"
+                    :placeholder="L('İsim veya e-posta', 'Name or email')"
+                    @input="onEmailInput" @keyup.enter="submitEmail" @focus="onEmailInput" />
+                  <ul v-if="showSuggest" class="fx-perm-suggest">
+                    <li v-for="u in suggestions" :key="u.id" @mousedown.prevent="pickUser(u)">
+                      <span class="fx-perm-suggest-av">{{ (u.display_name || u.email).charAt(0).toUpperCase() }}</span>
+                      <span class="fx-perm-suggest-txt">
+                        <span class="fx-perm-suggest-name">{{ u.display_name || u.email }}</span>
+                        <span class="fx-perm-suggest-meta">{{ u.email }} · {{ u.role }}</span>
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+                <select v-model="level" class="fx-perm-sel" :title="levels.find(o => o.v === level)?.d">
+                  <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
+                </select>
+                <button class="fx-perm-btn fx-perm-btn--primary" :disabled="busy" @click="submitEmail">
+                  {{ L('Ekle', 'Add') }}
+                </button>
               </div>
-              <select v-model="level" class="fx-perm-sel">
-                <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
-              </select>
-              <button class="fx-perm-btn fx-perm-btn--primary" :disabled="busy" @click="submitEmail">
-                {{ L('Ekle', 'Add') }}
+
+              <div v-if="noAccount" class="fx-perm-invite">
+                <p class="fx-perm-muted">{{ L('Bu e-postada hesap yok. Ne yapmak istersiniz?', 'No account for this email — what next?') }}</p>
+                <div class="fx-perm-invite-actions">
+                  <div class="fx-perm-invite-row">
+                    <select v-model="createRole" class="fx-perm-sel">
+                      <option value="user">{{ L('Kullanıcı', 'User') }}</option>
+                      <option value="viewer">{{ L('Görüntüleyen', 'Viewer') }}</option>
+                    </select>
+                    <button class="fx-perm-btn fx-perm-btn--primary" :disabled="busy" @click="inviteCreateUser">
+                      {{ L('Kullanıcı oluştur + yetki ver', 'Create user + grant') }}
+                    </button>
+                  </div>
+                  <button class="fx-perm-btn fx-perm-btn--ghost" :disabled="busy" @click="gotoShareWithMail">
+                    {{ L('Sadece paylaşım linki gönder →', 'Just send a share link →') }}
+                  </button>
+                </div>
+              </div>
+              <div v-if="notice" class="fx-perm-notice">{{ notice }}</div>
+              <div v-if="inviteResult?.tempPassword" class="fx-perm-reveal">
+                {{ L('Geçici parola:', 'Temp password:') }} <code>{{ inviteResult.tempPassword }}</code>
+              </div>
+            </div>
+
+            <!-- People with access -->
+            <div class="fx-perm-section">
+              <h4>{{ L('Erişimi olanlar', 'People with access') }}</h4>
+              <div v-if="!direct.length && !inherited.length" class="fx-perm-empty">
+                {{ L('Henüz kimseyle paylaşılmadı.', 'Not shared with anyone yet.') }}
+              </div>
+              <div v-for="g in direct" :key="'d' + g.id" class="fx-perm-person">
+                <span class="fx-perm-av">{{ ginitial(g) }}</span>
+                <span class="fx-perm-user" :title="g.user_email">{{ glabel(g) }}</span>
+                <select class="fx-perm-sel fx-perm-sel--sm" :value="g.level"
+                  @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
+                  <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
+                </select>
+                <button class="fx-perm-del" :disabled="busy" :title="L('Kaldır', 'Remove')" @click="removeGrant(g)">✕</button>
+              </div>
+              <div v-for="g in inherited" :key="'i' + g.id" class="fx-perm-person fx-perm-inh">
+                <span class="fx-perm-av fx-perm-av--dim">{{ ginitial(g) }}</span>
+                <span class="fx-perm-user" :title="g.user_email">{{ glabel(g) }}</span>
+                <span class="fx-perm-badge">{{ levelLabel(g.level) }}</span>
+                <span class="fx-perm-from" :title="L('Üst klasörden gelir', 'Inherited from') + ': ' + (g.path_prefix || '/')">
+                  ↳ {{ g.path_prefix || '/' }}
+                </span>
+              </div>
+            </div>
+          </template>
+        </template>
+
+        <!-- ───────── Share tab ───────── -->
+        <template v-if="tab === 'share'">
+          <div class="fx-perm-addcard">
+            <div class="fx-perm-share-opts">
+              <label class="fx-perm-check">
+                <input type="checkbox" v-model="sharePwd" />
+                {{ L('PIN ile koru', 'Protect with a PIN') }}
+              </label>
+              <label class="fx-perm-expiry">
+                <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
+                <select v-model.number="shareExpiry" class="fx-perm-sel fx-perm-sel--sm">
+                  <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+                </select>
+              </label>
+              <button class="fx-perm-btn fx-perm-btn--primary" :disabled="shareBusy" @click="createLink">
+                {{ L('Bağlantı oluştur', 'Create link') }}
               </button>
             </div>
-            <div v-if="noAccount" class="fx-perm-invite">
-              <p class="fx-perm-muted">{{ L('Bu e-postada hesap yok. Ne yapmak istersiniz?', 'No account for this email.') }}</p>
-              <div class="fx-perm-add">
-                <select v-model="createRole" class="fx-perm-sel">
-                  <option value="user">{{ L('Kullanıcı', 'User') }}</option>
-                  <option value="viewer">{{ L('Görüntüleyen', 'Viewer') }}</option>
-                </select>
-                <button class="fx-perm-btn" :disabled="busy" @click="inviteCreateUser">{{ L('Yeni kullanıcı aç + yetki ver', 'Create user + grant') }}</button>
-                <button class="fx-perm-btn" :disabled="busy" @click="inviteShare">{{ L('Paylaşım linki gönder', 'Send share link') }}</button>
+
+            <div v-if="shareErr" class="fx-perm-warn">{{ shareErr }}</div>
+
+            <div v-if="shareResult" class="fx-perm-result">
+              <div class="fx-perm-linkrow">
+                <a :href="shareResult.url" target="_blank" rel="noopener" class="fx-perm-link">{{ shareResult.url }}</a>
+                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareResult.url, 'new')">
+                  {{ copied === 'new' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+                </button>
               </div>
+              <p v-if="shareResult.pin" class="fx-perm-pin">PIN: <code>{{ shareResult.pin }}</code></p>
+
+              <!-- send by email -->
+              <div class="fx-perm-mailrow">
+                <input v-model="shareMailTo" type="email" class="fx-perm-input" autocomplete="off"
+                  :placeholder="L('e-posta ile gönder', 'send by email')" @keyup.enter="sendShareMail" />
+                <button class="fx-perm-btn" :disabled="shareMailBusy" @click="sendShareMail">
+                  {{ L('Gönder', 'Send') }}
+                </button>
+              </div>
+              <div v-if="shareMailNotice" class="fx-perm-notice">{{ shareMailNotice }}</div>
             </div>
-            <div v-if="notice" class="fx-perm-notice">{{ notice }}</div>
-            <div v-if="inviteResult?.tempPassword" class="fx-perm-reveal">
-              {{ L('Geçici parola:', 'Temp password:') }} <code>{{ inviteResult.tempPassword }}</code>
-            </div>
-            <div v-if="inviteResult?.link" class="fx-perm-reveal">
-              <a :href="inviteResult.link" target="_blank" rel="noopener">{{ inviteResult.link }}</a>
+            <p v-else-if="shareMailTo" class="fx-perm-hint">
+              {{ L('Aşağıdan bir bağlantı oluşturun, ardından', 'Create a link below, then it will be sent to') }}
+              <strong>{{ shareMailTo }}</strong> {{ L('adresine gönderin.', '.') }}
+            </p>
+          </div>
+
+          <div class="fx-perm-section">
+            <h4>{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
+            <div v-if="!shares.length" class="fx-perm-empty">{{ L('Yok', 'None') }}</div>
+            <div v-for="s in shares" :key="s.uuid" class="fx-perm-person">
+              <span class="fx-perm-user fx-perm-link" :title="s.url">{{ s.url }}</span>
+              <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(s.url, s.uuid)">
+                {{ copied === s.uuid ? L('✓', '✓') : L('Kopyala', 'Copy') }}
+              </button>
+              <button class="fx-perm-del" :disabled="shareBusy" :title="L('İptal', 'Revoke')" @click="revoke(s)">✕</button>
             </div>
           </div>
         </template>
-      </template>
-
-      <!-- ───────── Share tab ───────── -->
-      <template v-if="tab === 'share'">
-        <div class="fx-perm-section">
-          <label class="fx-perm-check">
-            <input type="checkbox" v-model="sharePwd" />
-            {{ L('PIN ile koru', 'Protect with a PIN') }}
-          </label>
-          <div class="fx-perm-add" style="margin-top:8px">
-            <button class="fx-perm-btn fx-perm-btn--primary" :disabled="shareBusy" @click="createLink">
-              {{ L('Bağlantı oluştur', 'Create link') }}
-            </button>
-          </div>
-          <div v-if="shareErr" class="fx-perm-warn">{{ shareErr }}</div>
-          <div v-if="shareResult" class="fx-perm-reveal">
-            <div class="fx-perm-add">
-              <a :href="shareResult.url" target="_blank" rel="noopener" class="fx-perm-user">{{ shareResult.url }}</a>
-              <button class="fx-perm-btn" @click="copy(shareResult.url)">{{ L('Kopyala', 'Copy') }}</button>
-            </div>
-            <p v-if="shareResult.pin" class="fx-perm-notice">PIN: <code>{{ shareResult.pin }}</code></p>
-          </div>
-        </div>
-        <div class="fx-perm-section">
-          <h4>{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
-          <div v-if="!shares.length" class="fx-perm-muted">{{ L('Yok', 'None') }}</div>
-          <div v-for="s in shares" :key="s.uuid" class="fx-perm-row">
-            <span class="fx-perm-user">{{ s.url }}</span>
-            <button class="fx-perm-btn" @click="copy(s.url)">{{ L('Kopyala', 'Copy') }}</button>
-            <button class="fx-perm-del" :disabled="shareBusy" @click="revoke(s)">✕</button>
-          </div>
-        </div>
-      </template>
+      </div>
     </div>
   </div>
 </template>
@@ -376,69 +474,135 @@ function copy(text: string) {
   font-family: var(--fe-font);
 }
 .fx-perm-modal {
+  display: flex; flex-direction: column;
   background: var(--fe-bg); color: var(--fe-text);
-  width: min(560px, 94vw); max-height: 88vh; overflow: auto;
-  border: 1px solid var(--fe-border); border-radius: var(--fe-radius-lg, 12px);
-  padding: 18px 20px; box-shadow: var(--fe-shadow); font-size: 14px;
+  width: min(520px, 94vw); max-height: 86vh;
+  border: 1px solid var(--fe-border); border-radius: var(--fe-radius-lg, 14px);
+  box-shadow: var(--fe-shadow); font-size: 14px; overflow: hidden;
 }
-.fx-perm-head { display: flex; align-items: center; justify-content: space-between; }
-.fx-perm-head h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--fe-text); }
-.fx-perm-x { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--fe-text-muted); }
-.fx-perm-x:hover { color: var(--fe-text); }
-.fx-perm-path { font-size: 12px; color: var(--fe-text-muted); margin: 2px 0 10px; word-break: break-all; }
-.fx-perm-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--fe-border); margin-bottom: 6px; }
+/* header + tabs are fixed; only the body scrolls */
+.fx-perm-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 16px 18px 12px; flex: none;
+}
+.fx-perm-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fx-perm-ico { font-size: 22px; line-height: 1; }
+.fx-perm-titletext { display: flex; flex-direction: column; min-width: 0; }
+.fx-perm-title h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--fe-text); }
+.fx-perm-sub {
+  font-size: 12px; color: var(--fe-text); max-width: 340px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fx-perm-subdim { color: var(--fe-text-muted); }
+.fx-perm-x {
+  background: none; border: none; font-size: 17px; cursor: pointer;
+  color: var(--fe-text-muted); flex: none; line-height: 1; padding: 2px 4px; border-radius: 6px;
+}
+.fx-perm-x:hover { color: var(--fe-text); background: var(--fe-bg-hover); }
+.fx-perm-tabs { display: flex; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--fe-border); flex: none; }
 .fx-perm-tab {
   background: none; border: none; border-bottom: 2px solid transparent;
-  padding: 6px 10px; cursor: pointer; color: var(--fe-text-muted); font-size: 13px; font-family: inherit;
+  padding: 8px 12px; cursor: pointer; color: var(--fe-text-muted); font-size: 13px;
+  font-family: inherit; font-weight: 500;
 }
-.fx-perm-tab.is-active { color: var(--fe-text); border-bottom-color: var(--fe-primary); }
-.fx-perm-section { margin-top: 14px; }
+.fx-perm-tab:hover { color: var(--fe-text); }
+.fx-perm-tab.is-active { color: var(--fe-primary); border-bottom-color: var(--fe-primary); }
+.fx-perm-body { flex: 1 1 auto; overflow-y: auto; padding: 14px 18px 18px; }
+
+.fx-perm-addcard {
+  padding: 12px; border-radius: var(--fe-radius-md, 10px);
+  background: var(--fe-bg-elev); border: 1px solid var(--fe-border);
+}
+.fx-perm-section { margin-top: 16px; }
 .fx-perm-section h4 {
-  margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fe-text-muted);
+  margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fe-text-muted);
 }
-.fx-perm-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
-.fx-perm-inh { color: var(--fe-text-muted); font-size: 13px; }
-.fx-perm-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fe-text); }
-.fx-perm-from { font-size: 11px; color: var(--fe-text-muted); }
-.fx-perm-badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--fe-bg-hover); color: var(--fe-text); }
+.fx-perm-empty { color: var(--fe-text-muted); font-size: 13px; padding: 8px 2px; }
+
+/* person rows */
+.fx-perm-person { display: flex; align-items: center; gap: 10px; padding: 7px 2px; }
+.fx-perm-person + .fx-perm-person { border-top: 1px solid var(--fe-border); }
+.fx-perm-inh { color: var(--fe-text-muted); }
+.fx-perm-av {
+  width: 28px; height: 28px; flex: none; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--fe-primary); color: var(--fe-text-on-primary, #fff);
+  font-size: 12px; font-weight: 600;
+}
+.fx-perm-av--dim { background: var(--fe-bg-hover); color: var(--fe-text-muted); }
+.fx-perm-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fe-text); min-width: 0; }
+.fx-perm-from { font-size: 11px; color: var(--fe-text-muted); white-space: nowrap; }
+.fx-perm-badge {
+  font-size: 11px; padding: 2px 9px; border-radius: 999px;
+  background: var(--fe-bg-hover); color: var(--fe-text);
+}
+
+/* inputs / selects / buttons */
 .fx-perm-sel, .fx-perm-input {
-  padding: 6px 8px; border-radius: var(--fe-radius-sm, 6px); border: 1px solid var(--fe-border);
-  background: var(--fe-bg-elev); color: var(--fe-text); font-size: 13px; font-family: inherit;
+  padding: 7px 9px; border-radius: var(--fe-radius-sm, 7px); border: 1px solid var(--fe-border);
+  background: var(--fe-bg); color: var(--fe-text); font-size: 13px; font-family: inherit;
 }
+.fx-perm-sel--sm { padding: 5px 7px; font-size: 12px; }
 .fx-perm-sel:focus, .fx-perm-input:focus { outline: none; border-color: var(--fe-primary); }
-.fx-perm-emailwrap { position: relative; flex: 1; min-width: 160px; }
+.fx-perm-add { display: flex; gap: 8px; align-items: stretch; }
+.fx-perm-emailwrap { position: relative; flex: 1; min-width: 120px; }
 .fx-perm-input { width: 100%; box-sizing: border-box; }
 .fx-perm-suggest {
-  position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 5; margin: 0; padding: 4px;
-  list-style: none; background: var(--fe-bg-elev); border: 1px solid var(--fe-border);
-  border-radius: var(--fe-radius-sm, 6px); box-shadow: var(--fe-shadow-sm); max-height: 200px; overflow: auto;
+  position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 5; margin: 0; padding: 4px;
+  list-style: none; background: var(--fe-bg); border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm, 7px); box-shadow: var(--fe-shadow); max-height: 210px; overflow: auto;
 }
-.fx-perm-suggest li { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.fx-perm-suggest li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .fx-perm-suggest li:hover { background: var(--fe-bg-hover); }
-.fx-perm-suggest-name { color: var(--fe-text); font-size: 13px; }
+.fx-perm-suggest-av {
+  width: 24px; height: 24px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: var(--fe-bg-hover); color: var(--fe-text); font-size: 11px; font-weight: 600;
+}
+.fx-perm-suggest-txt { display: flex; flex-direction: column; min-width: 0; }
+.fx-perm-suggest-name { color: var(--fe-text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-perm-suggest-meta { color: var(--fe-text-muted); font-size: 11px; }
-.fx-perm-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.fx-perm-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--fe-text); }
+.fx-perm-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--fe-text); cursor: pointer; }
 .fx-perm-btn {
-  padding: 6px 12px; border-radius: var(--fe-radius-sm, 6px); border: 1px solid var(--fe-border);
-  background: var(--fe-bg-elev); color: var(--fe-text); font-size: 13px; font-family: inherit; cursor: pointer;
+  padding: 7px 13px; border-radius: var(--fe-radius-sm, 7px); border: 1px solid var(--fe-border);
+  background: var(--fe-bg); color: var(--fe-text); font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap;
 }
 .fx-perm-btn:hover:not(:disabled) { background: var(--fe-bg-hover); }
 .fx-perm-btn:disabled { opacity: 0.55; cursor: default; }
-.fx-perm-btn--primary { background: var(--fe-primary); border-color: var(--fe-primary); color: var(--fe-text-on-primary); }
-.fx-perm-btn--primary:hover:not(:disabled) { background: var(--fe-primary-hover); }
-.fx-perm-del { background: none; border: none; color: var(--fe-danger); cursor: pointer; font-size: 14px; }
+.fx-perm-btn--sm { padding: 5px 10px; font-size: 12px; }
+.fx-perm-btn--primary { background: var(--fe-primary); border-color: var(--fe-primary); color: var(--fe-text-on-primary, #fff); }
+.fx-perm-btn--primary:hover:not(:disabled) { background: var(--fe-primary-hover, var(--fe-primary)); filter: brightness(1.05); }
+.fx-perm-btn--ghost { background: none; border-color: transparent; color: var(--fe-primary); padding-left: 2px; }
+.fx-perm-btn--ghost:hover:not(:disabled) { background: none; text-decoration: underline; }
+.fx-perm-del { background: none; border: none; color: var(--fe-danger); cursor: pointer; font-size: 14px; flex: none; padding: 2px 4px; }
+.fx-perm-del:hover:not(:disabled) { filter: brightness(1.15); }
+
+/* invite sub-flow */
+.fx-perm-invite {
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--fe-border);
+}
+.fx-perm-invite-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.fx-perm-invite-row { display: flex; gap: 8px; align-items: stretch; }
+.fx-perm-invite-row .fx-perm-btn--primary { flex: 1; }
+
+/* share result */
+.fx-perm-share-opts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.fx-perm-expiry { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.fx-perm-share-opts .fx-perm-btn--primary { margin-left: auto; }
+.fx-perm-result { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--fe-border); }
+.fx-perm-linkrow { display: flex; gap: 8px; align-items: center; }
+.fx-perm-link { color: var(--fe-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-decoration: none; }
+.fx-perm-link:hover { text-decoration: underline; }
+.fx-perm-pin { margin: 8px 0 0; font-size: 13px; color: var(--fe-text); }
+.fx-perm-pin code, .fx-perm-reveal code { font-family: var(--fe-font-mono, monospace); background: var(--fe-bg-hover); padding: 1px 6px; border-radius: 5px; }
+.fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
+.fx-perm-mailrow .fx-perm-input { flex: 1; }
+.fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }
+
 .fx-perm-warn {
   background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4);
-  border-radius: var(--fe-radius-sm, 6px); padding: 8px 10px; font-size: 13px; margin-top: 8px; color: var(--fe-text);
+  border-radius: var(--fe-radius-sm, 7px); padding: 8px 10px; font-size: 13px; margin-bottom: 10px; color: var(--fe-text);
 }
 .fx-perm-notice { margin-top: 8px; font-size: 13px; color: var(--fe-text-muted); }
-.fx-perm-reveal { margin-top: 6px; font-size: 13px; word-break: break-all; color: var(--fe-text); }
-.fx-perm-reveal code { font-family: var(--fe-font-mono); }
-.fx-perm-reveal a { color: var(--fe-primary); }
+.fx-perm-reveal { margin-top: 8px; font-size: 13px; word-break: break-all; color: var(--fe-text); }
 .fx-perm-muted { color: var(--fe-text-muted); font-size: 13px; }
-.fx-perm-invite {
-  margin-top: 10px; padding: 10px; border-radius: var(--fe-radius-sm, 6px);
-  background: var(--fe-bg-elev); border: 1px solid var(--fe-border);
-}
 </style>

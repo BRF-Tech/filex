@@ -141,4 +141,23 @@ func TestRBAC_Grants_And_SelfTokens(t *testing.T) {
 	// Non-admin cannot hit the admin grants overview.
 	st, _ = doReq(t, userClient, http.MethodGet, srv.URL+"/api/admin/grants", nil)
 	assert.Equal(t, http.StatusForbidden, st)
+
+	// share-mail: editor+ may send (503 here since no SMTP is configured), but a
+	// viewer with no editor grant is refused.
+	st, _ = doReq(t, adminClient, http.MethodPost, srv.URL+"/api/files/permissions/share-mail",
+		map[string]any{"path": "s1://alfa", "email": "x@test.local", "url": "https://f/s/tok"})
+	assert.Equal(t, http.StatusServiceUnavailable, st, "admin share-mail: no SMTP → 503, not 403")
+	st, _ = doReq(t, viewClient, http.MethodPost, srv.URL+"/api/files/permissions/share-mail",
+		map[string]any{"path": "s1://beta", "email": "x@test.local", "url": "https://f/s/tok"})
+	assert.Equal(t, http.StatusForbidden, st, "viewer cannot share-mail")
+
+	// is_dir honored: a grant created with is_dir=false stays a file grant.
+	st, raw = doReq(t, adminClient, http.MethodPost, srv.URL+"/api/files/permissions",
+		map[string]any{"path": "s1://alfa/doc.txt", "user_id": uid, "level": "viewer", "is_dir": false})
+	require.Equal(t, http.StatusOK, st, "file grant: %s", raw)
+	var fg struct {
+		IsDir bool `json:"is_dir"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &fg))
+	assert.False(t, fg.IsDir, "is_dir=false must be persisted for single-file grants")
 }
