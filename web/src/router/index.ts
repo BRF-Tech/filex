@@ -37,6 +37,11 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: AdminLayout,
+    // The whole admin panel is admin-only. Non-admin (user/viewer) accounts
+    // are redirected to the chrome-less /explore by the guard below. Enforcement
+    // is backend-side (every /api/admin/* route checks the role); this is the
+    // cosmetic navigation gate so non-admins never see the panel shell.
+    meta: { requiresAdmin: true },
     children: [
       {
         path: 'dashboard',
@@ -215,6 +220,12 @@ router.beforeEach(async (to) => {
 
   if (!auth.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } };
+  }
+
+  // Admin-panel routes are admin-only. Non-admin accounts (user/viewer) get
+  // the explorer instead — they never see the panel chrome.
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { name: 'explore' };
   }
 
   return true;

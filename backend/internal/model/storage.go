@@ -28,7 +28,14 @@ type Storage struct {
 	LastSyncToken string          `json:"last_sync_token,omitempty"`
 	Enabled       bool            `json:"enabled"`
 	ReadOnly      bool            `json:"read_only"`
-	CreatedAt     time.Time       `json:"created_at"`
+	// RBACEnabled turns on per-user/per-item access control for this storage.
+	// When false (default) the storage is visible to every authenticated user
+	// and capability is governed purely by account role (RBAC-off passthrough,
+	// preserving pre-00012 behavior). When true the storage is hidden by
+	// default and only paths explicitly granted (directly or via an ancestor
+	// folder) are visible; see internal/acl. Added in migration 00012.
+	RBACEnabled bool `json:"rbac_enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 	// Replica pairing — `role` and `replica_of_id` are LEGACY columns
 	// retained for backwards compatibility with v0.1.16 deployments
 	// (SQLite can't DROP COLUMN cleanly). The current model lives in

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
@@ -35,6 +36,21 @@ type aiOps struct {
 	share      *share.Service // optional — nil disables file_share/unshare
 	publicURL  string         // base for /s/<token> links
 	convertURL string         // external converter URL (empty = not configured)
+	acl        *acl.Resolver  // RBAC — nil disables per-user grant enforcement
+}
+
+// allow reports whether the bound user has at least `need` on rel within s.
+// The AI surface bypasses confine.Middleware and manager gating, so every op
+// routes through resolveStorage / these asserts. nil resolver (unwired) allows.
+func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need acl.Level) bool {
+	if a.acl == nil {
+		return true
+	}
+	set, err := a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
+	if err != nil || set == nil {
+		return false
+	}
+	return set.Effective(rel) >= need
 }
 
 func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *aiOps {
@@ -53,6 +69,10 @@ type aiEntry struct {
 
 // errAINoStorage is returned when no storage is configured / resolvable.
 var errAINoStorage = errors.New("no storage configured")
+
+// errAIForbidden is returned when the bound user lacks the required grant level
+// for a mutating AI op (read denials surface from resolveStorage instead).
+var errAIForbidden = errors.New("access denied: insufficient permission")
 
 // resolveStorage maps an adapter://path to (storage, relativePath). When the
 // path carries no adapter prefix the first enabled storage is used.
@@ -100,7 +120,15 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 			if strings.Contains(rel, "..") {
 				return nil, "", errors.New("bad path")
 			}
-			return s, strings.Trim(rel, "/"), nil
+			clean := strings.Trim(rel, "/")
+			// RBAC read floor: the bound user needs ≥viewer on the path. This is
+			// the single chokepoint for the AI surface (it bypasses the /api/files
+			// confine + ACL gating), so reads are denied here and writes assert
+			// ≥editor in their own methods.
+			if !a.allow(ctx, s, clean, acl.LevelViewer) {
+				return nil, "", fmt.Errorf("access denied: no permission for %s", joinAdapterPath(s.Name, clean))
+			}
+			return s, clean, nil
 		}
 	}
 	return nil, "", fmt.Errorf("unknown storage: %s", adapter)
@@ -123,7 +151,14 @@ type aiRootInfo struct {
 func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 	info := aiRootInfo{Storages: []string{}}
 	if storages, err := a.store.ListEnabledStorages(ctx); err == nil {
+		user := auth.UserFrom(ctx)
 		for _, s := range storages {
+			// RBAC: only advertise storages the bound user can see.
+			if a.acl != nil {
+				if set, _ := a.acl.LoadSet(ctx, user, s); set == nil || !set.StorageVisible() {
+					continue
+				}
+			}
 			info.Storages = append(info.Storages, s.Name)
 		}
 	}
@@ -302,6 +337,9 @@ func (a *aiOps) Write(ctx context.Context, p string, data []byte) (*aiEntry, err
 	if s.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
+	if !a.allow(ctx, s, rel, acl.LevelEditor) {
+		return nil, errAIForbidden
+	}
 	name := path.Base(rel)
 	if name == "" || name == "." || name == "/" {
 		return nil, errors.New("bad filename")
@@ -357,6 +395,9 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	}
 	if s.ReadOnly {
 		return storage.ErrReadOnly
+	}
+	if !a.allow(ctx, s, rel, acl.LevelEditor) {
+		return errAIForbidden
 	}
 	drv, err := a.resolver(s.ID)
 	if err != nil {
@@ -495,6 +536,9 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if sSrc.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
+	if !a.allow(ctx, sSrc, relSrc, acl.LevelEditor) || !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
+		return nil, errAIForbidden
+	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {
 		return nil, err
@@ -526,6 +570,9 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	if s.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
+	if !a.allow(ctx, s, rel, acl.LevelEditor) {
+		return nil, errAIForbidden
+	}
 	drv, err := a.resolver(s.ID)
 	if err != nil {
 		return nil, err
@@ -553,6 +600,10 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 		return nil, err
 	}
 	root, confined := confine.RootFromToken(ctx)
+	var set *acl.Set
+	if a.acl != nil {
+		set, _ = a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
+	}
 	rows, err := a.store.SearchNodes(ctx, s.ID, "%"+query+"%", 200)
 	if err != nil {
 		return nil, err
@@ -564,6 +615,9 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 		}
 		if confined && !root.Within(s.Name, n.Path) {
 			continue // outside the token's confinement root
+		}
+		if set != nil && !set.CanSee(n.Path) {
+			continue // outside the user's RBAC grants
 		}
 		typ := "file"
 		if n.Type == model.NodeTypeDirectory {
@@ -692,6 +746,9 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	}
 	if sDest.ReadOnly {
 		return nil, storage.ErrReadOnly
+	}
+	if !a.allow(ctx, sDest, relDest, acl.LevelEditor) {
+		return nil, errAIForbidden
 	}
 	drvDest, err := a.resolver(sDest.ID)
 	if err != nil {
@@ -848,6 +905,9 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 	}
 	if sDst.ReadOnly {
 		return 0, storage.ErrReadOnly
+	}
+	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
+		return 0, errAIForbidden
 	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {

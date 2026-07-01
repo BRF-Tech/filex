@@ -14,12 +14,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/api/handlers"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/capability"
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/confine"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
+	"gitlab.com/brftech/filemanager/backend/internal/mailer"
 	"gitlab.com/brftech/filemanager/backend/internal/notify"
 	"gitlab.com/brftech/filemanager/backend/internal/onlyoffice"
 	"gitlab.com/brftech/filemanager/backend/internal/ops"
@@ -58,11 +60,23 @@ type Deps struct {
 	Embed           embed.FS // web/dist + admin
 	LocalAuth       auth.LoginDriver
 	OIDCAuth        auth.OIDCDriver
+	// ACL resolves per-user/per-item grants (RBAC feature). Constructed in
+	// BuildRouter from Store when nil.
+	ACL *acl.Resolver
+	// Mailer sends invite/share notices (optional; nil → links shown on-screen).
+	Mailer *mailer.Service
 }
 
 // BuildRouter constructs the chi router with all routes wired up.
 func BuildRouter(d *Deps) http.Handler {
 	r := chi.NewRouter()
+
+	// RBAC/ACL resolver — the identity-driven complement to confine. Every
+	// file handler consults it to filter listings and gate reads/mutations by
+	// the caller's grants + account-role ceiling.
+	if d.ACL == nil {
+		d.ACL = acl.New(d.Store)
+	}
 
 	r.Use(Logger)
 	r.Use(Recoverer)
@@ -77,6 +91,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
+	mh.AttachACL(d.ACL)
 	if d.Index != nil {
 		// Wire Bleve so vfSearch consults the index before falling
 		// back to SQL LIKE.
@@ -89,9 +104,13 @@ func BuildRouter(d *Deps) http.Handler {
 		mh.AttachThumbPipeline(d.Thumbs)
 	}
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
+	uh.AttachACL(d.ACL)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
+	ah.AttachACL(d.ACL)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
+	sh.AttachACL(d.ACL)
 	oh := handlers.NewOps(d.Ops, d.Store)
+	oh.AttachACL(d.ACL)
 	if d.Ops != nil {
 		// The async ops worker must mirror its filesystem moves/deletes/copies
 		// into the DB node index (listings read the DB). The manager handler
@@ -100,6 +119,7 @@ func BuildRouter(d *Deps) http.Handler {
 		d.Ops.SetSync(mh)
 	}
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
+	ooh.AttachACL(d.ACL)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps)
 	stg := handlers.NewStorages(d.Store, d.Worker)
@@ -107,6 +127,7 @@ func BuildRouter(d *Deps) http.Handler {
 	seth := handlers.NewSettings(d.Store)
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL)
 	sxh := handlers.NewSearch(d.Index, d.Store)
+	sxh.AttachACL(d.ACL)
 
 	// New self-service + admin handlers.
 	authSelf := handlers.NewAuthSelf(d.Store)
@@ -123,9 +144,11 @@ func BuildRouter(d *Deps) http.Handler {
 	notifH := handlers.NewNotifications(d.Notify)
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
 	trashH := handlers.NewTrash(d.Trash, d.Store)
+	trashH.AttachACL(d.ACL)
 	metaH := handlers.NewMeta(d.Store)
 	quotaH := handlers.NewQuota(d.Quota)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
+	saveTextH.AttachACL(d.ACL)
 	if d.Versions != nil {
 		// Snapshot the pre-edit bytes into version history before
 		// every save-text write (Burak: "değişiklik sonrası sürüm
@@ -134,6 +157,9 @@ func BuildRouter(d *Deps) http.Handler {
 		saveTextH.AttachVersions(d.Versions)
 	}
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
+	grantsH := handlers.NewGrants(d.Store, d.ACL)
+	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
+	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -183,6 +209,13 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/api/auth/totp/enroll", authSelf.TotpEnroll)
 		r.Post("/api/auth/totp/verify", authSelf.TotpVerify)
 		r.Post("/api/auth/totp/disable", authSelf.TotpDisable)
+
+		// Self-service API tokens — any user (incl. non-admin user/viewer) may
+		// mint tokens bound to themselves, capped to their role ceiling + own
+		// grants (see handlers.SelfTokens). Admins also have /api/admin/ai-tokens.
+		r.Get("/api/tokens", selfTokensH.List)
+		r.Post("/api/tokens", selfTokensH.Create)
+		r.Delete("/api/tokens/{id}", selfTokensH.Delete)
 
 		// Per-user notifications (bell + history + read/unread).
 		r.Route("/api/notifications", func(r chi.Router) {
@@ -242,6 +275,15 @@ func BuildRouter(d *Deps) http.Handler {
 
 			// Plain-text save target for the SFC's code/markdown editor.
 			r.Post("/save-text", saveTextH.Save)
+
+			// Per-file/per-folder permissions panel (RBAC). Owner/admin only —
+			// enforced inside the handler, not the route.
+			r.Get("/permissions", grantsH.List)
+			r.Post("/permissions", grantsH.Create)
+			r.Patch("/permissions/{id}", grantsH.Update)
+			r.Delete("/permissions/{id}", grantsH.Delete)
+			r.Get("/permissions/resolve", grantsH.Resolve)
+			r.Post("/permissions/invite", grantsH.Invite)
 
 			// Per-user metadata: tags, starred flag, recently-opened.
 			r.Route("/manager/tags", func(r chi.Router) {
@@ -423,6 +465,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
 	// scopes set grants everything.
 	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
+	aiH.AttachACL(d.ACL)
 	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
 		Store:           d.Store,
 		Caps:            d.Caps,
@@ -436,6 +479,7 @@ func BuildRouter(d *Deps) http.Handler {
 		ReplicaReloader: d.ReplicaReloader,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
+	aiMCP.AttachACL(d.ACL)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 

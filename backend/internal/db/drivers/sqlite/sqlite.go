@@ -85,9 +85,9 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 		cfg = []byte("{}")
 	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only)
-		 VALUES (?,?,?,?,?,?,?,?)`,
-		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly))
+		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled)
+		 VALUES (?,?,?,?,?,?,?,?,?)`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled))
 	if err != nil {
 		return nil, err
 	}
@@ -96,17 +96,17 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 }
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE id=?`, id)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE name=?`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE name=?`, name)
 	return scanStorage(row)
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE enabled=1 ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE enabled=1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -153,9 +153,9 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 		repMode = "async"
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE storages SET name=?, driver=?, mount_path=?, config_json=?, sync_mode=?, sync_interval_s=?, enabled=?, read_only=?, role=?, replica_of_id=?, replica_mode=?, replica_target_id=? WHERE id=?`,
+		`UPDATE storages SET name=?, driver=?, mount_path=?, config_json=?, sync_mode=?, sync_interval_s=?, enabled=?, read_only=?, rbac_enabled=?, role=?, replica_of_id=?, replica_mode=?, replica_target_id=? WHERE id=?`,
 		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS,
-		btoi(st.Enabled), btoi(st.ReadOnly),
+		btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled),
 		role, st.ReplicaOfID, repMode, st.ReplicaTargetID,
 		st.ID)
 	return err
@@ -626,6 +626,25 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=? ORDER BY created_at DESC`,
+		userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.APIToken
+	for rows.Next() {
+		t, err := scanAPIToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
@@ -651,6 +670,97 @@ func scanAPIToken(row rowScanner) (*model.APIToken, error) {
 		t.ExpiresAt = &expires.Time
 	}
 	return t, nil
+}
+
+// ─────────────────── File grants (RBAC/ACL, migration 00012) ───────────────────
+
+const fileGrantCols = `id, storage_id, path_prefix, is_dir, user_id, level, created_by, created_at`
+
+func scanFileGrant(r rowScanner) (*model.FileGrant, error) {
+	g := &model.FileGrant{}
+	var createdBy sql.NullInt64
+	if err := r.Scan(&g.ID, &g.StorageID, &g.PathPrefix, &g.IsDir, &g.UserID, &g.Level, &createdBy, &g.CreatedAt); err != nil {
+		return nil, err
+	}
+	if createdBy.Valid {
+		v := createdBy.Int64
+		g.CreatedBy = &v
+	}
+	return g, nil
+}
+
+func (s *Store) ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? AND user_id=?`, storageID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.FileGrant
+	for rows.Next() {
+		g, err := scanFileGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? ORDER BY path_prefix, user_id`, storageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.FileGrant
+	for rows.Next() {
+		g, err := scanFileGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, error) {
+	return scanFileGrant(s.db.QueryRowContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE id=?`, id))
+}
+
+// CreateFileGrant upserts a grant on the (storage_id, path_prefix, user_id)
+// unique key. Uses a portable check-then-write (UPDATE, else INSERT) so the
+// same code path works for the MySQL driver that wraps this Store — MySQL does
+// not understand SQLite's `ON CONFLICT ... excluded.` upsert.
+func (s *Store) CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE file_grants SET level=?, is_dir=?, created_by=? WHERE storage_id=? AND path_prefix=? AND user_id=?`,
+		g.Level, btoi(g.IsDir), g.CreatedBy, g.StorageID, g.PathPrefix, g.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return scanFileGrant(s.db.QueryRowContext(ctx,
+			`SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=? AND path_prefix=? AND user_id=?`,
+			g.StorageID, g.PathPrefix, g.UserID))
+	}
+	ins, err := s.db.ExecContext(ctx,
+		`INSERT INTO file_grants (storage_id, path_prefix, is_dir, user_id, level, created_by) VALUES (?,?,?,?,?,?)`,
+		g.StorageID, g.PathPrefix, btoi(g.IsDir), g.UserID, g.Level, g.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := ins.LastInsertId()
+	return s.GetFileGrant(ctx, id)
+}
+
+func (s *Store) UpdateFileGrantLevel(ctx context.Context, id int64, level string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE file_grants SET level=? WHERE id=?`, level, id)
+	return err
+}
+
+func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM file_grants WHERE id=?`, id)
+	return err
 }
 
 // ─────────────────── Shares ───────────────────
@@ -1167,6 +1277,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
 		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
 		&role, &replicaOf, &replicaMode, &replicaTarget,
+		&st.RBACEnabled,
 	)
 	if err != nil {
 		return nil, err

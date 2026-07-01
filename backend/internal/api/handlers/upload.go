@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
 	"gitlab.com/brftech/filemanager/backend/internal/storage"
@@ -38,7 +39,12 @@ type Upload struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
 	Thumbs          *thumb.Pipeline
+	ACL             *acl.Resolver
 }
+
+// AttachACL wires the RBAC resolver so chunked uploads require ≥editor on the
+// destination at init time (finalize/abort continue an already-authorized id).
+func (u *Upload) AttachACL(r *acl.Resolver) { u.ACL = r }
 
 // NewUpload constructs an Upload handler.
 //
@@ -112,6 +118,11 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.Contains(target, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	// RBAC: uploading writes a new file → require ≥editor on the target path.
+	if !aclAllowID(r.Context(), u.ACL, u.Store, storageID, target, acl.LevelEditor) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return
 	}
 

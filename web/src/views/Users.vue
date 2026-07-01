@@ -59,7 +59,7 @@ watch([q, role], () => {
 const roleOptions = [
   { value: '', label: t('common.all') },
   { value: 'admin', label: t('users.roles.admin') },
-  { value: 'editor', label: t('users.roles.editor') },
+  { value: 'user', label: t('users.roles.user') },
   { value: 'viewer', label: t('users.roles.viewer') },
 ];
 
@@ -75,7 +75,7 @@ const columns = computed<Column<User>[]>(() => [
 
 const roleTone = (r: UserRole) => {
   if (r === 'admin') return 'rose';
-  if (r === 'editor') return 'amber';
+  if (r === 'user') return 'amber';
   return 'zinc';
 };
 

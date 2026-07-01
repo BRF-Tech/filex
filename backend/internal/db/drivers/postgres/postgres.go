@@ -90,24 +90,24 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 		cfg = []byte("{}")
 	}
 	row := s.db.QueryRowContext(ctx,
-		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only)
-		 VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8) RETURNING id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at`,
-		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, st.Enabled, st.ReadOnly)
+		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled)
+		 VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9) RETURNING id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, st.Enabled, st.ReadOnly, st.RBACEnabled)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE id=$1`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE id=$1`, id)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE name=$1`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE name=$1`, name)
 	return scanStorage(row)
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id FROM storages WHERE enabled=true ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json::text, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE enabled=true ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -154,9 +154,9 @@ func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
 		repMode = "async"
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE storages SET name=$1, driver=$2, mount_path=$3, config_json=$4::jsonb, sync_mode=$5, sync_interval_s=$6, enabled=$7, read_only=$8, role=$9, replica_of_id=$10, replica_mode=$11, replica_target_id=$12 WHERE id=$13`,
+		`UPDATE storages SET name=$1, driver=$2, mount_path=$3, config_json=$4::jsonb, sync_mode=$5, sync_interval_s=$6, enabled=$7, read_only=$8, rbac_enabled=$9, role=$10, replica_of_id=$11, replica_mode=$12, replica_target_id=$13 WHERE id=$14`,
 		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS,
-		st.Enabled, st.ReadOnly,
+		st.Enabled, st.ReadOnly, st.RBACEnabled,
 		role, st.ReplicaOfID, repMode, st.ReplicaTargetID,
 		st.ID)
 	return err
@@ -547,6 +547,25 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
+		userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.APIToken
+	for rows.Next() {
+		t, err := scanAPIToken(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at=NOW() WHERE id=$1`, id)
 	return err
@@ -570,6 +589,81 @@ func scanAPIToken(r rowScanner) (*model.APIToken, error) {
 		t.ExpiresAt = &expires.Time
 	}
 	return t, nil
+}
+
+// ─────────────────── File grants (RBAC/ACL, migration 00012) ───────────────────
+
+const fileGrantCols = `id, storage_id, path_prefix, is_dir, user_id, level, created_by, created_at`
+
+func scanFileGrant(r rowScanner) (*model.FileGrant, error) {
+	g := &model.FileGrant{}
+	var createdBy sql.NullInt64
+	if err := r.Scan(&g.ID, &g.StorageID, &g.PathPrefix, &g.IsDir, &g.UserID, &g.Level, &createdBy, &g.CreatedAt); err != nil {
+		return nil, err
+	}
+	if createdBy.Valid {
+		v := createdBy.Int64
+		g.CreatedBy = &v
+	}
+	return g, nil
+}
+
+func (s *Store) ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=$1 AND user_id=$2`, storageID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.FileGrant
+	for rows.Next() {
+		g, err := scanFileGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE storage_id=$1 ORDER BY path_prefix, user_id`, storageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.FileGrant
+	for rows.Next() {
+		g, err := scanFileGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetFileGrant(ctx context.Context, id int64) (*model.FileGrant, error) {
+	return scanFileGrant(s.db.QueryRowContext(ctx, `SELECT `+fileGrantCols+` FROM file_grants WHERE id=$1`, id))
+}
+
+func (s *Store) CreateFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error) {
+	return scanFileGrant(s.db.QueryRowContext(ctx,
+		`INSERT INTO file_grants (storage_id, path_prefix, is_dir, user_id, level, created_by)
+		 VALUES ($1,$2,$3,$4,$5,$6)
+		 ON CONFLICT (storage_id, path_prefix, user_id)
+		 DO UPDATE SET level=EXCLUDED.level, is_dir=EXCLUDED.is_dir, created_by=EXCLUDED.created_by
+		 RETURNING `+fileGrantCols,
+		g.StorageID, g.PathPrefix, g.IsDir, g.UserID, g.Level, g.CreatedBy))
+}
+
+func (s *Store) UpdateFileGrantLevel(ctx context.Context, id int64, level string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE file_grants SET level=$1 WHERE id=$2`, level, id)
+	return err
+}
+
+func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM file_grants WHERE id=$1`, id)
+	return err
 }
 
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
@@ -913,6 +1007,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
 		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
 		&role, &replicaOf, &replicaMode, &replicaTarget,
+		&st.RBACEnabled,
 	)
 	if err != nil {
 		return nil, err

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gitlab.com/brftech/filemanager/backend/internal/acl"
 	"gitlab.com/brftech/filemanager/backend/internal/auth"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
@@ -22,7 +23,12 @@ type OnlyOffice struct {
 	Service         *onlyoffice.Service
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
+	ACL             *acl.Resolver
 }
+
+// AttachACL wires the RBAC resolver: opening a document needs ≥viewer; an
+// editable config additionally needs ≥editor (else it's downgraded to view).
+func (h *OnlyOffice) AttachACL(r *acl.Resolver) { h.ACL = r }
 
 // NewOnlyOffice constructs the handler. Pass nil svc to disable the routes
 // (handlers will return 503 — easier than gating in routes.go).
@@ -110,6 +116,19 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		node = n
+	}
+
+	// RBAC: must be able to view the doc at all; an edit request without
+	// ≥editor is downgraded to a read-only view (viewers can preview office
+	// files but never edit/convert).
+	if node != nil && h.ACL != nil {
+		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelViewer) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return
+		}
+		if mode == "edit" && !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
+			mode = "view"
+		}
 	}
 
 	cfg, err := h.Service.BuildConfigForNode(node, user, lang, mode)
