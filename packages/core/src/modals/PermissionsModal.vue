@@ -193,6 +193,7 @@ async function inviteCreateUser() {
     const r = await props.api.invitePermission({
       path: props.path, email: email.value.trim().toLowerCase(),
       level: level.value, create_user: true, role: createRole.value, is_dir: !!props.isDir,
+      locale: props.locale ?? 'tr',
     });
     inviteResult.value = { tempPassword: r.temp_password };
     notice.value = r.emailed
@@ -268,7 +269,12 @@ async function sendShareMail() {
   shareMailBusy.value = true;
   shareMailNotice.value = '';
   try {
-    await props.api.shareMail({ path: props.path, email: addr, url: shareResult.value.url });
+    await props.api.shareMail({
+      path: props.path, email: addr, url: shareResult.value.url,
+      pin: shareResult.value.pin ?? undefined,
+      expires_days: shareExpiry.value || undefined,
+      locale: props.locale ?? 'tr',
+    });
     shareMailNotice.value = L('E-posta gönderildi ✓', 'Email sent ✓');
   } catch (e) {
     const detail = (e as { detail?: string }).detail ?? '';

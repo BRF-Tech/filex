@@ -257,7 +257,10 @@
       "verified": "Verified",
       "unverified": "Not verified",
       "testOk": "SMTP OK",
-      "testFail": "SMTP failed"
+      "testFail": "SMTP failed",
+      "testTo": "Send test email to",
+      "send": "Send",
+      "enterEmail": "Enter a valid email address."
     }
   },
   "external": {

@@ -257,7 +257,10 @@
       "verified": "Doğrulandı",
       "unverified": "Doğrulanmadı",
       "testOk": "SMTP tamam",
-      "testFail": "SMTP hatası"
+      "testFail": "SMTP hatası",
+      "testTo": "Test e-postası gönderilecek adres",
+      "send": "Gönder",
+      "enterEmail": "Geçerli bir e-posta adresi girin."
     }
   },
   "external": {

@@ -461,6 +461,7 @@ type inviteReq struct {
 	CreateUser bool   `json:"create_user,omitempty"`
 	Role       string `json:"role,omitempty"` // new-user role when CreateUser (default "user")
 	IsDir      *bool  `json:"is_dir,omitempty"`
+	Locale     string `json:"locale,omitempty"` // composer UI locale (mail language fallback)
 }
 
 // Invite grants access to an email address. Three outcomes (owner/admin only):
@@ -522,8 +523,13 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
 		}
-		emailed := h.tryMail(r.Context(), email, "Bir öğe sizinle paylaşıldı",
-			"Merhaba,\n\nfilex üzerinde bir klasör/dosya sizinle paylaşıldı: "+st.Name+"://"+rel+"\n\n"+h.PublicURL+"/admin/explore")
+		// Prefer the recipient's own language; fall back to the composer's.
+		loc := u.Locale
+		if loc == "" {
+			loc = req.Locale
+		}
+		subject, body := itemGrantText(loc, st.Name+"://"+rel, h.PublicURL+"/admin/explore")
+		emailed := h.tryMail(r.Context(), email, subject, body)
 		writeJSON(w, http.StatusOK, map[string]any{"mode": "granted", "user_id": u.ID, "emailed": emailed})
 		return
 	}
@@ -556,7 +562,13 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": herr.Error()})
 			return
 		}
-		newU, cerr := h.Store.CreateUser(r.Context(), email, hash, role, "en", "UTC")
+		// Normalize the new account's locale to tr/en from the composer's UI
+		// locale (empty → en default).
+		loc := "en"
+		if req.Locale != "" && !mailLangEN(req.Locale) {
+			loc = "tr"
+		}
+		newU, cerr := h.Store.CreateUser(r.Context(), email, hash, role, loc, "UTC")
 		if cerr != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "could not create user: " + cerr.Error()})
 			return
@@ -568,8 +580,8 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		loginURL := h.PublicURL + "/admin/"
-		emailed := h.tryMail(r.Context(), email, "filex hesabınız oluşturuldu",
-			"Merhaba,\n\nSizin için bir filex hesabı oluşturuldu.\n\nGiriş: "+loginURL+"\nE-posta: "+email+"\nGeçici parola: "+tempPw+"\n\nLütfen giriş yaptıktan sonra parolanızı değiştirin.")
+		subject, body := accountCreatedText(loc, loginURL, email, tempPw)
+		emailed := h.tryMail(r.Context(), email, subject, body)
 		resp := map[string]any{"mode": "user_created", "user_id": newU.ID, "emailed": emailed}
 		if !emailed {
 			resp["temp_password"] = tempPw // show once so the admin can relay it
@@ -595,15 +607,18 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := h.PublicURL + "/s/" + sh.Token
-	emailed := h.tryMail(r.Context(), email, "Bir dosya sizinle paylaşıldı",
-		"Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n"+url)
+	subject, body := shareMailText(req.Locale, url, "", 0)
+	emailed := h.tryMail(r.Context(), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
 }
 
 type shareMailReq struct {
-	Path  string `json:"path"`
-	Email string `json:"email"`
-	URL   string `json:"url"`
+	Path        string `json:"path"`
+	Email       string `json:"email"`
+	URL         string `json:"url"`
+	Pin         string `json:"pin,omitempty"`
+	ExpiresDays int    `json:"expires_days,omitempty"`
+	Locale      string `json:"locale,omitempty"`
 }
 
 // ShareMail emails an already-created public share link to an address. It does
@@ -640,8 +655,13 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": "not_configured"})
 		return
 	}
-	if err := h.Mailer.Send(r.Context(), email, "Bir dosya sizinle paylaşıldı",
-		"Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n"+link); err != nil {
+	// Prefer the recipient's stored language if they have an account.
+	loc := req.Locale
+	if u, uerr := h.Store.GetUserByEmail(r.Context(), email); uerr == nil && u != nil && u.Locale != "" {
+		loc = u.Locale
+	}
+	subject, body := shareMailText(loc, link, req.Pin, req.ExpiresDays)
+	if err := h.Mailer.Send(r.Context(), email, subject, body); err != nil {
 		// Distinguish "SMTP not set up / not verified" (show the link) from a
 		// transient send failure (worth retrying) so the UI can say which.
 		reason := "send_failed"
