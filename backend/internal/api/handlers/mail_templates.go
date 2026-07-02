@@ -15,13 +15,53 @@ func mailLangEN(locale string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en")
 }
 
-// shareMailText builds the subject + body for a public share-link notice,
-// including the PIN and validity window when present.
-func shareMailText(locale, link, pin string, expiresDays int) (string, string) {
+// humanSize renders a byte count as a short human-readable string (1.4 MB).
+func humanSize(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+// shareMailText builds the subject + body for a public share-link notice.
+// The subject/body name the item (file vs folder), show its size (files only),
+// prefix the site name, and include the PIN + validity window when present.
+func shareMailText(locale, siteName, name string, isDir bool, size int64, link, pin string, expiresDays int) (string, string) {
+	if name == "" {
+		if isDir {
+			name = "/"
+		} else {
+			name = "dosya"
+		}
+	}
 	if mailLangEN(locale) {
+		kind := "file"
+		if isDir {
+			kind = "folder"
+		}
+		subject := name + " has been shared with you"
 		var b strings.Builder
-		b.WriteString("Hello,\n\nA file has been shared with you. Download it here:\n\n")
-		b.WriteString(link + "\n")
+		b.WriteString("Hello,\n\n")
+		if siteName != "" {
+			b.WriteString("A " + kind + " has been shared with you via " + siteName + ":\n\n")
+		} else {
+			b.WriteString("A " + kind + " has been shared with you:\n\n")
+		}
+		if isDir {
+			b.WriteString("Folder: " + name + "\n")
+		} else {
+			b.WriteString("File: " + name + "\n")
+			if size > 0 {
+				b.WriteString("Size: " + humanSize(size) + "\n")
+			}
+		}
+		b.WriteString("\nDownload it here:\n" + link + "\n")
 		if pin != "" {
 			b.WriteString("\nPIN (access code): " + pin + "\n")
 		}
@@ -30,11 +70,31 @@ func shareMailText(locale, link, pin string, expiresDays int) (string, string) {
 		} else {
 			b.WriteString("\nThis link does not expire.\n")
 		}
-		return "A file has been shared with you", b.String()
+		return subject, b.String()
 	}
+	kind := "dosya"
+	kindPossessive := "dosyası"
+	if isDir {
+		kind = "klasör"
+		kindPossessive = "klasörü"
+	}
+	subject := name + " " + kindPossessive + " sizinle paylaşıldı"
 	var b strings.Builder
-	b.WriteString("Merhaba,\n\nSizinle bir dosya paylaşıldı. İndirmek için:\n\n")
-	b.WriteString(link + "\n")
+	b.WriteString("Merhaba,\n\n")
+	if siteName != "" {
+		b.WriteString(siteName + " üzerinden bir " + kind + " sizinle paylaşıldı:\n\n")
+	} else {
+		b.WriteString("Sizinle bir " + kind + " paylaşıldı:\n\n")
+	}
+	if isDir {
+		b.WriteString("Klasör: " + name + "\n")
+	} else {
+		b.WriteString("Dosya: " + name + "\n")
+		if size > 0 {
+			b.WriteString("Boyut: " + humanSize(size) + "\n")
+		}
+	}
+	b.WriteString("\nİndirmek için:\n" + link + "\n")
 	if pin != "" {
 		b.WriteString("\nPIN (erişim kodu): " + pin + "\n")
 	}
@@ -43,7 +103,7 @@ func shareMailText(locale, link, pin string, expiresDays int) (string, string) {
 	} else {
 		b.WriteString("\nBu bağlantının süresi yoktur.\n")
 	}
-	return "Bir dosya sizinle paylaşıldı", b.String()
+	return subject, b.String()
 }
 
 // itemGrantText builds the notice sent when an existing account is granted

@@ -12,6 +12,7 @@ const props = defineProps<{
   api: FileApi;
   path: string; // adapter://rel of the target item
   isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
+  size?: number; // bytes, for the share-mail body (files only)
   locale?: 'tr' | 'en';
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -274,6 +275,8 @@ async function sendShareMail() {
       pin: shareResult.value.pin ?? undefined,
       expires_days: shareExpiry.value || undefined,
       locale: props.locale ?? 'tr',
+      is_dir: !!props.isDir,
+      size: props.size,
     });
     shareMailNotice.value = L('E-posta gönderildi ✓', 'Email sent ✓');
   } catch (e) {

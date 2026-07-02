@@ -1782,6 +1782,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :api="api"
       :path="permTarget.path"
       :is-dir="permTarget.type === 'dir'"
+      :size="typeof permTarget.size === 'number' ? permTarget.size : undefined"
       :locale="locale === 'en' ? 'en' : 'tr'"
       @close="showPerm = false"
     />

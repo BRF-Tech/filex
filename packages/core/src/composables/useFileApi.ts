@@ -308,7 +308,7 @@ export function useFileApi(config: ExplorerConfig) {
   async function invitePermission(body: { path: string; email: string; level: string; create_user?: boolean; role?: string; is_dir?: boolean; locale?: string }): Promise<InviteResponse> {
     return jsonFetch<InviteResponse>(permissionsUrl('/invite'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
-  async function shareMail(body: { path: string; email: string; url: string; pin?: string | null; expires_days?: number; locale?: string }): Promise<{ emailed: boolean }> {
+  async function shareMail(body: { path: string; email: string; url: string; pin?: string | null; expires_days?: number; locale?: string; is_dir?: boolean; size?: number }): Promise<{ emailed: boolean }> {
     return jsonFetch<{ emailed: boolean }>(permissionsUrl('/share-mail'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
 

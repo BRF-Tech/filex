@@ -607,7 +607,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	url := h.PublicURL + "/s/" + sh.Token
-	subject, body := shareMailText(req.Locale, url, "", 0)
+	subject, body := shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), isDir, 0, url, "", 0)
 	emailed := h.tryMail(r.Context(), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
 }
@@ -619,6 +619,23 @@ type shareMailReq struct {
 	Pin         string `json:"pin,omitempty"`
 	ExpiresDays int    `json:"expires_days,omitempty"`
 	Locale      string `json:"locale,omitempty"`
+	IsDir       bool   `json:"is_dir,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+}
+
+// baseName returns the last path segment (the file/folder name).
+func baseName(rel string) string {
+	rel = strings.Trim(rel, "/")
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return rel[i+1:]
+	}
+	return rel
+}
+
+// siteName reads the operator's configured site name (used to brand emails).
+func (h *Grants) siteName(ctx context.Context) string {
+	v, _ := h.Store.GetSetting(ctx, "site_name")
+	return strings.TrimSpace(v)
 }
 
 // ShareMail emails an already-created public share link to an address. It does
@@ -655,12 +672,10 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": "not_configured"})
 		return
 	}
-	// Prefer the recipient's stored language if they have an account.
-	loc := req.Locale
-	if u, uerr := h.Store.GetUserByEmail(r.Context(), email); uerr == nil && u != nil && u.Locale != "" {
-		loc = u.Locale
-	}
-	subject, body := shareMailText(loc, link, req.Pin, req.ExpiresDays)
+	// Use the composer's selected UI language (req.Locale). We intentionally do
+	// NOT override with the recipient's stored locale here: a share link often
+	// goes to people outside the system, and the sender picks the language.
+	subject, body := shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
 	if err := h.Mailer.Send(r.Context(), email, subject, body); err != nil {
 		// Distinguish "SMTP not set up / not verified" (show the link) from a
 		// transient send failure (worth retrying) so the UI can say which.
