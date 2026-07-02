@@ -1659,8 +1659,14 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
     />
 
     <div class="fe__body" @click.self="selection.clear()">
+      <!-- Initial load: show a spinner rather than an empty/"no files" flash.
+           Only when there's nothing yet — navigation keeps the current list. -->
+      <div v-if="loading && files.length === 0" class="fe__loading">
+        <span class="fe__spinner" aria-hidden="true"></span>
+        <p class="fe__loading-text">{{ t('loading') }}</p>
+      </div>
       <ListView
-        v-if="viewMode === 'list'"
+        v-else-if="viewMode === 'list'"
         :files="files"
         :selected="selection.selected.value"
         :clipped="clippedPaths"

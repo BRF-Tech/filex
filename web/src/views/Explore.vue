@@ -83,6 +83,9 @@ function readBearerToken(): string | null {
 // otherwise the explorer would show "no storages" for every non-admin.
 type RootEntry = { name: string; label: string; driver?: string; readOnly?: boolean };
 const roots = ref<RootEntry[]>([]);
+// True until the first storage-discovery pass finishes, so we show a loading
+// screen instead of flashing the "no storage" empty state during startup.
+const loading = ref(true);
 
 async function fetchVisibleStorages(): Promise<RootEntry[]> {
   if (storages.items.length) {
@@ -158,8 +161,13 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
 });
 
 async function refresh() {
-  roots.value = await fetchVisibleStorages();
-  remountKey.value += 1;
+  loading.value = true;
+  try {
+    roots.value = await fetchVisibleStorages();
+    remountKey.value += 1;
+  } finally {
+    loading.value = false;
+  }
 }
 
 function back() {
@@ -172,11 +180,15 @@ function onExplorerError(err: { message: string; context?: unknown }) {
 }
 
 onMounted(async () => {
-  await auth.fetchMe();
-  // Admin store fetch is best-effort (403s for non-admins) — roots then fall
-  // back to manager-root discovery inside fetchVisibleStorages().
-  await storages.fetch().catch(() => {});
-  roots.value = await fetchVisibleStorages();
+  try {
+    await auth.fetchMe();
+    // Admin store fetch is best-effort (403s for non-admins) — roots then fall
+    // back to manager-root discovery inside fetchVisibleStorages().
+    await storages.fetch().catch(() => {});
+    roots.value = await fetchVisibleStorages();
+  } finally {
+    loading.value = false;
+  }
 });
 </script>
 
@@ -220,7 +232,15 @@ onMounted(async () => {
 
     <main class="flex-1 flex flex-col min-h-0">
       <div
-        v-if="!roots.length"
+        v-if="loading"
+        class="flex flex-1 flex-col items-center justify-center gap-4 text-zinc-500"
+      >
+        <span class="fx-explore-spinner" aria-hidden="true"></span>
+        <p class="text-sm">{{ t('explore.loading') }}</p>
+      </div>
+
+      <div
+        v-else-if="!roots.length"
         class="flex flex-col items-center justify-center gap-3 mt-16 text-sm text-zinc-500"
       >
         <p>{{ t('explore.noStorage') }}</p>
@@ -251,5 +271,16 @@ onMounted(async () => {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
+}
+.fx-explore-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgb(161 161 170 / 0.25); /* zinc-400/25 */
+  border-top-color: rgb(99 102 241); /* brand/indigo */
+  animation: fx-explore-spin 0.7s linear infinite;
+}
+@keyframes fx-explore-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

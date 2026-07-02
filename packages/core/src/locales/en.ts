@@ -59,6 +59,7 @@ export const en: Record<string, string> = {
 
   'empty.folder': 'This folder is empty',
   'empty.search': 'No results',
+  'loading': 'Loading…',
 
   'col.name': 'Name',
   'col.size': 'Size',

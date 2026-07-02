@@ -26,6 +26,33 @@
   background: var(--fe-bg);
 }
 
+/* Initial-load spinner (shown until the first listing arrives). */
+.fe__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 240px;
+  height: 100%;
+  color: var(--fe-text-muted);
+}
+.fe__spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--fe-text-muted) 30%, transparent);
+  border-top-color: var(--fe-primary);
+  animation: fe-spin 0.7s linear infinite;
+}
+.fe__loading-text {
+  margin: 0;
+  font-size: 13px;
+}
+@keyframes fe-spin {
+  to { transform: rotate(360deg); }
+}
+
 .fe__file-input {
   position: absolute;
   left: -9999px;

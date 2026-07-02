@@ -59,6 +59,7 @@ export const tr: Record<string, string> = {
 
   'empty.folder': 'Bu klasör boş',
   'empty.search': 'Sonuç bulunamadı',
+  'loading': 'Yükleniyor…',
 
   'col.name': 'Ad',
   'col.size': 'Boyut',
