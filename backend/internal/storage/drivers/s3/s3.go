@@ -175,6 +175,9 @@ func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
 			if strings.Contains(name, "/") {
 				continue
 			}
+			if name == emptyMarker {
+				continue // hidden empty-folder keep-marker
+			}
 			out = append(out, storage.Object{
 				Path:  path.Join(p, name),
 				Name:  name,
@@ -272,8 +275,31 @@ func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) e
 	return err
 }
 
-// Delete implements storage.Deleter.
+// emptyMarker is the hidden 0-byte object filex writes inside a folder so an
+// otherwise-empty directory still exists on an object store (which has no real
+// directories). It is filtered from every listing (see List) and is moved /
+// deleted along with its folder.
+const emptyMarker = ".empty"
+
+// Delete implements storage.Deleter. For a directory it removes every object
+// under the prefix — S3 has no folders, so a single DeleteObject on the bare
+// prefix key would be a no-op and orphan the contents.
 func (d *Driver) Delete(ctx context.Context, p string) error {
+	if d.isDir(ctx, p) {
+		keys, err := d.listKeysUnder(ctx, p)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if _, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: aws.String(d.bucket),
+				Key:    aws.String(k),
+			}); err != nil {
+				return fmt.Errorf("s3: delete %s: %w", k, err)
+			}
+		}
+		return nil
+	}
 	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(p)),
@@ -281,16 +307,30 @@ func (d *Driver) Delete(ctx context.Context, p string) error {
 	return err
 }
 
-// Move implements storage.Mover (copy + delete).
+// Move implements storage.Mover (copy + delete). A directory is moved as a
+// unit by recursing the prefix: CopyObject cannot operate on a bare prefix, so
+// the old single-object move 404'd on any folder (empty or not) — the S3
+// folder-delete/rename bug this method fixes.
 func (d *Driver) Move(ctx context.Context, src, dst string) error {
+	if d.isDir(ctx, src) {
+		return d.copyDir(ctx, src, dst, true)
+	}
 	if err := d.Copy(ctx, src, dst); err != nil {
 		return err
 	}
-	return d.Delete(ctx, src)
+	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(src)),
+	})
+	return err
 }
 
-// Copy implements storage.Copier (server-side).
+// Copy implements storage.Copier (server-side). Directories are copied
+// recursively (same prefix rationale as Move).
 func (d *Driver) Copy(ctx context.Context, src, dst string) error {
+	if d.isDir(ctx, src) {
+		return d.copyDir(ctx, src, dst, false)
+	}
 	source := d.bucket + "/" + d.key(src)
 	_, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(d.bucket),
@@ -300,12 +340,90 @@ func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 	return err
 }
 
-// Mkdir is a no-op for S3 (objects don't require parent dirs).
+// copyDir copies every object under src/ to the matching key under dst/,
+// preserving the relative subtree (marker included). When del is true it also
+// deletes each source object after copying — i.e. a move.
+func (d *Driver) copyDir(ctx context.Context, src, dst string, del bool) error {
+	srcPrefix := d.key(src)
+	if !strings.HasSuffix(srcPrefix, "/") {
+		srcPrefix += "/"
+	}
+	dstPrefix := d.key(dst)
+	if !strings.HasSuffix(dstPrefix, "/") {
+		dstPrefix += "/"
+	}
+	keys, err := d.listKeysUnder(ctx, src)
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		dstKey := dstPrefix + strings.TrimPrefix(k, srcPrefix)
+		if _, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
+			Bucket:     aws.String(d.bucket),
+			CopySource: aws.String(d.bucket + "/" + k),
+			Key:        aws.String(dstKey),
+		}); err != nil {
+			return fmt.Errorf("s3: copy-dir %s: %w", k, err)
+		}
+		if del {
+			if _, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: aws.String(d.bucket),
+				Key:    aws.String(k),
+			}); err != nil {
+				return fmt.Errorf("s3: move-dir del %s: %w", k, err)
+			}
+		}
+	}
+	return nil
+}
+
+// isDir reports whether p is a directory: no object exists at the exact key but
+// ≥1 object exists under the p/ prefix. A real object at the key ⇒ file.
+func (d *Driver) isDir(ctx context.Context, p string) bool {
+	if _, err := d.Stat(ctx, p); err == nil {
+		return false
+	}
+	keys, _ := d.listKeysUnder(ctx, p)
+	return len(keys) > 0
+}
+
+// listKeysUnder returns every raw S3 key under p's prefix (recursive, no
+// delimiter), including the folder's own marker objects. Used by the
+// directory-aware Copy/Move/Delete.
+func (d *Driver) listKeysUnder(ctx context.Context, p string) ([]string, error) {
+	prefix := d.key(p)
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	var keys []string
+	var token *string
+	for {
+		resp, err := d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(d.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("s3: list-under: %w", err)
+		}
+		for _, o := range resp.Contents {
+			keys = append(keys, aws.ToString(o.Key))
+		}
+		if !aws.ToBool(resp.IsTruncated) {
+			break
+		}
+		token = resp.NextContinuationToken
+	}
+	return keys, nil
+}
+
+// Mkdir writes the hidden .empty keep-marker so an empty folder exists on the
+// object store (and shows as a directory) without any visible child. The
+// marker is filtered from listings and moved/removed with the folder.
 func (d *Driver) Mkdir(ctx context.Context, p string) error {
-	// Optional: drop a 0-byte zero-padded marker for compatibility.
 	_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(d.bucket),
-		Key:    aws.String(d.key(p) + "/"),
+		Key:    aws.String(d.key(p) + "/" + emptyMarker),
 		Body:   strings.NewReader(""),
 	})
 	return err

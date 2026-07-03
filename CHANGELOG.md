@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.53 below.)
+(Nothing yet — see v0.1.54 below.)
+
+## [0.1.54] - 2026-07-03
+
+### Fixed
+
+- **S3 folder delete/move/copy was broken** (empty *and* non-empty folders).
+  On an object store a folder is only a key prefix, but the S3 driver's
+  `Move`/`Copy`/`Delete` issued a single `CopyObject`/`DeleteObject` on the bare
+  folder key — which 404s (`NoSuchKey`) because no object lives at that exact
+  key. Every folder delete therefore failed with
+  `trash: … S3: CopyObject 404`, and the trash/restore path inherited it. The
+  S3 driver is now **directory-aware**: `Move`/`Copy`/`Delete` detect a prefix
+  and recurse over every object under it (preserving the relative subtree),
+  so folders trash, restore, move and copy correctly. Local/SFTP were already
+  dir-native (`os.Rename`/`RemoveAll`); this was S3-specific.
+  (`backend/internal/storage/drivers/s3/s3.go`.)
+
+### Changed
+
+- Empty folders on S3 are now marked with a hidden `.empty` keep-object (was a
+  bare `<path>/` marker), created by `Mkdir` and filtered from every listing —
+  so an empty folder persists and shows as a directory without any visible
+  child. Recursive delete/move carries the marker along.
 
 ## [0.1.53] - 2026-07-03
 
