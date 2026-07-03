@@ -383,8 +383,20 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if err := mover.Move(r.Context(), srcRel, trashRel); err != nil {
-				writeJSON(w, mapDriverErr(err), map[string]string{"error": "trash: " + err.Error()})
-				return
+				if !errors.Is(err, storage.ErrNotFound) {
+					writeJSON(w, mapDriverErr(err), map[string]string{"error": "trash: " + err.Error()})
+					return
+				}
+				// Source object already gone (stale index / out-of-band delete):
+				// drop the cache row and continue so one missing item doesn't
+				// fail the whole delete batch.
+				origClean := normalizeDBPath(srcRel)
+				origHash := managerPathHash(current.ID, origClean)
+				if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
+					_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
+					h.removeFromIndex(r.Context(), existing.ID)
+				}
+				continue
 			}
 		}
 

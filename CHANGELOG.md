@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.54 below.)
+(Nothing yet — see v0.1.55 below.)
+
+## [0.1.55] - 2026-07-03
+
+### Fixed
+
+- **S3 CopyObject on special-character keys 404'd** (`NoSuchKey`). The
+  `CopySource` header was not URL-encoded, so any file whose name contained a
+  space or non-ASCII character (e.g. Turkish `ÜYE BİLGİ … (1).doc`) failed to
+  move, rename or delete-to-trash. `CopySource` is now URL-encoded per path
+  segment. (`backend/internal/storage/drivers/s3/s3.go`.)
+- **Delete/move now tolerate an already-missing source.** A stale index row
+  (S3 object deleted out-of-band, or old test artifacts) made
+  `Copy`/`Move` 404 and aborted the *entire* batch — so one phantom item broke
+  a multi-select delete. The S3 `Copy` now returns `storage.ErrNotFound` for a
+  missing source, and the delete/move paths (sync `vfDelete`, async ops) treat
+  that as "already gone": they drop the stale cache row and carry on instead of
+  failing. (`s3.go`, `ops/service.go`, `manager_mutate.go`.)
 
 ## [0.1.54] - 2026-07-03
 

@@ -393,7 +393,16 @@ func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src st
 		if mover, ok := drv.(storage.Mover); ok {
 			trashRel := trashRelFor(src)
 			if err := mover.Move(ctx, src, trashRel); err != nil {
-				return err
+				if !errors.Is(err, storage.ErrNotFound) {
+					return err
+				}
+				// Source object already gone (stale index / out-of-band delete):
+				// drop the cache row outright instead of trashing a phantom, so a
+				// batch delete never fails on already-missing items.
+				if s.dbsync != nil {
+					s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
+				}
+				return nil
 			}
 			if s.dbsync != nil {
 				s.dbsync.SyncSoftDelete(ctx, op.StorageID, src, trashRel)
@@ -419,7 +428,16 @@ func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src st
 		}
 		dst := joinIntoDir(op.Dest, src)
 		if err := m.Move(ctx, src, dst); err != nil {
-			return err
+			if !errors.Is(err, storage.ErrNotFound) {
+				return err
+			}
+			// Source already gone: the move can't happen, but the stale cache
+			// row should not linger — drop it and treat the step as done rather
+			// than failing a batch on a phantom.
+			if s.dbsync != nil {
+				s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
+			}
+			return nil
 		}
 		if s.dbsync != nil {
 			s.dbsync.SyncMove(ctx, op.StorageID, src, dst)

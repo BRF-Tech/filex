@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -326,18 +327,38 @@ func (d *Driver) Move(ctx context.Context, src, dst string) error {
 }
 
 // Copy implements storage.Copier (server-side). Directories are copied
-// recursively (same prefix rationale as Move).
+// recursively (same prefix rationale as Move). The CopySource header MUST be
+// URL-encoded — the AWS SDK does not do it for you — or keys with spaces or
+// non-ASCII characters (e.g. Turkish filenames) 404 as NoSuchKey. A genuinely
+// missing source maps to storage.ErrNotFound so a delete can treat it as
+// already-done rather than failing the whole batch.
 func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 	if d.isDir(ctx, src) {
 		return d.copyDir(ctx, src, dst, false)
 	}
-	source := d.bucket + "/" + d.key(src)
 	_, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(d.bucket),
-		CopySource: aws.String(source),
+		CopySource: aws.String(encodeCopySource(d.bucket, d.key(src))),
 		Key:        aws.String(d.key(dst)),
 	})
-	return err
+	if err != nil {
+		if isS3NotFound(err) {
+			return storage.ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// encodeCopySource URL-encodes each segment of an S3 key for the CopySource
+// header (path slashes preserved). Without this, spaces and non-ASCII bytes in
+// a key make CopyObject fail with NoSuchKey.
+func encodeCopySource(bucket, key string) string {
+	segs := strings.Split(key, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return bucket + "/" + strings.Join(segs, "/")
 }
 
 // copyDir copies every object under src/ to the matching key under dst/,
@@ -360,9 +381,12 @@ func (d *Driver) copyDir(ctx context.Context, src, dst string, del bool) error {
 		dstKey := dstPrefix + strings.TrimPrefix(k, srcPrefix)
 		if _, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
 			Bucket:     aws.String(d.bucket),
-			CopySource: aws.String(d.bucket + "/" + k),
+			CopySource: aws.String(encodeCopySource(d.bucket, k)),
 			Key:        aws.String(dstKey),
 		}); err != nil {
+			if isS3NotFound(err) {
+				continue // vanished mid-op (race) — nothing to move
+			}
 			return fmt.Errorf("s3: copy-dir %s: %w", k, err)
 		}
 		if del {
