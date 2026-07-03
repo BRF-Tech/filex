@@ -9,12 +9,9 @@ on `main` and in the next tag. Please run a recent version.
 
 **Please do not open a public issue for security problems.**
 
-Report privately instead:
-
-- Preferred: use the repository host's private vulnerability reporting
-  ("Report a vulnerability" / private security advisory).
-- Or email: `security@example.com` *(replace with the project's real address
-  before publishing)*.
+Report privately instead — use this repository's **private vulnerability
+reporting**: the **Security** tab → **Report a vulnerability** (GitHub Security
+Advisories). This opens a channel visible only to the maintainers.
 
 Include, where possible:
 

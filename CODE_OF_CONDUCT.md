@@ -49,10 +49,10 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-`conduct@example.com` *(replace with the project's real address before
-publishing)*. All complaints will be reviewed and investigated promptly and
-fairly.
+reported privately to the project maintainers — by opening a private advisory
+via the repository's **Security → Report a vulnerability**, or by contacting a
+maintainer directly. All complaints will be reviewed and investigated promptly
+and fairly.
 
 ## Attribution
 
