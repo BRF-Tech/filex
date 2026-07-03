@@ -1,0 +1,29 @@
+# Caddy config for the full filex stack. Caddy obtains + renews HTTPS certs
+# automatically for the domains below (ports 80/443 must be reachable).
+
+{$FILEX_DOMAIN} {
+	encode zstd gzip
+	# Large uploads: only the init/finalize JSON transits the proxy for S3
+	# (multipart PUTs go browser→S3 directly), but local/SFTP uploads stream
+	# through here.
+	request_body {
+		max_size 5GB
+	}
+	# WebSocket/SSE (e.g. the MCP stream at /api/ai/mcp) upgrade automatically.
+	reverse_proxy filex:5212 {
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# OnlyOffice Document Server — the browser loads its iframe from here, and
+# filex's server-to-server fetch/callback also uses filex's public URL, so
+# both must be HTTPS on real hostnames.
+{$ONLYOFFICE_DOMAIN} {
+	reverse_proxy onlyoffice:80
+}
+
+# Optional: the MinIO web console (bucket management). Remove this block if you
+# don't want the console exposed.
+{$MINIO_CONSOLE_DOMAIN} {
+	reverse_proxy minio:9001
+}

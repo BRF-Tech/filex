@@ -1,0 +1,48 @@
+{
+  "name": "filemanager-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "filex — self-hosted file manager: Go backend + multi-framework frontend (Vue/React/WC), single binary + Docker",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brf-tech/filex.git"
+  },
+  "homepage": "https://github.com/brf-tech/filex",
+  "author": "BRF Tech <hello@example.com>",
+  "scripts": {
+    "build": "pnpm -r --filter='./packages/*' build && pnpm --filter='./web' build",
+    "dev": "pnpm -r --parallel dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean && rm -rf bin/ goreleaser-dist/",
+    "build:backend": "cd backend && go build -trimpath -ldflags='-s -w' -o ../bin/filex ./cmd/filex",
+    "build:web": "pnpm --filter='./web' build",
+    "build:packages": "pnpm -r --filter='./packages/*' build",
+    "build:all": "pnpm run build:packages && pnpm run build:web && pnpm run sync:embed && pnpm run build:backend",
+    "sync:embed": "node scripts/sync-embed.mjs",
+    "release:dry": "goreleaser release --snapshot --clean --skip=publish",
+    "release": "goreleaser release --clean"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "file-manager",
+    "file-explorer",
+    "self-hosted",
+    "s3",
+    "sftp",
+    "webdav",
+    "vue",
+    "react",
+    "web-component",
+    "go"
+  ]
+}

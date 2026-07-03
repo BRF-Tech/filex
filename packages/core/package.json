@@ -1,0 +1,89 @@
+{
+  "name": "@brftech/filex-core",
+  "version": "0.1.56",
+  "description": "filex core — Vue 3 source of truth for the filex file manager (FileExplorer SFC + composables + types)",
+  "type": "module",
+  "main": "./dist/filex-core.umd.cjs",
+  "module": "./dist/filex-core.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/filex-core.js",
+      "require": "./dist/filex-core.umd.cjs"
+    },
+    "./style.css": "./dist/style.css",
+    "./src/FileExplorer.vue": "./src/FileExplorer.vue",
+    "./src/*": "./src/*"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "scripts": {
+    "build": "vue-tsc --noEmit && vite build",
+    "build:no-dts": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "vue-tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "peerDependencies": {
+    "vue": "^3.4.0",
+    "monaco-editor": "*",
+    "highlight.js": "*",
+    "markdown-it": "*",
+    "codemirror": "*",
+    "@google/model-viewer": "*",
+    "epubjs": "*",
+    "mermaid": "*",
+    "utif": "*",
+    "ag-psd": "*",
+    "pdfjs-dist": "*",
+    "papaparse": "*",
+    "katex": "*"
+  },
+  "peerDependenciesMeta": {
+    "monaco-editor": { "optional": true },
+    "highlight.js": { "optional": true },
+    "markdown-it": { "optional": true },
+    "codemirror": { "optional": true },
+    "@google/model-viewer": { "optional": true },
+    "epubjs": { "optional": true },
+    "mermaid": { "optional": true },
+    "utif": { "optional": true },
+    "ag-psd": { "optional": true },
+    "pdfjs-dist": { "optional": true },
+    "papaparse": { "optional": true },
+    "katex": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.10",
+    "vite-plugin-dts": "^4.3.0",
+    "vue": "^3.5.13",
+    "vue-tsc": "^2.1.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "filex",
+    "file-manager",
+    "vue3",
+    "brftech"
+  ],
+  "author": "BRF Tech <hello@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brf-tech/filex.git",
+    "directory": "packages/core"
+  }
+}

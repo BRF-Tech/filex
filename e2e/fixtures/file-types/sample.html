@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>filex sample — self-hosted file manager</title>
+  <style>
+    :root { --brand:#3b82f6; --bg:#0b0d12; --fg:#e6eaf0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; padding: 48px 24px; }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 { color: var(--brand); font-size: 2.4rem; margin-bottom: 0.4rem; }
+    h2 { margin-top: 2.4rem; border-bottom: 1px solid #2c3140; padding-bottom: 8px; }
+    code { background: #1a1f2c; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .feature { background: #161b27; padding: 16px; border-radius: 8px; border: 1px solid #2c3140; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>filex</h1>
+    <p>Self-hosted file management for the example.com stack.</p>
+
+    <h2>Features</h2>
+    <div class="features">
+      <div class="feature"><strong>Multi-driver storage</strong><br>local, S3, FTP, SFTP, WebDAV.</div>
+      <div class="feature"><strong>Live thumbnails</strong><br>ffmpeg + ghostscript + libreoffice.</div>
+      <div class="feature"><strong>Replica</strong><br>Path-glob fan-out + reconcile.</div>
+      <div class="feature"><strong>Persistent queue</strong><br>sqlite, redis, postgres.</div>
+    </div>
+
+    <h2>Quick install</h2>
+    <pre><code>docker run -p 5212:5212 ghcr.io/brf-tech/filex:latest</code></pre>
+
+    <h2>Embed snippet</h2>
+    <pre><code>import { mountFileExplorer } from '@brftech/filex-core';
+mountFileExplorer('#root', { api: { baseURL: '/api/files' } });</code></pre>
+  </div>
+</body>
+</html>

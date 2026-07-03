@@ -1,0 +1,49 @@
+# filex example config — drop in /etc/filex/config.yaml
+listen: 0.0.0.0:5212
+public_url: https://fm.example.com
+
+auth:
+  drivers: [local, oidc]
+  oidc:
+    issuer: https://auth.example.com/realms/main
+    client_id: filex
+    admin_group: filex-admin
+
+storages:
+  - name: local
+    driver: local
+    config:
+      root: /var/lib/filex/storage
+  - name: s3-prod
+    driver: s3
+    config:
+      bucket: example-data
+      region: eu-central-1
+      endpoint: https://s3.eu-central-1.amazonaws.com
+  - name: s3-backup
+    driver: s3
+    config:
+      bucket: example-backup
+      region: us-east-1
+
+thumbs:
+  enabled: true
+  formats: [image, video, audio, pdf, office]
+  cache_dir: /data/thumbs
+  max_concurrency: 4
+
+replica:
+  enabled: true
+  rules:
+    - source: local
+      target: s3-backup
+      glob: "**/*.docx"
+    - source: local
+      target: s3-backup
+      glob: "**/*.pdf"
+
+external:
+  onlyoffice:
+    url: https://docs.example.com
+  drawio:
+    url: https://embed.diagrams.net

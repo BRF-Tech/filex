@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>filex demo · vanilla JS / Web Component</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    header {
+      padding: 16px 24px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    header p  { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+    main { flex: 1; display: flex; min-height: 0; }
+    filex-explorer { flex: 1; min-height: 0; }
+    .config-bar {
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.04);
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      font-size: 13px;
+    }
+    @media (prefers-color-scheme: dark) { .config-bar { background: rgba(255,255,255,0.06); } }
+    .config-bar input { padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.2); min-width: 280px; }
+    .config-bar button { padding: 4px 12px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>filex · vanilla JS / Web Component demo</h1>
+    <p>Drop-in <code>&lt;filex-explorer&gt;</code> from <code>@brftech/filex</code>. Works in any framework or none.</p>
+  </header>
+
+  <div class="config-bar">
+    <label>API base:
+      <input id="api-base" value="http://localhost:5212" />
+    </label>
+    <label>Bearer:
+      <input id="bearer" placeholder="(optional JWT)" />
+    </label>
+    <button id="apply">Apply</button>
+    <span id="status" style="opacity:.7"></span>
+  </div>
+
+  <main>
+    <filex-explorer id="fx"></filex-explorer>
+  </main>
+
+  <!-- Web Component bundle -->
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@brftech/filex/dist/filex.js"></script>
+
+  <script type="module">
+    const fx = document.getElementById('fx');
+    const apiBaseInput = document.getElementById('api-base');
+    const bearerInput  = document.getElementById('bearer');
+    const apply = document.getElementById('apply');
+    const status = document.getElementById('status');
+
+    function applyConfig() {
+      const apiBase = apiBaseInput.value.trim().replace(/\/$/, '');
+      const token = bearerInput.value.trim();
+      fx.config = {
+        apiBase,
+        auth: token ? { kind: 'bearer', token } : { kind: 'cookie' },
+        startPath: '/',
+        locale: 'auto',
+        theme: 'auto',
+      };
+      status.textContent = 'Connecting...';
+    }
+
+    apply.addEventListener('click', applyConfig);
+    apply.click();
+
+    // Listen to all the events the WC emits.
+    fx.addEventListener('filex-ready', (e) => {
+      status.textContent = `Ready · v${e.detail.capabilities.version}`;
+    });
+    fx.addEventListener('filex-error', (e) => {
+      status.textContent = `Error: ${e.detail.code} — ${e.detail.message}`;
+      console.error('[filex]', e.detail);
+    });
+    fx.addEventListener('filex-share-created', (e) => {
+      navigator.clipboard.writeText(e.detail.share.url);
+      status.textContent = `Share URL copied: ${e.detail.share.url}`;
+    });
+    fx.addEventListener('filex-navigate', (e) => {
+      status.textContent = `Path: ${e.detail.path}`;
+    });
+  </script>
+</body>
+</html>

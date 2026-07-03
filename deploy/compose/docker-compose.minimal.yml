@@ -1,0 +1,31 @@
+# filex — minimal single-container stack.
+#
+# Just filex: SQLite database, embedded search + thumbnails, and one local
+# storage folder. No external services. Great for trying it out or small use.
+#
+#   docker compose -f docker-compose.minimal.yml up -d
+#   docker compose -f docker-compose.minimal.yml logs -f   # first-run admin creds
+#   open http://localhost:5212/admin
+#
+# The first run prints (once) the generated admin@local password; it is also
+# saved to the filex-data volume at /data/.first-run.txt (mode 0600).
+
+services:
+  filex:
+    image: ghcr.io/brf-tech/filex:latest
+    ports:
+      - "5212:5212"
+    environment:
+      # Must be the URL users actually open in the browser. Behind a reverse
+      # proxy set this to your https://… domain instead.
+      FILEX_PUBLIC_URL: http://localhost:5212
+    volumes:
+      # DB + search index + thumbnail cache + first-run secret.
+      - filex-data:/data
+      # A folder to serve. After first login, add a "local" storage in the
+      # admin UI with path: /srv/files
+      - ./files:/srv/files
+    restart: unless-stopped
+
+volumes:
+  filex-data:

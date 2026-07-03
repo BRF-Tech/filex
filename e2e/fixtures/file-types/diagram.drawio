@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-05-18T13:30:00.000Z" agent="filex-fixture" version="22.0.0" type="device">
+  <diagram id="filex-deploy" name="filex deployment">
+    <mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" arrows="1" connect="1">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="cf" value="Cloudflare Tunnel" style="shape=ellipse;fillColor=#f59e0b;fontColor=#fff;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="hetz" value="Primary\n10.0.0.1" style="rounded=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="320" y="40" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="fm" value="fm.example.com\n(filex prod)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="180" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="demo" value="demo-fm.example.com\n(filex demo)" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="260" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="Object Storage\ns3.example.com" style="rounded=1;fillColor=#fff2cc;" vertex="1" parent="1">
+          <mxGeometry x="600" y="180" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="docs" value="docs.example.com\n(OnlyOffice)" style="rounded=1;fillColor=#e1d5e7;" vertex="1" parent="1">
+          <mxGeometry x="600" y="40" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="replica" value="Replica\n10.0.0.2" style="rounded=1;fillColor=#f8cecc;" vertex="1" parent="1">
+          <mxGeometry x="320" y="360" width="200" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="endArrow=classic;" edge="1" parent="1" source="cf" target="hetz">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=classic;" edge="1" parent="1" source="hetz" target="fm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="endArrow=classic;" edge="1" parent="1" source="hetz" target="demo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" style="endArrow=classic;" edge="1" parent="1" source="fm" target="s3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="docs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="endArrow=classic;dashed=1;" edge="1" parent="1" source="fm" target="replica">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,77 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/brf-tech/filex/backend/internal/capability"
+)
+
+// Capabilities exposes /api/capabilities.
+type Capabilities struct {
+	Service *capability.Service
+}
+
+// NewCapabilities constructs a Capabilities handler.
+func NewCapabilities(svc *capability.Service) *Capabilities {
+	return &Capabilities{Service: svc}
+}
+
+// Get returns the runtime feature snapshot.
+//
+// We emit BOTH the rich nested shape (filex-core admin SPA) AND a flat
+// alias set (legacy embed.js + filex-core SFC fallback expected:
+// `ffmpeg / ghostscript / libreoffice / max_chunk_mb / upload_limit_mb /
+// onlyoffice_url / drawio_url`). Cheap to ship both — keeps the SFC
+// happy without breaking the existing admin UI bindings.
+func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
+	c, err := h.Service.Get(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Build flat aliases.
+	const mb = int64(1024 * 1024)
+	flat := map[string]any{
+		"ffmpeg":       c.Thumbs.Video,
+		"imagemagick":  c.Thumbs.ImageMagick,
+		"ghostscript":  c.Thumbs.PDF,
+		"libreoffice":  c.Thumbs.Office,
+		"max_chunk_mb": int64(0),
+		"upload_limit_mb": func() int64 {
+			if c.MaxUploadSize <= 0 {
+				return 0
+			}
+			return c.MaxUploadSize / mb
+		}(),
+		"onlyoffice_url": "",
+		"drawio_url":     "",
+		"convert_url":    "",
+	}
+	if c.ChunkSize > 0 {
+		flat["max_chunk_mb"] = c.ChunkSize / mb
+	}
+	if oo, ok := c.External["onlyoffice"]; ok && oo.Enabled {
+		flat["onlyoffice_url"] = oo.URL
+	}
+	if dr, ok := c.External["drawio"]; ok && dr.Enabled {
+		flat["drawio_url"] = dr.URL
+	}
+	if cv, ok := c.External["convert"]; ok && cv.Enabled {
+		flat["convert_url"] = cv.URL
+	}
+
+	// Marshal the rich snapshot to a generic map so we can layer the
+	// flat aliases on top (no struct tag wrestling).
+	raw, _ := json.Marshal(c)
+	merged := map[string]any{}
+	_ = json.Unmarshal(raw, &merged)
+	for k, v := range flat {
+		// Don't clobber an existing nested field of the same name.
+		if _, exists := merged[k]; !exists {
+			merged[k] = v
+		}
+	}
+	writeJSON(w, http.StatusOK, merged)
+}

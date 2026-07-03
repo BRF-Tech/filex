@@ -1,0 +1,38 @@
+flowchart TB
+    subgraph "Browser"
+      U[User]
+    end
+    subgraph "filex HTTP API"
+      H[handlers]
+      Auth[auth middleware]
+      Q[queue dispatcher]
+    end
+    subgraph "Storage Drivers"
+      L[local]
+      S[s3]
+      F[ftp]
+      W[webdav]
+    end
+    subgraph "Pipelines"
+      Sync[sync worker]
+      Thumb[thumb pipeline]
+      Rep[replica fan-out]
+      Idx[bleve index]
+    end
+    subgraph "External"
+      OO[OnlyOffice DS]
+      DR[diagrams.net]
+    end
+    U -->|HTTPS| Auth
+    Auth --> H
+    H -->|Read/Write| L
+    H -->|Read/Write| S
+    H -->|Read/Write| F
+    H -->|Read/Write| W
+    H -.->|fire-and-forget| Q
+    Q --> Sync
+    Q --> Thumb
+    Q --> Rep
+    Sync --> Idx
+    H -.->|JWT-signed| OO
+    H -.->|postMessage| DR

@@ -1,0 +1,80 @@
+# Default values for filex — a minimal install: one filex pod, SQLite on a PVC,
+# an Ingress. Enable the toggles below (or use values-full.yaml) for Postgres,
+# Redis and OnlyOffice.
+
+image:
+  repository: ghcr.io/brf-tech/filex
+  tag: ""                 # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# The external URL users open. REQUIRED — it is baked into share links, the OIDC
+# redirect and OnlyOffice callbacks. Usually https://<ingress.host>.
+publicURL: "https://files.example.com"
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 5212
+
+ingress:
+  enabled: true
+  className: ""           # e.g. "nginx"
+  host: files.example.com
+  # TLS secret name (e.g. issued by cert-manager). Empty = no TLS block.
+  tlsSecretName: ""
+  annotations: {}
+    # Large uploads + websockets on nginx-ingress:
+    # nginx.ingress.kubernetes.io/proxy-body-size: "5g"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+
+# /data holds the SQLite DB (if used), the search index and the thumbnail cache.
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+# Database. Default is SQLite on the PVC. For an external DB set driver +
+# dsn; or set postgresql.enabled=true to run a bundled Postgres.
+database:
+  driver: sqlite          # sqlite | postgres | mysql
+  dsn: ""                 # external DSN (postgres://… / user:pass@tcp(host)/db)
+
+postgresql:
+  enabled: false          # deploy a bundled single-instance Postgres
+  image: postgres:16-alpine
+  password: change-me-postgres
+  storage: 8Gi
+
+# Queue. Default sqlite (shares the DB). Redis enables distributed workers.
+queue:
+  driver: sqlite          # sqlite | postgres | redis
+  dsn: ""
+
+redis:
+  enabled: false          # deploy a bundled single-instance Redis for the queue
+  image: redis:7-alpine
+
+# OnlyOffice document editing — point at an external Document Server.
+# (Deploy one with e.g. the onlyoffice/docs-* chart, or the compose stack.)
+onlyoffice:
+  url: ""                 # https://office.example.com — empty disables editing
+  jwtSecret: ""           # MUST equal the Document Server's JWT_SECRET
+
+# Any extra FILEX_* overrides (see docs/CONFIGURATION.md).
+extraEnv: {}
+  # FILEX_LOG_LEVEL: debug
+  # FILEX_OIDC_ISSUER: https://id.example.com/realms/main
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podSecurityContext: {}
+securityContext: {}

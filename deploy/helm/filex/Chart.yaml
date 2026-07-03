@@ -1,0 +1,18 @@
+apiVersion: v2
+name: filex
+description: Self-hosted file manager — Go backend + Vue/React/Web Component frontend, pluggable storage/auth/DB drivers.
+type: application
+version: 0.1.0
+appVersion: "0.1.56"
+home: https://github.com/BRF-Tech/filex
+sources:
+  - https://github.com/BRF-Tech/filex
+keywords:
+  - file-manager
+  - self-hosted
+  - s3
+  - webdav
+  - sftp
+  - onlyoffice
+maintainers:
+  - name: BRF-Tech

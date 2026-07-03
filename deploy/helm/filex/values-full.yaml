@@ -1,0 +1,19 @@
+# Full install: bundled Postgres + Redis, and an external OnlyOffice.
+# Usage:
+#   helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
+#     --set ingress.host=files.example.com \
+#     --set publicURL=https://files.example.com
+
+postgresql:
+  enabled: true
+  password: change-me-postgres     # override with --set or a secret
+
+queue:
+  driver: redis
+
+redis:
+  enabled: true
+
+onlyoffice:
+  url: https://office.example.com  # deploy a Document Server separately
+  jwtSecret: change-me-onlyoffice  # must match the Document Server's JWT_SECRET

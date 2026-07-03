@@ -1,0 +1,176 @@
+# goreleaser config for filex
+# Docs: https://goreleaser.com
+#
+# Build matrix: linux/darwin/windows × amd64/arm64 (8 binaries)
+# CGO_ENABLED=0 + modernc.org/sqlite — no C toolchain needed.
+#
+# Pre-flight assumes web/dist and packages/webcomponent/dist already exist
+# and have been synced into backend/embed/{admin,web} (see scripts/sync-embed.mjs
+# or the GitLab CI job that runs before this).
+#
+# Usage:
+#   goreleaser release --snapshot --clean --skip=publish    # local dry run
+#   goreleaser release --clean                              # tag-triggered (GitLab CI)
+
+version: 2
+
+project_name: filex
+
+# NOTE: removed `before.hooks` here because goreleaser v2's stricter
+# YAML parser refuses the `sh -c '... && ...'` string forms that v1
+# accepted ("yaml: unmarshal errors: cannot unmarshal !!map into
+# string"). The hooks were also redundant — the GitLab CI script
+# (release:goreleaser) already runs the embed mkdir+cp dance, and
+# the build:backend stage takes care of `go mod tidy` indirectly.
+# If you need a local-friendly assertion, run scripts/sync-embed.mjs
+# before invoking goreleaser.
+
+builds:
+  - id: filex
+    main: ./cmd/filex
+    dir: backend
+    binary: filex
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # Must match the package var declarations in internal/version/version.go.
+      # `-X main.version=...` silently no-ops because cmd/filex/main.go has no
+      # `version` symbol; the linker skips unknown -X targets, so binaries
+      # ship as "0.1.0-dev (unknown, unknown)" even on tagged release builds.
+      - -s -w
+      - -X github.com/brf-tech/filex/backend/internal/version.Version={{.Version}}
+      - -X github.com/brf-tech/filex/backend/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/brf-tech/filex/backend/internal/version.Date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Reproducible builds-friendly mod-timestamp.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: filex
+    builds:
+      - filex
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{.ShortCommit}}"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  # GitLab native release. Set GITLAB_TOKEN in CI env.
+  github:
+    owner: brf-tech
+    name: filex
+  draft: false
+  replace_existing_draft: true
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  header: |
+    ## filex v{{ .Version }}
+
+    Self-hosted file manager — Go single binary + multi-framework frontend.
+
+    Download a binary below, or pull a Docker image:
+
+    ```bash
+    docker pull ghcr.io/brf-tech/filex:slim-{{ .Tag }}
+    docker pull ghcr.io/brf-tech/filex:full-{{ .Tag }}
+    ```
+  footer: |
+    ---
+    **Verify:** `sha256sum -c checksums.txt`
+
+    Issues: https://github.com/brf-tech/filex/-/issues
+    Docs:   https://github.com/brf-tech/filex/-/blob/main/docs/
+
+# --- Optional: SBOM (syft) ---
+# Uncomment after installing syft into the goreleaser CI image.
+# sboms:
+#   - id: archive
+#     artifacts: archive
+#     documents:
+#       - "${artifact}.sbom.json"
+#     cmd: syft
+#     args: ["${artifact}", "--output", "spdx-json={{ .Document }}"]
+
+# --- Optional: cosign signing ---
+# Uncomment + set COSIGN_KEY / COSIGN_PASSWORD secrets in CI.
+# signs:
+#   - id: cosign-archives
+#     cmd: cosign
+#     stdin: '{{ .Env.COSIGN_PASSWORD }}'
+#     args:
+#       - sign-blob
+#       - --key=cosign.key
+#       - --output-signature=${signature}
+#       - ${artifact}
+#     artifacts: archive
+
+# --- Docker images ---
+# We build Docker images in a separate GitLab CI job (release:docker) using
+# the in-tree Dockerfiles, because:
+#   1. We need a Node toolchain to build npm packages + admin UI.
+#   2. goreleaser's docker target would require us to copy embed assets into
+#      a context that the Dockerfile can see, which is identical to what the
+#      multi-stage Dockerfile already does itself.
+# If you want to switch to goreleaser-driven Docker builds later:
+#
+# dockers:
+#   - image_templates:
+#       - "ghcr.io/brf-tech/filex:slim-{{ .Tag }}-amd64"
+#     dockerfile: docker/Dockerfile
+#     use: buildx
+#     build_flag_templates:
+#       - "--platform=linux/amd64"
+#       - "--label=org.opencontainers.image.source=https://github.com/brf-tech/filex"
+#       - "--label=org.opencontainers.image.version={{ .Version }}"

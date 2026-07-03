@@ -1,0 +1,111 @@
+# filex full image (~250 MB)
+# - Same Go binary as slim
+# - + ffmpeg (video thumbs), vips-tools (image enhance), ghostscript (PDF rasterise),
+#   poppler-utils (PDF info), libreoffice (.docx/.xlsx/.pptx/.odt/.ods/.odp → PDF)
+# - + fonts so libreoffice/Ghostscript don't render tofu
+#
+# Build (from repo root):
+#   docker build -t ghcr.io/brf-tech/filex:full -f docker/Dockerfile.full .
+#
+# Run:
+#   docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:full
+
+# Reuse the same multi-stage frontend + Go build logic from the slim Dockerfile,
+# duplicated inline so this image can be built independently (no chained
+# `FROM ghcr.io/brf-tech/filex:slim` dependency in CI).
+
+# ---------------------------------------------------------------------------
+# Stage 1: Build npm packages + admin UI
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS frontend-build
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /src
+
+# vue-tsc OOMs the default 1.7 GB Node heap once we pull in
+# @brftech/filex-core (workspace dep with code-split viewers). Bump
+# the budget to 4 GB for every Node process during the build.
+# Mirrors docker/Dockerfile (the slim image already had this since
+# round 8).
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
+COPY package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml* ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/webcomponent/package.json ./packages/webcomponent/
+COPY packages/react/package.json ./packages/react/
+COPY web/package.json ./web/
+
+RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+
+COPY packages/ ./packages/
+COPY web/ ./web/
+
+RUN pnpm -r --filter='./packages/*' build && pnpm --filter='./web' build
+
+# ---------------------------------------------------------------------------
+# Stage 2: Stage embed assets
+# ---------------------------------------------------------------------------
+FROM frontend-build AS embed-prep
+RUN mkdir -p /tmp/embed/admin /tmp/embed/web && \
+    cp -r /src/web/dist/. /tmp/embed/admin/ && \
+    cp -r /src/packages/webcomponent/dist/. /tmp/embed/web/
+
+# ---------------------------------------------------------------------------
+# Stage 3: Build Go binary
+# ---------------------------------------------------------------------------
+FROM golang:1.25-alpine AS backend-build
+RUN apk --no-cache add git ca-certificates
+WORKDIR /src
+COPY backend/go.mod ./
+COPY backend/go.sum* ./
+RUN go mod download || go mod tidy
+COPY backend/ ./
+RUN go mod tidy
+COPY --from=embed-prep /tmp/embed/admin ./embed/admin
+COPY --from=embed-prep /tmp/embed/web   ./embed/web
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -o /out/filex \
+    ./cmd/filex
+
+# ---------------------------------------------------------------------------
+# Stage 4: Runtime with thumbnail toolchain
+# ---------------------------------------------------------------------------
+FROM alpine:3.20
+
+RUN apk --no-cache add \
+        ca-certificates \
+        tzdata \
+        su-exec \
+        ffmpeg \
+        vips-tools \
+        ghostscript \
+        poppler-utils \
+        libreoffice \
+        openjdk17-jre-headless \
+        rsvg-convert \
+        ttf-liberation \
+        ttf-dejavu \
+        font-noto \
+        font-noto-cjk \
+    && addgroup -S filex && adduser -S -G filex filex
+
+COPY --from=backend-build /out/filex /usr/local/bin/filex
+
+EXPOSE 5212
+VOLUME ["/data"]
+
+ENV FILEX_DATA_DIR=/data \
+    FILEX_LISTEN=0.0.0.0:5212 \
+    FILEX_THUMBS_ENABLED=true
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:5212/healthz || exit 1
+
+ENTRYPOINT ["/usr/local/bin/filex"]
+CMD ["serve"]

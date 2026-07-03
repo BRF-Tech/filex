@@ -1,0 +1,90 @@
+/**
+ * CSS variables — theme hooks.
+ *
+ * Consumer overrides by setting `--fe-*` on a higher scope.
+ */
+:root {
+  --fe-bg: #ffffff;
+  --fe-bg-elev: #f7f8fa;
+  --fe-bg-hover: #edf0f5;
+  --fe-bg-selected: #dfe8ff;
+  --fe-border: #e2e6ed;
+  --fe-border-strong: #c7ced9;
+  --fe-text: #1a1e27;
+  --fe-text-muted: #5a6475;
+  --fe-text-on-primary: #ffffff;
+  --fe-primary: #3b82f6;
+  --fe-primary-hover: #2563eb;
+  --fe-danger: #dc2626;
+  --fe-danger-hover: #b91c1c;
+  --fe-shadow: 0 10px 32px rgba(15, 23, 42, 0.14);
+  --fe-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.08);
+  --fe-radius: 8px;
+  --fe-radius-sm: 4px;
+  --fe-radius-lg: 12px;
+  --fe-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fe-font-mono: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  --fe-gap: 12px;
+}
+
+.fe--theme-dark,
+:root[data-theme='dark'] .fe,
+.fe.fe--theme-dark,
+/* Tailwind dark-mode class shipped by the host admin shell —
+ * web/src/lib/theme.ts toggles document.documentElement.classList
+ * .toggle('dark', dark), so we adopt the same hook here. Without
+ * this selector the embedded explorer stayed on the :root light
+ * defaults even when the rest of the admin UI flipped dark.
+ *
+ * The bare `:root.dark` / `.dark` selectors (no `.fe` descendant)
+ * also publish the variables at the html-level so non-SFC consumers —
+ * the standalone /files/edit Editor.vue route, which doesn't wrap its
+ * host div in `.fe` — pick up the dark palette via CSS-variable
+ * cascade. v0.1.11 added the bare selectors after operators reported
+ * the new tab opening light when the admin panel was dark. */
+:root.dark,
+.dark,
+:root.dark .fe,
+.dark .fe,
+/* Teleported context menu lives outside the `.fe` parent, so we have
+ * to apply the same dark-mode variable overrides on its backdrop too —
+ * otherwise it stays on the :root light defaults and the menu renders
+ * as white-on-white inside dark hosts. */
+.fe-ctx-backdrop--theme-dark,
+.fe-ctx-backdrop--theme-auto[data-prefers-dark='1'] {
+  --fe-bg: #0f1419;
+  --fe-bg-elev: #161c25;
+  --fe-bg-hover: #1f2733;
+  --fe-bg-selected: #23324a;
+  --fe-border: #2a323e;
+  --fe-border-strong: #3a4453;
+  --fe-text: #e5e9f0;
+  --fe-text-muted: #8b95a7;
+  --fe-primary: #60a5fa;
+  --fe-primary-hover: #3b82f6;
+  --fe-danger: #f87171;
+  --fe-danger-hover: #ef4444;
+  --fe-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --fe-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  .fe:not(.fe--theme-light),
+  /* Same trick for the teleported backdrop in auto mode. */
+  .fe-ctx-backdrop--theme-auto:not(.fe-ctx-backdrop--theme-light) {
+    --fe-bg: #0f1419;
+    --fe-bg-elev: #161c25;
+    --fe-bg-hover: #1f2733;
+    --fe-bg-selected: #23324a;
+    --fe-border: #2a323e;
+    --fe-border-strong: #3a4453;
+    --fe-text: #e5e9f0;
+    --fe-text-muted: #8b95a7;
+    --fe-primary: #60a5fa;
+    --fe-primary-hover: #3b82f6;
+    --fe-danger: #f87171;
+    --fe-danger-hover: #ef4444;
+    --fe-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --fe-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.25);
+  }
+}

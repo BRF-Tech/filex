@@ -1,0 +1,103 @@
+# filex — full all-in-one stack (production-shaped).
+#
+# filex + PostgreSQL (DB) + Redis (queue) + OnlyOffice (editing) + MinIO
+# (S3 storage) + Caddy (reverse proxy with automatic HTTPS).
+#
+# 1. Copy .env.example to .env and set your domains + secrets.
+# 2. Point DNS for FILEX_DOMAIN and ONLYOFFICE_DOMAIN at this host.
+# 3.  docker compose -f docker-compose.full.yml --env-file .env up -d
+# 4.  docker compose -f docker-compose.full.yml logs -f filex   # first-run admin creds
+#
+# Then, in the admin UI, add an S3 storage backed by the bundled MinIO:
+#   driver=s3, endpoint=http://minio:9000, path_style=true, region=auto,
+#   bucket=<your bucket>, prefix=filex, access_key/secret_key = MINIO_ROOT_*.
+# (Create the bucket first at https://<MINIO_CONSOLE_DOMAIN>.)
+
+services:
+  filex:
+    image: ghcr.io/brf-tech/filex:latest       # full image (thumbnails included)
+    environment:
+      FILEX_PUBLIC_URL: https://${FILEX_DOMAIN}
+      FILEX_DB_DRIVER: postgres
+      FILEX_DB_DSN: postgres://filex:${POSTGRES_PASSWORD}@postgres:5432/filex?sslmode=disable
+      FILEX_QUEUE_DRIVER: redis
+      FILEX_QUEUE_DSN: redis://redis:6379/0
+      FILEX_ONLYOFFICE_URL: https://${ONLYOFFICE_DOMAIN}
+      FILEX_ONLYOFFICE_JWT: ${ONLYOFFICE_JWT_SECRET}     # must match onlyoffice JWT_SECRET
+      FILEX_THUMBS_ENABLED: "true"
+    volumes:
+      - filex-data:/data          # DB (if you switch to sqlite), search index, thumbs, first-run secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: filex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: filex
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filex"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}     # must match FILEX_ONLYOFFICE_JWT
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      FILEX_DOMAIN: ${FILEX_DOMAIN}
+      ONLYOFFICE_DOMAIN: ${ONLYOFFICE_DOMAIN}
+      MINIO_CONSOLE_DOMAIN: ${MINIO_CONSOLE_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - filex
+      - onlyoffice
+    restart: unless-stopped
+
+volumes:
+  filex-data:
+  postgres-data:
+  redis-data:
+  onlyoffice-data:
+  minio-data:
+  caddy-data:
+  caddy-config:

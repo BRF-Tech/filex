@@ -1,0 +1,63 @@
+{
+  "name": "@brftech/filex-react",
+  "version": "0.1.56",
+  "description": "filex React adapter — wraps <filex-explorer> for React idiom (props + camelCase event handlers)",
+  "type": "module",
+  "main": "./dist/filex-react.cjs",
+  "module": "./dist/filex-react.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/filex-react.js",
+      "require": "./dist/filex-react.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "build:no-dts": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@brftech/filex": "workspace:*",
+    "@brftech/filex-core": "workspace:*",
+    "@lit/react": "^1.0.5"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.10",
+    "vite-plugin-dts": "^4.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "filex",
+    "file-manager",
+    "react",
+    "brftech"
+  ],
+  "author": "BRF Tech <hello@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brf-tech/filex.git",
+    "directory": "packages/react"
+  }
+}

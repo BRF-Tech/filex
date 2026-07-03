@@ -1,0 +1,24 @@
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+**/.vite
+
+# Backend artefacts.
+filex
+filex-test
+backend/embed/admin
+backend/embed/web
+!backend/embed/admin/.keep
+!backend/embed/web/.keep
+
+# Test reports.
+e2e/test-results
+e2e/playwright-report
+e2e/.playwright-mcp
+
+# Local dev.
+.idea
+.vscode
+*.log
+sweep-2026-05-09

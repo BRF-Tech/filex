@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------- */
+/* Base layer overrides                                             */
+/* ---------------------------------------------------------------- */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: theme('fontFamily.sans');
+  }
+
+  /* Hide native dialog backdrop noise; we paint our own. */
+  dialog::backdrop {
+    background: transparent;
+  }
+
+  /* Simple scrollbar styling — kept light. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: theme('colors.zinc.300');
+    border-radius: 9999px;
+  }
+  .dark *::-webkit-scrollbar-thumb {
+    background: theme('colors.zinc.700');
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.zinc.400');
+  }
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.zinc.600');
+  }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.brand.600');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Component shortcuts                                              */
+/* ---------------------------------------------------------------- */
+@layer components {
+  .card {
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-sm;
+  }
+
+  .card-header {
+    @apply px-4 py-3 border-b border-zinc-200 dark:border-zinc-800;
+  }
+
+  .card-body {
+    @apply p-4;
+  }
+
+  .input-base {
+    @apply block w-full rounded-md border border-zinc-300 dark:border-zinc-700
+           bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100
+           placeholder:text-zinc-400 dark:placeholder:text-zinc-500
+           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 focus:outline-none
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition-colors;
+  }
+
+  .label-base {
+    @apply block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1;
+  }
+
+  .help-text {
+    @apply text-xs text-zinc-500 dark:text-zinc-400 mt-1;
+  }
+
+  .error-text {
+    @apply text-xs text-rose-600 dark:text-rose-400 mt-1;
+  }
+
+  .divider {
+    @apply border-t border-zinc-200 dark:border-zinc-800;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium
+           text-zinc-600 dark:text-zinc-400
+           hover:bg-zinc-100 hover:text-zinc-900
+           dark:hover:bg-zinc-800 dark:hover:text-zinc-100
+           transition-colors;
+  }
+
+  .nav-link-active {
+    @apply bg-brand-50 text-brand-700 hover:bg-brand-100 hover:text-brand-800
+           dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20 dark:hover:text-brand-200;
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Utility extensions                                               */
+/* ---------------------------------------------------------------- */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+}

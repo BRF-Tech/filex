@@ -1,0 +1,187 @@
+# filex — self-hosted file manager stack.
+#
+# Profiles let you mix-and-match optional services. Defaults to the slim
+# filex image only, with SQLite + local storage. Bring up extras as needed:
+#
+#   docker compose up                                            # filex slim only
+#   docker compose --profile full up                             # filex + thumbnail tools
+#   docker compose --profile onlyoffice up                       # filex + OnlyOffice editor
+#   docker compose --profile postgres --profile minio up         # full self-hosted stack
+#   docker compose --profile full --profile onlyoffice --profile postgres up
+#
+# Copy `.env.example` -> `.env` and edit before going to prod.
+
+services:
+  # ---------------------------------------------------------------------
+  # filex (slim) — default
+  # ---------------------------------------------------------------------
+  filex:
+    image: ${FILEX_IMAGE:-ghcr.io/brf-tech/filex:latest}
+    container_name: filex
+    restart: unless-stopped
+    ports:
+      - "${FILEX_PORT:-5212}:5212"
+    volumes:
+      - ./data:/data
+      - ./storage-local:/var/lib/filex/local-storage
+    environment:
+      FILEX_PUBLIC_URL: ${FILEX_PUBLIC_URL:-http://localhost:5212}
+      FILEX_LISTEN: 0.0.0.0:5212
+
+      # --- Auth ---
+      FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
+      FILEX_OIDC_ISSUER: ${FILEX_OIDC_ISSUER:-}
+      FILEX_OIDC_CLIENT_ID: ${FILEX_OIDC_CLIENT_ID:-}
+      FILEX_OIDC_CLIENT_SECRET: ${FILEX_OIDC_CLIENT_SECRET:-}
+      FILEX_OIDC_REDIRECT_URL: ${FILEX_OIDC_REDIRECT_URL:-}
+
+      # --- DB ---
+      FILEX_DB_DRIVER: ${FILEX_DB_DRIVER:-sqlite}
+      FILEX_DB_DSN: ${FILEX_DB_DSN:-/data/filex.db}
+
+      # --- Storage defaults ---
+      FILEX_DEFAULT_STORAGE_DRIVER: ${FILEX_DEFAULT_STORAGE_DRIVER:-local}
+
+      # --- Plug & play services (URL = enabled) ---
+      FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
+      FILEX_ONLYOFFICE_JWT: ${FILEX_ONLYOFFICE_JWT:-}
+      FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
+
+      # --- Thumbs ---
+      FILEX_THUMBS_ENABLED: ${FILEX_THUMBS_ENABLED:-false}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5212/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - filex-net
+
+  # ---------------------------------------------------------------------
+  # filex (full) — alternative with thumbnail tools (~250 MB image)
+  # Activate with `--profile full` and stop the `filex` service first
+  # (or change the published port via FILEX_PORT in .env).
+  # ---------------------------------------------------------------------
+  filex-full:
+    profiles: ["full"]
+    image: ${FILEX_FULL_IMAGE:-ghcr.io/brf-tech/filex:full}
+    container_name: filex-full
+    restart: unless-stopped
+    ports:
+      - "${FILEX_PORT:-5212}:5212"
+    volumes:
+      - ./data:/data
+      - ./storage-local:/var/lib/filex/local-storage
+    environment:
+      FILEX_PUBLIC_URL: ${FILEX_PUBLIC_URL:-http://localhost:5212}
+      FILEX_LISTEN: 0.0.0.0:5212
+      FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
+      FILEX_DB_DRIVER: ${FILEX_DB_DRIVER:-sqlite}
+      FILEX_DB_DSN: ${FILEX_DB_DSN:-/data/filex.db}
+      FILEX_THUMBS_ENABLED: "true"
+      FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
+      FILEX_ONLYOFFICE_JWT: ${FILEX_ONLYOFFICE_JWT:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5212/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - filex-net
+
+  # ---------------------------------------------------------------------
+  # OnlyOffice Document Server (profile: onlyoffice)
+  # Required only if you want office-doc editing in the file manager.
+  # ---------------------------------------------------------------------
+  onlyoffice:
+    profiles: ["onlyoffice"]
+    image: onlyoffice/documentserver:latest
+    container_name: filex-onlyoffice
+    restart: unless-stopped
+    ports:
+      - "${ONLYOFFICE_PORT:-8099}:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      JWT_HEADER: AuthorizationJwt
+      USE_UNAUTHORIZED_STORAGE: "false"
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-logs:/var/log/onlyoffice
+      - onlyoffice-cache:/var/lib/onlyoffice
+      - onlyoffice-fonts:/usr/share/fonts/truetype/custom
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthcheck"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - filex-net
+
+  # ---------------------------------------------------------------------
+  # PostgreSQL (profile: postgres) — instead of bundled SQLite
+  # Set FILEX_DB_DRIVER=postgres + FILEX_DB_DSN in .env.
+  # ---------------------------------------------------------------------
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    container_name: filex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-filex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-filex}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-filex}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - filex-net
+
+  # ---------------------------------------------------------------------
+  # MinIO (profile: minio) — local S3-compatible blob store
+  # Use as a storage backend for the `s3` driver, or for testing.
+  # ---------------------------------------------------------------------
+  minio:
+    profiles: ["minio"]
+    image: minio/minio:latest
+    container_name: filex-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - filex-net
+
+volumes:
+  onlyoffice-data:
+  onlyoffice-logs:
+  onlyoffice-cache:
+  onlyoffice-fonts:
+  postgres-data:
+  minio-data:
+
+networks:
+  filex-net:
+    driver: bridge

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<filex-manifest version="1.0" generated="2026-05-18T13:30:00Z">
+  <storages>
+    <storage name="local" driver="local" enabled="true">
+      <config>
+        <root>/var/lib/filex/storage</root>
+        <sync-mode>fsnotify</sync-mode>
+      </config>
+      <stats files="12480" total-bytes="26000000000"/>
+    </storage>
+    <storage name="s3-prod" driver="s3" enabled="true">
+      <config>
+        <bucket>example-data</bucket>
+        <region>eu-central-1</region>
+      </config>
+      <stats files="9120" total-bytes="164000000000"/>
+    </storage>
+  </storages>
+  <thumbs enabled="true">
+    <format>image</format>
+    <format>video</format>
+    <format>audio</format>
+    <format>pdf</format>
+    <format>office</format>
+  </thumbs>
+  <users>
+    <user id="1" email="ada@example.com" role="admin"/>
+    <user id="2" email="gokcil@example.com" role="admin"/>
+    <user id="3" email="demo@demo.com" role="demo"/>
+  </users>
+</filex-manifest>

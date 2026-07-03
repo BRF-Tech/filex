@@ -1,0 +1,1224 @@
+/* FileExplorer — unscoped stylesheet (lib consumers apply once). */
+
+.fe {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  height: 100%;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: var(--fe-font);
+  font-size: 14px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  overflow: hidden;
+  outline: none;
+}
+
+.fe * {
+  box-sizing: border-box;
+}
+
+.fe__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  background: var(--fe-bg);
+}
+
+/* Initial-load spinner (shown until the first listing arrives). */
+.fe__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 240px;
+  height: 100%;
+  color: var(--fe-text-muted);
+}
+.fe__spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--fe-text-muted) 30%, transparent);
+  border-top-color: var(--fe-primary);
+  animation: fe-spin 0.7s linear infinite;
+}
+.fe__loading-text {
+  margin: 0;
+  font-size: 13px;
+}
+@keyframes fe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fe__file-input {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+/* ---------- Buttons ---------- */
+
+.fe-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--fe-bg-elev);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  color: var(--fe-text);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.fe-btn:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.fe-btn--primary {
+  background: var(--fe-primary);
+  border-color: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+}
+.fe-btn--primary:hover:not(:disabled) {
+  background: var(--fe-primary-hover);
+  border-color: var(--fe-primary-hover);
+}
+.fe-btn--danger {
+  background: var(--fe-danger);
+  border-color: var(--fe-danger);
+  color: var(--fe-text-on-primary);
+}
+.fe-btn--danger:hover:not(:disabled) {
+  background: var(--fe-danger-hover);
+  border-color: var(--fe-danger-hover);
+}
+.fe-btn--icon-only {
+  padding: 6px 8px;
+}
+.fe-btn.is-active {
+  background: var(--fe-bg-selected);
+  border-color: var(--fe-primary);
+}
+.fe-btn__label {
+  line-height: 1;
+}
+
+.fe-icon {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+/* ---------- Toolbar ---------- */
+
+.fe-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--fe-bg-elev);
+  border-bottom: 1px solid var(--fe-border);
+  flex-wrap: wrap;
+}
+.fe-toolbar__primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fe-toolbar__spacer {
+  flex: 1 1 auto;
+}
+/* Search + Yükle + Yenile pinned together so the cluster doesn't get
+ * orphaned by the wrap point on narrow widths. */
+.fe-toolbar__search-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  padding: 2px;
+}
+.fe-toolbar__search-group .fe-search__input {
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+}
+.fe-toolbar__search-group .fe-btn {
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+}
+.fe-toolbar__search-group .fe-btn:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-toolbar__view {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+}
+.fe-toolbar__view .fe-btn {
+  border: 0;
+  background: transparent;
+}
+.fe-toolbar__view .fe-btn.is-active {
+  background: var(--fe-bg-selected);
+}
+
+/* ---------- Search ---------- */
+
+.fe-search {
+  position: relative;
+}
+.fe-search__input {
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--fe-text);
+  min-width: 200px;
+}
+.fe-search__input:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+
+/* ---------- Breadcrumb ---------- */
+
+.fe-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  background: var(--fe-bg);
+  border-bottom: 1px solid var(--fe-border);
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+.fe-breadcrumb__crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 2px 6px;
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+  font: inherit;
+}
+.fe-breadcrumb__crumb:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-breadcrumb__crumb.is-last {
+  color: var(--fe-text);
+  font-weight: 600;
+}
+.fe-breadcrumb__sep {
+  color: var(--fe-text-muted);
+}
+/* Edit pencil button — V1.5: "yolu yazıp gideyim" */
+.fe-breadcrumb__edit {
+  margin-left: auto;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.fe-breadcrumb__edit:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+  border-color: var(--fe-border);
+}
+/* Inline path input — replaces the crumbs while editing */
+.fe-breadcrumb__input {
+  flex: 1;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  border: 1px solid var(--fe-accent, #2563eb);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--fe-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 13px;
+  outline: none;
+}
+
+/* ---------- List view ---------- */
+
+.fe-list {
+  display: flex;
+  flex-direction: column;
+}
+.fe-list__head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 120px 180px;
+  gap: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  color: var(--fe-text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--fe-bg-elev);
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-list__body {
+  display: flex;
+  flex-direction: column;
+}
+.fe-list__row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 120px 180px;
+  gap: 8px;
+  padding: 8px 12px;
+  align-items: center;
+  cursor: pointer;
+  border-bottom: 1px solid var(--fe-border);
+  transition: background 0.08s;
+  user-select: none;
+}
+.fe-list__row:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-list__row.is-selected {
+  background: var(--fe-bg-selected);
+}
+.fe-list__row.is-trash {
+  opacity: 0.7;
+}
+.fe-list__row.is-clipped,
+.fe-grid__card.is-clipped {
+  opacity: 0.45;
+  font-style: italic;
+}
+.fe-list__row:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-list__col--star {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.fe-list__row:hover .fe-list__col--star,
+.fe-list__row:focus-within .fe-list__col--star,
+.fe-list__col--star:has(.is-starred) {
+  opacity: 1;
+}
+.fe-list__col--star .filex-star-btn.is-starred {
+  color: var(--fe-warning, #f59e0b);
+}
+.fe-list__col--name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-list__icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+.fe-list__name-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.fe-list__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-list__parent {
+  font-size: 11px;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+.fe-list__col--size,
+.fe-list__col--mod {
+  color: var(--fe-text-muted);
+  font-size: 13px;
+}
+.fe-list__empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--fe-text-muted);
+}
+
+/* ---------- Grid view ---------- */
+
+.fe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--fe-gap);
+  padding: var(--fe-gap);
+}
+.fe-grid__card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  cursor: pointer;
+  transition: background 0.08s, border-color 0.08s;
+  user-select: none;
+}
+.fe-grid__card:hover {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-grid__card.is-selected {
+  background: var(--fe-bg-selected);
+  border-color: var(--fe-primary);
+}
+.fe-grid__card.is-trash {
+  opacity: 0.7;
+}
+.fe-grid__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  background: var(--fe-bg);
+  border-radius: var(--fe-radius-sm);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.fe-grid__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.fe-grid__icon {
+  font-size: 32px;
+}
+.fe-grid__label {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-grid__meta {
+  font-size: 11px;
+  color: var(--fe-text-muted);
+  margin-top: 2px;
+}
+.fe-grid__parent {
+  font-size: 11px;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-style: italic;
+}
+.fe-grid__empty {
+  grid-column: 1 / -1;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--fe-text-muted);
+}
+
+/* ---------- Drag overlay ---------- */
+
+.fe__dragover {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(59, 130, 246, 0.12);
+  border: 3px dashed var(--fe-primary);
+  pointer-events: none;
+}
+.fe__dragover-card {
+  background: var(--fe-bg);
+  border-radius: var(--fe-radius-lg);
+  padding: 24px 40px;
+  box-shadow: var(--fe-shadow);
+  text-align: center;
+}
+.fe__dragover-card .fe-icon {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* ---------- Upload progress ---------- */
+
+.fe-upload {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: min(360px, calc(100% - 32px));
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  box-shadow: var(--fe-shadow);
+  z-index: 40;
+  max-height: 40vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fe-upload__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--fe-bg-elev);
+  border-bottom: 1px solid var(--fe-border);
+  font-size: 13px;
+}
+.fe-upload__count {
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.fe-upload__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow: auto;
+}
+.fe-upload__item {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-upload__item:last-child {
+  border-bottom: 0;
+}
+.fe-upload__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.fe-upload__bar {
+  background: var(--fe-bg-elev);
+  border-radius: 99px;
+  height: 6px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.fe-upload__bar-fill {
+  background: var(--fe-primary);
+  height: 100%;
+  transition: width 0.2s;
+}
+.fe-upload__item.is-error .fe-upload__bar-fill,
+.fe-upload__item.is-aborted .fe-upload__bar-fill {
+  background: var(--fe-danger);
+}
+.fe-upload__item.is-done .fe-upload__bar-fill {
+  background: #16a34a;
+}
+.fe-upload__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fe-text-muted);
+}
+.fe-upload__cancel {
+  background: transparent;
+  border: 0;
+  color: var(--fe-primary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.fe-upload-slide-enter-active,
+.fe-upload-slide-leave-active {
+  transition: transform 0.2s, opacity 0.2s;
+}
+.fe-upload-slide-enter-from,
+.fe-upload-slide-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* ---------- Pending ops tray ---------- */
+
+/* Sits to the left of UploadProgress (which uses right: 16px) so the
+ * two stacks don't overlap when both are active. */
+.fe-ops {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  width: min(320px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 40;
+}
+.fe-ops__item {
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  box-shadow: var(--fe-shadow);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.fe-ops__item.is-done {
+  border-color: #16a34a;
+}
+.fe-ops__item.is-error {
+  border-color: var(--fe-danger);
+}
+.fe-ops__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.fe-ops__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.fe-ops__dismiss {
+  background: transparent;
+  border: 0;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.fe-ops__bar {
+  background: var(--fe-bg-elev);
+  border-radius: 99px;
+  height: 6px;
+  overflow: hidden;
+}
+.fe-ops__bar-fill {
+  background: var(--fe-primary);
+  height: 100%;
+  transition: width 0.25s;
+}
+.fe-ops__item.is-done .fe-ops__bar-fill {
+  background: #16a34a;
+}
+.fe-ops__item.is-error .fe-ops__bar-fill {
+  background: var(--fe-danger);
+}
+.fe-ops__error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--fe-danger);
+}
+.fe-ops-slide-enter-active,
+.fe-ops-slide-leave-active {
+  transition: transform 0.2s, opacity 0.2s;
+}
+.fe-ops-slide-enter-from,
+.fe-ops-slide-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* ---------- Context menu ---------- */
+
+.fe-ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  /* Make the backdrop itself the variable scope. After teleporting under
+   * <body> we lose the `.fe` parent, so without explicit `color` here
+   * the menu inherits Filament's body color (white on dark) and the
+   * labels disappear against `--fe-bg` (white). V1.1 bug list update. */
+  color: var(--fe-text);
+  font-family: var(--fe-font);
+  font-size: 14px;
+}
+.fe-ctx {
+  position: absolute;
+  min-width: 180px;
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  box-shadow: var(--fe-shadow);
+  padding: 4px;
+  z-index: 90;
+  color: var(--fe-text);
+}
+.fe-ctx__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--fe-radius-sm);
+  border: 0;
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.fe-ctx__item:hover:not(.is-disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-ctx__item.is-danger {
+  color: var(--fe-danger);
+}
+.fe-ctx__item.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fe-ctx__icon {
+  width: 1.2em;
+  text-align: center;
+}
+.fe-ctx__sep {
+  height: 1px;
+  background: var(--fe-border);
+  margin: 4px 0;
+}
+.fe-ctx-enter-active,
+.fe-ctx-leave-active {
+  transition: opacity 0.1s;
+}
+.fe-ctx-enter-from,
+.fe-ctx-leave-to {
+  opacity: 0;
+}
+
+/* ---------- Modal ---------- */
+
+.fe-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 19, 27, 0.48);
+  padding: 16px;
+}
+.fe-modal__card {
+  background: var(--fe-bg);
+  border-radius: var(--fe-radius);
+  box-shadow: var(--fe-shadow);
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fe-modal__card--sm { max-width: 420px; }
+.fe-modal__card--md { max-width: 560px; }
+.fe-modal__card--lg { max-width: 800px; }
+.fe-modal__card--xl { max-width: 1080px; height: calc(100vh - 64px); }
+
+/* Recently-opened tray — anchored modal that drops down from the
+ * toolbar. Re-uses fe-modal__backdrop, just pins the panel to the top. */
+.fe-recents__backdrop {
+  align-items: flex-start !important;
+  padding-top: 60px;
+}
+.fe-recents__panel {
+  background: var(--fe-bg, #fff);
+  border-radius: var(--fe-radius, 8px);
+  box-shadow: var(--fe-shadow, 0 6px 24px rgba(0, 0, 0, 0.18));
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fe-recents__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--fe-border, #e2e6ed);
+}
+.fe-recents__close {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--fe-text-muted, #6b7280);
+  padding: 0 4px;
+}
+.fe-recents__close:hover {
+  color: var(--fe-text, #111);
+}
+
+/* Markdown split editor — textarea (raw) | rendered HTML preview.
+ * The chromeless modal's full viewport makes the side-by-side feasible;
+ * on narrower screens it collapses to a vertical stack. */
+.fe-preview__md-split {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+}
+.fe-preview__md-split-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--fe-bg-elev, #f6f7f9);
+  border-bottom: 1px solid var(--fe-border, #e2e6ed);
+  flex: 0 0 auto;
+}
+.fe-preview__md-split-label {
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fe-text-muted, #6b7280);
+}
+.fe-preview__md-split-error {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--fe-danger, #dc2626);
+  text-align: center;
+}
+.fe-preview__md-split-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.fe-preview__md-split-input {
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 16px 20px;
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--fe-bg, #fff);
+  color: var(--fe-text, #111);
+  border-right: 1px solid var(--fe-border, #e2e6ed);
+  overflow: auto;
+  tab-size: 2;
+}
+.fe-preview__md-split-output {
+  overflow: auto;
+  padding: 16px 24px;
+  background: var(--fe-bg, #fff);
+}
+/* The split-output element carries BOTH `fe-preview__md-split-output` and
+ * `fe-preview__md`. The shared `.fe-preview__md` rule caps height at 70vh
+ * (right for the standalone modal preview, wrong here) and — being later in
+ * source order at equal specificity — wins over a plain
+ * `.fe-preview__md-split-output { max-height: none }`. The compound selector
+ * below raises specificity so the cap is dropped regardless of order, letting
+ * the rendered pane fill the grid row (tall docs scroll inside it) instead of
+ * leaving a dead gap below the content. */
+.fe-preview__md-split-output.fe-preview__md {
+  max-height: none;
+  min-height: 0;
+  height: 100%;
+}
+@media (max-width: 900px) {
+  .fe-preview__md-split-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .fe-preview__md-split-input {
+    border-right: 0;
+    border-bottom: 1px solid var(--fe-border, #e2e6ed);
+  }
+}
+
+/* Chromeless — used by the standalone /files/edit route. Drops the
+ * dialog frame entirely so the viewport belongs to the viewer. */
+.fe-modal__backdrop--chromeless {
+  background: transparent;
+  padding: 0;
+}
+.fe-modal__card--chromeless {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  box-shadow: none;
+}
+.fe-modal__card--chromeless .fe-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+}
+.fe-modal__card--chromeless .fe-preview {
+  /* Override center-alignment so split editors + iframes fill the
+   * full chromeless viewport instead of floating in the middle. */
+  align-items: stretch;
+  justify-content: stretch;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.fe-modal__card--chromeless .fe-preview > * {
+  width: 100%;
+  height: 100%;
+}
+
+.fe-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-modal__title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+.fe-modal__close {
+  background: transparent;
+  border: 0;
+  color: var(--fe-text-muted);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.fe-modal__body {
+  padding: 16px;
+  overflow: auto;
+  flex: 1 1 auto;
+}
+.fe-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+}
+
+.fe-modal-enter-active,
+.fe-modal-leave-active {
+  transition: opacity 0.15s;
+}
+.fe-modal-enter-from,
+.fe-modal-leave-to {
+  opacity: 0;
+}
+
+/* ---------- Form ---------- */
+
+.fe-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  font: inherit;
+  color: var(--fe-text);
+}
+.fe-input:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-input--mono {
+  font-family: var(--fe-font-mono);
+  letter-spacing: 0.1em;
+}
+.fe-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fe-form__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fe-form__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+.fe-form__error {
+  color: var(--fe-danger);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+/* Share result */
+.fe-share-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fe-share-result__row label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fe-text-muted);
+  margin-bottom: 4px;
+}
+.fe-share-result__copy {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- Preview ---------- */
+
+.fe-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 50vh;
+  background: var(--fe-bg-elev);
+}
+.fe-preview__image {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+.fe-preview__video,
+.fe-preview__audio {
+  max-width: 100%;
+  max-height: 70vh;
+}
+.fe-preview__iframe {
+  width: 100%;
+  height: 70vh;
+  border: 0;
+  background: #fff;
+}
+.fe-preview__office {
+  width: 100%;
+  height: 78vh;
+  background: var(--fe-bg);
+}
+/* CodeMirror 6 editor surface — Burak (V1.5 follow-up #4): "monaco
+   editör çalışmıyor" → CodeMirror replacement. */
+.fe-preview__code-wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 78vh;
+}
+.fe-preview__code-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--fe-bg-hover, #f3f4f6);
+  border-bottom: 1px solid var(--fe-border, #e5e7eb);
+  font-size: 12px;
+}
+.fe-preview__code-lang {
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  color: var(--fe-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fe-preview__code-toolbar > .fe-btn {
+  margin-left: auto;
+}
+.fe-preview__code-status {
+  font-size: 12px;
+  font-weight: 500;
+}
+.fe-preview__code-status--ok { color: #059669; }
+.fe-preview__code-status--err { color: #dc2626; cursor: help; }
+.fe-preview__code-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.fe-preview__code-editor .cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+.fe-preview__code-editor .cm-scroller {
+  font-family: var(--fe-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+.fe-preview__fallback {
+  text-align: center;
+  color: var(--fe-text-muted);
+  padding: 40px 20px;
+}
+.fe-preview__fallback-icon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 12px;
+}
+.fe-preview__pre {
+  margin: 0;
+  padding: 16px;
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: var(--fe-font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.fe-preview__code {
+  white-space: pre;
+  word-wrap: normal;
+}
+/* Minimal highlight.js theme — host can override by importing one of
+ * highlight.js's stylesheets ahead of file-explorer.css. We ship
+ * something usable so the unstyled colour-class spans don't render as
+ * raw text in the wild. */
+.hljs { background: var(--fe-bg); color: var(--fe-text); }
+.hljs-comment, .hljs-quote { color: var(--fe-text-muted); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-section,
+.hljs-meta { color: #c678dd; }
+.hljs-string, .hljs-attr, .hljs-symbol, .hljs-bullet, .hljs-addition,
+.hljs-link { color: #98c379; }
+.hljs-number, .hljs-literal, .hljs-deletion { color: #d19a66; }
+.hljs-title, .hljs-name, .hljs-selector-id, .hljs-selector-class,
+.hljs-template-tag, .hljs-template-variable { color: #61aeee; }
+.hljs-type, .hljs-tag { color: #e06c75; }
+.hljs-variable, .hljs-attribute { color: #d19a66; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
+.fe-preview__md {
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 24px 32px;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  line-height: 1.6;
+  font-size: 15px;
+}
+.fe-preview__md h1,
+.fe-preview__md h2,
+.fe-preview__md h3,
+.fe-preview__md h4 {
+  margin: 1.2em 0 0.6em;
+  font-weight: 600;
+}
+.fe-preview__md h1 { font-size: 1.8em; border-bottom: 1px solid var(--fe-border); padding-bottom: 0.3em; }
+.fe-preview__md h2 { font-size: 1.4em; border-bottom: 1px solid var(--fe-border); padding-bottom: 0.3em; }
+.fe-preview__md h3 { font-size: 1.2em; }
+.fe-preview__md p { margin: 0.8em 0; }
+.fe-preview__md a { color: var(--fe-primary); text-decoration: underline; }
+.fe-preview__md code {
+  font-family: var(--fe-font-mono);
+  background: var(--fe-bg-elev);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+.fe-preview__md pre {
+  background: var(--fe-bg-elev);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  padding: 12px 16px;
+  overflow: auto;
+  font-size: 0.9em;
+}
+.fe-preview__md pre code { background: transparent; padding: 0; }
+.fe-preview__md ul,
+.fe-preview__md ol { padding-left: 2em; margin: 0.8em 0; }
+.fe-preview__md li { margin: 0.3em 0; }
+.fe-preview__md blockquote {
+  border-left: 3px solid var(--fe-border-strong);
+  padding: 0 1em;
+  color: var(--fe-text-muted);
+  margin: 0.8em 0;
+}
+.fe-preview__md table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+.fe-preview__md th,
+.fe-preview__md td {
+  border: 1px solid var(--fe-border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.fe-preview__md th { background: var(--fe-bg-elev); }
+.fe-preview__md img { max-width: 100%; }
+
+/* ---------- Toast ---------- */
+
+.fe-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--fe-text);
+  color: var(--fe-bg);
+  padding: 8px 14px;
+  border-radius: var(--fe-radius);
+  font-size: 13px;
+  box-shadow: var(--fe-shadow-sm);
+  z-index: 95;
+}
+.fe-toast-enter-active,
+.fe-toast-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+.fe-toast-enter-from,
+.fe-toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 10px);
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 640px) {
+  .fe-list__head,
+  .fe-list__row {
+    grid-template-columns: 28px minmax(0, 1fr) 90px;
+  }
+  .fe-list__col--mod {
+    display: none;
+  }
+  .fe-toolbar {
+    padding: 8px;
+  }
+  .fe-search__input {
+    min-width: 120px;
+  }
+}

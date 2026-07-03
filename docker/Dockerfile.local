@@ -1,0 +1,79 @@
+# Dockerfile.local — uses pre-built dist artifacts from `pnpm -r build`
+# Skips the in-image frontend build (which needs --shamefully-hoist tweaks
+# in the alpine pnpm cache that we don't want to upstream into the
+# canonical Dockerfile). Used for local hot-fix builds only.
+#
+# Build (from repo root):
+#   pnpm -r --filter='./packages/*' build
+#   pnpm --filter='./web' build
+#   docker build -f docker/Dockerfile.local -t ghcr.io/brf-tech/filex:vX.Y.Z .
+
+# ---------------------------------------------------------------------------
+# Stage 1: Stage embed assets straight from the host build tree
+# ---------------------------------------------------------------------------
+FROM alpine:3.20 AS embed-prep
+WORKDIR /tmp/embed
+COPY web/dist ./admin
+COPY packages/webcomponent/dist ./web
+
+# ---------------------------------------------------------------------------
+# Stage 2: Go binary
+# ---------------------------------------------------------------------------
+FROM golang:1.25-alpine AS backend-build
+RUN apk --no-cache add git ca-certificates
+WORKDIR /src
+
+COPY backend/go.mod ./
+COPY backend/go.sum* ./
+RUN go mod download || go mod tidy
+
+COPY backend/ ./
+COPY --from=embed-prep /tmp/embed/admin ./embed/admin
+COPY --from=embed-prep /tmp/embed/web   ./embed/web
+
+RUN go mod tidy
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -o /out/filex \
+    ./cmd/filex
+
+# ---------------------------------------------------------------------------
+# Stage 3: Runtime — full thumbnail toolchain (matches docker/Dockerfile)
+# ---------------------------------------------------------------------------
+FROM alpine:3.20
+
+RUN apk --no-cache add \
+        ca-certificates \
+        tzdata \
+        su-exec \
+        ffmpeg \
+        ghostscript \
+        poppler-utils \
+        libreoffice \
+        openjdk17-jre-headless \
+        rsvg-convert \
+        ttf-liberation \
+        ttf-dejavu \
+        font-noto \
+        font-noto-cjk \
+    && addgroup -S filex && adduser -S -G filex filex
+
+COPY --from=backend-build /out/filex /usr/local/bin/filex
+
+EXPOSE 5212
+VOLUME ["/data"]
+
+ENV FILEX_DATA_DIR=/data \
+    FILEX_LISTEN=0.0.0.0:5212 \
+    FILEX_THUMBS_ENABLED=true
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:5212/healthz || exit 1
+
+ENTRYPOINT ["/usr/local/bin/filex"]
+CMD ["serve"]

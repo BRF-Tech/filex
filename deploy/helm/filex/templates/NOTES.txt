@@ -1,0 +1,31 @@
+filex is installing.
+
+1. Wait for the pod to become ready:
+   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "filex.fullname" . }}
+
+2. Grab the first-run admin credentials from the logs (shown once):
+   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "filex.fullname" . }} | grep -A3 "First run"
+
+{{- if .Values.ingress.enabled }}
+
+3. Open the admin UI:
+   https://{{ .Values.ingress.host }}/admin
+{{- else }}
+
+3. No Ingress enabled — port-forward to reach it:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "filex.fullname" . }} 5212:{{ .Values.service.port }}
+   open http://localhost:5212/admin
+{{- end }}
+
+Config in use:
+  DB:    {{ if .Values.postgresql.enabled }}bundled PostgreSQL{{ else if ne .Values.database.driver "sqlite" }}external {{ .Values.database.driver }}{{ else }}SQLite (on the PVC){{ end }}
+  Queue: {{ if .Values.redis.enabled }}bundled Redis{{ else }}{{ .Values.queue.driver }}{{ end }}
+  OnlyOffice: {{ if .Values.onlyoffice.url }}{{ .Values.onlyoffice.url }}{{ else }}disabled (set onlyoffice.url to enable){{ end }}
+
+Next: add a storage in the admin UI (Storages -> Add) — see docs/STORAGE.md.
+
+{{- if and .Values.postgresql.enabled (eq .Values.postgresql.password "change-me-postgres") }}
+
+WARNING: postgresql.password is the default. Set a real one:
+  --set postgresql.password=$(openssl rand -hex 24)
+{{- end }}
