@@ -326,9 +326,6 @@ const showConvert = ref(false);
 const convertTarget = ref<FileNode | null>(null);
 const showPerm = ref(false);
 const permTarget = ref<FileNode | null>(null);
-// Which tab the Share/Permissions popup opens on — the "Dosya İste" action
-// deep-links to the file-drop tab; the "Paylaş / İzinler" action leaves it null.
-const permInitialTab = ref<'perms' | 'share' | 'drop' | undefined>(undefined);
 
 // RBAC helpers. '' means ACL is not enforced on this storage → full access
 // (the pre-RBAC default). Otherwise 'editor'/'owner' may write; only 'owner'
@@ -988,17 +985,16 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   const w = permCanEdit(p); // may write here
   // Unified "Paylaş / İzinler" popup: public share link (editor+) + per-user
   // permissions (owner-only, decided inside the modal).
+  // Unified "Paylaş / İzinler" popup carries the public share link, per-user
+  // permissions AND the folder-only "Dosya İste" (file-drop) tab — the user
+  // picks the action from inside the modal, so there's no separate button.
   const accessLabel = locale.value === 'en' ? 'Share / Permissions' : 'Paylaş / İzinler';
-  // "Dosya İste" (file-drop / public upload link) — folders only.
-  const isDirSel = single && sel[0]?.type === 'dir';
-  const dropLabel = locale.value === 'en' ? 'Request files' : 'Dosya İste';
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
     { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w, disabled: !isFile },
     { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w },
-    { key: 'drop', label: dropLabel, icon: '📥', hidden: !isDirSel || !w },
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '', hidden: !w },
     { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single || !w, disabled: !single },
@@ -1072,14 +1068,6 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'access':
       if (targets[0]) {
         permTarget.value = targets[0];
-        permInitialTab.value = undefined;
-        showPerm.value = true;
-      }
-      break;
-    case 'drop':
-      if (targets[0]) {
-        permTarget.value = targets[0];
-        permInitialTab.value = 'drop';
         showPerm.value = true;
       }
       break;
@@ -1805,7 +1793,6 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :is-dir="permTarget.type === 'dir'"
       :size="typeof permTarget.size === 'number' ? permTarget.size : undefined"
       :locale="locale === 'en' ? 'en' : 'tr'"
-      :initial-tab="permInitialTab"
       @close="showPerm = false"
     />
 

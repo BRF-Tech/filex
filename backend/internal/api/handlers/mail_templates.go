@@ -108,13 +108,22 @@ func shareMailText(locale, siteName, name string, isDir bool, size int64, link, 
 
 // dropInviteMailText builds the subject + body for a public file-drop
 // (upload) link invite — the inverse of shareMailText. It asks the recipient
-// to UPLOAD files into a folder rather than download one.
-func dropInviteMailText(locale, siteName, folder, link, pin string, expiresDays int) (string, string) {
+// to UPLOAD files into a named folder, and spells out the configured limits
+// (max files, size per file, allowed types, validity) so the sender's terms
+// are clear up front. maxFiles/maxFileSizeMB <= 0 fall back to the drop
+// defaults; an empty allowedExt means all types.
+func dropInviteMailText(locale, siteName, folder, link, pin string, expiresDays, maxFiles, maxFileSizeMB int, allowedExt []string) (string, string) {
 	if folder == "" {
 		folder = "/"
 	}
+	if maxFiles <= 0 {
+		maxFiles = dropDefaultMaxFiles
+	}
+	if maxFileSizeMB <= 0 {
+		maxFileSizeMB = dropDefaultMaxFileSizeMB
+	}
 	if mailLangEN(locale) {
-		subject := "You've been asked to send files"
+		subject := "You've been asked to add files to " + folder
 		var b strings.Builder
 		b.WriteString("Hello,\n\n")
 		if siteName != "" {
@@ -123,6 +132,12 @@ func dropInviteMailText(locale, siteName, folder, link, pin string, expiresDays 
 			b.WriteString("You've been invited to upload files.\n\n")
 		}
 		b.WriteString("Folder: " + folder + "\n")
+		b.WriteString(fmt.Sprintf("Limit: up to %d file(s), %d MB per file.\n", maxFiles, maxFileSizeMB))
+		if len(allowedExt) > 0 {
+			b.WriteString("Allowed types: " + strings.Join(allowedExt, ", ") + "\n")
+		} else {
+			b.WriteString("Allowed types: all\n")
+		}
 		b.WriteString("\nUpload your files here:\n" + link + "\n")
 		if pin != "" {
 			b.WriteString("\nPIN (access code): " + pin + "\n")
@@ -134,7 +149,7 @@ func dropInviteMailText(locale, siteName, folder, link, pin string, expiresDays 
 		}
 		return subject, b.String()
 	}
-	subject := "Sizden dosya göndermeniz istendi"
+	subject := folder + " adlı klasöre dosya eklemeniz istendi"
 	var b strings.Builder
 	b.WriteString("Merhaba,\n\n")
 	if siteName != "" {
@@ -143,6 +158,12 @@ func dropInviteMailText(locale, siteName, folder, link, pin string, expiresDays 
 		b.WriteString("Dosya yüklemeniz istendi.\n\n")
 	}
 	b.WriteString("Klasör: " + folder + "\n")
+	b.WriteString(fmt.Sprintf("Sınır: en fazla %d dosya, dosya başına %d MB.\n", maxFiles, maxFileSizeMB))
+	if len(allowedExt) > 0 {
+		b.WriteString("İzinli türler: " + strings.Join(allowedExt, ", ") + "\n")
+	} else {
+		b.WriteString("İzinli türler: tüm türler\n")
+	}
 	b.WriteString("\nDosyalarınızı buradan yükleyebilirsiniz:\n" + link + "\n")
 	if pin != "" {
 		b.WriteString("\nPIN (erişim kodu): " + pin + "\n")

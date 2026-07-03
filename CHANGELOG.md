@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.52 below.)
+(Nothing yet — see v0.1.53 below.)
+
+## [0.1.53] - 2026-07-03
+
+### Changed
+
+- **File-drop UX polish** (follow-up to v0.1.52):
+  - The public upload page now sets the native file picker's `accept` filter
+    to the link's allowed extensions when configured, so pickers only offer
+    valid files.
+  - The upload-link invite email now spells out the configured limits
+    (max files, MB per file, allowed types) and its subject names the target
+    folder ("«Folder» — you've been asked to add files"). Limits are read back
+    from the drop link's own settings, so the email always matches.
+  - Copy buttons added next to the generated PIN in the Share and Request-files
+    tabs.
+  - "Request files" (Dosya İste) is no longer a separate context action — it
+    lives as a tab inside the unified "Share / Permissions" popup, so folders
+    expose share, per-user permissions and file-drop from one button.
 
 ## [0.1.52] - 2026-07-03
 

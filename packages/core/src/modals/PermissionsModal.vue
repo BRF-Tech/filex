@@ -14,7 +14,6 @@ const props = defineProps<{
   isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
   size?: number; // bytes, for the share-mail body (files only)
   locale?: 'tr' | 'en';
-  initialTab?: 'perms' | 'share' | 'drop'; // open straight to a tab ("Dosya İste" action → 'drop')
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -33,7 +32,7 @@ const pathParts = computed(() => {
 });
 
 type Tab = 'perms' | 'share' | 'drop';
-const tab = ref<Tab>(props.initialTab ?? 'perms');
+const tab = ref<Tab>('perms');
 const canManage = ref(false); // owner/admin → can see the permissions tab
 
 // ── permissions state ──
@@ -134,9 +133,8 @@ async function reload() {
     const st = (e as { status?: number }).status;
     if (st === 403) {
       canManage.value = false;
-      // Editor (not owner): no permissions tab. Keep an explicitly-requested
-      // tab (e.g. the "Dosya İste" action) else fall back to the link tab.
-      if (!props.initialTab) tab.value = 'share';
+      // Editor (not owner): no permissions tab → fall back to the link tab.
+      tab.value = 'share';
     } else {
       err.value = e instanceof Error ? e.message : String(e);
     }
@@ -553,7 +551,12 @@ function copy(text: string, tag = 'url') {
                   {{ copied === 'new' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
                 </button>
               </div>
-              <p v-if="shareResult.pin" class="fx-perm-pin">PIN: <code>{{ shareResult.pin }}</code></p>
+              <div v-if="shareResult.pin" class="fx-perm-pin">
+                <span>PIN: <code>{{ shareResult.pin }}</code></span>
+                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareResult.pin, 'sharepin')">
+                  {{ copied === 'sharepin' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+                </button>
+              </div>
 
               <!-- send by email (one or more, comma/space separated) -->
               <div class="fx-perm-mailrow">
@@ -637,7 +640,12 @@ function copy(text: string, tag = 'url') {
                   {{ copied === 'drop' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
                 </button>
               </div>
-              <p v-if="dropResult.pin" class="fx-perm-pin">PIN: <code>{{ dropResult.pin }}</code></p>
+              <div v-if="dropResult.pin" class="fx-perm-pin">
+                <span>PIN: <code>{{ dropResult.pin }}</code></span>
+                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(dropResult.pin, 'droppin')">
+                  {{ copied === 'droppin' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+                </button>
+              </div>
 
               <!-- email the upload link to one or more people -->
               <div class="fx-perm-mailrow">
@@ -781,7 +789,7 @@ function copy(text: string, tag = 'url') {
 .fx-perm-linkrow { display: flex; gap: 8px; align-items: center; }
 .fx-perm-link { color: var(--fe-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-decoration: none; }
 .fx-perm-link:hover { text-decoration: underline; }
-.fx-perm-pin { margin: 8px 0 0; font-size: 13px; color: var(--fe-text); }
+.fx-perm-pin { margin: 8px 0 0; font-size: 13px; color: var(--fe-text); display: flex; align-items: center; gap: 8px; }
 .fx-perm-pin code, .fx-perm-reveal code { font-family: var(--fe-font-mono, monospace); background: var(--fe-bg-hover); padding: 1px 6px; border-radius: 5px; }
 .fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
 .fx-perm-mailrow .fx-perm-input { flex: 1; }

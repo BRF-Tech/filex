@@ -104,6 +104,21 @@ func normalizeExts(in []string) []string {
 	return out
 }
 
+// dropTokenFromURL extracts the {token} from a /d/{token} link (strips any
+// query/fragment + trailing slash). Used by share-mail to look a drop link's
+// configured limits back up for the invite body.
+func dropTokenFromURL(link string) string {
+	s := strings.TrimSpace(link)
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimRight(s, "/")
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
 // extAllowed reports whether name's extension is in the (already-normalized)
 // allowlist. An empty allowlist allows everything.
 func extAllowed(name string, allow []string) bool {
@@ -578,6 +593,8 @@ if (CFG.askName) el('nameField').style.display = 'block';
 var limitBits = ['En fazla ' + CFG.maxFiles + ' dosya', 'dosya başına ' + CFG.maxFileSizeMB + ' MB'];
 if (CFG.allowedExt && CFG.allowedExt.length) limitBits.push('izinli türler: ' + CFG.allowedExt.join(', '));
 el('foot').textContent = limitBits.join(' · ');
+// Restrict the native file picker to the allowed extensions when set.
+if (CFG.allowedExt && CFG.allowedExt.length) { fileInput.setAttribute('accept', CFG.allowedExt.map(function(e){ return '.' + e; }).join(',')); }
 
 function human(b){ if(b<1024) return b+' B'; var u=['KB','MB','GB','TB'],i=-1; do{ b/=1024; i++; }while(b>=1024&&i<u.length-1); return b.toFixed(1)+' '+u[i]; }
 

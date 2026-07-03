@@ -701,7 +701,17 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 	// ("mode":"drop") is an upload invite, so it uses the upload-worded body.
 	var subject, body string
 	if req.Mode == model.ShareKindDrop {
-		subject, body = dropInviteMailText(req.Locale, h.siteName(r.Context()), baseName(rel), link, req.Pin, req.ExpiresDays)
+		// Look the drop link's configured limits back up from the token so the
+		// invite spells them out (X files, Y MB per file, allowed types).
+		var maxFiles, maxSizeMB int
+		var allowedExt []string
+		if tok := dropTokenFromURL(link); tok != "" {
+			if sh, err := h.Store.GetShareByToken(r.Context(), tok); err == nil && sh != nil && sh.IsDrop() {
+				ds := parseDropSettings(sh.DropSettings)
+				maxFiles, maxSizeMB, allowedExt = ds.MaxFiles, ds.MaxFileSizeMB, ds.AllowedExt
+			}
+		}
+		subject, body = dropInviteMailText(req.Locale, h.siteName(r.Context()), baseName(rel), link, req.Pin, req.ExpiresDays, maxFiles, maxSizeMB, allowedExt)
 	} else {
 		subject, body = shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
 	}
