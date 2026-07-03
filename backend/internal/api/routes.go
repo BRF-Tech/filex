@@ -109,6 +109,10 @@ func BuildRouter(d *Deps) http.Handler {
 	ah.AttachACL(d.ACL)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
 	sh.AttachACL(d.ACL)
+	// File-drop (public upload link) handler — the inverse of Share. Reuses
+	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
+	// exactly like authenticated uploads (mime, node cache, thumbnails).
+	dh := handlers.NewDrop(d.Store, mh, d.Share, d.Notify, d.Mailer, d.Cfg.PublicURL)
 	oh := handlers.NewOps(d.Ops, d.Store)
 	oh.AttachACL(d.ACL)
 	if d.Ops != nil {
@@ -166,6 +170,14 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
 	r.Get("/s/{token}", sh.HandleDownload)
 	r.Post("/s/{token}", sh.HandleDownload) // PIN form posts to same URL
+
+	// ────── public file-drop (upload link) ──────
+	// GET renders the upload page (PIN gate first when protected); POST is
+	// both the PIN-form submit and the multipart drop. No auth: the target
+	// folder is resolved server-side from the token, and existing contents
+	// are never listed ("blind drop").
+	r.Get("/d/{token}", dh.Page)
+	r.Post("/d/{token}", dh.Upload)
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
 	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)

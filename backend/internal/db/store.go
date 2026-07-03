@@ -119,6 +119,7 @@ type Store interface {
 	ListAllShares(ctx context.Context, creatorID *int64, activeOnly bool, limit, offset int) ([]*ShareWithMeta, int64, error)
 	RevokeShare(ctx context.Context, id int64) error
 	IncrementShareDownload(ctx context.Context, id int64) error
+	IncrementShareUpload(ctx context.Context, id int64, n int) error
 	DeleteShare(ctx context.Context, id int64) error
 	DeleteExpiredShares(ctx context.Context) error
 

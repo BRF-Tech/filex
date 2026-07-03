@@ -308,8 +308,8 @@ export function useFileApi(config: ExplorerConfig) {
   async function invitePermission(body: { path: string; email: string; level: string; create_user?: boolean; role?: string; is_dir?: boolean; locale?: string }): Promise<InviteResponse> {
     return jsonFetch<InviteResponse>(permissionsUrl('/invite'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
-  async function shareMail(body: { path: string; email: string; url: string; pin?: string | null; expires_days?: number; locale?: string; is_dir?: boolean; size?: number }): Promise<{ emailed: boolean }> {
-    return jsonFetch<{ emailed: boolean }>(permissionsUrl('/share-mail'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  async function shareMail(body: { path: string; email?: string; emails?: string[]; url: string; pin?: string | null; expires_days?: number; locale?: string; is_dir?: boolean; size?: number; mode?: string }): Promise<{ emailed: boolean; sent?: string[]; failed?: string[] }> {
+    return jsonFetch<{ emailed: boolean; sent?: string[]; failed?: string[] }>(permissionsUrl('/share-mail'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
 
   // --------------------------------------------------------------------
@@ -578,7 +578,12 @@ export function useFileApi(config: ExplorerConfig) {
     password?: boolean;
     expires_at?: string | null;
     max_downloads?: number | null;
-  }): Promise<{ share: ShareInfo & { url: string; path: string; filename: string } }> {
+    // File-drop (public upload link) — kind:'drop' mints an upload link into a
+    // folder instead of a download link; drop_settings carries the caps.
+    kind?: string;
+    max_uploads?: number | null;
+    drop_settings?: Record<string, unknown> | null;
+  }): Promise<{ share: ShareInfo & { url: string; path: string; filename: string; kind?: string } }> {
     if (!endpoints.shareCreate) throw new Error('shareCreate endpoint not configured');
     return jsonFetch(endpoints.shareCreate, {
       method: 'POST',

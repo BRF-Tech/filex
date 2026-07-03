@@ -68,6 +68,15 @@ type shareCreateReq struct {
 	// Shared.
 	ExpiresAt    string `json:"expires_at,omitempty"` // RFC3339 — overrides expires_in
 	MaxDownloads int    `json:"max_downloads,omitempty"`
+
+	// File-drop (public upload link) fields. kind=="drop" mints an UPLOAD
+	// link into a folder — the inverse of a download share. The target must
+	// be a directory. drop_settings carries the per-link limits blob
+	// {max_files, max_file_size_mb, allowed_ext, ask_name}; max_uploads caps
+	// the total number of files the link may ever receive.
+	Kind         string          `json:"kind,omitempty"`
+	MaxUploads   int             `json:"max_uploads,omitempty"`
+	DropSettings json.RawMessage `json:"drop_settings,omitempty"`
 }
 
 // shareCreateRespInner is the payload nested under `share` in the
@@ -77,6 +86,7 @@ type shareCreateRespInner struct {
 	UUID         string     `json:"uuid"` // alias for token (frontend uses uuid in delete URL)
 	Token        string     `json:"token"`
 	URL          string     `json:"url"`
+	Kind         string     `json:"kind,omitempty"` // "download" | "drop"
 	Path         string     `json:"path,omitempty"`
 	Filename     string     `json:"filename,omitempty"`
 	HasPin       bool       `json:"has_pin"`
@@ -129,6 +139,22 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// File-drop links mint a public UPLOAD endpoint into a folder — validate
+	// the target is a directory up front so a public uploader can never be
+	// pointed at (and made to overwrite) a single file.
+	isDrop := req.Kind == model.ShareKindDrop
+	if isDrop {
+		node, err := h.Store.GetNode(r.Context(), nodeID)
+		if err != nil || node == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		if node.Type != model.NodeTypeDirectory {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "drop links require a folder target"})
+			return
+		}
+	}
+
 	// PIN: explicit string wins; password=true generates one; otherwise empty.
 	pin := req.PIN
 	pinGenerated := ""
@@ -163,17 +189,32 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if req.MaxDownloads > 0 {
 		opts.MaxDownloads = &req.MaxDownloads
 	}
+	if isDrop {
+		opts.Kind = model.ShareKindDrop
+		if req.MaxUploads > 0 {
+			opts.MaxUploads = &req.MaxUploads
+		}
+		if len(req.DropSettings) > 0 {
+			ds := string(req.DropSettings)
+			opts.DropSettings = &ds
+		}
+	}
 	sh, err := h.Service.Create(r.Context(), opts)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
+	linkURL := h.shareURL(sh.Token)
+	if sh.IsDrop() {
+		linkURL = h.dropURL(sh.Token)
+	}
 	inner := shareCreateRespInner{
 		ID:           sh.ID,
 		UUID:         sh.Token,
 		Token:        sh.Token,
-		URL:          h.shareURL(sh.Token),
+		URL:          linkURL,
+		Kind:         sh.Kind,
 		HasPin:       sh.PinHash != "",
 		PasswordPin:  pinGenerated,
 		ExpiresAt:    sh.ExpiresAt,
@@ -191,6 +232,7 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		"id":            inner.ID,
 		"token":         inner.Token,
 		"url":           inner.URL,
+		"kind":          inner.Kind,
 		"has_pin":       inner.HasPin,
 		"expires_at":    inner.ExpiresAt,
 		"max_downloads": inner.MaxDownloads,
@@ -534,6 +576,14 @@ func (h *Share) shareURL(token string) string {
 		return "/s/" + token
 	}
 	return h.PublicURL + "/s/" + token
+}
+
+// dropURL returns the canonical /d/{token} public upload (file-drop) URL.
+func (h *Share) dropURL(token string) string {
+	if h.PublicURL == "" {
+		return "/d/" + token
+	}
+	return h.PublicURL + "/d/" + token
 }
 
 // shareURLPath returns the URL path for a share token.

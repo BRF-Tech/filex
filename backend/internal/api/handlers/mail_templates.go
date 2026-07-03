@@ -106,6 +106,55 @@ func shareMailText(locale, siteName, name string, isDir bool, size int64, link, 
 	return subject, b.String()
 }
 
+// dropInviteMailText builds the subject + body for a public file-drop
+// (upload) link invite — the inverse of shareMailText. It asks the recipient
+// to UPLOAD files into a folder rather than download one.
+func dropInviteMailText(locale, siteName, folder, link, pin string, expiresDays int) (string, string) {
+	if folder == "" {
+		folder = "/"
+	}
+	if mailLangEN(locale) {
+		subject := "You've been asked to send files"
+		var b strings.Builder
+		b.WriteString("Hello,\n\n")
+		if siteName != "" {
+			b.WriteString("You've been invited to upload files via " + siteName + ".\n\n")
+		} else {
+			b.WriteString("You've been invited to upload files.\n\n")
+		}
+		b.WriteString("Folder: " + folder + "\n")
+		b.WriteString("\nUpload your files here:\n" + link + "\n")
+		if pin != "" {
+			b.WriteString("\nPIN (access code): " + pin + "\n")
+		}
+		if expiresDays > 0 {
+			b.WriteString(fmt.Sprintf("\nThis link is valid for %d day(s).\n", expiresDays))
+		} else {
+			b.WriteString("\nThis link does not expire.\n")
+		}
+		return subject, b.String()
+	}
+	subject := "Sizden dosya göndermeniz istendi"
+	var b strings.Builder
+	b.WriteString("Merhaba,\n\n")
+	if siteName != "" {
+		b.WriteString(siteName + " üzerinden dosya yüklemeniz istendi.\n\n")
+	} else {
+		b.WriteString("Dosya yüklemeniz istendi.\n\n")
+	}
+	b.WriteString("Klasör: " + folder + "\n")
+	b.WriteString("\nDosyalarınızı buradan yükleyebilirsiniz:\n" + link + "\n")
+	if pin != "" {
+		b.WriteString("\nPIN (erişim kodu): " + pin + "\n")
+	}
+	if expiresDays > 0 {
+		b.WriteString(fmt.Sprintf("\nBu bağlantı %d gün geçerlidir.\n", expiresDays))
+	} else {
+		b.WriteString("\nBu bağlantının süresi yoktur.\n")
+	}
+	return subject, b.String()
+}
+
 // itemGrantText builds the notice sent when an existing account is granted
 // access to an item.
 func itemGrantText(locale, item, exploreURL string) (string, string) {

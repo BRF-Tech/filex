@@ -38,6 +38,12 @@ type CreateOpts struct {
 	ExpiresAt    *time.Time // optional
 	MaxDownloads *int       // optional
 	CreatedBy    *int64     // user ID
+
+	// Drop-link options (Kind == model.ShareKindDrop). Ignored/zero for a
+	// normal download share.
+	Kind         string  // "" defaults to download
+	MaxUploads   *int    // cap on total files a drop link may receive
+	DropSettings *string // JSON limits blob
 }
 
 // Create issues a fresh share token.
@@ -57,6 +63,10 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		}
 		pinHash = string(h)
 	}
+	kind := opts.Kind
+	if kind == "" {
+		kind = model.ShareKindDownload
+	}
 	sh := &model.Share{
 		NodeID:       opts.NodeID,
 		Token:        tok,
@@ -64,6 +74,9 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		ExpiresAt:    opts.ExpiresAt,
 		MaxDownloads: opts.MaxDownloads,
 		CreatedBy:    opts.CreatedBy,
+		Kind:         kind,
+		MaxUploads:   opts.MaxUploads,
+		DropSettings: opts.DropSettings,
 	}
 	return s.store.CreateShare(ctx, sh)
 }
@@ -92,6 +105,12 @@ func (s *Service) Resolve(ctx context.Context, token, pin string) (*model.Share,
 // before or after streaming the file.
 func (s *Service) IncrementDownload(ctx context.Context, id int64) error {
 	return s.store.IncrementShareDownload(ctx, id)
+}
+
+// IncrementUpload bumps a drop link's received-file counter by n. Feeds the
+// MaxUploads cap enforced by Share.IsExpired.
+func (s *Service) IncrementUpload(ctx context.Context, id int64, n int) error {
+	return s.store.IncrementShareUpload(ctx, id, n)
 }
 
 // ListByNode returns all shares pointing at a given node.

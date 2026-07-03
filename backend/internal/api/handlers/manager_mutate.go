@@ -722,3 +722,116 @@ func managerPathHash(storageID int64, p string) string {
 	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// IngestFile writes one uploaded file into destRel/filename on the given
+// storage and upserts + indexes + thumbnails its node. It is the shared
+// ingest path behind the authenticated multipart upload (vfUpload's loop) and
+// the public file-drop handler, so both surface identical mime sniffing, node
+// caching and thumbnail dispatch. Parent dir nodes are looked up lazily — call
+// EnsureDir first when writing into a freshly-created folder so the new file's
+// node links to the right parent.
+func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, filename string, src io.Reader, size int64) (*model.Node, error) {
+	name := path.Base(filename)
+	if name == "" || name == "." || name == "/" || strings.ContainsAny(name, "\\") {
+		return nil, fmt.Errorf("bad filename: %q", filename)
+	}
+	drv, err := h.StorageResolver(st.ID)
+	if err != nil {
+		return nil, err
+	}
+	wr, ok := drv.(storage.Writer)
+	if !ok {
+		return nil, storage.ErrUnsupported
+	}
+	fullRel := path.Join(destRel, name)
+
+	// Sniff the first 512 bytes for mime, then replay them into the write so
+	// the driver still receives the full payload (see vfUpload for the
+	// OnlyOffice office-format refinement rationale).
+	var sniff [512]byte
+	n, _ := io.ReadFull(src, sniff[:])
+	mime := ""
+	if n > 0 {
+		mime = storage.RefineOfficeMime(http.DetectContentType(sniff[:n]), name)
+	}
+	merged := io.MultiReader(bytes.NewReader(sniff[:n]), src)
+	if err := wr.Write(ctx, fullRel, merged, size); err != nil {
+		return nil, err
+	}
+
+	clean := normalizeDBPath(fullRel)
+	hash := managerPathHash(st.ID, clean)
+	if existing, _ := h.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
+		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
+		if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
+			h.indexNode(ctx, fresh)
+			h.dispatchThumb(fresh)
+			return fresh, nil
+		}
+		return existing, nil
+	}
+	parentID, _ := h.lookupDirID(ctx, st.ID, path.Dir(clean))
+	node := &model.Node{
+		StorageID:  st.ID,
+		ParentID:   parentID,
+		Name:       name,
+		Path:       clean,
+		PathHash:   hash,
+		StorageKey: clean,
+		Type:       model.NodeTypeFile,
+		Size:       size,
+		Mime:       mime,
+		SyncState:  model.SyncStateSynced,
+	}
+	created, err := h.Store.CreateNode(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	h.indexNode(ctx, created)
+	h.dispatchThumb(created)
+	return created, nil
+}
+
+// EnsureDir makes sure a directory exists on the driver AND has a node row,
+// returning its node id. The file-drop handler calls it to materialise a
+// per-submission subfolder before ingesting files into it, so the owner sees
+// the folder (and its parent link) immediately without waiting for a sync.
+// Idempotent: returns the existing node id when the dir is already known.
+func (h *Manager) EnsureDir(ctx context.Context, st *model.Storage, rel string) (*int64, error) {
+	clean := normalizeDBPath(rel)
+	if clean == "" || clean == "/" {
+		return nil, fmt.Errorf("EnsureDir: empty path")
+	}
+	drv, err := h.StorageResolver(st.ID)
+	if err != nil {
+		return nil, err
+	}
+	if mk, ok := drv.(storage.Mkdirer); ok {
+		// Best-effort — object stores have no real dirs; a placeholder or a
+		// no-op is fine, the files written under the prefix stand on their own.
+		_ = mk.Mkdir(ctx, strings.TrimPrefix(clean, "/"))
+	}
+	hash := managerPathHash(st.ID, clean)
+	if existing, _ := h.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
+		id := existing.ID
+		return &id, nil
+	}
+	parentID, _ := h.lookupDirID(ctx, st.ID, path.Dir(clean))
+	node := &model.Node{
+		StorageID:  st.ID,
+		ParentID:   parentID,
+		Name:       path.Base(clean),
+		Path:       clean,
+		PathHash:   hash,
+		StorageKey: clean,
+		Type:       model.NodeTypeDirectory,
+		SyncState:  model.SyncStateSynced,
+	}
+	created, err := h.Store.CreateNode(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	h.indexNode(ctx, created)
+	id := created.ID
+	return &id, nil
+}

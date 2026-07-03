@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.2 below.)
+(Nothing yet — see v0.1.52 below.)
+
+## [0.1.52] - 2026-07-03
+
+### Added
+
+- **Public file-drop (upload link)** — the inverse of the share/download
+  link. "Dosya İste" (Request files), a new folder-only action, mints a
+  public `/d/{token}` link that lets anyone UPLOAD one or more files INTO a
+  folder without an account. Critically it is a **blind drop**: the uploader
+  never sees, lists or downloads the folder's existing contents — the target
+  is resolved server-side from the token and confined; the anonymous client
+  cannot influence the destination path. Each submission lands in its own
+  `<date_time>_<name|anon>` subfolder (no collisions, clear provenance), with
+  an optional uploader name + note (`NOT.txt`). Options: PIN, expiry, and an
+  "Advanced" panel (max files, MB/file, allowed extensions, ask-name).
+  Per-IP rate limiting guards the anonymous write surface. The owner is
+  notified on each drop (in-app + email). Backend reuses the manager's ingest
+  path (`IngestFile`/`EnsureDir`) so dropped files get identical mime
+  detection, node caching and thumbnails. Server-rendered upload page (same
+  dependency-free template style as the share PIN/error pages).
+  (`shares.kind='drop'` + `max_uploads`/`upload_count`/`drop_settings`
+  columns, migration `00013_share_drop`; `internal/api/handlers/drop.go`.)
+- **Multiple recipients for share-mail** — both the download share link and
+  the new upload link can be emailed to one *or many* addresses at once
+  (comma/space/semicolon separated). (`POST /permissions/share-mail` now
+  accepts `emails[]` + a `mode:"drop"` upload-worded body.)
 
 ## [0.1.2] - 2026-05-09
 

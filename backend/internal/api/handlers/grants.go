@@ -613,14 +613,37 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 }
 
 type shareMailReq struct {
-	Path        string `json:"path"`
-	Email       string `json:"email"`
-	URL         string `json:"url"`
-	Pin         string `json:"pin,omitempty"`
-	ExpiresDays int    `json:"expires_days,omitempty"`
-	Locale      string `json:"locale,omitempty"`
-	IsDir       bool   `json:"is_dir,omitempty"`
-	Size        int64  `json:"size,omitempty"`
+	Path        string   `json:"path"`
+	Email       string   `json:"email"`            // single recipient (back-compat)
+	Emails      []string `json:"emails,omitempty"` // multiple recipients
+	URL         string   `json:"url"`
+	Pin         string   `json:"pin,omitempty"`
+	ExpiresDays int      `json:"expires_days,omitempty"`
+	Locale      string   `json:"locale,omitempty"`
+	IsDir       bool     `json:"is_dir,omitempty"`
+	Size        int64    `json:"size,omitempty"`
+	Mode        string   `json:"mode,omitempty"` // "download" (default) | "drop"
+}
+
+// parseRecipients merges the single `email` + `emails[]` inputs, splitting each
+// on commas/semicolons/whitespace/newlines, lowercasing, validating (@) and
+// deduping — so one textarea of addresses or a chips array both work.
+func parseRecipients(single string, list []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, chunk := range append([]string{single}, list...) {
+		for _, part := range strings.FieldsFunc(chunk, func(r rune) bool {
+			return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+		}) {
+			e := strings.ToLower(strings.TrimSpace(part))
+			if e == "" || !strings.Contains(e, "@") || seen[e] {
+				continue
+			}
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // baseName returns the last path segment (the file/folder name).
@@ -658,8 +681,8 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 	if !h.requireEditor(w, r, st, rel) {
 		return
 	}
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email == "" || !strings.Contains(email, "@") {
+	recipients := parseRecipients(req.Email, req.Emails)
+	if len(recipients) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "valid email required"})
 		return
 	}
@@ -673,18 +696,33 @@ func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Use the composer's selected UI language (req.Locale). We intentionally do
-	// NOT override with the recipient's stored locale here: a share link often
-	// goes to people outside the system, and the sender picks the language.
-	subject, body := shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
-	if err := h.Mailer.Send(r.Context(), email, subject, body); err != nil {
-		// Distinguish "SMTP not set up / not verified" (show the link) from a
-		// transient send failure (worth retrying) so the UI can say which.
-		reason := "send_failed"
-		if errors.Is(err, mailer.ErrNotConfigured) || errors.Is(err, mailer.ErrNotVerified) {
-			reason = "not_configured"
+	// NOT override with the recipient's stored locale here: a link often goes to
+	// people outside the system, and the sender picks the language. A drop link
+	// ("mode":"drop") is an upload invite, so it uses the upload-worded body.
+	var subject, body string
+	if req.Mode == model.ShareKindDrop {
+		subject, body = dropInviteMailText(req.Locale, h.siteName(r.Context()), baseName(rel), link, req.Pin, req.ExpiresDays)
+	} else {
+		subject, body = shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
+	}
+	var sent, failed []string
+	reason := ""
+	for _, email := range recipients {
+		if err := h.Mailer.Send(r.Context(), email, subject, body); err != nil {
+			// Distinguish "SMTP not set up / not verified" (show the link) from a
+			// transient send failure (worth retrying) so the UI can say which.
+			reason = "send_failed"
+			if errors.Is(err, mailer.ErrNotConfigured) || errors.Is(err, mailer.ErrNotVerified) {
+				reason = "not_configured"
+			}
+			failed = append(failed, email)
+			continue
 		}
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": reason, "detail": err.Error()})
+		sent = append(sent, email)
+	}
+	if len(sent) == 0 {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": reason, "failed": failed})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"emailed": true})
+	writeJSON(w, http.StatusOK, map[string]any{"emailed": true, "sent": sent, "failed": failed})
 }

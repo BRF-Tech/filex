@@ -14,6 +14,7 @@ const props = defineProps<{
   isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
   size?: number; // bytes, for the share-mail body (files only)
   locale?: 'tr' | 'en';
+  initialTab?: 'perms' | 'share' | 'drop'; // open straight to a tab ("Dosya İste" action → 'drop')
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -31,8 +32,8 @@ const pathParts = computed(() => {
   return { adapter, name: segs.length ? segs[segs.length - 1] : adapter, rel };
 });
 
-type Tab = 'perms' | 'share';
-const tab = ref<Tab>('perms');
+type Tab = 'perms' | 'share' | 'drop';
+const tab = ref<Tab>(props.initialTab ?? 'perms');
 const canManage = ref(false); // owner/admin → can see the permissions tab
 
 // ── permissions state ──
@@ -81,6 +82,44 @@ const expiryOptions = [
   { v: 30, l: L('30 gün', '30 days') },
 ];
 
+// ── file-drop (public upload link) state ──
+const dropPwd = ref(false);
+const dropExpiry = ref(0); // days; 0 = never
+const dropShowAdv = ref(false);
+const dropMaxFiles = ref<string>('');
+const dropMaxSizeMB = ref<string>('');
+const dropAllowedExt = ref<string>('');
+const dropAskName = ref(true);
+const dropBusy = ref(false);
+const dropErr = ref('');
+const dropResult = ref<{ url: string; pin?: string | null } | null>(null);
+const dropMailTo = ref('');
+const dropMailBusy = ref(false);
+const dropMailNotice = ref('');
+
+// splitEmails turns a free-text recipient field into a deduped address list —
+// comma / semicolon / whitespace separated, so one input handles many people.
+function splitEmails(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[,;\s]+/)) {
+    const e = part.trim().toLowerCase();
+    if (e && e.includes('@') && !seen.has(e)) {
+      seen.add(e);
+      out.push(e);
+    }
+  }
+  return out;
+}
+
+// mailResultNotice renders a sent/failed summary from the share-mail response.
+function mailResultNotice(res: { sent?: string[]; failed?: string[] }): string {
+  const sent = res.sent?.length ?? 0;
+  const failed = res.failed?.length ?? 0;
+  if (failed === 0) return L(`E-posta gönderildi ✓ (${sent})`, `Email sent ✓ (${sent})`);
+  return L(`${sent} gönderildi, ${failed} başarısız`, `${sent} sent, ${failed} failed`);
+}
+
 async function reload() {
   loading.value = true;
   err.value = '';
@@ -95,7 +134,9 @@ async function reload() {
     const st = (e as { status?: number }).status;
     if (st === 403) {
       canManage.value = false;
-      tab.value = 'share';
+      // Editor (not owner): no permissions tab. Keep an explicitly-requested
+      // tab (e.g. the "Dosya İste" action) else fall back to the link tab.
+      if (!props.initialTab) tab.value = 'share';
     } else {
       err.value = e instanceof Error ? e.message : String(e);
     }
@@ -261,8 +302,8 @@ async function createLink() {
   }
 }
 async function sendShareMail() {
-  const addr = shareMailTo.value.trim().toLowerCase();
-  if (!addr || !addr.includes('@')) {
+  const list = splitEmails(shareMailTo.value);
+  if (!list.length) {
     shareMailNotice.value = L('Geçerli bir e-posta girin.', 'Enter a valid email.');
     return;
   }
@@ -270,15 +311,15 @@ async function sendShareMail() {
   shareMailBusy.value = true;
   shareMailNotice.value = '';
   try {
-    await props.api.shareMail({
-      path: props.path, email: addr, url: shareResult.value.url,
+    const res = await props.api.shareMail({
+      path: props.path, emails: list, url: shareResult.value.url,
       pin: shareResult.value.pin ?? undefined,
       expires_days: shareExpiry.value || undefined,
       locale: props.locale ?? 'tr',
       is_dir: !!props.isDir,
       size: props.size,
     });
-    shareMailNotice.value = L('E-posta gönderildi ✓', 'Email sent ✓');
+    shareMailNotice.value = mailResultNotice(res);
   } catch (e) {
     const detail = (e as { detail?: string }).detail ?? '';
     if (detail.includes('not_configured')) {
@@ -290,6 +331,67 @@ async function sendShareMail() {
     }
   } finally {
     shareMailBusy.value = false;
+  }
+}
+
+// ── file-drop (upload link) actions ──
+function dropExpiresAtISO(): string | null {
+  if (!dropExpiry.value) return null;
+  return new Date(Date.now() + dropExpiry.value * 86400000).toISOString();
+}
+async function createDropLink() {
+  dropBusy.value = true;
+  dropErr.value = '';
+  dropResult.value = null;
+  dropMailNotice.value = '';
+  try {
+    const drop_settings: Record<string, unknown> = { ask_name: dropAskName.value };
+    if (dropMaxFiles.value) drop_settings.max_files = Number(dropMaxFiles.value);
+    if (dropMaxSizeMB.value) drop_settings.max_file_size_mb = Number(dropMaxSizeMB.value);
+    const exts = dropAllowedExt.value.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
+    if (exts.length) drop_settings.allowed_ext = exts;
+    const r = await props.api.createShare({
+      path: props.path,
+      kind: 'drop',
+      password: dropPwd.value,
+      expires_at: dropExpiresAtISO(),
+      drop_settings,
+    });
+    dropResult.value = { url: r.share.url, pin: r.share.password_pin ?? null };
+  } catch (e) {
+    dropErr.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    dropBusy.value = false;
+  }
+}
+async function sendDropMail() {
+  const list = splitEmails(dropMailTo.value);
+  if (!list.length) {
+    dropMailNotice.value = L('Geçerli bir e-posta girin.', 'Enter a valid email.');
+    return;
+  }
+  if (!dropResult.value?.url) return;
+  dropMailBusy.value = true;
+  dropMailNotice.value = '';
+  try {
+    const res = await props.api.shareMail({
+      path: props.path, emails: list, url: dropResult.value.url,
+      pin: dropResult.value.pin ?? undefined,
+      expires_days: dropExpiry.value || undefined,
+      locale: props.locale ?? 'tr',
+      is_dir: true,
+      mode: 'drop',
+    });
+    dropMailNotice.value = mailResultNotice(res);
+  } catch (e) {
+    const detail = (e as { detail?: string }).detail ?? '';
+    if (detail.includes('not_configured')) {
+      dropMailNotice.value = L('SMTP ayarlı/doğrulanmış değil — linki elle iletin.', 'SMTP not set up/verified — share the link manually.');
+    } else {
+      dropMailNotice.value = e instanceof Error ? e.message : String(e);
+    }
+  } finally {
+    dropMailBusy.value = false;
   }
 }
 async function revoke(s: ShareInfo) {
@@ -331,6 +433,12 @@ function copy(text: string, tag = 'url') {
           :class="{ 'is-active': tab === 'share' }"
           @click="tab = 'share'"
         >{{ L('Bağlantı', 'Link') }}</button>
+        <button
+          v-if="isDir"
+          class="fx-perm-tab"
+          :class="{ 'is-active': tab === 'drop' }"
+          @click="tab = 'drop'"
+        >{{ L('Dosya İste', 'Request files') }}</button>
       </div>
 
       <div class="fx-perm-body">
@@ -447,10 +555,10 @@ function copy(text: string, tag = 'url') {
               </div>
               <p v-if="shareResult.pin" class="fx-perm-pin">PIN: <code>{{ shareResult.pin }}</code></p>
 
-              <!-- send by email -->
+              <!-- send by email (one or more, comma/space separated) -->
               <div class="fx-perm-mailrow">
-                <input v-model="shareMailTo" type="email" class="fx-perm-input" autocomplete="off"
-                  :placeholder="L('e-posta ile gönder', 'send by email')" @keyup.enter="sendShareMail" />
+                <input v-model="shareMailTo" type="text" class="fx-perm-input" autocomplete="off"
+                  :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendShareMail" />
                 <button class="fx-perm-btn" :disabled="shareMailBusy" @click="sendShareMail">
                   {{ L('Gönder', 'Send') }}
                 </button>
@@ -472,6 +580,74 @@ function copy(text: string, tag = 'url') {
                 {{ copied === s.uuid ? L('✓', '✓') : L('Kopyala', 'Copy') }}
               </button>
               <button class="fx-perm-del" :disabled="shareBusy" :title="L('İptal', 'Revoke')" @click="revoke(s)">✕</button>
+            </div>
+          </div>
+        </template>
+
+        <!-- ───────── File-drop (upload link) tab ───────── -->
+        <template v-if="tab === 'drop'">
+          <div class="fx-perm-addcard">
+            <p class="fx-perm-muted fx-perm-dropintro">
+              {{ L('Bu klasöre herkesin dosya YÜKLEYEBİLECEĞİ herkese açık bir bağlantı. Yükleyenler klasördeki mevcut dosyaları göremez.', 'A public link that lets anyone UPLOAD files into this folder. Uploaders never see the folder\'s existing files.') }}
+            </p>
+            <div class="fx-perm-share-opts">
+              <label class="fx-perm-check">
+                <input type="checkbox" v-model="dropPwd" />
+                {{ L('PIN ile koru', 'Protect with a PIN') }}
+              </label>
+              <label class="fx-perm-expiry">
+                <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
+                <select v-model.number="dropExpiry" class="fx-perm-sel fx-perm-sel--sm">
+                  <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+                </select>
+              </label>
+              <button class="fx-perm-btn fx-perm-btn--primary" :disabled="dropBusy" @click="createDropLink">
+                {{ L('Bağlantı oluştur', 'Create link') }}
+              </button>
+            </div>
+
+            <button type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-advtoggle" @click="dropShowAdv = !dropShowAdv">
+              {{ dropShowAdv ? L('Gelişmiş ▲', 'Advanced ▲') : L('Gelişmiş ▼', 'Advanced ▼') }}
+            </button>
+            <div v-if="dropShowAdv" class="fx-perm-adv">
+              <label class="fx-perm-adv-row">
+                <span class="fx-perm-muted">{{ L('En fazla dosya', 'Max files') }}</span>
+                <input v-model="dropMaxFiles" type="number" min="1" class="fx-perm-input fx-perm-input--sm" placeholder="20" />
+              </label>
+              <label class="fx-perm-adv-row">
+                <span class="fx-perm-muted">{{ L('Dosya başı MB', 'MB / file') }}</span>
+                <input v-model="dropMaxSizeMB" type="number" min="1" class="fx-perm-input fx-perm-input--sm" placeholder="500" />
+              </label>
+              <label class="fx-perm-adv-row">
+                <span class="fx-perm-muted">{{ L('İzinli türler', 'Allowed types') }}</span>
+                <input v-model="dropAllowedExt" type="text" class="fx-perm-input fx-perm-input--sm" :placeholder="L('hepsi (örn. pdf, jpg)', 'all (e.g. pdf, jpg)')" />
+              </label>
+              <label class="fx-perm-check">
+                <input type="checkbox" v-model="dropAskName" />
+                {{ L('Yükleyenin adını sor', 'Ask uploader name') }}
+              </label>
+            </div>
+
+            <div v-if="dropErr" class="fx-perm-warn">{{ dropErr }}</div>
+
+            <div v-if="dropResult" class="fx-perm-result">
+              <div class="fx-perm-linkrow">
+                <a :href="dropResult.url" target="_blank" rel="noopener" class="fx-perm-link">{{ dropResult.url }}</a>
+                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(dropResult.url, 'drop')">
+                  {{ copied === 'drop' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+                </button>
+              </div>
+              <p v-if="dropResult.pin" class="fx-perm-pin">PIN: <code>{{ dropResult.pin }}</code></p>
+
+              <!-- email the upload link to one or more people -->
+              <div class="fx-perm-mailrow">
+                <input v-model="dropMailTo" type="text" class="fx-perm-input" autocomplete="off"
+                  :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendDropMail" />
+                <button class="fx-perm-btn" :disabled="dropMailBusy" @click="sendDropMail">
+                  {{ L('Gönder', 'Send') }}
+                </button>
+              </div>
+              <div v-if="dropMailNotice" class="fx-perm-notice">{{ dropMailNotice }}</div>
             </div>
           </div>
         </template>
@@ -610,6 +786,16 @@ function copy(text: string, tag = 'url') {
 .fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
 .fx-perm-mailrow .fx-perm-input { flex: 1; }
 .fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }
+
+/* file-drop tab */
+.fx-perm-dropintro { margin: 0 0 12px; line-height: 1.4; }
+.fx-perm-advtoggle { margin-top: 10px; padding-left: 2px; }
+.fx-perm-adv {
+  margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--fe-border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.fx-perm-adv-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.fx-perm-input--sm { width: 130px; padding: 5px 8px; font-size: 12px; }
 
 .fx-perm-warn {
   background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4);

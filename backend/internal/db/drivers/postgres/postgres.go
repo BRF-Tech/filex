@@ -686,8 +686,8 @@ func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO shares (node_id, token, pin_hash, expires_at, max_downloads, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-		sh.NodeID, sh.Token, sh.PinHash, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy).Scan(&id)
+		`INSERT INTO shares (node_id, token, pin_hash, expires_at, max_downloads, created_by, kind, max_uploads, drop_settings) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		sh.NodeID, sh.Token, sh.PinHash, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -698,11 +698,11 @@ func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share,
 }
 
 func (s *Store) GetShareByToken(ctx context.Context, token string) (*model.Share, error) {
-	return scanShare(s.db.QueryRowContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at FROM shares WHERE token=$1`, token))
+	return scanShare(s.db.QueryRowContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE token=$1`, token))
 }
 
 func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Share, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at FROM shares WHERE node_id=$1 ORDER BY created_at DESC`, nodeID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE node_id=$1 ORDER BY created_at DESC`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -720,6 +720,11 @@ func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Sh
 
 func (s *Store) IncrementShareDownload(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1 WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) IncrementShareUpload(ctx context.Context, id int64, n int) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE shares SET upload_count = upload_count + $1 WHERE id=$2`, n, id)
 	return err
 }
 
@@ -1061,11 +1066,19 @@ func scanUser(r rowScanner) (*model.User, error) {
 
 func scanShare(r rowScanner) (*model.Share, error) {
 	sh := &model.Share{}
-	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt); err != nil {
+	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount, &sh.DropSettings); err != nil {
 		return nil, err
 	}
 	sh.HasPin = sh.PinHash != ""
 	return sh, nil
+}
+
+// shareKind defaults an empty kind to "download" so old callers keep working.
+func shareKind(k string) string {
+	if k == "" {
+		return model.ShareKindDownload
+	}
+	return k
 }
 
 func scanSyncRun(r rowScanner) (*model.SyncRun, error) {
@@ -1342,7 +1355,7 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName
 // GetShareByID looks up a share by its row ID.
 func (s *Store) GetShareByID(ctx context.Context, id int64) (*model.Share, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at FROM shares WHERE id=$1`, id)
+		`SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE id=$1`, id)
 	return scanShare(row)
 }
 
