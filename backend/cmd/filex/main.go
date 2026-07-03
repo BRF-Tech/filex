@@ -28,6 +28,7 @@ import (
 	"gitlab.com/brftech/filemanager/backend/internal/config"
 	"gitlab.com/brftech/filemanager/backend/internal/db"
 	"gitlab.com/brftech/filemanager/backend/internal/model"
+	"gitlab.com/brftech/filemanager/backend/internal/observability"
 	"gitlab.com/brftech/filemanager/backend/internal/server"
 	"gitlab.com/brftech/filemanager/backend/internal/version"
 
@@ -91,6 +92,11 @@ func setupLogger(cfg config.Config) {
 	} else {
 		h = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	}
+	// Optional Sentry-wire error reporting (GlitchTip). When a DSN is set, tee
+	// WARN+ERROR logs to it so operational failures surface centrally.
+	if observability.Init(cfg.Sentry.DSN, cfg.Sentry.Environment, version.Version) {
+		h = observability.WrapSlog(h)
+	}
 	slog.SetDefault(slog.New(h))
 }
 
@@ -106,6 +112,7 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 			setupLogger(cfg)
+			defer observability.Flush()
 
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()

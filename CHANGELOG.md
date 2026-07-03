@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.55 below.)
+(Nothing yet — see v0.1.56 below.)
+
+## [0.1.56] - 2026-07-03
+
+### Added
+
+- **Optional Sentry-wire error reporting** (self-hosted GlitchTip). Set
+  `FILEX_SENTRY_DSN` (+ `FILEX_SENTRY_ENVIRONMENT`) and the backend tees
+  WARN+ERROR slog records to the DSN, so operational failures already logged —
+  the ops worker's "ops: step failed", storage errors, recovered panics —
+  surface centrally without scattering capture calls. WARN is only forwarded
+  when it carries an `err` attribute (filters benign warnings); ERROR always.
+  No DSN → no reporting (default build unchanged). Errors-only (no perf
+  tracing). (`backend/internal/observability/`, `config`, `cmd/filex`.)
 
 ## [0.1.55] - 2026-07-03
 

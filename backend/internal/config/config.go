@@ -39,6 +39,16 @@ type Config struct {
 	Queue            QueueConfig  `yaml:"queue"`
 	Notify           NotifyConfig `yaml:"notify"`
 	Demo             DemoConfig   `yaml:"demo"`
+	Sentry           SentryConfig `yaml:"sentry"`
+}
+
+// SentryConfig — optional Sentry-wire error reporting (self-hosted GlitchTip at
+// errors.brf.sh). An empty DSN disables it entirely (default build reports
+// nothing). Environment tags events (e.g. production / demo) so one project can
+// serve multiple deployments.
+type SentryConfig struct {
+	DSN         string `yaml:"dsn"`
+	Environment string `yaml:"environment"`
 }
 
 // DemoConfig — public-demo affordances. When Mode=true the login page
@@ -306,6 +316,12 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v
+	}
+	if v := os.Getenv("FILEX_SENTRY_DSN"); v != "" {
+		c.Sentry.DSN = v
+	}
+	if v := os.Getenv("FILEX_SENTRY_ENVIRONMENT"); v != "" {
+		c.Sentry.Environment = v
 	}
 	if v := os.Getenv("FILEX_LOG_FORMAT"); v != "" {
 		c.Log.Format = v
