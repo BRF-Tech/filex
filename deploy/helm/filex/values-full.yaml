@@ -1,12 +1,15 @@
-# Full install: bundled Postgres + Redis, and an external OnlyOffice.
+# Full install: bundled Postgres + Redis + MinIO, plus external OnlyOffice and
+# Drawio wired in. Every add-on is a toggle — flip `enabled` to add/remove it.
+#
 # Usage:
 #   helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
 #     --set ingress.host=files.example.com \
 #     --set publicURL=https://files.example.com
 
+# ── Bundled data services (deployed by this chart) ──────────────────────
 postgresql:
   enabled: true
-  password: change-me-postgres     # override with --set or a secret
+  password: change-me-postgres     # override with --set or a sealed secret
 
 queue:
   driver: redis
@@ -14,6 +17,23 @@ queue:
 redis:
   enabled: true
 
+minio:
+  enabled: true
+  rootPassword: change-me-minio     # then add it as an S3 storage in the admin UI
+
+# ── External integrations (run separately; the chart wires filex) ───────
+# Flip enabled=false to remove one later (e.g. drop OnlyOffice tomorrow).
 onlyoffice:
-  url: https://office.example.com  # deploy a Document Server separately
-  jwtSecret: change-me-onlyoffice  # must match the Document Server's JWT_SECRET
+  enabled: true
+  url: https://office.example.com   # deploy a Document Server separately
+  jwtSecret: change-me-onlyoffice   # must match the Document Server's JWT_SECRET
+
+drawio:
+  enabled: true
+  url: https://draw.example.com     # self-host jgraph/drawio
+
+convert:
+  enabled: false                    # no public image yet — see docs/CONVERT-INTEGRATION.md
+  url: ""
+
+# Mermaid needs nothing — it renders in the browser.

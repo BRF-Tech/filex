@@ -56,11 +56,40 @@ redis:
   enabled: false          # deploy a bundled single-instance Redis for the queue
   image: redis:7-alpine
 
-# OnlyOffice document editing — point at an external Document Server.
-# (Deploy one with e.g. the onlyoffice/docs-* chart, or the compose stack.)
+# ── External integrations ───────────────────────────────────────────────
+# Each is toggled with `enabled`. The chart wires filex to the service; run the
+# service itself (its own chart / Deployment) and give its browser-facing
+# `url` an Ingress + DNS. Set enabled=false to hide the feature in filex — e.g.
+# drop OnlyOffice later by flipping one flag.
+
+# OnlyOffice — edit Word / Excel / PowerPoint in the browser.
 onlyoffice:
-  url: ""                 # https://office.example.com — empty disables editing
+  enabled: false
+  url: ""                 # https://office.example.com — browser-facing
   jwtSecret: ""           # MUST equal the Document Server's JWT_SECRET
+
+# Drawio / diagrams.net — diagram editing, embedded as an iframe.
+drawio:
+  enabled: false
+  url: ""                 # https://draw.example.com (self-host jgraph/drawio)
+
+# Universal file converter (p2r3/convert fork, in-browser WASM). No public
+# image is published yet — see docs/CONVERT-INTEGRATION.md.
+convert:
+  enabled: false
+  url: ""                 # https://files.example.com/convert
+
+# Mermaid diagrams render in the browser with no service — always available.
+
+# ── Bundled MinIO (S3-compatible storage) ───────────────────────────────
+# Deploys an internal MinIO. After install, add it as an S3 storage in the
+# admin UI: endpoint=http://<release>-minio:9000, path_style=true, region=auto.
+minio:
+  enabled: false
+  image: minio/minio:latest
+  rootUser: filex
+  rootPassword: change-me-minio
+  storage: 20Gi
 
 # Any extra FILEX_* overrides (see docs/CONFIGURATION.md).
 extraEnv: {}

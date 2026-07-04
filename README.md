@@ -45,7 +45,7 @@ Open http://localhost:5212/admin — first run prints credentials and embed inst
 ## Quick start — binary
 
 ```bash
-# Download from https://github.com/brf-tech/filex/-/releases
+# Download from https://github.com/brf-tech/filex/releases
 ./filex serve
 ```
 
@@ -65,6 +65,24 @@ Output:
   Change at: /admin/profile
 ═══════════════════════════════════════════════════════════════
 ```
+
+## Self-host with Compose or Helm
+
+The bare `docker run` above is enough to try filex out. For a real deployment,
+ready-made stacks live in [`deploy/`](deploy/):
+
+- **[`deploy/compose/`](deploy/compose/)** — Docker Compose:
+  - **minimal** — filex + SQLite + local disk (one service, zero dependencies).
+  - **full** — filex + PostgreSQL + Redis + Caddy (auto-HTTPS), plus toggleable
+    add-ons: **OnlyOffice**, **Drawio**, universal **converter**, **MinIO** (S3).
+    Turn each on/off with a Compose profile in `.env`.
+- **[`deploy/helm/filex/`](deploy/helm/filex/)** — a Helm chart for Kubernetes
+  (Deployment + PVC + optional Ingress). Every add-on above is an `enabled`
+  toggle in `values.yaml` — bundle PostgreSQL / Redis / MinIO, or wire external
+  OnlyOffice / Drawio / converter.
+
+Step-by-step instructions for each tier are in
+[docs/INSTALLATION.md](docs/INSTALLATION.md).
 
 ## Embed in your app
 
@@ -132,7 +150,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```bash
 git clone https://github.com/brf-tech/filex.git
-cd filemanager
+cd filex
 pnpm install
 pnpm run build:all    # builds packages, web, then Go binary
 ./bin/filex serve
@@ -146,6 +164,7 @@ Subdirectories:
 - `web/` — Vue 3 admin UI (embedded into Go binary via `go:embed`)
 - `demo/` — Standalone HTML demos for each framework
 - `docker/` — Dockerfiles + compose
+- `deploy/` — ready-made Compose stacks + Helm chart (see [`deploy/`](deploy/))
 - `docs/` — Markdown documentation
 
 ## License

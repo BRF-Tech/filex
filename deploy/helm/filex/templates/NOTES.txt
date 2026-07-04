@@ -20,7 +20,10 @@ filex is installing.
 Config in use:
   DB:    {{ if .Values.postgresql.enabled }}bundled PostgreSQL{{ else if ne .Values.database.driver "sqlite" }}external {{ .Values.database.driver }}{{ else }}SQLite (on the PVC){{ end }}
   Queue: {{ if .Values.redis.enabled }}bundled Redis{{ else }}{{ .Values.queue.driver }}{{ end }}
-  OnlyOffice: {{ if .Values.onlyoffice.url }}{{ .Values.onlyoffice.url }}{{ else }}disabled (set onlyoffice.url to enable){{ end }}
+  MinIO: {{ if .Values.minio.enabled }}bundled (add as S3 storage: http://{{ include "filex.fullname" . }}-minio:9000){{ else }}off{{ end }}
+  OnlyOffice: {{ if and .Values.onlyoffice.enabled .Values.onlyoffice.url }}{{ .Values.onlyoffice.url }}{{ else }}off{{ end }}
+  Drawio:     {{ if and .Values.drawio.enabled .Values.drawio.url }}{{ .Values.drawio.url }}{{ else }}off{{ end }}
+  Convert:    {{ if and .Values.convert.enabled .Values.convert.url }}{{ .Values.convert.url }}{{ else }}off{{ end }}
 
 Next: add a storage in the admin UI (Storages -> Add) — see docs/STORAGE.md.
 
@@ -28,4 +31,9 @@ Next: add a storage in the admin UI (Storages -> Add) — see docs/STORAGE.md.
 
 WARNING: postgresql.password is the default. Set a real one:
   --set postgresql.password=$(openssl rand -hex 24)
+{{- end }}
+{{- if and .Values.minio.enabled (eq .Values.minio.rootPassword "change-me-minio") }}
+
+WARNING: minio.rootPassword is the default. Set a real one:
+  --set minio.rootPassword=$(openssl rand -hex 24)
 {{- end }}

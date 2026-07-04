@@ -1,29 +1,47 @@
-# Caddy config for the full filex stack. Caddy obtains + renews HTTPS certs
-# automatically for the domains below (ports 80/443 must be reachable).
+# Caddy config for the full filex stack. HTTPS is obtained + renewed
+# automatically for real public domains (ports 80/443 must be reachable).
+#
+# Add-on vhosts (OnlyOffice / Drawio / MinIO) below default to a harmless
+# *.localhost self-signed host when you don't run that add-on. Leave the block
+# or delete it — an unused *.localhost vhost costs nothing and requests no cert.
 
 {$FILEX_DOMAIN} {
 	encode zstd gzip
-	# Large uploads: only the init/finalize JSON transits the proxy for S3
-	# (multipart PUTs go browser→S3 directly), but local/SFTP uploads stream
-	# through here.
+	# Large uploads: for S3 only the init/finalize JSON transits the proxy
+	# (multipart PUTs go browser→S3 directly); local/SFTP uploads stream through.
 	request_body {
 		max_size 5GB
 	}
-	# WebSocket/SSE (e.g. the MCP stream at /api/ai/mcp) upgrade automatically.
-	reverse_proxy filex:5212 {
-		header_up X-Real-IP {remote_host}
+
+	# Universal converter (convert profile) is served under /convert.
+	@convert path /convert /convert/*
+	handle @convert {
+		reverse_proxy convert:80
+	}
+
+	# Everything else → filex. WebSocket/SSE (e.g. /api/ai/mcp) upgrades itself.
+	handle {
+		reverse_proxy filex:5212 {
+			header_up X-Real-IP {remote_host}
+		}
 	}
 }
 
-# OnlyOffice Document Server — the browser loads its iframe from here, and
-# filex's server-to-server fetch/callback also uses filex's public URL, so
-# both must be HTTPS on real hostnames.
+# OnlyOffice Document Server (onlyoffice profile). The browser loads its iframe
+# from here and filex calls it server-to-server, so it needs a real HTTPS host.
+# Delete this block if you don't run OnlyOffice.
 {$ONLYOFFICE_DOMAIN} {
 	reverse_proxy onlyoffice:80
 }
 
-# Optional: the MinIO web console (bucket management). Remove this block if you
-# don't want the console exposed.
+# Drawio / diagrams.net editor (drawio profile) — embedded as an iframe, so it
+# needs a real HTTPS host. Delete this block if you don't run Drawio.
+{$DRAWIO_DOMAIN} {
+	reverse_proxy drawio:8080
+}
+
+# MinIO web console (minio profile) — bucket management UI. Delete this block if
+# you don't want the console exposed.
 {$MINIO_CONSOLE_DOMAIN} {
 	reverse_proxy minio:9001
 }
