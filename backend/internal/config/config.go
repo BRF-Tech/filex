@@ -40,6 +40,53 @@ type Config struct {
 	Notify           NotifyConfig `yaml:"notify"`
 	Demo             DemoConfig   `yaml:"demo"`
 	Sentry           SentryConfig `yaml:"sentry"`
+	Seed             SeedConfig   `yaml:"seed"`
+}
+
+// SeedConfig holds one-time bootstrap values applied to the DB on first boot,
+// only when the target record is ABSENT (operator UI edits are never
+// clobbered). It lets a fresh `helm install` / `docker compose up` come up
+// fully configured from env alone — admin user, SMTP, branding, trash policy
+// and an initial storage — with zero admin-UI clicks. Consumed by
+// internal/server/seed.go. (Auth/OIDC is env-authoritative already via
+// AuthConfig, so it is not duplicated here.)
+type SeedConfig struct {
+	AdminEmail    string      `yaml:"admin_email"`
+	AdminPassword string      `yaml:"admin_password"`
+	SiteName      string      `yaml:"site_name"`
+	TrashDays     string      `yaml:"trash_retention_days"`
+	SMTP          SeedSMTP    `yaml:"smtp"`
+	Storage       SeedStorage `yaml:"storage"`
+}
+
+// SeedSMTP mirrors the mailer's smtp.* settings keys.
+type SeedSMTP struct {
+	Host     string `yaml:"host"`
+	Port     string `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	From     string `yaml:"from"`
+	TLS      string `yaml:"tls"` // starttls | tls | none
+}
+
+// Configured reports whether enough SMTP fields are set to seed a row.
+func (s SeedSMTP) Configured() bool { return s.Host != "" && s.Port != "" && s.From != "" }
+
+// SeedStorage describes an initial storage row to create when no storage
+// exists yet. Driver "" (default) seeds nothing.
+type SeedStorage struct {
+	Driver    string `yaml:"driver"` // local | s3 | "" (none)
+	Name      string `yaml:"name"`
+	MountPath string `yaml:"mount_path"`
+	Path      string `yaml:"path"` // local driver on-disk root
+	// s3 driver:
+	Bucket    string `yaml:"bucket"`
+	Prefix    string `yaml:"prefix"`
+	Endpoint  string `yaml:"endpoint"`
+	Region    string `yaml:"region"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	PathStyle bool   `yaml:"path_style"`
 }
 
 // SentryConfig — optional Sentry-wire error reporting (self-hosted GlitchTip at
@@ -150,7 +197,6 @@ type HeaderProxyConfig struct {
 type ExtServices struct {
 	OnlyOffice OnlyOfficeConfig `yaml:"onlyoffice"`
 	Drawio     DrawioConfig     `yaml:"drawio"`
-	Mermaid    MermaidConfig    `yaml:"mermaid"`
 	Convert    ConvertConfig    `yaml:"convert"`
 }
 
@@ -170,10 +216,8 @@ type ConvertConfig struct {
 	URL string `yaml:"url"`
 }
 
-// MermaidConfig — render service URL (optional).
-type MermaidConfig struct {
-	URL string `yaml:"url"`
-}
+// Mermaid needs no external service — diagrams render client-side in the
+// browser via the bundled `mermaid` library, so there is no MermaidConfig.
 
 // SyncConfig — worker settings.
 type SyncConfig struct {
@@ -266,6 +310,12 @@ func Load(path string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	// Default the OIDC redirect to <public_url>/api/auth/oidc/callback so an
+	// issuer + client id/secret are enough to stand up SSO (no need to also
+	// spell out the callback URL).
+	if cfg.Auth.OIDC.Issuer != "" && cfg.Auth.OIDC.RedirectURL == "" {
+		cfg.Auth.OIDC.RedirectURL = strings.TrimRight(cfg.PublicURL, "/") + "/api/auth/oidc/callback"
+	}
 	cfg.DataDir = expandHome(cfg.DataDir)
 	if cfg.DB.Driver == "sqlite" && cfg.DB.DSN == "" {
 		cfg.DB.DSN = filepath.Join(cfg.DataDir, "instance.sqlite")
@@ -380,9 +430,6 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_CONVERT_URL"); v != "" {
 		c.ExternalServices.Convert.URL = v
 	}
-	if v := os.Getenv("FILEX_MERMAID_URL"); v != "" {
-		c.ExternalServices.Mermaid.URL = v
-	}
 	if v := os.Getenv("FILEX_SYNC_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.Sync.DefaultInterval = d
@@ -433,5 +480,116 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DEMO_PASS"); v != "" {
 		c.Demo.Pass = v
+	}
+
+	// LDAP directory bind (previously YAML-only). Enable with
+	// FILEX_AUTH_DRIVERS=local,ldap.
+	if v := os.Getenv("FILEX_LDAP_URL"); v != "" {
+		c.Auth.LDAP.URL = v
+	}
+	if v := os.Getenv("FILEX_LDAP_BIND_DN"); v != "" {
+		c.Auth.LDAP.BindDN = v
+	}
+	if v := os.Getenv("FILEX_LDAP_BIND_PASSWORD"); v != "" {
+		c.Auth.LDAP.BindPassword = v
+	}
+	if v := os.Getenv("FILEX_LDAP_BASE_DN"); v != "" {
+		c.Auth.LDAP.BaseDN = v
+	}
+	if v := os.Getenv("FILEX_LDAP_USER_FILTER"); v != "" {
+		c.Auth.LDAP.UserFilter = v
+	}
+	if v := os.Getenv("FILEX_LDAP_EMAIL_ATTR"); v != "" {
+		c.Auth.LDAP.EmailAttr = v
+	}
+	if v := os.Getenv("FILEX_LDAP_START_TLS"); v != "" {
+		c.Auth.LDAP.StartTLS = v == "1" || strings.EqualFold(v, "true")
+	}
+
+	// Reverse-proxy header auth (previously YAML-only). Enable with
+	// FILEX_AUTH_DRIVERS=proxy_header.
+	if v := os.Getenv("FILEX_HEADER_EMAIL"); v != "" {
+		c.Auth.Header.EmailHeader = v
+	}
+	if v := os.Getenv("FILEX_HEADER_GROUP"); v != "" {
+		c.Auth.Header.GroupHeader = v
+	}
+	if v := os.Getenv("FILEX_HEADER_TRUSTED_IPS"); v != "" {
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		c.Auth.Header.TrustedIPs = out
+	}
+	if v := os.Getenv("FILEX_HEADER_ADMIN_GROUP"); v != "" {
+		c.Auth.Header.AdminGroup = v
+	}
+
+	// ── Boot seeds (env → DB rows on first boot, only-if-absent) ──────
+	if v := os.Getenv("FILEX_ADMIN_EMAIL"); v != "" {
+		c.Seed.AdminEmail = v
+	}
+	if v := os.Getenv("FILEX_ADMIN_PASSWORD"); v != "" {
+		c.Seed.AdminPassword = v
+	}
+	if v := os.Getenv("FILEX_SITE_NAME"); v != "" {
+		c.Seed.SiteName = v
+	}
+	if v := os.Getenv("FILEX_TRASH_RETENTION_DAYS"); v != "" {
+		c.Seed.TrashDays = v
+	}
+	if v := os.Getenv("FILEX_SMTP_HOST"); v != "" {
+		c.Seed.SMTP.Host = v
+	}
+	if v := os.Getenv("FILEX_SMTP_PORT"); v != "" {
+		c.Seed.SMTP.Port = v
+	}
+	if v := os.Getenv("FILEX_SMTP_USERNAME"); v != "" {
+		c.Seed.SMTP.Username = v
+	}
+	if v := os.Getenv("FILEX_SMTP_PASSWORD"); v != "" {
+		c.Seed.SMTP.Password = v
+	}
+	if v := os.Getenv("FILEX_SMTP_FROM"); v != "" {
+		c.Seed.SMTP.From = v
+	}
+	if v := os.Getenv("FILEX_SMTP_TLS"); v != "" {
+		c.Seed.SMTP.TLS = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_DRIVER"); v != "" {
+		c.Seed.Storage.Driver = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_NAME"); v != "" {
+		c.Seed.Storage.Name = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_MOUNT"); v != "" {
+		c.Seed.Storage.MountPath = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_PATH"); v != "" {
+		c.Seed.Storage.Path = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_BUCKET"); v != "" {
+		c.Seed.Storage.Bucket = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_PREFIX"); v != "" {
+		c.Seed.Storage.Prefix = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_ENDPOINT"); v != "" {
+		c.Seed.Storage.Endpoint = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_REGION"); v != "" {
+		c.Seed.Storage.Region = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY"); v != "" {
+		c.Seed.Storage.AccessKey = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_SECRET_KEY"); v != "" {
+		c.Seed.Storage.SecretKey = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_PATH_STYLE"); v != "" {
+		c.Seed.Storage.PathStyle = v == "1" || strings.EqualFold(v, "true")
 	}
 }

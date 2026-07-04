@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -175,16 +176,22 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	if email == "" {
 		return nil, "", errors.New("oidc: id_token missing email claim")
 	}
+	// Roles/groups may live in the id_token OR the access_token, under a flat
+	// or dotted claim path. Keycloak, for instance, puts realm roles at
+	// "realm_access.roles" in the ACCESS token, not the id_token — so check
+	// both tokens and traverse the dotted path.
 	role := d.defaultRole
-	if roleClaim != "" {
-		if v, ok := claims[roleClaim].(string); ok && v == adminGroup {
-			role = model.RoleAdmin
-		} else if list, ok := claims[roleClaim].([]any); ok {
-			for _, x := range list {
-				if s, _ := x.(string); s == adminGroup {
-					role = model.RoleAdmin
-					break
-				}
+	if roleClaim != "" && adminGroup != "" {
+		claimSets := []map[string]any{claims}
+		if at, _ := tok.Extra("access_token").(string); at != "" {
+			if ac := parseJWTClaims(at); ac != nil {
+				claimSets = append(claimSets, ac)
+			}
+		}
+		for _, cs := range claimSets {
+			if claimContains(cs, roleClaim, adminGroup) {
+				role = model.RoleAdmin
+				break
 			}
 		}
 	}
@@ -209,6 +216,54 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 		return nil, "", err
 	}
 	return user, sessionToken, nil
+}
+
+// parseJWTClaims decodes a JWT payload WITHOUT verifying the signature. It is
+// used only to read role/group claims from an access_token that filex already
+// obtained over TLS from the token endpoint in the code exchange (the id_token
+// is separately signature-verified). Returns nil if the token is not a
+// parseable JWT (e.g. an opaque access token).
+func parseJWTClaims(token string) map[string]any {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if json.Unmarshal(payload, &m) != nil {
+		return nil
+	}
+	return m
+}
+
+// claimContains traverses a possibly-dotted claim path (e.g.
+// "realm_access.roles") and reports whether the value equals want (a string
+// claim) or contains want (an array-of-strings claim).
+func claimContains(claims map[string]any, path, want string) bool {
+	var cur any = claims
+	for _, seg := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return false
+		}
+		if cur, ok = m[seg]; !ok {
+			return false
+		}
+	}
+	switch v := cur.(type) {
+	case string:
+		return v == want
+	case []any:
+		for _, x := range v {
+			if s, _ := x.(string); s == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func randString(nBytes int) (string, error) {

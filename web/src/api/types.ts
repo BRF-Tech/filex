@@ -161,7 +161,6 @@ export interface Capabilities {
   libreoffice: boolean;
   onlyoffice_url?: string | null;
   drawio_url?: string | null;
-  mermaid_url?: string | null;
   monaco: boolean;
   storage_drivers: string[];
   auth_drivers: string[];
@@ -183,7 +182,7 @@ export interface SettingsMap {
 }
 
 export interface ExternalService {
-  id: 'onlyoffice' | 'drawio' | 'mermaid';
+  id: 'onlyoffice' | 'drawio';
   url: string | null;
   jwt_secret_set: boolean;
   enabled: boolean;

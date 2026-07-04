@@ -19,7 +19,32 @@ redis:
 
 minio:
   enabled: true
-  rootPassword: change-me-minio     # then add it as an S3 storage in the admin UI
+  rootPassword: change-me-minio
+
+# Seed the bundled MinIO as the default storage on first boot — endpoint +
+# credentials are auto-filled from the minio block above, so files have a home
+# with zero admin-UI clicks.
+storage:
+  type: s3
+  s3:
+    bucket: filex
+    prefix: files
+
+# ── Zero-touch SSO (uncomment + fill to stand up OIDC with no UI clicks) ──
+# auth:
+#   drivers: "local,oidc"
+#   oidc:
+#     issuer: https://id.example.com/realms/main
+#     clientId: filex
+#     clientSecret: change-me-oidc
+#     roleClaim: realm_access.roles
+#     adminGroup: filex-admin
+# admin:
+#   email: admin@example.com
+#   password: change-me-admin
+# smtp:
+#   host: smtp.example.com
+#   from: no-reply@example.com
 
 # ── External integrations (run separately; the chart wires filex) ───────
 # Flip enabled=false to remove one later (e.g. drop OnlyOffice tomorrow).

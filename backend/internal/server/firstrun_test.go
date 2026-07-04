@@ -62,7 +62,7 @@ func TestFirstRun_BootstrapsAdmin(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
 	dataDir := t.TempDir()
 
-	creds, err := FirstRun(context.Background(), store, dataDir)
+	creds, err := FirstRun(context.Background(), store, dataDir, "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, creds.AdminEmail)
 	require.NotEmpty(t, creds.AdminPassword)
@@ -104,7 +104,7 @@ func TestFirstRun_NoOpWhenUsersPresent(t *testing.T) {
 	_, err := store.CreateUser(context.Background(), "boss@test", hash, model.RoleAdmin, "en", "UTC")
 	require.NoError(t, err)
 
-	creds, err := FirstRun(context.Background(), store, dataDir)
+	creds, err := FirstRun(context.Background(), store, dataDir, "", "")
 	require.NoError(t, err)
 	assert.Empty(t, creds.AdminEmail, "no creds returned when users already exist")
 	assert.Empty(t, creds.AdminPassword)
@@ -113,4 +113,27 @@ func TestFirstRun_NoOpWhenUsersPresent(t *testing.T) {
 	// File MUST NOT have been written.
 	_, err = os.Stat(filepath.Join(dataDir, ".first-run.txt"))
 	assert.True(t, os.IsNotExist(err), "first-run.txt should not exist on second-run")
+}
+
+// TestFirstRun_PresetAdminFromEnv — supplying admin email+password (from
+// FILEX_ADMIN_*) uses them verbatim, marks Preset, and does NOT spill the
+// creds to a file.
+func TestFirstRun_PresetAdminFromEnv(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	dataDir := t.TempDir()
+
+	creds, err := FirstRun(context.Background(), store, dataDir, "boss@example.com", "s3cret-preset-pw")
+	require.NoError(t, err)
+	assert.Equal(t, "boss@example.com", creds.AdminEmail)
+	assert.True(t, creds.Preset)
+	assert.Empty(t, creds.AdminPassword, "preset password is not echoed back")
+	assert.Empty(t, creds.WroteFile, "preset admin writes no file")
+
+	_, err = os.Stat(filepath.Join(dataDir, ".first-run.txt"))
+	assert.True(t, os.IsNotExist(err), "preset admin should not write first-run.txt")
+
+	user, err := store.GetUserByEmail(context.Background(), "boss@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, model.RoleAdmin, user.Role)
+	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("s3cret-preset-pw")))
 }

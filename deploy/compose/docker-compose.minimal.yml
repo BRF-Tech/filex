@@ -19,11 +19,18 @@ services:
       # Must be the URL users actually open in the browser. Behind a reverse
       # proxy set this to your https://… domain instead.
       FILEX_PUBLIC_URL: http://localhost:5212
+      # A local storage is auto-created on first boot pointing at /srv/files
+      # (the ./files bind-mount below) — so you can upload immediately, no
+      # admin-UI setup needed.
+      FILEX_DEFAULT_STORAGE_DRIVER: local
+      FILEX_DEFAULT_STORAGE_PATH: /srv/files
+      # Optional: preset the first admin instead of a random password.
+      # FILEX_ADMIN_EMAIL: admin@example.com
+      # FILEX_ADMIN_PASSWORD: change-me
     volumes:
       # DB + search index + thumbnail cache + first-run secret.
       - filex-data:/data
-      # A folder to serve. After first login, add a "local" storage in the
-      # admin UI with path: /srv/files
+      # The folder your files live in (seeded as the default local storage).
       - ./files:/srv/files
     restart: unless-stopped
 

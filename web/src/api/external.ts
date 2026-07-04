@@ -32,7 +32,7 @@ interface ListResponse {
   entries: BackendExternal[] | null;
 }
 
-const KNOWN_IDS: ReadonlyArray<ExternalService['id']> = ['onlyoffice', 'drawio', 'mermaid'];
+const KNOWN_IDS: ReadonlyArray<ExternalService['id']> = ['onlyoffice', 'drawio'];
 
 function pickName(b: BackendExternal): string {
   return (b.Name ?? b.name ?? '').toLowerCase();

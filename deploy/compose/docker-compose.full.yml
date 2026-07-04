@@ -40,8 +40,41 @@ services:
       FILEX_ONLYOFFICE_JWT: ${ONLYOFFICE_JWT_SECRET:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
       FILEX_CONVERT_URL: ${FILEX_CONVERT_URL:-}
+      # ── Zero-touch config (seeded on first boot; fill in .env) ──────────
+      # SSO: set FILEX_AUTH_DRIVERS=local,oidc + the FILEX_OIDC_* vars.
+      FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
+      FILEX_OIDC_ISSUER: ${FILEX_OIDC_ISSUER:-}
+      FILEX_OIDC_CLIENT_ID: ${FILEX_OIDC_CLIENT_ID:-}
+      FILEX_OIDC_CLIENT_SECRET: ${FILEX_OIDC_CLIENT_SECRET:-}
+      FILEX_OIDC_REDIRECT_URL: ${FILEX_OIDC_REDIRECT_URL:-}
+      FILEX_OIDC_ROLE_CLAIM: ${FILEX_OIDC_ROLE_CLAIM:-}
+      FILEX_OIDC_ADMIN_GROUP: ${FILEX_OIDC_ADMIN_GROUP:-}
+      FILEX_ADMIN_EMAIL: ${FILEX_ADMIN_EMAIL:-}
+      FILEX_ADMIN_PASSWORD: ${FILEX_ADMIN_PASSWORD:-}
+      FILEX_SMTP_HOST: ${FILEX_SMTP_HOST:-}
+      FILEX_SMTP_PORT: ${FILEX_SMTP_PORT:-587}
+      FILEX_SMTP_USERNAME: ${FILEX_SMTP_USERNAME:-}
+      FILEX_SMTP_PASSWORD: ${FILEX_SMTP_PASSWORD:-}
+      FILEX_SMTP_FROM: ${FILEX_SMTP_FROM:-}
+      FILEX_SMTP_TLS: ${FILEX_SMTP_TLS:-starttls}
+      FILEX_SITE_NAME: ${FILEX_SITE_NAME:-}
+      FILEX_TRASH_RETENTION_DAYS: ${FILEX_TRASH_RETENTION_DAYS:-}
+      # Default storage seeded on first boot. Default = a local folder on the
+      # ./files bind-mount. Switch to the bundled MinIO by setting DRIVER=s3 +
+      # the S3 vars in .env and enabling the minio profile (minio-init creates
+      # the bucket).
+      FILEX_DEFAULT_STORAGE_DRIVER: ${FILEX_DEFAULT_STORAGE_DRIVER:-local}
+      FILEX_DEFAULT_STORAGE_PATH: ${FILEX_DEFAULT_STORAGE_PATH:-/srv/files}
+      FILEX_DEFAULT_STORAGE_S3_BUCKET: ${FILEX_DEFAULT_STORAGE_S3_BUCKET:-}
+      FILEX_DEFAULT_STORAGE_S3_PREFIX: ${FILEX_DEFAULT_STORAGE_S3_PREFIX:-files}
+      FILEX_DEFAULT_STORAGE_S3_ENDPOINT: ${FILEX_DEFAULT_STORAGE_S3_ENDPOINT:-}
+      FILEX_DEFAULT_STORAGE_S3_REGION: ${FILEX_DEFAULT_STORAGE_S3_REGION:-auto}
+      FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY: ${FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY:-}
+      FILEX_DEFAULT_STORAGE_S3_SECRET_KEY: ${FILEX_DEFAULT_STORAGE_S3_SECRET_KEY:-}
+      FILEX_DEFAULT_STORAGE_S3_PATH_STYLE: ${FILEX_DEFAULT_STORAGE_S3_PATH_STYLE:-true}
     volumes:
       - filex-data:/data          # DB (if you switch to sqlite), search index, thumbs, first-run secret
+      - ./files:/srv/files        # default local storage folder (seeded on boot)
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,6 +161,20 @@ services:
     volumes:
       - minio-data:/data
     restart: unless-stopped
+
+  # One-shot: create the default bucket in the bundled MinIO so an s3 default
+  # storage seeds cleanly. Runs only with the minio profile.
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["minio"]
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      BUCKET: ${FILEX_DEFAULT_STORAGE_S3_BUCKET:-filex}
+    entrypoint: ["/bin/sh", "-c", "until mc alias set m http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\"; do sleep 2; done; mc mb -p \"m/$$BUCKET\"; echo bucket ready"]
+    restart: "no"
 
 volumes:
   filex-data:

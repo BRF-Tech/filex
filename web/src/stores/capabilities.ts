@@ -12,7 +12,6 @@ const EMPTY: Capabilities = {
   libreoffice: false,
   onlyoffice_url: null,
   drawio_url: null,
-  mermaid_url: null,
   monaco: true,
   storage_drivers: [],
   auth_drivers: [],

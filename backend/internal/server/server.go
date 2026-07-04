@@ -445,11 +445,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Seed default rows in external_services so the admin UI has
-	// editable cards for OnlyOffice/Drawio/Mermaid even on fresh
-	// installs. UpsertExternalService is no-op when the row already
-	// exists with the same shape (sqlite + postgres drivers).
+	// Seed default rows in external_services so the admin UI has editable
+	// cards for OnlyOffice/Drawio/Convert even on fresh installs, then seed
+	// settings (SMTP/branding/trash) + an initial storage from env. All are
+	// only-if-absent, so operator UI edits are never clobbered.
 	seedExternalDefaults(ctx, store, cfg)
+	seedFromEnv(ctx, store, cfg)
 
 	return srvObj, nil
 }
@@ -467,7 +468,6 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 	defaults := []defRow{
 		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret},
 		{name: "drawio", url: cfg.ExternalServices.Drawio.URL, secret: ""},
-		{name: "mermaid", url: cfg.ExternalServices.Mermaid.URL, secret: ""},
 		{name: "convert", url: cfg.ExternalServices.Convert.URL, secret: ""},
 	}
 	for _, d := range defaults {
@@ -489,7 +489,7 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 // Start runs first-run, prints the banner, starts the worker, and serves
 // HTTP. Blocks until ctx is cancelled.
 func (s *Server) Start(ctx context.Context) error {
-	fr, err := FirstRun(ctx, s.store, s.cfg.DataDir)
+	fr, err := FirstRun(ctx, s.store, s.cfg.DataDir, s.cfg.Seed.AdminEmail, s.cfg.Seed.AdminPassword)
 	if err != nil {
 		return fmt.Errorf("server: first run: %w", err)
 	}

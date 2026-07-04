@@ -43,8 +43,12 @@ func PrintBanner(w io.Writer, cfg config.Config, fr FirstRunCredentials, caps ma
 		dim.Fprintln(w, "  ─── First run detected ─────────────────────────────────────")
 		fmt.Fprintln(w, "  Admin user created:")
 		fmt.Fprintf(w, "    Email:     %s\n", green.Sprint(fr.AdminEmail))
-		fmt.Fprintf(w, "    Password:  %s\n", yellow.Sprint(fr.AdminPassword))
-		fmt.Fprintf(w, "  Saved to:  %s (mode 0600, shown ONCE)\n", fr.WroteFile)
+		if fr.Preset {
+			fmt.Fprintln(w, "    Password:  (from FILEX_ADMIN_PASSWORD)")
+		} else {
+			fmt.Fprintf(w, "    Password:  %s\n", yellow.Sprint(fr.AdminPassword))
+			fmt.Fprintf(w, "  Saved to:  %s (mode 0600, shown ONCE)\n", fr.WroteFile)
+		}
 		fmt.Fprintln(w, "  Change at: /admin/profile")
 	}
 

@@ -45,6 +45,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if and (eq .Values.storage.type "local") (ne .Values.storage.local.volume.type "data") }}
+            - name: storage-files
+              mountPath: /srv/files
+            {{- end }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -53,6 +57,21 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if and (eq .Values.storage.type "local") (ne .Values.storage.local.volume.type "data") }}
+        - name: storage-files
+          {{- if eq .Values.storage.local.volume.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ include "filex.fullname" . }}-storage
+          {{- else if eq .Values.storage.local.volume.type "nfs" }}
+          nfs:
+            server: {{ required "storage.local.volume.nfsServer is required for nfs" .Values.storage.local.volume.nfsServer | quote }}
+            path: {{ required "storage.local.volume.nfsPath is required for nfs" .Values.storage.local.volume.nfsPath | quote }}
+          {{- else if eq .Values.storage.local.volume.type "hostPath" }}
+          hostPath:
+            path: {{ required "storage.local.volume.hostPath is required for hostPath" .Values.storage.local.volume.hostPath | quote }}
+            type: DirectoryOrCreate
+          {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

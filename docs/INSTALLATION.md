@@ -72,6 +72,12 @@ Set `FILEX_DOMAIN` / `ONLYOFFICE_DOMAIN` and strong secrets
 between filex and OnlyOffice — the compose file already wires the same variable
 to both.
 
+> **Zero‑touch config.** The admin account, SSO/LDAP/header auth, SMTP, branding
+> and an initial storage can all be set through `FILEX_*` env in `.env`, so the
+> stack comes up already configured (no first‑run UI clicks). See
+> [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero‑touch seeding) and
+> the [`deploy/compose/`](../deploy/compose/) examples.
+
 **2. DNS.** Point `FILEX_DOMAIN` and `ONLYOFFICE_DOMAIN` (and
 `MINIO_CONSOLE_DOMAIN` if you keep the console) at the host. Open ports **80 and
 443** so Caddy can issue certificates.
@@ -122,6 +128,12 @@ helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
 Key `values.yaml` toggles: `postgresql.enabled`, `redis.enabled`,
 `onlyoffice.enabled`, `minio.enabled`, `persistence.size`, `ingress.*`,
 `resources`. See the chart's `values.yaml` for the full list.
+
+> **Zero‑touch config.** Auth (OIDC/LDAP/header), the first admin, SMTP, branding
+> and a default storage can all be supplied as `FILEX_*` env in the chart values,
+> so a fresh release boots fully configured with no admin‑UI setup. See
+> [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero‑touch seeding) and
+> the [`deploy/helm/filex/`](../deploy/helm/filex/) values examples.
 
 ---
 

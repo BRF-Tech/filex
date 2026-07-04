@@ -87,6 +87,34 @@ A "Sign in with SSO" affordance appears on the login page (when `oidc` is in
 
 ---
 
+## Zero-touch / env-driven setup
+
+OIDC is configured **entirely from environment variables** — there are no
+admin‑UI clicks to enable SSO. A container/Helm deployment that ships these vars
+comes up with SSO already live:
+
+```bash
+FILEX_AUTH_DRIVERS=local,oidc
+FILEX_OIDC_ISSUER=https://id.example.com/realms/myrealm
+FILEX_OIDC_CLIENT_ID=filex
+FILEX_OIDC_CLIENT_SECRET=<client-secret-from-idp>
+FILEX_OIDC_ROLE_CLAIM=realm_access.roles      # optional (admin mapping)
+FILEX_OIDC_ADMIN_GROUP=filex-admin            # optional (admin mapping)
+```
+
+`FILEX_OIDC_REDIRECT_URL` is **optional** — when omitted it defaults to
+`FILEX_PUBLIC_URL` + `/api/auth/oidc/callback` (still register that exact URL in
+your IdP). Set it explicitly only if your callback lives elsewhere.
+
+**LDAP** and **proxy‑header** auth are likewise env‑drivable now
+(`FILEX_LDAP_*` / `FILEX_HEADER_*`) — see
+[CONFIGURATION.md → Authentication](CONFIGURATION.md#authentication). The admin
+account, SMTP, branding and an initial storage can also be seeded from env on
+first boot — see
+[CONFIGURATION.md → Zero‑touch seeding](CONFIGURATION.md#zero-touch-seeding).
+
+---
+
 ## Roles & admin access
 
 - Every SSO user is created with the default **`user`** role on first login.

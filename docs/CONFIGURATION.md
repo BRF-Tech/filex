@@ -15,6 +15,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 - [Logging](#logging)
 - [Database](#database)
 - [Authentication](#authentication)
+- [Zero-touch seeding](#zero-touch-seeding)
 - [External services](#external-services)
 - [Storage sync](#storage-sync)
 - [Thumbnails](#thumbnails)
@@ -90,12 +91,90 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_OIDC_ROLE_CLAIM` | Claim carrying roles/groups |
 | `FILEX_OIDC_ADMIN_GROUP` | Value that elevates to admin |
 
-**LDAP** and **proxy‑header** have **no env vars** — configure them under
-`auth.ldap.*` / `auth.header_proxy.*` in [config.yaml](#configyaml). See
-[SSO.md → other auth drivers](SSO.md#other-auth-drivers).
+**LDAP** (enable with `FILEX_AUTH_DRIVERS=local,ldap`):
+
+| Env var | Description |
+|---|---|
+| `FILEX_LDAP_URL` | Directory URL, e.g. `ldaps://ldap.example.com` |
+| `FILEX_LDAP_BIND_DN` | Service bind DN |
+| `FILEX_LDAP_BIND_PASSWORD` | Service bind password |
+| `FILEX_LDAP_BASE_DN` | Search base for users |
+| `FILEX_LDAP_USER_FILTER` | User filter, e.g. `(mail=%s)` |
+| `FILEX_LDAP_EMAIL_ATTR` | Attribute holding the email (e.g. `mail`) |
+| `FILEX_LDAP_START_TLS` | `true` to upgrade a plain connection with StartTLS |
+
+**Proxy‑header** — trust an authenticating reverse proxy (enable with
+`FILEX_AUTH_DRIVERS=proxy_header`):
+
+| Env var | Description |
+|---|---|
+| `FILEX_HEADER_EMAIL` | Header carrying the authenticated email (e.g. `X-Auth-Email`) |
+| `FILEX_HEADER_GROUP` | Header carrying roles/groups (e.g. `X-Auth-Roles`) |
+| `FILEX_HEADER_TRUSTED_IPS` | Comma list of proxy CIDRs allowed to set the headers |
+| `FILEX_HEADER_ADMIN_GROUP` | Group value that elevates a user to admin |
+
+> LDAP and proxy‑header can still be set under `auth.ldap.*` /
+> `auth.header_proxy.*` in [config.yaml](#configyaml); the env vars above override
+> those. See [SSO.md → other auth drivers](SSO.md#other-auth-drivers).
 
 Local auth uses the `filex_session` cookie (12 h), bcrypt passwords, optional
-TOTP 2FA. First boot creates `admin@local` (see [INSTALLATION.md](INSTALLATION.md#first-run)).
+TOTP 2FA. First boot creates `admin@local` (or seed a known admin — see
+[Zero‑touch seeding](#zero-touch-seeding) and [INSTALLATION.md](INSTALLATION.md#first-run)).
+
+---
+
+## Zero-touch seeding
+
+These variables **seed the database once, on first boot, only when the target
+record is absent.** They let a fresh `docker compose up` / `helm install` come up
+fully configured from env alone — no admin‑UI clicks. Once a record exists, later
+operator edits in the UI **always win**; changing the env afterwards does **not**
+re‑seed or overwrite. (OIDC/LDAP/header auth are read live from env every boot and
+so are configured in [Authentication](#authentication), not here.)
+
+**First admin** — created if the user table is empty:
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_ADMIN_EMAIL` | `admin@local` | Email of the seeded admin account. |
+| `FILEX_ADMIN_PASSWORD` | *(random, printed once)* | Password for that admin. Omit both to get a random `admin@local` (see [INSTALLATION.md → first run](INSTALLATION.md#first-run)). |
+
+**SMTP** (mailer) — seeded when host, port and from are all set:
+
+| Env var | Description |
+|---|---|
+| `FILEX_SMTP_HOST` | SMTP server host. |
+| `FILEX_SMTP_PORT` | SMTP server port. |
+| `FILEX_SMTP_USERNAME` | Auth username (optional). |
+| `FILEX_SMTP_PASSWORD` | Auth password (optional). |
+| `FILEX_SMTP_FROM` | From address on outbound mail. |
+| `FILEX_SMTP_TLS` | `starttls` · `tls` · `none`. |
+
+**Branding & trash:**
+
+| Env var | Description |
+|---|---|
+| `FILEX_SITE_NAME` | Instance display name shown in the UI. |
+| `FILEX_TRASH_RETENTION_DAYS` | Days to keep trashed items before purge (see [TRASH-VERSIONING.md](TRASH-VERSIONING.md)). |
+
+**Default storage** — seeds one initial storage when **no storage exists yet**, so
+a fresh install already has a working place for files. Leave
+`FILEX_DEFAULT_STORAGE_DRIVER` empty to seed nothing. (See [STORAGE.md](STORAGE.md)
+for the storage model.)
+
+| Env var | Applies to | Description |
+|---|---|---|
+| `FILEX_DEFAULT_STORAGE_DRIVER` | both | `local` · `s3` (empty = seed no storage). |
+| `FILEX_DEFAULT_STORAGE_NAME` | both | Display name / top‑level folder label. |
+| `FILEX_DEFAULT_STORAGE_MOUNT` | both | Logical mount point (default `/`). |
+| `FILEX_DEFAULT_STORAGE_PATH` | local | On‑disk directory to serve. |
+| `FILEX_DEFAULT_STORAGE_S3_BUCKET` | s3 | Bucket name. |
+| `FILEX_DEFAULT_STORAGE_S3_PREFIX` | s3 | Key prefix = storage root (keep non‑empty — root guard). |
+| `FILEX_DEFAULT_STORAGE_S3_ENDPOINT` | s3 | Custom endpoint (MinIO/R2/Hetzner …); omit for AWS. |
+| `FILEX_DEFAULT_STORAGE_S3_REGION` | s3 | e.g. `us-east-1`; `auto` for R2/MinIO. |
+| `FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY` | s3 | Access key. |
+| `FILEX_DEFAULT_STORAGE_S3_SECRET_KEY` | s3 | Secret key. |
+| `FILEX_DEFAULT_STORAGE_S3_PATH_STYLE` | s3 | `true` for path‑style addressing (MinIO/Hetzner/B2/R2). |
 
 ---
 
@@ -109,8 +188,11 @@ Each is optional — an empty URL disables it. Set via env or
 | `FILEX_ONLYOFFICE_URL` | OnlyOffice Document Server URL (see [ONLYOFFICE.md](ONLYOFFICE.md)) |
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret — must match the Document Server |
 | `FILEX_DRAWIO_URL` | Drawio embed URL (diagram editing) |
-| `FILEX_MERMAID_URL` | Mermaid render URL |
 | `FILEX_CONVERT_URL` | External universal converter URL |
+
+> **Mermaid needs no service.** Mermaid diagrams render entirely client‑side in
+> the browser via a bundled `mermaid` library — there is nothing to deploy and no
+> URL to set (the former `FILEX_MERMAID_URL` was removed).
 
 ---
 
@@ -235,7 +317,7 @@ auth:
     redirect_url: https://files.example.com/api/auth/oidc/callback
     role_claim: realm_access.roles
     admin_group: filex-admin
-  ldap:                            # file-only
+  ldap:                            # also overridable via FILEX_LDAP_*
     url: ldaps://ldap.example.com
     bind_dn: "cn=svc,dc=example,dc=com"
     bind_password: "…"
@@ -243,7 +325,7 @@ auth:
     user_filter: "(mail=%s)"
     email_attr: mail
     start_tls: false
-  header_proxy:                    # file-only — trust an auth proxy
+  header_proxy:                    # trust an auth proxy — also FILEX_HEADER_*
     email_header: X-Auth-Email
     group_header: X-Auth-Roles
     trusted_ips: ["10.0.0.0/8"]
@@ -251,8 +333,7 @@ auth:
 
 external_services:
   onlyoffice: { url: https://office.example.com, jwt_secret: "…" }
-  drawio:     { url: "" }
-  mermaid:    { url: "" }
+  drawio:     { url: "" }        # mermaid renders client-side — no service
   convert:    { url: "" }
 
 sync:   { default_interval: 15m, workers: 4 }
@@ -266,6 +347,16 @@ queue:  { driver: sqlite, dsn: "", workers: 4, enabled: true }
 notify: { enabled: true, webhook_url: "", webhook_token: "" }
 demo:   { mode: false, user: demo@demo.com, pass: demo }
 sentry: { dsn: "", environment: "" }
+
+seed:                              # first-boot only-if-absent (see Zero-touch seeding)
+  admin_email: ""
+  admin_password: ""
+  site_name: ""
+  trash_retention_days: ""
+  smtp:    { host: "", port: "", username: "", password: "", from: "", tls: starttls }
+  storage: { driver: "", name: "", mount_path: "/", path: "",
+             bucket: "", prefix: "", endpoint: "", region: "",
+             access_key: "", secret_key: "", path_style: false }
 ```
 
 Some settings (branding, default thumbnail policy) live in the database
@@ -277,6 +368,9 @@ Some settings (branding, default thumbnail policy) live in the database
 
 - `FILEX_SYNC_DEFAULT_INTERVAL` is **not** read — the correct var is
   `FILEX_SYNC_INTERVAL`.
-- `FILEX_DEFAULT_STORAGE_DRIVER` is not read by anything (storages are DB rows).
+- `FILEX_DEFAULT_STORAGE_*` only takes effect on a **fresh** install (it seeds a
+  default storage when none exists yet); it never edits or replaces an existing
+  storage. See [Zero‑touch seeding](#zero-touch-seeding).
 - Booleans accept only `"1"` / `"true"`; anything else is false.
-- LDAP and proxy‑header are **config.yaml only** (no env overrides).
+- LDAP and proxy‑header now have env vars (`FILEX_LDAP_*` / `FILEX_HEADER_*`); the
+  env value overrides the matching `config.yaml` field.

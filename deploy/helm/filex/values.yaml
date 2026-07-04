@@ -91,10 +91,75 @@ minio:
   rootPassword: change-me-minio
   storage: 20Gi
 
+# ── Zero-touch config (seeded from env on first boot) ───────────────────
+# Everything below is applied to the DB once, on first boot, only when unset —
+# so a fresh install comes up fully configured with NO admin-UI clicks. Later
+# edits in the admin UI win.
+
+# Authentication. `drivers` is a comma list: local | oidc | ldap | proxy_header.
+# For SSO, set drivers "local,oidc" and fill oidc.* — that is the whole setup.
+auth:
+  drivers: "local"
+  oidc:
+    issuer: ""            # e.g. https://id.example.com/realms/main
+    clientId: ""
+    clientSecret: ""
+    redirectURL: ""       # blank → <publicURL>/api/auth/oidc/callback
+    roleClaim: ""         # e.g. realm_access.roles
+    adminGroup: ""        # token group/role that grants filex admin
+
+# First admin user, created on first boot. Blank password → a random
+# admin@local (printed once in the pod logs).
+admin:
+  email: ""
+  password: ""
+
+# SMTP for share / invite email. Seeded on first boot.
+smtp:
+  host: ""
+  port: "587"
+  username: ""
+  password: ""
+  from: ""
+  tls: "starttls"         # starttls | tls | none
+
+# Branding + trash policy.
+siteName: ""
+trashRetentionDays: ""
+
+# Initial storage, seeded on first boot so files have a home immediately.
+#   type: none | local | s3
+#   local — a directory on a mounted volume (choose it under storage.local.volume)
+#   s3    — an S3/MinIO bucket; blank endpoint + minio.enabled uses bundled MinIO
+storage:
+  type: none
+  name: Files
+  mountPath: "/"
+  local:
+    # Where the user files physically live.
+    #   data     — reuse the /data PVC (simplest; files under /data/files)
+    #   pvc      — a dedicated PersistentVolumeClaim
+    #   nfs      — an NFS server export
+    #   hostPath — a directory on the node
+    volume:
+      type: data          # data | pvc | nfs | hostPath
+      size: 20Gi          # pvc
+      storageClass: ""     # pvc (blank = cluster default)
+      nfsServer: ""        # nfs
+      nfsPath: ""          # nfs
+      hostPath: ""         # hostPath
+  s3:
+    bucket: filex
+    prefix: files
+    endpoint: ""           # blank + minio.enabled → bundled MinIO
+    region: auto
+    accessKey: ""          # blank + minio.enabled → minio.rootUser
+    secretKey: ""          # blank + minio.enabled → minio.rootPassword
+    pathStyle: true
+
 # Any extra FILEX_* overrides (see docs/CONFIGURATION.md).
 extraEnv: {}
   # FILEX_LOG_LEVEL: debug
-  # FILEX_OIDC_ISSUER: https://id.example.com/realms/main
 
 resources:
   requests:

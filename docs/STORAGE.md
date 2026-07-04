@@ -84,6 +84,16 @@ filex storage remove --name team-bucket
 > ⚠ **`filex storage add` does not validate the root‑path guard** (the API/UI
 > do). Always give a non‑empty `prefix`/`root`/`path` — never `/`.
 
+### Seed from env (first boot)
+
+A fresh install can come up with a working storage already mounted — no UI/API
+call needed. On **first boot only, when no storage exists yet**, filex seeds one
+default storage from `FILEX_DEFAULT_STORAGE_*` env vars (driver `local` or `s3`).
+Leaving `FILEX_DEFAULT_STORAGE_DRIVER` empty seeds nothing. The seed becomes a
+normal DB row you can edit afterwards; changing the env later never re‑seeds. See
+[CONFIGURATION.md → Zero‑touch seeding](CONFIGURATION.md#zero-touch-seeding) for
+the full variable list (local `…_PATH`, or the `…_S3_*` set).
+
 ---
 
 ## The storage config

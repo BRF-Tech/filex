@@ -119,9 +119,8 @@ test.describe('Capability gating', () => {
     expect(caps).toHaveProperty('external');
     expect(caps.external).toHaveProperty('onlyoffice');
     expect(caps.external).toHaveProperty('drawio');
-    expect(caps.external).toHaveProperty('mermaid');
 
-    for (const svc of ['onlyoffice', 'drawio', 'mermaid'] as const) {
+    for (const svc of ['onlyoffice', 'drawio'] as const) {
       const s = caps.external[svc];
       expect(typeof s.enabled).toBe('boolean');
       expect(typeof s.state).toBe('string');
@@ -175,7 +174,7 @@ test.describe('Capability gating', () => {
     expect(popupOpened).toBe(false);
   });
 
-  test('logged-out probe still surfaces drawio + mermaid state', async ({ request }) => {
+  test('logged-out probe still surfaces drawio state', async ({ request }) => {
     // Documentation contract: embedders rely on these flags to render
     // their UI without first logging in to filex. Regressing this would
     // force every consumer to add auth headers to their capability
@@ -184,10 +183,6 @@ test.describe('Capability gating', () => {
     const res = await request.get('/api/capabilities');
     const caps = await res.json();
     expect(caps.external.drawio).toMatchObject({
-      enabled: expect.any(Boolean),
-      state: expect.stringMatching(/^(ok|error|disabled|unknown)$/),
-    });
-    expect(caps.external.mermaid).toMatchObject({
       enabled: expect.any(Boolean),
       state: expect.stringMatching(/^(ok|error|disabled|unknown)$/),
     });

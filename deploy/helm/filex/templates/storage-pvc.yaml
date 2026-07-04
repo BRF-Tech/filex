@@ -1,0 +1,16 @@
+{{- if and (eq .Values.storage.type "local") (eq .Values.storage.local.volume.type "pvc") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "filex.fullname" . }}-storage
+  labels:
+    {{- include "filex.labels" . | nindent 4 }}
+spec:
+  accessModes: ["{{ .Values.persistence.accessMode | default "ReadWriteOnce" }}"]
+  resources:
+    requests:
+      storage: {{ .Values.storage.local.volume.size }}
+  {{- if .Values.storage.local.volume.storageClass }}
+  storageClassName: {{ .Values.storage.local.volume.storageClass }}
+  {{- end }}
+{{- end }}
