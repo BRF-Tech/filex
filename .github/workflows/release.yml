@@ -94,10 +94,10 @@ jobs:
       # `v0.1.58` tag publishes @brftech/*@0.1.58. The packages were built into
       # dist/ by the frontend step above.
       - name: Publish npm packages
-        if: ${{ secrets.NPM_TOKEN != '' }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [ -z "$NPM_TOKEN" ]; then echo "NPM_TOKEN not set — skipping npm publish"; exit 0; fi
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
           VER="${GITHUB_REF_NAME#v}"
           pnpm -r --filter='./packages/*' exec npm version "$VER" --no-git-tag-version --allow-same-version
