@@ -68,30 +68,40 @@ func seedDefaultStorage(ctx context.Context, store db.Store, cfg config.Config) 
 	}
 
 	var cfgMap map[string]any
-	switch s.Driver {
-	case "local":
-		if s.Path == "" {
-			slog.Warn("seed storage: local driver needs FILEX_DEFAULT_STORAGE_PATH")
+	if s.Config != "" {
+		// Raw JSON config for ANY driver (sftp/webdav/ftp, or advanced s3) —
+		// this is how an existing external storage is connected from env.
+		if err := json.Unmarshal([]byte(s.Config), &cfgMap); err != nil {
+			slog.Warn("seed storage: FILEX_DEFAULT_STORAGE_CONFIG is not valid JSON", slog.String("err", err.Error()))
 			return
 		}
-		cfgMap = map[string]any{"path": s.Path}
-	case "s3":
-		if s.Bucket == "" || s.Prefix == "" {
-			slog.Warn("seed storage: s3 driver needs FILEX_DEFAULT_STORAGE_S3_BUCKET and _PREFIX")
+	} else {
+		switch s.Driver {
+		case "local":
+			if s.Path == "" {
+				slog.Warn("seed storage: local driver needs FILEX_DEFAULT_STORAGE_PATH")
+				return
+			}
+			cfgMap = map[string]any{"path": s.Path}
+		case "s3":
+			if s.Bucket == "" || s.Prefix == "" {
+				slog.Warn("seed storage: s3 driver needs FILEX_DEFAULT_STORAGE_S3_BUCKET and _PREFIX")
+				return
+			}
+			cfgMap = map[string]any{
+				"bucket":     s.Bucket,
+				"prefix":     s.Prefix,
+				"endpoint":   s.Endpoint,
+				"region":     s.Region,
+				"access_key": s.AccessKey,
+				"secret_key": s.SecretKey,
+				"path_style": s.PathStyle,
+			}
+		default:
+			slog.Warn("seed storage: set FILEX_DEFAULT_STORAGE_CONFIG (raw JSON) for this driver",
+				slog.String("driver", s.Driver))
 			return
 		}
-		cfgMap = map[string]any{
-			"bucket":     s.Bucket,
-			"prefix":     s.Prefix,
-			"endpoint":   s.Endpoint,
-			"region":     s.Region,
-			"access_key": s.AccessKey,
-			"secret_key": s.SecretKey,
-			"path_style": s.PathStyle,
-		}
-	default:
-		slog.Warn("seed storage: unsupported driver", slog.String("driver", s.Driver))
-		return
 	}
 
 	if err := storage.ValidateNonRootPath(s.Driver, cfgMap); err != nil {

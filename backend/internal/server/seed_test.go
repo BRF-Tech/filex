@@ -100,6 +100,29 @@ func TestSeedDefaultStorage_S3(t *testing.T) {
 	assert.Contains(t, blob, "minio:9000")
 }
 
+// TestSeedDefaultStorage_RawConfig — an existing external storage (sftp) is
+// connected via a raw config JSON, for any driver.
+func TestSeedDefaultStorage_RawConfig(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	cfg := config.Default()
+	cfg.Seed.Storage = config.SeedStorage{
+		Driver: "sftp",
+		Name:   "NAS",
+		Config: `{"host":"nas.example.com","user":"filex","password":"x","root":"/srv/files"}`,
+	}
+
+	seedFromEnv(ctx, store, cfg)
+
+	sts, err := store.ListStorages(ctx)
+	require.NoError(t, err)
+	require.Len(t, sts, 1)
+	assert.Equal(t, "sftp", sts[0].Driver)
+	assert.Equal(t, "NAS", sts[0].Name)
+	assert.Contains(t, string(sts[0].ConfigJSON), "nas.example.com")
+}
+
 // TestSeedDefaultStorage_NoneWhenDriverEmpty — no driver → no storage seeded.
 func TestSeedDefaultStorage_NoneWhenDriverEmpty(t *testing.T) {
 	_, store := testutil.NewTestDB(t)

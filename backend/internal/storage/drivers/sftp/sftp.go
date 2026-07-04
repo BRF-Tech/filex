@@ -61,7 +61,7 @@ func (d *Driver) Name() string { return "sftp" }
 // private_key must be set. Optional: port (default 22), root.
 func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	d.host, _ = cfg["host"].(string)
-	if v, ok := cfg["port"].(int); ok {
+	if v, ok := storage.ConfigInt(cfg["port"]); ok {
 		d.port = v
 	}
 	if d.port == 0 {

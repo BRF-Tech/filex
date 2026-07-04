@@ -74,10 +74,17 @@ func (s SeedSMTP) Configured() bool { return s.Host != "" && s.Port != "" && s.F
 
 // SeedStorage describes an initial storage row to create when no storage
 // exists yet. Driver "" (default) seeds nothing.
+//
+// For local + s3 the ergonomic fields below are enough. To seed ANY other
+// driver (sftp, webdav, ftp) — i.e. connect an EXISTING external storage — set
+// Driver plus Config to the driver's raw config JSON; it is used verbatim.
 type SeedStorage struct {
-	Driver    string `yaml:"driver"` // local | s3 | "" (none)
+	Driver    string `yaml:"driver"` // local | s3 | sftp | webdav | ftp | "" (none)
 	Name      string `yaml:"name"`
 	MountPath string `yaml:"mount_path"`
+	// Config is a raw JSON object used verbatim as the storage's driver config.
+	// Set it for sftp/webdav/ftp (or advanced s3); overrides the fields below.
+	Config    string `yaml:"config"`
 	Path      string `yaml:"path"` // local driver on-disk root
 	// s3 driver:
 	Bucket    string `yaml:"bucket"`
@@ -570,6 +577,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DEFAULT_STORAGE_PATH"); v != "" {
 		c.Seed.Storage.Path = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_STORAGE_CONFIG"); v != "" {
+		c.Seed.Storage.Config = v
 	}
 	if v := os.Getenv("FILEX_DEFAULT_STORAGE_S3_BUCKET"); v != "" {
 		c.Seed.Storage.Bucket = v

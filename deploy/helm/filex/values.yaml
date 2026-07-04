@@ -156,6 +156,12 @@ storage:
     accessKey: ""          # blank + minio.enabled → minio.rootUser
     secretKey: ""          # blank + minio.enabled → minio.rootPassword
     pathStyle: true
+  # Connect an EXISTING external storage of ANY driver (sftp / webdav / ftp, or
+  # advanced s3): set `type` to the driver name and fill `config` with that
+  # driver's settings — it is passed through verbatim. Example:
+  #   type: sftp
+  #   config: { host: nas.example.com, user: filex, password: "s3cret", root: /srv/files }
+  config: {}
 
 # Any extra FILEX_* overrides (see docs/CONFIGURATION.md).
 extraEnv: {}

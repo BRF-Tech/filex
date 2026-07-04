@@ -84,15 +84,75 @@ filex storage remove --name team-bucket
 > ⚠ **`filex storage add` does not validate the root‑path guard** (the API/UI
 > do). Always give a non‑empty `prefix`/`root`/`path` — never `/`.
 
-### Seed from env (first boot)
+### Connect a storage at install time (env / Compose / Helm)
 
-A fresh install can come up with a working storage already mounted — no UI/API
-call needed. On **first boot only, when no storage exists yet**, filex seeds one
-default storage from `FILEX_DEFAULT_STORAGE_*` env vars (driver `local` or `s3`).
-Leaving `FILEX_DEFAULT_STORAGE_DRIVER` empty seeds nothing. The seed becomes a
-normal DB row you can edit afterwards; changing the env later never re‑seeds. See
-[CONFIGURATION.md → Zero‑touch seeding](CONFIGURATION.md#zero-touch-seeding) for
-the full variable list (local `…_PATH`, or the `…_S3_*` set).
+You don't have to open the admin UI at all. A fresh install can come up with a
+storage **already mounted**, seeded from environment on **first boot only, when
+no storage exists yet**. The seed becomes a normal storage row you can edit
+afterwards; changing the env later never re‑seeds. Leaving the driver empty
+seeds nothing.
+
+**The variables** (see [CONFIGURATION.md](CONFIGURATION.md#zero-touch-seeding)):
+
+| Variable | For | Example |
+|---|---|---|
+| `FILEX_DEFAULT_STORAGE_DRIVER` | all | `local` · `s3` · `sftp` · `webdav` · `ftp` |
+| `FILEX_DEFAULT_STORAGE_NAME` | all | `Files` (top‑level folder label) |
+| `FILEX_DEFAULT_STORAGE_PATH` | local | `/srv/files` |
+| `FILEX_DEFAULT_STORAGE_S3_*` (`BUCKET`/`PREFIX`/`ENDPOINT`/`REGION`/`ACCESS_KEY`/`SECRET_KEY`/`PATH_STYLE`) | s3 | see below |
+| `FILEX_DEFAULT_STORAGE_CONFIG` | **any driver** | one line of the driver's [config JSON](#adapters) |
+
+Use the dedicated vars for **local** and **S3**. To connect **any other existing
+external storage** (sftp / webdav / ftp), set the driver name and put its config
+JSON in `FILEX_DEFAULT_STORAGE_CONFIG`.
+
+**Plain binary / systemd / `docker run` — set env directly:**
+
+```bash
+# an existing S3 bucket (AWS / Hetzner / R2 / Backblaze)
+FILEX_DEFAULT_STORAGE_DRIVER=s3
+FILEX_DEFAULT_STORAGE_S3_BUCKET=my-bucket
+FILEX_DEFAULT_STORAGE_S3_PREFIX=filex
+FILEX_DEFAULT_STORAGE_S3_REGION=eu-central-1
+FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY=AKIA...
+FILEX_DEFAULT_STORAGE_S3_SECRET_KEY=...
+
+# an existing SFTP / NAS server (any driver → one JSON line)
+FILEX_DEFAULT_STORAGE_DRIVER=sftp
+FILEX_DEFAULT_STORAGE_CONFIG={"host":"nas.example.com","port":22,"user":"filex","password":"s3cret","root":"/srv/files"}
+```
+
+**Docker Compose** — put the same vars in `.env`. The shipped
+[`deploy/compose/.env.example`](../deploy/compose/.env.example) has ready
+copy‑paste blocks for MinIO, an external S3 bucket, SFTP and WebDAV.
+
+**Helm** — set them under `storage:` in your values
+([`deploy/helm/filex/values.yaml`](../deploy/helm/filex/values.yaml)):
+
+```yaml
+# an existing S3 bucket
+storage:
+  type: s3
+  s3:
+    bucket: my-bucket
+    prefix: filex
+    region: eu-central-1
+    endpoint: "https://s3.eu-central-1.amazonaws.com"
+    accessKey: "AKIA..."
+    secretKey: "..."
+```
+```yaml
+# an existing SFTP / NAS — any driver via `config`
+storage:
+  type: sftp
+  name: NAS
+  config:
+    host: nas.example.com
+    port: 22
+    user: filex
+    password: "s3cret"
+    root: /srv/files
+```
 
 ---
 

@@ -2,8 +2,29 @@ package storage
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 )
+
+// ConfigInt reads an integer from a driver config value that may arrive as an
+// int (YAML / direct), a float64 (JSON numbers unmarshal to float64), or a
+// numeric string (form input). This is why e.g. an sftp "port" set via a JSON
+// config still resolves correctly.
+func ConfigInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
+}
 
 // ErrRootPathForbidden is returned when a storage is configured with an empty
 // or root path/prefix. Operators must always scope a Storage to a sub-folder
