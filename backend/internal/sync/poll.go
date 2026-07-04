@@ -63,6 +63,13 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	}
 
 	_ = s.store.UpdateStorageSyncCursor(ctx, s.storage.ID, runStart, "")
+	// Cache each folder's recursive size on its own row so the explorer can show
+	// folder sizes without re-scanning the backend (best-effort; never fails the
+	// sync).
+	if err := RecomputeFolderSizes(ctx, s.store, s.storage.ID); err != nil {
+		slog.Warn("sync: folder-size recompute",
+			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+	}
 	_ = s.store.FinishSyncRun(ctx, run.ID, "", seen, added, updated, deleted, "ok", "")
 	return nil
 }

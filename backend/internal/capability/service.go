@@ -38,6 +38,7 @@ type Service struct {
 	build          string
 	demoMode       bool
 	demoUser       string
+	defaultLocale  string
 }
 
 // New constructs a Service.
@@ -51,6 +52,7 @@ func (s *Service) SetStaticInventory(
 	searchEnabled bool,
 	version, build string,
 	demoMode bool, demoUser string,
+	defaultLocale string,
 ) {
 	s.mu.Lock()
 	s.authDrivers = append(s.authDrivers[:0], authDrivers...)
@@ -61,6 +63,7 @@ func (s *Service) SetStaticInventory(
 	s.build = build
 	s.demoMode = demoMode
 	s.demoUser = demoUser
+	s.defaultLocale = defaultLocale
 	s.cached = nil
 	s.mu.Unlock()
 }
@@ -150,6 +153,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.Build = s.build
 	caps.DemoMode = s.demoMode
 	caps.DemoUser = s.demoUser
+	caps.DefaultLocale = s.defaultLocale
 	s.mu.RUnlock()
 	if has("magick") || has("convert") {
 		caps.Thumbs.ImageMagick = true

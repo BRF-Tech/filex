@@ -156,7 +156,7 @@ function iconFor(n: FileNode): string {
         :title="parentDir(n.path)"
       >{{ parentDir(n.path) || '—' }}</div>
       <div class="fe-grid__meta">
-        {{ n.type === 'dir' ? '—' : formatSize(n.size) }}
+        {{ formatSize(n.size) }}
       </div>
     </div>
     <div v-if="!loading && files.length === 0" class="fe-grid__empty">

@@ -7,6 +7,16 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
+// NodeAgg is a lightweight node row used for folder-size aggregation
+// (internal/sync.RecomputeFolderSizes): just enough to walk the tree and sum
+// descendant file sizes into each folder's cached size.
+type NodeAgg struct {
+	ID       int64
+	ParentID *int64
+	IsDir    bool
+	Size     int64
+}
+
 // Store is the interface implemented by every dialect-specific query
 // adapter. Methods are intentionally tiny domain operations — handlers
 // should never reach into *sql.DB directly.
@@ -40,6 +50,12 @@ type Store interface {
 	// deleted_at back to NULL.
 	GetNodeByPathIncludingDeleted(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
+	// AggNodes returns a lightweight {id, parent_id, is_dir, size} row for every
+	// live node of a storage — the input to folder-size aggregation.
+	AggNodes(ctx context.Context, storageID int64) ([]NodeAgg, error)
+	// SetNodeSize overwrites a node's cached size. Used to store recursive folder
+	// totals (see internal/sync.RecomputeFolderSizes).
+	SetNodeSize(ctx context.Context, id int64, size int64) error
 	UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error
 	TouchNodeSeen(ctx context.Context, id int64) error
 	SoftDeleteNode(ctx context.Context, id int64) error

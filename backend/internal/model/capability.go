@@ -47,6 +47,10 @@ type Capabilities struct {
 	// the demo" CTA that auto-submits the supplied creds.
 	DemoMode bool   `json:"demo_mode"`
 	DemoUser string `json:"demo_user,omitempty"`
+
+	// DefaultLocale, when set (FILEX_DEFAULT_LOCALE), pins the initial UI
+	// language for users who haven't picked one — overriding browser detection.
+	DefaultLocale string `json:"default_locale,omitempty"`
 }
 
 // StorageCapabilities describes a single backend's optional features. Used

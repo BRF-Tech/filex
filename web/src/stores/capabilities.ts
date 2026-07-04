@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { CapabilitiesApi } from '@/api/capabilities';
 import type { Capabilities } from '@/api/types';
+import { applyServerDefaultLocale } from '@/i18n';
 
 const EMPTY: Capabilities = {
   version: '0.0.0',
@@ -35,6 +36,7 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
       // and crash callers that read `.length` / `.includes(...)`.
       data.value = { ...EMPTY, ...res };
       loaded.value = true;
+      applyServerDefaultLocale(data.value.default_locale);
     } catch {
       // Capabilities are best-effort. Keep defaults if backend isn't ready yet.
     } finally {

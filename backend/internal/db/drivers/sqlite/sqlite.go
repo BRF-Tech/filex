@@ -312,6 +312,33 @@ func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID
 	return out, rows.Err()
 }
 
+func (s *Store) AggNodes(ctx context.Context, storageID int64) ([]db.NodeAgg, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, parent_id, type, size FROM nodes WHERE storage_id=? AND deleted_at IS NULL`,
+		storageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []db.NodeAgg
+	for rows.Next() {
+		var n db.NodeAgg
+		var typ string
+		if err := rows.Scan(&n.ID, &n.ParentID, &typ, &n.Size); err != nil {
+			return nil, err
+		}
+		n.IsDir = typ == string(model.NodeTypeDirectory)
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SetNodeSize(ctx context.Context, id int64, size int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE nodes SET size=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, size, id)
+	return err
+}
+
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE nodes SET size=?, mime=?, etag=?, backend_mtime=?, seen_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`,

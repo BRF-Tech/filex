@@ -28,6 +28,7 @@ type Config struct {
 	Listen           string       `yaml:"listen"`
 	PublicURL        string       `yaml:"public_url"`
 	DataDir          string       `yaml:"data_dir"`
+	DefaultLocale    string       `yaml:"default_locale"`
 	Log              LogConfig    `yaml:"log"`
 	DB               DBConfig     `yaml:"db"`
 	Auth             AuthConfig   `yaml:"auth"`
@@ -370,6 +371,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DATA_DIR"); v != "" {
 		c.DataDir = v
+	}
+	if v := os.Getenv("FILEX_DEFAULT_LOCALE"); v != "" {
+		c.DefaultLocale = v
 	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v

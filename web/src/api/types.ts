@@ -168,6 +168,7 @@ export interface Capabilities {
   search_enabled: boolean;
   demo_mode?: boolean;
   demo_user?: string;
+  default_locale?: string | null;
 }
 
 export interface SettingsMap {

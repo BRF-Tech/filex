@@ -198,7 +198,7 @@ const rows = computed(() => props.files);
           </div>
         </div>
         <div class="fe-list__col fe-list__col--size">
-          {{ n.type === 'dir' ? '—' : formatSize(n.size) }}
+          {{ formatSize(n.size) }}
         </div>
         <div class="fe-list__col fe-list__col--mod">
           {{ displayDate(n.last_modified) }}

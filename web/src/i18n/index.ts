@@ -26,6 +26,18 @@ export function applyStoredLocale(): void {
   document.documentElement.lang = l;
 }
 
+// applyServerDefaultLocale pins the UI language to the operator's
+// FILEX_DEFAULT_LOCALE (from /api/capabilities) for users who haven't picked
+// one yet — overriding browser detection. A user's explicit switch (stored in
+// localStorage) always wins, and this never persists, so it stays a *default*.
+export function applyServerDefaultLocale(def?: string | null): void {
+  if (!def) return;
+  if (localStorage.getItem(STORAGE_KEY)) return; // user already chose
+  if (!(SUPPORTED_LOCALES as string[]).includes(def)) return;
+  document.documentElement.lang = def;
+  i18n.global.locale.value = def as Locale;
+}
+
 export const i18n = createI18n({
   legacy: false,
   globalInjection: true,
