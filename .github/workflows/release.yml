@@ -87,3 +87,18 @@ jobs:
           tags: |
             ghcr.io/brf-tech/filex:full
             ghcr.io/brf-tech/filex:full-${{ github.ref_name }}
+
+      # ── npm packages → npmjs (@brftech scope) ───────────────────────────
+      # Runs only if an NPM_TOKEN (an npm *Automation* token, which bypasses
+      # 2FA) repo secret is set. Package versions are pinned to the tag so a
+      # `v0.1.58` tag publishes @brftech/*@0.1.58. The packages were built into
+      # dist/ by the frontend step above.
+      - name: Publish npm packages
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          VER="${GITHUB_REF_NAME#v}"
+          pnpm -r --filter='./packages/*' exec npm version "$VER" --no-git-tag-version --allow-same-version
+          pnpm publish --filter='./packages/*' --access public --no-git-checks
