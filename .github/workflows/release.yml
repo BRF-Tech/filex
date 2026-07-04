@@ -1,0 +1,89 @@
+name: Release
+
+# On a version tag (v*): publish the binaries (goreleaser -> GitHub Release) and
+# the Docker images (-> ghcr.io/brf-tech/filex). The frontend is built and
+# embedded first so the binaries carry the admin UI. The images rebuild the
+# frontend themselves inside their multi-stage Dockerfiles.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the GitHub Release + upload assets
+  packages: write   # push images to ghcr.io
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Frontend → backend/embed (the binaries need it prebuilt) ────────
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build frontend + sync into backend/embed
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          pnpm -r --filter='./packages/*' build
+          pnpm --filter='./web' build
+          mkdir -p backend/embed/admin backend/embed/web
+          cp -r web/dist/. backend/embed/admin/
+          cp -r packages/webcomponent/dist/. backend/embed/web/
+
+      # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Docker images → ghcr.io/brf-tech/filex ──────────────────────────
+      - id: meta
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Default image (latest + version)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta.outputs.date }}
+          tags: |
+            ghcr.io/brf-tech/filex:latest
+            ghcr.io/brf-tech/filex:${{ github.ref_name }}
+      - name: Full image (extra thumbnail tools)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.full
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta.outputs.date }}
+          tags: |
+            ghcr.io/brf-tech/filex:full
+            ghcr.io/brf-tech/filex:full-${{ github.ref_name }}
