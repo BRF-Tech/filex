@@ -147,10 +147,9 @@ services:
 
   convert:
     # filex embeds the p2r3/convert universal converter (GPL-2.0, in-browser
-    # WASM) in a hidden iframe. No public image is published yet — build the
-    # fork per docs/CONVERT-INTEGRATION.md and set CONVERT_IMAGE, or point
-    # FILEX_CONVERT_URL at your own deployment. Caddy serves it under /convert.
-    image: ${CONVERT_IMAGE:-ghcr.io/brf-tech/filex-convert:latest}
+    # WASM) in a hidden iframe. This is our fork with the embed bridge; see
+    # docs/CONVERT-INTEGRATION.md. Caddy serves it under /convert.
+    image: ${CONVERT_IMAGE:-ghcr.io/brf-tech/converter-filex:latest}
     profiles: ["convert"]
     restart: unless-stopped
 
