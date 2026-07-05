@@ -244,6 +244,7 @@ func (h *Auth) setSessionCookie(w http.ResponseWriter, r *http.Request, token st
 		Path:     "/",
 		Domain:   h.cookieDomain(r),
 		HttpOnly: true,
+		Secure:   requestIsHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(authlocal.SessionTTL),
 	})
@@ -256,6 +257,18 @@ func (h *Auth) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Domain:   h.cookieDomain(r),
 		HttpOnly: true,
+		Secure:   requestIsHTTPS(r),
 		MaxAge:   -1,
 	})
+}
+
+// requestIsHTTPS reports whether the client reached filex over TLS — either
+// directly (r.TLS) or, far more commonly, through a TLS-terminating reverse
+// proxy that forwards X-Forwarded-Proto. Behind such a proxy r.TLS is nil, so
+// without the header check the session cookie would never be marked Secure on
+// an HTTPS site. A Secure session cookie is both correct hardening and, on a
+// cross-subdomain (Domain-scoped) cookie, what keeps Chrome's schemeful
+// same-site rules from dropping it during the OIDC redirect chain.
+func requestIsHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }

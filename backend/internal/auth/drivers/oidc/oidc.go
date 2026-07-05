@@ -141,7 +141,10 @@ func (d *Driver) StartFlow(w http.ResponseWriter, r *http.Request) error {
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		// Behind a TLS-terminating proxy r.TLS is nil; trust X-Forwarded-Proto
+		// so the state cookie is still marked Secure on an HTTPS site (matches
+		// the session cookie — see handlers.requestIsHTTPS).
+		Secure:   r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   600,
 	})

@@ -6,7 +6,9 @@ package handlers_test
 // See docs/MULTI-TENANCY.md.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -127,6 +129,30 @@ func TestCookieDomain_MultiTenant_Resolution(t *testing.T) {
 	assert.Contains(t, logoutClear(t, a, "files.localhost"), "Domain=global.test")
 	// Host with no provider row → global too.
 	assert.Contains(t, logoutClear(t, a, "stranger.test"), "Domain=global.test")
+}
+
+// Session cookie must be Secure on an HTTPS request — either r.TLS or, behind
+// a TLS-terminating proxy, X-Forwarded-Proto=https — and must NOT be Secure on
+// plain HTTP so TLS-less installs keep working.
+func TestSessionCookie_SecureFollowsForwardedProto(t *testing.T) {
+	srv, client, store := testutil.NewTestServer(t)
+	email, pw := testutil.SeedAdmin(t, store)
+	body, _ := json.Marshal(map[string]string{"email": email, "password": pw})
+
+	// httptest speaks plain HTTP with no XFP → no Secure.
+	resp, err := client.Post(srv.URL+"/api/auth/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.NotContains(t, sessionSetCookie(t, resp), "Secure")
+
+	// Same login with X-Forwarded-Proto: https → Secure.
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp2, err := client.Do(req)
+	require.NoError(t, err)
+	resp2.Body.Close()
+	assert.Contains(t, sessionSetCookie(t, resp2), "Secure")
 }
 
 func TestCookieDomain_MultiTenant_NoValuesMeansHostOnly(t *testing.T) {

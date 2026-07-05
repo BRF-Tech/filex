@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.66 below.)
+(Nothing yet — see v0.1.67 below.)
+
+## [0.1.67] - 2026-07-06
+
+### Fixed
+
+- **Session (and OIDC state) cookies are now marked `Secure` on HTTPS.**
+  Previously the session cookie never set `Secure`, and the OIDC state cookie
+  only did so when `r.TLS != nil` — which is never true behind a
+  TLS-terminating reverse proxy (nginx/Caddy), where filex is reached over
+  plain HTTP with `X-Forwarded-Proto: https`. Both cookies now derive `Secure`
+  from `r.TLS` **or** `X-Forwarded-Proto=https`. On a **`Domain`-scoped**
+  cookie this is what Chrome's schemeful-same-site rules require to keep the
+  cookie through the OIDC redirect chain — the observed difference from a
+  working Roundcube cookie behind the very same proxy. Plain-HTTP installs
+  (no `X-Forwarded-Proto`) still get a non-Secure cookie, so TLS-less setups
+  keep working. This is both correct hardening and the most likely fix for
+  cookie-domain SSO login loops behind a proxy. (`handlers.requestIsHTTPS`,
+  `oidc.StartFlow`.)
 
 ## [0.1.66] - 2026-07-06
 
