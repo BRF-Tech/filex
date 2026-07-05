@@ -25,15 +25,15 @@ import (
 
 // Config is the top-level runtime configuration object.
 type Config struct {
-	Listen           string       `yaml:"listen"`
-	PublicURL        string       `yaml:"public_url"`
-	DataDir          string       `yaml:"data_dir"`
-	DefaultLocale    string       `yaml:"default_locale"`
+	Listen        string `yaml:"listen"`
+	PublicURL     string `yaml:"public_url"`
+	DataDir       string `yaml:"data_dir"`
+	DefaultLocale string `yaml:"default_locale"`
 	// CookieDomain sets the Domain attribute on the filex_session cookie
 	// (e.g. ".example.com" to share the session across subdomains). Empty =
 	// host-only cookie, the historical behavior. Applied on both set and
 	// clear so logout removes the same cookie it created.
-	CookieDomain     string       `yaml:"cookie_domain"`
+	CookieDomain string `yaml:"cookie_domain"`
 	// MultiTenant turns on native multi-tenancy (host-resolved provider =
 	// tenant, per-provider storage confinement, scoped user directory). OFF by
 	// default — a single-tenant install behaves exactly as before. See
@@ -95,8 +95,8 @@ type SeedStorage struct {
 	MountPath string `yaml:"mount_path"`
 	// Config is a raw JSON object used verbatim as the storage's driver config.
 	// Set it for sftp/webdav/ftp (or advanced s3); overrides the fields below.
-	Config    string `yaml:"config"`
-	Path      string `yaml:"path"` // local driver on-disk root
+	Config string `yaml:"config"`
+	Path   string `yaml:"path"` // local driver on-disk root
 	// s3 driver:
 	Bucket    string `yaml:"bucket"`
 	Prefix    string `yaml:"prefix"`

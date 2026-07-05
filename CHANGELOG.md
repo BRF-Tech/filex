@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.63 below.)
+(Nothing yet — see v0.1.64 below.)
+
+## [0.1.64] - 2026-07-06
+
+### Fixed
+
+- **CI lint pass restored.** staticcheck flagged an unused
+  `adminIDFiltersIn` type and two files had drifted from gofmt, which kept
+  the source repository's tag-triggered release automation from running.
+  Dead type removed, files formatted. (No runtime changes — see 0.1.63
+  for the feature content.)
 
 ## [0.1.63] - 2026-07-05
 

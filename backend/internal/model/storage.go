@@ -34,7 +34,7 @@ type Storage struct {
 	// preserving pre-00012 behavior). When true the storage is hidden by
 	// default and only paths explicitly granted (directly or via an ancestor
 	// folder) are visible; see internal/acl. Added in migration 00012.
-	RBACEnabled bool `json:"rbac_enabled"`
+	RBACEnabled bool      `json:"rbac_enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	// Replica pairing — `role` and `replica_of_id` are LEGACY columns
 	// retained for backwards compatibility with v0.1.16 deployments

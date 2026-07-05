@@ -416,11 +416,6 @@ type adminFiltersIn struct {
 	Filters map[string]any `json:"filters,omitempty" jsonschema:"optional query filters (e.g. limit, offset, status, storage_id, unresolved, active, role, action, unread)"`
 }
 
-type adminIDFiltersIn struct {
-	ID      int64          `json:"id" jsonschema:"numeric id of the target row"`
-	Filters map[string]any `json:"filters,omitempty" jsonschema:"optional query filters (e.g. limit)"`
-}
-
 type adminBodyIn struct {
 	Body map[string]any `json:"body" jsonschema:"JSON request body object"`
 }
