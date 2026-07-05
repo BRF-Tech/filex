@@ -345,6 +345,154 @@ func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) er
 	return err
 }
 
+// ─── Providers (tenants) — see docs/MULTI-TENANCY.md ─────────────────
+// SQL here is kept portable (no ON CONFLICT / INSERT OR IGNORE) because the
+// MySQL driver reuses this Store verbatim.
+
+const providerCols = `id, slug, name, COALESCE(host,''), auth_type, ` +
+	`COALESCE(oidc_issuer,''), COALESCE(oidc_client_id,''), COALESCE(oidc_client_secret,''), ` +
+	`COALESCE(oidc_redirect_url,''), COALESCE(role_claim,''), COALESCE(admin_group,''), ` +
+	`is_supertenant, enabled, created_at, updated_at`
+
+func scanProvider(r rowScanner) (*model.Provider, error) {
+	p := &model.Provider{}
+	if err := r.Scan(&p.ID, &p.Slug, &p.Name, &p.Host, &p.AuthType,
+		&p.OIDCIssuer, &p.OIDCClientID, &p.OIDCClientSecret, &p.OIDCRedirectURL,
+		&p.RoleClaim, &p.AdminGroup, &p.IsSupertenant, &p.Enabled,
+		&p.CreatedAt, &p.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error) {
+	at := p.AuthType
+	if at == "" {
+		at = model.AuthTypeOIDC
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, is_supertenant, enabled)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		p.Slug, p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
+		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, btoi(p.IsSupertenant), btoi(p.Enabled))
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return s.GetProvider(ctx, id)
+}
+
+func (s *Store) GetProvider(ctx context.Context, id int64) (*model.Provider, error) {
+	return scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE id=?`, id))
+}
+
+func (s *Store) GetProviderBySlug(ctx context.Context, slug string) (*model.Provider, error) {
+	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE slug=?`, slug))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
+func (s *Store) GetProviderByHost(ctx context.Context, host string) (*model.Provider, error) {
+	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE host=? AND enabled=1`, host))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
+func (s *Store) GetSupertenant(ctx context.Context) (*model.Provider, error) {
+	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE is_supertenant=1 ORDER BY id LIMIT 1`))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
+func (s *Store) ListProviders(ctx context.Context) ([]*model.Provider, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+providerCols+` FROM providers ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Provider
+	for rows.Next() {
+		p, err := scanProvider(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateProvider(ctx context.Context, p *model.Provider) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE providers SET slug=?, name=?, host=?, auth_type=?, oidc_issuer=?, oidc_client_id=?, oidc_client_secret=?, oidc_redirect_url=?, role_claim=?, admin_group=?, is_supertenant=?, enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		p.Slug, p.Name, p.Host, p.AuthType, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
+		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, btoi(p.IsSupertenant), btoi(p.Enabled), p.ID)
+	return err
+}
+
+func (s *Store) DeleteProvider(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id=?`, id)
+	return err
+}
+
+func (s *Store) LinkProviderStorage(ctx context.Context, providerID, storageID int64) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM provider_storages WHERE provider_id=? AND storage_id=?`,
+		providerID, storageID).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO provider_storages (provider_id, storage_id) VALUES (?,?)`, providerID, storageID)
+	return err
+}
+
+func (s *Store) UnlinkProviderStorage(ctx context.Context, providerID, storageID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM provider_storages WHERE provider_id=? AND storage_id=?`, providerID, storageID)
+	return err
+}
+
+func (s *Store) ListProviderStorageIDs(ctx context.Context, providerID int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT storage_id FROM provider_storages WHERE provider_id=? ORDER BY storage_id`, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetProviderIDForStorage(ctx context.Context, storageID int64) (int64, bool, error) {
+	var pid int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT provider_id FROM provider_storages WHERE storage_id=? ORDER BY provider_id LIMIT 1`,
+		storageID).Scan(&pid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return pid, true, nil
+}
+
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE nodes SET size=?, mime=?, etag=?, backend_mtime=?, seen_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
@@ -461,14 +609,59 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 // ─────────────────── Users ───────────────────
 
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error) {
+	// Every user belongs to a provider (tenant). New users default to the
+	// always-present "default" provider (the supertenant), so single-tenant
+	// installs behave unchanged and every user can log in; OIDC JIT overrides
+	// this with the host-resolved tenant via SetUserProvider. This keeps the
+	// CreateUser signature stable for its many callers.
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (email, password_hash, role, locale, timezone) VALUES (?,?,?,?,?)`,
+		`INSERT INTO users (email, password_hash, role, locale, timezone, provider_id)
+		 VALUES (?,?,?,?,?, (SELECT id FROM providers WHERE slug='default'))`,
 		email, passwordHash, role, locale, tz)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return s.GetUser(ctx, id)
+}
+
+// SetUserProvider re-homes a user to a provider (tenant) and records its OIDC
+// subject. Used by OIDC JIT to stamp the host-resolved tenant. Passing an empty
+// oidcSubject leaves the column as-is is NOT done here — it is overwritten, so
+// callers should pass the current value when only changing the provider.
+func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET provider_id=?, oidc_subject=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		providerID, oidcSubject, userID)
+	return err
+}
+
+// GetUserByProviderEmail looks a user up within a single provider (tenant), the
+// multi-tenant analogue of GetUserByEmail. Returns (nil, nil) if absent.
+func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
+	u, err := scanUser(s.db.QueryRowContext(ctx, userSelect()+` FROM users WHERE provider_id=? AND email=?`, providerID, email))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return u, err
+}
+
+// ListUsersByProvider lists a tenant's users (provider admin + delete-cascade).
+func (s *Store) ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error) {
+	rows, err := s.db.QueryContext(ctx, userSelect()+` FROM users WHERE provider_id=? ORDER BY id`, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetUser(ctx context.Context, id int64) (*model.User, error) {
@@ -1356,19 +1549,24 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,'')`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var totpEnabled int
 	var recoveryJSON string
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
+	var providerID sql.NullInt64
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
+	}
+	if providerID.Valid {
+		v := providerID.Int64
+		u.ProviderID = &v
 	}
 	return u, nil
 }

@@ -4,17 +4,25 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
+	"github.com/brf-tech/filex/backend/internal/db"
 )
 
 // Capabilities exposes /api/capabilities.
 type Capabilities struct {
 	Service *capability.Service
+	// Store + MultiTenant power the per-tenant branding block: in multi-tenant
+	// mode the (pre-auth, host-resolved) capabilities answer carries only THIS
+	// host's tenant identity — never the existence of other tenants
+	// (docs/MULTI-TENANCY.md §12 + isolation checklist).
+	Store       db.Store
+	MultiTenant bool
 }
 
 // NewCapabilities constructs a Capabilities handler.
-func NewCapabilities(svc *capability.Service) *Capabilities {
-	return &Capabilities{Service: svc}
+func NewCapabilities(svc *capability.Service, store db.Store, multiTenant bool) *Capabilities {
+	return &Capabilities{Service: svc, Store: store, MultiTenant: multiTenant}
 }
 
 // Get returns the runtime feature snapshot.
@@ -71,6 +79,13 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		// Don't clobber an existing nested field of the same name.
 		if _, exists := merged[k]; !exists {
 			merged[k] = v
+		}
+	}
+
+	// Per-tenant branding: identify only the tenant this host belongs to.
+	if h.MultiTenant && h.Store != nil {
+		if p, _ := h.Store.GetProviderByHost(r.Context(), multioidc.RequestHost(r)); p != nil {
+			merged["tenant"] = map[string]any{"slug": p.Slug, "name": p.Name}
 		}
 	}
 	writeJSON(w, http.StatusOK, merged)

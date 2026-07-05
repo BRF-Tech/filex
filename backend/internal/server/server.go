@@ -19,6 +19,7 @@ import (
 	authapitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	authldap "github.com/brf-tech/filex/backend/internal/auth/drivers/ldap"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	authoidc "github.com/brf-tech/filex/backend/internal/auth/drivers/oidc"
 	authproxyheader "github.com/brf-tech/filex/backend/internal/auth/drivers/proxyheader"
 	"github.com/brf-tech/filex/backend/internal/capability"
@@ -36,6 +37,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/version"
@@ -171,7 +173,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 
 	// API-token driver is always enabled (independent of cfg.Auth.Drivers)
-	// so AI agents / the work.example.com FilexClient / MCP clients can
+	// so AI agents / the work.brf.sh FilexClient / MCP clients can
 	// authenticate against /api/files and /api/ai with X-Filex-Token or a
 	// Bearer token. Tokens are minted from /api/admin/ai-tokens.
 	{
@@ -182,6 +184,14 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		enabled = append(enabled, atDrv)
 	}
 	auth.SetEnabled(enabled)
+
+	// Multi-tenant mode: dispatch OIDC per tenant realm — request host →
+	// provider row → that realm's driver (JIT stamps the tenant). Hosts with no
+	// tenant OIDC config fall back to the config-file driver above, so the
+	// operator's own login keeps working. See docs/MULTI-TENANCY.md.
+	if cfg.MultiTenant {
+		oidcDrv = multioidc.New(store, oidcDrv)
+	}
 
 	// Search index.
 	var idx *search.Index
@@ -414,9 +424,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Mailer for invite/share notices — verified periodically in Start().
 	srvObj.mailer = mailer.New(store)
 
+	// Handlers see the tenant-scoped store: storage listings are confined to the
+	// request's tenant (no-op unless multi-tenant mode is on — the wrapper only
+	// diverges when the context carries a tenant scope). Background services above
+	// keep the raw `store`; their contexts carry no scope, so they are unaffected.
+	scopedStore := tenantstore.New(store)
+
 	deps := &api.Deps{
 		Cfg:             cfg,
-		Store:           store,
+		Store:           scopedStore,
 		Worker:          worker,
 		Index:           idx,
 		Caps:            caps,

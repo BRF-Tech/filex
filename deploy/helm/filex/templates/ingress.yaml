@@ -13,11 +13,20 @@ spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
-  {{- if .Values.ingress.tlsSecretName }}
+  {{- if or .Values.ingress.tlsSecretName .Values.ingress.extraHosts }}
   tls:
+    {{- if .Values.ingress.tlsSecretName }}
     - hosts:
         - {{ .Values.ingress.host | quote }}
       secretName: {{ .Values.ingress.tlsSecretName }}
+    {{- end }}
+    {{- range .Values.ingress.extraHosts }}
+    {{- if .tlsSecretName }}
+    - hosts:
+        - {{ .host | quote }}
+      secretName: {{ .tlsSecretName }}
+    {{- end }}
+    {{- end }}
   {{- end }}
   rules:
     - host: {{ .Values.ingress.host | quote }}
@@ -30,4 +39,16 @@ spec:
                 name: {{ include "filex.fullname" . }}
                 port:
                   name: http
+    {{- range .Values.ingress.extraHosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "filex.fullname" $ }}
+                port:
+                  name: http
+    {{- end }}
 {{- end }}

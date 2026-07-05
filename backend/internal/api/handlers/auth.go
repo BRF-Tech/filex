@@ -13,15 +13,16 @@ import (
 
 // Auth handles login/logout/oidc routes.
 type Auth struct {
-	Store     db.Store
-	LocalAuth auth.LoginDriver
-	OIDCAuth  auth.OIDCDriver
-	PublicURL string
+	Store       db.Store
+	LocalAuth   auth.LoginDriver
+	OIDCAuth    auth.OIDCDriver
+	PublicURL   string
+	MultiTenant bool
 }
 
 // NewAuth constructs an Auth handler.
-func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publicURL string) *Auth {
-	return &Auth{Store: store, LocalAuth: local, OIDCAuth: oidc, PublicURL: publicURL}
+func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publicURL string, multiTenant bool) *Auth {
+	return &Auth{Store: store, LocalAuth: local, OIDCAuth: oidc, PublicURL: publicURL, MultiTenant: multiTenant}
 }
 
 type loginReq struct {
@@ -54,6 +55,16 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	user, token, err := h.LocalAuth.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		return
+	}
+	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, user) {
+		// Maintenance mode: multi-tenant is off but tenants exist — only the
+		// supertenant may sign in. See docs/MULTI-TENANCY.md.
+		_ = h.Store.DeleteSession(r.Context(), token)
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":       "sign-in is temporarily limited to the platform operator",
+			"maintenance": true,
+		})
 		return
 	}
 	if user.TOTPEnabled {
@@ -107,9 +118,15 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OIDC not configured"})
 		return
 	}
-	_, token, err := h.OIDCAuth.HandleCallback(w, r)
+	usr, token, err := h.OIDCAuth.HandleCallback(w, r)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		return
+	}
+	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, usr) {
+		// Maintenance mode (see docs/MULTI-TENANCY.md): tenant locked out.
+		_ = h.Store.DeleteSession(r.Context(), token)
+		http.Redirect(w, r, h.PublicURL+"/admin/login?maintenance=1", http.StatusFound)
 		return
 	}
 	setSessionCookie(w, token)

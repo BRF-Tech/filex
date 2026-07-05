@@ -44,6 +44,18 @@ type Driver struct {
 	roleClaim   string // metadata field name containing role
 	adminGroup  string // group/role string that elevates user to admin
 	defaultRole string
+	// providerID scopes this driver instance to one tenant (multi-tenant mode;
+	// docs/MULTI-TENANCY.md): the JIT upsert then looks users up WITHIN that
+	// provider and stamps new users with it. 0 = single-tenant behaviour.
+	providerID int64
+}
+
+// SetProviderID pins this driver instance to a tenant. Called by the
+// multi-provider dispatcher right after Init.
+func (d *Driver) SetProviderID(id int64) {
+	d.mu.Lock()
+	d.providerID = id
+	d.mu.Unlock()
 }
 
 // New constructs an empty OIDC driver — Init must be called.
@@ -146,6 +158,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	verifier := d.verifier
 	roleClaim := d.roleClaim
 	adminGroup := d.adminGroup
+	providerID := d.providerID
 	d.mu.RUnlock()
 	if oauthCfg == nil {
 		return nil, "", errors.New("oidc: not initialized")
@@ -196,13 +209,40 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 		}
 	}
 
-	// Upsert user.
+	// Upsert user. In multi-tenant mode (providerID set) the lookup is scoped to
+	// THIS tenant, a new user is JIT-stamped with it, and the tag is immutable —
+	// an email already registered to another tenant cannot hop realms (the JIT
+	// create then fails on the unique email and the login is refused).
 	ctx := r.Context()
-	user, err := d.store.GetUserByEmail(ctx, strings.ToLower(email))
-	if err != nil {
-		user, err = d.store.CreateUser(ctx, strings.ToLower(email), "", role, "en", "UTC")
+	lower := strings.ToLower(email)
+	var user *model.User
+	if providerID != 0 {
+		user, err = d.store.GetUserByProviderEmail(ctx, providerID, lower)
 		if err != nil {
-			return nil, "", fmt.Errorf("oidc: upsert user: %w", err)
+			return nil, "", fmt.Errorf("oidc: lookup user: %w", err)
+		}
+		if user == nil {
+			user, err = d.store.CreateUser(ctx, lower, "", role, "en", "UTC")
+			if err != nil {
+				return nil, "", fmt.Errorf("oidc: this email is registered to another tenant: %w", err)
+			}
+			if err := d.store.SetUserProvider(ctx, user.ID, providerID, idTok.Subject); err != nil {
+				return nil, "", fmt.Errorf("oidc: stamp tenant: %w", err)
+			}
+			if u2, err := d.store.GetUser(ctx, user.ID); err == nil {
+				user = u2
+			}
+		} else if user.OIDCSubject == "" {
+			// Backfill the subject for a pre-existing tenant user.
+			_ = d.store.SetUserProvider(ctx, user.ID, providerID, idTok.Subject)
+		}
+	} else {
+		user, err = d.store.GetUserByEmail(ctx, lower)
+		if err != nil {
+			user, err = d.store.CreateUser(ctx, lower, "", role, "en", "UTC")
+			if err != nil {
+				return nil, "", fmt.Errorf("oidc: upsert user: %w", err)
+			}
 		}
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)

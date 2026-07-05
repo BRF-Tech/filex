@@ -27,6 +27,15 @@ ingress:
     # Large uploads + websockets on nginx-ingress:
     # nginx.ingress.kubernetes.io/proxy-body-size: "5g"
     # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  # MULTI-TENANT (docs/MULTI-TENANCY.md): one Ingress rule + TLS cert per
+  # tenant host, all routed to the same filex. Set FILEX_MULTI_TENANT=1 in
+  # `env` and provision each host as a provider over /api/admin/providers.
+  # With cert-manager, an annotation above issues each host its own cert.
+  extraHosts: []
+  # - host: files.acme.example
+  #   tlsSecretName: files-acme-example-tls
+  # - host: files.beta.example
+  #   tlsSecretName: files-beta-example-tls
 
 # /data holds the SQLite DB (if used), the search index and the thumbnail cache.
 persistence:

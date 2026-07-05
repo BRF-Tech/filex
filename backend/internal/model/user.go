@@ -45,6 +45,11 @@ type User struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	LastLoginAt       *time.Time `json:"last_login_at,omitempty"`
+	// Multi-tenancy (docs/MULTI-TENANCY.md): the tenant (provider) this user
+	// belongs to. Nil only on rows predating the 00014 backfill; assigned
+	// immutably at JIT login. OIDCSubject pins the OIDC identity per provider.
+	ProviderID  *int64 `json:"provider_id,omitempty"`
+	OIDCSubject string `json:"-"`
 }
 
 // IsAdmin returns true if the user has the admin role.
@@ -89,7 +94,7 @@ type Session struct {
 }
 
 // APIToken is a long-lived bearer credential for non-interactive callers
-// (AI agents, the work.example.com FilexClient, the MCP server). It is bound to
+// (AI agents, the work.brf.sh FilexClient, the MCP server). It is bound to
 // a user so every authenticated call inherits that user's role. The
 // plaintext value is shown only once at creation; only TokenHash (sha256
 // hex) is persisted.

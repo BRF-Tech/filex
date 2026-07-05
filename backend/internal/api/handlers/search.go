@@ -10,6 +10,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Search handles /api/files/search.
@@ -86,6 +87,19 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			results = fallback
 		}
 	}
+	// Multi-tenant: drop hits in storages outside the caller's tenant. This is
+	// the file-data (layer-1) confinement — an unfiltered search is the classic
+	// cross-tenant leak (content, not just a name). No-op unless a scope is set.
+	if scope, ok := tenant.FromContext(r.Context()); ok {
+		kept := results[:0]
+		for _, n := range results {
+			if scope.CanAccessStorage(n.StorageID) {
+				kept = append(kept, n)
+			}
+		}
+		results = kept
+	}
+
 	// RBAC: drop hits the caller can't see (per-storage grants; cached).
 	if h.ACL != nil {
 		user := auth.UserFrom(r.Context())

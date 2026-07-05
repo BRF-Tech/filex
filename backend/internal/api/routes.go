@@ -125,12 +125,13 @@ func BuildRouter(d *Deps) http.Handler {
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	ooh.AttachACL(d.ACL)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
-	ch := handlers.NewCapabilities(d.Caps)
+	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	stg := handlers.NewStorages(d.Store, d.Worker)
 	ush := handlers.NewUsers(d.Store)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
-	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL)
+	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant)
+	provH := handlers.NewProviders(d.Store, d.Cfg.MultiTenant)
 	sxh := handlers.NewSearch(d.Index, d.Store)
 	sxh.AttachACL(d.ACL)
 
@@ -208,6 +209,9 @@ func BuildRouter(d *Deps) http.Handler {
 		// API token (host apps proxying the embedded explorer). Token absent →
 		// falls through to the session chain, so existing auth is unchanged.
 		r.Use(auth.MiddlewareWithToken(d.Store, true))
+		// Resolve the tenant (provider) scope from the user (no-op unless
+		// multi-tenant mode is on). See docs/MULTI-TENANCY.md.
+		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
 		// Audit curated self-service + file mutations (profile, password,
 		// TOTP, shares, file deletes — shouldAudit() filters the rest).
 		r.Use(auth.AuditMiddleware(d.Store))
@@ -336,6 +340,10 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(true))
 		r.Use(auth.RequireAdmin)
+		// Scope admin to its tenant (no-op unless multi-tenant mode is on). A
+		// tenant-admin then only sees its own storages/users; the supertenant
+		// sees all. See docs/MULTI-TENANCY.md.
+		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
 		// Record every successful mutating admin action. The middleware is
 		// otherwise defined but never installed anywhere, which left the
 		// Audit page empty even after real changes.
@@ -381,6 +389,17 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/", seth.Update)
 				r.Post("/smtp-test", seth.SMTPTest)
 				r.Put("/{key}", seth.Set)
+			})
+
+			// Tenant lifecycle (multi-tenancy). In multi-tenant mode only the
+			// supertenant's admins pass the handler's internal gate.
+			r.Route("/providers", func(r chi.Router) {
+				r.Get("/", provH.List)
+				r.Post("/", provH.Create)
+				r.Patch("/{id}", provH.Update)
+				r.Delete("/{id}", provH.Delete)
+				r.Post("/{id}/storages", provH.LinkStorage)
+				r.Delete("/{id}/storages/{storageID}", provH.UnlinkStorage)
 			})
 
 			// AI / MCP / FilexClient bearer tokens. POST returns the
@@ -479,7 +498,7 @@ func BuildRouter(d *Deps) http.Handler {
 	})
 
 	// ────── AI / MCP (token-authenticated) ──────
-	// Token-only namespace consumed by AI agents, the work.example.com
+	// Token-only namespace consumed by AI agents, the work.brf.sh
 	// FilexClient, and MCP clients. auth.APITokenMiddleware validates
 	// X-Filex-Token / Bearer and attaches the bound principal + token;
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
@@ -502,6 +521,9 @@ func BuildRouter(d *Deps) http.Handler {
 	aiMCP.AttachACL(d.ACL)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
+		// Agents are tenant-scoped too — resolve the token user's provider
+		// (no-op unless multi-tenant mode is on). See docs/MULTI-TENANCY.md.
+		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
 
 		// Discovery: any valid token may learn its confinement root + reachable
 		// storages (no verb scope needed) so a confined agent stops guessing.

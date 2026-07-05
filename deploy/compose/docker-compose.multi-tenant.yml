@@ -1,0 +1,75 @@
+# filex — MULTI-TENANT example: one install serving two tenants
+# (docs/MULTI-TENANCY.md). Each tenant = its own host + OIDC realm + storage.
+#
+#   files.acme.example  → tenant "acme"  → storage acme-files
+#   files.beta.example  → tenant "beta"  → storage beta-files
+#   filex.example       → the operator (supertenant realm / config-file OIDC)
+#
+# Bring-up:
+#   1. docker compose -f docker-compose.multi-tenant.yml up -d
+#   2. Sign in as the bootstrap admin on filex.example, then provision tenants
+#      over the lifecycle API (or your own tooling):
+#        POST /api/admin/storages         {"name":"acme-files","driver":"local",
+#                                          "config":{"path":"/storages/acme/files"}}
+#        POST /api/admin/providers        {"slug":"acme","host":"files.acme.example",
+#                                          "oidc_issuer":"https://kc.example/realms/acme",
+#                                          "oidc_client_id":"filex","oidc_client_secret":"…",
+#                                          "role_claim":"realm_access.roles","admin_group":"filex-admins"}
+#        POST /api/admin/providers/{id}/storages  {"storage_id": <acme storage id>}
+#   3. Point each tenant's DNS at the proxy; per-host TLS terminates there.
+#
+# The proxy MUST pass the original Host header through (Caddy's reverse_proxy
+# does by default) — filex resolves the tenant from it. Only route trusted
+# hosts to filex (docs/MULTI-TENANCY.md §13 trusted-host).
+
+services:
+  filex:
+    image: ghcr.io/brf-tech/filex:latest
+    restart: unless-stopped
+    environment:
+      FILEX_MULTI_TENANT: "1"
+      # The operator's own URL (supertenant). Tenant hosts are provider rows.
+      FILEX_PUBLIC_URL: https://filex.example
+      FILEX_DATA_DIR: /data
+      # Bootstrap local admin = break-glass + first-run provisioning
+      # (docs/MULTI-TENANCY.md §8). The config-file OIDC below stays the
+      # operator/supertenant realm; tenant realms live in the DB.
+      FILEX_AUTH_DRIVERS: local,oidc
+      FILEX_OIDC_ISSUER: https://kc.example/realms/ops
+      FILEX_OIDC_CLIENT_ID: filex
+      FILEX_OIDC_CLIENT_SECRET: change-me
+      FILEX_OIDC_ROLE_CLAIM: realm_access.roles
+      FILEX_OIDC_ADMIN_GROUP: filex-admins
+      # Tenant storages are created in step 2 over the admin API/UI (one
+      # `local` storage per mounted path below — or point each tenant at its
+      # own S3 bucket instead) and then linked to their providers.
+    volumes:
+      - filex-data:/data
+      - acme-files:/storages/acme
+      - beta-files:/storages/beta
+
+  # Per-host TLS + Host passthrough. In production replace with your own
+  # front-door (Caddy/Traefik/nginx/cert-manager Ingress) — one cert per
+  # tenant host (SNI), all routed to the same filex.
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy-data:/data
+
+configs:
+  caddyfile:
+    content: |
+      filex.example, files.acme.example, files.beta.example {
+        reverse_proxy filex:5212
+      }
+
+volumes:
+  filex-data:
+  acme-files:
+  beta-files:
+  caddy-data:

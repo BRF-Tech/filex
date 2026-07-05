@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Audit handles /api/admin/audit.
@@ -64,6 +65,25 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if entries == nil {
 		entries = []*db.AuditEntryWithUser{}
+	}
+	// Multi-tenant: a tenant-admin only sees its own users' audit trail
+	// (docs/MULTI-TENANCY.md §9). System entries (no user) stay
+	// supertenant-only. Total is recomputed from the filtered page.
+	if scope, ok := tenant.FromContext(ctx); ok && !scope.IsSupertenant {
+		allowed := map[int64]bool{}
+		if users, err := h.Store.ListUsersByProvider(ctx, scope.ProviderID); err == nil {
+			for _, u := range users {
+				allowed[u.ID] = true
+			}
+		}
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.Entry != nil && e.Entry.UserID != nil && allowed[*e.Entry.UserID] {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+		total = int64(len(entries))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,
