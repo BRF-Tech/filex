@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Build npm packages + admin UI
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-build
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /src
 
@@ -53,7 +53,7 @@ RUN mkdir -p /tmp/embed/admin /tmp/embed/web && \
 # ---------------------------------------------------------------------------
 # Stage 3: Build Go binary
 # ---------------------------------------------------------------------------
-FROM golang:1.25-alpine AS backend-build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend-build
 RUN apk --no-cache add git ca-certificates
 WORKDIR /src
 COPY backend/go.mod ./
@@ -67,9 +67,17 @@ COPY --from=embed-prep /tmp/embed/web   ./embed/web
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
-RUN CGO_ENABLED=0 GOOS=linux go build \
+ARG TARGETOS
+ARG TARGETARCH
+# Fully-qualified -X paths (matching internal/version/version.go) — the old
+# `-X main.version` form was a silent no-op, so full images always reported
+# "0.1.0-dev (unknown, unknown)".
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -ldflags="-s -w \
+        -X github.com/brf-tech/filex/backend/internal/version.Version=${VERSION} \
+        -X github.com/brf-tech/filex/backend/internal/version.Commit=${COMMIT} \
+        -X github.com/brf-tech/filex/backend/internal/version.Date=${DATE}" \
     -o /out/filex \
     ./cmd/filex
 

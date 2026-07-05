@@ -16,10 +16,16 @@
 # Run:
 #   docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:latest
 
+# Multi-arch: build stages are pinned to $BUILDPLATFORM so the Node/Go work
+# always runs natively on the build host; the Go stage cross-compiles via
+# TARGETOS/TARGETARCH (CGO=0 makes this free). Only the final runtime stage
+# (apk installs) runs per-target-arch, under QEMU when cross-building.
+#   docker buildx build --platform linux/amd64,linux/arm64 -f docker/Dockerfile .
+
 # ---------------------------------------------------------------------------
 # Stage 1: Build npm packages (filex-core, webcomponent, react) + admin UI
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-build
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /src
 
@@ -63,7 +69,7 @@ RUN mkdir -p /tmp/embed/admin /tmp/embed/web && \
 # ---------------------------------------------------------------------------
 # Bumped to 1.25 for golang.org/x/image v0.39+ (BMP/TIFF/WebP decoders we
 # import in internal/thumb/image.go register Go 1.25 toolchain features).
-FROM golang:1.25-alpine AS backend-build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend-build
 RUN apk --no-cache add git ca-certificates
 WORKDIR /src
 
@@ -86,13 +92,17 @@ RUN go mod tidy
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
+# TARGETOS/TARGETARCH are set by buildx per requested platform; empty on a
+# plain `docker build`, where Go then falls back to the host defaults.
+ARG TARGETOS
+ARG TARGETARCH
 # ldflag symbol path must match the package var declarations in
 # internal/version/version.go — `-X main.version=...` is silently a no-op
 # because cmd/filex/main.go has no `version` symbol; the linker just skips
 # unknown -X targets, so the banner/footer falls back to "0.1.0-dev (unknown,
 # unknown)" even on tagged release builds. Use the fully-qualified package
 # path instead.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -trimpath \
     -ldflags="-s -w \
         -X github.com/brf-tech/filex/backend/internal/version.Version=${VERSION} \

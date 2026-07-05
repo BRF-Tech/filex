@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.64 below.)
+(Nothing yet — see v0.1.65 below.)
+
+## [0.1.65] - 2026-07-06
+
+### Added
+
+- **Multi-arch Docker images: linux/amd64 + linux/arm64.** Release binaries
+  were already cross-built for arm64 (goreleaser), but the container images
+  only shipped amd64. The Dockerfiles now pin the Node/Go build stages to
+  `$BUILDPLATFORM` and cross-compile the Go binary via `TARGETOS`/`TARGETARCH`
+  (CGO=0 makes it free), so only the runtime stage's package installs run
+  per-arch; the release workflow builds and pushes both platforms as a
+  single manifest (QEMU + buildx). All runtime packages verified present in
+  Alpine 3.20 aarch64. A plain single-arch `docker build` keeps working
+  unchanged.
+
+### Fixed
+
+- **Full image version stamp.** `Dockerfile.full` still used the `-X
+  main.version` ldflags form — a silent no-op — so `:full` images always
+  reported "0.1.0-dev (unknown, unknown)". Now uses the fully-qualified
+  version package path like the default image.
+- **CI: 30-minute hard timeout on the e2e jobs** (source-repo CI) — a hung
+  browser e2e run sat 14 hours on a single-slot runner and starved every
+  queued pipeline.
 
 ## [0.1.64] - 2026-07-06
 
