@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.60 below.)
+(Nothing yet — see v0.1.61 below.)
+
+## [0.1.61] - 2026-07-05
+
+### Added
+
+- **Native multi-tenancy** (`FILEX_MULTI_TENANT`). One install serves N
+  tenants: a *provider* = an auth realm (OIDC or local) bound to a host and
+  linked to its storages. A realm's users sign in on their own domain and see
+  only their own storages — even admins — and users of other realms are
+  invisible (including on the permission/grant picker, search, shares/audit/
+  grants lists). Per-tenant OIDC realms (host → provider → cached driver) with
+  provider-scoped JIT and an immutable tenant tag; a supertenant provider is
+  platform-scoped (at most one, moved only by transfer, undeletable); tenant
+  lifecycle API under `/api/admin/providers` (provision / suspend / delete
+  with user cascade); maintenance mode (flag off + tenants present ⇒
+  supertenant-only login, fully reversible). **Off by default — a
+  single-tenant install behaves exactly as before** (migration 00014 is
+  additive and inert). Design + status: `docs/MULTI-TENANCY.md`; deploy
+  examples: `deploy/compose/docker-compose.multi-tenant.yml` + Helm
+  `ingress.extraHosts`.
 
 ## [0.1.60] - 2026-07-05
 
