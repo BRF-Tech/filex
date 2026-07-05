@@ -333,6 +333,148 @@ func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) er
 	return err
 }
 
+// ─── Providers (tenants) — see docs/MULTI-TENANCY.md ─────────────────
+
+const providerCols = `id, slug, name, COALESCE(host,''), auth_type, ` +
+	`COALESCE(oidc_issuer,''), COALESCE(oidc_client_id,''), COALESCE(oidc_client_secret,''), ` +
+	`COALESCE(oidc_redirect_url,''), COALESCE(role_claim,''), COALESCE(admin_group,''), ` +
+	`is_supertenant, enabled, created_at, updated_at`
+
+func scanProvider(r rowScanner) (*model.Provider, error) {
+	p := &model.Provider{}
+	if err := r.Scan(&p.ID, &p.Slug, &p.Name, &p.Host, &p.AuthType,
+		&p.OIDCIssuer, &p.OIDCClientID, &p.OIDCClientSecret, &p.OIDCRedirectURL,
+		&p.RoleClaim, &p.AdminGroup, &p.IsSupertenant, &p.Enabled,
+		&p.CreatedAt, &p.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error) {
+	at := p.AuthType
+	if at == "" {
+		at = model.AuthTypeOIDC
+	}
+	row := s.db.QueryRowContext(ctx,
+		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, is_supertenant, enabled)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+providerCols,
+		p.Slug, p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
+		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.IsSupertenant, p.Enabled)
+	return scanProvider(row)
+}
+
+func (s *Store) GetProvider(ctx context.Context, id int64) (*model.Provider, error) {
+	return scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE id=$1`, id))
+}
+
+func (s *Store) GetProviderBySlug(ctx context.Context, slug string) (*model.Provider, error) {
+	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE slug=$1`, slug))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
+func (s *Store) GetProviderByHost(ctx context.Context, host string) (*model.Provider, error) {
+	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE host=$1 AND enabled=TRUE`, host))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
+func (s *Store) GetSupertenant(ctx context.Context) (*model.Provider, error) {
+	p, err := scanProvider(s.db.QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE is_supertenant=TRUE ORDER BY id LIMIT 1`))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
+}
+
+func (s *Store) ListProviders(ctx context.Context) ([]*model.Provider, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+providerCols+` FROM providers ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Provider
+	for rows.Next() {
+		p, err := scanProvider(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateProvider(ctx context.Context, p *model.Provider) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE providers SET slug=$1, name=$2, host=$3, auth_type=$4, oidc_issuer=$5, oidc_client_id=$6, oidc_client_secret=$7, oidc_redirect_url=$8, role_claim=$9, admin_group=$10, is_supertenant=$11, enabled=$12, updated_at=NOW() WHERE id=$13`,
+		p.Slug, p.Name, p.Host, p.AuthType, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
+		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.IsSupertenant, p.Enabled, p.ID)
+	return err
+}
+
+func (s *Store) DeleteProvider(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) LinkProviderStorage(ctx context.Context, providerID, storageID int64) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM provider_storages WHERE provider_id=$1 AND storage_id=$2`,
+		providerID, storageID).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO provider_storages (provider_id, storage_id) VALUES ($1,$2)`, providerID, storageID)
+	return err
+}
+
+func (s *Store) UnlinkProviderStorage(ctx context.Context, providerID, storageID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM provider_storages WHERE provider_id=$1 AND storage_id=$2`, providerID, storageID)
+	return err
+}
+
+func (s *Store) ListProviderStorageIDs(ctx context.Context, providerID int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT storage_id FROM provider_storages WHERE provider_id=$1 ORDER BY storage_id`, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetProviderIDForStorage(ctx context.Context, storageID int64) (int64, bool, error) {
+	var pid int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT provider_id FROM provider_storages WHERE storage_id=$1 ORDER BY provider_id LIMIT 1`,
+		storageID).Scan(&pid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return pid, true, nil
+}
+
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET size=$1, mime=$2, etag=$3, backend_mtime=$4, seen_at=NOW(), updated_at=NOW() WHERE id=$5`, size, mime, etag, mtime, id)
 	return err
@@ -441,14 +583,50 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 // the login second-factor check on Postgres.
 const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, ` +
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
-	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at`
+	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
+	`provider_id, COALESCE(oidc_subject,'')`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
+	// New users default to the always-present "default" provider (the
+	// supertenant); OIDC JIT overrides via SetUserProvider. See sqlite driver.
 	row := s.db.QueryRowContext(ctx,
-		`INSERT INTO users (email, password_hash, role, locale, timezone) VALUES ($1,$2,$3,$4,$5)
+		`INSERT INTO users (email, password_hash, role, locale, timezone, provider_id)
+		 VALUES ($1,$2,$3,$4,$5, (SELECT id FROM providers WHERE slug='default'))
 		 RETURNING `+userCols,
 		email, hash, role, locale, tz)
 	return scanUser(row)
+}
+
+func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET provider_id=$1, oidc_subject=$2, updated_at=NOW() WHERE id=$3`,
+		providerID, oidcSubject, userID)
+	return err
+}
+
+func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
+	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE provider_id=$1 AND email=$2`, providerID, email))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return u, err
+}
+
+func (s *Store) ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+userCols+` FROM users WHERE provider_id=$1 ORDER BY id`, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) GetUser(ctx context.Context, id int64) (*model.User, error) {
@@ -1086,11 +1264,16 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt); err != nil {
+	var providerID sql.NullInt64
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject); err != nil {
 		return nil, err
 	}
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
+	}
+	if providerID.Valid {
+		v := providerID.Int64
+		u.ProviderID = &v
 	}
 	return u, nil
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // SharesAdmin handles /api/admin/shares.
@@ -53,6 +54,28 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	// Multi-tenant: a tenant-admin only sees shares on its own storages
+	// (docs/MULTI-TENANCY.md §9). The scoped store's ListStorages is already
+	// tenant-confined, so its name set IS the allowed set; a row without a
+	// resolvable storage name stays hidden (fail closed). Total is recomputed
+	// from the filtered page — approximate across pages, acceptable for a
+	// name-level admin view.
+	if scope, ok := tenant.FromContext(r.Context()); ok && !scope.IsSupertenant {
+		allowed := map[string]bool{}
+		if sts, err := h.Store.ListStorages(r.Context()); err == nil {
+			for _, st := range sts {
+				allowed[st.Name] = true
+			}
+		}
+		kept := rows[:0]
+		for _, row := range rows {
+			if row.StorageName != "" && allowed[row.StorageName] {
+				kept = append(kept, row)
+			}
+		}
+		rows = kept
+		total = int64(len(rows))
 	}
 	// Dual envelope: `items/total/page/page_size` is what the admin
 	// SPA expects (PaginatedResponse); `entries/limit/offset` keeps

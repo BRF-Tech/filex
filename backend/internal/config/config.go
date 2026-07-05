@@ -29,6 +29,11 @@ type Config struct {
 	PublicURL        string       `yaml:"public_url"`
 	DataDir          string       `yaml:"data_dir"`
 	DefaultLocale    string       `yaml:"default_locale"`
+	// MultiTenant turns on native multi-tenancy (host-resolved provider =
+	// tenant, per-provider storage confinement, scoped user directory). OFF by
+	// default — a single-tenant install behaves exactly as before. See
+	// docs/MULTI-TENANCY.md.
+	MultiTenant      bool         `yaml:"multi_tenant"`
 	Log              LogConfig    `yaml:"log"`
 	DB               DBConfig     `yaml:"db"`
 	Auth             AuthConfig   `yaml:"auth"`
@@ -98,7 +103,7 @@ type SeedStorage struct {
 }
 
 // SentryConfig — optional Sentry-wire error reporting (self-hosted GlitchTip at
-// errors.example.com). An empty DSN disables it entirely (default build reports
+// errors.brf.sh). An empty DSN disables it entirely (default build reports
 // nothing). Environment tags events (e.g. production / demo) so one project can
 // serve multiple deployments.
 type SentryConfig struct {
@@ -375,6 +380,9 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_DEFAULT_LOCALE"); v != "" {
 		c.DefaultLocale = v
 	}
+	if v := os.Getenv("FILEX_MULTI_TENANT"); v == "1" || v == "true" {
+		c.MultiTenant = true
+	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v
 	}
@@ -397,7 +405,7 @@ func applyEnv(c *Config) {
 	//   FILEX_OIDC_*       (deploy/.env.example + docs)
 	//   FILEX_AUTH_OIDC_*  (legacy from earlier draft of this file)
 	// The shorter form wins when both are set, matching the convention
-	// used in deploy/demo-fm.example.com.compose.yml + plan files.
+	// used in deploy/demo-fm.brf.sh.compose.yml + plan files.
 	if v := os.Getenv("FILEX_AUTH_DRIVERS"); v != "" {
 		parts := strings.Split(v, ",")
 		out := make([]string, 0, len(parts))

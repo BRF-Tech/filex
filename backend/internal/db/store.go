@@ -94,6 +94,11 @@ type Store interface {
 	CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error)
 	GetUser(ctx context.Context, id int64) (*model.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*model.User, error)
+	// Multi-tenancy (docs/MULTI-TENANCY.md): look a user up within one provider
+	// (tenant); re-home a user to a provider + record its OIDC subject (JIT).
+	GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error)
+	SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error
+	ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error)
 	ListUsers(ctx context.Context) ([]*model.User, error)
 	CountUsers(ctx context.Context) (int64, error)
 	UpdateUserPassword(ctx context.Context, id int64, hash string) error
@@ -279,6 +284,28 @@ type Store interface {
 
 	GetReplicaSettings(ctx context.Context) (*model.ReplicaSettings, error)
 	UpsertReplicaSettings(ctx context.Context, s *model.ReplicaSettings) error
+
+	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
+	// mode is off; a single "default" provider always exists (migration 00014).
+	CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error)
+	GetProvider(ctx context.Context, id int64) (*model.Provider, error)
+	GetProviderBySlug(ctx context.Context, slug string) (*model.Provider, error)
+	// GetProviderByHost resolves a request Host to its tenant; returns nil if no
+	// enabled provider claims that host.
+	GetProviderByHost(ctx context.Context, host string) (*model.Provider, error)
+	ListProviders(ctx context.Context) ([]*model.Provider, error)
+	UpdateProvider(ctx context.Context, p *model.Provider) error
+	DeleteProvider(ctx context.Context, id int64) error
+	// GetSupertenant returns the single is_supertenant provider, or nil.
+	GetSupertenant(ctx context.Context) (*model.Provider, error)
+
+	// Provider ↔ storage links (M:N; 1:1 in the first UI).
+	LinkProviderStorage(ctx context.Context, providerID, storageID int64) error
+	UnlinkProviderStorage(ctx context.Context, providerID, storageID int64) error
+	ListProviderStorageIDs(ctx context.Context, providerID int64) ([]int64, error)
+	// GetProviderIDForStorage returns the (first) provider a storage is linked
+	// to — used by background workers to derive tenancy from a storage.
+	GetProviderIDForStorage(ctx context.Context, storageID int64) (int64, bool, error)
 }
 
 // ExternalService is the DB row representation. Lives in the db package so

@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Grants is the per-file/per-folder permission-management API backing the
@@ -350,10 +351,16 @@ func (h *Grants) AdminList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Multi-tenant: a tenant-admin only sees grants on its own storages
+	// (docs/MULTI-TENANCY.md §9).
+	scope, scoped := tenant.FromContext(r.Context())
 	storageName := map[int64]string{}
 	userEmail := map[int64]string{}
 	out := make([]map[string]any, 0, len(all))
 	for _, g := range all {
+		if scoped && !scope.IsSupertenant && !scope.CanAccessStorage(g.StorageID) {
+			continue
+		}
 		if _, ok := storageName[g.StorageID]; !ok {
 			if st, e := h.Store.GetStorage(r.Context(), g.StorageID); e == nil && st != nil {
 				storageName[g.StorageID] = st.Name
