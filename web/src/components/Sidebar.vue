@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, onMounted, watch, type Component } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
+import { trashApi } from '@/api/trash';
+import TrashFull from './icons/TrashFull.vue';
 import {
   LayoutDashboard,
   Database,
@@ -36,10 +38,24 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const { t } = useI18n();
 const route = useRoute();
 
+// Trash icon reflects whether the trash has anything in it: a full bin when
+// there are items, the empty bin otherwise. Refreshed on mount + on navigation
+// (e.g. after emptying/restoring). Best-effort — falls back to the empty bin.
+const trashCount = ref(0);
+async function refreshTrash(): Promise<void> {
+  try {
+    trashCount.value = (await trashApi.list({ limit: 1 })).total;
+  } catch {
+    /* keep the empty-bin icon */
+  }
+}
+onMounted(refreshTrash);
+watch(() => route.name, refreshTrash);
+
 interface NavItem {
   to: { name: string };
   label: string;
-  icon: typeof LayoutDashboard;
+  icon: Component;
   group: 'main' | 'access' | 'ops' | 'meta';
 }
 
@@ -50,7 +66,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'storages' }, label: t('nav.storages'), icon: Database, group: 'main' },
   { to: { name: 'sync' }, label: t('nav.sync'), icon: RefreshCcw, group: 'main' },
   { to: { name: 'shares' }, label: t('nav.shares'), icon: Share2, group: 'main' },
-  { to: { name: 'trash' }, label: t('nav.trash'), icon: Trash2, group: 'main' },
+  { to: { name: 'trash' }, label: t('nav.trash'), icon: trashCount.value > 0 ? TrashFull : Trash2, group: 'main' },
   { to: { name: 'search' }, label: t('nav.search'), icon: Search, group: 'main' },
   { to: { name: 'tagged' }, label: t('nav.tagged'), icon: Tag, group: 'main' },
 

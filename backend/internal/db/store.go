@@ -15,6 +15,9 @@ type NodeAgg struct {
 	ParentID *int64
 	IsDir    bool
 	Size     int64
+	// Mtime is the node's backend_mtime (nullable). For folders it feeds the
+	// "last activity" date = newest descendant mtime (see RecomputeFolderSizes).
+	Mtime *time.Time
 }
 
 // Store is the interface implemented by every dialect-specific query
@@ -56,6 +59,10 @@ type Store interface {
 	// SetNodeSize overwrites a node's cached size. Used to store recursive folder
 	// totals (see internal/sync.RecomputeFolderSizes).
 	SetNodeSize(ctx context.Context, id int64, size int64) error
+	// SetNodeMtime overwrites a node's cached backend_mtime. Used to give folders
+	// a "last activity" date (newest descendant mtime) so the explorer can show a
+	// date for directories whose driver reports none (e.g. synthetic S3 prefixes).
+	SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) error
 	UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error
 	TouchNodeSeen(ctx context.Context, id int64) error
 	SoftDeleteNode(ctx context.Context, id int64) error

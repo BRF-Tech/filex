@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.56 below.)
+(Nothing yet — see v0.1.59 below.)
+
+## [0.1.59] - 2026-07-05
+
+### Added
+
+- **Folders now show a date in the explorer.** Alongside the recursive size
+  added in 0.1.58, each folder's row reports a "last activity" date — the
+  modification time of its newest descendant. It is computed in the same
+  end-of-sync aggregation pass (one post-order tree walk, no extra queries) and
+  cached in `nodes.backend_mtime`, so the explorer serves it straight from the
+  index with no per-folder backend scan. This matters most for object stores
+  whose directories are synthetic and carry no native mtime (e.g. S3 prefixes),
+  which previously showed no date at all. (`backend/internal/sync/aggregate.go`,
+  sqlite/postgres drivers, `db.Store.SetNodeMtime`.)
+
+### Changed
+
+- **The trash sidebar icon reflects its contents** — a full bin when the trash
+  holds items, the empty bin otherwise. Refreshed on navigation (e.g. after
+  emptying or restoring). Falls back to the empty bin if the count can't be
+  fetched. (`web/src/components/Sidebar.vue`, `icons/TrashFull.vue`.)
+
+## [0.1.58] - 2026-07-04
+
+### Added
+
+- **Folder sizes in the explorer.** Each folder's row shows its recursive total
+  size (the sum of its descendant files). Sizes are computed once at the end of
+  every storage sync and cached in the node index (`nodes.size`) — served from
+  the index, never re-scanned per folder (no N+1). (`backend/internal/sync/`,
+  `db.Store.AggNodes` / `SetNodeSize`.)
+- **`FILEX_DEFAULT_LOCALE`** pins the UI's default language independent of the
+  browser (e.g. a public demo can default to English while a user may still
+  switch to another supported locale — their choice persists in
+  `localStorage`). Exposed via the capabilities endpoint. (`config`,
+  `capability`, `web/src/i18n`.)
 
 ## [0.1.56] - 2026-07-03
 
@@ -131,7 +167,7 @@ fixes; no schema changes, no breaking API.
   mesh data, so model-viewer's poster canvas stayed at 0×0 and emitted
   WebGL framebuffer warnings. Replaced the fixture with the Khronos
   Box.glb sample (~1.6 KB, real cube mesh) — re-verify on
-  `https://fm.example.com/admin/files/edit?path=s3-test%3A%2F%2Fexample%2Fcube.glb&type=glb`
+  `https://fm.brf.sh/admin/files/edit?path=s3-test%3A%2F%2Fexample%2Fcube.glb&type=glb`
   now shows zero console warnings and a properly rendered cube. The
   v0.1.1 inline-style code change is what made the fixture-fix possible
   — both layers were needed.
@@ -139,7 +175,7 @@ fixes; no schema changes, no breaking API.
 ## [0.1.1] - 2026-05-09
 
 Patch release closing six bugs surfaced by the post-v0.1.0 production
-sweep against `https://fm.example.com` (see `sweep-2026-05-09/sweep-report.md`
+sweep against `https://fm.brf.sh` (see `sweep-2026-05-09/sweep-report.md`
 for the full matrix). No breaking changes; existing storages continue to
 work, three previously dead-end UI features are now usable.
 
@@ -190,7 +226,7 @@ work, three previously dead-end UI features are now usable.
 
 ### Notes
 
-- The live `s3-test` storage on `fm.example.com` was retrofitted with
+- The live `s3-test` storage on `fm.brf.sh` was retrofitted with
   `path_style: true` + `disable_presign: true` in addition to this
   release. Operators on Hetzner Object Storage should set both flags
   on existing storages (no migration provided since storage configs
@@ -226,7 +262,7 @@ manager with replication, persistent queue and notifications.
 - `@brftech/filex-react` — React adapter via `@lit/react`.
 - First-run console banner with admin credentials + embed instructions.
 - Multi-platform release matrix (Linux / macOS / Windows × amd64 / arm64).
-- Docker images: `ghcr.io/brf-tech/filex:slim` (~40 MB) and `ghcr.io/brf-tech/filex:full`
+- Docker images: `brftech/filex:slim` (~40 MB) and `brftech/filex:full`
   (~250 MB w/ thumbnail tools).
 - GitLab CI pipeline (lint + test + build + npm publish + Docker push +
   release matrix).
@@ -317,14 +353,19 @@ manager with replication, persistent queue and notifications.
 
 ### Demo URL
 
-- Example deployment artifacts under `deploy/` (Docker Compose, Caddy
-  fragment, env template) for a standalone demo host.
+- `files.brf.sh` → `demo-fm.brf.sh` rename across `deploy/`,
+  `docs/DEPLOY_BRF.md`, `docs/MIGRATION_FISHAPP.md`,
+  `deploy/keycloak-client-filex.json`, `deploy/.env.example`,
+  `deploy/README.md`. Deploy host moved from main to brkip Caddy
+  (DR-site, internal CA TLS).
 
 ### Known Gaps for v0.2
 
-- Full standalone backend swap (the filex Go binary as the sole files
-  backend). This release ships the new UI on the new backend; deeper
-  integration into an existing host application is a later phase.
+- Full B-plan brf-mono backend swap (filex Go binary as the sole
+  files backend; legacy `Modules/FishApp/Services/*` removed). v0.1
+  ships with the frontend-swap A-plan (filex UI + brf-mono PHP
+  backend continues to handle storage). See
+  `plan/07-integration-and-release.md` §1.
 - `replicated_driver` is wired by ad-hoc admin SQL today
   (storages.role + replica_of_id). v0.2 will auto-discover replica
   pairs from the `storages` table.

@@ -304,7 +304,7 @@ func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID
 
 func (s *Store) AggNodes(ctx context.Context, storageID int64) ([]db.NodeAgg, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, parent_id, type, size FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`,
+		`SELECT id, parent_id, type, size, backend_mtime FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`,
 		storageID)
 	if err != nil {
 		return nil, err
@@ -314,7 +314,7 @@ func (s *Store) AggNodes(ctx context.Context, storageID int64) ([]db.NodeAgg, er
 	for rows.Next() {
 		var n db.NodeAgg
 		var typ string
-		if err := rows.Scan(&n.ID, &n.ParentID, &typ, &n.Size); err != nil {
+		if err := rows.Scan(&n.ID, &n.ParentID, &typ, &n.Size, &n.Mtime); err != nil {
 			return nil, err
 		}
 		n.IsDir = typ == string(model.NodeTypeDirectory)
@@ -325,6 +325,11 @@ func (s *Store) AggNodes(ctx context.Context, storageID int64) ([]db.NodeAgg, er
 
 func (s *Store) SetNodeSize(ctx context.Context, id int64, size int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET size=$1, updated_at=NOW() WHERE id=$2`, size, id)
+	return err
+}
+
+func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET backend_mtime=$1, updated_at=NOW() WHERE id=$2`, mtime, id)
 	return err
 }
 
