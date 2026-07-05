@@ -127,6 +127,13 @@ func SeedRegularUser(t *testing.T, store db.Store, email, password string) {
 //
 // LocalAuth is wired so /api/auth/login works.
 func NewTestServer(t *testing.T) (*httptest.Server, *http.Client, db.Store) {
+	return NewTestServerCfg(t, nil)
+}
+
+// NewTestServerCfg is NewTestServer with a config hook applied before the
+// router is built — for exercising config-dependent behavior (e.g.
+// FILEX_COOKIE_DOMAIN stamping a Domain on the session cookie).
+func NewTestServerCfg(t *testing.T, mutate func(*config.Config)) (*httptest.Server, *http.Client, db.Store) {
 	t.Helper()
 
 	_, store := NewTestDB(t)
@@ -154,6 +161,9 @@ func NewTestServer(t *testing.T) (*httptest.Server, *http.Client, db.Store) {
 	cfg.PublicURL = "http://test.local"
 	// Tighten CORS so cors middleware doesn't echo arbitrary origins back.
 	cfg.CORS.AllowedOrigins = []string{"*"}
+	if mutate != nil {
+		mutate(&cfg)
+	}
 
 	deps := &api.Deps{
 		Cfg:             cfg,

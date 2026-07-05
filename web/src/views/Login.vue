@@ -47,8 +47,35 @@ const localEnabled = computed(
 const demoMode = computed(() => caps.data.demo_mode === true);
 const demoUser = computed(() => caps.data.demo_user || 'demo@demo.com');
 
+// SSO-first mode (FILEX_OIDC_AUTO_REDIRECT): unauthenticated visitors go
+// straight to the IdP; the password form hides behind a "sign in with
+// password" link (?local=1) for break-glass/admin logins.
+const wantLocal = computed(() => route.query.local !== undefined);
+const oidcError = computed(() => route.query.error === 'oidc');
+const autoRedirect = computed(
+  () => caps.data.oidc_auto_redirect === true && oidcEnabled.value && !demoMode.value,
+);
+const showLocalForm = computed(
+  () => localEnabled.value && (!autoRedirect.value || wantLocal.value),
+);
+const redirecting = ref(false);
+
 onMounted(async () => {
   if (!caps.loaded) await caps.fetch();
+  // Loop guards: never auto-redirect when the visitor explicitly asked for
+  // the password form (?local=1), when the IdP round-trip just failed
+  // (?error=... — redirecting again would loop), or when the tenant is
+  // locked out (?maintenance=1). The OIDC callback itself is a backend
+  // route, so the SPA never mounts on it.
+  if (
+    autoRedirect.value &&
+    !wantLocal.value &&
+    route.query.error === undefined &&
+    route.query.maintenance === undefined
+  ) {
+    redirecting.value = true;
+    startOidc();
+  }
 });
 
 async function submit() {
@@ -213,48 +240,67 @@ function startOidc() {
           </p>
         </div>
 
-        <form v-if="localEnabled" class="space-y-3" @submit.prevent="submit">
-          <Input v-model="email" type="email" autocomplete="username" required :label="t('common.email')" placeholder="admin@local" name="email" />
-          <Input v-model="password" type="password" autocomplete="current-password" required :label="t('common.password')" name="password" />
+        <p v-if="redirecting" class="text-center text-sm text-zinc-500 dark:text-zinc-400">
+          {{ t('login.redirecting') }}
+        </p>
 
-          <div class="text-right">
-            <button
-              type="button"
-              class="text-xs text-brand-600 hover:underline dark:text-brand-400"
-              @click="showTotp = !showTotp"
-            >
-              {{ showTotp ? t('common.hide') : t('common.show') }} 2FA
-            </button>
-          </div>
-
-          <Input v-if="showTotp" v-model="totp" type="text" inputmode="numeric" autocomplete="one-time-code" :hint="t('login.totpHint')" name="totp" placeholder="123456" />
-
-          <Checkbox v-model="remember" :label="t('login.remember')" />
-
-          <p v-if="localError" class="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
-            {{ localError }}
+        <template v-else>
+          <p v-if="oidcError" class="mb-3 text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
+            {{ t('login.errOidc') }}
           </p>
 
-          <Button type="submit" :loading="auth.loading" block>
-            <Lock class="h-4 w-4" />
-            {{ t('login.submit') }}
+          <form v-if="showLocalForm" class="space-y-3" @submit.prevent="submit">
+            <Input v-model="email" type="email" autocomplete="username" required :label="t('common.email')" placeholder="admin@local" name="email" />
+            <Input v-model="password" type="password" autocomplete="current-password" required :label="t('common.password')" name="password" />
+
+            <div class="text-right">
+              <button
+                type="button"
+                class="text-xs text-brand-600 hover:underline dark:text-brand-400"
+                @click="showTotp = !showTotp"
+              >
+                {{ showTotp ? t('common.hide') : t('common.show') }} 2FA
+              </button>
+            </div>
+
+            <Input v-if="showTotp" v-model="totp" type="text" inputmode="numeric" autocomplete="one-time-code" :hint="t('login.totpHint')" name="totp" placeholder="123456" />
+
+            <Checkbox v-model="remember" :label="t('login.remember')" />
+
+            <p v-if="localError" class="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
+              {{ localError }}
+            </p>
+
+            <Button type="submit" :loading="auth.loading" block>
+              <Lock class="h-4 w-4" />
+              {{ t('login.submit') }}
+            </Button>
+          </form>
+
+          <div v-if="showLocalForm && oidcEnabled" class="my-4 flex items-center gap-2">
+            <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
+            <span class="text-xs uppercase text-zinc-500">{{ t('login.or') }}</span>
+            <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
+          </div>
+
+          <Button v-if="oidcEnabled" variant="outline" block @click="startOidc">
+            <Github class="h-4 w-4" />
+            {{ t('login.oidc') }}
           </Button>
-        </form>
 
-        <div v-if="localEnabled && oidcEnabled" class="my-4 flex items-center gap-2">
-          <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
-          <span class="text-xs uppercase text-zinc-500">{{ t('login.or') }}</span>
-          <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
-        </div>
+          <div v-if="localEnabled && autoRedirect && !wantLocal" class="mt-4 text-center">
+            <router-link
+              :to="{ query: { ...route.query, local: '1' } }"
+              class="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 underline-offset-2 hover:underline"
+            >
+              {{ t('login.local') }}
+            </router-link>
+          </div>
 
-        <Button v-if="oidcEnabled" variant="outline" block @click="startOidc">
-          <Github class="h-4 w-4" />
-          {{ t('login.oidc') }}
-        </Button>
-
-        <p v-if="!localEnabled && !oidcEnabled" class="mt-4 text-center text-sm text-rose-600 dark:text-rose-400">
-          No auth providers enabled. Set <code class="font-mono">AUTH_DRIVERS</code> in your env.
-        </p>
+          <p v-if="!localEnabled && !oidcEnabled" class="mt-4 text-center text-sm text-rose-600 dark:text-rose-400">
+            No auth providers enabled. Set <code class="font-mono">AUTH_DRIVERS</code> in your env.
+          </p>
+        </template>
       </div>
 
       <p class="mt-4 text-xs text-zinc-500 dark:text-zinc-400 inline-flex items-center gap-1">

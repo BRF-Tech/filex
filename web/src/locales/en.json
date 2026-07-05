@@ -104,10 +104,13 @@
     "submit": "Sign in",
     "or": "or",
     "oidc": "Sign in with SSO (Keycloak)",
+    "local": "Sign in with password",
+    "redirecting": "Redirecting to SSO sign-in…",
     "totpHint": "Enter the 6-digit code from your authenticator app",
     "errInvalid": "Email or password is wrong",
     "errLocked": "Account is locked. Contact your administrator.",
-    "errGeneric": "Something went wrong. Try again."
+    "errGeneric": "Something went wrong. Try again.",
+    "errOidc": "SSO sign-in failed. Try again, or sign in with password."
   },
   "dashboard": {
     "title": "Dashboard",

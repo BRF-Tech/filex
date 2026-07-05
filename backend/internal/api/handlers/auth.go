@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,11 +19,16 @@ type Auth struct {
 	OIDCAuth    auth.OIDCDriver
 	PublicURL   string
 	MultiTenant bool
+	// CookieDomain, when non-empty (FILEX_COOKIE_DOMAIN), is stamped as the
+	// Domain attribute on the session cookie so subdomains share it. It must
+	// be applied on clear too — a logout without the matching Domain leaves
+	// the old cookie behind.
+	CookieDomain string
 }
 
 // NewAuth constructs an Auth handler.
-func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publicURL string, multiTenant bool) *Auth {
-	return &Auth{Store: store, LocalAuth: local, OIDCAuth: oidc, PublicURL: publicURL, MultiTenant: multiTenant}
+func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publicURL string, multiTenant bool, cookieDomain string) *Auth {
+	return &Auth{Store: store, LocalAuth: local, OIDCAuth: oidc, PublicURL: publicURL, MultiTenant: multiTenant, CookieDomain: cookieDomain}
 }
 
 type loginReq struct {
@@ -85,7 +91,7 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	setSessionCookie(w, token)
+	h.setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":  user,
 		"token": token,
@@ -97,7 +103,7 @@ func (h *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(authlocal.SessionCookieName); err == nil && c.Value != "" {
 		_ = h.Store.DeleteSession(r.Context(), c.Value)
 	}
-	clearSessionCookie(w)
+	h.clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -120,7 +126,13 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	usr, token, err := h.OIDCAuth.HandleCallback(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		// The callback is a browser navigation (the IdP redirected here), so
+		// a JSON body would dead-end the user on a raw error page. Send them
+		// back to the login form with a generic marker instead; the SPA shows
+		// a friendly message and — critically — suppresses OIDC auto-redirect
+		// so a broken IdP can't cause a redirect loop.
+		slog.Warn("oidc callback failed", slog.String("err", err.Error()))
+		http.Redirect(w, r, h.PublicURL+"/admin/login?error=oidc", http.StatusFound)
 		return
 	}
 	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, usr) {
@@ -129,7 +141,7 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, h.PublicURL+"/admin/login?maintenance=1", http.StatusFound)
 		return
 	}
-	setSessionCookie(w, token)
+	h.setSessionCookie(w, token)
 	// After successful callback redirect to admin (or wherever the SPA wants).
 	http.Redirect(w, r, h.PublicURL+"/admin/", http.StatusFound)
 }
@@ -142,22 +154,24 @@ func (h *Auth) WhoAmI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func setSessionCookie(w http.ResponseWriter, token string) {
+func (h *Auth) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     authlocal.SessionCookieName,
 		Value:    token,
 		Path:     "/",
+		Domain:   h.CookieDomain,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(authlocal.SessionTTL),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func (h *Auth) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     authlocal.SessionCookieName,
 		Value:    "",
 		Path:     "/",
+		Domain:   h.CookieDomain,
 		HttpOnly: true,
 		MaxAge:   -1,
 	})

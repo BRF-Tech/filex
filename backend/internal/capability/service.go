@@ -30,15 +30,16 @@ type Service struct {
 	storageResolver func(int64) (storage.Driver, error)
 
 	// Static fields filled by the bootstrap that don't need probing.
-	authDrivers    []string
-	storageDrivers []string
-	dbDriver       string
-	searchEnabled  bool
-	version        string
-	build          string
-	demoMode       bool
-	demoUser       string
-	defaultLocale  string
+	authDrivers      []string
+	storageDrivers   []string
+	dbDriver         string
+	searchEnabled    bool
+	version          string
+	build            string
+	demoMode         bool
+	demoUser         string
+	defaultLocale    string
+	oidcAutoRedirect bool
 }
 
 // New constructs a Service.
@@ -53,6 +54,7 @@ func (s *Service) SetStaticInventory(
 	version, build string,
 	demoMode bool, demoUser string,
 	defaultLocale string,
+	oidcAutoRedirect bool,
 ) {
 	s.mu.Lock()
 	s.authDrivers = append(s.authDrivers[:0], authDrivers...)
@@ -64,6 +66,7 @@ func (s *Service) SetStaticInventory(
 	s.demoMode = demoMode
 	s.demoUser = demoUser
 	s.defaultLocale = defaultLocale
+	s.oidcAutoRedirect = oidcAutoRedirect
 	s.cached = nil
 	s.mu.Unlock()
 }
@@ -154,6 +157,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.DemoMode = s.demoMode
 	caps.DemoUser = s.demoUser
 	caps.DefaultLocale = s.defaultLocale
+	caps.OIDCAutoRedirect = s.oidcAutoRedirect
 	s.mu.RUnlock()
 	if has("magick") || has("convert") {
 		caps.Thumbs.ImageMagick = true

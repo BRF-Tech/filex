@@ -42,6 +42,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 | `FILEX_DATA_DIR` | `~/.filex` (`/data` in Docker) | Holds the SQLite DB, search index, thumbnail cache, first‑run secret. |
 | `FILEX_DEFAULT_LOCALE` | — | Pin the initial UI language (`en` / `tr`) for users who haven't chosen one, overriding browser detection. A user's explicit language switch still wins. |
 | `FILEX_MULTI_TENANT` | `false` | Turn on native multi-tenancy — one install serves N tenants, each a host-bound auth realm (provider) confined to its own storage(s). **Off = a normal single-tenant install, behaviour unchanged.** See [MULTI-TENANCY.md](./MULTI-TENANCY.md). |
+| `FILEX_COOKIE_DOMAIN` | — (host-only) | `Domain` attribute for the `filex_session` cookie, e.g. `.example.com` — subdomains of that domain then share the session. Applied on **both** set and clear, so logout removes the same cookie it created. Empty = host-only cookie (unchanged behaviour). `Secure`/`SameSite`/`HttpOnly` are unaffected. On a multi-tenant instance this is a single global value — when every tenant has its own apex domain, run one instance per tenant (or leave it empty); deriving it per provider host is not implemented. |
 | `FILEX_CONFIG` | — | Path to `config.yaml` (same as `--config`). |
 
 ---
@@ -92,6 +93,7 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_OIDC_REDIRECT_URL` | `<public>/api/auth/oidc/callback` |
 | `FILEX_OIDC_ROLE_CLAIM` | Claim carrying roles/groups |
 | `FILEX_OIDC_ADMIN_GROUP` | Value that elevates to admin |
+| `FILEX_OIDC_AUTO_REDIRECT` | **SSO-first login** (default `false`): the login page starts the OIDC flow immediately instead of showing the password form. Local login stays available behind a "Sign in with password" link (`/admin/login?local=1`) for break-glass/`admin@local`. The redirect is skipped on `?local=1`, after a failed IdP round-trip (`?error=oidc`) and on `?maintenance=1`, so a broken IdP can never cause a redirect loop. Requires `oidc` in `FILEX_AUTH_DRIVERS`. Multi-tenant: the flag is instance-global; the flow itself already dispatches per request host to the right tenant realm. |
 
 **LDAP** (enable with `FILEX_AUTH_DRIVERS=local,ldap`):
 

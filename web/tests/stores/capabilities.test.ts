@@ -24,6 +24,9 @@ describe('stores/capabilities', () => {
     expect(store.data.ffmpeg).toBe(false);
     expect(store.data.monaco).toBe(true);
     expect(store.data.storage_drivers).toEqual([]);
+    // SSO-first auto-redirect must default to OFF — an older backend that
+    // omits the field must never trigger a login-page redirect.
+    expect(store.data.oidc_auto_redirect).toBe(false);
   });
 
   it('fetch() populates from the API', async () => {
@@ -42,6 +45,7 @@ describe('stores/capabilities', () => {
       auth_drivers: ['local'],
       db_driver: 'sqlite',
       search_enabled: true,
+      oidc_auto_redirect: true,
     });
 
     const store = useCapabilitiesStore();
@@ -50,6 +54,7 @@ describe('stores/capabilities', () => {
     expect(store.loaded).toBe(true);
     expect(store.data.ffmpeg).toBe(true);
     expect(store.data.storage_drivers).toEqual(['local', 's3']);
+    expect(store.data.oidc_auto_redirect).toBe(true);
   });
 
   it('fetch() failure keeps defaults; loaded remains false', async () => {

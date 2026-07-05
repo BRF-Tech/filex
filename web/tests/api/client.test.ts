@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 
 // Helper to build a fake-router stub with the bare minimum surface
-// installAxiosInterceptors touches.
-function fakeRouter(name: string = 'home'): Router {
+// installAxiosInterceptors touches. A settled route always has a non-empty
+// `matched`; pass matched: [] to simulate the cold-load START_LOCATION.
+function fakeRouter(name: string | undefined = 'home', matched: unknown[] = [{}]): Router {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return {
     currentRoute: {
-      value: { name },
+      value: { name, matched },
     },
   } as unknown as Router;
 }
@@ -102,6 +103,21 @@ describe('api/client', () => {
     const { api, installAxiosInterceptors } = await freshClient();
     const onUnauthorized = vi.fn();
     installAxiosInterceptors({ router: fakeRouter('login'), onUnauthorized });
+
+    const handlers = (api.interceptors.response as unknown as { handlers: Array<{ rejected: (err: unknown) => Promise<unknown> }> }).handlers;
+    const handler = handlers[handlers.length - 1];
+    const err = { response: { status: 401 }, message: '401' };
+    await expect(handler.rejected(err)).rejects.toBe(err);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('response interceptor does NOT call onUnauthorized during initial navigation', async () => {
+    // Cold load: currentRoute is still the START_LOCATION (nothing matched).
+    // The router guard owns routing here — a push would race the pending
+    // navigation and strip the login page's query params (?local=1 etc.).
+    const { api, installAxiosInterceptors } = await freshClient();
+    const onUnauthorized = vi.fn();
+    installAxiosInterceptors({ router: fakeRouter(undefined, []), onUnauthorized });
 
     const handlers = (api.interceptors.response as unknown as { handlers: Array<{ rejected: (err: unknown) => Promise<unknown> }> }).handlers;
     const handler = handlers[handlers.length - 1];

@@ -104,10 +104,13 @@
     "submit": "Giriş yap",
     "or": "veya",
     "oidc": "SSO ile giriş yap (Keycloak)",
+    "local": "Parola ile giriş yap",
+    "redirecting": "SSO girişine yönlendiriliyorsun…",
     "totpHint": "Authenticator uygulamandaki 6 haneli kodu gir",
     "errInvalid": "E-posta veya şifre yanlış",
     "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
-    "errGeneric": "Bir şeyler ters gitti. Tekrar dene."
+    "errGeneric": "Bir şeyler ters gitti. Tekrar dene.",
+    "errOidc": "SSO girişi başarısız oldu. Tekrar dene veya parola ile giriş yap."
   },
   "dashboard": {
     "title": "Panel",

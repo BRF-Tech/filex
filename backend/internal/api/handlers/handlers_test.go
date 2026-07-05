@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 )
@@ -45,6 +46,10 @@ func TestRouter_Capabilities_Public(t *testing.T) {
 	testutil.ReadJSON(t, resp, &got)
 	require.Contains(t, got, "upload")
 	require.Contains(t, got, "thumbs")
+	// SSO-first flag is always present and defaults to false so the SPA
+	// login page never auto-redirects unless the operator opted in.
+	require.Contains(t, got, "oidc_auto_redirect")
+	assert.Equal(t, false, got["oidc_auto_redirect"])
 }
 
 // ---------- /api/auth/login ----------
@@ -92,6 +97,67 @@ func TestRouter_Login_BadJSON(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// ---------- session cookie Domain (FILEX_COOKIE_DOMAIN) ----------
+
+// sessionSetCookie returns the raw Set-Cookie header for filex_session so
+// tests can assert attributes (Domain) exactly as they go over the wire.
+func sessionSetCookie(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	for _, v := range resp.Header.Values("Set-Cookie") {
+		if strings.HasPrefix(v, "filex_session=") {
+			return v
+		}
+	}
+	t.Fatal("no filex_session Set-Cookie header in response")
+	return ""
+}
+
+// Default (no FILEX_COOKIE_DOMAIN): host-only cookie — no Domain attribute,
+// the historical behavior. Guards the backward-compat contract.
+func TestRouter_SessionCookie_HostOnlyByDefault(t *testing.T) {
+	srv, client, store := testutil.NewTestServer(t)
+	email, pw := testutil.SeedAdmin(t, store)
+
+	body, _ := json.Marshal(map[string]string{"email": email, "password": pw})
+	resp, err := client.Post(srv.URL+"/api/auth/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.NotContains(t, sessionSetCookie(t, resp), "Domain=")
+
+	lo, err := client.Post(srv.URL+"/api/auth/logout", "application/json", nil)
+	require.NoError(t, err)
+	lo.Body.Close()
+	require.Equal(t, http.StatusOK, lo.StatusCode)
+	assert.NotContains(t, sessionSetCookie(t, lo), "Domain=")
+}
+
+// With FILEX_COOKIE_DOMAIN the Domain attribute rides on BOTH the login
+// set and the logout clear — clearing with a different scope would leave
+// the old cookie behind. (Go serializes ".example.com" without the dot;
+// per RFC 6265 the two forms are equivalent.)
+func TestRouter_SessionCookie_DomainSetAndCleared(t *testing.T) {
+	srv, client, store := testutil.NewTestServerCfg(t, func(c *config.Config) {
+		c.CookieDomain = ".example.com"
+	})
+	email, pw := testutil.SeedAdmin(t, store)
+
+	body, _ := json.Marshal(map[string]string{"email": email, "password": pw})
+	resp, err := client.Post(srv.URL+"/api/auth/login", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, sessionSetCookie(t, resp), "Domain=example.com")
+
+	lo, err := client.Post(srv.URL+"/api/auth/logout", "application/json", nil)
+	require.NoError(t, err)
+	lo.Body.Close()
+	require.Equal(t, http.StatusOK, lo.StatusCode)
+	clear := sessionSetCookie(t, lo)
+	assert.Contains(t, clear, "Domain=example.com")
+	assert.Contains(t, clear, "Max-Age=0")
 }
 
 // ---------- /api/auth/me ----------

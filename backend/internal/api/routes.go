@@ -130,7 +130,7 @@ func BuildRouter(d *Deps) http.Handler {
 	ush := handlers.NewUsers(d.Store)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
-	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant)
+	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
 	provH := handlers.NewProviders(d.Store, d.Cfg.MultiTenant)
 	sxh := handlers.NewSearch(d.Index, d.Store)
 	sxh.AttachACL(d.ACL)

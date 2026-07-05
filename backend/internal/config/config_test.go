@@ -43,6 +43,58 @@ func TestOIDCRedirectDefault(t *testing.T) {
 	}
 }
 
+// TestSSOFirstCookieDomainDefaults — both knobs default to off/empty so an
+// existing install's behavior does not change.
+func TestSSOFirstCookieDomainDefaults(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.OIDC.AutoRedirect {
+		t.Fatal("oidc auto_redirect must default to false")
+	}
+	if cfg.CookieDomain != "" {
+		t.Fatalf("cookie_domain must default to empty, got %q", cfg.CookieDomain)
+	}
+}
+
+// TestSSOFirstCookieDomainEnv — FILEX_OIDC_AUTO_REDIRECT (both prefixes) +
+// FILEX_COOKIE_DOMAIN land on the config.
+func TestSSOFirstCookieDomainEnv(t *testing.T) {
+	t.Setenv("FILEX_OIDC_AUTO_REDIRECT", "1")
+	t.Setenv("FILEX_COOKIE_DOMAIN", ".example.com")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Auth.OIDC.AutoRedirect {
+		t.Fatal("FILEX_OIDC_AUTO_REDIRECT=1 not applied")
+	}
+	if cfg.CookieDomain != ".example.com" {
+		t.Fatalf("cookie domain: %q", cfg.CookieDomain)
+	}
+
+	t.Setenv("FILEX_OIDC_AUTO_REDIRECT", "")
+	t.Setenv("FILEX_AUTH_OIDC_AUTO_REDIRECT", "true")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Auth.OIDC.AutoRedirect {
+		t.Fatal("legacy FILEX_AUTH_OIDC_AUTO_REDIRECT=true not applied")
+	}
+
+	t.Setenv("FILEX_AUTH_OIDC_AUTO_REDIRECT", "")
+	t.Setenv("FILEX_OIDC_AUTO_REDIRECT", "0")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.OIDC.AutoRedirect {
+		t.Fatal("FILEX_OIDC_AUTO_REDIRECT=0 must stay off")
+	}
+}
+
 // TestSeedAndAuthEnv — the new seed + LDAP env vars land on the config.
 func TestSeedAndAuthEnv(t *testing.T) {
 	t.Setenv("FILEX_ADMIN_EMAIL", "boss@example.com")

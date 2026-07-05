@@ -215,6 +215,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		cfg.Demo.Mode,
 		cfg.Demo.User,
 		cfg.DefaultLocale,
+		cfg.Auth.OIDC.AutoRedirect,
 	)
 
 	// Sync worker. Bind the search index so every create/update/delete

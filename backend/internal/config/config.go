@@ -29,6 +29,11 @@ type Config struct {
 	PublicURL        string       `yaml:"public_url"`
 	DataDir          string       `yaml:"data_dir"`
 	DefaultLocale    string       `yaml:"default_locale"`
+	// CookieDomain sets the Domain attribute on the filex_session cookie
+	// (e.g. ".example.com" to share the session across subdomains). Empty =
+	// host-only cookie, the historical behavior. Applied on both set and
+	// clear so logout removes the same cookie it created.
+	CookieDomain     string       `yaml:"cookie_domain"`
 	// MultiTenant turns on native multi-tenancy (host-resolved provider =
 	// tenant, per-provider storage confinement, scoped user directory). OFF by
 	// default — a single-tenant install behaves exactly as before. See
@@ -185,6 +190,10 @@ type OIDCConfig struct {
 	RedirectURL  string `yaml:"redirect_url"`
 	RoleClaim    string `yaml:"role_claim"`
 	AdminGroup   string `yaml:"admin_group"`
+	// AutoRedirect makes the login page start the OIDC flow immediately
+	// (SSO-first installs). The password form stays reachable via ?local=1
+	// for break-glass/admin logins. OFF by default — unchanged behavior.
+	AutoRedirect bool `yaml:"auto_redirect"`
 }
 
 // LDAPConfig — directory bind.
@@ -383,6 +392,9 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_MULTI_TENANT"); v == "1" || v == "true" {
 		c.MultiTenant = true
 	}
+	if v := os.Getenv("FILEX_COOKIE_DOMAIN"); v != "" {
+		c.CookieDomain = v
+	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v
 	}
@@ -436,6 +448,9 @@ func applyEnv(c *Config) {
 	}
 	if v := getenvFirst("FILEX_OIDC_ADMIN_GROUP", "FILEX_AUTH_OIDC_ADMIN_GROUP"); v != "" {
 		c.Auth.OIDC.AdminGroup = v
+	}
+	if v := getenvFirst("FILEX_OIDC_AUTO_REDIRECT", "FILEX_AUTH_OIDC_AUTO_REDIRECT"); v != "" {
+		c.Auth.OIDC.AutoRedirect = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.URL = v

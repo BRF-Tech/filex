@@ -46,9 +46,17 @@ export function installAxiosInterceptors(opts: InterceptorOpts): void {
     (r) => r,
     (err: AxiosError<{ error?: string; message?: string }>) => {
       const status = err.response?.status;
-      const onLogin = opts.router.currentRoute.value.name === 'login';
+      const current = opts.router.currentRoute.value;
+      const onLogin = current.name === 'login';
+      // During the cold-load initial navigation currentRoute is still the
+      // START_LOCATION (nothing matched yet). A 401 here (e.g. the router
+      // guard's fetchMe) must NOT push to /login: the guard already routes
+      // unauthenticated visitors, and a bare push would race the pending
+      // navigation and strip the login page's query params (?local=1,
+      // ?error=oidc, ?redirect=…).
+      const navigating = current.matched.length === 0;
 
-      if (status === 401 && !onLogin) {
+      if (status === 401 && !onLogin && !navigating) {
         opts.onUnauthorized?.();
       } else if (!err.response) {
         // No HTTP response = network/timeout. Surface globally because no

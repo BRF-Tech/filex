@@ -98,6 +98,30 @@ func TestService_Invalidate(t *testing.T) {
 	assert.NotNil(t, first, "first call still returned a value")
 }
 
+// TestService_StaticInventory_OIDCAutoRedirect — the SSO-first flag flows
+// from SetStaticInventory into the snapshot; a service that never got the
+// inventory reports false (default-off).
+func TestService_StaticInventory_OIDCAutoRedirect(t *testing.T) {
+	_, store := dbtest.NewTestDB(t)
+	svc := New(store)
+
+	caps, err := svc.Get(context.Background())
+	require.NoError(t, err)
+	assert.False(t, caps.OIDCAutoRedirect, "must default to false")
+
+	svc.SetStaticInventory(
+		[]string{"local", "oidc"}, nil,
+		"sqlite", false,
+		"test", "",
+		false, "",
+		"",
+		true,
+	)
+	caps, err = svc.Get(context.Background())
+	require.NoError(t, err)
+	assert.True(t, caps.OIDCAutoRedirect)
+}
+
 // TestService_Get_NoExternalServices — fresh DB returns the canned default
 // capabilities (Upload, Move, Copy, Delete, Mkdir all true).
 func TestService_Get_Defaults(t *testing.T) {

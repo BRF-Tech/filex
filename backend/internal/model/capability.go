@@ -39,6 +39,12 @@ type Capabilities struct {
 	DBDriver       string   `json:"db_driver"`
 	SearchEnabled  bool     `json:"search_enabled"`
 
+	// OIDCAutoRedirect tells the login page to start the OIDC flow
+	// immediately instead of showing the password form (SSO-first
+	// installs, FILEX_OIDC_AUTO_REDIRECT). The form stays reachable via
+	// ?local=1.
+	OIDCAutoRedirect bool `json:"oidc_auto_redirect"`
+
 	// Build metadata.
 	Version string `json:"version"`
 	Build   string `json:"build"`

@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.62 below.)
+(Nothing yet — see v0.1.63 below.)
+
+## [0.1.63] - 2026-07-05
+
+### Added
+
+- **SSO-first login** (`FILEX_OIDC_AUTO_REDIRECT`, default `false`). With the
+  flag on and `oidc` among the auth drivers, the login page starts the OIDC
+  flow immediately (redirect to the IdP) instead of rendering the password
+  form. Local login stays available for break-glass/`admin@local` behind a
+  "Sign in with password" link (`/admin/login?local=1`). Loop guards: the
+  auto-redirect is suppressed on `?local=1`, after a failed IdP round-trip
+  (`?error=oidc`) and on `?maintenance=1`; demo mode is unaffected. A failed
+  OIDC callback now redirects back to the login page with `?error=oidc` and a
+  friendly message instead of dead-ending on a raw JSON 401 (the error is
+  logged server-side). Exposed to the SPA as `oidc_auto_redirect` in
+  `/api/capabilities`. Multi-tenant installs keep their per-host realm
+  dispatch — the redirect simply enters the existing `/api/auth/oidc/start`
+  flow. **Off by default — existing installs behave exactly as before.**
+- **`FILEX_COOKIE_DOMAIN`** (default empty). Sets the `Domain` attribute on
+  the `filex_session` cookie (e.g. `.example.com`) so subdomains share the
+  session. Applied on **both** login set and logout clear — clearing with a
+  different scope would leave a stale cookie behind. `Secure`/`SameSite`/
+  `HttpOnly` unchanged. Empty = host-only cookie, the historical behavior.
+
+### Fixed
+
+- **Login-page query params no longer vanish on cold load.** During the
+  SPA's initial navigation the axios 401 interceptor (fired by the router
+  guard's session probe) pushed a bare `/login`, racing the pending
+  navigation and stripping its query (`?redirect=…`, and now `?local=1` /
+  `?error=oidc`). The interceptor now stays quiet until the first route has
+  settled — the router guard already owns cold-load routing. (`client.ts`.)
 
 ## [0.1.62] - 2026-07-05
 

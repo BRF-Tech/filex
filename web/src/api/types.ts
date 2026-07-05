@@ -166,6 +166,9 @@ export interface Capabilities {
   auth_drivers: string[];
   db_driver: string;
   search_enabled: boolean;
+  /** SSO-first installs: login page starts the OIDC flow immediately;
+   *  the password form stays reachable via ?local=1. */
+  oidc_auto_redirect?: boolean;
   demo_mode?: boolean;
   demo_user?: string;
   default_locale?: string | null;
