@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.65 below.)
+(Nothing yet — see v0.1.66 below.)
+
+## [0.1.66] - 2026-07-06
+
+### Fixed
+
+- **Multi-tenant: OIDC callback now redirects to the TENANT's host.** After a
+  successful (or failed) IdP round-trip the callback bounced the user to
+  `FILEX_PUBLIC_URL` — the operator/supertenant host — instead of the tenant
+  host the login started on, stranding them without a session. All three
+  callback redirects (success `/admin/`, error `?error=oidc`, maintenance
+  `?maintenance=1`) now derive their base from the request host, but only
+  when it resolves to an enabled provider row (the same trusted-host model
+  as tenant resolution); unknown hosts fall back to `PublicURL`, and
+  single-tenant installs are untouched. Scheme honors
+  `X-Forwarded-Proto: http` for TLS-less setups, defaulting to https.
+
+### Added
+
+- **Multi-tenant: per-tenant session-cookie `Domain`.** The global
+  `FILEX_COOKIE_DOMAIN` (0.1.63) cannot serve tenants on different apex
+  domains. In multi-tenant mode the `filex_session` Domain now resolves per
+  request: the provider's new optional **`cookie_domain`** column (settable
+  via `/api/admin/providers`, migration `00015`) wins; else it is derived
+  from the provider host by dropping the first label (`files.example.com` →
+  `.example.com`); else the global value. Set and clear stay symmetric.
+  Single-tenant behaviour is unchanged. ⚠ Tenants served on a bare apex or
+  whose derived value would be a public suffix (`.com.tr`) must set
+  `cookie_domain` explicitly — see docs/MULTI-TENANCY.md.
 
 ## [0.1.65] - 2026-07-06
 

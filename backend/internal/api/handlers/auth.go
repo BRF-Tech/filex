@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -19,10 +20,11 @@ type Auth struct {
 	OIDCAuth    auth.OIDCDriver
 	PublicURL   string
 	MultiTenant bool
-	// CookieDomain, when non-empty (FILEX_COOKIE_DOMAIN), is stamped as the
-	// Domain attribute on the session cookie so subdomains share it. It must
-	// be applied on clear too — a logout without the matching Domain leaves
-	// the old cookie behind.
+	// CookieDomain (FILEX_COOKIE_DOMAIN) is the GLOBAL session-cookie Domain
+	// attribute. In multi-tenant mode it is only the last-resort fallback —
+	// see cookieDomain() for the per-provider resolution. Applied on clear
+	// too — a logout without the matching Domain leaves the old cookie
+	// behind.
 	CookieDomain string
 }
 
@@ -91,7 +93,7 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.setSessionCookie(w, token)
+	h.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":  user,
 		"token": token,
@@ -103,7 +105,7 @@ func (h *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(authlocal.SessionCookieName); err == nil && c.Value != "" {
 		_ = h.Store.DeleteSession(r.Context(), c.Value)
 	}
-	h.clearSessionCookie(w)
+	h.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -124,6 +126,7 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OIDC not configured"})
 		return
 	}
+	base := h.redirectBase(r)
 	usr, token, err := h.OIDCAuth.HandleCallback(w, r)
 	if err != nil {
 		// The callback is a browser navigation (the IdP redirected here), so
@@ -132,18 +135,98 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		// a friendly message and — critically — suppresses OIDC auto-redirect
 		// so a broken IdP can't cause a redirect loop.
 		slog.Warn("oidc callback failed", slog.String("err", err.Error()))
-		http.Redirect(w, r, h.PublicURL+"/admin/login?error=oidc", http.StatusFound)
+		http.Redirect(w, r, base+"/admin/login?error=oidc", http.StatusFound)
 		return
 	}
 	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, usr) {
 		// Maintenance mode (see docs/MULTI-TENANCY.md): tenant locked out.
 		_ = h.Store.DeleteSession(r.Context(), token)
-		http.Redirect(w, r, h.PublicURL+"/admin/login?maintenance=1", http.StatusFound)
+		http.Redirect(w, r, base+"/admin/login?maintenance=1", http.StatusFound)
 		return
 	}
-	h.setSessionCookie(w, token)
+	h.setSessionCookie(w, r, token)
 	// After successful callback redirect to admin (or wherever the SPA wants).
-	http.Redirect(w, r, h.PublicURL+"/admin/", http.StatusFound)
+	http.Redirect(w, r, base+"/admin/", http.StatusFound)
+}
+
+// redirectBase returns the origin that OIDCCallback redirects should target.
+//
+// Single-tenant: the configured PublicURL (which IS the install's host).
+// Multi-tenant: the callback arrives on the TENANT's own host (each realm's
+// redirect_uri points there — see multioidc.driverFor), so bouncing the user
+// to h.PublicURL would strand them on the operator/supertenant host where
+// they have no session and no files. Derive the base from the request host
+// instead — but only when that host resolves to an enabled provider row (the
+// same trusted-host model as tenant resolution, docs/MULTI-TENANCY.md §13);
+// anything else falls back to PublicURL. Scheme is https (multi-tenant hosts
+// sit behind the TLS-terminating proxy, same assumption as the per-tenant
+// OIDC redirect default) unless the trusted proxy says X-Forwarded-Proto:
+// http (TLS-less test setups).
+func (h *Auth) redirectBase(r *http.Request) string {
+	if !h.MultiTenant {
+		return h.PublicURL
+	}
+	host := requestHost(r)
+	if host == "" {
+		return h.PublicURL
+	}
+	p, err := h.Store.GetProviderByHost(r.Context(), host)
+	if err != nil || p == nil {
+		return h.PublicURL
+	}
+	scheme := "https"
+	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
+		scheme = "http"
+	}
+	return scheme + "://" + host
+}
+
+// cookieDomain returns the Domain attribute for the session cookie on this
+// request. Single-tenant: the global FILEX_COOKIE_DOMAIN (may be empty =
+// host-only). Multi-tenant, when the request host resolves to a provider:
+//  1. the provider's explicit cookie_domain (operator-set, always wins);
+//  2. else derived from the provider host by dropping its first label
+//     (files.example.com → .example.com) — skipped when the remainder has
+//     no dot left (files.localhost);
+//  3. else the global FILEX_COOKIE_DOMAIN.
+//
+// ⚠ The derived form assumes the host is a subdomain OF the tenant apex
+// (files.<apex>, the documented layout). A tenant served on its bare apex —
+// or one whose derivation would land on a public suffix (diyetlif.com.tr →
+// .com.tr, which browsers REJECT) — must set cookie_domain explicitly.
+func (h *Auth) cookieDomain(r *http.Request) string {
+	if !h.MultiTenant {
+		return h.CookieDomain
+	}
+	host := requestHost(r)
+	if host == "" {
+		return h.CookieDomain
+	}
+	p, err := h.Store.GetProviderByHost(r.Context(), host)
+	if err != nil || p == nil {
+		return h.CookieDomain
+	}
+	if p.CookieDomain != "" {
+		return p.CookieDomain
+	}
+	if p.Host != "" {
+		if i := strings.Index(p.Host, "."); i > 0 && strings.Contains(p.Host[i+1:], ".") {
+			return p.Host[i:]
+		}
+	}
+	return h.CookieDomain
+}
+
+// requestHost extracts the bare lowercase hostname (no port) the client asked
+// for. Behind the reverse proxy filex trusts the proxied Host header — the
+// proxy is the only reachable path in the documented deployments (§13).
+// Mirrors multioidc.RequestHost.
+func requestHost(r *http.Request) string {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.ToLower(host)
 }
 
 // WhoAmI returns the current user (or null).
@@ -154,24 +237,24 @@ func (h *Auth) WhoAmI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Auth) setSessionCookie(w http.ResponseWriter, token string) {
+func (h *Auth) setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     authlocal.SessionCookieName,
 		Value:    token,
 		Path:     "/",
-		Domain:   h.CookieDomain,
+		Domain:   h.cookieDomain(r),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(authlocal.SessionTTL),
 	})
 }
 
-func (h *Auth) clearSessionCookie(w http.ResponseWriter) {
+func (h *Auth) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     authlocal.SessionCookieName,
 		Value:    "",
 		Path:     "/",
-		Domain:   h.CookieDomain,
+		Domain:   h.cookieDomain(r),
 		HttpOnly: true,
 		MaxAge:   -1,
 	})

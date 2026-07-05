@@ -338,13 +338,13 @@ func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) er
 const providerCols = `id, slug, name, COALESCE(host,''), auth_type, ` +
 	`COALESCE(oidc_issuer,''), COALESCE(oidc_client_id,''), COALESCE(oidc_client_secret,''), ` +
 	`COALESCE(oidc_redirect_url,''), COALESCE(role_claim,''), COALESCE(admin_group,''), ` +
-	`is_supertenant, enabled, created_at, updated_at`
+	`COALESCE(cookie_domain,''), is_supertenant, enabled, created_at, updated_at`
 
 func scanProvider(r rowScanner) (*model.Provider, error) {
 	p := &model.Provider{}
 	if err := r.Scan(&p.ID, &p.Slug, &p.Name, &p.Host, &p.AuthType,
 		&p.OIDCIssuer, &p.OIDCClientID, &p.OIDCClientSecret, &p.OIDCRedirectURL,
-		&p.RoleClaim, &p.AdminGroup, &p.IsSupertenant, &p.Enabled,
+		&p.RoleClaim, &p.AdminGroup, &p.CookieDomain, &p.IsSupertenant, &p.Enabled,
 		&p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -357,10 +357,10 @@ func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.P
 		at = model.AuthTypeOIDC
 	}
 	row := s.db.QueryRowContext(ctx,
-		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, is_supertenant, enabled)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+providerCols,
+		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, cookie_domain, is_supertenant, enabled)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING `+providerCols,
 		p.Slug, p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
-		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.IsSupertenant, p.Enabled)
+		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.CookieDomain, p.IsSupertenant, p.Enabled)
 	return scanProvider(row)
 }
 
@@ -411,9 +411,9 @@ func (s *Store) ListProviders(ctx context.Context) ([]*model.Provider, error) {
 
 func (s *Store) UpdateProvider(ctx context.Context, p *model.Provider) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE providers SET slug=$1, name=$2, host=$3, auth_type=$4, oidc_issuer=$5, oidc_client_id=$6, oidc_client_secret=$7, oidc_redirect_url=$8, role_claim=$9, admin_group=$10, is_supertenant=$11, enabled=$12, updated_at=NOW() WHERE id=$13`,
+		`UPDATE providers SET slug=$1, name=$2, host=$3, auth_type=$4, oidc_issuer=$5, oidc_client_id=$6, oidc_client_secret=$7, oidc_redirect_url=$8, role_claim=$9, admin_group=$10, cookie_domain=$11, is_supertenant=$12, enabled=$13, updated_at=NOW() WHERE id=$14`,
 		p.Slug, p.Name, p.Host, p.AuthType, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
-		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.IsSupertenant, p.Enabled, p.ID)
+		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.CookieDomain, p.IsSupertenant, p.Enabled, p.ID)
 	return err
 }
 

@@ -41,6 +41,13 @@ type Provider struct {
 	RoleClaim        string `json:"role_claim,omitempty"`
 	AdminGroup       string `json:"admin_group,omitempty"`
 
+	// CookieDomain, when set (e.g. ".example.com"), is stamped as the Domain
+	// attribute on this tenant's session cookie so the tenant's subdomains
+	// share the session. Empty = derive from Host by dropping its first
+	// label (files.example.com → .example.com), falling back to the global
+	// FILEX_COOKIE_DOMAIN. Only consulted in multi-tenant mode.
+	CookieDomain string `json:"cookie_domain,omitempty"`
+
 	IsSupertenant bool `json:"is_supertenant"`
 	Enabled       bool `json:"enabled"`
 

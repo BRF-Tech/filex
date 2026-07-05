@@ -91,7 +91,8 @@ New in migration `00014_multi_tenant` (3 dialects, additive only):
 
 - **`providers`** — the tenant/provider registry: `slug`, `name`, `host`,
   `auth_type` (`oidc|local`), `oidc_*` (issuer/client_id/client_secret/redirect),
-  `role_claim`, `admin_group`, `is_supertenant`, `enabled`.
+  `role_claim`, `admin_group`, `is_supertenant`, `enabled`. Migration
+  `00015` adds the optional `cookie_domain` (see §Session cookie below).
 - **`provider_storages`** — M:N link (behaviour 1:1 in the first UI; join table
   from day 1 so 1:N is a UI change, not a migration).
 - **`users.provider_id`** (nullable FK) + **`users.oidc_subject`**.
@@ -151,6 +152,31 @@ context through workers.
 - Role/scope: reuse the existing OIDC claim→role logic (roles read from *both*
   id_token and access_token, dotted-path `admin_group`). `scope = platform if
   provider.is_supertenant else tenant`.
+
+### Callback redirects & session cookie (multi-tenant)
+
+- **OIDC callback redirects target the TENANT's host, not `FILEX_PUBLIC_URL`.**
+  Each realm's `redirect_uri` points at the tenant's own host, so after the
+  IdP round-trip the success (`/admin/`), error (`/admin/login?error=oidc`)
+  and maintenance (`?maintenance=1`) redirects all derive their base from the
+  request host — **only when that host resolves to an enabled provider row**
+  (same trusted-host model as tenant resolution, §13); any other host falls
+  back to `PublicURL`. Scheme is `https` (TLS-terminating proxy assumed, as
+  for the per-tenant OIDC redirect default) unless the proxy sends
+  `X-Forwarded-Proto: http`. Single-tenant behaviour is unchanged.
+- **Session-cookie `Domain` resolves per tenant** so each tenant can share
+  its session across its own subdomains (`files.` / `webmail.` / `portal.`):
+  1. the provider's explicit **`cookie_domain`** (e.g. `.example.com`) —
+     always wins, set it via `/api/admin/providers`;
+  2. else **derived from `provider.host`** by dropping the first label
+     (`files.example.com` → `.example.com`); skipped when nothing dotted
+     remains (`files.localhost`);
+  3. else the global **`FILEX_COOKIE_DOMAIN`** (may be empty = host-only).
+  Applied on set AND clear (logout removes the same cookie it created).
+  ⚠ Derivation assumes the `files.<apex>` layout. A tenant served on its
+  bare apex — or one whose derived value would be a **public suffix**
+  (`tenant.com.tr` → `.com.tr`, which browsers silently reject, breaking
+  login) — must set `cookie_domain` explicitly.
 
 ## 8. Supertenant & super-admin
 

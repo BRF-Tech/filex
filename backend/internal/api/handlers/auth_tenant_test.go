@@ -1,0 +1,138 @@
+package handlers_test
+
+// Multi-tenant auth handler behaviour: OIDC callback redirects must target
+// the TENANT's host (not the operator PublicURL) and the session cookie
+// Domain resolves per provider (explicit > derived from host > global).
+// See docs/MULTI-TENANCY.md.
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/testutil"
+)
+
+// fakeOIDC satisfies auth.OIDCDriver with canned results.
+type fakeOIDC struct {
+	user  *model.User
+	token string
+	err   error
+}
+
+func (f *fakeOIDC) StartFlow(http.ResponseWriter, *http.Request) error { return nil }
+func (f *fakeOIDC) HandleCallback(http.ResponseWriter, *http.Request) (*model.User, string, error) {
+	return f.user, f.token, f.err
+}
+
+func seedProvider(t *testing.T, store db.Store, p *model.Provider) *model.Provider {
+	t.Helper()
+	p.Enabled = true
+	out, err := store.CreateProvider(context.Background(), p)
+	require.NoError(t, err)
+	return out
+}
+
+func callbackLocation(t *testing.T, a *handlers.Auth, host string, hdr map[string]string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
+	req.Host = host
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	a.OIDCCallback(rec, req)
+	require.Equal(t, http.StatusFound, rec.Code)
+	return rec.Header().Get("Location")
+}
+
+func TestOIDCCallback_MultiTenant_RedirectsToTenantHost(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	seedProvider(t, store, &model.Provider{Slug: "tenant-a", Host: "files.tenant-a.test", AuthType: model.AuthTypeOIDC})
+
+	// Error path — back to the TENANT's login, not the operator's.
+	a := handlers.NewAuth(store, nil, &fakeOIDC{err: errors.New("boom")}, "https://operator.test", true, "")
+	loc := callbackLocation(t, a, "files.tenant-a.test", nil)
+	assert.Equal(t, "https://files.tenant-a.test/admin/login?error=oidc", loc)
+
+	// Success path — tenant admin, with the session cookie scoped to the
+	// tenant apex (derived from the provider host).
+	a = handlers.NewAuth(store, nil, &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant-a.test"}, token: "tkn"}, "https://operator.test", true, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
+	req.Host = "files.tenant-a.test"
+	rec := httptest.NewRecorder()
+	a.OIDCCallback(rec, req)
+	require.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, "https://files.tenant-a.test/admin/", rec.Header().Get("Location"))
+	assert.Contains(t, sessionSetCookie(t, rec.Result()), "Domain=tenant-a.test")
+}
+
+func TestOIDCCallback_MultiTenant_UnknownHostFallsBackToPublicURL(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	a := handlers.NewAuth(store, nil, &fakeOIDC{err: errors.New("boom")}, "https://operator.test", true, "")
+	loc := callbackLocation(t, a, "evil.example", nil)
+	assert.Equal(t, "https://operator.test/admin/login?error=oidc", loc)
+}
+
+func TestOIDCCallback_SingleTenant_KeepsPublicURL(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	seedProvider(t, store, &model.Provider{Slug: "tenant-b", Host: "files.tenant-b.test", AuthType: model.AuthTypeOIDC})
+	a := handlers.NewAuth(store, nil, &fakeOIDC{err: errors.New("boom")}, "https://operator.test", false, "")
+	loc := callbackLocation(t, a, "files.tenant-b.test", nil)
+	assert.Equal(t, "https://operator.test/admin/login?error=oidc", loc)
+}
+
+func TestOIDCCallback_MultiTenant_HonorsForwardedProtoHTTP(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	seedProvider(t, store, &model.Provider{Slug: "tenant-c", Host: "files.tenant-c.test", AuthType: model.AuthTypeOIDC})
+	a := handlers.NewAuth(store, nil, &fakeOIDC{err: errors.New("boom")}, "https://operator.test", true, "")
+	loc := callbackLocation(t, a, "files.tenant-c.test", map[string]string{"X-Forwarded-Proto": "http"})
+	assert.Equal(t, "http://files.tenant-c.test/admin/login?error=oidc", loc)
+}
+
+// logoutClear drives Logout (public, always clears) and returns the raw
+// Set-Cookie header — the clear must carry the SAME Domain as the set.
+func logoutClear(t *testing.T, a *handlers.Auth, host string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.Host = host
+	rec := httptest.NewRecorder()
+	a.Logout(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	return sessionSetCookie(t, rec.Result())
+}
+
+func TestCookieDomain_MultiTenant_Resolution(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	// Explicit cookie_domain always wins.
+	seedProvider(t, store, &model.Provider{Slug: "exp", Host: "files.explicit.test", CookieDomain: ".override.test", AuthType: model.AuthTypeLocal})
+	// No explicit value → derived from host (drop the first label).
+	seedProvider(t, store, &model.Provider{Slug: "der", Host: "files.derived.com.test", AuthType: model.AuthTypeLocal})
+	// Derivation impossible (remainder has no dot) → global fallback.
+	seedProvider(t, store, &model.Provider{Slug: "loc", Host: "files.localhost", AuthType: model.AuthTypeLocal})
+
+	a := handlers.NewAuth(store, nil, nil, "https://operator.test", true, ".global.test")
+
+	assert.Contains(t, logoutClear(t, a, "files.explicit.test"), "Domain=override.test")
+	assert.Contains(t, logoutClear(t, a, "files.derived.com.test"), "Domain=derived.com.test")
+	assert.Contains(t, logoutClear(t, a, "files.localhost"), "Domain=global.test")
+	// Host with no provider row → global too.
+	assert.Contains(t, logoutClear(t, a, "stranger.test"), "Domain=global.test")
+}
+
+func TestCookieDomain_MultiTenant_NoValuesMeansHostOnly(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	seedProvider(t, store, &model.Provider{Slug: "bare", Host: "files.localhost", AuthType: model.AuthTypeLocal})
+	a := handlers.NewAuth(store, nil, nil, "https://operator.test", true, "")
+	clear := logoutClear(t, a, "files.localhost")
+	assert.False(t, strings.Contains(clear, "Domain="), "expected host-only cookie, got %q", clear)
+}

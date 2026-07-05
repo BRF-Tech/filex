@@ -57,6 +57,7 @@ type providerReq struct {
 	OIDCRedirectURL  *string `json:"oidc_redirect_url"`
 	RoleClaim        *string `json:"role_claim"`
 	AdminGroup       *string `json:"admin_group"`
+	CookieDomain     *string `json:"cookie_domain"`
 	IsSupertenant    *bool   `json:"is_supertenant"`
 	Enabled          *bool   `json:"enabled"`
 }
@@ -76,6 +77,7 @@ func (req *providerReq) apply(p *model.Provider) {
 	set(&p.OIDCRedirectURL, req.OIDCRedirectURL)
 	set(&p.RoleClaim, req.RoleClaim)
 	set(&p.AdminGroup, req.AdminGroup)
+	set(&p.CookieDomain, req.CookieDomain)
 	if req.OIDCClientSecret != nil && *req.OIDCClientSecret != "" {
 		// Empty secret in the payload means "keep the stored one" so the UI can
 		// round-trip the (never-serialized) secret without re-entering it.
