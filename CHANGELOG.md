@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.61 below.)
+(Nothing yet — see v0.1.62 below.)
+
+## [0.1.62] - 2026-07-05
+
+### Fixed
+
+- **Empty files and empty folders now show a size and a date in the explorer.**
+  A real zero renders as `0 B` instead of `—`, and rows without a backend
+  mtime (e.g. an empty folder on a synthetic-dir store, which has no
+  descendants to aggregate a date from) fall back to when filex first indexed
+  them. (`useLocale.formatSize`, `manager.go` index serialization.)
+- **The Trash row shows its real size and date.** The explorer's virtual
+  `.trash` entry now hydrates from the trash listing — total bytes of trashed
+  items + the newest deletion time — instead of a bare `— / —`. It also gets a
+  proper 🗑 icon (it rendered as a plain folder). (`FileExplorer.vue`,
+  `ListView`/`GridView`.)
 
 ## [0.1.61] - 2026-07-05
 

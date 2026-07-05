@@ -92,6 +92,7 @@ function parentDir(path: string): string {
 }
 
 function iconFor(n: FileNode): string {
+  if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
   if (n.type === 'dir') return '📁';
   const e = (n.extension || '').toLowerCase();

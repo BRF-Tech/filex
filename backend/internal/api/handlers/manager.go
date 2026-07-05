@@ -1010,6 +1010,11 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		}
 		if n.BackendMtime != nil {
 			entry["last_modified"] = n.BackendMtime.UnixMilli()
+		} else if !n.CreatedAt.IsZero() {
+			// No backend mtime (e.g. an empty folder on a synthetic-dir store —
+			// nothing to aggregate one from) — fall back to when filex first saw
+			// the node so the row still shows a date.
+			entry["last_modified"] = n.CreatedAt.UnixMilli()
 		}
 		out = append(out, entry)
 	}

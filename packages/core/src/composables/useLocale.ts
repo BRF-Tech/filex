@@ -24,7 +24,9 @@ export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
   }
 
   function formatSize(bytes: number | undefined | null): string {
-    if (bytes == null || bytes <= 0) return '—';
+    if (bytes == null || bytes < 0) return '—';
+    // A real zero (empty file / empty folder) is information, not absence.
+    if (bytes === 0) return `0 ${t('unit.bytes')}`;
     const units: Array<[number, string]> = [
       [1024 ** 4, 'unit.tb'],
       [1024 ** 3, 'unit.gb'],

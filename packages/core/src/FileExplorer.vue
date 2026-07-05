@@ -476,10 +476,12 @@ async function load(path?: string) {
         extension: '',
         storage: resp.adapter,
         visibility: 'private',
+        size: 0,
         file_size: 0,
         mime_type: 'inode/directory',
         extra_metadata: {},
       } as unknown as FileNode);
+      void hydrateTrashRow(resp.adapter);
     }
     // currentPath is the user-facing form: `s3-test/example` in
     // multi-storage mode, the bare relative path otherwise.
@@ -498,6 +500,29 @@ async function load(path?: string) {
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
   return idx === -1 ? p : p.slice(idx + 3);
+}
+
+// hydrateTrashRow — the virtual `.trash` row is synthesized with no size/date;
+// fill both from the backend trash listing (total bytes + newest deletion) so
+// the row reads like a real folder instead of "— / —". Best-effort and
+// non-blocking: the row appears immediately and updates when the listing lands.
+async function hydrateTrashRow(storage: string) {
+  try {
+    const { entries } = await api.listTrash(storage);
+    const row = files.value.find((f) => f.basename === '.trash');
+    if (!row) return;
+    let total = 0;
+    let newest = 0;
+    for (const e of entries) {
+      total += e.size || 0;
+      const ts = Date.parse(e.deleted_at);
+      if (!Number.isNaN(ts) && ts > newest) newest = ts;
+    }
+    row.size = total;
+    if (newest > 0) row.last_modified = newest;
+  } catch {
+    /* keep the bare row */
+  }
 }
 
 // loadTrash — show the backend trash (soft-deleted nodes) as a flat listing.
@@ -744,7 +769,7 @@ function openNode(n: FileNode) {
   // standalone editor route, regardless of file type. The editor page
   // picks the right viewer (OnlyOffice for office, Monaco for code/
   // text, drawio iframe for .drawio, image/PDF/3D viewers otherwise)
-  // and wires save-on-change. This is the shape the origin app ships and
+  // and wires save-on-change. This is the shape brf-mono ships and
   // what users expect from a Files-style file manager.
   //
   // Capability gate: if we already know the required backend is offline
@@ -802,7 +827,7 @@ async function restoreSelection(targets?: FileNode[]) {
       await loadTrash();
       return;
     }
-    // Legacy path-based restore (the origin app `.trash/` convention).
+    // Legacy path-based restore (brf-mono `.trash/` convention).
     if (!api.endpoints.restore) return;
     const items = nodes.map((n) => n.path); // qualified
     const { restored } = await api.restore(items);
