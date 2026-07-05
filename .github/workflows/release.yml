@@ -4,6 +4,11 @@ name: Release
 # the Docker images (-> ghcr.io/brf-tech/filex). The frontend is built and
 # embedded first so the binaries carry the admin UI. The images rebuild the
 # frontend themselves inside their multi-stage Dockerfiles.
+#
+# npm publishing is a SEPARATE job (`npm`) so it can be re-run on its own — a
+# failed publish (e.g. a bad token) does not force goreleaser to re-run, which
+# would fail on the "release already exists" tag. Re-run just the npm job with
+#   gh run rerun <id> --repo BRF-Tech/filex --failed
 
 on:
   push:
@@ -88,12 +93,29 @@ jobs:
             ghcr.io/brf-tech/filex:full
             ghcr.io/brf-tech/filex:full-${{ github.ref_name }}
 
-      # ── npm packages → npmjs (@brftech scope) ───────────────────────────
-      # Runs only if an NPM_TOKEN (an npm *Automation* token, which bypasses
-      # 2FA) repo secret is set. Package versions are pinned to the tag so a
-      # `v0.1.58` tag publishes @brftech/*@0.1.58. The packages were built into
-      # dist/ by the frontend step above.
-      - name: Publish npm packages
+  # ── npm packages → npmjs (@brftech scope) ─────────────────────────────
+  # Independent of `release` so it can be re-run on its own. Publishes only if
+  # an NPM_TOKEN repo secret is set — and that token MUST be an npm *Automation*
+  # token (or a granular access token), which bypasses 2FA; a "Publish" token
+  # still demands an OTP and fails with EOTP in CI. Package versions are pinned
+  # to the tag, so a `v0.1.60` tag publishes @brftech/*@0.1.60.
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build packages
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: pnpm -r --filter='./packages/*' build
+      - name: Publish
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |

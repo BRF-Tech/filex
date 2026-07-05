@@ -173,6 +173,14 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 				}
 			} else {
 				_ = s.store.TouchNodeSeen(ctx, existing.ID)
+				// Backfill a missing backend_mtime for nodes first synced by an
+				// older version (before mtime was recorded on insert). Without
+				// this, files whose content never drifts keep a null date
+				// forever, so their folders never get a "last activity" date
+				// after an upgrade. One cheap write per node, only while null.
+				if existing.BackendMtime == nil && !obj.Mtime.IsZero() {
+					_ = s.store.SetNodeMtime(ctx, existing.ID, timePtr(obj.Mtime))
+				}
 			}
 			if s.index != nil && drifted {
 				if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {

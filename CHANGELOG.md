@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.59 below.)
+(Nothing yet — see v0.1.60 below.)
+
+## [0.1.60] - 2026-07-05
+
+### Fixed
+
+- **Folder dates now appear for existing files after an upgrade.** The folder
+  "last activity" date added in 0.1.59 is derived from descendant file mtimes;
+  files first indexed by an older version (before mtime was recorded on insert)
+  carried no stored mtime, so their folders showed no date until the file's
+  content next changed. The sync now backfills a missing mtime from the storage
+  on its next pass — one cheap write per file, only while the value is missing.
+  (`backend/internal/sync/poll.go`.)
 
 ## [0.1.59] - 2026-07-05
 
