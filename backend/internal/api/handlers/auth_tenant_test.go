@@ -18,7 +18,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/testutil"
@@ -76,6 +78,70 @@ func TestOIDCCallback_MultiTenant_RedirectsToTenantHost(t *testing.T) {
 	require.Equal(t, http.StatusFound, rec.Code)
 	assert.Equal(t, "https://files.tenant-a.test/admin/", rec.Header().Get("Location"))
 	assert.Contains(t, sessionSetCookie(t, rec.Result()), "Domain=tenant-a.test")
+}
+
+// Reproduces the reported "callback emits no Set-Cookie with cookie-domain"
+// bug precisely: multi-tenant, provider with an EXPLICIT cookie_domain, and a
+// realistic base64url OIDC session token (oidc.randString uses '-'/'_'). The
+// callback MUST emit a Set-Cookie carrying that token + Domain — otherwise the
+// browser has no session and loops.
+func TestOIDCCallback_MultiTenant_ExplicitCookieDomain_EmitsSetCookie(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	// Explicit cookie_domain, on a multi-label public suffix like the live
+	// tenant (.diyetlif.com.tr). Token mimics base64.RawURLEncoding output.
+	seedProvider(t, store, &model.Provider{
+		Slug: "dtl", Host: "files.tenant.example", CookieDomain: ".tenant.example",
+		AuthType: model.AuthTypeOIDC,
+	})
+	tok := "aB3-cD_9xyZ012ABCdef-gh_"
+	a := handlers.NewAuth(store, nil,
+		&fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant.example"}, token: tok},
+		"https://operator.example", true, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
+	req.Host = "files.tenant.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	a.OIDCCallback(rec, req)
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	require.Equal(t, "https://files.tenant.example/admin/", rec.Header().Get("Location"))
+	sc := sessionSetCookie(t, rec.Result()) // fails loudly if no Set-Cookie
+	assert.Contains(t, sc, "filex_session="+tok)
+	assert.Contains(t, sc, "Domain=tenant.example")
+	assert.Contains(t, sc, "Secure")
+}
+
+// Same as above but through the REAL router + middleware chain (not a direct
+// handler call) — the layer the reported bug pointed at ("origin guard skips
+// the cookie-set"). Confirms nothing in the public /api/auth middleware stack
+// strips the callback's Set-Cookie in multi-tenant mode.
+func TestRouter_OIDCCallback_MultiTenant_EmitsSetCookie(t *testing.T) {
+	tok := "aB3-cD_9xyZ012ABCdef-gh_"
+	fake := &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant.example"}, token: tok}
+	srv, client, store := testutil.NewTestServerWith(t,
+		func(c *config.Config) { c.MultiTenant = true },
+		func(d *api.Deps) { d.OIDCAuth = fake },
+	)
+	seedProvider(t, store, &model.Provider{
+		Slug: "dtl", Host: "files.tenant.example", CookieDomain: ".tenant.example",
+		AuthType: model.AuthTypeOIDC,
+	})
+	// Inspect the callback's own 302, not the page it points at.
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/auth/oidc/callback?code=x&state=y", nil)
+	req.Host = "files.tenant.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+	sc := sessionSetCookie(t, resp)
+	assert.Contains(t, sc, "filex_session="+tok)
+	assert.Contains(t, sc, "Domain=tenant.example")
+	assert.Contains(t, sc, "Secure")
 }
 
 func TestOIDCCallback_MultiTenant_UnknownHostFallsBackToPublicURL(t *testing.T) {

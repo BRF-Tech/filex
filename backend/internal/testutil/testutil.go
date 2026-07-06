@@ -134,6 +134,13 @@ func NewTestServer(t *testing.T) (*httptest.Server, *http.Client, db.Store) {
 // router is built — for exercising config-dependent behavior (e.g.
 // FILEX_COOKIE_DOMAIN stamping a Domain on the session cookie).
 func NewTestServerCfg(t *testing.T, mutate func(*config.Config)) (*httptest.Server, *http.Client, db.Store) {
+	return NewTestServerWith(t, mutate, nil)
+}
+
+// NewTestServerWith is NewTestServerCfg plus a hook to mutate api.Deps before
+// the router is built — e.g. to inject an OIDC driver so the full router +
+// middleware chain can exercise /api/auth/oidc/callback end to end.
+func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate func(*api.Deps)) (*httptest.Server, *http.Client, db.Store) {
 	t.Helper()
 
 	_, store := NewTestDB(t)
@@ -161,8 +168,8 @@ func NewTestServerCfg(t *testing.T, mutate func(*config.Config)) (*httptest.Serv
 	cfg.PublicURL = "http://test.local"
 	// Tighten CORS so cors middleware doesn't echo arbitrary origins back.
 	cfg.CORS.AllowedOrigins = []string{"*"}
-	if mutate != nil {
-		mutate(&cfg)
+	if cfgMutate != nil {
+		cfgMutate(&cfg)
 	}
 
 	deps := &api.Deps{
@@ -174,6 +181,9 @@ func NewTestServerCfg(t *testing.T, mutate func(*config.Config)) (*httptest.Serv
 		StorageResolver: resolver,
 		Embed:           embed.FS{},
 		LocalAuth:       localDrv,
+	}
+	if depsMutate != nil {
+		depsMutate(deps)
 	}
 	router := api.BuildRouter(deps)
 
