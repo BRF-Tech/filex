@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.67 below.)
+(Nothing yet — see v0.1.68 below.)
+
+## [0.1.68] - 2026-07-06
+
+### Fixed
+
+- **OIDC login no longer loops behind a CDN that strips Set-Cookie from
+  redirects.** Measured live (nginx `$upstream_http_set_cookie` vs the
+  browser through Cloudflare): the origin emits the session `Set-Cookie` on
+  the callback's 302, but the CDN strips a **Domain-scoped** Set-Cookie from a
+  **3xx** response while passing it on a 200 (host-only cookies survive either
+  way) — so the just-minted session cookie vanished and the SPA looped on
+  `/api/auth/me` 401. The successful OIDC callback now writes the session
+  cookie (unchanged Domain/Secure/SameSite logic) and forwards the browser
+  with a minimal **200 `text/html` bounce** (`<meta refresh>` +
+  `location.replace` + a `<noscript>` link) to a fixed relative `/admin/`, so
+  the cookie rides a 200 the CDN passes through. The bounce target is a
+  constant relative path (stays on the tenant host from v0.1.66, zero
+  open-redirect surface; html/template-escaped). Error/maintenance branches
+  stay 302 (they set no cookie). No config or DB change; works with or without
+  a CDN, single- and multi-tenant. The OIDC *state* cookie is host-only and
+  already survives the start redirect. (`handlers.OIDCCallback`,
+  `writeOIDCBounce`.)
 
 ## [0.1.67] - 2026-07-06
 

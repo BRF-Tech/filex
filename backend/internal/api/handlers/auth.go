@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"html/template"
 	"log/slog"
 	"net"
 	"net/http"
@@ -145,8 +146,35 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.setSessionCookie(w, r, token)
-	// After successful callback redirect to admin (or wherever the SPA wants).
-	http.Redirect(w, r, base+"/admin/", http.StatusFound)
+	// Land on the panel via a 200 HTML bounce rather than a 302. A
+	// TLS-terminating CDN (Cloudflare, measured live) strips a Domain-scoped
+	// Set-Cookie from a 3xx response but keeps it on a 200 — so a 302 here
+	// silently loses the just-minted session cookie and the SPA loops on
+	// /api/auth/me 401. The session cookie is written above (unchanged
+	// Domain/Secure/SameSite logic); the body just forwards the browser. The
+	// target is a fixed relative path so it stays on the tenant host that
+	// served this callback (v0.1.66's host fix) with zero open-redirect
+	// surface.
+	writeOIDCBounce(w, "/admin/")
+}
+
+// oidcBounceTmpl is the 200 "signing in…" page that carries the session
+// Set-Cookie past a CDN that strips it from 3xx responses. html/template
+// context-escapes the target in the meta/JS/href sinks; the caller only ever
+// passes a fixed relative path.
+var oidcBounceTmpl = template.Must(template.New("oidcbounce").Parse(
+	`<!doctype html><html><head><meta charset="utf-8">` +
+		`<meta http-equiv="refresh" content="0;url={{.}}">` +
+		`<title>Signing in…</title></head>` +
+		`<body><script>location.replace("{{.}}")</script>` +
+		`<noscript><a href="{{.}}">Continue</a></noscript>` +
+		`Signing in…</body></html>`))
+
+func writeOIDCBounce(w http.ResponseWriter, target string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = oidcBounceTmpl.Execute(w, target)
 }
 
 // redirectBase returns the origin that OIDCCallback redirects should target.

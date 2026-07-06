@@ -68,15 +68,18 @@ func TestOIDCCallback_MultiTenant_RedirectsToTenantHost(t *testing.T) {
 	loc := callbackLocation(t, a, "files.tenant-a.test", nil)
 	assert.Equal(t, "https://files.tenant-a.test/admin/login?error=oidc", loc)
 
-	// Success path — tenant admin, with the session cookie scoped to the
-	// tenant apex (derived from the provider host).
+	// Success path — a 200 HTML bounce (not a 302, so a CDN can't strip the
+	// Set-Cookie), the session cookie scoped to the tenant apex (derived from
+	// the provider host), and a relative /admin/ target that stays on the
+	// tenant host that served the callback.
 	a = handlers.NewAuth(store, nil, &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant-a.test"}, token: "tkn"}, "https://operator.test", true, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
 	req.Host = "files.tenant-a.test"
 	rec := httptest.NewRecorder()
 	a.OIDCCallback(rec, req)
-	require.Equal(t, http.StatusFound, rec.Code)
-	assert.Equal(t, "https://files.tenant-a.test/admin/", rec.Header().Get("Location"))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get("Location"), "success is a 200 bounce, not a redirect")
+	assert.Contains(t, rec.Body.String(), "/admin/")
 	assert.Contains(t, sessionSetCookie(t, rec.Result()), "Domain=tenant-a.test")
 }
 
@@ -104,8 +107,8 @@ func TestOIDCCallback_MultiTenant_ExplicitCookieDomain_EmitsSetCookie(t *testing
 	rec := httptest.NewRecorder()
 	a.OIDCCallback(rec, req)
 
-	require.Equal(t, http.StatusFound, rec.Code)
-	require.Equal(t, "https://files.tenant.example/admin/", rec.Header().Get("Location"))
+	require.Equal(t, http.StatusOK, rec.Code) // 200 bounce, not 302 (CDN 3xx strip)
+	assert.Contains(t, rec.Body.String(), "/admin/")
 	sc := sessionSetCookie(t, rec.Result()) // fails loudly if no Set-Cookie
 	assert.Contains(t, sc, "filex_session="+tok)
 	assert.Contains(t, sc, "Domain=tenant.example")
@@ -127,9 +130,6 @@ func TestRouter_OIDCCallback_MultiTenant_EmitsSetCookie(t *testing.T) {
 		Slug: "dtl", Host: "files.tenant.example", CookieDomain: ".tenant.example",
 		AuthType: model.AuthTypeOIDC,
 	})
-	// Inspect the callback's own 302, not the page it points at.
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/auth/oidc/callback?code=x&state=y", nil)
 	req.Host = "files.tenant.example"
 	req.Header.Set("X-Forwarded-Proto", "https")
@@ -137,7 +137,8 @@ func TestRouter_OIDCCallback_MultiTenant_EmitsSetCookie(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	require.Equal(t, http.StatusFound, resp.StatusCode)
+	// 200 HTML bounce carries the Set-Cookie past a CDN that strips it on 3xx.
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	sc := sessionSetCookie(t, resp)
 	assert.Contains(t, sc, "filex_session="+tok)
 	assert.Contains(t, sc, "Domain=tenant.example")
