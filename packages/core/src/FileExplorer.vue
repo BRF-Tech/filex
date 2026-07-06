@@ -600,44 +600,72 @@ watch(
 // ----------------------------------------------------------------
 const PATH_LS_KEY = 'brf-file-explorer:path';
 
-function persistMode(): 'hash' | 'localStorage' | 'none' {
+function persistMode(): 'hash' | 'localStorage' | 'hash+localStorage' | 'none' {
   return props.config.pathPersist ?? 'hash';
+}
+
+function hashPersistEnabled(): boolean {
+  const m = persistMode();
+  return m === 'hash' || m === 'hash+localStorage';
+}
+
+// A pasted/hand-edited hash can carry a stray `%` (a folder literally named
+// "100%") that decodeURIComponent rejects — fall back to the raw text.
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+function readLsPath(): string {
+  try {
+    return localStorage.getItem(PATH_LS_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function readHashPath(): string {
+  const h = window.location.hash || '';
+  if (!h.startsWith('#')) return '';
+  return safeDecode(h.slice(1)).replace(/^\/+|\/+$/g, '');
 }
 
 function readPersistedPath(): string {
   if (typeof window === 'undefined') return '';
   const mode = persistMode();
   if (mode === 'none') return '';
-  if (mode === 'localStorage') {
-    try {
-      return localStorage.getItem(PATH_LS_KEY) || '';
-    } catch {
-      return '';
-    }
-  }
-  const h = window.location.hash || '';
-  if (!h.startsWith('#')) return '';
-  return decodeURIComponent(h.slice(1)).replace(/^\/+|\/+$/g, '');
+  if (mode === 'localStorage') return readLsPath();
+  const fromHash = readHashPath();
+  if (fromHash || mode === 'hash') return fromHash;
+  // hash+localStorage with an empty hash: an explicit start path
+  // (?storage= deep link / rootPath floor) outranks the remembered folder.
+  if (initialFloorPath) return '';
+  return readLsPath();
 }
-
-let hashSyncSuppressed = false;
 
 function writePersistedPath(path: string) {
   if (typeof window === 'undefined') return;
   const mode = persistMode();
   if (mode === 'none') return;
-  if (mode === 'localStorage') {
+  if (mode === 'localStorage' || mode === 'hash+localStorage') {
     try {
       if (path) localStorage.setItem(PATH_LS_KEY, path);
       else localStorage.removeItem(PATH_LS_KEY);
     } catch {
       /* private mode / quota */
     }
-    return;
+    if (mode === 'localStorage') return;
   }
-  const target = path ? `#${path}` : '';
-  if (window.location.hash === target) return;
-  hashSyncSuppressed = true;
+  // Encode per segment so folder names with `%`/`#`/`?` survive the URL
+  // round-trip while `/` separators stay readable.
+  const encoded = path ? path.split('/').map(encodeURIComponent).join('/') : '';
+  const target = encoded ? `#${encoded}` : '';
+  if ((window.location.hash || '') === target) return;
+  // replaceState never fires `hashchange`, so onHashChange only ever sees
+  // genuine external edits (paste, back/forward) — no self-echo to suppress.
   history.replaceState(
     null,
     '',
@@ -646,12 +674,8 @@ function writePersistedPath(path: string) {
 }
 
 function onHashChange() {
-  if (persistMode() !== 'hash') return;
-  if (hashSyncSuppressed) {
-    hashSyncSuppressed = false;
-    return;
-  }
-  const p = readPersistedPath();
+  if (!hashPersistEnabled()) return;
+  const p = readHashPath();
   if (p && p !== currentPath.value) {
     void load(p);
   }
@@ -672,7 +696,7 @@ onMounted(async () => {
   // expose /api/files/manager/starred. Without this stars never light
   // up on first render even when the row IS starred server-side.
   void loadStarred();
-  if (persistMode() === 'hash') {
+  if (hashPersistEnabled()) {
     window.addEventListener('hashchange', onHashChange);
   }
   if (api.endpoints.opsList) {

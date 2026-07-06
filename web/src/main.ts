@@ -25,7 +25,17 @@ app.use(i18n);
 // after Pinia + Router are attached so stores resolve.
 installAxiosInterceptors({
   router,
-  onUnauthorized: () => router.push({ name: 'login' }),
+  onUnauthorized: () => {
+    // Preserve the interrupted location (incl. the explorer's #<folder>
+    // deep-link hash, which vue-router doesn't track) so login lands the
+    // user back where they were headed.
+    const redirect = router.currentRoute.value.fullPath + window.location.hash;
+    router.push(
+      redirect && redirect !== '/'
+        ? { name: 'login', query: { redirect } }
+        : { name: 'login' },
+    );
+  },
   onError: (msg) => {
     const toast = useToastStore();
     toast.error(msg);

@@ -143,7 +143,10 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     auth: authConf,
     theme: currentTheme.value,
     locale: locale.value === 'en' ? 'en' : 'tr',
-    pathPersist: 'localStorage',
+    // The address bar mirrors the current folder (#<storage>/<sub>…) so the
+    // URL is a shareable deep link; localStorage still remembers the last
+    // folder for hash-less visits. Priority: hash → ?storage= → remembered.
+    pathPersist: 'hash+localStorage',
     trashVisible: true,
     showInfoPanel: true,
     multiStorageRoot: true,

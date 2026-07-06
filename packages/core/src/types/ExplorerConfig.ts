@@ -236,12 +236,16 @@ export interface ExplorerConfig {
   /**
    * Where to persist the current path so reload lands the user back
    * in the same folder.
-   *   'hash'         — URL hash. Default — works on plain web pages.
-   *   'localStorage' — `brf-file-explorer:path` key. Best for SPAs that
-   *                    already own the URL (Ionic / Vue Router / Next).
-   *   'none'         — don't persist. Embedder controls path externally.
+   *   'hash'              — URL hash. Default — works on plain web pages.
+   *   'localStorage'      — `brf-file-explorer:path` key. Best for SPAs that
+   *                         already own the URL (Ionic / Vue Router / Next).
+   *   'hash+localStorage' — both: the address bar always mirrors the
+   *                         current folder (copy-paste deep links), and
+   *                         localStorage remembers it for hash-less visits.
+   *                         Read priority: hash → `initialPath` → localStorage.
+   *   'none'              — don't persist. Embedder controls path externally.
    */
-  pathPersist?: 'hash' | 'localStorage' | 'none';
+  pathPersist?: 'hash' | 'localStorage' | 'hash+localStorage' | 'none';
 
   /**
    * Multi-storage root mode. When true, the explorer's "/" virtual
