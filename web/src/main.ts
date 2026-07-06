@@ -26,10 +26,14 @@ app.use(i18n);
 installAxiosInterceptors({
   router,
   onUnauthorized: () => {
-    // Preserve the interrupted location (incl. the explorer's #<folder>
-    // deep-link hash, which vue-router doesn't track) so login lands the
-    // user back where they were headed.
-    const redirect = router.currentRoute.value.fullPath + window.location.hash;
+    // Preserve the interrupted location so login lands the user back where
+    // they were headed. On a cold-load deep link vue-router already carries
+    // the #<folder> hash in fullPath; after in-app navigation the explorer
+    // writes it via replaceState behind the router's back — append it only
+    // in that case or the hash doubles up.
+    const current = router.currentRoute.value;
+    let redirect = current.fullPath;
+    if (!current.hash && window.location.hash) redirect += window.location.hash;
     router.push(
       redirect && redirect !== '/'
         ? { name: 'login', query: { redirect } }
