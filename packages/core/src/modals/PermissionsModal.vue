@@ -403,6 +403,87 @@ function copy(text: string, tag = 'url') {
   copied.value = tag;
   setTimeout(() => { if (copied.value === tag) copied.value = ''; }, 1400);
 }
+
+// ── native share (Web Share API) ──
+// Same OS share sheet the fishapp uses (Windows share / Android share). Only
+// shown when the browser supports it (secure context + navigator.share, e.g.
+// Chrome/Edge on Windows, Android). The shared text mirrors the invite email
+// body (see backend mail_templates.go) so a WhatsApp/mail forward reads the
+// same as an emailed link.
+const canShare = computed(() => typeof navigator !== 'undefined' && typeof navigator.share === 'function');
+
+// humanSize mirrors the Go humanSize() used in the email body (1.4 MB).
+function humanSize(b?: number): string {
+  if (!b || b <= 0) return '';
+  const unit = 1024;
+  if (b < unit) return `${b} B`;
+  const units = ['K', 'M', 'G', 'T', 'P', 'E'];
+  let div = unit, exp = 0;
+  for (let n = b / unit; n >= unit; n /= unit) { div *= unit; exp++; }
+  return `${(b / div).toFixed(1)} ${units[exp]}B`;
+}
+
+function expiryLine(days: number): string {
+  if (days > 0) return L(`Bu bağlantı ${days} gün geçerlidir.`, `This link is valid for ${days} day(s).`);
+  return L('Bu bağlantının süresi yoktur.', 'This link does not expire.');
+}
+
+// Text + title for a download-share link, mirroring shareMailText().
+function shareBody(): { title: string; text: string } {
+  const name = pathParts.value.name;
+  const url = shareResult.value?.url ?? '';
+  const pin = shareResult.value?.pin ?? '';
+  const kind = props.isDir ? L('klasör', 'folder') : L('dosya', 'file');
+  const title = tr.value
+    ? `${name} ${props.isDir ? 'klasörü' : 'dosyası'} sizinle paylaşıldı`
+    : `${name} has been shared with you`;
+  const lines: string[] = [];
+  lines.push(L('Merhaba,', 'Hello,'), '');
+  lines.push(L(`Sizinle bir ${kind} paylaşıldı:`, `A ${kind} has been shared with you:`), '');
+  if (props.isDir) {
+    lines.push(L(`Klasör: ${name}`, `Folder: ${name}`));
+  } else {
+    lines.push(L(`Dosya: ${name}`, `File: ${name}`));
+    const sz = humanSize(props.size);
+    if (sz) lines.push(L(`Boyut: ${sz}`, `Size: ${sz}`));
+  }
+  lines.push('', L('İndirmek için:', 'Download it here:'), url);
+  if (pin) lines.push('', L(`PIN (erişim kodu): ${pin}`, `PIN (access code): ${pin}`));
+  lines.push('', expiryLine(shareExpiry.value));
+  return { title, text: lines.join('\n') };
+}
+
+// Text + title for a file-drop (upload) link, mirroring dropInviteMailText().
+function dropBody(): { title: string; text: string } {
+  const folder = pathParts.value.name;
+  const url = dropResult.value?.url ?? '';
+  const pin = dropResult.value?.pin ?? '';
+  const maxFiles = Number(dropMaxFiles.value) || 20;
+  const maxMB = Number(dropMaxSizeMB.value) || 500;
+  const exts = dropAllowedExt.value.split(/[,\s]+/).map((s) => s.trim().replace(/^\./, '')).filter(Boolean);
+  const title = L(`${folder} adlı klasöre dosya eklemeniz istendi`, `You've been asked to add files to ${folder}`);
+  const lines: string[] = [];
+  lines.push(L('Merhaba,', 'Hello,'), '');
+  lines.push(L('Dosya yüklemeniz istendi.', "You've been invited to upload files."), '');
+  lines.push(L(`Klasör: ${folder}`, `Folder: ${folder}`));
+  lines.push(L(`Sınır: en fazla ${maxFiles} dosya, dosya başına ${maxMB} MB.`, `Limit: up to ${maxFiles} file(s), ${maxMB} MB per file.`));
+  lines.push(exts.length
+    ? L(`İzinli türler: ${exts.join(', ')}`, `Allowed types: ${exts.join(', ')}`)
+    : L('İzinli türler: tüm türler', 'Allowed types: all'));
+  lines.push('', L('Dosyalarınızı buradan yükleyebilirsiniz:', 'Upload your files here:'), url);
+  if (pin) lines.push('', L(`PIN (erişim kodu): ${pin}`, `PIN (access code): ${pin}`));
+  lines.push('', expiryLine(dropExpiry.value));
+  return { title, text: lines.join('\n') };
+}
+
+async function nativeShare(body: { title: string; text: string }) {
+  if (!canShare.value) return;
+  try {
+    await navigator.share(body);
+  } catch {
+    // user cancelled (AbortError) or the target rejected — nothing to do.
+  }
+}
 </script>
 
 <template>
@@ -567,6 +648,11 @@ function copy(text: string, tag = 'url') {
                 </button>
               </div>
               <div v-if="shareMailNotice" class="fx-perm-notice">{{ shareMailNotice }}</div>
+
+              <!-- native share (OS share sheet) — same as the fishapp Paylaş button -->
+              <button v-if="canShare" type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-sharebtn" @click="nativeShare(shareBody())">
+                <span aria-hidden="true">📤</span> {{ L('Paylaş', 'Share') }}
+              </button>
             </div>
             <p v-else-if="shareMailTo" class="fx-perm-hint">
               {{ L('Aşağıdan bir bağlantı oluşturun, ardından', 'Create a link below, then it will be sent to') }}
@@ -656,6 +742,11 @@ function copy(text: string, tag = 'url') {
                 </button>
               </div>
               <div v-if="dropMailNotice" class="fx-perm-notice">{{ dropMailNotice }}</div>
+
+              <!-- native share (OS share sheet) — same as the fishapp Paylaş button -->
+              <button v-if="canShare" type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-sharebtn" @click="nativeShare(dropBody())">
+                <span aria-hidden="true">📤</span> {{ L('Paylaş', 'Share') }}
+              </button>
             </div>
           </div>
         </template>
@@ -794,6 +885,8 @@ function copy(text: string, tag = 'url') {
 .fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
 .fx-perm-mailrow .fx-perm-input { flex: 1; }
 .fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }
+/* native "Paylaş" button — sits under the mail row, full width */
+.fx-perm-sharebtn { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
 
 /* file-drop tab */
 .fx-perm-dropintro { margin: 0 0 12px; line-height: 1.4; }
