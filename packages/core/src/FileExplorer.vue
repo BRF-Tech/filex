@@ -105,6 +105,10 @@ const files = ref<FileNode[]>([]);
 // RBAC effective level for the current directory ('' = ACL not enforced on
 // this storage → no gating). Drives which write/manage actions are offered.
 const dirPerm = ref<string>('');
+// The dead deep-link state: set to the requested path when a listing came
+// back 404 (folder doesn't exist) or 403 (RBAC-hidden — rendered identically
+// on purpose so a denied folder doesn't reveal that it exists). '' = none.
+const notFoundPath = ref<string>('');
 
 const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
 const viewMode = customRef<ViewMode>((track, trigger) => {
@@ -426,8 +430,9 @@ async function load(path?: string) {
   // Any normal navigation exits trash mode (the trash view is entered only
   // by opening the virtual `.trash` row, which calls loadTrash()).
   trashMode.value = false;
+  let requested = path ?? currentPath.value ?? '';
   try {
-    let requested = path ?? currentPath.value ?? '';
+    notFoundPath.value = '';
     // Clamp to the confined floor: an empty/above-floor request (incl. a stale
     // persisted path or the drives root) snaps back to rootPath. This both
     // suppresses the multi-storage drives list and blocks up-navigation.
@@ -490,6 +495,16 @@ async function load(path?: string) {
       : stripAdapter(resp.dirname);
   } catch (err) {
     const e = err instanceof Error ? err.message : String(err);
+    const status = (err as { status?: number }).status;
+    if (status === 404 || status === 403) {
+      // Dead deep link (deleted folder, phantom path or RBAC-hidden dir):
+      // show the dedicated not-found state instead of a toast over a stale
+      // listing that reads as "this folder is empty".
+      notFoundPath.value = String(requested);
+      files.value = [];
+      emit('error', { message: e, context: { path } });
+      return;
+    }
     emit('error', { message: e, context: { path } });
     flashToast(e);
   } finally {
@@ -500,6 +515,13 @@ async function load(path?: string) {
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
   return idx === -1 ? p : p.slice(idx + 3);
+}
+
+// "Go to root" escape hatch on the not-found state. load('') clamps to the
+// confined rootFloor on embeds, so this is safe everywhere.
+function leaveNotFound() {
+  notFoundPath.value = '';
+  void load('');
 }
 
 // hydrateTrashRow — the virtual `.trash` row is synthesized with no size/date;
@@ -1716,6 +1738,17 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       <div v-if="loading && files.length === 0" class="fe__loading">
         <span class="fe__spinner" aria-hidden="true"></span>
         <p class="fe__loading-text">{{ t('loading') }}</p>
+      </div>
+      <!-- Dead deep link (404) or RBAC-hidden dir (403, shown identically):
+           a dedicated state instead of a misleading "this folder is empty". -->
+      <div v-else-if="notFoundPath" class="fe__notfound">
+        <span class="fe__notfound-icon" aria-hidden="true">📁</span>
+        <p class="fe__notfound-title">{{ t('notFound.title') }}</p>
+        <p class="fe__notfound-path">{{ notFoundPath }}</p>
+        <p class="fe__notfound-desc">{{ t('notFound.desc') }}</p>
+        <button type="button" class="fe-btn" @click="leaveNotFound">
+          {{ t('notFound.goRoot') }}
+        </button>
       </div>
       <ListView
         v-else-if="viewMode === 'list'"

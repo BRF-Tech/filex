@@ -555,6 +555,19 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 	if err != nil {
 		return false
 	}
+	// …except that blob stores also "list" a NONEXISTENT prefix as an
+	// empty success, which used to render phantom folders as browsable
+	// empty dirs. Zero objects alone can't prove the dir exists, so
+	// confirm with Stat: a real empty dir (local/SFTP) stats as a
+	// directory; a phantom prefix doesn't. Legit empty dirs created via
+	// filex carry a .keepdir marker (len(objs) > 0), and the storage
+	// root ("") is always browsable.
+	if len(objs) == 0 && clean != "" {
+		st, serr := drv.Stat(r.Context(), clean)
+		if serr != nil || st.Kind != storage.KindDirectory {
+			return false
+		}
+	}
 	files := projectDriverObjects(s.Name, clean, objs, dirsOnly, set)
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})

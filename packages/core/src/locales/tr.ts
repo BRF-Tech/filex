@@ -61,6 +61,10 @@ export const tr: Record<string, string> = {
   'empty.search': 'Sonuç bulunamadı',
   'loading': 'Yükleniyor…',
 
+  'notFound.title': 'Klasör bulunamadı',
+  'notFound.desc': 'Bu klasör mevcut değil, taşınmış ya da erişim yetkiniz yok.',
+  'notFound.goRoot': 'Kök klasöre dön',
+
   'col.name': 'Ad',
   'col.size': 'Boyut',
   'col.modified': 'Tarih',

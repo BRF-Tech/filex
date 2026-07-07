@@ -61,6 +61,10 @@ export const en: Record<string, string> = {
   'empty.search': 'No results',
   'loading': 'Loading…',
 
+  'notFound.title': 'Folder not found',
+  'notFound.desc': 'This folder does not exist, was moved, or you do not have access to it.',
+  'notFound.goRoot': 'Go to root folder',
+
   'col.name': 'Name',
   'col.size': 'Size',
   'col.modified': 'Modified',

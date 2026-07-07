@@ -53,6 +53,42 @@
   to { transform: rotate(360deg); }
 }
 
+/* Dead deep-link state (404 / RBAC-hidden 403). */
+.fe__notfound {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 240px;
+  height: 100%;
+  color: var(--fe-text-muted);
+  text-align: center;
+  padding: 24px;
+}
+.fe__notfound-icon {
+  font-size: 40px;
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.fe__notfound-title {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fe-text);
+}
+.fe__notfound-path {
+  margin: 0;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+  max-width: 480px;
+}
+.fe__notfound-desc {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
 .fe__file-input {
   position: absolute;
   left: -9999px;

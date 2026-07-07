@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -356,4 +357,115 @@ func TestManagerDownload_AttachmentDisposition(t *testing.T) {
 	cd := rec.Header().Get("Content-Disposition")
 	assert.Contains(t, cd, "attachment")
 	assert.Contains(t, cd, "report.csv")
+}
+
+// ---------- phantom prefixes must 404, not render as empty dirs ----------
+
+// blobishDriver mimics an S3-style blob store: List on ANY prefix succeeds
+// (empty result for unknown prefixes — no "directory" concept), Stat only
+// answers for real object keys.
+type blobishDriver struct {
+	objects map[string]storage.Object
+}
+
+func (d *blobishDriver) Init(context.Context, map[string]any) error { return nil }
+func (d *blobishDriver) Name() string                               { return "blobish" }
+func (d *blobishDriver) List(_ context.Context, p string) ([]storage.Object, error) {
+	prefix := strings.Trim(p, "/")
+	out := []storage.Object{}
+	for k, o := range d.objects {
+		if prefix == "" || strings.HasPrefix(k, prefix+"/") {
+			out = append(out, o)
+		}
+	}
+	return out, nil
+}
+func (d *blobishDriver) Stat(_ context.Context, p string) (storage.Object, error) {
+	if o, ok := d.objects[strings.Trim(p, "/")]; ok {
+		return o, nil
+	}
+	return storage.Object{}, storage.ErrNotFound
+}
+func (d *blobishDriver) Read(context.Context, string) (io.ReadCloser, error) {
+	return nil, storage.ErrNotFound
+}
+func (d *blobishDriver) Capabilities() storage.Capabilities { return storage.Capabilities{} }
+
+func newBlobFixture(t *testing.T, objects map[string]storage.Object) *handlers.Manager {
+	t.Helper()
+	_, store := testutil.NewTestDB(t)
+	st, err := store.CreateStorage(context.Background(), &model.Storage{
+		Name:       "blob",
+		Driver:     "s3",
+		MountPath:  "/blob",
+		Enabled:    true,
+		ConfigJSON: json.RawMessage(`{}`),
+	})
+	require.NoError(t, err)
+	drv := &blobishDriver{objects: objects}
+	resolver := func(id int64) (storage.Driver, error) {
+		if id == st.ID {
+			return drv, nil
+		}
+		return nil, fmt.Errorf("unknown id %d", id)
+	}
+	return handlers.NewManager(store, resolver)
+}
+
+func TestManagerIndex_PhantomPrefix_404OnBlobStore(t *testing.T) {
+	mh := newBlobFixture(t, map[string]storage.Object{
+		"real/file.txt": {Path: "real/file.txt", Name: "file.txt", Kind: storage.KindFile, Size: 3},
+	})
+
+	// Nonexistent prefix: the blob driver lists it as empty-success, but
+	// nothing proves the dir exists → must be 404, not an empty listing.
+	rec := callList(t, mh, url.Values{
+		"action": []string{"index"},
+		"path":   []string{"blob://olmayan-klasor"},
+	})
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	// A prefix with real children stays browsable.
+	rec = callList(t, mh, url.Values{
+		"action": []string{"index"},
+		"path":   []string{"blob://real"},
+	})
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body struct {
+		Files []map[string]any `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Files, 1)
+
+	// The storage root is always browsable, even when the bucket is empty.
+	rec = callList(t, newBlobFixture(t, map[string]storage.Object{}), url.Values{
+		"action": []string{"index"},
+		"path":   []string{"blob://"},
+	})
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestManagerIndex_EmptyLocalDir_StillListable(t *testing.T) {
+	// A real (cold-cache) empty directory on a stat-capable driver must keep
+	// returning 200 — the phantom-prefix guard confirms it via Stat.
+	fx := newTwoStorageFixture(t)
+	require.NoError(t, os.Mkdir(filepath.Join(fx.rootA, "bosklasor"), 0o755))
+
+	rec := callList(t, fx.mh, url.Values{
+		"action": []string{"index"},
+		"path":   []string{"alpha://bosklasor"},
+	})
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body struct {
+		Files []map[string]any `json:"files"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Files, 0)
+
+	// And a nonexistent dir on the same driver stays 404 (List errors).
+	rec = callList(t, fx.mh, url.Values{
+		"action": []string{"index"},
+		"path":   []string{"alpha://hic-yok"},
+	})
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
