@@ -280,6 +280,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/archive/extract", ah.Extract)
 			r.Post("/archive/add", ah.Add)
 
+			r.Get("/share", sh.HandleList)
 			r.Post("/share", sh.HandleCreate)
 			r.Delete("/share/{id}", sh.HandleDelete)
 

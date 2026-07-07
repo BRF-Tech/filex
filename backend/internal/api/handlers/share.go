@@ -239,6 +239,85 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleList returns the current caller's active share links for one item, so
+// the permissions modal's "Existing links" section can list (and revoke) them.
+//
+//	GET /api/files/share?path=<adapter://rel>   (or ?node_id=<n>)
+//
+// Non-admins only see links they created; admins see every link on the item.
+// A path with no indexed node (or no links yet) returns an empty list rather
+// than an error so the modal shows "none" instead of failing. The `uuid` field
+// carries the numeric share id (what DELETE /share/{id} expects), while `url`
+// is built from the token — matching the ShareInfo shape the SFC consumes.
+func (h *Share) HandleList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	nodeID := int64(0)
+	if v := q.Get("node_id"); v != "" {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			nodeID = id
+		}
+	}
+	if nodeID == 0 {
+		p := q.Get("path")
+		if p == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path or node_id"})
+			return
+		}
+		resolved, err := h.resolveNodeIDFromPath(r.Context(), p)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
+			return
+		}
+		nodeID = resolved
+	}
+
+	// RBAC: seeing an item's links is the same bar as minting one (≥editor).
+	if h.ACL != nil {
+		node, err := h.Store.GetNode(r.Context(), nodeID)
+		if err != nil || node == nil {
+			writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
+			return
+		}
+		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return
+		}
+	}
+
+	rows, err := h.Store.ListSharesByNode(r.Context(), nodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	user := auth.UserFrom(r.Context())
+	now := time.Now()
+	out := make([]map[string]any, 0, len(rows))
+	for _, sh := range rows {
+		if sh.ExpiresAt != nil && !sh.ExpiresAt.After(now) {
+			continue // revoked / expired — keep it out of the active list
+		}
+		if user != nil && !user.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != user.ID) {
+			continue // non-admins only manage their own links
+		}
+		link := h.shareURL(sh.Token)
+		if sh.IsDrop() {
+			link = h.dropURL(sh.Token)
+		}
+		out = append(out, map[string]any{
+			"uuid":          strconv.FormatInt(sh.ID, 10),
+			"url":           link,
+			"kind":          sh.Kind,
+			"expires_at":    sh.ExpiresAt,
+			"max_downloads": sh.MaxDownloads,
+			"downloads":     sh.DownloadCount,
+			"created_at":    sh.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"shares": out})
+}
+
 // resolveNodeIDFromPath looks up a node by `<adapter>://<rel>` (or bare
 // rel against the first storage). Returns 0 + an error when no row.
 func (h *Share) resolveNodeIDFromPath(ctx context.Context, fullPath string) (int64, error) {
