@@ -67,6 +67,12 @@ func (sw *statusWriter) WriteHeader(code int) {
 	sw.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController /
+// coder/websocket can reach the underlying http.Hijacker for WebSocket
+// upgrades (GET /api/ws). Without it the Logger middleware's statusWriter
+// hides the Hijacker and the upgrade fails with 501.
+func (sw *statusWriter) Unwrap() http.ResponseWriter { return sw.ResponseWriter }
+
 func clientIP(r *http.Request) string {
 	if v := r.Header.Get("X-Forwarded-For"); v != "" {
 		return v

@@ -19,6 +19,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -146,6 +147,8 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Live: a folder appeared in this directory — refresh everyone viewing it.
+	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "create", Name: body.Name})
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
 }
 
@@ -216,6 +219,8 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
+	// Live: an item was renamed in this directory.
+	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "rename", Name: path.Base(srcRel), NewName: body.Name})
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
 }
 
@@ -264,6 +269,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	srcDirs := make(map[string]struct{})
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
 		if srcAdapter != "" && srcAdapter != current.Name {
@@ -287,8 +293,18 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
+		srcDirs[path.Dir(srcRel)] = struct{}{}
 	}
 
+	// Live: items landed in the destination — and left their source folders.
+	emitFolderChange(current.ID, destRel, realtime.ChangeEvent{Action: "move"})
+	destKey := normalizeDBPath(destRel)
+	for d := range srcDirs {
+		if normalizeDBPath(d) == destKey {
+			continue // same room as dest, already emitted
+		}
+		emitFolderChange(current.ID, d, realtime.ChangeEvent{Action: "move"})
+	}
 	h.vfIndex(w, r, current, destRel, storageNames, false)
 }
 
@@ -417,6 +433,8 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Live: items were removed from this directory.
+	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "delete"})
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
 }
 
@@ -549,6 +567,8 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Live: new/updated files in this directory.
+	emitFolderChange(current.ID, destRel, realtime.ChangeEvent{Action: "upload"})
 	h.vfIndex(w, r, current, destRel, storageNames, false)
 }
 

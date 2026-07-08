@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
@@ -77,6 +79,7 @@ type Server struct {
 	pipeline        *thumb.Pipeline
 	resolver        func(int64) (storage.Driver, error)
 	mailer          *mailer.Service
+	zipWarmer       *sharezip.Warmer
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -431,6 +434,37 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// keep the raw `store`; their contexts carry no scope, so they are unaffected.
 	scopedStore := tenantstore.New(store)
 
+	// Folder-share ZIP cache (shared by the download handler and the background
+	// warmer) + the warmer itself, which every DefaultWarmInterval re-checks
+	// each active folder share and pre-builds its zip if the folder changed, so
+	// downloads almost always hit a warm cache. Uses the raw (unscoped) store
+	// like the other background services.
+	zipCache := sharezip.New(filepath.Join(cfg.DataDir, "sharezips"))
+	srvObj.zipWarmer = sharezip.NewWarmer(
+		zipCache,
+		func(ctx context.Context) ([]sharezip.DirShare, error) {
+			rows, _, err := store.ListAllShares(ctx, nil, true, 1000, 0)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]sharezip.DirShare, 0, len(rows))
+			for _, sm := range rows {
+				if sm.Share == nil || sm.Share.Kind == model.ShareKindDrop {
+					continue
+				}
+				node, nerr := store.GetNode(ctx, sm.Share.NodeID)
+				if nerr != nil || node == nil || node.Type != model.NodeTypeDirectory {
+					continue
+				}
+				out = append(out, sharezip.DirShare{StorageID: node.StorageID, Path: node.Path, NodeID: node.ID})
+			}
+			return out, nil
+		},
+		resolver,
+		sharezip.DefaultWarmInterval,
+		func(f string, a ...any) { slog.Info(fmt.Sprintf(f, a...)) },
+	)
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           scopedStore,
@@ -454,6 +488,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		LocalAuth:       localDrv,
 		OIDCAuth:        oidcDrv,
 		Mailer:          srvObj.mailer,
+		ZipCache:        zipCache,
 	}
 	router := api.BuildRouter(deps)
 
@@ -530,6 +565,9 @@ func (s *Server) Start(ctx context.Context) error {
 		// in New() before this point; the legacy ops.Service still
 		// owns copy/move/delete via its own goroutine.
 		s.qpool.Start(ctx)
+	}
+	if s.zipWarmer != nil {
+		s.zipWarmer.Start(ctx)
 	}
 	if s.replicaCron != nil {
 		s.replicaCron.Start()

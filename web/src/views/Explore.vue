@@ -23,7 +23,9 @@ import Button from '@/components/ui/Button.vue';
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue';
 import DarkModeToggle from '@/components/DarkModeToggle.vue';
 import SelfTokensModal from '@/components/SelfTokensModal.vue';
+import PresenceBar from '@/components/PresenceBar.vue';
 import { effectiveTheme } from '@/lib/theme';
+import { RealtimeClient, type PresenceUser, type PresenceMessage } from '@/lib/realtime';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -182,6 +184,98 @@ function onExplorerError(err: { message: string; context?: unknown }) {
   console.warn('[explore] FileExplorer error:', err);
 }
 
+// ── Realtime live collaboration ──────────────────────────────────────────
+// Live file changes + presence for the folder currently being viewed. All of
+// this degrades gracefully: if the WebSocket never connects, the explorer keeps
+// working with no live updates and no errors.
+const explorerRef = ref<{ reload?: () => void } | null>(null);
+const realtime = ref<RealtimeClient | null>(null);
+const presenceUsers = ref<PresenceUser[]>([]);
+let pendingSubscribe: string | null = null;
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Convert the explorer's virtual path (`<storage>/<rel>`) to the subscribe wire
+// form (`<storage>://<rel>`). The drives root and the trash view have no folder
+// room, so they map to null (unsubscribe).
+function virtualToWirePath(vp: string): string | null {
+  const p = (vp || '').replace(/^\/+|\/+$/g, '');
+  if (!p || p === '.trash' || p.startsWith('.trash/')) return null;
+  const slash = p.indexOf('/');
+  if (slash < 0) return `${p}://`;
+  return `${p.slice(0, slash)}://${p.slice(slash + 1)}`;
+}
+
+function pathFromHash(): string | null {
+  const h = window.location.hash || '';
+  if (!h.startsWith('#')) return null;
+  let raw = h.slice(1);
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    /* keep raw — a literal % in a folder name */
+  }
+  return virtualToWirePath(raw);
+}
+
+function doSubscribe(wire: string | null) {
+  presenceUsers.value = []; // drop the previous folder's roster immediately
+  pendingSubscribe = wire;
+  realtime.value?.subscribe(wire);
+}
+
+// The core emits `navigate` on every folder change (it persists the path via
+// history.replaceState, which does NOT fire `hashchange`, so this event — not a
+// hash listener — is the reliable signal).
+function onNavigate(p: { path: string }) {
+  doSubscribe(virtualToWirePath(p.path));
+}
+
+function onRealtimeChange() {
+  // Debounce bursts (a multi-file upload emits several change frames) into one
+  // soft reload of the current folder, reusing the explorer's own list-fetch.
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    if (explorerRef.value?.reload) explorerRef.value.reload();
+    else remountKey.value += 1; // fallback if reload() isn't exposed
+  }, 200);
+}
+
+function onRealtimePresence(msg: PresenceMessage) {
+  // Ignore late frames for a folder we've already navigated away from.
+  if (pendingSubscribe && msg.path && msg.path !== pendingSubscribe) return;
+  presenceUsers.value = Array.isArray(msg.users) ? msg.users : [];
+}
+
+// Presence "focus": which file the user is looking at. A single selected file
+// counts as focus; a multi-select or a folder selection clears it.
+function onSelectionChange(items: Array<{ path: string; basename: string; type: 'file' | 'dir' }>) {
+  const files = items.filter((i) => i.type === 'file');
+  realtime.value?.setFocus(files.length === 1 ? files[0].basename : null);
+}
+
+function onFileOpened(f: { path: string; basename: string }) {
+  realtime.value?.setFocus(f.basename);
+}
+
+onMounted(() => {
+  realtime.value = new RealtimeClient({
+    onChange: onRealtimeChange,
+    onPresence: onRealtimePresence,
+  });
+  // Initial room: whatever the core already reported via `navigate` (child
+  // mounts before parent, so the event may have arrived pre-connect and been
+  // buffered), else derive it from the URL hash.
+  const initial = pendingSubscribe ?? pathFromHash();
+  if (initial) doSubscribe(initial);
+});
+
+onBeforeUnmount(() => {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  realtime.value?.close();
+  realtime.value = null;
+});
+
 onMounted(async () => {
   try {
     await auth.fetchMe();
@@ -212,6 +306,8 @@ onMounted(async () => {
       <LogoMark class="h-6 w-6" />
       <span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">filex</span>
       <span class="text-xs text-zinc-500 hidden sm:inline">{{ t('explore.tagline') }}</span>
+
+      <PresenceBar class="hidden sm:flex ml-2" :users="presenceUsers" :self-id="auth.user?.id ?? null" />
 
       <div class="ml-auto flex items-center gap-1.5">
         <Button size="xs" variant="ghost" @click="refresh()" :title="t('common.refresh')">
@@ -255,8 +351,12 @@ onMounted(async () => {
       <div v-else-if="explorerConfig" class="flex-1 min-h-0 explore-host">
         <FileExplorer
           :key="`fx-multi-${remountKey}`"
+          ref="explorerRef"
           :config="explorerConfig"
           @error="onExplorerError"
+          @navigate="onNavigate"
+          @selection-change="onSelectionChange"
+          @file-opened="onFileOpened"
         />
       </div>
     </main>

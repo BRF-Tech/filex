@@ -1,0 +1,13 @@
+{
+  "Version": "17.0.0",
+  "Name": "filex (text)",
+  "DestinationType": "TextUploader",
+  "RequestMethod": "POST",
+  "RequestURL": "https://fm.brf.sh/api/sharex/upload",
+  "Headers": {
+    "X-Filex-Token": "YOUR_TOKEN_HERE"
+  },
+  "Body": "MultipartFormData",
+  "FileFormName": "file",
+  "URL": "{json:url}"
+}

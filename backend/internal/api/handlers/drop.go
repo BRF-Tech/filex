@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
 )
 
@@ -318,6 +319,10 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 
 	_ = h.Service.IncrementUpload(r.Context(), sh.ID, saved)
 	h.notifyOwner(r.Context(), sh, node, saved, uploaderName, sub)
+
+	// Live: a public drop created a new submission subfolder — refresh anyone
+	// viewing the drop target folder.
+	emitFolderChange(node.StorageID, node.Path, realtime.ChangeEvent{Action: "create", Name: sub})
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": saved, "folder": sub})
 }

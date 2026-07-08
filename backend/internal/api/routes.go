@@ -27,9 +27,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -65,6 +67,8 @@ type Deps struct {
 	ACL *acl.Resolver
 	// Mailer sends invite/share notices (optional; nil → links shown on-screen).
 	Mailer *mailer.Service
+	// ZipCache caches folder-share ZIPs (shared with the background warmer).
+	ZipCache *sharezip.Cache
 }
 
 // BuildRouter constructs the chi router with all routes wired up.
@@ -107,7 +111,7 @@ func BuildRouter(d *Deps) http.Handler {
 	uh.AttachACL(d.ACL)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	ah.AttachACL(d.ACL)
-	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL)
+	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL, d.ZipCache)
 	sh.AttachACL(d.ACL)
 	// File-drop (public upload link) handler — the inverse of Share. Reuses
 	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
@@ -203,6 +207,13 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Get("/api/capabilities", ch.Get)
 	r.Get("/api/files/capabilities", ch.Get)
 
+	// Realtime hub for live folder updates + presence over WebSocket.
+	// SetChangeEmitter wires the file-mutation handlers to broadcast into it;
+	// a nil emitter (unwired) is a safe no-op.
+	hub := realtime.NewHub()
+	handlers.SetChangeEmitter(hub)
+	wsh := handlers.NewWS(d.Store, d.ACL, hub)
+
 	// ────── authenticated user routes ──────
 	r.Group(func(r chi.Router) {
 		// Accept EITHER a cookie/JWT session (native panel) OR a root-confined
@@ -215,6 +226,11 @@ func BuildRouter(d *Deps) http.Handler {
 		// Audit curated self-service + file mutations (profile, password,
 		// TOTP, shares, file deletes — shouldAudit() filters the rest).
 		r.Use(auth.AuditMiddleware(d.Store))
+
+		// Live-collaboration WebSocket (folder change events + presence).
+		// Mounted at group level (NOT under /api/files) so it skips
+		// confine.Middleware; cookie-session auth identifies the user.
+		r.Get("/api/ws", wsh.Handle)
 
 		// Self-service profile/password/TOTP.
 		// Avoid `r.Route("/api/auth", …)` here because chi forbids
@@ -562,6 +578,18 @@ func BuildRouter(d *Deps) http.Handler {
 		// bound principal is on the context — every successful mutating
 		// /api/ai/admin/* write lands in the audit log (action prefixed "ai.").
 		r.With(auth.RequireScope("admin"), auth.AuditMiddleware(d.Store)).Route("/admin", aiAdmin.Register)
+	})
+
+	// ────── ShareX uploader (token-authenticated) ──────
+	// POST a file/image/text from ShareX → stored + indexed via the AI path,
+	// a public /s/<token> share is minted, and {"url":"<link>?inline=1"} is
+	// returned (inline so images/text render in-browser).
+	sxUploadH := handlers.NewShareX(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
+	sxUploadH.AttachACL(d.ACL)
+	r.Route("/api/sharex", func(r chi.Router) {
+		r.Use(auth.APITokenMiddleware(d.Store))
+		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.With(auth.RequireScope("write")).Post("/upload", sxUploadH.Upload)
 	})
 
 	// ────── healthz ──────

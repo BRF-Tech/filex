@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -43,7 +44,7 @@ func newDropFixture(t *testing.T) (*chi.Mux, *share.Service, db.Store, *model.St
 		return drv, nil
 	}
 	svc := share.NewService(store)
-	shareH := handlers.NewShare(svc, store, resolver, "")
+	shareH := handlers.NewShare(svc, store, resolver, "", sharezip.New(""))
 	dh := handlers.NewDrop(store, mh, svc, nil, nil, "")
 	r := chi.NewRouter()
 	r.Post("/api/files/share", shareH.HandleCreate)

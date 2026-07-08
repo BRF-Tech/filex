@@ -12,6 +12,8 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -34,19 +37,25 @@ type Share struct {
 	StorageResolver func(int64) (storage.Driver, error)
 	PublicURL       string
 	ACL             *acl.Resolver
+	// Zip caches generated folder-share ZIPs (keyed by node id + content
+	// signature) so downloads don't re-zip the whole folder every time. A nil
+	// or disabled cache falls back to streaming a fresh zip. See serveFolderZip.
+	Zip *sharezip.Cache
 }
 
 // AttachACL wires the RBAC resolver so minting a public share link requires
 // ≥editor on the target node (sharing grants outside access — a write action).
 func (h *Share) AttachACL(r *acl.Resolver) { h.ACL = r }
 
-// NewShare constructs a Share handler.
-func NewShare(svc *share.Service, store db.Store, resolver func(int64) (storage.Driver, error), publicURL string) *Share {
+// NewShare constructs a Share handler. zipCache enables the folder-share ZIP
+// cache (pass a disabled/nil cache to stream fresh on every folder download).
+func NewShare(svc *share.Service, store db.Store, resolver func(int64) (storage.Driver, error), publicURL string, zipCache *sharezip.Cache) *Share {
 	return &Share{
 		Service:         svc,
 		Store:           store,
 		StorageResolver: resolver,
 		PublicURL:       strings.TrimRight(publicURL, "/"),
+		Zip:             zipCache,
 	}
 }
 
@@ -529,15 +538,16 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Folder share → stream every file under it as a ZIP ("download all").
+	// Folder share → serve every file under it as a ZIP ("download all").
 	// The single-file presign/Read path below can't open a directory as a
-	// byte stream — a shared folder used to 500 here ("read error").
+	// byte stream — a shared folder used to 500 here ("read error"). We cache
+	// the generated ZIP on local disk (keyed by content signature) so repeat
+	// downloads don't re-read + re-compress the whole folder from object
+	// storage every time, and show a "preparing…" progress page while a cold
+	// cache builds. serveFolderZip owns the download-count increment (only on a
+	// real byte serve, not status polls / the wait page).
 	if node.Type == model.NodeTypeDirectory {
-		if err := h.streamFolderZip(r.Context(), w, drv, node.Path, node.Name); err != nil {
-			// Mid-stream: headers/bytes may already be sent, so just stop.
-			return
-		}
-		_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
+		h.serveFolderZip(r.Context(), w, r, drv, node.Path, node.Name, node.ID, resolved.ID, pin)
 		return
 	}
 
@@ -631,6 +641,176 @@ func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv 
 	}
 	return walk(root, "")
 }
+
+// serveFolderZip serves a shared folder as a ZIP ("download all"), backed by
+// the on-disk cache in internal/sharezip so we don't re-read + re-compress the
+// whole folder from object storage on every download (slow for large folders
+// like receipt months). Behaviour by request:
+//   - cache warm  → serve the finished file immediately (known Content-Length)
+//   - ?zip=status → JSON {ready, percent} for the progress page (starts a build
+//     if idle); does not count as a download
+//   - ?zip=wait   → block until the build finishes then serve (no-JS fallback +
+//     the "ready" redirect target)
+//   - otherwise   → start the build and render a "preparing…" progress page
+//
+// The download counter is only bumped on a real byte serve. Any cache problem
+// falls back to streaming a fresh zip so a broken cache never blocks a download.
+func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, root, name string, nodeID, shareID int64, pin string) {
+	stream := func() {
+		if err := h.streamFolderZip(ctx, w, drv, root, name); err == nil {
+			_ = h.Service.IncrementDownload(ctx, shareID)
+		}
+	}
+	serve := func(cachePath string) {
+		if err := serveZipFile(w, cachePath, name); err == nil {
+			_ = h.Service.IncrementDownload(ctx, shareID)
+		}
+	}
+
+	if h.Zip == nil || !h.Zip.Enabled() {
+		stream()
+		return
+	}
+
+	cachePath, files, err := h.Zip.Plan(ctx, drv, root, nodeID)
+	if err != nil {
+		stream()
+		return
+	}
+
+	mode := r.URL.Query().Get("zip")
+
+	// Progress poll — ALWAYS returns JSON, even once the cache is warm, so the
+	// wait page's fetch().json() never chokes on zip bytes. Starts a build if
+	// idle (polling alone drives generation). Never counts as a download.
+	if mode == "status" {
+		if _, ok := h.Zip.Cached(cachePath); ok {
+			writeJSON(w, http.StatusOK, map[string]any{"ready": true, "percent": 100})
+			return
+		}
+		g := h.Zip.StartOrGet(cachePath, files, nodeID, drv)
+		if _, ok := h.Zip.Cached(cachePath); ok {
+			writeJSON(w, http.StatusOK, map[string]any{"ready": true, "percent": 100})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ready": false, "percent": g.Percent()})
+		return
+	}
+
+	// Cache hit → serve immediately (default + wait modes).
+	if _, ok := h.Zip.Cached(cachePath); ok {
+		serve(cachePath)
+		return
+	}
+
+	switch mode {
+	case "wait":
+		// Block until the build completes then serve (no-JS fallback + the JS
+		// "ready" redirect). A cancelled ctx (client left) just returns.
+		g := h.Zip.StartOrGet(cachePath, files, nodeID, drv)
+		_ = g.Wait(ctx)
+		if _, ok := h.Zip.Cached(cachePath); ok {
+			serve(cachePath)
+			return
+		}
+		stream() // build failed → fresh stream fallback
+	default:
+		// Cold cache → kick off the build and show a progress page.
+		h.Zip.StartOrGet(cachePath, files, nodeID, drv)
+		h.renderZipWaitPage(w, name, pin)
+	}
+}
+
+// serveZipFile streams a finished cached zip with an explicit Content-Length so
+// the browser shows real download progress.
+func serveZipFile(w http.ResponseWriter, cachePath, name string) error {
+	f, err := os.Open(cachePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(name)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
+	_, err = io.Copy(w, f)
+	return err
+}
+
+// renderZipWaitPage shows a "preparing…" page that polls ?zip=status for build
+// progress and, once ready, navigates to ?zip=wait to download. pin (when the
+// share is PIN-protected) is threaded through so the poll/download requests stay
+// authenticated — the viewer already proved it, so embedding it here is safe.
+func (h *Share) renderZipWaitPage(w http.ResponseWriter, name, pin string) {
+	pinQuery := ""
+	if pin != "" {
+		pinQuery = "&pin=" + url.QueryEscape(pin)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	// PinQuery is used only inside a JS string (html/template JS-escapes it); the
+	// static href works for no-PIN shares and the script rewrites it with the pin
+	// for PIN shares (which already require JS via the unlock page).
+	_ = zipWaitTemplate.Execute(w, map[string]any{
+		"Name":     name,
+		"PinQuery": pinQuery,
+	})
+}
+
+// zipWaitTemplate is a dependency-free progress page for a folder-share ZIP
+// that's still being built.
+var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype html>
+<html lang="tr"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dosya hazırlanıyor…</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
+@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
+.card { width: 380px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); text-align: center; }
+@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
+h1 { font-size: 1.2rem; margin: 0 0 6px; }
+.sub { margin: 0 0 20px; opacity: 0.7; font-size: 0.9rem; word-break: break-word; }
+.track { height: 10px; border-radius: 6px; background: rgba(127,127,127,0.2); overflow: hidden; }
+.bar { height: 100%; width: 0%; border-radius: 6px; background: #2563eb; transition: width 0.4s ease; }
+.pct { margin-top: 10px; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hint { margin-top: 18px; font-size: 0.8rem; opacity: 0.6; }
+.hint a { color: #2563eb; }
+</style>
+</head><body>
+<div class="card">
+<h1>Dosya hazırlanıyor…</h1>
+<p class="sub">{{.Name}} — tüm fişler ZIP olarak paketleniyor.</p>
+<div class="track"><div id="bar" class="bar"></div></div>
+<div class="pct"><span id="pct">%0</span></div>
+<p class="hint">İndirme hazır olduğunda otomatik başlayacak. Başlamazsa <a id="dl" href="?zip=wait">buraya tıklayın</a>.</p>
+</div>
+<script>
+(function(){
+  var q = "{{.PinQuery}}";
+  var dl = document.getElementById("dl");
+  if (dl) { dl.href = "?zip=wait" + q; }
+  function tick(){
+    fetch("?zip=status" + q, {headers:{"Accept":"application/json"}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var p = (d && typeof d.percent === "number") ? d.percent : 0;
+        document.getElementById("bar").style.width = p + "%";
+        document.getElementById("pct").textContent = "%" + p;
+        if (d && d.ready) { window.location = "?zip=wait" + q; }
+        else { setTimeout(tick, 1000); }
+      })
+      .catch(function(){ setTimeout(tick, 2000); });
+  }
+  tick();
+})();
+</script>
+</body></html>`))
 
 // extractPIN returns the PIN from query, header, or POST form.
 func (h *Share) extractPIN(r *http.Request) string {

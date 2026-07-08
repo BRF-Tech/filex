@@ -64,6 +64,10 @@ const emit = defineEmits<{
     e: 'selection-change',
     items: Array<{ path: string; basename: string; type: 'file' | 'dir' }>,
   ): void;
+  // Fires whenever the viewed folder changes (virtual `<storage>/<rel>` form).
+  // Lets a host (e.g. the Explore page's realtime layer) track the current
+  // folder without reaching into internal state.
+  (e: 'navigate', p: { path: string }): void;
 }>();
 
 // --------------------------------------------------------------------
@@ -703,7 +707,15 @@ function onHashChange() {
   }
 }
 
-watch(currentPath, (p) => writePersistedPath(p));
+watch(currentPath, (p) => {
+  writePersistedPath(p);
+  emit('navigate', { path: p });
+});
+
+// Let a host force a soft re-fetch of the current folder (reusing the existing
+// list-fetch) — used by the realtime layer to refresh on live change events
+// without a full component remount.
+defineExpose({ reload: () => load() });
 
 onMounted(async () => {
   // Eagerly start fetching Monaco — the user doesn't pay for it

@@ -21,6 +21,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -33,7 +34,7 @@ func newShareListFixture(t *testing.T) *chi.Mux {
 		}
 		return drv, nil
 	}
-	shareH := handlers.NewShare(share.NewService(store), store, resolver, "https://fm.example")
+	shareH := handlers.NewShare(share.NewService(store), store, resolver, "https://fm.example", sharezip.New(""))
 	r := chi.NewRouter()
 	r.Get("/api/files/share", shareH.HandleList)
 	r.Post("/api/files/share", shareH.HandleCreate)
@@ -59,7 +60,7 @@ func listShares(t *testing.T, r http.Handler, nodeID int64) shareListResp {
 func TestShare_List_EmptyThenListsCreatedLink(t *testing.T) {
 	_, store, _, st, root := newMutateFixture(t)
 	resolver := func(id int64) (storage.Driver, error) { return nil, fmt.Errorf("n/a %d", id) }
-	shareH := handlers.NewShare(share.NewService(store), store, resolver, "https://fm.example")
+	shareH := handlers.NewShare(share.NewService(store), store, resolver, "https://fm.example", sharezip.New(""))
 	r := chi.NewRouter()
 	r.Get("/api/files/share", shareH.HandleList)
 	r.Post("/api/files/share", shareH.HandleCreate)
