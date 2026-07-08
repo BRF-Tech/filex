@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -241,7 +242,20 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	storageID, storageName, rel, cleanDir, ok := h.resolveSubscribe(cctx, rawPath)
+	// Embedded (ticket-confined) explorers are confine-unaware: the host proxy
+	// injects X-Filex-Root, so the explorer treats the confined root as "/" and
+	// subscribes with paths RELATIVE to it (e.g. "s3-test://" for its own root).
+	// Translate that to the storage-absolute path the hub keys rooms by — and the
+	// mutation handlers emit — so the room, the confine check and RBAC all resolve
+	// the REAL folder. Frames still echo the client's own path (Hub stamps c.path)
+	// so the browser's path-matching keeps lining up against what it sent.
+	resolvePath := rawPath
+	if client.Confined && client.ConfineRel != "" {
+		_, rel := splitAdapterPath(rawPath)
+		resolvePath = client.ConfineAdapter + "://" + path.Join(client.ConfineRel, rel)
+	}
+
+	storageID, storageName, rel, cleanDir, ok := h.resolveSubscribe(cctx, resolvePath)
 	if !ok {
 		h.sendError(client, rawPath, "not_found")
 		return
@@ -259,8 +273,9 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 		h.sendError(client, rawPath, "forbidden")
 		return
 	}
-	displayPath := storageName + "://" + strings.TrimPrefix(cleanDir, "/")
-	h.Hub.Subscribe(client, storageID, cleanDir, displayPath)
+	// Echo the client's OWN path (rawPath), not the absolute one, so its frame
+	// path-matching lines up; the room itself is keyed by the absolute cleanDir.
+	h.Hub.Subscribe(client, storageID, cleanDir, rawPath)
 }
 
 // resolveSubscribe maps "<adapter>://<dir>" (or a bare dir against the first

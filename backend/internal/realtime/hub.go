@@ -44,13 +44,13 @@ type wirePresence struct {
 	Users []PresenceUser `json:"users"`
 }
 
-// room is the set of clients viewing one folder. path is the display form
-// ("<adapter>://<dir>") stashed from the first subscriber so presence/change
-// frames can echo it back for client-side matching (all members of a room
-// share the same storage+dir, hence the same display path).
+// room is the set of clients viewing one folder. Frames echo each client's OWN
+// subscribed display path (c.path), not a room-shared one: an embedded explorer
+// subscribes with a confine-RELATIVE path while a native panel uses the absolute
+// path for the same room, so a single shared path would fail one side's
+// client-side path-matching.
 type room struct {
 	clients map[*Client]struct{}
-	path    string
 }
 
 // Hub is the process-wide registry of rooms and their subscribers. All state
@@ -110,9 +110,6 @@ func (h *Hub) Subscribe(c *Client, storageID int64, dir, displayPath string) {
 		rm = &room{clients: make(map[*Client]struct{})}
 		h.rooms[key] = rm
 	}
-	if rm.path == "" {
-		rm.path = displayPath
-	}
 	rm.clients[c] = struct{}{}
 	c.room = key
 	c.path = displayPath
@@ -160,18 +157,19 @@ func (h *Hub) EmitChange(storageID int64, dir string, ev ChangeEvent) {
 		h.mu.Unlock()
 		return
 	}
-	frame, err := json.Marshal(wireChange{
-		Type:    "change",
-		Path:    rm.path,
-		Action:  ev.Action,
-		Name:    ev.Name,
-		NewName: ev.NewName,
-	})
-	if err != nil {
-		h.mu.Unlock()
-		return
-	}
+	// Stamp each client's own subscribed path so confined (relative) and native
+	// (absolute) viewers of the same room each get a frame they recognize.
 	for c := range rm.clients {
+		frame, err := json.Marshal(wireChange{
+			Type:    "change",
+			Path:    c.path,
+			Action:  ev.Action,
+			Name:    ev.Name,
+			NewName: ev.NewName,
+		})
+		if err != nil {
+			continue
+		}
 		trySend(c, frame)
 	}
 	h.mu.Unlock()
@@ -240,15 +238,19 @@ func (h *Hub) broadcastPresenceLocked(key string) {
 	if rm == nil {
 		return
 	}
-	frame, err := json.Marshal(wirePresence{
-		Type:  "presence",
-		Path:  rm.path,
-		Users: h.snapshotLocked(key),
-	})
-	if err != nil {
-		return
-	}
+	users := h.snapshotLocked(key)
+	// Per-client path: each viewer gets the roster stamped with the path IT
+	// subscribed to (relative for embedded, absolute for native) so its
+	// client-side path-matching accepts the frame.
 	for c := range rm.clients {
+		frame, err := json.Marshal(wirePresence{
+			Type:  "presence",
+			Path:  c.path,
+			Users: users,
+		})
+		if err != nil {
+			continue
+		}
 		trySend(c, frame)
 	}
 }

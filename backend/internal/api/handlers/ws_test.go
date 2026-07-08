@@ -164,6 +164,89 @@ func TestWSSubscribeUnknownAdapter(t *testing.T) {
 	_ = wsReadType(t, conn, "pong")
 }
 
+// newWSTicketFixture builds a ws server with a TicketStore but NO cookie user —
+// identity comes purely from a ticket, exactly like an embedded consumer that
+// fetched its ticket through the host proxy. Returns the mint store so a test can
+// forge a confined ticket (the work.brf.sh / fishapp X-Filex-Root scenario).
+func newWSTicketFixture(t *testing.T) (string, *realtime.Hub, db.Store, *realtime.TicketStore) {
+	t.Helper()
+	_, store := testutil.NewTestDB(t)
+	_, err := store.CreateStorage(context.Background(), &model.Storage{
+		Name:       "main",
+		Driver:     "local",
+		MountPath:  "/data",
+		Enabled:    true,
+		ConfigJSON: json.RawMessage(`{"root":"/tmp/ws-test"}`),
+	})
+	require.NoError(t, err)
+
+	tickets := realtime.NewTicketStore()
+	hub := realtime.NewHub()
+	wsh := handlers.NewWS(store, nil, hub, tickets, "https://fm.brf.sh")
+	srv := httptest.NewServer(http.HandlerFunc(wsh.Handle)) // no user injected
+	t.Cleanup(srv.Close)
+
+	return "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/ws", hub, store, tickets
+}
+
+// TestWSConfinedTicketSubscribe reproduces the embedded (work.brf.sh) flow: the
+// explorer is confine-unaware and subscribes with a confine-RELATIVE path
+// ("main://" for its root), while the ticket confines it to "projeler/5". The
+// handler must (a) NOT forbid it, (b) join the ABSOLUTE room so a mutation into
+// projeler/5 reaches it, and (c) echo the client's OWN relative path in frames.
+func TestWSConfinedTicketSubscribe(t *testing.T) {
+	url, hub, store, tickets := newWSTicketFixture(t)
+	tok, err := tickets.Mint(realtime.Ticket{
+		UserID: 1, Name: "Embedded", ConfineAdapter: "main", ConfineRel: "projeler/5",
+	}, time.Minute)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, url+"?ticket="+tok, nil)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Subscribe to the explorer's view of "root" — a bare confine-relative path.
+	wsSend(t, conn, map[string]any{"type": "subscribe", "path": "main://"})
+
+	pres := wsReadType(t, conn, "presence")
+	require.Equal(t, "main://", pres["path"], "frame must echo the client's own relative path")
+	users, _ := pres["users"].([]any)
+	require.Len(t, users, 1)
+
+	// A mutation into the ABSOLUTE folder (what the proxy resolves) must reach the
+	// confined viewer — proving the subscribe joined the absolute room.
+	storages, err := store.ListEnabledStorages(ctx)
+	require.NoError(t, err)
+	hub.EmitChange(storages[0].ID, "projeler/5", realtime.ChangeEvent{Action: "upload", Name: "fis.pdf"})
+
+	chg := wsReadType(t, conn, "change")
+	require.Equal(t, "upload", chg["action"])
+	require.Equal(t, "fis.pdf", chg["name"])
+	require.Equal(t, "main://", chg["path"], "change frame must echo the relative path too")
+}
+
+// TestWSConfinedTicketCannotEscape: a confined ticket may not watch a sibling
+// outside its root, even via "..". The subscribe is rejected with "forbidden".
+func TestWSConfinedTicketCannotEscape(t *testing.T) {
+	url, _, _, tickets := newWSTicketFixture(t)
+	tok, err := tickets.Mint(realtime.Ticket{
+		UserID: 1, Name: "Embedded", ConfineAdapter: "main", ConfineRel: "projeler/5",
+	}, time.Minute)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, url+"?ticket="+tok, nil)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// "../secret" resolves to projeler/secret — inside projeler but NOT under
+	// projeler/5, so confinement must reject it.
+	wsSend(t, conn, map[string]any{"type": "subscribe", "path": "main://../secret"})
+	errFrame := wsReadType(t, conn, "error")
+	require.Equal(t, "forbidden", errFrame["error"])
+}
+
 // TestWSUnauthorized: no user in context → 101 upgrade is refused with 401.
 func TestWSUnauthorized(t *testing.T) {
 	_, store := testutil.NewTestDB(t)

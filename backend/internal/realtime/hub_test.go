@@ -91,6 +91,38 @@ func TestHubChangeBroadcast(t *testing.T) {
 	}
 }
 
+// TestHubPerClientPath: two clients share ONE room but subscribed with
+// different display paths — an embedded explorer with a confine-RELATIVE path
+// ("s3://") and a native panel with the absolute path ("s3://projeler/5").
+// Every frame (change + presence) must echo each client's OWN path so their
+// client-side path-matching accepts it; a room-shared path would break one side.
+func TestHubPerClientPath(t *testing.T) {
+	h := NewHub()
+	embedded := NewClient(1, "Embedded", 16) // sees the room as its root
+	native := NewClient(2, "Native", 16)     // sees the absolute path
+
+	// Same room key (storage 7, dir "projeler/5"), different display paths.
+	h.Subscribe(embedded, 7, "projeler/5", "s3://")
+	h.Subscribe(native, 7, "projeler/5", "s3://projeler/5")
+
+	// Presence frames from the subscribes must each carry the client's own path.
+	if got := drainAll(embedded)["presence"]["path"]; got != "s3://" {
+		t.Fatalf("embedded presence path = %v, want s3://", got)
+	}
+	if got := drainAll(native)["presence"]["path"]; got != "s3://projeler/5" {
+		t.Fatalf("native presence path = %v, want s3://projeler/5", got)
+	}
+
+	// A single emit for the shared room reaches both, each with its own path.
+	h.EmitChange(7, "projeler/5", ChangeEvent{Action: "upload", Name: "a.pdf"})
+	if e := drain(t, embedded); e["type"] != "change" || e["path"] != "s3://" {
+		t.Fatalf("embedded change frame = %#v, want path s3://", e)
+	}
+	if n := drain(t, native); n["type"] != "change" || n["path"] != "s3://projeler/5" {
+		t.Fatalf("native change frame = %#v, want path s3://projeler/5", n)
+	}
+}
+
 // TestHubPresenceJoinLeaveFocus exercises the presence lifecycle.
 func TestHubPresenceJoinLeaveFocus(t *testing.T) {
 	h := NewHub()
