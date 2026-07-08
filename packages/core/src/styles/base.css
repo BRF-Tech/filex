@@ -26,6 +26,13 @@
   background: var(--fe-bg);
 }
 
+/* Live-presence strip (who else is in this folder) — shown under the breadcrumb. */
+.fe__presence {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--fe-border, rgba(0, 0, 0, 0.06));
+}
+
 /* Initial-load spinner (shown until the first listing arrives). */
 .fe__loading {
   display: flex;

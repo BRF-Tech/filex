@@ -37,7 +37,7 @@ func newWSFixture(t *testing.T, user *model.User) (string, *realtime.Hub, db.Sto
 	require.NoError(t, err)
 
 	hub := realtime.NewHub()
-	wsh := handlers.NewWS(store, nil, hub) // nil ACL → allow (RBAC covered elsewhere)
+	wsh := handlers.NewWS(store, nil, hub, nil, "") // nil ACL → allow (RBAC covered elsewhere)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsh.Handle(w, r.WithContext(auth.WithUser(r.Context(), user)))
@@ -167,7 +167,7 @@ func TestWSSubscribeUnknownAdapter(t *testing.T) {
 // TestWSUnauthorized: no user in context → 101 upgrade is refused with 401.
 func TestWSUnauthorized(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
-	wsh := handlers.NewWS(store, nil, realtime.NewHub())
+	wsh := handlers.NewWS(store, nil, realtime.NewHub(), nil, "")
 	srv := httptest.NewServer(http.HandlerFunc(wsh.Handle)) // no user injected
 	defer srv.Close()
 

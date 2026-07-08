@@ -12,6 +12,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -26,15 +27,69 @@ import (
 // resolves the caller (the browser's session cookie authenticates the upgrade;
 // it is same-origin, so no bearer token is involved for the native panel).
 type WS struct {
-	Store db.Store
-	ACL   *acl.Resolver
-	Hub   *realtime.Hub
+	Store     db.Store
+	ACL       *acl.Resolver
+	Hub       *realtime.Hub
+	Tickets   *realtime.TicketStore // ticket auth for embedded/cross-origin clients
+	PublicURL string                // used to advertise the wss:// URL in ticket responses
 }
 
 // NewWS constructs the WebSocket handler. A nil hub makes Handle reply 503 so
 // the route can be registered unconditionally.
-func NewWS(store db.Store, resolver *acl.Resolver, hub *realtime.Hub) *WS {
-	return &WS{Store: store, ACL: resolver, Hub: hub}
+func NewWS(store db.Store, resolver *acl.Resolver, hub *realtime.Hub, tickets *realtime.TicketStore, publicURL string) *WS {
+	return &WS{Store: store, ACL: resolver, Hub: hub, Tickets: tickets, PublicURL: publicURL}
+}
+
+// wsTicketTTL is how long a minted ticket stays valid — long enough for the
+// browser to open the socket, short enough to be near-useless if leaked.
+const wsTicketTTL = 60 * time.Second
+
+// Ticket mints a short-lived, single-use WebSocket auth ticket for the caller,
+// bound to their identity + confinement. Embedded consumers fetch this through
+// the host's HTTP proxy (which injects the real token) and then open
+// `wss://.../api/ws?ticket=<t>` directly — the durable token never reaches the
+// browser. Same-origin callers (the native panel) can use it too.
+//
+//	POST /api/files/ws-ticket  →  {"ticket": "...", "ws_url": "wss://host/api/ws"}
+func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFrom(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if h.Hub == nil || h.Tickets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "realtime unavailable"})
+		return
+	}
+	root, hasRoot, err := confine.FromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	t := realtime.Ticket{UserID: user.ID, Name: wsDisplayName(user)}
+	if hasRoot {
+		t.ConfineAdapter = root.Adapter
+		t.ConfineRel = root.Rel
+	}
+	tok, err := h.Tickets.Mint(t, wsTicketTTL)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mint failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ticket": tok, "ws_url": h.wsURL()})
+}
+
+// wsURL derives the public wss:// URL for /api/ws from the configured PublicURL.
+func (h *WS) wsURL() string {
+	base := strings.TrimRight(h.PublicURL, "/")
+	switch {
+	case strings.HasPrefix(base, "https://"):
+		return "wss://" + strings.TrimPrefix(base, "https://") + "/api/ws"
+	case strings.HasPrefix(base, "http://"):
+		return "ws://" + strings.TrimPrefix(base, "http://") + "/api/ws"
+	default:
+		return base + "/api/ws"
+	}
 }
 
 // wsClientMsg is the client → server wire message. `file` is a pointer so
@@ -50,21 +105,42 @@ var wsPongFrame = []byte(`{"type":"pong"}`)
 // Handle upgrades the request and runs the per-connection read loop + write
 // pump until the socket closes.
 func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFrom(r.Context())
-	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 	if h.Hub == nil {
 		http.Error(w, "realtime unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Default origin verification (the request host is always authorized) is a
-	// CSRF guard for the cookie-authenticated upgrade — keep it. Behind a
-	// reverse proxy the Host header must be preserved for this to pass (see the
-	// deploy note in the handover).
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{})
+	// Identity comes from EITHER a single-use ticket (embedded/cross-origin
+	// clients that can't send a cookie or Authorization header) OR the session
+	// cookie (native same-origin panel).
+	var (
+		userID   int64
+		name     string
+		ticketed bool
+		ticket   realtime.Ticket
+	)
+	if tok := r.URL.Query().Get("ticket"); tok != "" && h.Tickets != nil {
+		t, ok := h.Tickets.Consume(tok)
+		if !ok {
+			http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
+			return
+		}
+		ticketed, ticket = true, t
+		userID, name = t.UserID, t.Name
+	} else {
+		user := auth.UserFrom(r.Context())
+		if user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID, name = user.ID, wsDisplayName(user)
+	}
+
+	// Ticketed connections are cross-origin by design (embedded webcomponent →
+	// fm.brf.sh) and already authenticated by the one-shot ticket, so skip the
+	// same-origin (CSRF) check. Cookie connections keep it — behind a reverse
+	// proxy the Host header must be preserved for that to pass.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: ticketed})
 	if err != nil {
 		// Accept already wrote the HTTP error (e.g. 403 origin / 501 no hijacker).
 		slog.Debug("ws accept failed", slog.String("err", err.Error()))
@@ -80,7 +156,12 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	baseCtx := context.WithoutCancel(r.Context())
 
-	client := realtime.NewClient(user.ID, wsDisplayName(user), 32)
+	client := realtime.NewClient(userID, name, 32)
+	if ticketed && ticket.ConfineAdapter != "" {
+		client.Confined = true
+		client.ConfineAdapter = ticket.ConfineAdapter
+		client.ConfineRel = ticket.ConfineRel
+	}
 	defer h.Hub.Unsubscribe(client)
 
 	go h.writePump(connCtx, cancel, conn, client)
@@ -154,6 +235,12 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 	storageID, storageName, rel, cleanDir, ok := h.resolveSubscribe(cctx, rawPath)
 	if !ok {
 		h.sendError(client, rawPath, "not_found")
+		return
+	}
+	// Ticket confinement: a confined (embedded) client may only watch rooms
+	// within its ticket's root — a hard boundary on top of RBAC.
+	if !client.AllowsPath(storageName, strings.Trim(cleanDir, "/")) {
+		h.sendError(client, rawPath, "forbidden")
 		return
 	}
 	// RBAC: viewing a folder's live feed requires ≥viewer on it. A nil resolver

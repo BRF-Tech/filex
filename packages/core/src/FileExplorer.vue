@@ -30,7 +30,9 @@ import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 import { useLocale } from './composables/useLocale';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
+import { useRealtime } from './composables/useRealtime';
 import { preloadEditor } from './composables/useMonacoLoader';
+import PresenceBar from './components/PresenceBar.vue';
 
 import Toolbar, { type SelectionMode } from './components/Toolbar.vue';
 import StarButton from './components/StarButton.vue';
@@ -75,6 +77,25 @@ const emit = defineEmits<{
 // --------------------------------------------------------------------
 
 const api = useFileApi(props.config);
+
+// Live collaboration (WebSocket file-change events + presence), bundled into the
+// core so every consumer — the native panel AND the embedded webcomponent —
+// gets it. Auth is a short-lived ticket fetched through the same API (works
+// same-origin and proxied cross-origin); it degrades to polling when no live
+// socket is available.
+const realtime = useRealtime(api, { reload: () => load() });
+const presenceUsers = realtime.presenceUsers;
+function realtimeRoom(vp: string): string | null {
+  const p = (vp || '').replace(/^\/+|\/+$/g, '');
+  if (!p || p === '.trash' || p.startsWith('.trash/')) return null;
+  return virtualToWire(p) || null;
+}
+onMounted(() => {
+  realtime.start();
+  realtime.subscribe(realtimeRoom(currentPath.value));
+});
+onBeforeUnmount(() => realtime.stop());
+
 const chunked = useUploadChunked(props.config, api);
 const pendingOps = usePendingOps(props.config, api, {
   onSettled: (op: PendingOp) => {
@@ -198,6 +219,10 @@ watch(
       'selection-change',
       selection.nodes.value.map((n) => ({ path: n.path, basename: n.basename, type: n.type })),
     );
+    // Presence focus: a single selected file is what the user is "on"; a
+    // multi-select or folder selection clears it.
+    const focusFiles = selection.nodes.value.filter((n) => n.type === 'file');
+    realtime.setFocus(focusFiles.length === 1 ? focusFiles[0].basename : null);
   },
 );
 
@@ -710,6 +735,7 @@ function onHashChange() {
 watch(currentPath, (p) => {
   writePersistedPath(p);
   emit('navigate', { path: p });
+  realtime.subscribe(realtimeRoom(p));
 });
 
 // Let a host force a soft re-fetch of the current folder (reusing the existing
@@ -1743,6 +1769,11 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       @crumb-context="onCrumbContext"
       @crumb-drop="onCrumbDropInto"
     />
+
+    <!-- Live presence: who else is viewing this folder (empty → nothing shown). -->
+    <div v-if="presenceUsers.length" class="fe__presence">
+      <PresenceBar :users="presenceUsers" />
+    </div>
 
     <div class="fe__body" @click.self="selection.clear()">
       <!-- Initial load: show a spinner rather than an empty/"no files" flash.

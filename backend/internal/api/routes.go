@@ -212,7 +212,8 @@ func BuildRouter(d *Deps) http.Handler {
 	// a nil emitter (unwired) is a safe no-op.
 	hub := realtime.NewHub()
 	handlers.SetChangeEmitter(hub)
-	wsh := handlers.NewWS(d.Store, d.ACL, hub)
+	wsTickets := realtime.NewTicketStore()
+	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 
 	// ────── authenticated user routes ──────
 	r.Group(func(r chi.Router) {
@@ -265,6 +266,11 @@ func BuildRouter(d *Deps) http.Handler {
 			// locks every path-bearing request to one sub-folder (multi-tenant
 			// isolation). No-op for unconfined (admin/native) callers.
 			r.Use(confine.Middleware)
+			// Mint a short-lived WebSocket auth ticket. Lives under /api/files so
+			// the embedded webcomponent reaches it through the host's existing
+			// proxy (which injects the token); returns {ticket, ws_url} for a
+			// direct cross-origin wss:// connection. Confinement is inherited.
+			r.Post("/ws-ticket", wsh.Ticket)
 			r.Get("/manager", mh.List)
 			r.Post("/manager", mh.Mutate)
 			r.Get("/manager/trash", trashH.List)

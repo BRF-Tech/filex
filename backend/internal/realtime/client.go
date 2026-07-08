@@ -12,7 +12,10 @@
 // network — see hub_test.go.
 package realtime
 
-import "sync/atomic"
+import (
+	"strings"
+	"sync/atomic"
+)
 
 // clientSeq hands out process-unique client ids so two connections from the
 // same user (e.g. two browser tabs) are still distinguishable inside a room.
@@ -33,10 +36,35 @@ type Client struct {
 	Name   string // display name shown in presence
 	Send   chan []byte
 
+	// Confinement carried by a ticket-authenticated connection (embedded
+	// contexts like work.brf.sh proxy a root-confined token). When Confined is
+	// true the client may only subscribe to rooms within (ConfineAdapter,
+	// ConfineRel). Cookie-authenticated connections leave Confined=false and
+	// rely on RBAC alone. Set once before any hub interaction.
+	Confined       bool
+	ConfineAdapter string
+	ConfineRel     string
+
 	// Guarded by Hub.mu.
 	room string // current room key ("" = not subscribed)
 	path string // display path the client subscribed to ("<adapter>://<dir>")
 	file string // currently focused file name ("" = none)
+}
+
+// AllowsPath reports whether this client may subscribe to (adapter, rel). An
+// unconfined client may go anywhere (RBAC still applies); a confined client is
+// restricted to its ticket's root and everything under it.
+func (c *Client) AllowsPath(adapter, rel string) bool {
+	if !c.Confined {
+		return true
+	}
+	if adapter != c.ConfineAdapter {
+		return false
+	}
+	if c.ConfineRel == "" {
+		return true
+	}
+	return rel == c.ConfineRel || strings.HasPrefix(rel, c.ConfineRel+"/")
 }
 
 // NewClient builds a Client with a unique id and a buffered send channel.

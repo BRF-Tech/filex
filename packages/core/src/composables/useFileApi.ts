@@ -642,7 +642,22 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  // Mint a short-lived WebSocket auth ticket for the realtime layer. Derived
+  // from the manager URL (so it flows through the same host proxy) and uses the
+  // same auth/creds as every other call. Returns null on any failure (a backend
+  // without the endpoint, a network error) so the caller falls back to polling.
+  async function wsTicket(): Promise<{ ticket: string; ws_url: string } | null> {
+    const url = endpoints.manager.replace(/\/manager(\?.*)?$/, '/ws-ticket');
+    try {
+      return await jsonFetch<{ ticket: string; ws_url: string }>(url, { method: 'POST' });
+    } catch {
+      return null;
+    }
+  }
+
   return {
+    // Realtime
+    wsTicket,
     // Manager
     index,
     search,

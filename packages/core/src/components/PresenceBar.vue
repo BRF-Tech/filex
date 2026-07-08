@@ -5,7 +5,7 @@
 // live data comes from the realtime presence stream in Explore.vue.
 
 import { computed } from 'vue';
-import type { PresenceUser } from '@/lib/realtime';
+import type { PresenceUser } from '../lib/realtime';
 
 const props = defineProps<{
   users: PresenceUser[];
