@@ -215,6 +215,18 @@ func BuildRouter(d *Deps) http.Handler {
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 
+	// Live-collaboration WebSocket (folder change events + presence). OPTIONAL
+	// auth (required=false): a session cookie / API token sets the user for the
+	// native panel, while a ticket-only cross-origin upgrade from the embedded
+	// webcomponent passes through so wsh.Handle can authenticate it via ?ticket
+	// (a required-auth group would 401 the cookieless embedded connection before
+	// the handler ever sees the ticket). Outside /api/files → no confine.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.MiddlewareWithToken(d.Store, false))
+		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Get("/api/ws", wsh.Handle)
+	})
+
 	// ────── authenticated user routes ──────
 	r.Group(func(r chi.Router) {
 		// Accept EITHER a cookie/JWT session (native panel) OR a root-confined
@@ -227,11 +239,6 @@ func BuildRouter(d *Deps) http.Handler {
 		// Audit curated self-service + file mutations (profile, password,
 		// TOTP, shares, file deletes — shouldAudit() filters the rest).
 		r.Use(auth.AuditMiddleware(d.Store))
-
-		// Live-collaboration WebSocket (folder change events + presence).
-		// Mounted at group level (NOT under /api/files) so it skips
-		// confine.Middleware; cookie-session auth identifies the user.
-		r.Get("/api/ws", wsh.Handle)
 
 		// Self-service profile/password/TOTP.
 		// Avoid `r.Route("/api/auth", …)` here because chi forbids
