@@ -156,6 +156,15 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	baseCtx := context.WithoutCancel(r.Context())
 
+	// A ticketed connection carries no session, so RBAC on subscribe (which
+	// reads auth.UserFrom) would see no user and forbid everything. Load the
+	// ticket's user into the context so subscribes are authorized as that user.
+	if ticketed {
+		if u, err := h.Store.GetUser(baseCtx, ticket.UserID); err == nil && u != nil {
+			baseCtx = auth.WithUser(baseCtx, u)
+		}
+	}
+
 	client := realtime.NewClient(userID, name, 32)
 	if ticketed && ticket.ConfineAdapter != "" {
 		client.Confined = true
