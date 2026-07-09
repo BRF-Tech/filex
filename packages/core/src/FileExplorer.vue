@@ -87,8 +87,17 @@ const realtime = useRealtime(api, { reload: () => load() });
 const presenceUsers = realtime.presenceUsers;
 function realtimeRoom(vp: string): string | null {
   const p = (vp || '').replace(/^\/+|\/+$/g, '');
-  if (!p || p === '.trash' || p.startsWith('.trash/')) return null;
-  return virtualToWire(p) || null;
+  if (p === '.trash' || p.startsWith('.trash/')) return null;
+  // The wire form must go through the mode-aware qualify(), exactly like every
+  // API call: in single-storage mode currentPath is a BARE relative path
+  // ("projeler/5") — virtualToWire would mistake its first segment for an
+  // adapter ("projeler://5") and subscribe a nonexistent room, so presence and
+  // live changes silently missed the real folder. An empty p is the storage
+  // root — a real room ("main://") — not "no room"; only the multi-storage
+  // drives list (no adapter yet) has none.
+  const wire = qualify(p);
+  if (!wire || !wire.includes('://') || wire.startsWith('://')) return null;
+  return wire;
 }
 onMounted(() => {
   realtime.start();

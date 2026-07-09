@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // PresenceBar — compact avatar strip showing who else is viewing the current
-// folder, and (as a small badge) which file each person is focused on. Self is
-// filtered out so it reads as "who else is here". Purely presentational; the
-// live data comes from the realtime presence stream in Explore.vue.
+// folder, and (as a small badge) which file each person is focused on. The
+// server already excludes the recipient from the roster (presence answers
+// "who ELSE is here"); the optional selfId filter remains as a belt-and-braces
+// for older backends. Purely presentational; the live data comes from the
+// realtime presence stream.
 
 import { computed } from 'vue';
 import type { PresenceUser } from '../lib/realtime';
@@ -16,6 +18,12 @@ const others = computed(() =>
   (props.users ?? []).filter((u) => props.selfId == null || u.id !== props.selfId),
 );
 
+// Stable key per identity: end users behind one shared proxy token have the
+// same numeric id but distinct server-issued uids.
+function keyOf(u: PresenceUser): string {
+  return u.uid ?? String(u.id);
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -23,9 +31,12 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Deterministic hue per user so the same person keeps the same colour.
-function hue(id: number): number {
-  return (id * 47) % 360;
+// Deterministic hue per identity so the same person keeps the same colour.
+function hue(u: PresenceUser): number {
+  const s = keyOf(u);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
 }
 
 function label(u: PresenceUser): string {
@@ -38,9 +49,9 @@ function label(u: PresenceUser): string {
     <div class="fx-presence-avatars">
       <span
         v-for="u in others.slice(0, 5)"
-        :key="u.id"
+        :key="keyOf(u)"
         class="fx-presence-avatar"
-        :style="{ backgroundColor: `hsl(${hue(u.id)} 60% 45%)` }"
+        :style="{ backgroundColor: `hsl(${hue(u)} 60% 45%)` }"
         :title="label(u)"
       >
         {{ initials(u.name) }}

@@ -15,6 +15,10 @@
 
 export interface PresenceUser {
   id: number;
+  /** Stable identity key from the server (user id + optional per-end-user
+   *  presence key). Distinguishes end users sharing one proxy token — use it
+   *  for list keys and colours instead of `id`. */
+  uid?: string;
   name: string;
   file?: string;
 }

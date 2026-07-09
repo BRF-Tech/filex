@@ -17,6 +17,13 @@ import (
 type Ticket struct {
 	UserID int64
 	Name   string
+	// PresenceKey distinguishes different END users sharing one filex account.
+	// Embedded hosts (work/fishapp) authenticate every end user with a single
+	// proxy token — the same filex UserID — so presence would collapse them all
+	// into one entry. The host proxy stamps a per-end-user key (e.g. "work-7")
+	// via X-Filex-Presence-Key and presence identity becomes (UserID, key).
+	// Empty = identity is the filex user alone (native sessions).
+	PresenceKey string
 	// Confinement captured from the minting request (a root-confined token or
 	// X-Filex-Root header). Empty adapter = unconfined.
 	ConfineAdapter string

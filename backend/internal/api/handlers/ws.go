@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,7 +69,32 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	t := realtime.Ticket{UserID: user.ID, Name: wsDisplayName(user)}
+	// Presence identity: a native session shows the user's own name. An API
+	// token (embedded host proxies, MCP) shows the TOKEN's label — every end
+	// user behind a shared proxy token maps to the same filex account, so the
+	// account name ("admin") would be misleading. A trusted host proxy can go
+	// further and stamp the REAL end user via X-Filex-Presence-Name/-Key
+	// (honored only on token auth; proxies strip these from client requests, so
+	// end users can't spoof them).
+	name := wsDisplayName(user)
+	presenceKey := ""
+	if tok := auth.TokenFrom(r.Context()); tok != nil {
+		if l := strings.TrimSpace(tok.Label); l != "" {
+			name = l
+		}
+		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); v != "" {
+			name = v
+		}
+		presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
+		if presenceKey == "" {
+			// Default token connections to their own identity: without this a
+			// keyless token viewer collides with the token OWNER's cookie
+			// session (same user id) — self-exclusion would hide it and the
+			// merged entry's name would be nondeterministic.
+			presenceKey = "tok-" + strconv.FormatInt(tok.ID, 10)
+		}
+	}
+	t := realtime.Ticket{UserID: user.ID, Name: name, PresenceKey: presenceKey}
 	if hasRoot {
 		t.ConfineAdapter = root.Adapter
 		t.ConfineRel = root.Rel
@@ -167,10 +194,13 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := realtime.NewClient(userID, name, 32)
-	if ticketed && ticket.ConfineAdapter != "" {
-		client.Confined = true
-		client.ConfineAdapter = ticket.ConfineAdapter
-		client.ConfineRel = ticket.ConfineRel
+	if ticketed {
+		client.PresenceKey = ticket.PresenceKey
+		if ticket.ConfineAdapter != "" {
+			client.Confined = true
+			client.ConfineAdapter = ticket.ConfineAdapter
+			client.ConfineRel = ticket.ConfineRel
+		}
 	}
 	defer h.Hub.Unsubscribe(client)
 
@@ -242,17 +272,28 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Embedded (ticket-confined) explorers are confine-unaware: the host proxy
-	// injects X-Filex-Root, so the explorer treats the confined root as "/" and
-	// subscribes with paths RELATIVE to it (e.g. "s3-test://" for its own root).
-	// Translate that to the storage-absolute path the hub keys rooms by — and the
-	// mutation handlers emit — so the room, the confine check and RBAC all resolve
-	// the REAL folder. Frames still echo the client's own path (Hub stamps c.path)
-	// so the browser's path-matching keeps lining up against what it sent.
+	// Confined (embedded) clients may spell a folder two ways. The webcomponent
+	// itself is confine-AWARE — the backend returns storage-absolute dirnames
+	// under X-Filex-Root, so it subscribes with the ABSOLUTE path
+	// ("s3-test://projeler/5"): use it as-is so the room matches what mutation
+	// handlers emit. Hand-rolled integrators may instead send a confine-RELATIVE
+	// path ("s3-test://" for their root): only a path that does NOT already fall
+	// inside the confine gets ConfineRel prepended. (v0.1.78 prepended
+	// unconditionally, which shoved absolute subscribes into a doubled
+	// "projeler/5/projeler/5" room — presence looked fine between embedded
+	// viewers, but real changes never arrived and native viewers were invisible.)
+	// Frames still echo the client's own path (Hub stamps c.path).
 	resolvePath := rawPath
 	if client.Confined && client.ConfineRel != "" {
+		if strings.Contains(rawPath, "..") {
+			h.sendError(client, rawPath, "forbidden")
+			return
+		}
 		_, rel := splitAdapterPath(rawPath)
-		resolvePath = client.ConfineAdapter + "://" + path.Join(client.ConfineRel, rel)
+		rel = strings.Trim(path.Clean("/"+rel), "/")
+		if rel != client.ConfineRel && !strings.HasPrefix(rel, client.ConfineRel+"/") {
+			resolvePath = client.ConfineAdapter + "://" + path.Join(client.ConfineRel, rel)
+		}
 	}
 
 	storageID, storageName, rel, cleanDir, ok := h.resolveSubscribe(cctx, resolvePath)
@@ -317,6 +358,47 @@ func (h *WS) sendError(client *realtime.Client, path, reason string) {
 	case client.Send <- frame:
 	default:
 	}
+}
+
+// sanitizePresenceName cleans a proxy-supplied presence display name: control
+// characters stripped, whitespace collapsed, capped at 48 runes. HTTP header
+// values are latin-1 territory, so proxies send non-ASCII names (Ayşe, Gökçil)
+// RFC 2047-encoded (`=?utf-8?B?...?=`) — decode that first; plain values pass
+// through untouched.
+func sanitizePresenceName(v string) string {
+	if dec, err := new(mime.WordDecoder).DecodeHeader(v); err == nil {
+		v = dec
+	}
+	v = strings.Join(strings.Fields(v), " ")
+	v = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, v)
+	if runes := []rune(v); len(runes) > 48 {
+		v = string(runes[:48])
+	}
+	return strings.TrimSpace(v)
+}
+
+// sanitizePresenceKey restricts a proxy-supplied presence key to a safe
+// identifier alphabet, capped at 64 bytes. Anything else is dropped entirely
+// (a malformed key must not silently merge distinct users).
+func sanitizePresenceKey(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) > 64 {
+		return ""
+	}
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == ':':
+		default:
+			return ""
+		}
+	}
+	return v
 }
 
 // wsDisplayName picks the friendliest label for presence: display name, else

@@ -129,19 +129,20 @@ func TestHubPresenceJoinLeaveFocus(t *testing.T) {
 	ayse := NewClient(1, "Ayşe", 16)
 	burak := NewClient(2, "Burak", 16)
 
-	// Ayşe joins alone.
+	// Ayşe joins alone — presence answers "who ELSE is here", so her roster is
+	// empty (self is excluded).
 	h.Subscribe(ayse, 5, "x", "s3://x")
-	if got := presenceNames(drain(t, ayse)); len(got) != 1 || got[0] != "Ayşe" {
-		t.Fatalf("expected [Ayşe], got %v", got)
+	if got := presenceNames(drain(t, ayse)); len(got) != 0 {
+		t.Fatalf("expected empty roster for lone subscriber, got %v", got)
 	}
 
-	// Burak joins → both see a 2-person roster.
+	// Burak joins → each sees the OTHER (and not themselves).
 	h.Subscribe(burak, 5, "x", "s3://x")
-	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 2 {
-		t.Fatalf("ayşe expected 2 users after burak joined, got %v", got)
+	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 1 || got[0] != "Burak" {
+		t.Fatalf("ayşe expected [Burak] after burak joined, got %v", got)
 	}
-	if got := presenceNames(drainAll(burak)["presence"]); len(got) != 2 {
-		t.Fatalf("burak expected 2 users, got %v", got)
+	if got := presenceNames(drainAll(burak)["presence"]); len(got) != 1 || got[0] != "Ayşe" {
+		t.Fatalf("burak expected [Ayşe], got %v", got)
 	}
 
 	// Burak focuses a file → presence carries the file for his entry.
@@ -162,13 +163,14 @@ func TestHubPresenceJoinLeaveFocus(t *testing.T) {
 		t.Fatalf("expected Burak focused on rapor.pdf, got %#v", users)
 	}
 
-	// Burak leaves → Ayşe sees a 1-person roster again.
+	// Burak leaves → Ayşe's roster is empty again.
 	h.Unsubscribe(burak)
-	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 1 || got[0] != "Ayşe" {
-		t.Fatalf("expected [Ayşe] after burak left, got %v", got)
+	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 0 {
+		t.Fatalf("expected empty roster after burak left, got %v", got)
 	}
 
-	// The Presence() accessor agrees.
+	// The Presence() accessor is the FULL room roster (diagnostics) — it still
+	// includes Ayşe herself.
 	if snap := h.Presence(5, "x"); len(snap) != 1 || snap[0].Name != "Ayşe" {
 		t.Fatalf("Presence() snapshot mismatch: %#v", snap)
 	}
@@ -215,6 +217,77 @@ func TestHubDedupePerUser(t *testing.T) {
 	}
 	if snap[0].File != "doc.txt" {
 		t.Fatalf("expected focused file preserved, got %#v", snap[0])
+	}
+}
+
+// TestHubPresenceKeySharedToken: embedded hosts authenticate every end user
+// with ONE proxy token (same filex UserID). PresenceKey must keep them apart:
+// two work users behind user id 1 are two roster entries, each sees the other
+// (not themselves), and a native observer sees both.
+func TestHubPresenceKeySharedToken(t *testing.T) {
+	h := NewHub()
+	burak := NewClient(1, "Burak", 16)
+	burak.PresenceKey = "work-7"
+	gokcil := NewClient(1, "Gökçil", 16)
+	gokcil.PresenceKey = "work-8"
+	native := NewClient(2, "Native", 16)
+
+	h.Subscribe(burak, 3, "p", "s3://")
+	h.Subscribe(gokcil, 3, "p", "s3://")
+	h.Subscribe(native, 3, "p", "s3://p")
+
+	if got := presenceNames(drainAll(native)["presence"]); len(got) != 2 {
+		t.Fatalf("native expected both shared-token users, got %v", got)
+	}
+	got := presenceNames(drainAll(burak)["presence"])
+	if len(got) != 2 {
+		t.Fatalf("burak expected [Gökçil Native], got %v", got)
+	}
+	for _, n := range got {
+		if n == "Burak" {
+			t.Fatalf("burak must not see himself, got %v", got)
+		}
+	}
+
+	// Wire entries carry a stable uid per identity (for client-side keying).
+	pres := drainAll(gokcil)["presence"]
+	users, _ := pres["users"].([]any)
+	seen := map[string]bool{}
+	for _, u := range users {
+		um := u.(map[string]any)
+		uid, _ := um["uid"].(string)
+		if uid == "" || seen[uid] {
+			t.Fatalf("expected unique non-empty uids, got %#v", users)
+		}
+		seen[uid] = true
+	}
+}
+
+// TestHubRenameFocusFollow: a rename in the room updates any presence focus
+// pointing at the old name — viewers see the focus under the NEW name without
+// the focuser re-sending anything.
+func TestHubRenameFocusFollow(t *testing.T) {
+	h := NewHub()
+	ayse := NewClient(1, "Ayşe", 16)
+	burak := NewClient(2, "Burak", 16)
+	h.Subscribe(ayse, 4, "docs", "s3://docs")
+	h.Subscribe(burak, 4, "docs", "s3://docs")
+	h.SetFocus(ayse, "eski.pdf")
+	drainAll(ayse)
+	drainAll(burak)
+
+	h.EmitChange(4, "docs", ChangeEvent{Action: "rename", Name: "eski.pdf", NewName: "yeni.pdf"})
+
+	pres := drainAll(burak)["presence"]
+	if pres == nil {
+		t.Fatal("expected a presence re-broadcast after rename")
+	}
+	users, _ := pres["users"].([]any)
+	if len(users) != 1 {
+		t.Fatalf("burak expected [Ayşe], got %#v", users)
+	}
+	if um := users[0].(map[string]any); um["file"] != "yeni.pdf" {
+		t.Fatalf("expected focus to follow rename to yeni.pdf, got %#v", um)
 	}
 }
 

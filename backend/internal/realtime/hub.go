@@ -21,10 +21,13 @@ type ChangeEvent struct {
 }
 
 // PresenceUser is one person currently in a room and the file they're focused
-// on (empty = just browsing the folder). Presence is de-duplicated per user id,
-// so two tabs from the same person collapse to a single entry.
+// on (empty = just browsing the folder). Presence is de-duplicated per
+// identity (user id + optional per-end-user key), so two tabs from the same
+// person collapse to a single entry while two end users behind one shared
+// proxy token stay distinct.
 type PresenceUser struct {
 	ID   int64  `json:"id"`
+	UID  string `json:"uid"` // stable identity key (Client.Identity) for client-side keying/colours
 	Name string `json:"name"`
 	File string `json:"file,omitempty"`
 }
@@ -157,6 +160,25 @@ func (h *Hub) EmitChange(storageID int64, dir string, ev ChangeEvent) {
 		h.mu.Unlock()
 		return
 	}
+	// A rename/delete invalidates any presence focus pointing at the old name —
+	// the focuser's client has no reason to re-send it, so fix it server-side
+	// and re-broadcast the roster below.
+	presenceDirty := false
+	for c := range rm.clients {
+		if c.file == "" || c.file != ev.Name {
+			continue
+		}
+		switch ev.Action {
+		case "rename", "move":
+			if ev.NewName != "" && ev.NewName != ev.Name {
+				c.file = ev.NewName
+				presenceDirty = true
+			}
+		case "delete":
+			c.file = ""
+			presenceDirty = true
+		}
+	}
 	// Stamp each client's own subscribed path so confined (relative) and native
 	// (absolute) viewers of the same room each get a frame they recognize.
 	for c := range rm.clients {
@@ -171,6 +193,9 @@ func (h *Hub) EmitChange(storageID int64, dir string, ev ChangeEvent) {
 			continue
 		}
 		trySend(c, frame)
+	}
+	if presenceDirty {
+		h.broadcastPresenceLocked(key)
 	}
 	h.mu.Unlock()
 }
@@ -197,36 +222,37 @@ func (h *Hub) removeLocked(c *Client, key string) {
 	}
 }
 
-// snapshotLocked builds the de-duplicated (by user id) presence roster for a
-// room, sorted by name then id for stable output. Caller holds h.mu.
+// snapshotLocked builds the de-duplicated (by identity) presence roster for a
+// room, sorted by name then identity for stable output. Caller holds h.mu.
 func (h *Hub) snapshotLocked(key string) []PresenceUser {
 	rm := h.rooms[key]
 	if rm == nil {
 		return nil
 	}
-	byUser := make(map[int64]PresenceUser, len(rm.clients))
+	byIdent := make(map[string]PresenceUser, len(rm.clients))
 	for c := range rm.clients {
-		existing, ok := byUser[c.UserID]
+		ident := c.Identity()
+		existing, ok := byIdent[ident]
 		if !ok {
-			byUser[c.UserID] = PresenceUser{ID: c.UserID, Name: c.Name, File: c.file}
+			byIdent[ident] = PresenceUser{ID: c.UserID, UID: ident, Name: c.Name, File: c.file}
 			continue
 		}
 		// Prefer an entry that has a focused file so a person reading a
 		// document in one tab still shows that file.
 		if existing.File == "" && c.file != "" {
 			existing.File = c.file
-			byUser[c.UserID] = existing
+			byIdent[ident] = existing
 		}
 	}
-	out := make([]PresenceUser, 0, len(byUser))
-	for _, u := range byUser {
+	out := make([]PresenceUser, 0, len(byIdent))
+	for _, u := range byIdent {
 		out = append(out, u)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
 		}
-		return out[i].ID < out[j].ID
+		return out[i].UID < out[j].UID
 	})
 	return out
 }
@@ -239,14 +265,22 @@ func (h *Hub) broadcastPresenceLocked(key string) {
 		return
 	}
 	users := h.snapshotLocked(key)
-	// Per-client path: each viewer gets the roster stamped with the path IT
-	// subscribed to (relative for embedded, absolute for native) so its
-	// client-side path-matching accepts the frame.
+	// Per-client frame: the roster excludes the RECIPIENT's own identity
+	// (presence answers "who ELSE is here" — seeing yourself is noise) and is
+	// stamped with the path the recipient subscribed to (relative for embedded,
+	// absolute for native) so its client-side path-matching accepts the frame.
 	for c := range rm.clients {
+		ident := c.Identity()
+		others := make([]PresenceUser, 0, len(users))
+		for _, u := range users {
+			if u.UID != ident {
+				others = append(others, u)
+			}
+		}
 		frame, err := json.Marshal(wirePresence{
 			Type:  "presence",
 			Path:  c.path,
-			Users: users,
+			Users: others,
 		})
 		if err != nil {
 			continue

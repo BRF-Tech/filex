@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,11 +93,22 @@ func TestWSSubscribePresenceAndChange(t *testing.T) {
 
 	wsSend(t, conn, map[string]any{"type": "subscribe", "path": "main://reports"})
 
+	// Presence answers "who ELSE is here" — a lone subscriber gets an empty
+	// roster (self is excluded server-side).
 	pres := wsReadType(t, conn, "presence")
 	require.Equal(t, "main://reports", pres["path"])
 	users, _ := pres["users"].([]any)
-	require.Len(t, users, 1)
-	require.Equal(t, "Ayşe", users[0].(map[string]any)["name"])
+	require.Len(t, users, 0)
+
+	// Another user joins via the hub → the live socket sees THEM.
+	storagesForJoin, err := store.ListEnabledStorages(ctx)
+	require.NoError(t, err)
+	other := realtime.NewClient(9, "Cem", 16)
+	hub.Subscribe(other, storagesForJoin[0].ID, "reports", "main://reports")
+	joined := wsReadType(t, conn, "presence")
+	jusers, _ := joined["users"].([]any)
+	require.Len(t, jusers, 1)
+	require.Equal(t, "Cem", jusers[0].(map[string]any)["name"])
 
 	// Resolve the storage id the same way the handler does, then emit a change
 	// as a mutation handler would.
@@ -212,7 +224,7 @@ func TestWSConfinedTicketSubscribe(t *testing.T) {
 	pres := wsReadType(t, conn, "presence")
 	require.Equal(t, "main://", pres["path"], "frame must echo the client's own relative path")
 	users, _ := pres["users"].([]any)
-	require.Len(t, users, 1)
+	require.Len(t, users, 0, "lone subscriber sees an empty roster (self excluded)")
 
 	// A mutation into the ABSOLUTE folder (what the proxy resolves) must reach the
 	// confined viewer — proving the subscribe joined the absolute room.
@@ -224,6 +236,45 @@ func TestWSConfinedTicketSubscribe(t *testing.T) {
 	require.Equal(t, "upload", chg["action"])
 	require.Equal(t, "fis.pdf", chg["name"])
 	require.Equal(t, "main://", chg["path"], "change frame must echo the relative path too")
+}
+
+// TestWSConfinedTicketAbsoluteSubscribe reproduces the REAL webcomponent
+// behavior under confinement: the backend returns storage-absolute dirnames, so
+// the explorer subscribes with the ABSOLUTE path ("main://projeler/5"). That
+// must join the SAME room the mutation handlers emit into — NOT a doubled
+// "projeler/5/projeler/5" room (the v0.1.78 regression the dummy-app test
+// caught: presence looked fine between embedded viewers but changes never
+// arrived and native viewers were invisible).
+func TestWSConfinedTicketAbsoluteSubscribe(t *testing.T) {
+	url, hub, store, tickets := newWSTicketFixture(t)
+	tok, err := tickets.Mint(realtime.Ticket{
+		UserID: 1, Name: "Embedded", ConfineAdapter: "main", ConfineRel: "projeler/5",
+	}, time.Minute)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	conn, _, err := websocket.Dial(ctx, url+"?ticket="+tok, nil)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	wsSend(t, conn, map[string]any{"type": "subscribe", "path": "main://projeler/5"})
+	pres := wsReadType(t, conn, "presence")
+	require.Equal(t, "main://projeler/5", pres["path"], "frame echoes the client's own absolute path")
+
+	// The native (absolute) room must be the one this client joined.
+	storages, err := store.ListEnabledStorages(ctx)
+	require.NoError(t, err)
+	hub.EmitChange(storages[0].ID, "projeler/5", realtime.ChangeEvent{Action: "upload", Name: "abs.pdf"})
+	chg := wsReadType(t, conn, "change")
+	require.Equal(t, "abs.pdf", chg["name"])
+
+	// A native viewer of the same folder shares the room (cross-visibility).
+	native := realtime.NewClient(2, "Native", 16)
+	hub.Subscribe(native, storages[0].ID, "projeler/5", "main://projeler/5")
+	joined := wsReadType(t, conn, "presence")
+	users, _ := joined["users"].([]any)
+	require.Len(t, users, 1)
+	require.Equal(t, "Native", users[0].(map[string]any)["name"])
 }
 
 // TestWSConfinedTicketCannotEscape: a confined ticket may not watch a sibling
@@ -245,6 +296,81 @@ func TestWSConfinedTicketCannotEscape(t *testing.T) {
 	wsSend(t, conn, map[string]any{"type": "subscribe", "path": "main://../secret"})
 	errFrame := wsReadType(t, conn, "error")
 	require.Equal(t, "forbidden", errFrame["error"])
+}
+
+// mintVia calls the Ticket handler with the given context decorations +
+// headers and returns the minted realtime.Ticket for inspection.
+func mintVia(t *testing.T, user *model.User, token *model.APIToken, headers map[string]string) realtime.Ticket {
+	t.Helper()
+	_, store := testutil.NewTestDB(t)
+	tickets := realtime.NewTicketStore()
+	wsh := handlers.NewWS(store, nil, realtime.NewHub(), tickets, "https://fm.brf.sh")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/files/ws-ticket", nil)
+	ctx := auth.WithUser(req.Context(), user)
+	if token != nil {
+		ctx = auth.WithToken(ctx, token)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	wsh.Ticket(rec, req.WithContext(ctx))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var resp struct {
+		Ticket string `json:"ticket"`
+		WsURL  string `json:"ws_url"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, "wss://fm.brf.sh/api/ws", resp.WsURL)
+	tk, ok := tickets.Consume(resp.Ticket)
+	require.True(t, ok)
+	return tk
+}
+
+// TestWSTicketIdentity: what name/key a minted ticket carries per auth mode.
+//   - cookie session → the user's own display name; override headers IGNORED
+//   - API token      → the token's LABEL (a shared proxy token must not show
+//     its owner account's name to everyone)
+//   - API token + X-Filex-Presence-Name/-Key → the host proxy's stamped end
+//     user (trusted: proxies strip these headers from client requests)
+func TestWSTicketIdentity(t *testing.T) {
+	admin := &model.User{ID: 1, DisplayName: "admin", Email: "admin@local"}
+
+	cookie := mintVia(t, admin, nil, map[string]string{
+		"X-Filex-Presence-Name": "Sahte",
+		"X-Filex-Presence-Key":  "spoof-1",
+	})
+	require.Equal(t, "admin", cookie.Name, "cookie sessions must ignore override headers")
+	require.Empty(t, cookie.PresenceKey)
+
+	tok := &model.APIToken{ID: 5, UserID: 1, Label: "work-panel"}
+	viaToken := mintVia(t, admin, tok, nil)
+	require.Equal(t, "work-panel", viaToken.Name, "token auth shows the token label, not the owner account")
+	require.Equal(t, "tok-5", viaToken.PresenceKey,
+		"keyless token connections default to their own identity so they don't collide with the owner's cookie session")
+
+	stamped := mintVia(t, admin, tok, map[string]string{
+		"X-Filex-Presence-Name": "  Burak  Fun ",
+		"X-Filex-Presence-Key":  "work-7",
+	})
+	require.Equal(t, "Burak Fun", stamped.Name)
+	require.Equal(t, "work-7", stamped.PresenceKey)
+
+	badKey := mintVia(t, admin, tok, map[string]string{
+		"X-Filex-Presence-Key": "kötü anahtar!",
+	})
+	require.Equal(t, "tok-5", badKey.PresenceKey,
+		"malformed keys are dropped entirely and fall back to the token's own identity")
+
+	// HTTP headers are latin-1 territory — proxies RFC 2047-encode non-ASCII
+	// names (Turkish characters) and the mint must decode them.
+	encoded := mintVia(t, admin, tok, map[string]string{
+		"X-Filex-Presence-Name": mime.BEncoding.Encode("utf-8", "Gökçil Ayşe"),
+		"X-Filex-Presence-Key":  "work-8",
+	})
+	require.Equal(t, "Gökçil Ayşe", encoded.Name)
 }
 
 // TestWSUnauthorized: no user in context → 101 upgrade is refused with 401.

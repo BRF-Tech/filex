@@ -13,6 +13,7 @@
 package realtime
 
 import (
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -36,6 +37,11 @@ type Client struct {
 	Name   string // display name shown in presence
 	Send   chan []byte
 
+	// PresenceKey (from the ticket) distinguishes end users behind a shared
+	// proxy token; see realtime.Ticket.PresenceKey. Set once before any hub
+	// interaction. Empty for native (cookie) sessions.
+	PresenceKey string
+
 	// Confinement carried by a ticket-authenticated connection (embedded
 	// contexts like work.brf.sh proxy a root-confined token). When Confined is
 	// true the client may only subscribe to rooms within (ConfineAdapter,
@@ -49,6 +55,17 @@ type Client struct {
 	room string // current room key ("" = not subscribed)
 	path string // display path the client subscribed to ("<adapter>://<dir>")
 	file string // currently focused file name ("" = none)
+}
+
+// Identity is the presence identity this client is de-duplicated and
+// self-filtered by: the filex user id, refined by the per-end-user PresenceKey
+// when an embedded host supplied one. Two tabs of the same person share an
+// identity (one roster entry); two work users behind one proxy token do not.
+func (c *Client) Identity() string {
+	if c.PresenceKey != "" {
+		return strconv.FormatInt(c.UserID, 10) + "/" + c.PresenceKey
+	}
+	return strconv.FormatInt(c.UserID, 10)
 }
 
 // AllowsPath reports whether this client may subscribe to (adapter, rel). An
