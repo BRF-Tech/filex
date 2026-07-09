@@ -13,6 +13,10 @@ const props = defineProps<{
   showParentPath?: boolean;
   locale: LocaleCode;
   loading?: boolean;
+  /** Authenticated thumb resolver (useThumbs.src). Raw `thumb_url` is
+   *  root-relative and unauthenticated — a bare <img src> only works for the
+   *  native same-origin SPA, so embedded hosts NEED this. null = icon. */
+  thumbSrc?: (n: FileNode) => string | null;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +28,12 @@ const emit = defineEmits<{
 }>();
 
 const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
+
+// Prefer the authenticated resolver when the host wired one; otherwise fall
+// back to the raw URL (legacy same-origin behavior).
+function thumbOf(n: FileNode): string | null {
+  return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
+}
 
 function isSelected(n: FileNode): boolean {
   return props.selected.has(n.path);
@@ -140,8 +150,8 @@ function iconFor(n: FileNode): string {
           Parent card stays draggable=true so internal move works.
         -->
         <img
-          v-if="n.thumb_url"
-          :src="n.thumb_url"
+          v-if="thumbOf(n)"
+          :src="thumbOf(n)!"
           :alt="n.basename"
           loading="lazy"
           draggable="false"

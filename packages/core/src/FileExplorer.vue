@@ -31,6 +31,7 @@ import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 import { useLocale } from './composables/useLocale';
 import { usePendingOps, type PendingOp } from './composables/usePendingOps';
 import { useRealtime } from './composables/useRealtime';
+import { useThumbs } from './composables/useThumbs';
 import { preloadEditor } from './composables/useMonacoLoader';
 import PresenceBar from './components/PresenceBar.vue';
 
@@ -104,6 +105,11 @@ onMounted(() => {
   realtime.subscribe(realtimeRoom(currentPath.value));
 });
 onBeforeUnmount(() => realtime.stop());
+
+// Authenticated thumbnails — raw thumb_url is root-relative + header-less,
+// which only ever worked for the native same-origin SPA (embedded hosts got
+// empty/broken <img>s). See useThumbs.
+const thumbs = useThumbs(props.config.apiBase, api);
 
 const chunked = useUploadChunked(props.config, api);
 const pendingOps = usePendingOps(props.config, api, {
@@ -1828,6 +1834,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
         :show-parent-path="!!searchQuery"
         :locale="locale"
         :loading="loading"
+        :thumb-src="thumbs.src"
         @click-card="(n, m) => selection.click(n.path, m)"
         @dbl-card="openNode"
         @context-card="onContextTarget"
