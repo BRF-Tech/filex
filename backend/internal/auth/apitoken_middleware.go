@@ -19,8 +19,17 @@ import (
 // reverse).
 const apiTokenHeaderName = "X-Filex-Token"
 
+// tokenUserHeaderName selects which of the token's configured usernames this
+// request acts under (audit, shares, presence). Empty → the token's default.
+// A name outside the token's allow-list is rejected with 403 so a typo'd
+// integration surfaces immediately instead of blending into the default.
+const tokenUserHeaderName = "X-Filex-Token-User"
+
 // tokenCtxKey carries the matched *model.APIToken on the request context.
 type tokenCtxKey struct{}
+
+// tokenUserCtxKey carries the resolved token username for the request.
+type tokenUserCtxKey struct{}
 
 // WithToken stores the matched API token on ctx.
 func WithToken(ctx context.Context, t *model.APIToken) context.Context {
@@ -31,6 +40,18 @@ func WithToken(ctx context.Context, t *model.APIToken) context.Context {
 // authenticated by an API token (e.g. a cookie session).
 func TokenFrom(ctx context.Context) *model.APIToken {
 	v, _ := ctx.Value(tokenCtxKey{}).(*model.APIToken)
+	return v
+}
+
+// WithTokenUser stores the resolved token username on ctx.
+func WithTokenUser(ctx context.Context, username string) context.Context {
+	return context.WithValue(ctx, tokenUserCtxKey{}, username)
+}
+
+// TokenUserFrom returns the identity a token-authenticated request acts under
+// ("" for cookie sessions). Set by the token middlewares alongside WithToken.
+func TokenUserFrom(ctx context.Context) string {
+	v, _ := ctx.Value(tokenUserCtxKey{}).(string)
 	return v
 }
 
@@ -64,10 +85,16 @@ func APITokenMiddleware(store db.Store) func(http.Handler) http.Handler {
 				writeAuthErr(w, http.StatusUnauthorized, "token user not found")
 				return
 			}
+			username, ok := tok.ResolveUsername(r.Header.Get(tokenUserHeaderName))
+			if !ok {
+				writeAuthErr(w, http.StatusForbidden, "unknown token username")
+				return
+			}
 			_ = store.TouchAPIToken(ctx, tok.ID)
 
 			ctx = WithUser(ctx, user)
 			ctx = WithToken(ctx, tok)
+			ctx = WithTokenUser(ctx, username)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -89,9 +116,19 @@ func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.
 				if tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw)); err == nil && tok != nil {
 					if tok.ExpiresAt == nil || tok.ExpiresAt.After(time.Now()) {
 						if user, err := store.GetUser(ctx, tok.UserID); err == nil && user != nil {
+							// A username outside the token's allow-list is a hard
+							// error even on this hybrid chain — falling through to
+							// session auth would silently ignore the caller's
+							// intent.
+							username, ok := tok.ResolveUsername(r.Header.Get(tokenUserHeaderName))
+							if !ok {
+								writeAuthErr(w, http.StatusForbidden, "unknown token username")
+								return
+							}
 							_ = store.TouchAPIToken(ctx, tok.ID)
 							ctx = WithUser(ctx, user)
 							ctx = WithToken(ctx, tok)
+							ctx = WithTokenUser(ctx, username)
 							next.ServeHTTP(w, r.WithContext(ctx))
 							return
 						}

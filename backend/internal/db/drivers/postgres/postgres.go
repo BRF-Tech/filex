@@ -722,8 +722,8 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		t.UserID, t.Label, t.TokenHash, t.Scopes, t.ExpiresAt).Scan(&id)
+		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, expires_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, t.ExpiresAt).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -734,13 +734,13 @@ func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.A
 
 func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
 	return scanAPIToken(s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
 		tokenHash))
 }
 
 func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -758,7 +758,7 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 
 func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
 		userID)
 	if err != nil {
 		return nil, err
@@ -780,6 +780,21 @@ func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
 	return err
 }
 
+// UpdateAPITokenMeta edits label and/or the username allow-list. nil = keep.
+func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames *string) error {
+	if label != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET label=$1 WHERE id=$2`, *label, id); err != nil {
+			return err
+		}
+	}
+	if usernames != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET usernames=$1 WHERE id=$2`, *usernames, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id=$1`, id)
 	return err
@@ -788,7 +803,7 @@ func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
 func scanAPIToken(r rowScanner) (*model.APIToken, error) {
 	t := &model.APIToken{}
 	var lastUsed, expires sql.NullTime
-	if err := r.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &lastUsed, &expires, &t.CreatedAt); err != nil {
+	if err := r.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &lastUsed, &expires, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	if lastUsed.Valid {
@@ -895,8 +910,8 @@ func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO shares (node_id, token, pin_hash, expires_at, max_downloads, created_by, kind, max_uploads, drop_settings) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-		sh.NodeID, sh.Token, sh.PinHash, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings).Scan(&id)
+		`INSERT INTO shares (node_id, token, pin_hash, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		sh.NodeID, sh.Token, sh.PinHash, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, sh.CreatedVia, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -907,11 +922,11 @@ func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share,
 }
 
 func (s *Store) GetShareByToken(ctx context.Context, token string) (*model.Share, error) {
-	return scanShare(s.db.QueryRowContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE token=$1`, token))
+	return scanShare(s.db.QueryRowContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE token=$1`, token))
 }
 
 func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Share, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE node_id=$1 ORDER BY created_at DESC`, nodeID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE node_id=$1 ORDER BY created_at DESC`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -1280,7 +1295,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 
 func scanShare(r rowScanner) (*model.Share, error) {
 	sh := &model.Share{}
-	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount, &sh.DropSettings); err != nil {
+	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedVia, &sh.CreatedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount, &sh.DropSettings); err != nil {
 		return nil, err
 	}
 	sh.HasPin = sh.PinHash != ""
@@ -1569,7 +1584,7 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName
 // GetShareByID looks up a share by its row ID.
 func (s *Store) GetShareByID(ctx context.Context, id int64) (*model.Share, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE id=$1`, id)
+		`SELECT id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings FROM shares WHERE id=$1`, id)
 	return scanShare(row)
 }
 
@@ -1609,7 +1624,7 @@ func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly 
 	args = append(args, limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.id, s.node_id, s.token, COALESCE(s.pin_hash,''), s.expires_at, s.max_downloads, s.download_count, s.created_by, s.created_at,
+		SELECT s.id, s.node_id, s.token, COALESCE(s.pin_hash,''), s.expires_at, s.max_downloads, s.download_count, s.created_by, COALESCE(s.created_via,''), s.created_at,
 		       COALESCE(u.email,''), COALESCE(n.path,''), COALESCE(st.name,'')
 		FROM shares s
 		LEFT JOIN users u     ON u.id = s.created_by

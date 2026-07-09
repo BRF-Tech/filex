@@ -43,7 +43,18 @@ watch([action, targetType, from, to], () => {
 
 const columns = computed<Column<AuditEntry>[]>(() => [
   { key: 'at', label: t('common.created'), format: (r) => formatDate(r.at, locale.value) },
-  { key: 'user_email', label: t('audit.fields.user'), format: (r) => r.user_email ?? '—' },
+  {
+    key: 'user_email',
+    label: t('audit.fields.user'),
+    // Token-authenticated writes carry the acting token username in the
+    // metadata — show "email · username" so one account's tokens stay
+    // distinguishable ("admin@… · work" vs "admin@… · fishapp").
+    format: (r) => {
+      const who = r.user_email ?? '—';
+      const via = r.metadata?.token_username;
+      return typeof via === 'string' && via ? `${who} · ${via}` : who;
+    },
+  },
   { key: 'action', label: t('audit.fields.action'), cell: 'slot' },
   { key: 'target_type', label: t('audit.fields.target'), cell: 'slot' },
   { key: 'ip', label: t('audit.fields.ip'), format: (r) => r.ip ?? '—' },

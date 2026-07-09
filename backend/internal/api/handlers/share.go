@@ -179,9 +179,10 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		userID = &uid
 	}
 	opts := share.CreateOpts{
-		NodeID:    nodeID,
-		PIN:       pin,
-		CreatedBy: userID,
+		NodeID:     nodeID,
+		PIN:        pin,
+		CreatedBy:  userID,
+		CreatedVia: auth.TokenUserFrom(r.Context()),
 	}
 	switch {
 	case req.ExpiresAt != "":

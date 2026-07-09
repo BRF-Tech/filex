@@ -349,6 +349,8 @@
     "tokenCreated": "Token oluşturuldu",
     "tokenOnce": "Bu token yalnızca bir kez gösterilir — kopyala ve güvenli sakla.",
     "createdOk": "Token oluşturuldu",
+    "updatedOk": "Token güncellendi",
+    "editToken": "Token'ı düzenle",
     "deletedOk": "Token silindi",
     "deleteConfirm": "\"{label}\" token'ı silinsin mi? Bu token'ı kullanan entegrasyonlar erişimini kaybeder.",
     "empty": "Henüz token yok. AI/MCP erişimi için bir tane oluştur.",
@@ -356,6 +358,7 @@
     "fullDisk": "tüm disk",
     "cols": {
       "label": "Etiket",
+      "usernames": "Kullanıcı adları",
       "scopes": "Yetkiler",
       "root": "Kök dizin",
       "lastUsed": "Son kullanım",
@@ -372,7 +375,10 @@
       "rootPathPlaceholder": "alt/klasör (boş = depo kökü)",
       "rootHint": "Bir depo + yol seçersen token yalnız o alt-ağacı görür/yazar; üstüne çıkamaz. Boş = tüm diske erişim.",
       "expiry": "Geçerlilik (gün)",
-      "expiryHint": "0 veya boş = süresiz"
+      "expiryHint": "0 veya boş = süresiz",
+      "usernames": "Kullanıcı adları (opsiyonel)",
+      "usernamesPlaceholder": "work, fishapp",
+      "usernamesHint": "Bu anahtarla kullanılabilecek kimlikler (virgülle ayır; İLKİ varsayılan). İstemci X-Filex-Token-User ile seçer; boş bırakırsan anahtar adı kullanılır."
     },
     "scopeDesc": {
       "read": "Dosya listele/oku/ara/indir",

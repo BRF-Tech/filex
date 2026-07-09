@@ -199,6 +199,11 @@ onMounted(load);
       <template #cell-creator="{ row }">
         <span class="text-xs text-zinc-500 dark:text-zinc-400">
           {{ (row as ShareRow).creator_email || ('#' + (shareOf(row).created_by ?? '?')) }}
+          <!-- token username the creating API call acted under ("work", "fishapp"…) -->
+          <span
+            v-if="shareOf(row).created_via"
+            class="ml-1 rounded bg-violet-100 dark:bg-violet-900/40 px-1 py-0.5 font-mono text-[10px] text-violet-700 dark:text-violet-300"
+          >{{ shareOf(row).created_via }}</span>
         </span>
       </template>
 

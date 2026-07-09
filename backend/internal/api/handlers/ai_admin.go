@@ -310,7 +310,7 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 
 	rec := newBufRecorder()
 	h(rec, req)
-	a.auditInvoke(principal, method, path, urlParams, rec.status)
+	a.auditInvoke(ctx, principal, method, path, urlParams, rec.status)
 	return rec.status, rec.buf.Bytes()
 }
 
@@ -322,7 +322,7 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 // result. The action mirrors the REST path's name (prefixed "ai." via
 // auth.AIAdminAction) so panel / AI-REST / AI-MCP writes are indistinguishable
 // in the Audit page beyond that single "ai." marker.
-func (a *AIAdmin) auditInvoke(principal *model.User, method, path string, urlParams map[string]string, status int) {
+func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, method, path string, urlParams map[string]string, status int) {
 	if a.store == nil {
 		return
 	}
@@ -349,6 +349,14 @@ func (a *AIAdmin) auditInvoke(principal *model.User, method, path string, urlPar
 	if principal != nil && principal.ID > 0 {
 		uid := principal.ID
 		entry.UserID = &uid
+	}
+	// Stamp which token + username acted — MCP calls ride the API-token
+	// middleware, so both live on the tool-call context.
+	if tok := auth.TokenFrom(callCtx); tok != nil {
+		entry.Metadata = map[string]interface{}{"token_id": tok.ID}
+		if tu := auth.TokenUserFrom(callCtx); tu != "" {
+			entry.Metadata["token_username"] = tu
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

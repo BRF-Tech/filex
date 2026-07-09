@@ -54,6 +54,15 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 				uid := user.ID
 				entry.UserID = &uid
 			}
+			// Token-authenticated calls stamp WHICH credential + identity acted:
+			// one account often backs several tokens (work, fishapp, MCP…), and
+			// user_id alone can't tell them apart.
+			if tok := TokenFrom(r.Context()); tok != nil {
+				entry.Metadata = map[string]interface{}{"token_id": tok.ID}
+				if tu := TokenUserFrom(r.Context()); tu != "" {
+					entry.Metadata["token_username"] = tu
+				}
+			}
 			// Best-effort — don't block the response on a logging error.
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -109,6 +118,15 @@ func shouldAudit(r *http.Request) bool {
 	case strings.HasPrefix(p, "/api/ai/admin/"):
 		// AI-surface admin REST mirror (/api/ai/admin/*). Same admin write
 		// ops as the native panel, just behind a token instead of a session.
+		return true
+	case strings.HasPrefix(p, "/api/ai/"):
+		// AI file surface: reads are GET (already filtered out by method), so
+		// every mutating call here is a real write (upload/mkdir/move/delete/
+		// share/zip…) made by an integration token — exactly what the audit
+		// log should attribute per token username.
+		return true
+	case strings.HasPrefix(p, "/api/sharex/"):
+		// ShareX uploads are token-driven writes too.
 		return true
 	case strings.HasPrefix(p, "/api/auth/"):
 		// Skip noisy auth endpoints (login/logout get their own dedicated
@@ -279,6 +297,29 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	// ── sync ──
 	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/sync-runs/"):
 		return "sync.action", "sync_run", id
+	}
+
+	// AI file surface (/api/ai/<verb>, POST-only writes). Named after the verb
+	// segment so upload/mkdir/move/delete/share/zip all map without a case
+	// each — and a future endpoint lands as ai.file.<verb> instead of
+	// vanishing.
+	if strings.HasPrefix(p, "/api/ai/") && !strings.HasPrefix(p, "/api/ai/admin") {
+		seg := strings.TrimPrefix(p, "/api/ai/")
+		if i := strings.IndexByte(seg, '/'); i >= 0 {
+			seg = seg[:i]
+		}
+		switch seg {
+		case "share":
+			return "ai.share.create", "share", ""
+		case "unshare":
+			return "ai.share.delete", "share", ""
+		case "":
+		default:
+			return "ai.file." + seg, "node", ""
+		}
+	}
+	if method == http.MethodPost && strings.HasPrefix(p, "/api/sharex/") {
+		return "sharex.upload", "node", ""
 	}
 
 	// Generic fallback: any other mutating /api/admin/* request still gets a

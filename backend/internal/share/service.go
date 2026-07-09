@@ -38,6 +38,7 @@ type CreateOpts struct {
 	ExpiresAt    *time.Time // optional
 	MaxDownloads *int       // optional
 	CreatedBy    *int64     // user ID
+	CreatedVia   string     // token username of the creating API call (display-only)
 
 	// Drop-link options (Kind == model.ShareKindDrop). Ignored/zero for a
 	// normal download share.
@@ -74,6 +75,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		ExpiresAt:    opts.ExpiresAt,
 		MaxDownloads: opts.MaxDownloads,
 		CreatedBy:    opts.CreatedBy,
+		CreatedVia:   opts.CreatedVia,
 		Kind:         kind,
 		MaxUploads:   opts.MaxUploads,
 		DropSettings: opts.DropSettings,

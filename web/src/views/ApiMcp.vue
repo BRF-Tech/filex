@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Plus, Trash2, RefreshCcw, KeyRound } from 'lucide-vue-next';
+import { Pencil, Plus, Trash2, RefreshCcw, KeyRound } from 'lucide-vue-next';
 
 import { AITokensApi, type AIToken } from '@/api/ai-tokens';
 import { StoragesApi } from '@/api/storages';
@@ -40,9 +40,16 @@ const newScopes = ref<Record<Scope, boolean>>({
   admin: false,
 });
 const newExpiry = ref<number | null>(null);
+const newUsernames = ref('');
 const newRootStorage = ref('');
 const newRootPath = ref('');
 const createdToken = ref<string | null>(null);
+
+// Edit modal (label + username allow-list; the credential itself is immutable).
+const showEdit = ref<AIToken | null>(null);
+const editLabel = ref('');
+const editUsernames = ref('');
+const savingEdit = ref(false);
 
 const storages = ref<{ value: string; label: string }[]>([]);
 const storageOptions = computed(() => [
@@ -102,6 +109,7 @@ function openCreate() {
   newExpiry.value = null;
   newRootStorage.value = '';
   newRootPath.value = '';
+  newUsernames.value = '';
   createdToken.value = null;
   showCreate.value = true;
 }
@@ -117,6 +125,7 @@ async function submitCreate() {
     const res = await AITokensApi.create({
       label: newLabel.value.trim(),
       scopes: parts.join(','),
+      usernames: parseUsernames(newUsernames.value),
       expires_in_days: newExpiry.value && newExpiry.value > 0 ? newExpiry.value : undefined,
     });
     createdToken.value = res.token;
@@ -132,6 +141,45 @@ async function submitCreate() {
 function closeCreate() {
   showCreate.value = false;
   createdToken.value = null;
+}
+
+// "work, fishapp" → ["work","fishapp"] (comma/space separated; first = default).
+function parseUsernames(raw: string): string[] {
+  return raw
+    .split(/[,\s]+/)
+    .map((u) => u.trim())
+    .filter(Boolean);
+}
+
+function usernameList(tok: AIToken): string[] {
+  return (tok.usernames || '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
+}
+
+function openEdit(tok: AIToken) {
+  showEdit.value = tok;
+  editLabel.value = tok.label;
+  editUsernames.value = usernameList(tok).join(', ');
+}
+
+async function submitEdit() {
+  if (!showEdit.value) return;
+  savingEdit.value = true;
+  try {
+    await AITokensApi.update(showEdit.value.id, {
+      label: editLabel.value.trim(),
+      usernames: parseUsernames(editUsernames.value),
+    });
+    toast.success(t('apiMcp.updatedOk'));
+    showEdit.value = null;
+    await load();
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    savingEdit.value = false;
+  }
 }
 
 async function confirmDelete() {
@@ -210,6 +258,7 @@ onMounted(() => {
         <thead class="bg-zinc-50 dark:bg-zinc-800/50 text-left text-xs text-zinc-500">
           <tr>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.label') }}</th>
+            <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.usernames') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.scopes') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.root') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.lastUsed') }}</th>
@@ -221,6 +270,20 @@ onMounted(() => {
         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
           <tr v-for="tok in tokens" :key="tok.id">
             <td class="px-4 py-2 font-medium">{{ tok.label || '—' }}</td>
+            <td class="px-4 py-2">
+              <div class="flex flex-wrap items-center gap-1">
+                <!-- first entry = default identity; no list → the label doubles as it -->
+                <Badge
+                  v-for="(u, i) in usernameList(tok)"
+                  :key="u"
+                  :tone="i === 0 ? 'violet' : 'zinc'"
+                  size="xs"
+                >{{ u }}</Badge>
+                <span v-if="!usernameList(tok).length" class="text-xs text-zinc-400">
+                  {{ tok.label || '—' }}
+                </span>
+              </div>
+            </td>
             <td class="px-4 py-2">
               <div class="flex flex-wrap gap-1">
                 <Badge v-if="!scopeList(tok.scopes).length" tone="amber" size="xs">all</Badge>
@@ -248,13 +311,16 @@ onMounted(() => {
               {{ formatRelative(tok.created_at, locale) }}
             </td>
             <td class="px-4 py-2 text-right">
+              <Button size="xs" variant="ghost" @click="openEdit(tok)" :title="t('common.edit')">
+                <Pencil class="h-3.5 w-3.5 text-zinc-500" />
+              </Button>
               <Button size="xs" variant="ghost" @click="showDelete = tok" :title="t('common.delete')">
                 <Trash2 class="h-3.5 w-3.5 text-rose-500" />
               </Button>
             </td>
           </tr>
           <tr v-if="!tokens.length">
-            <td colspan="7" class="px-4 py-8 text-center text-zinc-500 text-sm">
+            <td colspan="8" class="px-4 py-8 text-center text-zinc-500 text-sm">
               {{ t('apiMcp.empty') }}
             </td>
           </tr>
@@ -307,6 +373,14 @@ onMounted(() => {
         </div>
 
         <Input
+          v-model="newUsernames"
+          :label="t('apiMcp.fields.usernames')"
+          :placeholder="t('apiMcp.fields.usernamesPlaceholder')"
+          :hint="t('apiMcp.fields.usernamesHint')"
+          monospace
+        />
+
+        <Input
           v-model.number="newExpiry"
           type="number"
           :min="0"
@@ -343,6 +417,30 @@ onMounted(() => {
           </Button>
         </template>
         <Button v-else @click="closeCreate">{{ t('common.close') }}</Button>
+      </template>
+    </Modal>
+
+    <!-- Edit modal (label + usernames; the credential is immutable) -->
+    <Modal
+      :model-value="showEdit !== null"
+      :title="t('apiMcp.editToken')"
+      size="sm"
+      :prevent-close="savingEdit"
+      @update:model-value="(v) => (v ? null : (showEdit = null))"
+    >
+      <form class="space-y-3" @submit.prevent="submitEdit">
+        <Input v-model="editLabel" :label="t('apiMcp.fields.label')" />
+        <Input
+          v-model="editUsernames"
+          :label="t('apiMcp.fields.usernames')"
+          :placeholder="t('apiMcp.fields.usernamesPlaceholder')"
+          :hint="t('apiMcp.fields.usernamesHint')"
+          monospace
+        />
+      </form>
+      <template #footer>
+        <Button variant="ghost" @click="showEdit = null">{{ t('common.cancel') }}</Button>
+        <Button :loading="savingEdit" @click="submitEdit">{{ t('common.save') }}</Button>
       </template>
     </Modal>
 

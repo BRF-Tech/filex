@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -48,12 +49,14 @@ func (h *AITokens) List(w http.ResponseWriter, r *http.Request) {
 
 // createTokenBody is the POST body. user_id defaults to the calling admin;
 // scopes is a comma-separated allow-list (empty == all). expires_in_days,
-// when > 0, sets an expiry.
+// when > 0, sets an expiry. usernames is the identity allow-list the caller
+// may act under per request (first = default; empty → the label).
 type createTokenBody struct {
-	Label         string `json:"label"`
-	UserID        int64  `json:"user_id,omitempty"`
-	Scopes        string `json:"scopes,omitempty"`
-	ExpiresInDays int    `json:"expires_in_days,omitempty"`
+	Label         string   `json:"label"`
+	UserID        int64    `json:"user_id,omitempty"`
+	Scopes        string   `json:"scopes,omitempty"`
+	Usernames     []string `json:"usernames,omitempty"`
+	ExpiresInDays int      `json:"expires_in_days,omitempty"`
 }
 
 // Create issues a new token. The plaintext value is returned ONCE — only its
@@ -85,6 +88,11 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": serr.Error()})
 		return
 	}
+	usernames, uerr := normalizeUsernames(body.Usernames)
+	if uerr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uerr.Error()})
+		return
+	}
 
 	plain, err := generateToken()
 	if err != nil {
@@ -97,6 +105,7 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 		Label:     strings.TrimSpace(body.Label),
 		TokenHash: apitoken.HashToken(plain),
 		Scopes:    scopes,
+		Usernames: usernames,
 	}
 	if body.ExpiresInDays > 0 {
 		exp := time.Now().AddDate(0, 0, body.ExpiresInDays)
@@ -112,6 +121,48 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 		"token": plain, // shown ONCE
 		"row":   created,
 	})
+}
+
+// updateTokenBody is the PATCH body — display metadata only (the credential
+// is immutable). A nil field is left unchanged; usernames: [] clears the list
+// (back to label-only).
+type updateTokenBody struct {
+	Label     *string   `json:"label,omitempty"`
+	Usernames *[]string `json:"usernames,omitempty"`
+}
+
+// Update edits a token's label / username allow-list.
+//
+//	PATCH /api/admin/ai-tokens/{id}
+func (h *AITokens) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body updateTokenBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	var label, usernames *string
+	if body.Label != nil {
+		l := strings.TrimSpace(*body.Label)
+		label = &l
+	}
+	if body.Usernames != nil {
+		u, uerr := normalizeUsernames(*body.Usernames)
+		if uerr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": uerr.Error()})
+			return
+		}
+		usernames = &u
+	}
+	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // Delete revokes a token by id.
@@ -135,6 +186,35 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// usernameRe is the slug alphabet for token usernames: they travel in HTTP
+// headers and land in audit/presence, so keep them plain ASCII identifiers.
+var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$`)
+
+// normalizeUsernames validates + dedupes the identity allow-list (order kept —
+// the FIRST entry is the default). Returns the comma-joined storage form.
+func normalizeUsernames(raw []string) (string, error) {
+	if len(raw) > 16 {
+		return "", fmt.Errorf("too many usernames (max 16)")
+	}
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, u := range raw {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if !usernameRe.MatchString(u) {
+			return "", fmt.Errorf("invalid username %q (allowed: letters, digits, . _ -; max 32 chars)", u)
+		}
+		if _, dup := seen[u]; dup {
+			continue
+		}
+		seen[u] = struct{}{}
+		out = append(out, u)
+	}
+	return strings.Join(out, ","), nil
 }
 
 // normalizeScopes trims whitespace around each comma-separated scope, drops

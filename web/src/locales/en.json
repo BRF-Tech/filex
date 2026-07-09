@@ -349,6 +349,8 @@
     "tokenCreated": "Token created",
     "tokenOnce": "This token is shown only once — copy it and store it safely.",
     "createdOk": "Token created",
+    "updatedOk": "Token updated",
+    "editToken": "Edit token",
     "deletedOk": "Token deleted",
     "deleteConfirm": "Delete token \"{label}\"? Integrations using it will lose access.",
     "empty": "No tokens yet. Create one for AI/MCP access.",
@@ -356,6 +358,7 @@
     "fullDisk": "full disk",
     "cols": {
       "label": "Label",
+      "usernames": "Usernames",
       "scopes": "Scopes",
       "root": "Root",
       "lastUsed": "Last used",
@@ -372,7 +375,10 @@
       "rootPathPlaceholder": "sub/folder (empty = storage root)",
       "rootHint": "Pick a storage + path to lock the token to that subtree — it can't escape upward. Empty = full disk access.",
       "expiry": "Validity (days)",
-      "expiryHint": "0 or empty = never"
+      "expiryHint": "0 or empty = never",
+      "usernames": "Usernames (optional)",
+      "usernamesPlaceholder": "work, fishapp",
+      "usernamesHint": "Identities this key may act as (comma-separated; the FIRST is the default). Callers pick one via X-Filex-Token-User; empty = the label."
     },
     "scopeDesc": {
       "read": "List/read/search/download files",

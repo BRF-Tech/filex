@@ -256,6 +256,7 @@ func BuildRouter(d *Deps) http.Handler {
 		// grants (see handlers.SelfTokens). Admins also have /api/admin/ai-tokens.
 		r.Get("/api/tokens", selfTokensH.List)
 		r.Post("/api/tokens", selfTokensH.Create)
+		r.Patch("/api/tokens/{id}", selfTokensH.Update)
 		r.Delete("/api/tokens/{id}", selfTokensH.Delete)
 
 		// Per-user notifications (bell + history + read/unread).
@@ -438,6 +439,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/ai-tokens", func(r chi.Router) {
 				r.Get("/", aiTokensH.List)
 				r.Post("/", aiTokensH.Create)
+				r.Patch("/{id}", aiTokensH.Update)
 				r.Delete("/{id}", aiTokensH.Delete)
 			})
 
@@ -554,6 +556,10 @@ func BuildRouter(d *Deps) http.Handler {
 		// Agents are tenant-scoped too — resolve the token user's provider
 		// (no-op unless multi-tenant mode is on). See docs/MULTI-TENANCY.md.
 		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		// Attribute every AI write to its token + username in the audit log
+		// (reads are GET and never audited). Runs after the token middleware so
+		// TokenFrom/TokenUserFrom are on the context.
+		r.Use(auth.AuditMiddleware(d.Store))
 
 		// Discovery: any valid token may learn its confinement root + reachable
 		// storages (no verb scope needed) so a confined agent stops guessing.
@@ -602,6 +608,7 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Route("/api/sharex", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(auth.AuditMiddleware(d.Store))
 		r.With(auth.RequireScope("write")).Post("/upload", sxUploadH.Upload)
 	})
 

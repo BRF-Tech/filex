@@ -99,14 +99,69 @@ type Session struct {
 // plaintext value is shown only once at creation; only TokenHash (sha256
 // hex) is persisted.
 type APIToken struct {
-	ID         int64      `json:"id"`
-	UserID     int64      `json:"user_id"`
-	Label      string     `json:"label"`
-	TokenHash  string     `json:"-"`
-	Scopes     string     `json:"scopes"` // comma-separated allow-list; "" == all
+	ID        int64  `json:"id"`
+	UserID    int64  `json:"user_id"`
+	Label     string `json:"label"`
+	TokenHash string `json:"-"`
+	Scopes    string `json:"scopes"` // comma-separated allow-list; "" == all
+	// Usernames is the comma-separated allow-list of identities a caller may
+	// act under (X-Filex-Token-User); the FIRST entry is the default. One
+	// durable token often serves several consumers (work panel, PWA, a PC MCP
+	// client) — the chosen username is what audit, shares and presence show.
+	// Empty == only the token's label is usable (legacy behavior).
+	Usernames  string     `json:"usernames"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// UsernameList returns the parsed, trimmed username allow-list (may be empty).
+func (t *APIToken) UsernameList() []string {
+	if t == nil || strings.TrimSpace(t.Usernames) == "" {
+		return nil
+	}
+	parts := strings.Split(t.Usernames, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// DefaultUsername is the identity used when the caller doesn't pick one: the
+// first configured username, else the token's label.
+func (t *APIToken) DefaultUsername() string {
+	if t == nil {
+		return ""
+	}
+	if l := t.UsernameList(); len(l) > 0 {
+		return l[0]
+	}
+	return strings.TrimSpace(t.Label)
+}
+
+// ResolveUsername maps the caller's requested identity to an effective one.
+// Empty request → the default (ok). A request matching the allow-list (or the
+// default itself) → that name (ok). Anything else → not ok; callers must
+// reject the request so a typo'd integration surfaces immediately instead of
+// silently blending into the default identity.
+func (t *APIToken) ResolveUsername(requested string) (string, bool) {
+	requested = strings.TrimSpace(requested)
+	def := t.DefaultUsername()
+	if requested == "" {
+		return def, true
+	}
+	if requested == def {
+		return requested, true
+	}
+	for _, u := range t.UsernameList() {
+		if requested == u {
+			return requested, true
+		}
+	}
+	return "", false
 }
 
 // HasScope reports whether the token grants `want`. An empty Scopes field

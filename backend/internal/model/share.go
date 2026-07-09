@@ -24,7 +24,11 @@ type Share struct {
 	MaxDownloads  *int       `json:"max_downloads,omitempty"`
 	DownloadCount int        `json:"download_count"`
 	CreatedBy     *int64     `json:"created_by,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
+	// CreatedVia is the token username the creating API call acted under
+	// ("work", "fishapp"…). Empty for browser-session shares. Display-only —
+	// ownership/authorization stay on CreatedBy.
+	CreatedVia string    `json:"created_via,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 
 	// Drop-link fields (Kind == ShareKindDrop). Empty/zero for a normal
 	// download share.

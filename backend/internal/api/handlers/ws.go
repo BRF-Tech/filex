@@ -70,28 +70,43 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Presence identity: a native session shows the user's own name. An API
-	// token (embedded host proxies, MCP) shows the TOKEN's label — every end
-	// user behind a shared proxy token maps to the same filex account, so the
-	// account name ("admin") would be misleading. A trusted host proxy can go
-	// further and stamp the REAL end user via X-Filex-Presence-Name/-Key
-	// (honored only on token auth; proxies strip these from client requests, so
-	// end users can't spoof them).
+	// token (embedded host proxies, MCP) shows its resolved token USERNAME
+	// (X-Filex-Token-User → the token's allow-list, default = first entry /
+	// label) — every end user behind a shared proxy token maps to the same
+	// filex account, so the account name ("admin") would be misleading. A
+	// trusted host proxy can additionally stamp the REAL end user via
+	// X-Filex-Presence-Name/-Key; the display then combines both:
+	// "Burak (work)". (Honored only on token auth; proxies strip these from
+	// client requests, so end users can't spoof them.)
 	name := wsDisplayName(user)
 	presenceKey := ""
 	if tok := auth.TokenFrom(r.Context()); tok != nil {
-		if l := strings.TrimSpace(tok.Label); l != "" {
-			name = l
+		uname := auth.TokenUserFrom(r.Context())
+		if uname == "" {
+			uname = tok.DefaultUsername()
+		}
+		if uname != "" {
+			name = uname
 		}
 		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); v != "" {
-			name = v
+			if uname != "" {
+				name = v + " (" + uname + ")"
+			} else {
+				name = v
+			}
 		}
 		presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
 		if presenceKey == "" {
-			// Default token connections to their own identity: without this a
-			// keyless token viewer collides with the token OWNER's cookie
-			// session (same user id) — self-exclusion would hide it and the
-			// merged entry's name would be nondeterministic.
+			// Default token connections to their own (token, username) identity:
+			// without this a keyless token viewer collides with the token
+			// OWNER's cookie session (same user id) — self-exclusion would hide
+			// it and the merged entry's name would be nondeterministic. The
+			// username is part of the key so "work" and "fishapp" viewers of one
+			// token stay distinct people.
 			presenceKey = "tok-" + strconv.FormatInt(tok.ID, 10)
+			if uname != "" {
+				presenceKey += "-" + uname
+			}
 		}
 	}
 	t := realtime.Ticket{UserID: user.ID, Name: name, PresenceKey: presenceKey}

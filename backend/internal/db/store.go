@@ -128,6 +128,9 @@ type Store interface {
 	ListAPITokens(ctx context.Context) ([]*model.APIToken, error)
 	ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	TouchAPIToken(ctx context.Context, id int64) error
+	// UpdateAPITokenMeta edits a token's display metadata (label / username
+	// allow-list); nil leaves a field unchanged. The credential is immutable.
+	UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames *string) error
 	DeleteAPIToken(ctx context.Context, id int64) error
 
 	// File grants — per-user/per-folder ACL (RBAC feature, migration 00012).

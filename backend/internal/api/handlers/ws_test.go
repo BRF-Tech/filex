@@ -299,8 +299,9 @@ func TestWSConfinedTicketCannotEscape(t *testing.T) {
 }
 
 // mintVia calls the Ticket handler with the given context decorations +
-// headers and returns the minted realtime.Ticket for inspection.
-func mintVia(t *testing.T, user *model.User, token *model.APIToken, headers map[string]string) realtime.Ticket {
+// headers and returns the minted realtime.Ticket for inspection. tokenUser
+// mimics what the auth middleware resolves from X-Filex-Token-User.
+func mintVia(t *testing.T, user *model.User, token *model.APIToken, tokenUser string, headers map[string]string) realtime.Ticket {
 	t.Helper()
 	_, store := testutil.NewTestDB(t)
 	tickets := realtime.NewTicketStore()
@@ -310,6 +311,9 @@ func mintVia(t *testing.T, user *model.User, token *model.APIToken, headers map[
 	ctx := auth.WithUser(req.Context(), user)
 	if token != nil {
 		ctx = auth.WithToken(ctx, token)
+	}
+	if tokenUser != "" {
+		ctx = auth.WithTokenUser(ctx, tokenUser)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -331,14 +335,15 @@ func mintVia(t *testing.T, user *model.User, token *model.APIToken, headers map[
 
 // TestWSTicketIdentity: what name/key a minted ticket carries per auth mode.
 //   - cookie session → the user's own display name; override headers IGNORED
-//   - API token      → the token's LABEL (a shared proxy token must not show
-//     its owner account's name to everyone)
-//   - API token + X-Filex-Presence-Name/-Key → the host proxy's stamped end
-//     user (trusted: proxies strip these headers from client requests)
+//   - API token      → its token USERNAME (default = first allow-list entry,
+//     else the label) — a shared proxy token must not show its owner
+//     account's name to everyone
+//   - API token + X-Filex-Presence-Name → "Kişi (username)" combined display
+//     (trusted: proxies strip these headers from client requests)
 func TestWSTicketIdentity(t *testing.T) {
 	admin := &model.User{ID: 1, DisplayName: "admin", Email: "admin@local"}
 
-	cookie := mintVia(t, admin, nil, map[string]string{
+	cookie := mintVia(t, admin, nil, "", map[string]string{
 		"X-Filex-Presence-Name": "Sahte",
 		"X-Filex-Presence-Key":  "spoof-1",
 	})
@@ -346,31 +351,68 @@ func TestWSTicketIdentity(t *testing.T) {
 	require.Empty(t, cookie.PresenceKey)
 
 	tok := &model.APIToken{ID: 5, UserID: 1, Label: "work-panel"}
-	viaToken := mintVia(t, admin, tok, nil)
-	require.Equal(t, "work-panel", viaToken.Name, "token auth shows the token label, not the owner account")
-	require.Equal(t, "tok-5", viaToken.PresenceKey,
-		"keyless token connections default to their own identity so they don't collide with the owner's cookie session")
+	viaToken := mintVia(t, admin, tok, "", nil)
+	require.Equal(t, "work-panel", viaToken.Name, "no usernames configured → the label IS the default username")
+	require.Equal(t, "tok-5-work-panel", viaToken.PresenceKey,
+		"keyless token connections default to their own (token, username) identity")
 
-	stamped := mintVia(t, admin, tok, map[string]string{
+	// A token with a username allow-list + the middleware-resolved selection.
+	named := &model.APIToken{ID: 6, UserID: 1, Label: "shared", Usernames: "work,fishapp"}
+	require.Equal(t, "work", mintVia(t, admin, named, "", nil).Name, "default = first allow-list entry")
+	sel := mintVia(t, admin, named, "fishapp", nil)
+	require.Equal(t, "fishapp", sel.Name, "the resolved X-Filex-Token-User wins")
+	require.Equal(t, "tok-6-fishapp", sel.PresenceKey)
+
+	// Proxy-stamped real person combines with the token username.
+	stamped := mintVia(t, admin, named, "work", map[string]string{
 		"X-Filex-Presence-Name": "  Burak  Fun ",
 		"X-Filex-Presence-Key":  "work-7",
 	})
-	require.Equal(t, "Burak Fun", stamped.Name)
+	require.Equal(t, "Burak Fun (work)", stamped.Name)
 	require.Equal(t, "work-7", stamped.PresenceKey)
 
-	badKey := mintVia(t, admin, tok, map[string]string{
+	badKey := mintVia(t, admin, tok, "", map[string]string{
 		"X-Filex-Presence-Key": "kötü anahtar!",
 	})
-	require.Equal(t, "tok-5", badKey.PresenceKey,
+	require.Equal(t, "tok-5-work-panel", badKey.PresenceKey,
 		"malformed keys are dropped entirely and fall back to the token's own identity")
 
 	// HTTP headers are latin-1 territory — proxies RFC 2047-encode non-ASCII
 	// names (Turkish characters) and the mint must decode them.
-	encoded := mintVia(t, admin, tok, map[string]string{
+	encoded := mintVia(t, admin, tok, "", map[string]string{
 		"X-Filex-Presence-Name": mime.BEncoding.Encode("utf-8", "Gökçil Ayşe"),
 		"X-Filex-Presence-Key":  "work-8",
 	})
-	require.Equal(t, "Gökçil Ayşe", encoded.Name)
+	require.Equal(t, "Gökçil Ayşe (work-panel)", encoded.Name)
+}
+
+// TestTokenUsernameResolution locks the ResolveUsername contract the auth
+// middlewares enforce: empty → default, allow-listed → chosen, anything
+// else → rejected (the request must 403, not silently blend into default).
+func TestTokenUsernameResolution(t *testing.T) {
+	tok := &model.APIToken{ID: 9, Label: "anahtar", Usernames: "work,fishapp"}
+
+	got, ok := tok.ResolveUsername("")
+	require.True(t, ok)
+	require.Equal(t, "work", got)
+
+	got, ok = tok.ResolveUsername("fishapp")
+	require.True(t, ok)
+	require.Equal(t, "fishapp", got)
+
+	_, ok = tok.ResolveUsername("saldirgan")
+	require.False(t, ok)
+
+	// Legacy token (no list): only empty or the label itself resolve.
+	legacy := &model.APIToken{ID: 10, Label: "eski"}
+	got, ok = legacy.ResolveUsername("")
+	require.True(t, ok)
+	require.Equal(t, "eski", got)
+	got, ok = legacy.ResolveUsername("eski")
+	require.True(t, ok)
+	require.Equal(t, "eski", got)
+	_, ok = legacy.ResolveUsername("baska")
+	require.False(t, ok)
 }
 
 // TestWSUnauthorized: no user in context → 101 upgrade is refused with 401.

@@ -679,7 +679,7 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 		uid := u.ID
 		userID = &uid
 	}
-	opts := share.CreateOpts{NodeID: node.ID, PIN: pinVal, CreatedBy: userID}
+	opts := share.CreateOpts{NodeID: node.ID, PIN: pinVal, CreatedBy: userID, CreatedVia: auth.TokenUserFrom(ctx)}
 	if expiresInDays > 0 {
 		t := time.Now().AddDate(0, 0, expiresInDays)
 		opts.ExpiresAt = &t

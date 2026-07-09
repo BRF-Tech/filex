@@ -215,6 +215,8 @@ export interface AuditEntry {
   ip: string | null;
   user_agent: string | null;
   details: Record<string, unknown> | null;
+  /** Backend metadata_json — token-authenticated writes carry token_id + token_username. */
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface Share {
@@ -232,6 +234,8 @@ export interface Share {
   max_downloads?: number | null;
   download_count?: number;
   created_by?: string | number;
+  /** Token username the creating API call acted under ("work", "fishapp"…). */
+  created_via?: string;
   created_at?: string;
   /** Legacy boolean — older callers. */
   revoked?: boolean;

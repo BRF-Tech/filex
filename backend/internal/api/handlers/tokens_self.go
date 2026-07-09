@@ -49,9 +49,10 @@ func (h *SelfTokens) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type selfTokenCreateReq struct {
-	Label         string `json:"label"`
-	Scopes        string `json:"scopes,omitempty"`
-	ExpiresInDays int    `json:"expires_in_days,omitempty"`
+	Label         string   `json:"label"`
+	Scopes        string   `json:"scopes,omitempty"`
+	Usernames     []string `json:"usernames,omitempty"`
+	ExpiresInDays int      `json:"expires_in_days,omitempty"`
 }
 
 // Create mints a token bound to the caller with capped scopes.
@@ -71,6 +72,11 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
 	}
+	usernames, uerr := normalizeUsernames(req.Usernames)
+	if uerr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": uerr.Error()})
+		return
+	}
 	plain, gerr := generateToken()
 	if gerr != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
@@ -81,6 +87,7 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 		Label:     strings.TrimSpace(req.Label),
 		TokenHash: apitoken.HashToken(plain),
 		Scopes:    scopes,
+		Usernames: usernames,
 	}
 	if req.ExpiresInDays > 0 {
 		exp := time.Now().AddDate(0, 0, req.ExpiresInDays)
@@ -95,6 +102,64 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 		"token": plain, // shown ONCE
 		"row":   created,
 	})
+}
+
+// Update edits one of the caller's own tokens (label / usernames; ownership
+// enforced — the credential and scopes stay immutable here).
+//
+//	PATCH /api/tokens/{id}
+func (h *SelfTokens) Update(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFrom(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if !h.ownsToken(r.Context(), u.ID, id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "token not found"})
+		return
+	}
+	var body updateTokenBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	var label, usernames *string
+	if body.Label != nil {
+		l := strings.TrimSpace(*body.Label)
+		label = &l
+	}
+	if body.Usernames != nil {
+		un, uerr := normalizeUsernames(*body.Usernames)
+		if uerr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": uerr.Error()})
+			return
+		}
+		usernames = &un
+	}
+	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ownsToken reports whether token id belongs to user uid.
+func (h *SelfTokens) ownsToken(ctx context.Context, uid, id int64) bool {
+	mine, err := h.store.ListAPITokensByUser(ctx, uid)
+	if err != nil {
+		return false
+	}
+	for _, t := range mine {
+		if t.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Delete revokes one of the caller's own tokens (ownership enforced).
