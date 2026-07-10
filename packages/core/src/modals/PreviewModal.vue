@@ -913,7 +913,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
               :disabled="!mdDirty || mdSaving"
               @click="saveMarkdown"
             >
-              {{ mdSaving ? 'Kaydediliyor…' : (mdDirty ? 'Kaydet (Ctrl+S)' : 'Kaydedildi') }}
+              {{ mdSaving ? t('viewer.saving') : (mdDirty ? t('viewer.save') : t('viewer.saved')) }}
             </button>
           </div>
           <div class="fe-preview__md-split-body">
@@ -973,18 +973,18 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
           <div class="fe-preview__code-toolbar">
             <span class="fe-preview__code-lang">{{ codeLanguage }}</span>
             <span v-if="!monacoReady && codeHtml" class="fe-preview__code-status">
-              {{ saveTextEndpoint ? 'Editör yükleniyor…' : 'Salt okunur' }}
+              {{ saveTextEndpoint ? t('viewer.editor_loading') : t('viewer.read_only') }}
             </span>
-            <span v-if="saveOk" class="fe-preview__code-status fe-preview__code-status--ok">✓ Kaydedildi</span>
-            <span v-if="saveError" class="fe-preview__code-status fe-preview__code-status--err" :title="saveError">✗ Hata</span>
-            <span v-if="openMode === 'view'" class="fe-preview__code-status">Salt okunur</span>
+            <span v-if="saveOk" class="fe-preview__code-status fe-preview__code-status--ok">✓ {{ t('viewer.saved') }}</span>
+            <span v-if="saveError" class="fe-preview__code-status fe-preview__code-status--err" :title="saveError">✗ {{ t('viewer.save_error') }}</span>
+            <span v-if="openMode === 'view'" class="fe-preview__code-status">{{ t('viewer.read_only') }}</span>
             <button
               v-else-if="saveTextEndpoint && monacoReady"
               type="button"
               class="fe-btn fe-btn--primary"
               :disabled="saving"
               @click="saveCode"
-            >{{ saving ? 'Kaydediliyor…' : 'Kaydet (Ctrl+S)' }}</button>
+            >{{ saving ? t('viewer.saving') : t('viewer.save') }}</button>
           </div>
           <!-- Monaco target — hidden until ready, then occupies the slot. -->
           <div ref="monacoEl" class="fe-preview__code-editor" :class="{ 'is-hidden': !monacoReady }" />
@@ -1005,7 +1005,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
         <div v-if="officeError" class="fe-preview__fallback">
           <span class="fe-preview__fallback-icon">📄</span>
           <p>{{ officeError }}</p>
-          <a :href="download" class="fe-btn fe-btn--primary">İndir</a>
+          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
         </div>
         <div v-else ref="officeEl" class="fe-preview__office" />
       </template>
@@ -1013,8 +1013,8 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
       <template v-else>
         <div class="fe-preview__fallback">
           <span class="fe-preview__fallback-icon">📎</span>
-          <p>Bu dosya tipi için önizleme henüz yok.</p>
-          <a :href="download" class="fe-btn fe-btn--primary">İndir</a>
+          <p>{{ t('viewer.no_preview') }}</p>
+          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
         </div>
       </template>
     </div>
@@ -1024,7 +1024,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
         type="button"
         class="fe-btn fe-btn--primary"
         @click="openEditInNewTab"
-      >✏ Düzenle</button>
+      >✏ {{ t('viewer.edit') }}</button>
       <button
         v-if="file"
         type="button"
@@ -1032,7 +1032,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
         @click="openInNewTab"
       >↗ {{ t('viewer.open_in_new_tab') }}</button>
       <a v-if="file" :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
-      <button type="button" class="fe-btn" @click="emit('close')">Kapat</button>
+      <button type="button" class="fe-btn" @click="emit('close')">{{ t('viewer.close') }}</button>
     </template>
   </Modal>
 </template>

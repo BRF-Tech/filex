@@ -21,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 // aiOps is the storage-facing core shared by the AI REST handler and the
@@ -33,10 +34,11 @@ import (
 type aiOps struct {
 	store      db.Store
 	resolver   func(int64) (storage.Driver, error)
-	share      *share.Service // optional — nil disables file_share/unshare
-	publicURL  string         // base for /s/<token> links
-	convertURL string         // external converter URL (empty = not configured)
-	acl        *acl.Resolver  // RBAC — nil disables per-user grant enforcement
+	share      *share.Service  // optional — nil disables file_share/unshare
+	publicURL  string          // base for /s/<token> links
+	convertURL string          // external converter URL (empty = not configured)
+	acl        *acl.Resolver   // RBAC — nil disables per-user grant enforcement
+	thumbs     *thumb.Pipeline // optional — nil skips thumbnail dispatch (manager-upload parity)
 }
 
 // allow reports whether the bound user has at least `need` on rel within s.
@@ -991,12 +993,15 @@ func (a *aiOps) cacheUpsertFile(ctx context.Context, s *model.Storage, rel strin
 	hash := managerPathHash(s.ID, clean)
 	if existing, _ := a.store.GetNodeByPath(ctx, s.ID, hash); existing != nil {
 		_ = a.store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
+		existing.Size = size
+		existing.Mime = mime
+		a.dispatchThumb(existing)
 		return
 	}
 	if perr != nil {
 		return
 	}
-	_, _ = a.store.CreateNode(ctx, &model.Node{
+	node, _ := a.store.CreateNode(ctx, &model.Node{
 		StorageID:  s.ID,
 		ParentID:   parentID,
 		Name:       path.Base(clean),
@@ -1008,6 +1013,33 @@ func (a *aiOps) cacheUpsertFile(ctx context.Context, s *model.Storage, rel strin
 		Mime:       mime,
 		SyncState:  model.SyncStateSynced,
 	})
+	a.dispatchThumb(node)
+}
+
+// dispatchThumb fires async thumbnail generation for a freshly written file —
+// the same behaviour manager uploads get in upload.go. AI-surface writes
+// (upload, write, unzip) previously skipped this entirely, so agent-uploaded
+// images showed the broken-image placeholder in grid view (issue #3). Nil
+// pipeline (tests / thumbs disabled) and nil node are no-ops; generation is
+// not part of the write SLA.
+func (a *aiOps) dispatchThumb(node *model.Node) {
+	if a.thumbs == nil || node == nil {
+		return
+	}
+	go func(n *model.Node) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Warn("ai: thumbnail panic", slog.Any("recover", rec))
+			}
+		}()
+		tctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := a.thumbs.GenerateThumb(tctx, n); err != nil && err != thumb.ErrSkipped {
+			slog.Warn("ai: thumbnail dispatch",
+				slog.Int64("node", n.ID),
+				slog.String("err", err.Error()))
+		}
+	}(node)
 }
 
 func (a *aiOps) cacheUpsertDir(ctx context.Context, s *model.Storage, rel string) {

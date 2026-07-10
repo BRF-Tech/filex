@@ -193,7 +193,7 @@ function startOidc() {
           <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.openTitle') }}</h3>
           <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
             {{ t('demo.features.openBody') }}
-            <a class="text-brand-600 dark:text-brand-400 hover:underline" href="https://github.com/brf-tech/filex" target="_blank" rel="noopener">github.com/brf-tech/filex</a>
+            <a class="text-brand-600 dark:text-brand-400 hover:underline" href="https://github.com/BRF-Tech/filex" target="_blank" rel="noopener">github.com/BRF-Tech/filex</a>
           </p>
         </div>
       </div>

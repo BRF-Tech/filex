@@ -556,8 +556,8 @@
       "notifyBody": "Generic JSON webhook + in-app bell + okundu/okunmadı + per-user mute.",
       "authTitle": "Auth çoklu",
       "authBody": "local (bcrypt), Keycloak OIDC, LDAP, proxy-header (Cloudflare Access / oauth2-proxy).",
-      "openTitle": "Açık kaynak (yakında)",
-      "openBody": "MIT, monorepo + GitLab CI:"
+      "openTitle": "Açık kaynak · MIT",
+      "openBody": "MIT lisanslı — kod, doküman ve release'ler:"
     }
   },
   "queue": {

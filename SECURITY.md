@@ -12,6 +12,7 @@ on `main` and in the next tag. Please run a recent version.
 Report privately instead — use this repository's **private vulnerability
 reporting**: the **Security** tab → **Report a vulnerability** (GitHub Security
 Advisories). This opens a channel visible only to the maintainers.
+Alternatively, e-mail **security@brf.sh**.
 
 Include, where possible:
 

@@ -15,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/version"
 )
 
@@ -42,12 +43,17 @@ type AIMCP struct {
 	publicURL  string
 	convertURL string
 	acl        *acl.Resolver
+	thumbs     *thumb.Pipeline
 	handler    http.Handler
 }
 
 // AttachACL wires the RBAC resolver so every per-request MCP tool op is gated
 // by the bound user's grants + role ceiling (same enforcement as the REST AI).
 func (h *AIMCP) AttachACL(r *acl.Resolver) { h.acl = r }
+
+// AttachThumbs wires the thumbnail pipeline so MCP tool writes dispatch
+// generation like manager uploads (nil = thumbnails skipped).
+func (h *AIMCP) AttachThumbs(p *thumb.Pipeline) { h.thumbs = p }
 
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
@@ -75,6 +81,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	}
 	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
 	ops.acl = h.acl
+	ops.thumbs = h.thumbs
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",

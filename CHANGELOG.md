@@ -7,7 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.68 below.)
+(Nothing yet — see v0.1.82 below.)
+
+## [0.1.82] - 2026-07-10
+
+### Fixed
+
+- **i18n:** viewer strings (save chip, Edit / Close / Download buttons,
+  read-only and no-preview labels) and the presence-bar toggle tooltip now
+  follow the UI locale instead of leaking Turkish into English sessions (#2).
+- **Thumbnails for AI-surface writes:** files written through `/api/ai/upload`,
+  the `file_write` MCP tool, unzip and ShareX captures now dispatch thumbnail
+  generation exactly like manager uploads — agent-uploaded images no longer
+  show the broken-image placeholder in grid view (#3).
+- **Demo landing:** the stale "Open source (soon)" card now reads
+  "Open source · MIT" and links to the public GitHub repository (#4).
+
+## [0.1.81] - 2026-07-09
+
+### Added
+
+- **Per-token identities** (`X-Filex-Token-User`): an API token can define a
+  list of usernames (first = default); the audit log, shares (`created_via`)
+  and presence are attributed per integration. Unknown username → 403.
+- `PATCH /api/admin/ai-tokens/{id}` and `PATCH /api/tokens/{id}` — token
+  editing (label / usernames) which previously did not exist.
+- `/api/ai/*` and `/api/sharex` writes are now audit-logged.
+
+## [0.1.80] - 2026-07-09
+
+### Fixed
+
+- **Embedded grid thumbnails**: thumbs are now fetched with the same auth chain
+  as API calls (bearer/proxy) and rendered from blob object-URLs, so embedded
+  web-component and PWA contexts show real previews instead of broken images.
+
+### Added
+
+- Presence bar expand/collapse toggle — full-name chips with horizontal scroll,
+  preference persisted per browser.
+
+## [0.1.79] - 2026-07-09
+
+### Fixed
+
+- **Presence shows real user identities** in embedded contexts: host proxies
+  stamp `X-Filex-Presence-Name` (RFC 2047) + `X-Filex-Presence-Key`, spoofing
+  headers are stripped, rosters exclude self, and renames follow focus.
+- `realtimeRoom` no longer subscribes to a mis-qualified room in single-storage
+  embeds (the root cause of live updates never arriving there).
+
+## [0.1.74] – [0.1.78] - 2026-07-08/09
+
+### Added
+
+- **Real-time collaboration**: `/api/ws` WebSocket presence + live folder
+  updates in the core component (native UI *and* embedded contexts via
+  short-lived tickets from `POST /api/files/ws-ticket`), API-polling fallback.
+- **Folder-share ZIP cache** keyed by content signature, a 5-minute warmer and
+  a "preparing %" page for cold hits.
+- **ShareX endpoint** (`POST /api/sharex/upload`) returning a ready public link.
+
+### Fixed
+
+- Confined (embedded) WebSocket contexts: optional-auth route, ticket-bound
+  RBAC user, relative→absolute room mapping, per-client frame paths.
+
+## [0.1.69] – [0.1.73] - 2026-07-07
+
+### Added
+
+- **Deep links**: the address bar tracks the open folder (`#storage/dir`);
+  pasting a link opens that folder, login preserves the hash.
+- Web Share (`navigator.share`) button in the share modal.
+
+### Fixed
+
+- Ghost folders now 404 (S3 empty-prefix verification); unauthorized folders
+  render the same "not found" screen (no RBAC information leak).
+- `GET /api/files/share` list route existed in the UI but not the backend —
+  "existing links" no longer always empty.
 
 ## [0.1.68] - 2026-07-06
 

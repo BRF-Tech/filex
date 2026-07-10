@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex-core",
-  "version": "0.1.56",
+  "version": "0.1.82",
   "description": "filex core — Vue 3 source of truth for the filex file manager (FileExplorer SFC + composables + types)",
   "type": "module",
   "main": "./dist/filex-core.umd.cjs",
@@ -47,18 +47,42 @@
     "katex": "*"
   },
   "peerDependenciesMeta": {
-    "monaco-editor": { "optional": true },
-    "highlight.js": { "optional": true },
-    "markdown-it": { "optional": true },
-    "codemirror": { "optional": true },
-    "@google/model-viewer": { "optional": true },
-    "epubjs": { "optional": true },
-    "mermaid": { "optional": true },
-    "utif": { "optional": true },
-    "ag-psd": { "optional": true },
-    "pdfjs-dist": { "optional": true },
-    "papaparse": { "optional": true },
-    "katex": { "optional": true }
+    "monaco-editor": {
+      "optional": true
+    },
+    "highlight.js": {
+      "optional": true
+    },
+    "markdown-it": {
+      "optional": true
+    },
+    "codemirror": {
+      "optional": true
+    },
+    "@google/model-viewer": {
+      "optional": true
+    },
+    "epubjs": {
+      "optional": true
+    },
+    "mermaid": {
+      "optional": true
+    },
+    "utif": {
+      "optional": true
+    },
+    "ag-psd": {
+      "optional": true
+    },
+    "pdfjs-dist": {
+      "optional": true
+    },
+    "papaparse": {
+      "optional": true
+    },
+    "katex": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

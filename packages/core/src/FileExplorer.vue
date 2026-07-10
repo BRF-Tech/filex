@@ -1787,7 +1787,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
 
     <!-- Live presence: who else is viewing this folder (empty → nothing shown). -->
     <div v-if="presenceUsers.length" class="fe__presence">
-      <PresenceBar :users="presenceUsers" />
+      <PresenceBar :users="presenceUsers" :locale="locale" />
     </div>
 
     <div class="fe__body" @click.self="selection.clear()">

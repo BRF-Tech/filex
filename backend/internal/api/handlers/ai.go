@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 // AI is the token-authenticated REST surface consumed by AI agents and the
@@ -44,6 +45,10 @@ func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSv
 // AttachACL wires the RBAC resolver into the AI REST surface's ops core so
 // every /api/ai file op is gated by the bound user's grants + role ceiling.
 func (h *AI) AttachACL(r *acl.Resolver) { h.ops.acl = r }
+
+// AttachThumbs wires the thumbnail pipeline so AI-surface writes dispatch
+// generation like manager uploads (nil = thumbnails skipped).
+func (h *AI) AttachThumbs(p *thumb.Pipeline) { h.ops.thumbs = p }
 
 // List → GET /api/ai/files?path=<adapter://dir>
 func (h *AI) List(w http.ResponseWriter, r *http.Request) {

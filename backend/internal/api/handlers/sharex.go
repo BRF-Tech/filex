@@ -11,6 +11,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 // ShareX is the token-authenticated endpoint that lets ShareX (the Windows
@@ -60,6 +61,10 @@ func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), sha
 // AttachACL wires the RBAC resolver so the write + share both enforce the bound
 // user's grants (≥editor on the target), mirroring the AI surface.
 func (h *ShareX) AttachACL(r *acl.Resolver) { h.ops.acl = r }
+
+// AttachThumbs wires the thumbnail pipeline so captures get grid thumbnails
+// like manager uploads (nil = thumbnails skipped).
+func (h *ShareX) AttachThumbs(p *thumb.Pipeline) { h.ops.thumbs = p }
 
 // Upload accepts a ShareX multipart capture (`file`), stores + indexes it, mints
 // a public inline-viewable share, and returns {"url": …}.

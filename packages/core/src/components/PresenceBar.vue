@@ -8,11 +8,16 @@
 
 import { computed, ref } from 'vue';
 import type { PresenceUser } from '../lib/realtime';
+import type { LocaleCode } from '../types/ExplorerConfig';
+import { useLocale } from '../composables/useLocale';
 
 const props = defineProps<{
   users: PresenceUser[];
   selfId?: number | null;
+  locale?: LocaleCode;
 }>();
+
+const { t } = useLocale(() => props.locale ?? 'tr');
 
 const others = computed(() =>
   (props.users ?? []).filter((u) => props.selfId == null || u.id !== props.selfId),
@@ -113,7 +118,7 @@ function label(u: PresenceUser): string {
     <button
       type="button"
       class="fx-presence-toggle"
-      :title="expanded ? 'Küçült' : 'İsimleri göster'"
+      :title="expanded ? t('presence.collapse') : t('presence.expand')"
       :aria-expanded="expanded"
       @click="toggleExpanded"
     >{{ expanded ? '‹' : '›' }}</button>

@@ -556,8 +556,8 @@
       "notifyBody": "Generic JSON webhook + in-app bell + read/unread + per-user mute.",
       "authTitle": "Auth-pluggable",
       "authBody": "local (bcrypt), Keycloak OIDC, LDAP, proxy-header (Cloudflare Access / oauth2-proxy).",
-      "openTitle": "Open source (soon)",
-      "openBody": "MIT, monorepo + GitLab CI:"
+      "openTitle": "Open source · MIT",
+      "openBody": "MIT licensed — code, docs & releases:"
     }
   },
   "queue": {

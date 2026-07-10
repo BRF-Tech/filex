@@ -537,6 +537,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// scopes set grants everything.
 	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
 	aiH.AttachACL(d.ACL)
+	aiH.AttachThumbs(d.Thumbs)
 	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
 		Store:           d.Store,
 		Caps:            d.Caps,
@@ -551,6 +552,7 @@ func BuildRouter(d *Deps) http.Handler {
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
 	aiMCP.AttachACL(d.ACL)
+	aiMCP.AttachThumbs(d.Thumbs)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		// Agents are tenant-scoped too — resolve the token user's provider
@@ -605,6 +607,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// returned (inline so images/text render in-browser).
 	sxUploadH := handlers.NewShareX(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
 	sxUploadH.AttachACL(d.ACL)
+	sxUploadH.AttachThumbs(d.Thumbs)
 	r.Route("/api/sharex", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
