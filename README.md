@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" alt="filex logo" width="96">
+
 # filex — self-hosted file manager that embeds anywhere
 
 [![Release](https://img.shields.io/github/v/release/BRF-Tech/filex?color=6366f1)](https://github.com/BRF-Tech/filex/releases)

@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png" alt="filex logo" width="72">
+
 # @brftech/filex-react
 
 React adapter for the [filex](https://github.com/brf-tech/filex)

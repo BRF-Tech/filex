@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png" alt="filex logo" width="72">
+
 # @brftech/filex
 
 Drop-in **`<filex-explorer>` Web Component** for the

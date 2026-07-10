@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png" alt="filex logo" width="72">
+
 # @brftech/filex-core
 
 Vue 3 source of truth for the **filex** file manager. Ships a single
