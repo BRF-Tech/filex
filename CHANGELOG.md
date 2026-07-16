@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.82 below.)
+(Nothing yet — see v0.1.83 below.)
+
+## [0.1.83] - 2026-07-16
+
+### Fixed
+
+- **Embedded explorers could not scroll in height-constrained hosts** (small
+  screens, mobile touch): three compounding layout issues fixed. The
+  web-component wrapper no longer forwards the host element's `style`/`class`
+  onto the inner `.fe` root (`inheritAttrs: false`) — an embedder's inline
+  `display:block` used to override `.fe{display:flex}` and collapse the
+  column layout. `.fe__body` gains `min-height: 0` so the flex body shrinks
+  to the remaining space and its `overflow:auto` actually engages. The
+  stylesheet now ships a `filex-explorer{display:block;height:100%}` default,
+  so embedders no longer need inline styles on the host element.
 
 ## [0.1.82] - 2026-07-10
 
