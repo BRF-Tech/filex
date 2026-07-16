@@ -23,7 +23,23 @@
 .fe__body {
   flex: 1 1 auto;
   overflow: auto;
+  /* Flexbox's default min-height:auto stops a flex item shrinking below its
+     content height — in a height-constrained embed the body would stay at
+     content height, its overflow:auto never engages and everything past the
+     fold is clipped (unreachable) by .fe's overflow:hidden. min-height:0
+     caps the body to the remaining space so internal (touch) scroll works. */
+  min-height: 0;
   background: var(--fe-bg);
+}
+
+/* Web-component host default: custom elements are display:inline, which
+   collapses the height chain. Declared here so embedders don't need inline
+   styles on <filex-explorer> — an inline style on the host falls through to
+   the .fe root (Vue attr fallthrough) where display:block would kill the
+   flex column and with it the internal scroll. */
+filex-explorer {
+  display: block;
+  height: 100%;
 }
 
 /* Live-presence strip (who else is in this folder) — shown under the breadcrumb. */

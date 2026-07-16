@@ -84,6 +84,15 @@ function buildConfig(
  * element by Vue itself when we `emit(...)` here.
  */
 const FilexExplorerWrapper = defineCustomElement({
+  /**
+   * Host attrs (style/class) must NOT fall through onto the inner `.fe`
+   * root: an embedder's `el.style.cssText = 'display:block;height:100%'`
+   * would get copied verbatim, and the inline display:block overrides the
+   * core `.fe{display:flex}` — the flex column collapses and internal
+   * scrolling dies in height-constrained embeds. The host element keeps
+   * its own style/class regardless (it is a real DOM element).
+   */
+  inheritAttrs: false,
   props: {
     /** Full ExplorerConfig as a JS property (preferred for complex shape). */
     config: {
