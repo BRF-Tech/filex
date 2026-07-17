@@ -106,6 +106,23 @@ export interface UserSearchResponse {
   users: UserSuggestion[];
 }
 
+/* === calisma:d3 — node comments (inspector panel) === */
+
+/** Mirrors backend `model.NodeComment` (GET /api/files/comments?node_id=…). */
+export interface NodeComment {
+  id: number;
+  node_id: number;
+  user_id: number;
+  body: string;
+  created_at: string;
+  updated_at?: string;
+  /** Joined author display name (email fallback), filled by the backend. */
+  author_name?: string;
+  /** Whether the CURRENT caller may delete this row (author or admin). */
+  can_delete?: boolean;
+}
+/* === /calisma:d3 === */
+
 export interface InviteResponse {
   mode: 'granted' | 'user_created' | 'shared';
   user_id?: number;
@@ -741,6 +758,38 @@ export function useFileApi(config: ExplorerConfig) {
   }
   /* === /koru:k1 === */
 
+  /* === calisma:d3 — node comments (inspector panel) ===
+   * Same manager-URL derivation trick as versions/permissions so embedded
+   * proxies forwarding the whole /api/files/* subtree keep working.
+   *   GET    /api/files/comments?node_id=N → {comments, node_id}
+   *   POST   /api/files/comments           → {node_id, body}
+   *   DELETE /api/files/comments/{id}      → {ok}
+   */
+  function commentsUrl(sub = ''): string {
+    const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/comments');
+    return base + sub;
+  }
+  async function listComments(nodeId: number): Promise<NodeComment[]> {
+    const data = await jsonFetch<{ comments?: NodeComment[] | null }>(
+      commentsUrl() + '?node_id=' + encodeURIComponent(String(nodeId)),
+    );
+    return Array.isArray(data?.comments) ? data.comments : [];
+  }
+  async function addComment(nodeId: number, body: string): Promise<NodeComment> {
+    const data = await jsonFetch<{ comment: NodeComment }>(commentsUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_id: nodeId, body }),
+    });
+    return data.comment;
+  }
+  async function deleteComment(id: number): Promise<void> {
+    await jsonFetch(commentsUrl('/' + encodeURIComponent(String(id))), {
+      method: 'DELETE',
+    });
+  }
+  /* === /calisma:d3 === */
+
   // Mint a short-lived WebSocket auth ticket for the realtime layer. Derived
   // from the manager URL (so it flows through the same host proxy) and uses the
   // same auth/creds as every other call. Returns null on any failure (a backend
@@ -790,6 +839,10 @@ export function useFileApi(config: ExplorerConfig) {
     listVersions,
     restoreVersion,
     snapshotVersion,
+    // Node comments (calisma:d3 inspector)
+    listComments,
+    addComment,
+    deleteComment,
     // Permissions (RBAC panel)
     listPermissions,
     resolveEmail,

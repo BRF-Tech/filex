@@ -3077,3 +3077,541 @@ filex-explorer {
   }
 }
 /* === /wiring:c4 === */
+
+/* === wiring:d1 — sekmeler (tab şeridi) + split panel === */
+
+/* Tab strip — thin row ABOVE the toolbar. The host renders it only with
+   2+ tabs, so the default single-tab embed stays pixel-identical. */
+.fe-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px 6px 0;
+  background: var(--fe-bg-elev);
+  border-bottom: 1px solid var(--fe-border);
+  user-select: none;
+}
+.fe-tabs__scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.fe-tabs__tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  min-width: 72px;
+  padding: 4px 6px 4px 10px;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+}
+.fe-tabs__tab:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-tabs__tab.is-active {
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  border-color: var(--fe-border);
+}
+/* Mask the strip's bottom border under the active tab (connected look). */
+.fe-tabs__tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--fe-bg);
+}
+.fe-tabs__tab.is-dragover {
+  outline: 1px dashed var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-tabs__tab:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-tabs__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-tabs__splitdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--fe-primary);
+  flex: 0 0 auto;
+}
+.fe-tabs__close {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+.fe-tabs__close:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-tabs__new,
+.fe-tabs__split {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0;
+}
+.fe-tabs__split .fe-ficon {
+  width: 14px;
+  height: 14px;
+}
+.fe-tabs__new:hover,
+.fe-tabs__split:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-tabs__split.is-active {
+  background: var(--fe-bg-selected);
+  color: var(--fe-primary);
+  border-color: var(--fe-border);
+}
+/* Narrow embeds: split disabled — the host already hides the button via
+   prop; this is belt & braces. */
+.fe--narrow .fe-tabs__split {
+  display: none;
+}
+
+/* Split layout — equal halves inside fe__main; the inspector (koru:k1)
+   keeps its fixed width to the right of both. */
+.fe__main--split > .fe__body {
+  flex: 1 1 50%;
+}
+.fe-split {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+}
+/* Active-panel accent: a thin top line on whichever pane owns the keyboard. */
+.fe__main--split > .fe__body,
+.fe-split {
+  box-shadow: inset 0 2px 0 transparent;
+}
+.fe__main--split > .fe__body.fe-pane--focus,
+.fe-split.fe-pane--focus {
+  box-shadow: inset 0 2px 0 var(--fe-primary);
+}
+
+.fe-split__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--fe-border);
+  font-size: 12px;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.fe-split__crumb {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 5px;
+  border-radius: 5px;
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-split__crumb:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-split__crumb.is-last {
+  color: var(--fe-text);
+  font-weight: 600;
+}
+.fe-split__sep {
+  opacity: 0.6;
+  flex: 0 0 auto;
+}
+.fe-split__spacer {
+  flex: 1 1 auto;
+}
+.fe-split__closebtn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.fe-split__closebtn:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+
+.fe-split__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+.fe-split__body.is-dropover {
+  outline: 2px dashed var(--fe-primary);
+  outline-offset: -4px;
+}
+.fe-split__list {
+  padding: 4px 0;
+}
+.fe-split__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: default;
+}
+.fe-split__row:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-split__row.is-selected {
+  background: var(--fe-bg-selected);
+}
+.fe-split__row.is-droptarget {
+  outline: 1.5px dashed var(--fe-primary);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.fe-split__row:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-split__icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+.fe-split__icon .fe-ficon {
+  width: 16px;
+  height: 16px;
+}
+.fe-split__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-split__size {
+  flex: 0 0 auto;
+  color: var(--fe-text-muted);
+  font-size: 11.5px;
+}
+.fe-split__state {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--fe-text-muted);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+/* === /wiring:d1 === */
+
+/* === wiring:d2 — galeri görünümü (GalleryView.vue) === */
+
+/* Büyük thumbnail ızgarası: kare kartlar, ad altta, boyut+tarih hover'da. */
+.fe-gal {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--fe-gap);
+  padding: var(--fe-gap);
+}
+.fe-gal__card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.08s, border-color 0.08s;
+  user-select: none;
+}
+.fe-gal__card:hover {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-gal__card.is-selected {
+  background: var(--fe-bg-selected);
+  border-color: var(--fe-primary);
+}
+.fe-gal__card.is-trash {
+  opacity: 0.7;
+}
+.fe-gal__card.is-clipped {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.fe-gal__card:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+.fe-gal__card.is-droptarget {
+  outline: 2px dashed var(--fe-primary);
+  outline-offset: -2px;
+  background: var(--fe-bg-selected);
+  border-color: var(--fe-primary);
+}
+.fe-gal__thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  background: var(--fe-bg);
+  overflow: hidden;
+}
+.fe-gal__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.fe-gal__icon {
+  font-size: 44px;
+}
+.fe-gal__icon--svg svg {
+  width: 64px;
+  height: 64px;
+}
+/* Hover meta bandı — thumbnail'ın altına oturan yarı saydam şerit; yalnız
+   hover/klavye odağında görünür (dokunmatikte kartın title'ı yeterli). */
+.fe-gal__meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--fe-text);
+  background: color-mix(in srgb, var(--fe-bg-elev) 88%, transparent);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+}
+.fe-gal__card:hover .fe-gal__meta,
+.fe-gal__card:focus-visible .fe-gal__meta {
+  opacity: 1;
+  transform: translateY(0);
+}
+.fe-gal__meta-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-gal__meta-line--path {
+  color: var(--fe-text-muted);
+  font-style: italic;
+}
+.fe-gal__label {
+  padding: 7px 9px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+.fe-gal__empty {
+  grid-column: 1 / -1;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--fe-text-muted);
+}
+/* Dar/embed mini modda daha küçük döşemeler (2-3 sütun sığar). */
+.fe--narrow .fe-gal {
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+}
+/* Yoğunluk: kompakt tercihte döşemeler küçülür (grid'le aynı mantık). */
+.fe--density-compact .fe-gal {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: calc(var(--fe-gap) * 0.6);
+}
+.fe--density-compact .fe-gal__label {
+  padding: 5px 7px;
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-gal__card,
+  .fe-gal__meta {
+    transition: none !important;
+    transform: none;
+  }
+}
+/* === /wiring:d2 === */
+
+/* === wiring:d3 — inspector Yorumlar (node comments) === */
+.fe-inspector__countbadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+  vertical-align: middle;
+}
+
+.fe-inspector__comments {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fe-inspector__comment {
+  border: 1px solid var(--fe-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--fe-bg);
+}
+.fe-inspector__comment-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.fe-inspector__comment-author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fe-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.fe-inspector__comment-time {
+  font-size: 11px;
+  color: var(--fe-text-muted);
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+.fe-inspector__comment-del {
+  border: none;
+  background: none;
+  color: var(--fe-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+.fe-inspector__comment-del:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-danger);
+}
+.fe-inspector__comment-del:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.fe-inspector__comment-body {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fe-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.fe-inspector__comment-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.fe-inspector__comment-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--fe-border);
+  border-radius: 8px;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.fe-inspector__comment-input:focus {
+  outline: none;
+  border-color: var(--fe-accent);
+}
+.fe-inspector__comment-input:disabled {
+  opacity: 0.6;
+}
+/* === /wiring:d3 === */

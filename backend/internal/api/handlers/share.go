@@ -562,6 +562,13 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// cache builds. serveFolderZip owns the download-count increment (only on a
 	// real byte serve, not status polls / the wait page).
 	if node.Type == model.NodeTypeDirectory {
+		/* wiring:d2 — zip parametresi YOKSA klasör paylaşımı artık gezinme
+		   sayfası gösterir (≥%60 görsel/video → galeri, değilse liste);
+		   ZIP akışı sayfadaki "Tümünü indir" → ?zip=… arkasında aynen durur. */
+		if r.URL.Query().Get("zip") == "" {
+			h.renderFolderBrowse(r.Context(), w, r, drv, node, resolved, pin)
+			return
+		}
 		h.serveFolderZip(r.Context(), w, r, drv, node.Path, node.Name, node.ID, resolved.ID, pin)
 		return
 	}

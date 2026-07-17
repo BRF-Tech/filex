@@ -313,6 +313,17 @@ type Store interface {
 	GetReplicaSettings(ctx context.Context) (*model.ReplicaSettings, error)
 	UpsertReplicaSettings(ctx context.Context, s *model.ReplicaSettings) error
 
+	/* calisma:d3 comments */
+	// Node comments (migration 00020) — flat chronological threads on
+	// file/folder nodes. List excludes soft-deleted rows and joins the
+	// author display name; hard removal happens via the nodes FK CASCADE
+	// plus DeleteNodeCommentsByNode in the trash purge hook.
+	CreateNodeComment(ctx context.Context, c *model.NodeComment) (*model.NodeComment, error)
+	GetNodeComment(ctx context.Context, id int64) (*model.NodeComment, error)
+	ListNodeComments(ctx context.Context, nodeID int64) ([]*model.NodeComment, error)
+	SoftDeleteNodeComment(ctx context.Context, id int64) error
+	DeleteNodeCommentsByNode(ctx context.Context, nodeID int64) error
+
 	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
 	// mode is off; a single "default" provider always exists (migration 00014).
 	CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error)

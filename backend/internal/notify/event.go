@@ -65,6 +65,11 @@ const (
 	// uploaded file; the payload carries the node plus a `signature`
 	// meta field, and the file is quarantined into trash.
 	EventFileInfected EventType = "file.infected"
+	/* calisma:d3 comments */
+	// EventCommentAdded fires when a user comments on a file/folder
+	// node (v0.6 "Çalışma"). The payload carries the node (path/name),
+	// the actor, and meta {comment_id, body (first 200 chars)}.
+	EventCommentAdded EventType = "comment.added"
 )
 
 // NodeRef identifies the file/folder an event is about (webhook v2

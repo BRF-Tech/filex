@@ -184,7 +184,8 @@ func BuildRouter(d *Deps) http.Handler {
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
 	r.Get("/s/{token}", sh.HandleDownload)
-	r.Post("/s/{token}", sh.HandleDownload) // PIN form posts to same URL
+	r.Post("/s/{token}", sh.HandleDownload)      // PIN form posts to same URL
+	r.Get("/s/{token}/f/*", sh.HandleBrowseFile) /* wiring:d2 — klasör paylaşımı alt-dosya (galeri/liste sayfası) */
 
 	// ────── public file-drop (upload link) ──────
 	// GET renders the upload page (PIN gate first when protected); POST is
@@ -380,6 +381,16 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/", metaH.ListRecent)
 				r.Post("/", metaH.SetRecent)
 			})
+
+			/* calisma:d3 comments */
+			// Node comments — flat chronological threads on files/folders
+			// (v0.6 "Çalışma"). Read+write = anyone who can SEE the node;
+			// delete = author-or-admin (both enforced in the handler).
+			cmtH := handlers.NewComments(d.Store)
+			cmtH.AttachACL(d.ACL)
+			r.Get("/comments", cmtH.List)
+			r.Post("/comments", cmtH.Create)
+			r.Delete("/comments/{id}", cmtH.Delete)
 
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)

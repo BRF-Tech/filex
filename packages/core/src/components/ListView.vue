@@ -361,6 +361,7 @@ const segments = computed<Segment[]>(() => {
         tabindex="0"
         :aria-selected="isSelected(n) ? 'true' : 'false'"
         :aria-label="nodeDisplayName(n) /* wiring:c4 */"
+        :data-fe-path="n.path /* wiring:d1 — orta-tık yeni sekme delegasyonu */"
         draggable="true"
         @click="onRowClick(n, $event)"
         @dblclick="onRowDbl(n)"

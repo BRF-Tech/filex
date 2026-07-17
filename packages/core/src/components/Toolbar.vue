@@ -221,11 +221,12 @@ const moreActions = computed<ContextAction[]>(() => {
         : t('toolbar.density.compact'),
     icon: '⇅',
   });
-  list.push(
-    props.viewMode === 'list'
-      ? { key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' }
-      : { key: 'view-list', label: t('toolbar.view.list'), icon: '☰' },
-  );
+  /* wiring:d2 — dar mod ⋯ menüsü: aktif olmayan İKİ görünüm de listelenir
+     (list/grid/gallery); eski tekli toggle üç modda eksik kalıyordu. */
+  if (props.viewMode !== 'list') list.push({ key: 'view-list', label: t('toolbar.view.list'), icon: '☰' });
+  if (props.viewMode !== 'grid') list.push({ key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' });
+  if (props.viewMode !== 'gallery') list.push({ key: 'view-gallery', label: t('toolbar.view.gallery'), icon: '▣' });
+  /* /wiring:d2 */
   /* koru:k1 — inspector toggle also reachable from the narrow overflow menu */
   list.push({ key: 'inspector', label: t('toolbar.inspector'), icon: 'ℹ' });
   /* wiring:c1 — tema galerisi de dar modda ⋯ menüsünden açılır */
@@ -256,6 +257,9 @@ function onMoreSelect(a: ContextAction) {
       break;
     case 'view-grid':
       emit('update:viewMode', 'grid');
+      break;
+    case 'view-gallery' /* wiring:d2 */:
+      emit('update:viewMode', 'gallery');
       break;
     case 'inspector' /* koru:k1 */:
       emit('toggle-inspector');
@@ -487,6 +491,20 @@ function onMoreSelect(a: ContextAction) {
       >
         <span class="fe-icon" aria-hidden="true">▦</span>
       </button>
+      <!-- wiring:d2 — üçüncü görünüm: galeri -->
+      <button
+        type="button"
+        class="fe-btn fe-btn--icon-only"
+        :class="{ 'is-active': viewMode === 'gallery' }"
+        role="tab"
+        :aria-selected="viewMode === 'gallery'"
+        :title="t('toolbar.view.gallery')"
+        :aria-label="t('toolbar.view.gallery')"
+        @click="emit('update:viewMode', 'gallery')"
+      >
+        <span class="fe-icon" aria-hidden="true">▣</span>
+      </button>
+      <!-- /wiring:d2 -->
     </div>
     </template>
 

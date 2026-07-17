@@ -39,6 +39,8 @@ const props = defineProps<{
   canGoUp?: boolean;
   /* bul:s3 — global search callback; absent = older host, group hidden. */
   globalSearch?: (q: string) => Promise<GlobalSearchHit[]>;
+  /* wiring:d1 — false hides the split command (narrow embeds). */
+  splitEnabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -57,6 +59,9 @@ const emit = defineEmits<{
   (e: 'open-theme'): void;
   (e: 'open-shortcut-settings'): void;
   (e: 'start-tour'): void;
+  /* wiring:d1 — tab / split commands */
+  (e: 'tab-new'): void;
+  (e: 'split-toggle'): void;
 }>();
 
 const { t, nodeDisplayName } = useLocale(() => props.locale);
@@ -126,7 +131,7 @@ const commandItems = computed<PaletteItem[]>(() => {
   const defs: Array<{ command: string; label: string; icon: string; enabled: boolean }> = [
     { command: 'new-folder', label: t('toolbar.new_folder'), icon: '📁', enabled: props.canWrite !== false },
     { command: 'upload', label: t('toolbar.upload'), icon: '⬆', enabled: props.canWrite !== false },
-    { command: 'toggle-view', label: t('cmd.view_toggle'), icon: props.viewMode === 'list' ? '▦' : '☰', enabled: true },
+    { command: 'toggle-view', label: t('cmd.view_toggle'), icon: props.viewMode === 'list' ? '▦' : props.viewMode === 'grid' ? '▣' : '☰', enabled: true /* wiring:d2 — sıradaki mod ikonu (list→grid→galeri→list) */ },
     { command: 'open-trash', label: t('cmd.trash'), icon: '🗑', enabled: true },
     { command: 'refresh', label: t('toolbar.refresh'), icon: '⟳', enabled: true },
     { command: 'go-up', label: t('toolbar.go_up'), icon: '↑', enabled: props.canGoUp !== false },
@@ -134,6 +139,9 @@ const commandItems = computed<PaletteItem[]>(() => {
     { command: 'open-theme', label: t('theme.menu'), icon: '🎨', enabled: true },
     { command: 'open-shortcut-settings', label: t('shortcuts.settings.menu'), icon: '⌨', enabled: true },
     { command: 'start-tour', label: t('tour.restart'), icon: '🎓', enabled: true },
+    /* wiring:d1 — sekme + split */
+    { command: 'tab-new', label: t('cmd.tab_new'), icon: '⧉', enabled: true },
+    { command: 'split-toggle', label: t('cmd.split_toggle'), icon: '◫', enabled: props.splitEnabled !== false },
   ];
   return defs
     .filter((d) => d.enabled && matchScore(d.label, q) >= 0)
@@ -322,6 +330,9 @@ function choose(item?: PaletteItem) {
       case 'open-theme': emit('open-theme'); break;
       case 'open-shortcut-settings': emit('open-shortcut-settings'); break;
       case 'start-tour': emit('start-tour'); break;
+      /* wiring:d1 */
+      case 'tab-new': emit('tab-new'); break;
+      case 'split-toggle': emit('split-toggle'); break;
     }
   }
 }

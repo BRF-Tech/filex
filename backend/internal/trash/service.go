@@ -345,6 +345,11 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 		}
 	}
 	owner, _ := s.Store.GetNodeOwner(ctx, n.ID)
+	/* calisma:d3 comments */
+	// Purge the node's comment rows explicitly (belt and suspenders next
+	// to the node_comments FK CASCADE — engines run with FK enforcement
+	// on, but an explicit delete keeps the purge self-contained).
+	_ = s.Store.DeleteNodeCommentsByNode(ctx, n.ID)
 	if err := s.Store.HardDeleteNode(ctx, n.ID); err != nil {
 		return err
 	}

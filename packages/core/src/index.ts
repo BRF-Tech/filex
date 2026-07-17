@@ -127,3 +127,9 @@ export type {
   OperationsStore,
 } from './composables/useOperations';
 export { default as OperationsCenter } from './components/OperationsCenter.vue';
+/* wiring:d1 — sekmeler + split panel */
+export { useTabs } from './composables/useTabs';
+export type { TabState, TabSplit, TabsApi } from './composables/useTabs';
+export { default as TabBar } from './components/TabBar.vue';
+export { default as SecondaryPane } from './components/SecondaryPane.vue';
+/* /wiring:d1 */

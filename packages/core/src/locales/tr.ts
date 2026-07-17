@@ -332,4 +332,37 @@ export const tr: Record<string, string> = {
   'toolbar.view_label': 'Görünüm',
   'list.aria': 'Dosya listesi',
   'grid.aria': 'Dosya ızgarası',
+
+  /* === wiring:d1 — sekmeler + split panel === */
+  'tabs.strip': 'Sekmeler',
+  'tabs.new': 'Yeni sekme',
+  'tabs.close': 'Sekmeyi kapat',
+  'tabs.split': 'Görünümü böl',
+  'tabs.split_off': 'Bölmeyi kapat',
+  'ctx.open_new_tab': 'Yeni sekmede aç',
+  'shortcuts.group.tabs': 'Sekmeler',
+  'shortcuts.tab_new': 'Yeni sekme',
+  'shortcuts.tab_close': 'Sekmeyi kapat',
+  'shortcuts.tab_next': 'Sonraki sekme',
+  'shortcuts.tab_prev': 'Önceki sekme',
+  'cmd.tab_new': 'Yeni sekme aç',
+  'cmd.split_toggle': 'Görünümü böl / birleştir',
+  'split.pane': 'İkincil panel',
+  'split.close': 'Yan paneli kapat',
+  'split.error': 'Liste yüklenemedi',
+  'split.retry': 'Yeniden dene',
+  'split.copy_queued': 'Kopyalama kuyruğa alındı',
+  'split.cross_copy': 'Depolar farklı — kopyalama kuyruğa alındı',
+  'split.cross_failed': 'Depolar arası kopyalama bu sunucuda desteklenmiyor',
+  /* === /wiring:d1 === */
+  /* wiring:d2 — galeri görünümü */
+  'toolbar.view.gallery': 'Galeri',
+  'gallery.aria': 'Dosya galerisi',
+  /* /wiring:d2 */
+  /* wiring:d3 — Yorumlar (inspector node comments) */
+  'inspector.section.comments': 'Yorumlar',
+  'inspector.comments.empty': 'Henüz yorum yok.',
+  'inspector.comments.placeholder': 'Yorum yaz…',
+  'inspector.comments.send': 'Gönder',
+  'inspector.comments.delete': 'Yorumu sil',
 };

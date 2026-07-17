@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "filex Web Component — drop-in <filex-explorer> custom element (Vue 3 runtime bundled)",
   "type": "module",
   "main": "./dist/filex.umd.cjs",

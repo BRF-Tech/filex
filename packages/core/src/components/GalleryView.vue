@@ -1,14 +1,19 @@
 <script setup lang="ts">
+// (unscoped styles by design — see base.css wiring:d2 block; SFC scoped
+// styles are banned for webcomponent data-v hash mismatch reasons.)
 /**
- * GridView — card grid. Thumbnails preferred, fall back to icon.
+ * GalleryView — wiring:d2. Third view mode: large-thumbnail gallery for
+ * visual browsing (photos/videos). Derived from GridView (same props/emits,
+ * same listbox a11y, same selection/drag/touch contract) but renders big
+ * square tiles: thumbnail (or SVG file-type icon fallback) with the name
+ * below and size+date revealed on hover/focus. GridView itself is untouched.
  */
-import { ref } from 'vue'; /* wiring:c4 */
+import { ref } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
-import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
-import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
+import { applyDragGhost } from '../lib/dragGhost';
 
 const props = defineProps<{
   files: FileNode[];
@@ -17,9 +22,9 @@ const props = defineProps<{
   showParentPath?: boolean;
   locale: LocaleCode;
   loading?: boolean;
-  /** Authenticated thumb resolver (useThumbs.src). Raw `thumb_url` is
-   *  root-relative and unauthenticated — a bare <img src> only works for the
-   *  native same-origin SPA, so embedded hosts NEED this. null = icon. */
+  /** Authenticated thumb resolver (useThumbs.src) — same contract as
+   *  GridView: raw `thumb_url` is root-relative and unauthenticated, so
+   *  embedded hosts NEED this. null = icon fallback. */
   thumbSrc?: (n: FileNode) => string | null;
 }>();
 
@@ -33,8 +38,6 @@ const emit = defineEmits<{
 
 const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
 
-// Prefer the authenticated resolver when the host wired one; otherwise fall
-// back to the raw URL (legacy same-origin behavior).
 function thumbOf(n: FileNode): string | null {
   return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
 }
@@ -58,7 +61,6 @@ function onCtx(n: FileNode, ev: MouseEvent) {
 }
 
 function onItemDragStart(n: FileNode, ev: DragEvent) {
-  /* wiring:c4 — custom ghost (name + multi-select count badge), visual only. */
   applyDragGhost(
     ev,
     nodeDisplayName(n),
@@ -67,7 +69,7 @@ function onItemDragStart(n: FileNode, ev: DragEvent) {
   emit('item-drag-start', n, ev);
 }
 
-/* wiring:c4 — droptarget highlight, mirrors ListView (visual layer only). */
+// Drop-target highlight — mirrors GridView (visual layer only).
 const dropTargetPath = ref<string | null>(null);
 
 function onItemDragOver(n: FileNode, ev: DragEvent) {
@@ -76,16 +78,15 @@ function onItemDragOver(n: FileNode, ev: DragEvent) {
   ev.preventDefault();
   ev.stopPropagation();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
-  dropTargetPath.value = n.path; /* wiring:c4 */
+  dropTargetPath.value = n.path;
 }
 
-/* wiring:c4 */
 function onItemDragLeave(n: FileNode) {
   if (dropTargetPath.value === n.path) dropTargetPath.value = null;
 }
 
 function onItemDrop(n: FileNode, ev: DragEvent) {
-  dropTargetPath.value = null; /* wiring:c4 */
+  dropTargetPath.value = null;
   if (n.type !== 'dir') return;
   if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
   ev.preventDefault();
@@ -93,6 +94,7 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
   emit('item-drop-into', n, ev);
 }
 
+// Long-press → context menu, same as GridView (touch parity).
 let pressTimer: ReturnType<typeof setTimeout> | undefined;
 let pressTarget: FileNode | null = null;
 function onTouchStart(n: FileNode, ev: TouchEvent) {
@@ -121,76 +123,67 @@ function parentDir(path: string): string {
   return stripped.slice(0, idx);
 }
 
-// Special rows keep their emoji (trash/storage are not file-TYPE icons);
-// everything else renders the SVG icon set from lib/fileIcons.
+// Special rows keep their emoji (trash/storage are not file-TYPE icons).
 function specialEmojiFor(n: FileNode): string | null {
   if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
   return null;
 }
 
-/* bul:s3 — search-result enrichment, same presence-gating as ListView:
- * only search hits carry `snippet`, so normal listings render nothing. */
-function cardSnippet(n: FileNode): string {
-  const s = (n as Record<string, unknown>).snippet;
-  return typeof s === 'string' ? s : '';
+function displayDate(ms: number | undefined): string {
+  if (!ms) return '';
+  const d = new Date(ms * (ms < 1e12 ? 1000 : 1));
+  return d.toLocaleString();
 }
 
-// Plain-text form for the title attribute — same parser as the render
-// path, guillemets dropped (no separate sanitize route).
-function snippetTitle(snippet: string): string {
-  return snippetSegments(snippet)
-    .map((seg) => seg.text)
-    .join('');
+// Hover meta line: size for files, entry count (when known) for dirs.
+function metaFor(n: FileNode): string {
+  const date = displayDate(n.last_modified);
+  const size = n.type === 'dir' ? '' : formatSize(n.size);
+  return [size, date].filter((s) => !!s).join(' · ');
 }
 </script>
 
 <template>
-  <!-- wiring:c4 — listbox semantics (multi-selectable cards as options);
-       localized label + busy state. Structure/layout untouched. -->
   <div
-    class="fe-grid"
+    class="fe-gal"
     :class="{ 'is-loading': loading }"
     role="listbox"
     aria-multiselectable="true"
-    :aria-label="t('grid.aria')"
+    :aria-label="t('gallery.aria')"
     :aria-busy="loading ? 'true' : undefined"
   >
     <div
       v-for="n in files"
       :key="n.path"
-      class="fe-grid__card"
+      class="fe-gal__card"
       :class="{
         'is-selected': isSelected(n),
         'is-dir': n.type === 'dir',
         'is-trash': n.trashed,
         'is-clipped': clipped?.has(n.path),
-        'is-droptarget': dropTargetPath === n.path /* wiring:c4 */,
+        'is-droptarget': dropTargetPath === n.path,
       }"
       tabindex="0"
       role="option"
       :aria-selected="isSelected(n) ? 'true' : 'false'"
-      :aria-label="nodeDisplayName(n) /* wiring:c4 */"
-      :data-fe-path="n.path /* wiring:d1 — orta-tık yeni sekme delegasyonu */"
+      :aria-label="nodeDisplayName(n)"
       draggable="true"
       @click="onClick(n, $event)"
       @dblclick="onDbl(n)"
       @contextmenu="onCtx(n, $event)"
       @dragstart="onItemDragStart(n, $event)"
       @dragover="onItemDragOver(n, $event)"
-      @dragleave="onItemDragLeave(n) /* wiring:c4 */"
+      @dragleave="onItemDragLeave(n)"
       @drop="onItemDrop(n, $event)"
       @touchstart.passive="onTouchStart(n, $event)"
       @touchend="cancelPress"
       @touchmove="cancelPress"
     >
-      <div class="fe-grid__thumb">
-        <!--
-          draggable="false" — HTML5 image drag dataTransfer adds 'Files'
-          MIME, which trips the parent's upload handler; without this
-          the user dragging an item with a thumbnail re-uploads it.
-          Parent card stays draggable=true so internal move works.
-        -->
+      <div class="fe-gal__thumb">
+        <!-- draggable="false" for the same reason as GridView: HTML5 image
+             drag adds a 'Files' MIME to dataTransfer, which would trip the
+             parent's upload handler on internal drags. -->
         <img
           v-if="thumbOf(n)"
           :src="thumbOf(n)!"
@@ -198,30 +191,23 @@ function snippetTitle(snippet: string): string {
           loading="lazy"
           draggable="false"
         />
-        <span v-else-if="specialEmojiFor(n)" class="fe-grid__icon">{{ specialEmojiFor(n) }}</span>
+        <span v-else-if="specialEmojiFor(n)" class="fe-gal__icon">{{ specialEmojiFor(n) }}</span>
         <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span v-else class="fe-grid__icon fe-grid__icon--svg" v-html="fileIconSvg(n)"></span>
+        <span v-else class="fe-gal__icon fe-gal__icon--svg" v-html="fileIconSvg(n)"></span>
+        <div class="fe-gal__meta" aria-hidden="true">
+          <span v-if="metaFor(n)" class="fe-gal__meta-line">{{ metaFor(n) }}</span>
+          <span
+            v-if="showParentPath && parentDir(n.path)"
+            class="fe-gal__meta-line fe-gal__meta-line--path"
+            :title="parentDir(n.path)"
+          >{{ parentDir(n.path) }}</span>
+        </div>
       </div>
-      <div class="fe-grid__label" :title="n.basename">
+      <div class="fe-gal__label" :title="n.basename">
         {{ nodeDisplayName(n) }}
       </div>
-      <div
-        v-if="showParentPath"
-        class="fe-grid__parent"
-        :title="parentDir(n.path)"
-      >{{ parentDir(n.path) || '—' }}</div>
-      <div class="fe-grid__meta">
-        {{ formatSize(n.size) }}
-      </div>
-      <!-- bul:s3 — content snippet («» → <mark> via TEXT segments, no innerHTML) -->
-      <div v-if="cardSnippet(n)" class="fe-grid__snippet" :title="snippetTitle(cardSnippet(n))">
-        <template v-for="(seg, si) in snippetSegments(cardSnippet(n))" :key="si">
-          <mark v-if="seg.match" class="fe-grid__mark">{{ seg.text }}</mark>
-          <template v-else>{{ seg.text }}</template>
-        </template>
-      </div>
     </div>
-    <div v-if="!loading && files.length === 0" class="fe-grid__empty">
+    <div v-if="!loading && files.length === 0" class="fe-gal__empty">
       {{ t('empty.folder') }}
     </div>
   </div>

@@ -244,6 +244,114 @@ watch(
   () => void refresh(),
   { immediate: true },
 );
+
+/* === calisma:d3 — Yorumlar (node comments) ===
+ * Flat chronological thread per node (files AND folders — every backend
+ * row carries an id). Loaded through its own watcher + seq guard so the
+ * existing refresh() stays untouched. Add/delete are NOT optimistic: the
+ * list re-fetches after each successful API round-trip. The section hides
+ * silently when the backend gates (401/403) or lacks (404) the endpoint.
+ */
+import type { NodeComment } from '../composables/useFileApi';
+
+const commentsState = ref<SectionState>('hidden');
+const comments = ref<NodeComment[]>([]);
+const commentDraft = ref('');
+const commentBusy = ref(false);
+const commentNodeId = computed<number | null>(() =>
+  typeof single.value?.id === 'number' ? (single.value.id as number) : null,
+);
+let commentSeq = 0;
+
+async function loadComments(): Promise<void> {
+  const seq = ++commentSeq;
+  const id = commentNodeId.value;
+  if (id == null) {
+    commentsState.value = 'hidden';
+    comments.value = [];
+    return;
+  }
+  commentsState.value = comments.value.length > 0 ? 'ok' : 'loading';
+  try {
+    const list = await props.api.listComments(id);
+    if (seq !== commentSeq) return;
+    comments.value = list;
+    commentsState.value = 'ok';
+  } catch (err) {
+    if (seq !== commentSeq) return;
+    comments.value = [];
+    const status = (err as { status?: number }).status;
+    commentsState.value =
+      status === 401 || status === 403 || status === 404 ? 'hidden' : 'error';
+  }
+}
+
+async function sendComment(): Promise<void> {
+  const id = commentNodeId.value;
+  const body = commentDraft.value.trim();
+  if (id == null || body === '' || commentBusy.value) return;
+  commentBusy.value = true;
+  try {
+    await props.api.addComment(id, body);
+    commentDraft.value = '';
+    await loadComments();
+  } catch (err) {
+    emit('toast', (err as Error).message);
+  } finally {
+    commentBusy.value = false;
+  }
+}
+
+async function removeComment(c: NodeComment): Promise<void> {
+  if (commentBusy.value) return;
+  commentBusy.value = true;
+  try {
+    await props.api.deleteComment(c.id);
+    await loadComments();
+  } catch (err) {
+    emit('toast', (err as Error).message);
+  } finally {
+    commentBusy.value = false;
+  }
+}
+
+/** Relative "3 minutes ago" stamp via Intl (locale-aware, no i18n keys). */
+function relativeTime(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return iso;
+  const diffS = Math.round((ms - Date.now()) / 1000);
+  const abs = Math.abs(diffS);
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ['year', 31536000],
+    ['month', 2592000],
+    ['day', 86400],
+    ['hour', 3600],
+    ['minute', 60],
+  ];
+  try {
+    const rtf = new Intl.RelativeTimeFormat(
+      props.locale === 'en' ? 'en' : 'tr',
+      { numeric: 'auto' },
+    );
+    for (const [unit, secs] of units) {
+      if (abs >= secs) return rtf.format(Math.trunc(diffS / secs), unit);
+    }
+    return rtf.format(diffS, 'second');
+  } catch {
+    return formatDateStr(iso);
+  }
+}
+
+watch(
+  () => commentNodeId.value,
+  () => {
+    comments.value = [];
+    commentDraft.value = '';
+    void loadComments();
+  },
+  { immediate: true },
+);
+/* === /calisma:d3 === */
 </script>
 
 <template>
@@ -450,6 +558,68 @@ watch(
           </li>
         </ul>
       </section>
+
+      <!-- ══ calisma:d3 — Yorumlar ══ -->
+      <section
+        v-if="commentsState === 'ok' || commentsState === 'error'"
+        class="fe-inspector__section"
+      >
+        <h3 class="fe-inspector__heading">
+          {{ t('inspector.section.comments') }}
+          <span
+            v-if="comments.length > 0"
+            class="fe-inspector__countbadge"
+          >{{ comments.length }}</span>
+        </h3>
+
+        <p v-if="commentsState === 'error'" class="fe-inspector__empty">
+          {{ t('inspector.error') }}
+        </p>
+        <template v-else>
+          <p v-if="comments.length === 0" class="fe-inspector__empty">
+            {{ t('inspector.comments.empty') }}
+          </p>
+          <ul v-else class="fe-inspector__comments">
+            <li v-for="c in comments" :key="c.id" class="fe-inspector__comment">
+              <div class="fe-inspector__comment-top">
+                <span class="fe-inspector__comment-author" :title="c.author_name">
+                  {{ c.author_name || '—' }}
+                </span>
+                <span class="fe-inspector__comment-time" :title="formatDateStr(c.created_at)">
+                  {{ relativeTime(c.created_at) }}
+                </span>
+                <button
+                  v-if="c.can_delete"
+                  type="button"
+                  class="fe-inspector__comment-del"
+                  :disabled="commentBusy"
+                  :title="t('inspector.comments.delete')"
+                  :aria-label="t('inspector.comments.delete')"
+                  @click="removeComment(c)"
+                >×</button>
+              </div>
+              <p class="fe-inspector__comment-body">{{ c.body }}</p>
+            </li>
+          </ul>
+          <form class="fe-inspector__comment-form" @submit.prevent="sendComment">
+            <input
+              v-model="commentDraft"
+              type="text"
+              class="fe-inspector__comment-input"
+              maxlength="5000"
+              :placeholder="t('inspector.comments.placeholder')"
+              :aria-label="t('inspector.comments.placeholder')"
+              :disabled="commentBusy"
+            />
+            <button
+              type="submit"
+              class="fe-btn fe-btn--primary fe-btn--sm"
+              :disabled="commentBusy || commentDraft.trim() === ''"
+            >{{ t('inspector.comments.send') }}</button>
+          </form>
+        </template>
+      </section>
+      <!-- ══ /calisma:d3 ══ -->
     </div>
   </aside>
 </template>

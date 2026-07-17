@@ -190,8 +190,16 @@ func TestShare_DownloadFolder_WaitPageAndStatus(t *testing.T) {
 		return rec
 	}
 
-	// Default GET on a cold cache → HTML progress page, not a zip.
+	/* wiring:d2 — the default GET now renders the folder BROWSE page (list /
+	   gallery); the ZIP progress page moved behind ?zip=… (the page's
+	   "Tümünü indir" button). */
 	rec := get("")
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+	require.Contains(t, rec.Body.String(), "a.txt", "browse page must list the folder contents")
+
+	// ?zip=1 (the download-all button) on a cold cache → HTML progress page.
+	rec = get("?zip=1")
 	require.Equal(t, 200, rec.Code)
 	require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
 	require.Contains(t, rec.Body.String(), "hazırlanıyor")

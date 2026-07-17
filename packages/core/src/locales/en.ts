@@ -332,4 +332,37 @@ export const en: Record<string, string> = {
   'toolbar.view_label': 'View',
   'list.aria': 'File list',
   'grid.aria': 'File grid',
+
+  /* === wiring:d1 — tabs + split pane === */
+  'tabs.strip': 'Tabs',
+  'tabs.new': 'New tab',
+  'tabs.close': 'Close tab',
+  'tabs.split': 'Split view',
+  'tabs.split_off': 'Close split',
+  'ctx.open_new_tab': 'Open in new tab',
+  'shortcuts.group.tabs': 'Tabs',
+  'shortcuts.tab_new': 'New tab',
+  'shortcuts.tab_close': 'Close tab',
+  'shortcuts.tab_next': 'Next tab',
+  'shortcuts.tab_prev': 'Previous tab',
+  'cmd.tab_new': 'Open a new tab',
+  'cmd.split_toggle': 'Toggle split view',
+  'split.pane': 'Secondary pane',
+  'split.close': 'Close the side pane',
+  'split.error': 'Could not load the listing',
+  'split.retry': 'Retry',
+  'split.copy_queued': 'Copy queued',
+  'split.cross_copy': 'Different storages — copy queued instead',
+  'split.cross_failed': 'Cross-storage copy is not supported by this server',
+  /* === /wiring:d1 === */
+  /* wiring:d2 — gallery view */
+  'toolbar.view.gallery': 'Gallery',
+  'gallery.aria': 'File gallery',
+  /* /wiring:d2 */
+  /* wiring:d3 — inspector node comments */
+  'inspector.section.comments': 'Comments',
+  'inspector.comments.empty': 'No comments yet.',
+  'inspector.comments.placeholder': 'Write a comment…',
+  'inspector.comments.send': 'Send',
+  'inspector.comments.delete': 'Delete comment',
 };

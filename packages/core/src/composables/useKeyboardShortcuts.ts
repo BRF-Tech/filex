@@ -38,6 +38,12 @@ export interface ShortcutHandlers {
   onShowHelp?: () => void; // ? (Shift+/ on most layouts)
   onToggleInspector?: () => void; // i (koru:k1 details panel)
   onQuickLook?: () => void; // Space (wiring:c2 quick-look overlay)
+  /* wiring:d1 — tab strip actions */
+  onTabNew?: () => void; // Ctrl+T
+  onTabClose?: () => void; // Ctrl+W
+  onTabNext?: () => void; // Ctrl+Tab
+  onTabPrev?: () => void; // Ctrl+Shift+Tab
+  /* /wiring:d1 */
   hasSelection?: () => boolean; // disambiguates Backspace
 }
 
@@ -87,6 +93,14 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'cut', defaultCombo: 'Ctrl+X', labelKey: 'shortcuts.cut', groupKey: 'shortcuts.group.file' },
   { id: 'copy', defaultCombo: 'Ctrl+C', labelKey: 'shortcuts.copy', groupKey: 'shortcuts.group.file' },
   { id: 'paste', defaultCombo: 'Ctrl+V', labelKey: 'shortcuts.paste', groupKey: 'shortcuts.group.file' },
+  /* wiring:d1 — tabs. Note: browsers reserve Ctrl+T/W/Tab in normal pages
+   * (preventDefault can't stop them there); they work in webcomponent/PWA/
+   * kiosk contexts and stay remappable through the settings modal. */
+  { id: 'tab-new', defaultCombo: 'Ctrl+T', labelKey: 'shortcuts.tab_new', groupKey: 'shortcuts.group.tabs' },
+  { id: 'tab-close', defaultCombo: 'Ctrl+W', labelKey: 'shortcuts.tab_close', groupKey: 'shortcuts.group.tabs' },
+  { id: 'tab-next', defaultCombo: 'Ctrl+Tab', labelKey: 'shortcuts.tab_next', groupKey: 'shortcuts.group.tabs' },
+  { id: 'tab-prev', defaultCombo: 'Ctrl+Shift+Tab', labelKey: 'shortcuts.tab_prev', groupKey: 'shortcuts.group.tabs' },
+  /* /wiring:d1 */
 ];
 
 /** action id → ShortcutHandlers callback name. */
@@ -105,6 +119,11 @@ const HANDLER_KEY: Record<string, keyof ShortcutHandlers> = {
   cut: 'onCut',
   copy: 'onCopy',
   paste: 'onPaste',
+  /* wiring:d1 */
+  'tab-new': 'onTabNew',
+  'tab-close': 'onTabClose',
+  'tab-next': 'onTabNext',
+  'tab-prev': 'onTabPrev',
 };
 
 // --------------------------------------------------------------------

@@ -3178,3 +3178,102 @@ func scanNotification(rs interface {
 	n.WebhookError = errMsg
 	return n, nil
 }
+
+/* calisma:d3 comments */
+
+// ─────────────────── Node comments (v0.6 "Çalışma") ───────────────────
+
+// CreateNodeComment inserts a comment row and returns the stored row
+// (with id + timestamps filled in). Body validation (length, emptiness)
+// belongs to internal/comments — the store persists what it is given.
+func (s *Store) CreateNodeComment(ctx context.Context, c *model.NodeComment) (*model.NodeComment, error) {
+	if c == nil || c.NodeID == 0 || c.UserID == 0 || c.Body == "" {
+		return nil, errors.New("sqlite: node comment missing node/user/body")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO node_comments (node_id, user_id, body) VALUES (?,?,?)`,
+		c.NodeID, c.UserID, c.Body)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: insert node comment: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return s.GetNodeComment(ctx, id)
+}
+
+// GetNodeComment returns a single live (not soft-deleted) comment by id.
+func (s *Store) GetNodeComment(ctx context.Context, id int64) (*model.NodeComment, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT c.id, c.node_id, c.user_id, c.body, c.created_at, c.updated_at,
+		        COALESCE(NULLIF(u.display_name, ''), u.email)
+		 FROM node_comments c
+		 LEFT JOIN users u ON u.id = c.user_id
+		 WHERE c.id=? AND c.deleted_at IS NULL`, id)
+	return scanNodeComment(row)
+}
+
+// ListNodeComments returns the live comments of one node in chronological
+// order (oldest first), each carrying the author's display name (falling
+// back to the author's email).
+func (s *Store) ListNodeComments(ctx context.Context, nodeID int64) ([]*model.NodeComment, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT c.id, c.node_id, c.user_id, c.body, c.created_at, c.updated_at,
+		        COALESCE(NULLIF(u.display_name, ''), u.email)
+		 FROM node_comments c
+		 LEFT JOIN users u ON u.id = c.user_id
+		 WHERE c.node_id=? AND c.deleted_at IS NULL
+		 ORDER BY c.created_at ASC, c.id ASC`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list node comments: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.NodeComment
+	for rows.Next() {
+		c, err := scanNodeComment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SoftDeleteNodeComment flips deleted_at on a live comment.
+func (s *Store) SoftDeleteNodeComment(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE node_comments SET deleted_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+		 WHERE id=? AND deleted_at IS NULL`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: soft delete node comment: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteNodeCommentsByNode hard-deletes every comment row of a node —
+// the trash purge hook (belt and suspenders next to the nodes FK
+// CASCADE, which engines without FK enforcement may skip).
+func (s *Store) DeleteNodeCommentsByNode(ctx context.Context, nodeID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM node_comments WHERE node_id=?`, nodeID)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete node comments by node: %w", err)
+	}
+	return nil
+}
+
+// scanNodeComment accepts both *sql.Row and *sql.Rows (7 columns:
+// comment row + joined author name).
+func scanNodeComment(rs interface {
+	Scan(...any) error
+}) (*model.NodeComment, error) {
+	c := &model.NodeComment{}
+	var author sql.NullString
+	if err := rs.Scan(&c.ID, &c.NodeID, &c.UserID, &c.Body, &c.CreatedAt, &c.UpdatedAt, &author); err != nil {
+		return nil, err
+	}
+	if author.Valid {
+		c.AuthorName = author.String
+	}
+	return c, nil
+}

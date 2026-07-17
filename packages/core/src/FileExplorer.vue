@@ -42,6 +42,7 @@ import RecentlyOpened from './components/RecentlyOpened.vue';
 import Breadcrumb from './components/Breadcrumb.vue';
 import ListView from './components/ListView.vue';
 import GridView from './components/GridView.vue';
+import GalleryView from './components/GalleryView.vue'; /* wiring:d2 */
 import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
 import PendingOpsTray from './components/PendingOpsTray.vue';
@@ -65,6 +66,11 @@ import { useOperations } from './composables/useOperations';
 /* wiring:c4 */
 import OnboardingTour from './components/OnboardingTour.vue';
 /* /wiring:c4 */
+/* wiring:d1 — sekmeler + tab başına split */
+import TabBar from './components/TabBar.vue';
+import SecondaryPane from './components/SecondaryPane.vue';
+import { useTabs, type TabState } from './composables/useTabs';
+/* /wiring:d1 */
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import RenameModal from './modals/RenameModal.vue';
@@ -167,6 +173,7 @@ const pendingOps = usePendingOps(props.config, api, {
       flashToast(`${verb} (${op.progress_total})`);
     }
     void load();
+    void splitPaneRef.value?.reload(); /* wiring:d1 — ikincil panel de tazelenir */
   },
 });
 
@@ -206,7 +213,7 @@ const viewMode = customRef<ViewMode>((track, trigger) => {
   let value: ViewMode = (() => {
     try {
       const stored = localStorage.getItem(VIEW_MODE_KEY);
-      if (stored === 'list' || stored === 'grid') return stored;
+      if (stored === 'list' || stored === 'grid' || stored === 'gallery') return stored; /* wiring:d2 */
     } catch {
       /* private mode */
     }
@@ -1084,8 +1091,9 @@ useKeyboardShortcuts(rootEl, {
       showRename.value = true;
     }
   },
-  onSelectAll: () => selection.selectAll(),
+  onSelectAll: () => (paneIsActive.value ? splitPaneRef.value?.selectAll() : selection.selectAll()) /* wiring:d1 pane-route */,
   onOpen: () => {
+    if (paneIsActive.value) return splitPaneRef.value?.openSelected(); /* wiring:d1 pane-route */
     const n = selection.nodes.value[0];
     if (n) openNode(n);
   },
@@ -1102,10 +1110,10 @@ useKeyboardShortcuts(rootEl, {
     if (isNarrow.value) closeInspector();
   },
   onFocusSearch: () => toolbarRef.value?.focusSearch(),
-  onCut: () => cut(),
-  onCopy: () => copyToClipboard(),
-  onPaste: () => paste(),
-  onGoUp: () => goUp(),
+  onCut: () => (paneIsActive.value ? paneCut() : cut()) /* wiring:d1 pane-route */,
+  onCopy: () => (paneIsActive.value ? paneCopy() : copyToClipboard()) /* wiring:d1 pane-route */,
+  onPaste: () => (paneIsActive.value ? void panePaste() : void paste()) /* wiring:d1 pane-route */,
+  onGoUp: () => (paneIsActive.value ? splitPaneRef.value?.goUp() : goUp()) /* wiring:d1 pane-route */,
   /* cila:c wiring */
   onPathJump: () => {
     showPalette.value = true;
@@ -1116,6 +1124,12 @@ useKeyboardShortcuts(rootEl, {
   /* /cila:c wiring */
   onQuickLook: () => quickLookToggle() /* wiring:c2 */,
   onToggleInspector: () => toggleInspector() /* koru:k1 */,
+  /* wiring:d1 — sekme aksiyonları (registry: tab-new/close/next/prev) */
+  onTabNew: () => newTabHere(),
+  onTabClose: () => closeTabById(tabsActiveId.value),
+  onTabNext: () => nextTab(),
+  onTabPrev: () => prevTab(),
+  /* /wiring:d1 */
   hasSelection: () => !selection.isEmpty.value,
 });
 
@@ -1370,6 +1384,7 @@ const contextActions = computed<ContextAction[]>(() => {
     if (!single) return [];
     return [
       { key: 'open', label: t('ctx.open'), icon: '↗' },
+      { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉' } /* wiring:d1 */,
     ];
   }
 
@@ -1410,6 +1425,7 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   const accessLabel = locale.value === 'en' ? 'Share / Permissions' : 'Paylaş / İzinler';
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
+    { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — klasörü yeni sekmede aç */,
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
     { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w, disabled: !isFile },
@@ -1535,6 +1551,11 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'duplicate':
       if (targets[0]) await duplicate(targets[0]);
       break;
+    /* wiring:d1 — sağ-tık "Yeni sekmede aç" */
+    case 'open-tab':
+      if (targets[0]) openNodeInTab(targets[0]);
+      break;
+    /* /wiring:d1 */
   }
 }
 
@@ -1881,11 +1902,38 @@ function onDragLeave() {
   if (dragCounter.value === 0) dragOver.value = false;
 }
 function onDragOver(ev: DragEvent) {
+  /* wiring:d1 — iç sürüklemeler kök gövdeye de bırakılabilir olmalı ki split
+     panelinden ana panelin BOŞLUĞUNA bırakmak çalışsın (origin dragover'da
+     okunamaz — karar drop anında verilir; aynı-klasör drop'u no-op kalır). */
+  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
+    ev.preventDefault();
+    return;
+  }
+  /* /wiring:d1 */
   if (isExternalFileDrag(ev)) {
     ev.preventDefault();
   }
 }
 function onDropUpload(ev: DragEvent) {
+  /* wiring:d1 — split panelinden ana panelin boşluğuna bırakma = geçerli
+     klasöre aktar (aynı klasörden gelenler no-op, eski davranış korunur). */
+  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
+    const d1Origin = ev.dataTransfer.getData(FE_DND_SRC_MIME) || '';
+    const d1Here = qualify(currentPath.value);
+    if (d1Origin && d1Here && d1Origin !== d1Here && !trashMode.value && canWriteHere.value) {
+      ev.preventDefault();
+      dragCounter.value = 0;
+      dragOver.value = false;
+      try {
+        const d1Items = JSON.parse(ev.dataTransfer.getData(FE_DND_MIME)) as Array<{ path: string }>;
+        void transferItems(d1Items.map((i) => i.path), d1Here, d1Origin);
+      } catch {
+        /* bozuk payload — yok say */
+      }
+      return;
+    }
+  }
+  /* /wiring:d1 */
   // Internal row drag — nothing to do here, the row drop handler
   // in GridView/ListView already resolved the move.
   if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
@@ -1959,13 +2007,14 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
     .filter((n) => n.basename !== '.trash')
     .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
   ev.dataTransfer.setData(FE_DND_MIME, JSON.stringify(items));
+  ev.dataTransfer.setData(FE_DND_SRC_MIME, qualify(currentPath.value)); /* wiring:d1 — paneller arası origin damgası */
   ev.dataTransfer.setData('text/plain', items.map((i) => i.path).join('\n'));
   ev.dataTransfer.effectAllowed = 'move';
 }
 
-async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string): Promise<void> {
+async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string, originOverride?: string): Promise<void> {
   try {
-    const originWire = qualify(currentPath.value);
+    const originWire = originOverride ?? qualify(currentPath.value); /* wiring:d1 — split panelinden gelen sürüklemede gerçek kaynak klasör */
     if (api.endpoints.moveAsync) {
       const { op } = await api.moveAsync(sources, targetDir, originWire);
       registerMoveUndo(op.id, sources, targetDir, originWire);
@@ -2006,7 +2055,7 @@ async function onItemDropInto(target: FileNode, ev: DragEvent) {
     flashToast('Aynı klasöre taşınamaz');
     return;
   }
-  await moveSourcesAsync(sources, targetDir, 'move-dnd');
+  await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — depo-farkında aktarım */
 }
 
 async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
@@ -2025,7 +2074,7 @@ async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
     .map((i) => i.path)
     .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/'));
   if (sources.length === 0) return;
-  await moveSourcesAsync(sources, targetDir, 'move-dnd-crumb');
+  await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — depo-farkında aktarım */
 }
 
 function onCancelUpload(job: UploadJob) {
@@ -2245,6 +2294,244 @@ onBeforeUnmount(() => {
   rootEl.value?.removeEventListener('fe:tour-restart', onTourRestartEvent);
 });
 /* === /wiring:c4 === */
+
+/* === wiring:d1 — sekmeler (tab şeridi) + tab başına split ===
+ *
+ * useTabs, mevcut konum state'inin (currentPath/viewMode) ÜSTÜNDE bir
+ * katmandır: aktif tab gezinmeleri watch ile dinleyip snapshot'ını
+ * günceller; tab geçişi mevcut load(path) yolunu çağırır — yeni fetch
+ * mantığı yok. Şerit tek sekmede hiç render edilmez (embed pixel-aynı).
+ *
+ * Persist: `filex.tabs` — pathPersist scope mantığı izlenir: mode 'none'
+ * ise persist kapalı; rootPath confine'ı anahtara eklenir ki farklı
+ * confine'lı embed'ler birbirinin sekmelerini ezmesin.
+ */
+const FE_DND_SRC_MIME = 'application/x-brf-files-src';
+
+const TABS_LS_BASE = 'filex.tabs';
+function tabsStorageKey(): string | null {
+  if (persistMode() === 'none') return null;
+  return rootPathProp ? `${TABS_LS_BASE}:${rootPathProp}` : TABS_LS_BASE;
+}
+const tabsApi = useTabs({ storageKey: tabsStorageKey() });
+const tabsRestored = tabsApi.restore();
+const tabsActiveId = tabsApi.activeId;
+
+const tabsVisible = computed(() => tabsApi.hasMultiple.value);
+const activeSplit = computed(() => tabsApi.activeTab.value?.split ?? null);
+
+// Sekme adı OTOMATİK = güncel klasör adı (kök = depo adı / kök etiketi).
+function tabLabel(path: string): string {
+  const p = (path || '').replace(/^\/+|\/+$/g, '');
+  if (p === '.trash') return t('node.trash');
+  if (!p) return multiStorageRoot.value ? t('breadcrumb.root') : adapter.value || t('breadcrumb.root');
+  return p.split('/').pop() || p;
+}
+const tabItems = computed(() =>
+  tabsApi.tabs.value.map((tb) => ({ id: tb.id, label: tabLabel(tb.path), split: !!tb.split })),
+);
+
+// Aktif tab kullanıcıyı izler: gezinme + görünüm değişimi snapshot'a yazılır.
+watch(currentPath, (p) => tabsApi.syncActive({ path: p }));
+watch(viewMode, (v) => tabsApi.syncActive({ viewMode: v }));
+
+// İlk sekme, ilk konum belli olur olmaz tohumlanır (restore varsa dokunma —
+// aktif snapshot ilk load sonrası currentPath watcher'ıyla zaten senkronlanır).
+onMounted(() => {
+  if (!tabsRestored) tabsApi.seed(currentPath.value ?? '', viewMode.value);
+});
+
+function applyTabLocation(tb: TabState) {
+  if (tb.viewMode && tb.viewMode !== viewMode.value) viewMode.value = tb.viewMode;
+  if (tb.path === '.trash') {
+    void loadTrash();
+    return;
+  }
+  void load(tb.path);
+}
+function activateTab(id: string) {
+  const tb = tabsApi.activate(id);
+  if (tb) applyTabLocation(tb);
+}
+function newTabHere() {
+  // Mevcut konumu klonlar; görünüm zaten oradadır, load gerekmez.
+  tabsApi.openTab(currentPath.value ?? '', { viewMode: viewMode.value, background: false });
+}
+function closeTabById(id: string) {
+  const next = tabsApi.closeTab(id);
+  if (next) applyTabLocation(next);
+}
+function nextTab() {
+  const tb = tabsApi.step(1);
+  if (tb) applyTabLocation(tb);
+}
+function prevTab() {
+  const tb = tabsApi.step(-1);
+  if (tb) applyTabLocation(tb);
+}
+
+/** Bir klasörü ARKA PLANDA yeni sekmede aç (orta-tık / sağ-tık / palet). */
+function openNodeInTab(n: FileNode) {
+  if (n.type !== 'dir' || n.basename === '.trash') return;
+  const target = multiStorageRoot.value ? wireToVirtual(n.path) : stripAdapter(n.path);
+  tabsApi.openTab(target, { viewMode: viewMode.value, background: true });
+}
+
+// Orta-tık delegasyonu: ListView/GridView satırları data-fe-path taşır; kendi
+// keydown/emit zinciri eklemek yerine kökte tek auxclick dinleyicisi yeter.
+// (SecondaryPane kendi satırlarında stopPropagation ile kendisi halleder.)
+function onListAuxClick(ev: MouseEvent) {
+  if (ev.button !== 1) return;
+  const host = ev.target as HTMLElement | null;
+  const el = host && typeof host.closest === 'function' ? host.closest('[data-fe-path]') : null;
+  const p = el?.getAttribute('data-fe-path');
+  if (!p) return;
+  const node = files.value.find((f) => f.path === p);
+  if (!node || node.type !== 'dir' || node.basename === '.trash') return;
+  ev.preventDefault();
+  openNodeInTab(node);
+}
+// Orta-tuş mousedown'ı satırlar üzerinde iptal: scroll'lu gövdede Chromium'un
+// autoscroll'u devreye girer ve auxclick HİÇ üretilmez (canlı teşhis) —
+// preventDefault autoscroll'u bastırır, auxclick yeniden akar.
+function onListMiddleDown(ev: MouseEvent) {
+  if (ev.button !== 1) return;
+  const host = ev.target as HTMLElement | null;
+  if (host && typeof host.closest === 'function' && host.closest('[data-fe-path]')) {
+    ev.preventDefault();
+  }
+}
+onMounted(() => {
+  rootEl.value?.addEventListener('auxclick', onListAuxClick);
+  rootEl.value?.addEventListener('mousedown', onListMiddleDown);
+});
+onBeforeUnmount(() => {
+  rootEl.value?.removeEventListener('auxclick', onListAuxClick);
+  rootEl.value?.removeEventListener('mousedown', onListMiddleDown);
+});
+
+// ---- split (tab başına ikincil panel) ------------------------------
+
+const splitPaneRef = ref<InstanceType<typeof SecondaryPane> | null>(null);
+// Dar modda split devre dışı (state korunur, genişleyince geri gelir).
+const splitVisible = computed(() => !!activeSplit.value && !isNarrow.value);
+
+function toggleSplit() {
+  if (activeSplit.value) {
+    tabsApi.setSplit(null);
+    activePane.value = 'main';
+    return;
+  }
+  if (isNarrow.value) return;
+  tabsApi.setSplit({ path: currentPath.value ?? '' });
+}
+function closeSplit() {
+  tabsApi.setSplit(null);
+  activePane.value = 'main';
+}
+function onPaneNavigate(p: string) {
+  tabsApi.setSplit({ path: p });
+}
+
+// Aktif panel: kısayollar aktif panele gider; panel tıklamayla aktifleşir.
+const activePane = ref<'main' | 'split'>('main');
+function setPaneMain() {
+  activePane.value = 'main';
+}
+watch(splitVisible, (v) => {
+  if (!v) activePane.value = 'main';
+});
+const paneIsActive = computed(() => activePane.value === 'split' && splitVisible.value);
+const mainPaneFocus = computed(() => splitVisible.value && activePane.value === 'main');
+
+// Pane yardımcıları — hep ana panelin mevcut dönüştürücülerini sarar.
+function paneToUser(wire: string): string {
+  return multiStorageRoot.value ? wireToVirtual(wire) : stripAdapter(wire);
+}
+function paneClamp(p: string): string {
+  const clean = String(p ?? '').replace(/^\/+|\/+$/g, '');
+  if (!rootFloor) return clean;
+  if (!clean || !(clean === rootFloor || clean.startsWith(rootFloor + '/'))) return rootFloor;
+  return clean;
+}
+
+// Pano (clipboard) aktif panele göre: kes/kopyala pane seçiminden beslenir,
+// yapıştır pane klasörüne iner. State ana panelinkiyle ORTAK — panolar arası
+// kes-yapıştır bedavaya çalışır.
+function paneCut() {
+  const nodes = splitPaneRef.value?.selectedNodes() ?? [];
+  if (nodes.length === 0) return;
+  clipboard.value = { mode: 'cut', items: nodes, sourcePath: splitPaneRef.value?.getPath() ?? '' };
+  flashToast('Kesildi');
+}
+function paneCopy() {
+  const nodes = splitPaneRef.value?.selectedNodes() ?? [];
+  if (nodes.length === 0) return;
+  clipboard.value = { mode: 'copy', items: nodes, sourcePath: splitPaneRef.value?.getPath() ?? '' };
+  flashToast('Kopyalandı');
+}
+async function panePaste() {
+  const cb = clipboard.value;
+  const pane = splitPaneRef.value;
+  if (!cb.mode || cb.items.length === 0 || !pane) return;
+  const targetWire = qualify(pane.getPath() ?? '');
+  const originWire = qualify(cb.sourcePath || '') || undefined;
+  if (cb.mode === 'cut' && originWire === targetWire) {
+    flashToast('Aynı klasöre kesilemez');
+    return;
+  }
+  await transferItems(cb.items.map((n) => n.path), targetWire, originWire, cb.mode === 'copy');
+  clipboard.value = { mode: null, items: [], sourcePath: null };
+}
+
+// ---- paneller arası aktarım ----------------------------------------
+
+function wireAdapterOf(p: string): string {
+  const i = p.indexOf('://');
+  return i === -1 ? '' : p.slice(0, i);
+}
+function dndOrigin(ev: DragEvent): string | undefined {
+  const v = ev.dataTransfer?.getData(FE_DND_SRC_MIME);
+  return v || undefined;
+}
+
+/**
+ * transferItems — panel-arası / pano aktarımının tek kapısı.
+ * Aynı depo → TAŞI (mevcut moveSourcesAsync yolu: kuyruk + geri al).
+ * Farklı depo → KOPYALA dene; backend cross-storage desteklemiyorsa
+ * i18n'li hata toast'ı. Bitince ikincil panel de tazelenir (ana panel
+ * moveSourcesAsync / pendingOps onSettled üzerinden zaten tazelenir).
+ */
+async function transferItems(
+  sources: string[],
+  targetWire: string,
+  originWire?: string,
+  forceCopy = false,
+): Promise<void> {
+  const list = sources.filter((p) => p && p !== targetWire && !targetWire.startsWith(p + '/'));
+  if (list.length === 0 || !targetWire) return;
+  const targetAdapter = wireAdapterOf(targetWire);
+  const cross = list.some((p) => wireAdapterOf(p) !== targetAdapter);
+  if (cross || forceCopy) {
+    try {
+      const { op } = await api.copy(list, targetWire);
+      pendingOps.register(op);
+      flashToast(cross ? t('split.cross_copy') : t('split.copy_queued'));
+    } catch (err) {
+      emit('error', { message: (err as Error).message, context: { op: 'transfer', targetWire } });
+      flashToast(cross ? t('split.cross_failed') : (err as Error).message);
+      return;
+    }
+  } else {
+    await moveSourcesAsync(list, targetWire, 'move-transfer', originWire);
+  }
+  void splitPaneRef.value?.reload();
+}
+
+function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?: string }) {
+  void transferItems(p.sources, p.targetWire, p.originWire);
+}
+/* === /wiring:d1 === */
 </script>
 
 <template>
@@ -2265,6 +2552,21 @@ onBeforeUnmount(() => {
     @drop="onDropUpload"
     @contextmenu="onContextCanvas"
   >
+    <!-- wiring:d1 — sekme şeridi: TEK sekmede hiç render edilmez (embed pixel-aynı) -->
+    <TabBar
+      v-if="tabsVisible"
+      :tabs="tabItems"
+      :active-id="tabsActiveId"
+      :locale="locale"
+      :split-enabled="!isNarrow"
+      :split-active="!!activeSplit"
+      @select="activateTab"
+      @close="closeTabById"
+      @new="newTabHere"
+      @reorder="(from: number, to: number) => tabsApi.move(from, to)"
+      @toggle-split="toggleSplit"
+    />
+    <!-- /wiring:d1 -->
     <Toolbar
       ref="toolbarRef"
       :view-mode="viewMode"
@@ -2328,14 +2630,19 @@ onBeforeUnmount(() => {
     <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
          as flex siblings (row). Without the inspector open it is visually
          identical to the previous direct-child fe__body. -->
-    <div class="fe__main">
-    <div class="fe__body" @click.self="selection.clear()">
+    <div class="fe__main" :class="{ 'fe__main--split': splitVisible } /* wiring:d1 */">
+    <div
+      class="fe__body"
+      :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — aktif panel vurgusu */"
+      @pointerdown.capture="setPaneMain() /* wiring:d1 */"
+      @click.self="selection.clear()"
+    >
       <!-- Initial load: skeleton ghosts (view-mode aware) instead of an
            empty/"no files" flash. Only when there's nothing yet — navigation
            keeps the current list, exactly as before. -->
       <div v-if="loading && files.length === 0" class="fe__skeleton" role="status">
         <span class="fe-sr-only">{{ t('loading') }}</span>
-        <div v-if="viewMode === 'grid'" class="fe-skel-grid" aria-hidden="true">
+        <div v-if="viewMode !== 'list' /* wiring:d2 — galeri de grid iskeletini kullanır */" class="fe-skel-grid" aria-hidden="true">
           <div v-for="i in 8" :key="i" class="fe-skel-card">
             <div class="fe-skel fe-skel--thumb"></div>
             <div class="fe-skel fe-skel--label"></div>
@@ -2504,6 +2811,22 @@ onBeforeUnmount(() => {
         @star-change="onStarChange"
       />
       <GridView
+        v-else-if="viewMode === 'grid' /* wiring:d2 — v-else → v-else-if (3. mod eklendi) */"
+        :files="files"
+        :selected="selection.selected.value"
+        :clipped="clippedPaths"
+        :show-parent-path="!!searchQuery"
+        :locale="locale"
+        :loading="loading"
+        :thumb-src="thumbs.src"
+        @click-card="(n, m) => selection.click(n.path, m)"
+        @dbl-card="openNode"
+        @context-card="onContextTarget"
+        @item-drag-start="onItemDragStart"
+        @item-drop-into="onItemDropInto"
+      />
+      <!-- wiring:d2 — galeri görünümü (GridView ile aynı event sözleşmesi) -->
+      <GalleryView
         v-else
         :files="files"
         :selected="selection.selected.value"
@@ -2518,7 +2841,34 @@ onBeforeUnmount(() => {
         @item-drag-start="onItemDragStart"
         @item-drop-into="onItemDropInto"
       />
+      <!-- /wiring:d2 -->
     </div>
+
+    <!-- wiring:d1 — tab başına split: sağ ikincil panel (dar modda kapalı).
+         :key tab kimliğine bağlı — tab geçişinde pane kendi konumuyla temiz
+         remount olur. -->
+    <SecondaryPane
+      v-if="splitVisible && activeSplit"
+      ref="splitPaneRef"
+      :key="'split-' + tabsActiveId"
+      :api="api"
+      :initial-path="activeSplit.path"
+      :locale="locale"
+      :qualify="qualify"
+      :to-user="paneToUser"
+      :clamp="paneClamp"
+      :root-label="multiStorageRoot ? '/' : adapter || t('breadcrumb.root')"
+      :floor="rootFloor"
+      :multi-root="multiStorageRoot"
+      :virtual-rows="virtualStorageRows"
+      :active="paneIsActive"
+      @navigate="onPaneNavigate"
+      @activate="activePane = 'split'"
+      @close="closeSplit"
+      @open-tab="(p: string) => tabsApi.openTab(p, { viewMode: viewMode, background: true })"
+      @transfer="onPaneTransfer"
+    />
+    <!-- /wiring:d1 -->
 
     <!-- koru:k1 — inspector (details) panel; v-if keeps the closed state
          free of any DOM. Narrow mode renders it as a full-size overlay. -->
@@ -2746,13 +3096,16 @@ onBeforeUnmount(() => {
       @navigate="(p: string) => load(p)"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
-      @toggle-view="viewMode = viewMode === 'list' ? 'grid' : 'list'"
+      @toggle-view="viewMode = viewMode === 'list' ? 'grid' : viewMode === 'grid' ? 'gallery' : 'list' /* wiring:d2 — 3 mod döngüsü */"
       @open-trash="loadTrash"
       @refresh="() => load()"
       @go-up="goUp"
       @open-theme="showThemeGallery = true /* wiring:int */"
       @open-shortcut-settings="showShortcutSettings = true /* wiring:int */"
       @start-tour="startTour() /* wiring:int */"
+      :split-enabled="!isNarrow /* wiring:d1 */"
+      @tab-new="newTabHere() /* wiring:d1 */"
+      @split-toggle="toggleSplit() /* wiring:d1 */"
     />
     <ShortcutsHelp
       :open="showShortcutsHelp"

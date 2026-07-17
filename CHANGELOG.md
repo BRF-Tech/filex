@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.5.0 below.)
+(Nothing yet — see v0.6.0 below.)
+
+## [0.6.0] - 2026-07-17
+
+### Added
+
+- **Tabs**: open multiple locations as tabs (Ctrl+T / middle-click a folder /
+  right-click → "Open in new tab"), switch with Ctrl(+Shift)+Tab, reorder by
+  dragging, close with Ctrl+W or middle-click. The tab strip only appears
+  with two or more tabs, and tabs (including the active one and per-tab
+  split state) persist per browser. All tab shortcuts are remappable.
+- **Split view**: split the active tab into two panes — the secondary pane
+  navigates independently, and dragging files between panes moves them
+  (same storage) or copies them (across storages). Keyboard actions follow
+  the focused pane; shared clipboard works across panes.
+- **Gallery view**: a third view mode with large media thumbnails alongside
+  list and grid.
+- **Browsable folder shares**: public folder share links now open a
+  navigable page (subfolders, per-file open/download) instead of jumping
+  straight to the ZIP flow — "Download all" keeps the ZIP path; folders
+  that are mostly images/videos render as a gallery.
+- **File comments**: per-file comment threads (visible to anyone who can
+  see the file; authors and admins can delete) shown in the details panel
+  with a count badge, plus a `comment.added` webhook event.
 
 ## [0.5.0] - 2026-07-17
 
