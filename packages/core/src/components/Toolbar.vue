@@ -11,7 +11,7 @@
  * Presentational only — all logic (rename, share, …) lives in
  * FileExplorer.vue, which listens for `action` emits.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { ViewMode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { ContextAction } from './ContextMenu.vue';
@@ -69,7 +69,33 @@ const emit = defineEmits<{
   (e: 'go-up'): void;
   (e: 'action', key: string): void;
   (e: 'open-recents'): void;
+  (e: 'update:density', v: Density): void;
 }>();
+
+// Density toggle — the toolbar owns the persisted preference; the parent
+// only mirrors the value into a root class so both views pick it up.
+export type Density = 'comfortable' | 'compact';
+const DENSITY_LS_KEY = 'filex.density';
+const density = ref<Density>(
+  (() => {
+    try {
+      return localStorage.getItem(DENSITY_LS_KEY) === 'compact' ? 'compact' : 'comfortable';
+    } catch {
+      return 'comfortable';
+    }
+  })(),
+);
+onMounted(() => emit('update:density', density.value));
+
+function toggleDensity() {
+  density.value = density.value === 'compact' ? 'comfortable' : 'compact';
+  try {
+    localStorage.setItem(DENSITY_LS_KEY, density.value);
+  } catch {
+    /* quota */
+  }
+  emit('update:density', density.value);
+}
 
 const { t } = useLocale(() => props.locale);
 
@@ -191,6 +217,44 @@ function fire(key: string) {
         <span class="fe-icon">↻</span>
       </button>
     </div>
+
+    <button
+      type="button"
+      class="fe-btn fe-btn--icon-only fe-toolbar__density"
+      :class="{ 'is-active': density === 'compact' }"
+      :aria-pressed="density === 'compact'"
+      :aria-label="density === 'compact' ? t('toolbar.density.comfortable') : t('toolbar.density.compact')"
+      :title="density === 'compact' ? t('toolbar.density.comfortable') : t('toolbar.density.compact')"
+      @click="toggleDensity"
+    >
+      <!-- Row-spacing glyph: tight rows when compact is ON, airy rows otherwise. -->
+      <svg
+        v-if="density === 'compact'"
+        class="fe-ficon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d="M4 6.5h16M4 10.5h16M4 14.5h16M4 18.5h16" />
+      </svg>
+      <svg
+        v-else
+        class="fe-ficon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d="M4 5.5h16M4 12h16M4 18.5h16" />
+      </svg>
+    </button>
 
     <div class="fe-toolbar__view" role="tablist" aria-label="View">
       <button

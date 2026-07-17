@@ -6,10 +6,11 @@
  * just emit the events and let FileExplorer.vue handle them uniformly
  * across List and Grid.
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { fileIconSvg } from '../lib/fileIcons';
 import StarButton from './StarButton.vue';
 
 const props = defineProps<{
@@ -111,21 +112,16 @@ function cancelPress() {
   pressTarget = null;
 }
 
-function iconFor(n: FileNode): string {
+// Special rows keep their emoji (trash/storage are not file-TYPE icons);
+// everything else renders the SVG icon set from lib/fileIcons.
+function specialEmojiFor(n: FileNode): string | null {
   if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
-  if (n.type === 'dir') return '📁';
-  const e = (n.extension || '').toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'svg'].includes(e)) return '🖼';
-  if (['mp4', 'webm', 'mov', 'mkv', 'avi', 'ogv', 'm4v'].includes(e)) return '🎞';
-  if (['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus'].includes(e)) return '🎵';
-  if (e === 'pdf') return '📕';
-  if (['doc', 'docx', 'odt', 'rtf'].includes(e)) return '📄';
-  if (['xls', 'xlsx', 'ods', 'csv'].includes(e)) return '📊';
-  if (['ppt', 'pptx', 'odp'].includes(e)) return '📽';
-  if (['zip', 'tar', 'gz', 'bz2', '7z', 'rar'].includes(e)) return '🗜';
-  if (['txt', 'md', 'log', 'json', 'yml', 'yaml', 'xml'].includes(e)) return '📝';
-  return '📎';
+  return null;
+}
+
+function isPinnedSpecial(n: FileNode): boolean {
+  return n.basename === '.trash' || n.mime_type === 'inode/storage';
 }
 
 function displayDate(ms: number | undefined): string {
@@ -141,20 +137,174 @@ function parentDir(path: string): string {
   return stripped.slice(0, idx);
 }
 
-const rows = computed(() => props.files);
+// ------------------------------------------------------------------
+// Column sorting — local to the list view. Default (null) keeps the
+// backend order, i.e. exactly the pre-existing behavior.
+// ------------------------------------------------------------------
+
+type SortKey = 'name' | 'size' | 'modified';
+const SORT_LS_KEY = 'filex.list-sort';
+
+const sortKey = ref<SortKey | null>(null);
+const sortDir = ref<'asc' | 'desc'>('asc');
+try {
+  const raw = localStorage.getItem(SORT_LS_KEY);
+  if (raw) {
+    const p = JSON.parse(raw) as { key?: unknown; dir?: unknown };
+    if (p.key === 'name' || p.key === 'size' || p.key === 'modified') sortKey.value = p.key;
+    if (p.dir === 'asc' || p.dir === 'desc') sortDir.value = p.dir;
+  }
+} catch {
+  /* private mode / bad JSON */
+}
+
+// Dates default to newest-first, the others to ascending.
+function defaultDir(key: SortKey): 'asc' | 'desc' {
+  return key === 'modified' ? 'desc' : 'asc';
+}
+
+// Click cycle per column: default direction → flipped → back to backend order.
+function toggleSort(key: SortKey) {
+  if (sortKey.value !== key) {
+    sortKey.value = key;
+    sortDir.value = defaultDir(key);
+  } else if (sortDir.value === defaultDir(key)) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey.value = null;
+  }
+  try {
+    localStorage.setItem(
+      SORT_LS_KEY,
+      JSON.stringify({ key: sortKey.value, dir: sortDir.value }),
+    );
+  } catch {
+    /* quota */
+  }
+}
+
+function ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
+  if (sortKey.value !== key) return 'none';
+  return sortDir.value === 'asc' ? 'ascending' : 'descending';
+}
+
+function modifiedMs(n: FileNode): number | null {
+  const v = n.last_modified;
+  if (!v) return null;
+  return v * (v < 1e12 ? 1000 : 1);
+}
+
+const rows = computed(() => {
+  const key = sortKey.value;
+  if (!key) return props.files;
+  // Virtual rows (.trash / storage drives) stay pinned on top in their
+  // original order; only real entries take part in the sort.
+  const pinned: FileNode[] = [];
+  const rest: FileNode[] = [];
+  for (const n of props.files) (isPinnedSpecial(n) ? pinned : rest).push(n);
+  const dir = sortDir.value === 'asc' ? 1 : -1;
+  rest.sort((a, b) => {
+    if (key === 'name') {
+      return (
+        dir *
+        a.basename.localeCompare(b.basename, undefined, { numeric: true, sensitivity: 'base' })
+      );
+    }
+    if (key === 'size') return dir * ((a.size ?? -1) - (b.size ?? -1));
+    const am = modifiedMs(a);
+    const bm = modifiedMs(b);
+    // Undated rows go last in both directions so date groups stay clean.
+    if (am == null && bm == null) return 0;
+    if (am == null) return 1;
+    if (bm == null) return -1;
+    return dir * (am - bm);
+  });
+  return [...pinned, ...rest];
+});
+
+// ------------------------------------------------------------------
+// Date grouping — only while sorted by modified date. Rows are split
+// into contiguous segments so the row markup below stays untouched.
+// ------------------------------------------------------------------
+
+interface Segment {
+  id: string;
+  /** null = no header (ungrouped mode, or the pinned virtual rows). */
+  label: string | null;
+  nodes: FileNode[];
+}
+
+const monthFmt = computed(
+  () =>
+    new Intl.DateTimeFormat(props.locale === 'tr' ? 'tr-TR' : 'en-US', {
+      month: 'long',
+      year: 'numeric',
+    }),
+);
+
+function bucketFor(ms: number | null): { id: string; label: string } {
+  if (ms == null) return { id: 'none', label: t('group.no_date') };
+  const d = new Date(ms);
+  const now = new Date();
+  const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const today = dayStart(now);
+  const day = dayStart(d);
+  const DAY = 86_400_000;
+  // Future stamps (clock skew) read best as "today".
+  if (day >= today) return { id: 'today', label: t('group.today') };
+  if (day === today - DAY) return { id: 'yesterday', label: t('group.yesterday') };
+  if (day > today - 7 * DAY) return { id: 'week', label: t('group.this_week') };
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
+    return { id: 'month', label: t('group.this_month') };
+  }
+  return { id: `m-${d.getFullYear()}-${d.getMonth()}`, label: monthFmt.value.format(d) };
+}
+
+const segments = computed<Segment[]>(() => {
+  const list = rows.value;
+  if (sortKey.value !== 'modified') return [{ id: 'all', label: null, nodes: list }];
+  const out: Segment[] = [];
+  let cur: Segment | null = null;
+  for (const n of list) {
+    const b = isPinnedSpecial(n) ? { id: 'pinned', label: null } : bucketFor(modifiedMs(n));
+    if (!cur || cur.id !== b.id) {
+      cur = { id: b.id, label: b.label, nodes: [] };
+      out.push(cur);
+    }
+    cur.nodes.push(n);
+  }
+  return out;
+});
 </script>
 
 <template>
   <div class="fe-list" :class="{ 'is-loading': loading, 'has-star-col': !!apiBase || apiBase === '' }">
     <div class="fe-list__head" role="row">
       <div class="fe-list__col fe-list__col--star" role="columnheader" aria-label="Star"></div>
-      <div class="fe-list__col fe-list__col--name" role="columnheader">{{ t('col.name') }}</div>
-      <div class="fe-list__col fe-list__col--size" role="columnheader">{{ t('col.size') }}</div>
-      <div class="fe-list__col fe-list__col--mod" role="columnheader">{{ t('col.modified') }}</div>
+      <div class="fe-list__col fe-list__col--name" role="columnheader" :aria-sort="ariaSort('name')">
+        <button type="button" class="fe-list__sort" :title="t('col.sort')" @click="toggleSort('name')">
+          {{ t('col.name') }}
+          <span v-if="sortKey === 'name'" class="fe-list__sort-arrow" aria-hidden="true">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
+        </button>
+      </div>
+      <div class="fe-list__col fe-list__col--size" role="columnheader" :aria-sort="ariaSort('size')">
+        <button type="button" class="fe-list__sort" :title="t('col.sort')" @click="toggleSort('size')">
+          {{ t('col.size') }}
+          <span v-if="sortKey === 'size'" class="fe-list__sort-arrow" aria-hidden="true">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
+        </button>
+      </div>
+      <div class="fe-list__col fe-list__col--mod" role="columnheader" :aria-sort="ariaSort('modified')">
+        <button type="button" class="fe-list__sort" :title="t('col.sort')" @click="toggleSort('modified')">
+          {{ t('col.modified') }}
+          <span v-if="sortKey === 'modified'" class="fe-list__sort-arrow" aria-hidden="true">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
+        </button>
+      </div>
     </div>
     <div class="fe-list__body" role="rowgroup">
+      <template v-for="seg in segments" :key="seg.id">
+      <div v-if="seg.label" class="fe-list__group" role="presentation">{{ seg.label }}</div>
       <div
-        v-for="n in rows"
+        v-for="n in seg.nodes"
         :key="n.path"
         class="fe-list__row"
         :class="{
@@ -188,7 +338,9 @@ const rows = computed(() => props.files);
           />
         </div>
         <div class="fe-list__col fe-list__col--name">
-          <span class="fe-list__icon" aria-hidden="true">{{ iconFor(n) }}</span>
+          <span v-if="specialEmojiFor(n)" class="fe-list__icon" aria-hidden="true">{{ specialEmojiFor(n) }}</span>
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span v-else class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconSvg(n)"></span>
           <div class="fe-list__name-wrap">
             <span class="fe-list__name" :title="n.basename">{{ nodeDisplayName(n) }}</span>
             <span
@@ -205,6 +357,7 @@ const rows = computed(() => props.files);
           {{ displayDate(n.last_modified) }}
         </div>
       </div>
+      </template>
       <div v-if="!loading && rows.length === 0" class="fe-list__empty">
         {{ t('empty.folder') }}
       </div>

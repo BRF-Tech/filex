@@ -88,3 +88,73 @@
     --fe-shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.25);
   }
 }
+
+/* === cila:a — file-type icon accent tokens (lib/fileIcons families) === */
+:root {
+  --fe-icon-folder: #d97706;
+  --fe-icon-image: #7c3aed;
+  --fe-icon-video: #db2777;
+  --fe-icon-audio: #0d9488;
+  --fe-icon-pdf: #dc2626;
+  --fe-icon-doc: #2563eb;
+  --fe-icon-sheet: #16a34a;
+  --fe-icon-slides: #ea580c;
+  --fe-icon-archive: #78716c;
+  --fe-icon-code: #4f46e5;
+  --fe-icon-text: #64748b;
+  --fe-icon-unknown: #94a3b8;
+}
+
+/* Dark values — same selector strategy as the palette blocks above. */
+.fe--theme-dark,
+:root[data-theme='dark'] .fe,
+.fe.fe--theme-dark,
+:root.dark,
+.dark,
+:root.dark .fe,
+.dark .fe,
+.fe-ctx-backdrop--theme-dark,
+.fe-ctx-backdrop--theme-auto[data-prefers-dark='1'] {
+  --fe-icon-folder: #fbbf24;
+  --fe-icon-image: #a78bfa;
+  --fe-icon-video: #f472b6;
+  --fe-icon-audio: #2dd4bf;
+  --fe-icon-pdf: #f87171;
+  --fe-icon-doc: #60a5fa;
+  --fe-icon-sheet: #4ade80;
+  --fe-icon-slides: #fb923c;
+  --fe-icon-archive: #a8a29e;
+  --fe-icon-code: #818cf8;
+  --fe-icon-text: #94a3b8;
+  --fe-icon-unknown: #8b95a7;
+}
+
+@media (prefers-color-scheme: dark) {
+  .fe:not(.fe--theme-light),
+  .fe-ctx-backdrop--theme-auto:not(.fe-ctx-backdrop--theme-light) {
+    --fe-icon-folder: #fbbf24;
+    --fe-icon-image: #a78bfa;
+    --fe-icon-video: #f472b6;
+    --fe-icon-audio: #2dd4bf;
+    --fe-icon-pdf: #f87171;
+    --fe-icon-doc: #60a5fa;
+    --fe-icon-sheet: #4ade80;
+    --fe-icon-slides: #fb923c;
+    --fe-icon-archive: #a8a29e;
+    --fe-icon-code: #818cf8;
+    --fe-icon-text: #94a3b8;
+    --fe-icon-unknown: #8b95a7;
+  }
+}
+
+/* === cila:b — status tokens === */
+/* Amber status accent (connection badge dot; StarButton already referenced it
+   via var(--fe-warning, #f59e0b)). Declared with the SAME value the fallbacks
+   used, and identical in light + dark on purpose — amber reads well on both
+   palettes, so making the token official changes nothing visually. */
+:root,
+.fe--theme-dark,
+:root.dark,
+.dark {
+  --fe-warning: #f59e0b;
+}

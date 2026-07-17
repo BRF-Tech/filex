@@ -528,65 +528,66 @@ var dropUploaderTemplate = template.Must(template.New("drop").Parse(`<!doctype h
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dosya gönder{{if .Folder}} — {{.Folder}}{{end}}</title>
+` + publicPageStyle + `
 <style>
-:root { color-scheme: light dark; --bg1:#f6f8fb; --bg2:#e9eef5; --card:rgba(255,255,255,0.9); --fg:#1c2128; --muted:#5b6572; --line:#d0d7de; --accent:#2563eb; --accent2:#1d4ed8; --ok:#22c55e; --err:#dc2626; }
-@media (prefers-color-scheme: dark) { :root { --bg1:#14171c; --bg2:#1c2128; --card:rgba(36,40,48,0.92); --fg:#e6eaf0; --muted:#9aa4b2; --line:#333b45; } }
-* { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin:0; min-height:100vh; display:grid; place-items:center; background:linear-gradient(135deg,var(--bg1),var(--bg2)); color:var(--fg); padding:20px; }
-.card { width:520px; max-width:100%; padding:28px; border-radius:14px; background:var(--card); box-shadow:0 10px 40px rgba(0,0,0,0.10); backdrop-filter:blur(8px); }
-h1 { font-size:1.25rem; margin:0 0 4px; }
-.sub { margin:0 0 20px; color:var(--muted); font-size:0.9rem; }
-.drop { border:2px dashed var(--line); border-radius:12px; padding:28px 16px; text-align:center; cursor:pointer; transition:.15s; }
-.drop:hover, .drop.over { border-color:var(--accent); background:rgba(37,99,235,0.06); }
-.drop .big { font-size:1rem; font-weight:600; }
-.drop .hint { color:var(--muted); font-size:0.82rem; margin-top:6px; }
-input[type=file] { display:none; }
-.field { margin-top:14px; }
-label { display:block; font-size:0.82rem; color:var(--muted); margin-bottom:5px; }
-input[type=text], textarea { width:100%; padding:11px; border:1px solid var(--line); border-radius:9px; font-size:0.95rem; background:transparent; color:inherit; font-family:inherit; }
-textarea { resize:vertical; min-height:64px; }
-.files { margin-top:14px; display:flex; flex-direction:column; gap:8px; }
-.f { display:flex; align-items:center; gap:10px; font-size:0.86rem; padding:8px 10px; border:1px solid var(--line); border-radius:9px; }
-.f .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.f .sz { color:var(--muted); font-variant-numeric:tabular-nums; }
-.f .x { cursor:pointer; color:var(--muted); border:0; background:none; font-size:1rem; }
-.bar { height:6px; border-radius:6px; background:var(--line); overflow:hidden; margin-top:16px; display:none; }
-.bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .2s; }
-button.go { width:100%; margin-top:18px; padding:13px; border:0; border-radius:10px; font-size:1rem; font-weight:700; cursor:pointer; background:var(--accent); color:#fff; }
-button.go:hover { background:var(--accent2); }
-button.go:disabled { opacity:.5; cursor:default; }
-.msg { margin-top:14px; font-size:0.88rem; }
-.msg.err { color:var(--err); }
-.done { text-align:center; }
-.done .check { width:60px; height:60px; margin:6px auto 14px; border-radius:50%; background:var(--ok); display:grid; place-items:center; color:#fff; font-size:32px; }
-.foot { margin-top:18px; text-align:center; color:var(--muted); font-size:0.72rem; }
+.card { width: 520px; text-align: left; }
+.drop { border: 2px dashed var(--px-line); border-radius: 12px; padding: 28px 16px; text-align: center; cursor: pointer; color: var(--px-muted); transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease; }
+.drop:hover, .drop.over { border-color: var(--px-accent); background: var(--px-accent-soft); color: var(--px-accent); }
+.drop:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 2px; }
+.drop svg { width: 38px; height: 38px; margin-bottom: 6px; }
+.drop .big { font-size: 1rem; font-weight: 600; color: var(--px-fg); }
+.drop .hint { font-size: 0.82rem; margin-top: 6px; }
+input[type=file] { display: none; }
+.field { margin-top: 14px; }
+label { display: block; font-size: 0.82rem; color: var(--px-muted); margin-bottom: 5px; }
+input[type=text], textarea { width: 100%; padding: 11px; border: 1px solid var(--px-line); border-radius: 9px; font-size: 0.95rem; background: transparent; color: inherit; font-family: inherit; }
+input[type=text]:focus, textarea:focus { outline: none; border-color: var(--px-accent); box-shadow: 0 0 0 3px var(--px-accent-soft); }
+textarea { resize: vertical; min-height: 64px; }
+.files { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.f { display: flex; align-items: center; gap: 10px; font-size: 0.86rem; padding: 8px 10px; border: 1px solid var(--px-line); border-radius: 9px; }
+.f .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f .sz { color: var(--px-muted); font-variant-numeric: tabular-nums; }
+.f .x { cursor: pointer; color: var(--px-muted); border: 0; background: none; font-size: 1rem; border-radius: 6px; padding: 2px 7px; }
+.f .x:hover { color: var(--px-err); background: var(--px-err-soft); }
+.f .x:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 1px; }
+.bar { height: 6px; border-radius: 999px; background: var(--px-line); overflow: hidden; margin-top: 16px; display: none; }
+.bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.2s ease; }
+.msg { margin-top: 14px; font-size: 0.88rem; }
+.msg.err { color: var(--px-err); }
+.done { text-align: center; }
+.foot { margin-top: 16px; text-align: center; color: var(--px-muted); font-size: 0.72rem; }
+@media (prefers-reduced-motion: reduce) { .drop, .bar > i { transition: none; } }
 </style>
 </head><body>
+<main class="wrap">
 <div class="card" id="card">
   <h1>Dosya gönder{{if .Folder}} · {{.Folder}}{{end}}</h1>
   <p class="sub" id="sub">Aşağıya dosyaları sürükleyin veya seçin. Yalnızca yükleyebilirsiniz; klasördeki dosyalar size görünmez.</p>
 
-  <div class="drop" id="drop">
+  <div class="drop" id="drop" role="button" tabindex="0" aria-label="Dosya seçin veya sürükleyip bırakın">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
     <div class="big">Dosyaları buraya bırakın</div>
     <div class="hint" id="hint">veya seçmek için tıklayın</div>
   </div>
   <input type="file" id="file" multiple>
 
   <div class="field" id="nameField" style="display:none">
-    <label>Adınız (isteğe bağlı)</label>
+    <label for="uploaderName">Adınız (isteğe bağlı)</label>
     <input type="text" id="uploaderName" maxlength="60" placeholder="Örn. Ahmet Yılmaz">
   </div>
   <div class="field">
-    <label>Not (isteğe bağlı)</label>
+    <label for="note">Not (isteğe bağlı)</label>
     <textarea id="note" maxlength="2000" placeholder="Kısa bir mesaj ekleyebilirsiniz"></textarea>
   </div>
 
   <div class="files" id="files"></div>
   <div class="bar" id="bar"><i id="barfill"></i></div>
-  <div class="msg" id="msg"></div>
-  <button class="go" id="send" disabled>Gönder</button>
+  <div class="msg" id="msg" role="status"></div>
+  <button class="btn" id="send" disabled>Gönder</button>
   <div class="foot" id="foot"></div>
 </div>
+` + publicFooterTR + `
+</main>
 
 <script>
 var CFG = {{.Config}};
@@ -612,6 +613,7 @@ function render(){
     var nm=document.createElement('span'); nm.className='nm'; nm.textContent=f.name;
     var sz=document.createElement('span'); sz.className='sz'; sz.textContent=human(f.size);
     var x=document.createElement('button'); x.className='x'; x.type='button'; x.textContent='✕';
+    x.setAttribute('aria-label','Kaldır: '+f.name);
     x.onclick=function(){ picked.splice(idx,1); render(); };
     row.appendChild(nm); row.appendChild(sz); row.appendChild(x); filesBox.appendChild(row);
   });
@@ -631,6 +633,7 @@ function add(list){
 }
 
 drop.onclick=function(){ fileInput.click(); };
+drop.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); } };
 fileInput.onchange=function(){ add(fileInput.files); fileInput.value=''; };
 ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.add('over'); }); });
 ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
@@ -660,9 +663,9 @@ sendBtn.onclick=function(){
 
 function success(n){
   el('card').innerHTML =
-    '<div class="done"><div class="check">✓</div>'+
+    '<div class="done"><div class="icon-badge ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11"/></svg></div>'+
     '<h1>Teşekkürler!</h1>'+
-    '<p class="sub">'+n+' dosya başarıyla gönderildi.</p></div>';
+    '<p class="sub" style="margin-bottom:0">'+n+' dosya başarıyla gönderildi.</p></div>';
 }
 function fail(code, res){
   sendBtn.disabled=false; sendBtn.textContent='Gönder'; el('bar').style.display='none'; el('barfill').style.width='0';

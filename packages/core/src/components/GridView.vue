@@ -5,6 +5,7 @@
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { fileIconSvg } from '../lib/fileIcons';
 
 const props = defineProps<{
   files: FileNode[];
@@ -101,20 +102,12 @@ function parentDir(path: string): string {
   return stripped.slice(0, idx);
 }
 
-function iconFor(n: FileNode): string {
+// Special rows keep their emoji (trash/storage are not file-TYPE icons);
+// everything else renders the SVG icon set from lib/fileIcons.
+function specialEmojiFor(n: FileNode): string | null {
   if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
-  if (n.type === 'dir') return '📁';
-  const e = (n.extension || '').toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg'].includes(e)) return '🖼';
-  if (['mp4', 'webm', 'mov', 'mkv'].includes(e)) return '🎞';
-  if (['mp3', 'wav', 'flac', 'ogg'].includes(e)) return '🎵';
-  if (e === 'pdf') return '📕';
-  if (['doc', 'docx', 'odt'].includes(e)) return '📄';
-  if (['xls', 'xlsx', 'csv'].includes(e)) return '📊';
-  if (['ppt', 'pptx'].includes(e)) return '📽';
-  if (['zip', 'tar', 'gz', '7z'].includes(e)) return '🗜';
-  return '📎';
+  return null;
 }
 </script>
 
@@ -156,7 +149,9 @@ function iconFor(n: FileNode): string {
           loading="lazy"
           draggable="false"
         />
-        <span v-else class="fe-grid__icon">{{ iconFor(n) }}</span>
+        <span v-else-if="specialEmojiFor(n)" class="fe-grid__icon">{{ specialEmojiFor(n) }}</span>
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+        <span v-else class="fe-grid__icon fe-grid__icon--svg" v-html="fileIconSvg(n)"></span>
       </div>
       <div class="fe-grid__label" :title="n.basename">
         {{ nodeDisplayName(n) }}

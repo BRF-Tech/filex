@@ -21,8 +21,40 @@ export interface ShortcutHandlers {
   onDuplicate?: () => void; // Ctrl+D
   onPathJump?: () => void; // Cmd+K / Ctrl+K
   onGoUp?: () => void; // Alt+Up / Backspace (when nothing selected)
+  onShowHelp?: () => void; // ? (Shift+/ on most layouts)
   hasSelection?: () => boolean; // disambiguates Backspace
 }
+
+/**
+ * SHORTCUTS — the single source of truth for the shortcut cheat-sheet
+ * (ShortcutsHelp.vue). Only shortcuts actually wired by FileExplorer are
+ * listed; labels/groups resolve through the locale catalogue so the help
+ * dialog stays tr/en aware. `keys` entries are display combos — each one
+ * renders as its own <kbd>, alternatives joined visually with "/".
+ */
+export interface ShortcutDef {
+  keys: string[];
+  labelKey: string;
+  groupKey: string;
+}
+
+export const SHORTCUTS: ShortcutDef[] = [
+  // Navigation
+  { keys: ['Ctrl+K'], labelKey: 'shortcuts.palette', groupKey: 'shortcuts.group.nav' },
+  { keys: ['/'], labelKey: 'shortcuts.search', groupKey: 'shortcuts.group.nav' },
+  { keys: ['Alt+↑', 'Backspace'], labelKey: 'shortcuts.go_up', groupKey: 'shortcuts.group.nav' },
+  { keys: ['Enter'], labelKey: 'shortcuts.open', groupKey: 'shortcuts.group.nav' },
+  { keys: ['Esc'], labelKey: 'shortcuts.close', groupKey: 'shortcuts.group.nav' },
+  { keys: ['?'], labelKey: 'shortcuts.help', groupKey: 'shortcuts.group.nav' },
+  // Selection
+  { keys: ['Ctrl+A'], labelKey: 'shortcuts.select_all', groupKey: 'shortcuts.group.selection' },
+  // File operations
+  { keys: ['F2'], labelKey: 'shortcuts.rename', groupKey: 'shortcuts.group.file' },
+  { keys: ['Del'], labelKey: 'shortcuts.delete', groupKey: 'shortcuts.group.file' },
+  { keys: ['Ctrl+X'], labelKey: 'shortcuts.cut', groupKey: 'shortcuts.group.file' },
+  { keys: ['Ctrl+C'], labelKey: 'shortcuts.copy', groupKey: 'shortcuts.group.file' },
+  { keys: ['Ctrl+V'], labelKey: 'shortcuts.paste', groupKey: 'shortcuts.group.file' },
+];
 
 export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: ShortcutHandlers) {
   function onKey(e: KeyboardEvent) {
@@ -85,6 +117,12 @@ export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: 
         if (handlers.onFocusSearch && !ctrl) {
           e.preventDefault();
           handlers.onFocusSearch();
+        }
+        break;
+      case '?':
+        if (handlers.onShowHelp && !ctrl && !e.altKey) {
+          e.preventDefault();
+          handlers.onShowHelp();
         }
         break;
       case 'a':

@@ -769,28 +769,27 @@ var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype htm
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dosya hazırlanıyor…</title>
+` + publicPageStyle + `
 <style>
-:root { color-scheme: light dark; }
-body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
-@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
-.card { width: 380px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); text-align: center; }
-@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
-h1 { font-size: 1.2rem; margin: 0 0 6px; }
-.sub { margin: 0 0 20px; opacity: 0.7; font-size: 0.9rem; word-break: break-word; }
-.track { height: 10px; border-radius: 6px; background: rgba(127,127,127,0.2); overflow: hidden; }
-.bar { height: 100%; width: 0%; border-radius: 6px; background: #2563eb; transition: width 0.4s ease; }
+.track { height: 10px; border-radius: 999px; background: var(--px-line); overflow: hidden; }
+.bar { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.4s ease; }
 .pct { margin-top: 10px; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-.hint { margin-top: 18px; font-size: 0.8rem; opacity: 0.6; }
-.hint a { color: #2563eb; }
+.hint { margin: 16px 0 0; font-size: 0.8rem; color: var(--px-muted); }
+.hint a { color: var(--px-accent); }
+@media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
 </style>
 </head><body>
+<main class="wrap">
 <div class="card">
+<div class="icon-badge">` + publicIconFolderZip + `</div>
 <h1>Dosya hazırlanıyor…</h1>
-<p class="sub">{{.Name}} — tüm fişler ZIP olarak paketleniyor.</p>
-<div class="track"><div id="bar" class="bar"></div></div>
+<p class="sub">{{.Name}} — klasör ZIP arşivi olarak paketleniyor.</p>
+<div class="track" aria-hidden="true"><div id="bar" class="bar"></div></div>
 <div class="pct"><span id="pct">%0</span></div>
 <p class="hint">İndirme hazır olduğunda otomatik başlayacak. Başlamazsa <a id="dl" href="?zip=wait">buraya tıklayın</a>.</p>
 </div>
+` + publicFooterTR + `
+</main>
 <script>
 (function(){
   var q = "{{.PinQuery}}";
@@ -851,6 +850,81 @@ func shareURLPath(token string) string {
 	return "/s/" + path.Clean(token)
 }
 
+// publicPageStyle is the shared inline stylesheet for every public
+// share-facing page (PIN gate, unlocked, error, zip-wait, drop). These pages
+// are served standalone with no access to the SPA's asset pipeline, so
+// everything stays inline and dependency-free. Light/dark comes from CSS
+// custom properties + prefers-color-scheme.
+const publicPageStyle = `<style>
+:root {
+  color-scheme: light dark;
+  --px-bg1: #f5f7fb; --px-bg2: #e9edf4;
+  --px-card: #ffffff;
+  --px-fg: #1b2129; --px-muted: #66727f;
+  --px-line: #d7dde5;
+  --px-accent: #4f46e5; --px-accent-hover: #4338ca;
+  --px-accent-soft: rgba(79, 70, 229, 0.10);
+  --px-ok: #16a34a; --px-ok-soft: rgba(22, 163, 74, 0.12);
+  --px-err: #dc2626; --px-err-soft: rgba(220, 38, 38, 0.10);
+  --px-shadow: 0 12px 40px rgba(15, 23, 42, 0.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --px-bg1: #12151a; --px-bg2: #191e25;
+    --px-card: #1f242c;
+    --px-fg: #e7ebf1; --px-muted: #97a1af;
+    --px-line: #3a424d;
+    --px-accent: #6366f1; --px-accent-hover: #818cf8;
+    --px-accent-soft: rgba(99, 102, 241, 0.18);
+    --px-ok: #22c55e; --px-ok-soft: rgba(34, 197, 94, 0.14);
+    --px-err: #f87171; --px-err-soft: rgba(248, 113, 113, 0.12);
+    --px-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+}
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: linear-gradient(160deg, var(--px-bg1), var(--px-bg2)); color: var(--px-fg); }
+.wrap { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.card { width: 400px; max-width: 100%; padding: 32px 28px; border-radius: 16px; background: var(--px-card); border: 1px solid var(--px-line); box-shadow: var(--px-shadow); text-align: center; }
+.icon-badge { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 50%; display: grid; place-items: center; background: var(--px-accent-soft); color: var(--px-accent); }
+.icon-badge.ok { background: var(--px-ok-soft); color: var(--px-ok); }
+.icon-badge.err { background: var(--px-err-soft); color: var(--px-err); }
+.icon-badge svg { width: 30px; height: 30px; }
+h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
+.sub { margin: 0 0 20px; color: var(--px-muted); font-size: 0.9rem; line-height: 1.5; overflow-wrap: anywhere; }
+.btn { display: block; width: 100%; margin-top: 18px; padding: 13px; border: 0; border-radius: 10px; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; background: var(--px-accent); color: #fff; transition: background 0.15s ease; }
+.btn:hover:not(:disabled) { background: var(--px-accent-hover); }
+.btn:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 2px; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.error { margin-top: 14px; padding: 10px 12px; border-radius: 9px; background: var(--px-err-soft); color: var(--px-err); font-size: 0.86rem; }
+.brand { display: inline-flex; align-items: center; gap: 7px; color: var(--px-muted); font-size: 0.78rem; }
+.brand svg { width: 16px; height: 16px; flex: none; }
+.brand a { color: inherit; font-weight: 600; text-decoration: none; }
+.brand a:hover { text-decoration: underline; color: var(--px-accent); }
+.spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; vertical-align: -2px; animation: px-spin 0.8s linear infinite; opacity: 0.5; margin-right: 8px; }
+@keyframes px-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .btn { transition: none; } }
+</style>`
+
+// publicBrandMark is the tiny inline filex logo used in the public-page
+// footer — the same folder+check mark as the SPA's LogoMark.vue, with a solid
+// fill so no gradient ids can collide across pages.
+const publicBrandMark = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#6366f1"/><path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
+// Public-page footers. Each template keeps its existing content language, so
+// there is a Turkish and an English variant of the same modest brand line.
+const (
+	publicFooterTR = `<footer class="brand">` + publicBrandMark + `<span><a href="https://filex.sh" target="_blank" rel="noopener">filex</a> ile paylaşıldı</span></footer>`
+	publicFooterEN = `<footer class="brand">` + publicBrandMark + `<span>Shared with <a href="https://filex.sh" target="_blank" rel="noopener">filex</a></span></footer>`
+)
+
+// Inline line-style icons (currentColor) for the public pages.
+const (
+	publicIconLock      = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/><path d="M12 14.5v2"/></svg>`
+	publicIconCheck     = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11"/></svg>`
+	publicIconAlert     = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 4.2 2.6 17.9a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.5"/><path d="M12 17.4h.01"/></svg>`
+	publicIconFolderZip = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7z"/><path d="M12 10.5V16"/><path d="M9.5 13.5 12 16l2.5-2.5"/></svg>`
+)
+
 // pinFormTemplate is a dependency-free HTML page rendered when a share
 // requires a PIN and none was provided.
 var pinFormTemplate = template.Must(template.New("pin").Parse(`<!doctype html>
@@ -858,27 +932,23 @@ var pinFormTemplate = template.Must(template.New("pin").Parse(`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Enter PIN</title>
+` + publicPageStyle + `
 <style>
-:root { color-scheme: light dark; }
-body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
-@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
-.card { width: 360px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); }
-@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
-h1 { font-size: 1.25rem; margin: 0 0 8px; }
-p { margin: 0 0 24px; opacity: 0.7; font-size: 0.9rem; }
-input { width: 100%; padding: 12px; border: 1px solid #d0d7de; border-radius: 8px; font-size: 1rem; box-sizing: border-box; background: transparent; color: inherit; }
-button { width: 100%; padding: 12px; margin-top: 16px; border: 0; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; background: #2563eb; color: #fff; }
-button:hover { background: #1d4ed8; }
-.error { color: #dc2626; font-size: 0.85rem; margin-top: 12px; }
+.pin-input { width: 100%; padding: 13px 12px; font-size: 1.45rem; letter-spacing: 0.35em; text-align: center; border: 1.5px solid var(--px-line); border-radius: 10px; background: transparent; color: inherit; font-family: inherit; }
+.pin-input:focus { outline: none; border-color: var(--px-accent); box-shadow: 0 0 0 3px var(--px-accent-soft); }
 </style>
 </head><body>
+<main class="wrap">
 <form class="card" method="post" action="{{.Action}}">
+<div class="icon-badge">` + publicIconLock + `</div>
 <h1>This share is PIN-protected</h1>
-<p>Enter the PIN to access the file.</p>
-<input type="password" name="pin" autocomplete="one-time-code" autofocus required>
-{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-<button type="submit">Unlock</button>
+<p class="sub">Enter the PIN to access the file.</p>
+<input class="pin-input" type="password" name="pin" inputmode="numeric" autocomplete="one-time-code" aria-label="PIN" autofocus required>
+{{if .Error}}<div class="error" role="alert">{{.Error}}</div>{{end}}
+<button class="btn" type="submit">Unlock</button>
 </form>
+` + publicFooterEN + `
+</main>
 </body></html>`))
 
 func (h *Share) renderPINForm(w http.ResponseWriter, token, errMsg string) {
@@ -921,32 +991,24 @@ func (h *Share) renderErrorPage(w http.ResponseWriter, status int, title, body s
 }
 
 var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype html>
-<html lang="en"><head>
+<html lang="tr"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PIN accepted</title>
-<style>
-:root { color-scheme: light dark; }
-body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
-@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
-.card { width: 360px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); text-align: center; }
-@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
-.check { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%; background: #22c55e; display: grid; place-items: center; color: white; font-size: 28px; }
-h1 { font-size: 1.25rem; margin: 0 0 8px; }
-p { margin: 0 0 16px; opacity: 0.7; font-size: 0.9rem; }
-.spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; vertical-align: middle; animation: spin 0.8s linear infinite; opacity: 0.4; margin-right: 8px; }
-@keyframes spin { to { transform: rotate(360deg); } }
-</style>
+` + publicPageStyle + `
 </head><body>
+<main class="wrap">
 <div class="card">
-<div class="check">✓</div>
+<div class="icon-badge ok">` + publicIconCheck + `</div>
 <h1>PIN doğru</h1>
-<p><span class="spinner"></span>İndirme birazdan başlayacak…</p>
+<p class="sub" style="margin-bottom:0"><span class="spinner" aria-hidden="true"></span>İndirme birazdan başlayacak…</p>
 <form id="f" method="post" action="{{.Action}}" style="display:none">
 <input type="hidden" name="pin" value="{{.PIN}}">
 </form>
 <script>setTimeout(function(){document.getElementById('f').submit();}, 700);</script>
 </div>
+` + publicFooterTR + `
+</main>
 </body></html>`))
 
 var errorPageTemplate = template.Must(template.New("err").Parse(`<!doctype html>
@@ -954,20 +1016,18 @@ var errorPageTemplate = template.Must(template.New("err").Parse(`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
+` + publicPageStyle + `
 <style>
-:root { color-scheme: light dark; }
-body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: linear-gradient(135deg, #f6f8fb 0%, #e9eef5 100%); }
-@media (prefers-color-scheme: dark) { body { background: linear-gradient(135deg, #14171c 0%, #1c2128 100%); color: #e6eaf0; } }
-.card { width: 420px; max-width: 90%; padding: 32px; border-radius: 12px; background: rgba(255,255,255,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.08); backdrop-filter: blur(8px); text-align: center; }
-@media (prefers-color-scheme: dark) { .card { background: rgba(36,40,48,0.85); box-shadow: 0 10px 40px rgba(0,0,0,0.4); } }
-.code { font-size: 3rem; font-weight: 800; color: #dc2626; margin-bottom: 8px; }
-h1 { font-size: 1.4rem; margin: 0 0 12px; }
-p { margin: 0; opacity: 0.7; font-size: 0.95rem; line-height: 1.5; }
+.code { display: inline-block; margin-bottom: 14px; padding: 3px 10px; border: 1px solid var(--px-line); border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; color: var(--px-muted); font-variant-numeric: tabular-nums; }
 </style>
 </head><body>
+<main class="wrap">
 <div class="card">
+<div class="icon-badge err">` + publicIconAlert + `</div>
 <div class="code">{{.Code}}</div>
 <h1>{{.Title}}</h1>
-<p>{{.Body}}</p>
+<p class="sub" style="margin-bottom:0">{{.Body}}</p>
 </div>
+` + publicFooterEN + `
+</main>
 </body></html>`))

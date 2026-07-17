@@ -19,6 +19,12 @@ export interface RealtimeApi {
 export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
   const presenceUsers: Ref<PresenceUser[]> = ref([]);
   const connected = ref(false);
+  // True while the live socket is unavailable and the polling fallback is
+  // active — the explorer surfaces a small "no live connection" badge from it.
+  // Stays false during ordinary reconnect attempts, so brief blips don't flash
+  // the badge; only a genuinely given-up socket (RealtimeClient onFallback)
+  // flips it.
+  const degraded = ref(false);
 
   let client: RealtimeClient | null = null;
   let pendingSubscribe: string | null = null;
@@ -42,6 +48,7 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
   }
 
   function onFallback(active: boolean): void {
+    degraded.value = active;
     if (active) {
       // No live socket → poll the listing; presence isn't available here.
       presenceUsers.value = [];
@@ -88,7 +95,8 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
     }
     client?.close();
     client = null;
+    degraded.value = false;
   }
 
-  return { presenceUsers, connected, start, subscribe, setFocus, stop };
+  return { presenceUsers, connected, degraded, start, subscribe, setFocus, stop };
 }

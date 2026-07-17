@@ -45,6 +45,10 @@ import GridView from './components/GridView.vue';
 import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
 import PendingOpsTray from './components/PendingOpsTray.vue';
+/* cila:c wiring */
+import CommandPalette from './components/CommandPalette.vue';
+import ShortcutsHelp from './components/ShortcutsHelp.vue';
+/* /cila:c wiring */
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import RenameModal from './modals/RenameModal.vue';
@@ -79,6 +83,12 @@ const emit = defineEmits<{
 
 const api = useFileApi(props.config);
 
+// Locale up-front: the pendingOps onSettled callback below (and the undo-toast
+// helpers) need `t()` at runtime, so the catalogue must be constructed before
+// they are wired. Depends only on props — safe this early.
+const locale = computed(() => props.config.locale || 'tr');
+const { t } = useLocale(locale);
+
 // Live collaboration (WebSocket file-change events + presence), bundled into the
 // core so every consumer — the native panel AND the embedded webcomponent —
 // gets it. Auth is a short-lived ticket fetched through the same API (works
@@ -86,6 +96,10 @@ const api = useFileApi(props.config);
 // socket is available.
 const realtime = useRealtime(api, { reload: () => load() });
 const presenceUsers = realtime.presenceUsers;
+// True while the live socket is unavailable and the explorer runs on the
+// polling fallback — drives the small "no live connection" badge. Healthy
+// connections show nothing.
+const realtimeDegraded = realtime.degraded;
 function realtimeRoom(vp: string): string | null {
   const p = (vp || '').replace(/^\/+|\/+$/g, '');
   if (p === '.trash' || p.startsWith('.trash/')) return null;
@@ -112,10 +126,21 @@ onBeforeUnmount(() => realtime.stop());
 const thumbs = useThumbs(props.config.apiBase, api);
 
 const chunked = useUploadChunked(props.config, api);
+
+// Undo registry for async pending ops: when a cleanly-invertible operation
+// (move → reverse move, trash-delete → restore) is queued, its inverse is
+// registered under the op id; once the op settles OK the toast grows a
+// "Geri Al" action. Ops without an entry keep the plain settled toast.
+const opUndo = new Map<number, { message: string; fn: () => Promise<void> }>();
+
 const pendingOps = usePendingOps(props.config, api, {
   onSettled: (op: PendingOp) => {
+    const undo = opUndo.get(op.id);
+    opUndo.delete(op.id);
     if (op.status === 'error') {
       flashToast(op.error_message || 'İşlem başarısız');
+    } else if (undo) {
+      undoToast(`${undo.message} (${op.progress_total})`, undo.fn);
     } else {
       const verb =
         op.op_type === 'copy'
@@ -149,6 +174,16 @@ const dirPerm = ref<string>('');
 // back 404 (folder doesn't exist) or 403 (RBAC-hidden — rendered identically
 // on purpose so a denied folder doesn't reveal that it exists). '' = none.
 const notFoundPath = ref<string>('');
+// Listing failure that is NOT a dead link (network error, 5xx): remembered so
+// the body can render a retryable error state instead of a misleading "this
+// folder is empty". Only shown when no listing is visible — a failed
+// navigation away from a healthy listing keeps the current list + toast,
+// exactly as before.
+const loadError = ref<string>('');
+let loadErrorPath: string | undefined;
+function retryLoad() {
+  void load(loadErrorPath);
+}
 
 const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
 const viewMode = customRef<ViewMode>((track, trigger) => {
@@ -178,6 +213,9 @@ const viewMode = customRef<ViewMode>((track, trigger) => {
     },
   };
 });
+/* cila:a density — Toolbar owns the persisted preference (filex.density);
+   mirrored here only so the root `.fe` can carry fe--density-compact. */
+const density = ref<'comfortable' | 'compact'>('comfortable');
 const searchQuery = ref('');
 // trashMode — true while viewing the filex trash (soft-deleted nodes from the
 // backend trash endpoint), entered by opening the virtual `.trash` row and
@@ -189,7 +227,6 @@ const trashMode = ref(false);
 // global root). Set in loadTrash().
 const trashOrigin = ref<string>('');
 const trashActive = computed(() => trashMode.value);
-const locale = computed(() => props.config.locale || 'tr');
 
 // canGoUp/goUp — toolbar's "↑ Up one level" button. In single-storage
 // mode "" means the storage root; in multi-storage mode "" means
@@ -223,8 +260,6 @@ function goUp() {
   if (rootFloor && !(parent === rootFloor || parent.startsWith(rootFloor + '/'))) parent = rootFloor;
   void load(parent);
 }
-
-const { t } = useLocale(locale);
 
 const selection = useSelection(() => files.value);
 watch(
@@ -396,19 +431,57 @@ function selPerm(sel: FileNode[]): string {
 // Can the current user write into the directory being viewed? Gates the
 // toolbar New Folder / Upload / Paste + drag-drop upload.
 const canWriteHere = computed(() => permCanEdit(dirPerm.value));
+// Empty-state affordances: the "drop files here" hint + upload button only
+// make sense in a real writable folder (not the virtual drives root, not the
+// trash view).
+const emptyCanUpload = computed(
+  () => canWriteHere.value && !atVirtualRoot.value && !trashMode.value,
+);
 
 // Context menu
 const ctxRef = ref<InstanceType<typeof ContextMenu> | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
 const toolbarRef = ref<InstanceType<typeof Toolbar> | null>(null);
 
-// Toast (tiny, no lib)
-const toast = ref<string | null>(null);
+// Toast (tiny, no lib). Evolved into a snackbar: plain messages keep the old
+// 2.5s auto-hide; messages carrying an action ("Geri Al") stay 8s and can be
+// dismissed by click or Esc.
+interface ToastState {
+  message: string;
+  actionLabel?: string;
+  action?: () => void | Promise<void>;
+}
+const toast = ref<ToastState | null>(null);
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-function flashToast(msg: string) {
-  toast.value = msg;
+function showToast(state: ToastState, ms: number) {
+  toast.value = state;
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toast.value = null), 2500);
+  toastTimer = setTimeout(() => (toast.value = null), ms);
+}
+function flashToast(msg: string) {
+  showToast({ message: msg }, 2500);
+}
+function undoToast(message: string, undo: () => Promise<void>) {
+  showToast({ message, actionLabel: t('toast.undo'), action: undo }, 8000);
+}
+function dismissToast() {
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = undefined;
+  }
+  toast.value = null;
+}
+async function runToastAction() {
+  const act = toast.value?.action;
+  dismissToast();
+  if (!act) return;
+  try {
+    await act();
+    flashToast(t('toast.undone'));
+    await load();
+  } catch {
+    flashToast(t('toast.undo_failed'));
+  }
 }
 
 // --------------------------------------------------------------------
@@ -477,6 +550,7 @@ async function load(path?: string) {
   let requested = path ?? currentPath.value ?? '';
   try {
     notFoundPath.value = '';
+    loadError.value = '';
     // Clamp to the confined floor: an empty/above-floor request (incl. a stale
     // persisted path or the drives root) snaps back to rootPath. This both
     // suppresses the multi-storage drives list and blocks up-navigation.
@@ -549,8 +623,13 @@ async function load(path?: string) {
       emit('error', { message: e, context: { path } });
       return;
     }
+    // Real failure (network, 5xx). Never swallowed: the error still emits, and
+    // it surfaces either as the retryable error state (nothing else on screen)
+    // or as the classic toast over the still-visible previous listing.
+    loadError.value = e;
+    loadErrorPath = typeof requested === 'string' ? requested : undefined;
     emit('error', { message: e, context: { path } });
-    flashToast(e);
+    if (files.value.length > 0) flashToast(e);
   } finally {
     loading.value = false;
   }
@@ -654,6 +733,53 @@ function qualify(p: string): string {
   }
   if (!p) return `${adapter.value}://`;
   return `${adapter.value}://${p.replace(/^\/+/, '')}`;
+}
+
+// ----------------------------------------------------------------
+// Undo helpers — compute the inverse of cleanly-invertible operations
+// (move → reverse move, rename → rename back, trash → restore). All
+// paths here are wire form (`<adapter>://<rel>`).
+// ----------------------------------------------------------------
+
+function wireBasename(p: string): string {
+  const idx = p.indexOf('://');
+  const rel = (idx === -1 ? p : p.slice(idx + 3)).replace(/\/+$/, '');
+  const slash = rel.lastIndexOf('/');
+  return slash === -1 ? rel : rel.slice(slash + 1);
+}
+
+function wireParent(p: string): string {
+  const idx = p.indexOf('://');
+  const prefix = idx === -1 ? '' : p.slice(0, idx + 3);
+  const rel = (idx === -1 ? p : p.slice(idx + 3)).replace(/\/+$/, '');
+  const slash = rel.lastIndexOf('/');
+  return slash === -1 ? prefix : prefix + rel.slice(0, slash);
+}
+
+function wireJoin(dir: string, name: string): string {
+  if (!dir) return name;
+  return dir.endsWith('://') || dir.endsWith('/') ? dir + name : `${dir}/${name}`;
+}
+
+// Register the inverse of a queued async move under its op id: once the op
+// settles OK, the toast offers "Geri Al" which queues the reverse move. The
+// inverse op deliberately gets NO undo entry of its own (no redo ping-pong).
+function registerMoveUndo(
+  opId: number,
+  sources: string[],
+  targetWire: string,
+  originWire: string | undefined,
+) {
+  if (!originWire || !targetWire) return;
+  const movedPaths = sources.map((p) => wireJoin(targetWire, wireBasename(p)));
+  if (movedPaths.length === 0) return;
+  opUndo.set(opId, {
+    message: t('toast.moved'),
+    fn: async () => {
+      const { op } = await api.moveAsync(movedPaths, originWire, targetWire);
+      pendingOps.register(op);
+    },
+  });
 }
 
 watch(
@@ -793,6 +919,11 @@ onMounted(async () => {
 // Keyboard
 // --------------------------------------------------------------------
 
+/* cila:c wiring — command palette (Ctrl/Cmd+K) + shortcuts help (?) state */
+const showPalette = ref(false);
+const showShortcutsHelp = ref(false);
+/* /cila:c wiring */
+
 useKeyboardShortcuts(rootEl, {
   onDelete: () => {
     if (!selection.isEmpty.value) showDelete.value = true;
@@ -815,12 +946,21 @@ useKeyboardShortcuts(rootEl, {
     showShare.value = false;
     showPreview.value = false;
     ctxRef.value?.hide();
+    dismissToast();
   },
   onFocusSearch: () => toolbarRef.value?.focusSearch(),
   onCut: () => cut(),
   onCopy: () => copyToClipboard(),
   onPaste: () => paste(),
   onGoUp: () => goUp(),
+  /* cila:c wiring */
+  onPathJump: () => {
+    showPalette.value = true;
+  },
+  onShowHelp: () => {
+    showShortcutsHelp.value = true;
+  },
+  /* /cila:c wiring */
   hasSelection: () => !selection.isEmpty.value,
 });
 
@@ -1264,7 +1404,10 @@ async function paste() {
     }
 
     if (cb.mode === 'cut') {
-      const { op } = await api.moveAsync(items, qualify(currentPath.value), qualify(sourceDir) || undefined);
+      const targetWire = qualify(currentPath.value);
+      const originWire = qualify(sourceDir) || undefined;
+      const { op } = await api.moveAsync(items, targetWire, originWire);
+      registerMoveUndo(op.id, items, targetWire, originWire);
       pendingOps.register(op);
       flashToast('Taşıma kuyruğa alındı');
     } else {
@@ -1311,10 +1454,20 @@ async function submitRename(name: string) {
   const target = renameTarget.value;
   if (!target) return;
   try {
-    await api.rename(qualify(currentPath.value), target.path, name);
+    const dirWire = qualify(currentPath.value);
+    const oldPath = target.path; // qualified
+    const oldName = target.basename;
+    await api.rename(dirWire, oldPath, name);
     showRename.value = false;
     renameTarget.value = null;
     await load();
+    // Clean inverse: rename the new path back to the old basename.
+    if (name && name !== oldName) {
+      const newPath = wireJoin(wireParent(oldPath), name);
+      undoToast(t('toast.renamed'), async () => {
+        await api.rename(dirWire, newPath, oldName);
+      });
+    }
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'rename' } });
   }
@@ -1329,19 +1482,37 @@ async function confirmDelete() {
     flashToast('Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.');
     return;
   }
-  const items = selection.nodes.value.map((n) => n.path);
+  const targets = selection.nodes.value;
+  const items = targets.map((n) => n.path);
   if (items.length === 0) {
     showDelete.value = false;
     return;
   }
+  // Trash-delete is invertible via node-id restore — but only when EVERY
+  // selected node carries a backend id and the restore endpoint exists.
+  // A partial-undo offer would be a lie, so all-or-nothing.
+  const nodeIds = targets
+    .map((n) => (n as { id?: number }).id)
+    .filter((x): x is number => typeof x === 'number');
+  const restoreUndo =
+    api.endpoints.trashRestore && nodeIds.length === targets.length
+      ? async () => {
+          const { restored } = await api.restoreIds(nodeIds);
+          if (restored === 0) throw new Error('restore failed');
+        }
+      : null;
   try {
     if (api.endpoints.deleteAsync) {
       const { op } = await api.deleteAsync(items, qualify(currentPath.value));
+      if (restoreUndo) {
+        opUndo.set(op.id, { message: t('toast.trashed'), fn: restoreUndo });
+      }
       pendingOps.register(op);
       flashToast('Silme kuyruğa alındı');
     } else {
       await api.deleteItems(qualify(currentPath.value), items);
       await load();
+      if (restoreUndo) undoToast(t('toast.trashed'), restoreUndo);
     }
     showDelete.value = false;
     selection.clear();
@@ -1635,13 +1806,20 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
 
 async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string): Promise<void> {
   try {
+    const originWire = qualify(currentPath.value);
     if (api.endpoints.moveAsync) {
-      const { op } = await api.moveAsync(sources, targetDir, qualify(currentPath.value));
+      const { op } = await api.moveAsync(sources, targetDir, originWire);
+      registerMoveUndo(op.id, sources, targetDir, originWire);
       pendingOps.register(op);
       flashToast('Taşıma kuyruğa alındı');
     } else {
-      await api.move(qualify(currentPath.value), sources, targetDir);
+      await api.move(originWire, sources, targetDir);
       await load();
+      // Sync move (no async endpoint): offer the reverse move right away.
+      const movedPaths = sources.map((p) => wireJoin(targetDir, wireBasename(p)));
+      undoToast(t('toast.moved'), async () => {
+        await api.move(targetDir, movedPaths, originWire);
+      });
     }
     selection.clear();
   } catch (err) {
@@ -1741,6 +1919,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       'fe--theme-light': config.theme === 'light',
       'fe--theme-dark': config.theme === 'dark',
       'fe--is-dragover': dragOver,
+      'fe--density-compact': density === 'compact' /* cila:a density */,
     }"
     tabindex="-1"
     @dragenter="onDragEnter"
@@ -1764,6 +1943,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :locale="locale"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"
+      @update:density="density = $event"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
       @refresh="() => load()"
@@ -1785,28 +1965,171 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       @crumb-drop="onCrumbDropInto"
     />
 
-    <!-- Live presence: who else is viewing this folder (empty → nothing shown). -->
-    <div v-if="presenceUsers.length" class="fe__presence">
-      <PresenceBar :users="presenceUsers" :locale="locale" />
+    <!-- Live presence: who else is viewing this folder (empty → nothing shown).
+         When the live socket is unavailable the same strip carries a small
+         degraded-connection badge instead (presence is empty in fallback);
+         a healthy connection shows nothing extra. -->
+    <div v-if="presenceUsers.length || realtimeDegraded" class="fe__presence">
+      <PresenceBar v-if="presenceUsers.length" :users="presenceUsers" :locale="locale" />
+      <span
+        v-if="realtimeDegraded"
+        class="fe-connbadge"
+        role="status"
+        :title="t('conn.tooltip')"
+      >
+        <span class="fe-connbadge__dot" aria-hidden="true"></span>
+        {{ t('conn.offline') }}
+      </span>
     </div>
 
     <div class="fe__body" @click.self="selection.clear()">
-      <!-- Initial load: show a spinner rather than an empty/"no files" flash.
-           Only when there's nothing yet — navigation keeps the current list. -->
-      <div v-if="loading && files.length === 0" class="fe__loading">
-        <span class="fe__spinner" aria-hidden="true"></span>
-        <p class="fe__loading-text">{{ t('loading') }}</p>
+      <!-- Initial load: skeleton ghosts (view-mode aware) instead of an
+           empty/"no files" flash. Only when there's nothing yet — navigation
+           keeps the current list, exactly as before. -->
+      <div v-if="loading && files.length === 0" class="fe__skeleton" role="status">
+        <span class="fe-sr-only">{{ t('loading') }}</span>
+        <div v-if="viewMode === 'grid'" class="fe-skel-grid" aria-hidden="true">
+          <div v-for="i in 8" :key="i" class="fe-skel-card">
+            <div class="fe-skel fe-skel--thumb"></div>
+            <div class="fe-skel fe-skel--label"></div>
+          </div>
+        </div>
+        <div v-else class="fe-skel-list" aria-hidden="true">
+          <div v-for="i in 8" :key="i" class="fe-skel-row">
+            <div class="fe-skel fe-skel--icon"></div>
+            <div class="fe-skel fe-skel--name"></div>
+            <div class="fe-skel fe-skel--size"></div>
+            <div class="fe-skel fe-skel--date"></div>
+          </div>
+        </div>
       </div>
       <!-- Dead deep link (404) or RBAC-hidden dir (403, shown identically):
            a dedicated state instead of a misleading "this folder is empty". -->
-      <div v-else-if="notFoundPath" class="fe__notfound">
-        <span class="fe__notfound-icon" aria-hidden="true">📁</span>
-        <p class="fe__notfound-title">{{ t('notFound.title') }}</p>
-        <p class="fe__notfound-path">{{ notFoundPath }}</p>
-        <p class="fe__notfound-desc">{{ t('notFound.desc') }}</p>
-        <button type="button" class="fe-btn" @click="leaveNotFound">
-          {{ t('notFound.goRoot') }}
-        </button>
+      <div v-else-if="notFoundPath" class="fe-state">
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M18 36v42a6 6 0 0 0 6 6h72a6 6 0 0 0 6-6V44a6 6 0 0 0-6-6H62l-9-10H24a6 6 0 0 0-6 6z" />
+          <path d="M52 55c0-4.6 3.6-8 8-8s8 3.4 8 8c0 5.5-8 4.8-8 11" />
+          <circle cx="60" cy="73" r="1.6" fill="currentColor" stroke="none" />
+        </svg>
+        <p class="fe-state__title">{{ t('notFound.title') }}</p>
+        <p class="fe-state__path">{{ notFoundPath }}</p>
+        <p class="fe-state__hint">{{ t('notFound.desc') }}</p>
+        <div class="fe-state__actions">
+          <button type="button" class="fe-btn" @click="leaveNotFound">
+            {{ t('notFound.goRoot') }}
+          </button>
+        </div>
+      </div>
+      <!-- Listing failed (network / 5xx) with nothing else to show: retryable
+           error state in the same visual language. -->
+      <div v-else-if="loadError && files.length === 0" class="fe-state">
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="60" cy="50" r="28" />
+          <path d="M60 36v18" />
+          <circle cx="60" cy="63" r="1.8" fill="currentColor" stroke="none" />
+          <path d="M24 88h72" stroke-dasharray="3 5" />
+        </svg>
+        <p class="fe-state__title">{{ t('error.title') }}</p>
+        <p class="fe-state__hint">{{ loadError }}</p>
+        <div class="fe-state__actions">
+          <button type="button" class="fe-btn fe-btn--primary" @click="retryLoad">
+            {{ t('error.retry') }}
+          </button>
+        </div>
+      </div>
+      <!-- Search with zero hits — its own message, not "folder is empty". -->
+      <div v-else-if="!loading && files.length === 0 && searchQuery" class="fe-state">
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="52" cy="44" r="22" />
+          <path d="M68 61l20 20" />
+          <path d="M46 38l12 12M58 38l-12 12" />
+        </svg>
+        <p class="fe-state__title">{{ t('empty.search.title') }}</p>
+        <p class="fe-state__hint">{{ t('empty.search.hint') }}</p>
+      </div>
+      <!-- Empty trash view. -->
+      <div v-else-if="!loading && files.length === 0 && trashMode" class="fe-state">
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M38 34l4 48a6 6 0 0 0 6 5.6h24a6 6 0 0 0 6-5.6l4-48" />
+          <path d="M32 34h56" />
+          <path d="M50 34v-6a6 6 0 0 1 6-6h8a6 6 0 0 1 6 6v6" />
+          <path d="M52 44v32M60 44v32M68 44v32" opacity="0.5" />
+        </svg>
+        <p class="fe-state__title">{{ t('empty.trash.title') }}</p>
+      </div>
+      <!-- Loaded, zero files, no search: the real empty-folder state. The
+           upload affordances follow write permission (RBAC viewers only get
+           the title). -->
+      <div v-else-if="!loading && files.length === 0" class="fe-state">
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M18 36v42a6 6 0 0 0 6 6h72a6 6 0 0 0 6-6V44a6 6 0 0 0-6-6H62l-9-10H24a6 6 0 0 0-6 6z" />
+          <g v-if="emptyCanUpload">
+            <path d="M60 50v14" stroke-dasharray="3 4" />
+            <path d="M53 59l7 8 7-8" />
+          </g>
+        </svg>
+        <p class="fe-state__title">{{ t('empty.folder') }}</p>
+        <p v-if="emptyCanUpload" class="fe-state__hint">{{ t('empty.hint') }}</p>
+        <div v-if="emptyCanUpload" class="fe-state__actions">
+          <button type="button" class="fe-btn fe-btn--primary" @click="triggerUpload">
+            {{ t('empty.upload') }}
+          </button>
+        </div>
       </div>
       <ListView
         v-else-if="viewMode === 'list'"
@@ -1995,6 +2318,31 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       </div>
     </transition>
 
+    <!-- cila:c wiring — command palette (Ctrl/Cmd+K) + shortcuts help (?) -->
+    <CommandPalette
+      :open="showPalette"
+      :locale="locale"
+      :files="files"
+      :view-mode="viewMode"
+      :can-write="canWriteHere && !atVirtualRoot && !trashActive"
+      :can-go-up="canGoUp"
+      @close="showPalette = false"
+      @open-node="openNode"
+      @navigate="(p: string) => load(p)"
+      @new-folder="showNewFolder = true"
+      @upload="triggerUpload"
+      @toggle-view="viewMode = viewMode === 'list' ? 'grid' : 'list'"
+      @open-trash="loadTrash"
+      @refresh="() => load()"
+      @go-up="goUp"
+    />
+    <ShortcutsHelp
+      :open="showShortcutsHelp"
+      :locale="locale"
+      @close="showShortcutsHelp = false"
+    />
+    <!-- /cila:c wiring -->
+
     <input
       ref="fileInputEl"
       type="file"
@@ -2004,7 +2352,21 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
     />
 
     <transition name="fe-toast">
-      <div v-if="toast" class="fe-toast">{{ toast }}</div>
+      <div
+        v-if="toast"
+        class="fe-toast"
+        :class="{ 'fe-toast--action': !!toast.actionLabel }"
+        role="status"
+        @click="dismissToast"
+      >
+        <span class="fe-toast__msg">{{ toast.message }}</span>
+        <button
+          v-if="toast.actionLabel && toast.action"
+          type="button"
+          class="fe-toast__action"
+          @click.stop="runToastAction"
+        >{{ toast.actionLabel }}</button>
+      </div>
     </transition>
   </div>
 </template>

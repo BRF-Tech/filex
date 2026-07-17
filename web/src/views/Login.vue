@@ -13,6 +13,7 @@ import {
   ListChecks,
   FolderTree,
   ArrowRight,
+  KeyRound,
 } from 'lucide-vue-next';
 
 import { useAuthStore } from '@/stores/auth';
@@ -228,26 +229,42 @@ function startOidc() {
     </div>
 
     <!-- ─────────── Standard sign-in (non-demo) ─────────── -->
-    <div v-else class="min-h-screen flex flex-col items-center justify-center px-4">
-      <div class="card w-full max-w-md p-6">
-        <div class="flex flex-col items-center gap-2 mb-5">
-          <LogoMark class="h-12 w-12" />
-          <h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+    <div v-else class="min-h-screen flex flex-col items-center justify-center px-4 py-10">
+      <div class="card w-full max-w-md p-8">
+        <div class="flex flex-col items-center gap-1.5 mb-6 text-center">
+          <LogoMark class="h-14 w-14" />
+          <h1 class="mt-2 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
             {{ t('login.title') }}
           </h1>
-          <p class="text-sm text-zinc-500 dark:text-zinc-400 text-center">
+          <p class="text-sm text-zinc-500 dark:text-zinc-400">
             {{ t('login.subtitle') }}
           </p>
         </div>
 
         <p v-if="redirecting" class="text-center text-sm text-zinc-500 dark:text-zinc-400">
+          <span
+            class="mr-1.5 inline-block h-3.5 w-3.5 align-[-2px] animate-spin rounded-full border-2 border-current border-r-transparent opacity-50"
+            aria-hidden="true"
+          />
           {{ t('login.redirecting') }}
         </p>
 
         <template v-else>
-          <p v-if="oidcError" class="mb-3 text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
+          <p v-if="oidcError" role="alert" class="mb-4 text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
             {{ t('login.errOidc') }}
           </p>
+
+          <!-- SSO is the primary path whenever OIDC is configured. -->
+          <Button v-if="oidcEnabled" variant="primary" size="lg" block @click="startOidc">
+            <KeyRound class="h-4 w-4" />
+            {{ t('login.oidc') }}
+          </Button>
+
+          <div v-if="showLocalForm && oidcEnabled" class="my-5 flex items-center gap-3">
+            <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
+            <span class="text-xs uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{{ t('login.or') }}</span>
+            <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
+          </div>
 
           <form v-if="showLocalForm" class="space-y-3" @submit.prevent="submit">
             <Input v-model="email" type="email" autocomplete="username" required :label="t('common.email')" placeholder="admin@local" name="email" />
@@ -267,28 +284,17 @@ function startOidc() {
 
             <Checkbox v-model="remember" :label="t('login.remember')" />
 
-            <p v-if="localError" class="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
+            <p v-if="localError" role="alert" class="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
               {{ localError }}
             </p>
 
-            <Button type="submit" :loading="auth.loading" block>
+            <Button type="submit" :variant="oidcEnabled ? 'outline' : 'primary'" :loading="auth.loading" block>
               <Lock class="h-4 w-4" />
               {{ t('login.submit') }}
             </Button>
           </form>
 
-          <div v-if="showLocalForm && oidcEnabled" class="my-4 flex items-center gap-2">
-            <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
-            <span class="text-xs uppercase text-zinc-500">{{ t('login.or') }}</span>
-            <span class="flex-1 border-t border-zinc-200 dark:border-zinc-800" />
-          </div>
-
-          <Button v-if="oidcEnabled" variant="outline" block @click="startOidc">
-            <Github class="h-4 w-4" />
-            {{ t('login.oidc') }}
-          </Button>
-
-          <div v-if="localEnabled && autoRedirect && !wantLocal" class="mt-4 text-center">
+          <div v-if="localEnabled && autoRedirect && !wantLocal" class="mt-5 text-center">
             <router-link
               :to="{ query: { ...route.query, local: '1' } }"
               class="text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 underline-offset-2 hover:underline"
@@ -303,7 +309,7 @@ function startOidc() {
         </template>
       </div>
 
-      <p class="mt-4 text-xs text-zinc-500 dark:text-zinc-400 inline-flex items-center gap-1">
+      <p class="mt-5 text-xs text-zinc-500 dark:text-zinc-400 inline-flex items-center gap-1">
         <Mail class="h-3 w-3" /> filex {{ caps.data.version }}
       </p>
     </div>

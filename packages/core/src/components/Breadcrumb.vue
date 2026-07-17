@@ -19,7 +19,7 @@
  * The ✏ button swaps the crumbs for a free-form input; Enter
  * navigates, Escape cancels.
  */
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 
@@ -123,6 +123,64 @@ const crumbs = computed<Crumb[]>(() => {
     out.push({ label, adapterPath: `${adapterPrefix}${acc}` });
   }
   return out;
+});
+
+// ------------------------------------------------------------------
+// Overflow collapse (cila:c / I5) — when the trail grows past the
+// threshold, show `root › … › parent › current`; the middle crumbs move
+// into a dropdown. Visible crumbs keep their full click/drag-drop/context
+// behavior; dropdown entries only navigate.
+// ------------------------------------------------------------------
+const OVERFLOW_THRESHOLD = 4;
+const collapsed = computed(() => crumbs.value.length > OVERFLOW_THRESHOLD);
+const leadCrumbs = computed<Crumb[]>(() =>
+  collapsed.value ? crumbs.value.slice(0, 1) : crumbs.value,
+);
+const middleCrumbs = computed<Crumb[]>(() =>
+  collapsed.value ? crumbs.value.slice(1, -2) : [],
+);
+const tailCrumbs = computed<Crumb[]>(() =>
+  collapsed.value ? crumbs.value.slice(-2) : [],
+);
+
+const overflowOpen = ref(false);
+const moreWrapEl = ref<HTMLElement | null>(null);
+
+function onOverflowPick(crumb: Crumb) {
+  overflowOpen.value = false;
+  emit('navigate', crumb.adapterPath);
+}
+
+function onDocClick(e: MouseEvent) {
+  const wrap = moreWrapEl.value;
+  if (wrap && e.target instanceof Node && wrap.contains(e.target)) return;
+  overflowOpen.value = false;
+}
+
+function onDocKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    overflowOpen.value = false;
+  }
+}
+
+watch(overflowOpen, (v) => {
+  if (v) {
+    document.addEventListener('click', onDocClick, true);
+    document.addEventListener('keydown', onDocKeydown, true);
+  } else {
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onDocKeydown, true);
+  }
+});
+// Navigation rebuilds the trail — a stale open menu would list crumbs of
+// the previous folder.
+watch(crumbs, () => {
+  overflowOpen.value = false;
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick, true);
+  document.removeEventListener('keydown', onDocKeydown, true);
 });
 
 function onClick(crumb: Crumb) {
@@ -242,19 +300,56 @@ function cancelEdit() {
   <nav class="fe-breadcrumb" aria-label="Breadcrumb">
     <template v-if="!editing">
       <button
-        v-for="(c, i) in crumbs"
+        v-for="(c, i) in leadCrumbs"
         :key="c.adapterPath"
         class="fe-breadcrumb__crumb"
-        :class="{ 'is-last': i === crumbs.length - 1 }"
+        :class="{ 'is-last': !collapsed && i === leadCrumbs.length - 1 }"
         type="button"
-        :aria-current="i === crumbs.length - 1 ? 'page' : undefined"
+        :aria-current="!collapsed && i === leadCrumbs.length - 1 ? 'page' : undefined"
         @click="onClick(c)"
         @contextmenu="onContext($event, c)"
         @dragover="onCrumbDragOver"
         @drop="onCrumbDrop($event, c)"
       >
         <span>{{ c.label }}</span>
-        <span v-if="i < crumbs.length - 1" class="fe-breadcrumb__sep" aria-hidden="true">›</span>
+        <span v-if="collapsed || i < leadCrumbs.length - 1" class="fe-breadcrumb__sep" aria-hidden="true">›</span>
+      </button>
+      <span v-if="middleCrumbs.length" ref="moreWrapEl" class="fe-breadcrumb__more-wrap">
+        <button
+          type="button"
+          class="fe-breadcrumb__more"
+          aria-haspopup="menu"
+          :aria-expanded="overflowOpen"
+          :aria-label="t('breadcrumb.more')"
+          :title="t('breadcrumb.more')"
+          @click="overflowOpen = !overflowOpen"
+        >…</button>
+        <span class="fe-breadcrumb__sep" aria-hidden="true">›</span>
+        <div v-if="overflowOpen" class="fe-breadcrumb__menu" role="menu">
+          <button
+            v-for="c in middleCrumbs"
+            :key="c.adapterPath"
+            type="button"
+            class="fe-breadcrumb__menu-item"
+            role="menuitem"
+            @click="onOverflowPick(c)"
+          >{{ c.label }}</button>
+        </div>
+      </span>
+      <button
+        v-for="(c, i) in tailCrumbs"
+        :key="c.adapterPath"
+        class="fe-breadcrumb__crumb"
+        :class="{ 'is-last': i === tailCrumbs.length - 1 }"
+        type="button"
+        :aria-current="i === tailCrumbs.length - 1 ? 'page' : undefined"
+        @click="onClick(c)"
+        @contextmenu="onContext($event, c)"
+        @dragover="onCrumbDragOver"
+        @drop="onCrumbDrop($event, c)"
+      >
+        <span>{{ c.label }}</span>
+        <span v-if="i < tailCrumbs.length - 1" class="fe-breadcrumb__sep" aria-hidden="true">›</span>
       </button>
       <button
         type="button"

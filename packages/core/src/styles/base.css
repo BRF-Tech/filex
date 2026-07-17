@@ -1281,3 +1281,552 @@ filex-explorer {
     min-width: 120px;
   }
 }
+
+/* === cila:a — file-type SVG icons + date group headers + density mode === */
+
+/* SVG icon set (lib/fileIcons) — sized by the wrapper's font-size so the
+ * existing 32px grid / 16px list scales keep working. */
+.fe-ficon {
+  width: 1em;
+  height: 1em;
+  display: block;
+  flex-shrink: 0;
+}
+.fe-ficon--folder { color: var(--fe-icon-folder); }
+.fe-ficon--image { color: var(--fe-icon-image); }
+.fe-ficon--video { color: var(--fe-icon-video); }
+.fe-ficon--audio { color: var(--fe-icon-audio); }
+.fe-ficon--pdf { color: var(--fe-icon-pdf); }
+.fe-ficon--doc { color: var(--fe-icon-doc); }
+.fe-ficon--sheet { color: var(--fe-icon-sheet); }
+.fe-ficon--slides { color: var(--fe-icon-slides); }
+.fe-ficon--archive { color: var(--fe-icon-archive); }
+.fe-ficon--code { color: var(--fe-icon-code); }
+.fe-ficon--text { color: var(--fe-icon-text); }
+.fe-ficon--unknown { color: var(--fe-icon-unknown); }
+.fe-grid__icon--svg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-list__icon--svg {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Sortable list column headers — plain-looking buttons, arrow only when
+ * the column drives the order. */
+.fe-list__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.fe-list__sort:hover {
+  color: var(--fe-text);
+}
+.fe-list__sort:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.fe-list__sort-arrow {
+  font-size: 11px;
+  color: var(--fe-primary);
+}
+
+/* Date group headers (only while sorted by modified date) — thin, muted,
+ * non-interactive. */
+.fe-list__group {
+  padding: 12px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fe-text-muted);
+  user-select: none;
+}
+
+/* Density: compact — tighter rows/cards, smaller grid tiles. Toggled from
+ * the toolbar; class lives on the `.fe` root. */
+.fe--density-compact .fe-toolbar {
+  padding: 6px 8px;
+  gap: 6px;
+}
+.fe--density-compact .fe-breadcrumb {
+  padding: 4px 12px;
+}
+.fe--density-compact .fe-list__head {
+  padding: 4px 12px;
+}
+.fe--density-compact .fe-list__row {
+  padding: 3px 12px;
+}
+.fe--density-compact .fe-list__icon {
+  font-size: 14px;
+}
+.fe--density-compact .fe-list__group {
+  padding: 8px 12px 2px;
+}
+.fe--density-compact .fe-grid {
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+.fe--density-compact .fe-grid__card {
+  padding: 6px;
+}
+.fe--density-compact .fe-grid__icon {
+  font-size: 24px;
+}
+
+
+/* === cila:c — command palette + shortcuts help + breadcrumb overflow === */
+
+/* Command palette (Ctrl/Cmd+K) — top-anchored launcher card. */
+.fe-cmdp__backdrop {
+  align-items: flex-start;
+  padding-top: min(18vh, 160px);
+}
+.fe-cmdp {
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  box-shadow: var(--fe-shadow);
+  width: min(560px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fe-cmdp__inputwrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--fe-border);
+  color: var(--fe-text-muted);
+}
+.fe-cmdp__glyph {
+  flex: 0 0 auto;
+}
+.fe-cmdp__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 15px;
+}
+.fe-cmdp__input::placeholder {
+  color: var(--fe-text-muted);
+}
+.fe-cmdp__list {
+  max-height: min(48vh, 380px);
+  overflow-y: auto;
+  padding: 6px;
+}
+.fe-cmdp__group {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-cmdp__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  padding: 8px 10px;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.fe-cmdp__item.is-active {
+  background: var(--fe-bg-selected);
+}
+.fe-cmdp__item:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-cmdp__icon {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+}
+.fe-cmdp__label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-cmdp__empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--fe-text-muted);
+  font-size: 13px;
+}
+.fe-cmdp__hint {
+  padding: 8px 14px;
+  border-top: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+  font-size: 11px;
+  color: var(--fe-text-muted);
+}
+
+/* Shortcuts help ("?") — grouped cheat-sheet inside the standard modal. */
+.fe-shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.fe-shortcuts__heading {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-shortcuts__table {
+  display: flex;
+  flex-direction: column;
+}
+.fe-shortcuts__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+.fe-shortcuts__keys {
+  flex: 0 0 40%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fe-shortcuts__desc {
+  flex: 1 1 auto;
+  font-size: 13px;
+  color: var(--fe-text);
+}
+.fe-shortcuts__or {
+  color: var(--fe-text-muted);
+  font-size: 11px;
+}
+.fe-kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  border: 1px solid var(--fe-border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  font-family: var(--fe-font-mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* Breadcrumb overflow — "…" trigger + dropdown for the collapsed middle. */
+.fe-breadcrumb__more-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.fe-breadcrumb__more {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 2px 8px;
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+}
+.fe-breadcrumb__more:hover,
+.fe-breadcrumb__more[aria-expanded='true'] {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-breadcrumb__more:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-breadcrumb__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 80;
+  min-width: 160px;
+  max-width: 280px;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  box-shadow: var(--fe-shadow);
+}
+.fe-breadcrumb__menu-item {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 6px 10px;
+  border-radius: var(--fe-radius-sm);
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-breadcrumb__menu-item:hover,
+.fe-breadcrumb__menu-item:focus-visible {
+  background: var(--fe-bg-hover);
+}
+
+/* Long folder names shouldn't blow up the crumb row — ellipsize labels. */
+.fe-breadcrumb__crumb > span:first-child {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .fe-breadcrumb__crumb > span:first-child {
+    max-width: 110px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fe-modal-enter-active,
+  .fe-modal-leave-active {
+    transition: none !important;
+  }
+}
+
+
+/* === cila:b — skeleton loading, state screens, undo snackbar, connection badge === */
+
+/* Screen-reader-only helper (skeleton announces "loading" without visuals). */
+.fe-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Skeleton (initial load) ---------- */
+
+.fe__skeleton {
+  min-height: 240px;
+}
+.fe-skel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--fe-radius-sm);
+  background: color-mix(in srgb, var(--fe-text-muted) 14%, transparent);
+}
+.fe-skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--fe-text-muted) 12%, transparent),
+    transparent
+  );
+  animation: fe-skel-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes fe-skel-shimmer {
+  to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Static faint blocks — no sweep. */
+  .fe-skel::after {
+    animation: none;
+    content: none;
+  }
+}
+
+/* List-mode ghosts mirror .fe-list__row's grid so the swap to real rows
+   doesn't shift the layout. */
+.fe-skel-list {
+  padding-top: 2px;
+}
+.fe-skel-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 120px 180px;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-skel-row .fe-skel {
+  height: 12px;
+}
+.fe-skel-row .fe-skel--icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+}
+.fe-skel-row .fe-skel--name { width: 55%; }
+.fe-skel-row:nth-child(2n) .fe-skel--name { width: 38%; }
+.fe-skel-row:nth-child(3n) .fe-skel--name { width: 70%; }
+.fe-skel-row .fe-skel--size { width: 56px; justify-self: start; }
+.fe-skel-row .fe-skel--date { width: 110px; justify-self: start; }
+
+/* Grid-mode ghosts mirror .fe-grid / .fe-grid__card. */
+.fe-skel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--fe-gap);
+  padding: var(--fe-gap);
+}
+.fe-skel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
+.fe-skel-card .fe-skel--thumb {
+  aspect-ratio: 1 / 1;
+}
+.fe-skel-card .fe-skel--label {
+  height: 12px;
+  width: 70%;
+}
+.fe-skel-card:nth-child(2n) .fe-skel--label { width: 50%; }
+.fe-skel-card:nth-child(3n) .fe-skel--label { width: 85%; }
+
+/* ---------- State screens (empty / search-empty / not-found / error) ---------- */
+
+.fe-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 240px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--fe-text-muted);
+}
+.fe-state__art {
+  color: var(--fe-text-muted);
+  opacity: 0.7;
+  margin-bottom: 4px;
+  flex: 0 0 auto;
+}
+.fe-state__title {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fe-text);
+}
+.fe-state__hint {
+  margin: 0;
+  font-size: 13px;
+  max-width: 420px;
+}
+.fe-state__path {
+  margin: 0;
+  font-size: 12px;
+  font-family: var(--fe-font-mono);
+  word-break: break-all;
+  max-width: 480px;
+}
+.fe-state__actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Undo snackbar (action-capable toast) ---------- */
+
+.fe-toast--action {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px 8px 14px;
+  cursor: pointer;
+  max-width: min(480px, calc(100% - 32px));
+}
+.fe-toast__msg {
+  min-width: 0;
+}
+.fe-toast__action {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  border-radius: var(--fe-radius-sm);
+  font: inherit;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--fe-primary) 70%, var(--fe-bg));
+  cursor: pointer;
+}
+.fe-toast__action:hover {
+  background: color-mix(in srgb, var(--fe-bg) 14%, transparent);
+}
+.fe-toast__action:focus-visible {
+  outline: 2px solid var(--fe-bg);
+  outline-offset: 1px;
+}
+
+/* ---------- Connection badge (degraded realtime only) ---------- */
+
+.fe-connbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fe-text-muted);
+  background: var(--fe-bg-elev);
+  border: 1px solid var(--fe-border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: help;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.fe-connbadge__dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fe-warning, #f59e0b);
+}

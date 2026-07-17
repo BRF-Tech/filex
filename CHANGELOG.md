@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.83 below.)
+(Nothing yet — see v0.1.84 below.)
+
+## [0.1.84] - 2026-07-17
+
+### Added
+
+- **Command palette** (`Ctrl/Cmd+K`): fuzzy-jump to files and folders in the
+  current listing, run common actions (new folder, upload, toggle view, trash,
+  refresh, go up) and jump to a typed path — all from the keyboard.
+- **Keyboard shortcuts help**: press `?` to see every shortcut, grouped and
+  sourced from a single registry so the sheet never drifts from reality.
+- **Date grouping & sorting**: list columns (name / size / date) are now
+  sortable; sorting by date segments rows under Today / Yesterday / This week /
+  This month / month-year headers.
+- **Density toggle**: compact ⇄ comfortable list & grid density, persisted per
+  browser.
+- **Undo snackbar**: rename, move and trash operations offer a one-click
+  "Undo" for 8 seconds.
+- **Connection badge**: when the live (WebSocket) channel is unavailable the
+  explorer quietly falls back to polling and now says so with a small amber
+  pill instead of staying silent.
+
+### Changed
+
+- **File-type icons**: hand-drawn SVG icon set (12 families with per-family
+  accent colors, light + dark) replaces the emoji icons in grid and list views;
+  thumbnails keep priority.
+- **Empty / not-found / error states**: illustrated, actionable screens (drag &
+  drop hint + upload button, retry on load failure, distinct empty-trash and
+  empty-search states) replace bare text.
+- **Skeleton loading**: initial listing shows ghost rows/cards instead of a
+  spinner (motion-reduced friendly).
+- **Public share pages** (PIN, download, ZIP-preparing, file-drop) redesigned
+  with a shared card language, dark-mode support, accessible focus states and
+  a subtle "Shared with filex" footer; login page got the same visual pass with
+  SSO-first hierarchy.
 
 ## [0.1.83] - 2026-07-16
 
