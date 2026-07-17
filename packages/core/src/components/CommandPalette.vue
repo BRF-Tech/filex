@@ -53,6 +53,10 @@ const emit = defineEmits<{
   (e: 'go-up'): void;
   /* bul:s3 — an "everywhere" hit was chosen. */
   (e: 'open-hit', hit: GlobalSearchHit): void;
+  /* wiring:int — settings surfaces reachable from anywhere via the palette */
+  (e: 'open-theme'): void;
+  (e: 'open-shortcut-settings'): void;
+  (e: 'start-tour'): void;
 }>();
 
 const { t, nodeDisplayName } = useLocale(() => props.locale);
@@ -126,6 +130,10 @@ const commandItems = computed<PaletteItem[]>(() => {
     { command: 'open-trash', label: t('cmd.trash'), icon: '🗑', enabled: true },
     { command: 'refresh', label: t('toolbar.refresh'), icon: '⟳', enabled: true },
     { command: 'go-up', label: t('toolbar.go_up'), icon: '↑', enabled: props.canGoUp !== false },
+    /* wiring:int */
+    { command: 'open-theme', label: t('theme.menu'), icon: '🎨', enabled: true },
+    { command: 'open-shortcut-settings', label: t('shortcuts.settings.menu'), icon: '⌨', enabled: true },
+    { command: 'start-tour', label: t('tour.restart'), icon: '🎓', enabled: true },
   ];
   return defs
     .filter((d) => d.enabled && matchScore(d.label, q) >= 0)
@@ -310,6 +318,10 @@ function choose(item?: PaletteItem) {
       case 'open-trash': emit('open-trash'); break;
       case 'refresh': emit('refresh'); break;
       case 'go-up': emit('go-up'); break;
+      /* wiring:int */
+      case 'open-theme': emit('open-theme'); break;
+      case 'open-shortcut-settings': emit('open-shortcut-settings'); break;
+      case 'start-tour': emit('start-tour'); break;
     }
   }
 }

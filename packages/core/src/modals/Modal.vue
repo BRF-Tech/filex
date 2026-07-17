@@ -31,19 +31,32 @@ const emit = defineEmits<{
 
 const cardEl = ref<HTMLElement | null>(null);
 
+/* wiring:c4 — a11y: unique title id for aria-labelledby + focus restore.
+ * The element focused before the modal opened gets focus back on close so
+ * keyboard users return to where they were instead of <body>. */
+let modalSeq = 0;
+const titleId = `fe-modal-title-${++modalSeq}-${Math.random().toString(36).slice(2, 7)}`;
+let prevFocus: HTMLElement | null = null;
+
+const FOCUSABLE =
+  'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),' +
+  'button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
+
 watch(
   () => props.open,
   (v) => {
     if (v) {
+      prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
       document.addEventListener('keydown', onKey);
       setTimeout(() => {
-        const focusable = cardEl.value?.querySelector<HTMLElement>(
-          'input,select,textarea,button,[tabindex]:not([tabindex="-1"])',
-        );
+        const focusable = cardEl.value?.querySelector<HTMLElement>(FOCUSABLE);
         focusable?.focus();
       }, 30);
     } else {
       document.removeEventListener('keydown', onKey);
+      /* wiring:c4 — return focus to the opener. */
+      prevFocus?.focus?.();
+      prevFocus = null;
     }
   },
 );
@@ -51,7 +64,28 @@ watch(
 onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close');
+  if (e.key === 'Escape') {
+    emit('close');
+    return;
+  }
+  /* wiring:c4 — focus trap: Tab cycles inside the card (WAI-ARIA dialog).
+   * Without it, Tab walked out into the host page behind the backdrop. */
+  if (e.key === 'Tab' && cardEl.value) {
+    const nodes = Array.from(cardEl.value.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (el) => el.offsetParent !== null || el === document.activeElement,
+    );
+    if (nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && (active === first || !cardEl.value.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (active === last || !cardEl.value.contains(active))) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 }
 
 function onBackdrop() {
@@ -81,10 +115,12 @@ function onBackdrop() {
         ]"
         role="dialog"
         aria-modal="true"
+        :aria-labelledby="title && !chromeless ? titleId : undefined"
+        :aria-label="!title || chromeless ? title || undefined : undefined"
         @click.stop
       >
         <header v-if="title && !chromeless" class="fe-modal__head">
-          <h2 class="fe-modal__title">{{ title }}</h2>
+          <h2 :id="titleId" class="fe-modal__title">{{ title }}</h2>
           <button
             type="button"
             class="fe-modal__close"

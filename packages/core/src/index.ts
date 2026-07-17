@@ -82,3 +82,48 @@ export {
 
 // ——— Locale catalogue (consumers may merge their own keys) ———
 export { messages, tr, en } from './locales';
+
+/* wiring:c1 — theme registry + gallery (hosts can list/apply themes programmatically) */
+export {
+  THEMES,
+  THEME_LS_KEY,
+  DEFAULT_THEME_ID,
+  themeById,
+  useThemeState,
+  setTheme,
+  applyThemeToEl,
+  syncThemeStyle,
+  generateThemeCss,
+} from './lib/themes';
+export type { ThemeDef, ThemeTokenMap } from './lib/themes';
+export { default as ThemeGallery } from './components/ThemeGallery.vue';
+/* wiring:c2 — customizable shortcut registry + settings/quick-look UI */
+export {
+  SHORTCUT_ACTIONS,
+  useShortcutList,
+  effectiveCombo,
+  setShortcutOverride,
+  resetShortcut,
+  resetAllShortcuts,
+  findShortcutConflict,
+  comboFromEvent,
+} from './composables/useKeyboardShortcuts';
+export type {
+  ShortcutActionDef,
+  ShortcutView,
+  ShortcutConflict,
+} from './composables/useKeyboardShortcuts';
+export { default as ShortcutSettings } from './components/ShortcutSettings.vue';
+export { default as QuickLook } from './components/QuickLook.vue';
+/* /wiring:c2 */
+/* wiring:c3 — unified operations center (badge + panel + store) */
+export { useOperations } from './composables/useOperations';
+export type {
+  Operation,
+  OperationInput,
+  OperationActions,
+  OperationKind,
+  OperationStatus,
+  OperationsStore,
+} from './composables/useOperations';
+export { default as OperationsCenter } from './components/OperationsCenter.vue';

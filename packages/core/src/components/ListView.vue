@@ -12,6 +12,7 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
 import { matchedInContent, snippetSegments } from '../lib/snippet'; /* bul:s3 */
+import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 import StarButton from './StarButton.vue';
 
 const props = defineProps<{
@@ -71,8 +72,21 @@ function onRowCtx(n: FileNode, ev: MouseEvent) {
 }
 
 function onItemDragStart(n: FileNode, ev: DragEvent) {
+  /* wiring:c4 — custom ghost (name + multi-select count badge). Visual
+   * only; the payload/selection logic stays in FileExplorer. */
+  applyDragGhost(
+    ev,
+    nodeDisplayName(n),
+    props.selected.has(n.path) ? props.selected.size : 1,
+  );
   emit('item-drag-start', n, ev);
 }
+
+/* wiring:c4 — droptarget highlight: the folder row currently hovered by an
+ * internal drag gets `.is-droptarget`. Purely visual — the accept/deny
+ * decision below is untouched (files never preventDefault, so the browser
+ * shows the native no-drop cursor on invalid targets). */
+const dropTargetPath = ref<string | null>(null);
 
 function onItemDragOver(n: FileNode, ev: DragEvent) {
   if (n.type !== 'dir') return;
@@ -80,9 +94,16 @@ function onItemDragOver(n: FileNode, ev: DragEvent) {
   ev.preventDefault();
   ev.stopPropagation();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+  dropTargetPath.value = n.path; /* wiring:c4 */
+}
+
+/* wiring:c4 */
+function onItemDragLeave(n: FileNode) {
+  if (dropTargetPath.value === n.path) dropTargetPath.value = null;
 }
 
 function onItemDrop(n: FileNode, ev: DragEvent) {
+  dropTargetPath.value = null; /* wiring:c4 */
   if (n.type !== 'dir') return;
   if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
   ev.preventDefault();
@@ -292,9 +313,17 @@ const segments = computed<Segment[]>(() => {
 </script>
 
 <template>
-  <div class="fe-list" :class="{ 'is-loading': loading, 'has-star-col': !!apiBase || apiBase === '' }">
+  <!-- wiring:c4 — grid semantics: container role + localized labels; rows
+       carry aria-selected below. Structure/layout untouched. -->
+  <div
+    class="fe-list"
+    :class="{ 'is-loading': loading, 'has-star-col': !!apiBase || apiBase === '' }"
+    role="grid"
+    :aria-label="t('list.aria')"
+    :aria-busy="loading ? 'true' : undefined"
+  >
     <div class="fe-list__head" role="row">
-      <div class="fe-list__col fe-list__col--star" role="columnheader" aria-label="Star"></div>
+      <div class="fe-list__col fe-list__col--star" role="columnheader" :aria-label="t('col.star') /* wiring:c4 */"></div>
       <div class="fe-list__col fe-list__col--name" role="columnheader" :aria-sort="ariaSort('name')">
         <button type="button" class="fe-list__sort" :title="t('col.sort')" @click="toggleSort('name')">
           {{ t('col.name') }}
@@ -326,21 +355,25 @@ const segments = computed<Segment[]>(() => {
           'is-dir': n.type === 'dir',
           'is-trash': n.trashed,
           'is-clipped': clipped?.has(n.path),
+          'is-droptarget': dropTargetPath === n.path /* wiring:c4 */,
         }"
         role="row"
         tabindex="0"
+        :aria-selected="isSelected(n) ? 'true' : 'false'"
+        :aria-label="nodeDisplayName(n) /* wiring:c4 */"
         draggable="true"
         @click="onRowClick(n, $event)"
         @dblclick="onRowDbl(n)"
         @contextmenu="onRowCtx(n, $event)"
         @dragstart="onItemDragStart(n, $event)"
         @dragover="onItemDragOver(n, $event)"
+        @dragleave="onItemDragLeave(n) /* wiring:c4 */"
         @drop="onItemDrop(n, $event)"
         @touchstart.passive="onTouchStart(n, $event)"
         @touchend="cancelPress"
         @touchmove="cancelPress"
       >
-        <div class="fe-list__col fe-list__col--star" @click.stop>
+        <div class="fe-list__col fe-list__col--star" role="gridcell" @click.stop>
           <StarButton
             v-if="typeof n.id === 'number' && n.type === 'file'"
             :starred="!!starredIds?.has(n.id)"
@@ -351,7 +384,7 @@ const segments = computed<Segment[]>(() => {
             @change="(val: boolean) => emit('star-change', n, val)"
           />
         </div>
-        <div class="fe-list__col fe-list__col--name">
+        <div class="fe-list__col fe-list__col--name" role="gridcell">
           <span v-if="specialEmojiFor(n)" class="fe-list__icon" aria-hidden="true">{{ specialEmojiFor(n) }}</span>
           <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
           <span v-else class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconSvg(n)"></span>
@@ -375,10 +408,10 @@ const segments = computed<Segment[]>(() => {
             </span>
           </div>
         </div>
-        <div class="fe-list__col fe-list__col--size">
+        <div class="fe-list__col fe-list__col--size" role="gridcell">
           {{ formatSize(n.size) }}
         </div>
-        <div class="fe-list__col fe-list__col--mod">
+        <div class="fe-list__col fe-list__col--mod" role="gridcell">
           {{ displayDate(n.last_modified) }}
         </div>
       </div>

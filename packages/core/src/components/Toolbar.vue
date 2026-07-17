@@ -86,6 +86,8 @@ const emit = defineEmits<{
   (e: 'open-recents'): void;
   (e: 'update:density', v: Density): void;
   (e: 'toggle-inspector'): void /* koru:k1 */;
+  (e: 'open-theme'): void /* wiring:c1 — tema galerisi */;
+  (e: 'open-shortcut-settings'): void /* wiring:c2 */;
 }>();
 
 // Density toggle — the toolbar owns the persisted preference; the parent
@@ -226,6 +228,10 @@ const moreActions = computed<ContextAction[]>(() => {
   );
   /* koru:k1 — inspector toggle also reachable from the narrow overflow menu */
   list.push({ key: 'inspector', label: t('toolbar.inspector'), icon: 'ℹ' });
+  /* wiring:c1 — tema galerisi de dar modda ⋯ menüsünden açılır */
+  list.push({ key: 'theme', label: t('theme.menu'), icon: '🎨' });
+  list.push({ key: 'shortcut-settings', label: t('shortcuts.settings.menu'), icon: '⌨' }) /* wiring:c2 */;
+  list.push({ key: 'tour', label: t('tour.restart'), icon: '🎓' }); /* wiring:c4 */
   return list;
 });
 
@@ -253,6 +259,15 @@ function onMoreSelect(a: ContextAction) {
       break;
     case 'inspector' /* koru:k1 */:
       emit('toggle-inspector');
+      break;
+    case 'theme' /* wiring:c1 */:
+      emit('open-theme');
+      break;
+    case 'shortcut-settings' /* wiring:c2 */:
+      emit('open-shortcut-settings');
+      break;
+    case 'tour' /* wiring:c4 — bubbles to the FileExplorer root listener */:
+      moreBtnEl.value?.dispatchEvent(new CustomEvent('fe:tour-restart', { bubbles: true }));
       break;
     default:
       fire(a.key);
@@ -331,7 +346,7 @@ function onMoreSelect(a: ContextAction) {
           class="fe-search__input"
           :placeholder="t('toolbar.search.placeholder')"
           :value="localSearch"
-          aria-label="Search"
+          :aria-label="t('toolbar.search') /* wiring:c4 — was hardcoded EN */"
           @input="onSearchInput"
         />
       </div>
@@ -340,17 +355,19 @@ function onMoreSelect(a: ContextAction) {
         type="button"
         class="fe-btn fe-btn--icon-only"
         :title="t('toolbar.upload')"
+        :aria-label="t('toolbar.upload') /* wiring:c4 */"
         @click="emit('upload')"
       >
-        <span class="fe-icon">⬆</span>
+        <span class="fe-icon" aria-hidden="true">⬆</span>
       </button>
       <button
         type="button"
         class="fe-btn fe-btn--icon-only"
         :title="t('toolbar.refresh')"
+        :aria-label="t('toolbar.refresh') /* wiring:c4 */"
         @click="emit('refresh')"
       >
-        <span class="fe-icon">↻</span>
+        <span class="fe-icon" aria-hidden="true">↻</span>
       </button>
     </div>
 
@@ -418,7 +435,34 @@ function onMoreSelect(a: ContextAction) {
       </svg>
     </button>
 
-    <div class="fe-toolbar__view" role="tablist" aria-label="View">
+    <!-- wiring:c1 — tema galerisi (palet ikonu) -->
+    <button
+      type="button"
+      class="fe-btn fe-btn--icon-only fe-toolbar__theme"
+      :title="t('theme.menu')"
+      :aria-label="t('theme.menu')"
+      @click="emit('open-theme')"
+    >
+      <svg
+        class="fe-ficon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d="M12 3a9 9 0 1 0 0 18h1.4a2.1 2.1 0 0 0 1.5-3.6 2.1 2.1 0 0 1 1.5-3.6H19a2 2 0 0 0 2-2A9 9 0 0 0 12 3z" />
+        <circle cx="7.8" cy="10.2" r="1.15" fill="currentColor" stroke="none" />
+        <circle cx="11.6" cy="7.2" r="1.15" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="8.6" r="1.15" fill="currentColor" stroke="none" />
+      </svg>
+    </button>
+    <!-- /wiring:c1 -->
+
+    <div class="fe-toolbar__view" role="tablist" :aria-label="t('toolbar.view_label') /* wiring:c4 — was hardcoded EN */">
       <button
         type="button"
         class="fe-btn fe-btn--icon-only"
@@ -426,9 +470,10 @@ function onMoreSelect(a: ContextAction) {
         role="tab"
         :aria-selected="viewMode === 'list'"
         :title="t('toolbar.view.list')"
+        :aria-label="t('toolbar.view.list') /* wiring:c4 */"
         @click="emit('update:viewMode', 'list')"
       >
-        <span class="fe-icon">☰</span>
+        <span class="fe-icon" aria-hidden="true">☰</span>
       </button>
       <button
         type="button"
@@ -437,9 +482,10 @@ function onMoreSelect(a: ContextAction) {
         role="tab"
         :aria-selected="viewMode === 'grid'"
         :title="t('toolbar.view.grid')"
+        :aria-label="t('toolbar.view.grid') /* wiring:c4 */"
         @click="emit('update:viewMode', 'grid')"
       >
-        <span class="fe-icon">▦</span>
+        <span class="fe-icon" aria-hidden="true">▦</span>
       </button>
     </div>
     </template>

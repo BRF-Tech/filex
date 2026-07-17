@@ -2,11 +2,13 @@
 /**
  * GridView — card grid. Thumbnails preferred, fall back to icon.
  */
+import { ref } from 'vue'; /* wiring:c4 */
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
 import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
+import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 
 const props = defineProps<{
   files: FileNode[];
@@ -56,8 +58,17 @@ function onCtx(n: FileNode, ev: MouseEvent) {
 }
 
 function onItemDragStart(n: FileNode, ev: DragEvent) {
+  /* wiring:c4 — custom ghost (name + multi-select count badge), visual only. */
+  applyDragGhost(
+    ev,
+    nodeDisplayName(n),
+    props.selected.has(n.path) ? props.selected.size : 1,
+  );
   emit('item-drag-start', n, ev);
 }
+
+/* wiring:c4 — droptarget highlight, mirrors ListView (visual layer only). */
+const dropTargetPath = ref<string | null>(null);
 
 function onItemDragOver(n: FileNode, ev: DragEvent) {
   if (n.type !== 'dir') return;
@@ -65,9 +76,16 @@ function onItemDragOver(n: FileNode, ev: DragEvent) {
   ev.preventDefault();
   ev.stopPropagation();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+  dropTargetPath.value = n.path; /* wiring:c4 */
+}
+
+/* wiring:c4 */
+function onItemDragLeave(n: FileNode) {
+  if (dropTargetPath.value === n.path) dropTargetPath.value = null;
 }
 
 function onItemDrop(n: FileNode, ev: DragEvent) {
+  dropTargetPath.value = null; /* wiring:c4 */
   if (n.type !== 'dir') return;
   if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
   ev.preventDefault();
@@ -128,7 +146,16 @@ function snippetTitle(snippet: string): string {
 </script>
 
 <template>
-  <div class="fe-grid" :class="{ 'is-loading': loading }">
+  <!-- wiring:c4 — listbox semantics (multi-selectable cards as options);
+       localized label + busy state. Structure/layout untouched. -->
+  <div
+    class="fe-grid"
+    :class="{ 'is-loading': loading }"
+    role="listbox"
+    aria-multiselectable="true"
+    :aria-label="t('grid.aria')"
+    :aria-busy="loading ? 'true' : undefined"
+  >
     <div
       v-for="n in files"
       :key="n.path"
@@ -138,14 +165,19 @@ function snippetTitle(snippet: string): string {
         'is-dir': n.type === 'dir',
         'is-trash': n.trashed,
         'is-clipped': clipped?.has(n.path),
+        'is-droptarget': dropTargetPath === n.path /* wiring:c4 */,
       }"
       tabindex="0"
+      role="option"
+      :aria-selected="isSelected(n) ? 'true' : 'false'"
+      :aria-label="nodeDisplayName(n) /* wiring:c4 */"
       draggable="true"
       @click="onClick(n, $event)"
       @dblclick="onDbl(n)"
       @contextmenu="onCtx(n, $event)"
       @dragstart="onItemDragStart(n, $event)"
       @dragover="onItemDragOver(n, $event)"
+      @dragleave="onItemDragLeave(n) /* wiring:c4 */"
       @drop="onItemDrop(n, $event)"
       @touchstart.passive="onTouchStart(n, $event)"
       @touchend="cancelPress"

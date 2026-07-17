@@ -7,7 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.4.2 below.)
+(Nothing yet — see v0.5.0 below.)
+
+## [0.5.0] - 2026-07-17
+
+### Added
+
+- **Theme gallery**: 8 built-in themes (default, night blue, forest, amber,
+  lilac, high contrast, soft gray, terminal green), each with its own light
+  and dark variant — theme choice is independent from light/dark mode.
+  Applied as `--fe-*` token overrides on the explorer root (embeds keep the
+  host page untouched), persisted per browser, synced across tabs.
+- **Customizable keyboard shortcuts**: a settings modal (toolbar menu, the
+  "?" card or the command palette) lists every action grouped by category;
+  press-to-capture rebinding with conflict detection ("unbind the old one"
+  flow), per-row and global reset. Only deviations from the defaults are
+  stored.
+- **Quick look**: Space peeks the selected file in a lightweight overlay —
+  arrow keys move the selection with the preview following, Enter promotes
+  to the full open flow.
+- **Operations center**: uploads and background file operations now live in
+  one corner badge with an expandable panel — overall progress ring, per-item
+  progress, session history, sticky error rows with retry (failed uploads
+  retry into their original target folder).
+- **Onboarding tour**: a first-run coach-mark tour (6 steps) highlights the
+  core surfaces; steps whose targets are absent are skipped, and the tour
+  can be restarted from the toolbar menu or the command palette.
+- Command palette: new "Theme", "Shortcuts" and "Restart tour" commands.
+
+### Improved
+
+- Accessibility: grid/list views expose proper `grid`/`listbox` roles with
+  keyboard focus rings, the context menu is fully keyboard-navigable
+  (arrows/Home/End/Esc with focus restore) and flips at screen edges,
+  modals trap focus and restore it on close, icon-only buttons carry
+  localized labels, and animations respect `prefers-reduced-motion`.
+- Drag & drop: valid drop targets highlight while dragging and the drag
+  ghost shows the item name with a count badge for multi-selections.
+- Error states: friendlier error cards with a collapsible technical-details
+  section alongside retry.
 
 ## [0.4.2] - 2026-07-17
 

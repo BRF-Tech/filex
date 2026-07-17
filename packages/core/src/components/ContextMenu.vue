@@ -54,10 +54,23 @@ const y = ref(0);
 const targetNodes = ref<FileNode[]>([]);
 const menuEl = ref<HTMLElement | null>(null);
 
+/* wiring:c4 — where the pointer opened the menu; kept separate from x/y so
+ * the edge-flip can re-anchor ABOVE/LEFT of the cursor instead of merely
+ * clamping (a clamp near the bottom edge used to leave the menu covering
+ * the clicked row). */
+let anchorX = 0;
+let anchorY = 0;
+/* wiring:c4 — focus restore: whatever had focus before the menu opened gets
+ * it back on hide, so keyboard users don't fall back to <body>. */
+let prevFocus: HTMLElement | null = null;
+
 async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[]) {
+  prevFocus = (document.activeElement as HTMLElement | null) ?? null; /* wiring:c4 */
   open.value = true;
   x.value = ev.clientX;
   y.value = ev.clientY;
+  anchorX = ev.clientX; /* wiring:c4 */
+  anchorY = ev.clientY; /* wiring:c4 */
   targetNodes.value = nodes;
   // After the menu renders, clamp it inside the viewport so a click near the
   // bottom/right edge doesn't push the menu off-screen (it opens down-right
@@ -70,6 +83,7 @@ async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[])
     return;
   }
   clampToViewport();
+  focusItem(0); /* wiring:c4 — keyboard nav starts on the first item */
 }
 
 function clampToViewport() {
@@ -79,11 +93,16 @@ function clampToViewport() {
   const margin = 8;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  if (y.value + rect.height > vh - margin) {
-    y.value = Math.max(margin, vh - rect.height - margin);
+  /* wiring:c4 — edge flip: overflowing the bottom/right edge re-anchors the
+   * menu above/left of the cursor when there's room; clamping stays as the
+   * fallback for tiny viewports. */
+  if (anchorY + rect.height > vh - margin) {
+    const flipped = anchorY - rect.height;
+    y.value = flipped >= margin ? flipped : Math.max(margin, vh - rect.height - margin);
   }
-  if (x.value + rect.width > vw - margin) {
-    x.value = Math.max(margin, vw - rect.width - margin);
+  if (anchorX + rect.width > vw - margin) {
+    const flipped = anchorX - rect.width;
+    x.value = flipped >= margin ? flipped : Math.max(margin, vw - rect.width - margin);
   }
 }
 
@@ -92,7 +111,42 @@ function hide() {
   /* bag:b4 — reset any in-flight sheet drag so reopening starts clean. */
   sheetDragging.value = false;
   sheetDragY.value = 0;
+  /* wiring:c4 — give focus back to the opener (row/card/⋯ button). */
+  prevFocus?.focus?.();
+  prevFocus = null;
 }
+
+/* === wiring:c4 — keyboard navigation (menu + sheet) ===
+ * Arrow keys cycle through enabled items, Home/End jump, Enter/Space
+ * activate the focused <button> natively, Esc closes (see onKey). Disabled
+ * buttons are unfocusable, so the query skips them by construction. */
+function menuItems(): HTMLElement[] {
+  const host = props.sheet ? sheetEl.value : menuEl.value;
+  if (!host) return [];
+  return Array.from(
+    host.querySelectorAll<HTMLElement>('.fe-ctx__item:not(:disabled)'),
+  );
+}
+
+function focusItem(idx: number) {
+  const items = menuItems();
+  if (items.length === 0) return;
+  const i = ((idx % items.length) + items.length) % items.length;
+  items[i]?.focus();
+}
+
+function moveFocus(delta: number) {
+  const items = menuItems();
+  if (items.length === 0) return;
+  const active = document.activeElement as HTMLElement | null;
+  const cur = active ? items.indexOf(active) : -1;
+  if (cur === -1) {
+    focusItem(delta > 0 ? 0 : items.length - 1);
+    return;
+  }
+  focusItem(cur + delta);
+}
+/* === /wiring:c4 === */
 
 /* bag:b4 — sheet drag-to-dismiss. Bound to the grab handle only, so the
  * scrollable item list keeps its native touch scrolling. Dragging past the
@@ -139,10 +193,60 @@ function pick(a: ContextAction) {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') hide();
+  if (e.key === 'Escape') {
+    // Scoped close: Esc with the menu open closes ONLY the menu — the
+    // explorer's global onClose (which also dismisses modals/toasts)
+    // shouldn't fire underneath.
+    e.stopPropagation();
+    hide();
+    return;
+  }
+  if (e.key === 'Enter' || e.key === ' ') {
+    // Native button activation handles the pick; stop the bubble so the
+    // explorer's global Enter=open shortcut doesn't double-fire and pop
+    // the preview modal on top of the chosen action.
+    e.stopPropagation();
+    return;
+  }
+  /* wiring:c4 — arrow-key navigation; stopPropagation keeps the explorer's
+   * global shortcut handler (Enter=open, Backspace=up…) out of the loop
+   * while the menu is up. */
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    e.stopPropagation();
+    moveFocus(1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    e.stopPropagation();
+    moveFocus(-1);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    focusItem(0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    focusItem(-1);
+  } else if (e.key === 'Tab') {
+    // A menu is not a tab-stop container — Tab closes it (WAI-ARIA menu
+    // pattern) instead of tabbing behind the backdrop.
+    e.preventDefault();
+    hide();
+  }
 }
 
-const visibleActions = computed(() => props.actions.filter((a) => !a.hidden));
+/* wiring:c4 — hidden-entry filtering used to leave orphaned separators
+ * (leading/trailing/doubled) when the entries around a divider were hidden
+ * by RBAC or selection shape. Collapse them here so every visible divider
+ * actually separates two groups. */
+const visibleActions = computed(() => {
+  const vis = props.actions.filter((a) => !a.hidden);
+  const out: ContextAction[] = [];
+  for (const a of vis) {
+    if (a.divider && (out.length === 0 || out[out.length - 1].divider)) continue;
+    out.push(a);
+  }
+  while (out.length > 0 && out[out.length - 1].divider) out.pop();
+  return out;
+});
 
 const prefersDark = ref(false);
 let mq: MediaQueryList | undefined;
@@ -204,7 +308,7 @@ defineExpose({ show, hide });
           />
           <div class="fe-sheet__items">
             <template v-for="(a, i) in visibleActions" :key="a.key || i">
-              <div v-if="a.divider" class="fe-ctx__sep" />
+              <div v-if="a.divider" class="fe-ctx__sep" role="separator" />
               <button
                 v-else
                 type="button"
@@ -225,11 +329,13 @@ defineExpose({ show, hide });
           ref="menuEl"
           class="fe-ctx"
           role="menu"
+          aria-orientation="vertical"
+          :aria-label="t('sheet.menu') /* wiring:c4 */"
           :style="{ top: y + 'px', left: x + 'px' }"
           @click.stop
         >
           <template v-for="(a, i) in visibleActions" :key="a.key || i">
-            <div v-if="a.divider" class="fe-ctx__sep" />
+            <div v-if="a.divider" class="fe-ctx__sep" role="separator" />
             <button
               v-else
               type="button"

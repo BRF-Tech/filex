@@ -50,6 +50,21 @@ import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
 import CommandPalette from './components/CommandPalette.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
+/* wiring:c1 — tema galerisi */
+import ThemeGallery from './components/ThemeGallery.vue';
+import { useThemeState, applyThemeToEl, syncThemeStyle } from './lib/themes';
+/* /wiring:c1 */
+/* wiring:c2 — shortcut settings modal + Space quick-look overlay */
+import ShortcutSettings from './components/ShortcutSettings.vue';
+import QuickLook from './components/QuickLook.vue';
+/* /wiring:c2 */
+/* wiring:c3 — unified operations center */
+import OperationsCenter from './components/OperationsCenter.vue';
+import { useOperations } from './composables/useOperations';
+/* /wiring:c3 */
+/* wiring:c4 */
+import OnboardingTour from './components/OnboardingTour.vue';
+/* /wiring:c4 */
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import RenameModal from './modals/RenameModal.vue';
@@ -1099,6 +1114,7 @@ useKeyboardShortcuts(rootEl, {
     showShortcutsHelp.value = true;
   },
   /* /cila:c wiring */
+  onQuickLook: () => quickLookToggle() /* wiring:c2 */,
   onToggleInspector: () => toggleInspector() /* koru:k1 */,
   hasSelection: () => !selection.isEmpty.value,
 });
@@ -2052,6 +2068,183 @@ async function onCopyPath(adapterPath: string) {
 function buildAuthHeaders(extra: Record<string, string> = {}) {
   return api.authHeadersSync({ ...extra });
 }
+
+/* === wiring:c1 — tema galerisi ===
+ * Selected theme (shared module state, localStorage `filex.theme`) is applied
+ * as inline `--fe-*` variables on the explorer root, resolved to the active
+ * light/dark variant — plus a mirrored injected stylesheet for the surfaces
+ * that re-declare tokens (teleported context menu, modal backdrops). Theme
+ * selection is independent from the light/dark mode: the mode only picks
+ * WHICH variant of the theme paints. */
+const showThemeGallery = ref(false);
+const { themeId: activeThemeId, setTheme: setActiveTheme } = useThemeState();
+// Resolved mode: explicit config wins, otherwise the OS preference — the same
+// logic variables.css encodes in CSS. The inline root variables beat every
+// stylesheet rule, so they must track this resolution at runtime.
+const themeMq =
+  typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : undefined;
+const themeOsDark = ref(!!themeMq?.matches);
+function onThemeMqChange(e: MediaQueryListEvent) {
+  themeOsDark.value = e.matches;
+}
+onMounted(() => themeMq?.addEventListener?.('change', onThemeMqChange));
+onBeforeUnmount(() => themeMq?.removeEventListener?.('change', onThemeMqChange));
+const themeResolvedDark = computed(
+  () => props.config.theme === 'dark' || (props.config.theme !== 'light' && themeOsDark.value),
+);
+watch(
+  [activeThemeId, themeResolvedDark, rootEl],
+  () => {
+    syncThemeStyle(activeThemeId.value);
+    if (rootEl.value) applyThemeToEl(rootEl.value, activeThemeId.value, themeResolvedDark.value);
+  },
+  { immediate: true },
+);
+/* === /wiring:c1 === */
+/* === wiring:c2 — shortcut settings modal + Space quick-look ===
+ * quickLookTarget follows the selection while the peek is open: arrow
+ * keys emitted by QuickLook move the selection here, and the watcher
+ * below syncs the previewed file. Space toggles (registry action
+ * `quicklook`); Enter promotes the peek into the normal open flow. */
+const showShortcutSettings = ref(false);
+const quickLookOpen = ref(false);
+const quickLookTarget = ref<FileNode | null>(null);
+
+function quickLookToggle() {
+  if (quickLookOpen.value) {
+    quickLookOpen.value = false;
+    return;
+  }
+  const sel = selection.nodes.value;
+  const n = sel.length === 1 ? sel[0] : null;
+  if (!n || n.type !== 'file' || n.basename === '.trash') return;
+  quickLookTarget.value = n;
+  quickLookOpen.value = true;
+  void markRecent(n);
+}
+
+function quickLookNav(delta: number) {
+  const onlyFiles = files.value.filter((f) => f.type === 'file');
+  if (onlyFiles.length === 0) return;
+  const cur = quickLookTarget.value;
+  let idx = cur ? onlyFiles.findIndex((f) => f.path === cur.path) : -1;
+  idx = idx === -1 ? (delta > 0 ? 0 : onlyFiles.length - 1) : (idx + delta + onlyFiles.length) % onlyFiles.length;
+  const next = onlyFiles[idx];
+  if (!next || next.path === cur?.path) return;
+  selection.click(next.path);
+}
+
+function quickLookOpenFull() {
+  const n = quickLookTarget.value;
+  quickLookOpen.value = false;
+  if (n) openNode(n);
+}
+
+watch(
+  () => selection.nodes.value,
+  (nodes) => {
+    if (!quickLookOpen.value) return;
+    const n = nodes.length === 1 && nodes[0].type === 'file' ? nodes[0] : null;
+    if (n && n.path !== quickLookTarget.value?.path) {
+      quickLookTarget.value = n;
+      void markRecent(n);
+    }
+  },
+);
+/* === /wiring:c2 === */
+/* wiring:c3 — operations center store + failed-upload retry */
+const opsCenter = useOperations();
+
+/**
+ * Retry a failed upload from the operations center. The failed row is
+ * already retired by the store; re-run the upload against the job's ORIGINAL
+ * target folder (the user may have navigated away since) via the legacy
+ * single-POST path — works for any storage / size, no chunked precondition.
+ */
+function retryUploadJob(job: UploadJob) {
+  uploadJobs.value = uploadJobs.value.filter((j) => j.id !== job.id);
+  const file = job.file;
+  const target = job.path || qualify(currentPath.value);
+  const id = crypto.randomUUID();
+  uploadJobs.value = [
+    ...uploadJobs.value,
+    { id, file, path: target, totalBytes: file.size, uploadedBytes: 0, percent: 0, status: 'uploading', cancel() {} },
+  ];
+  const patchRetry = (p: Partial<UploadJob>) => {
+    const idx = uploadJobs.value.findIndex((j) => j.id === id);
+    if (idx === -1) return;
+    const next = [...uploadJobs.value];
+    next[idx] = { ...next[idx], ...p };
+    uploadJobs.value = next;
+  };
+  api
+    .uploadMultipart(target, [file], (percent) => {
+      patchRetry({ percent, uploadedBytes: Math.round((percent / 100) * file.size) });
+      emit('upload-progress', { uploadId: id, percent, done: percent >= 100 });
+    })
+    .then(() => {
+      patchRetry({ percent: 100, uploadedBytes: file.size, status: 'done' });
+      emit('upload-progress', { uploadId: id, percent: 100, done: true });
+      void load();
+    })
+    .catch((err: Error) => {
+      patchRetry({ status: 'error', error: err.message });
+      emit('error', { message: err.message, context: { op: 'upload-retry', file: file.name } });
+    });
+}
+/* /wiring:c3 */
+/* === wiring:c4 — onboarding coach-mark tour ===
+ * First mount with no `filex.tourDone` flag auto-starts the tour (short
+ * delay so the listing/toolbar are laid out). Closing it — finished OR
+ * skipped — stamps the flag; "Turu tekrar başlat" re-opens it any time.
+ * Restart arrives as a bubbled `fe:tour-restart` CustomEvent from the
+ * Toolbar overflow menu, so no extra prop/emit threading through the
+ * shared component tags is needed. */
+const TOUR_LS_KEY = 'filex.tourDone';
+const showTour = ref(false);
+let tourTimer: ReturnType<typeof setTimeout> | undefined;
+
+function tourAlreadyDone(): boolean {
+  try {
+    return localStorage.getItem(TOUR_LS_KEY) === '1';
+  } catch {
+    return true; // no storage → never auto-nag
+  }
+}
+
+function startTour() {
+  showTour.value = true;
+}
+
+function onTourClose() {
+  showTour.value = false;
+  try {
+    localStorage.setItem(TOUR_LS_KEY, '1');
+  } catch {
+    /* private mode / quota */
+  }
+  rootEl.value?.focus();
+}
+
+function onTourRestartEvent() {
+  startTour();
+}
+
+onMounted(() => {
+  rootEl.value?.addEventListener('fe:tour-restart', onTourRestartEvent);
+  if (!tourAlreadyDone()) {
+    tourTimer = setTimeout(() => {
+      if (!showTour.value) startTour();
+    }, 900);
+  }
+});
+onBeforeUnmount(() => {
+  if (tourTimer) clearTimeout(tourTimer);
+  rootEl.value?.removeEventListener('fe:tour-restart', onTourRestartEvent);
+});
+/* === /wiring:c4 === */
 </script>
 
 <template>
@@ -2089,9 +2282,11 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :theme="config.theme || 'auto' /* bag:b4 */"
       :inspector-open="showInspector /* koru:k1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
+      @open-theme="showThemeGallery = true /* wiring:c1 */"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"
       @update:density="density = $event"
+      @open-shortcut-settings="showShortcutSettings = true /* wiring:c2 */"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
       @refresh="() => load()"
@@ -2204,12 +2399,19 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
           <path d="M24 88h72" stroke-dasharray="3 5" />
         </svg>
         <p class="fe-state__title">{{ t('error.title') }}</p>
-        <p class="fe-state__hint">{{ loadError }}</p>
+        <!-- wiring:c4 — friendly hint + collapsible technical detail; the raw
+             error message used to sit in the hint slot and read like UI copy. -->
+        <p class="fe-state__hint">{{ t('error.hint') }}</p>
         <div class="fe-state__actions">
           <button type="button" class="fe-btn fe-btn--primary" @click="retryLoad">
             {{ t('error.retry') }}
           </button>
         </div>
+        <details class="fe-state__details">
+          <summary class="fe-state__details-summary">{{ t('error.details') }}</summary>
+          <pre class="fe-state__details-pre">{{ loadError }}</pre>
+        </details>
+        <!-- /wiring:c4 -->
       </div>
       <!-- Search with zero hits — its own message, not "folder is empty". -->
       <div v-else-if="!loading && files.length === 0 && searchQuery" class="fe-state">
@@ -2345,18 +2547,32 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       </div>
     </div>
 
+    <!-- wiring:c3 — unified operations center. UploadProgress + PendingOpsTray
+         no longer draw their own corner UIs: they are renderless publishers
+         feeding the opsCenter store; the single visible surface is the
+         OperationsCenter badge + panel below. -->
     <UploadProgress
       :jobs="uploadJobs"
       :locale="locale"
+      :center="opsCenter"
       @cancel="onCancelUpload"
       @dismiss="onDismissUpload"
+      @retry="retryUploadJob"
     />
 
     <PendingOpsTray
       :ops="pendingOps.ops.value"
       :locale="locale"
+      :center="opsCenter"
       @dismiss="(id) => pendingOps.dismiss(id)"
     />
+
+    <OperationsCenter
+      :center="opsCenter"
+      :locale="locale"
+      :narrow="isNarrow"
+    />
+    <!-- /wiring:c3 -->
 
     <!-- bag:b4 — narrow-mode upload FAB (hidden in trash / read-only /
          virtual root; PendingOpsTray+UploadProgress shift up via CSS). -->
@@ -2534,13 +2750,29 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       @open-trash="loadTrash"
       @refresh="() => load()"
       @go-up="goUp"
+      @open-theme="showThemeGallery = true /* wiring:int */"
+      @open-shortcut-settings="showShortcutSettings = true /* wiring:int */"
+      @start-tour="startTour() /* wiring:int */"
     />
     <ShortcutsHelp
       :open="showShortcutsHelp"
       :locale="locale"
       @close="showShortcutsHelp = false"
+      @customize="showShortcutsHelp = false; showShortcutSettings = true /* wiring:c2 */"
     />
     <!-- /cila:c wiring -->
+
+    <!-- wiring:c1 — tema galerisi -->
+    <ThemeGallery
+      :open="showThemeGallery"
+      :locale="locale"
+      :theme="config.theme || 'auto'"
+      :dark="themeResolvedDark"
+      :current="activeThemeId"
+      @close="showThemeGallery = false"
+      @select="setActiveTheme"
+    />
+    <!-- /wiring:c1 -->
 
     <input
       ref="fileInputEl"
@@ -2567,6 +2799,42 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
         >{{ toast.actionLabel }}</button>
       </div>
     </transition>
+
+    <!-- wiring:c2 — shortcut settings modal + Space quick-look overlay -->
+    <ShortcutSettings
+      :open="showShortcutSettings"
+      :locale="locale"
+      :theme="config.theme || 'auto'"
+      @close="showShortcutSettings = false"
+    />
+    <QuickLook
+      :open="quickLookOpen"
+      :locale="locale"
+      :file="quickLookTarget"
+      :theme="config.theme || 'auto'"
+      :preview-url="(p: string) => api.previewUrl(p)"
+      :download-url="(p: string) => api.downloadUrl(p)"
+      :only-office-base="effectiveOnlyOfficeBase"
+      :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
+      :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
+      :auth-credentials="api.credentialsMode()"
+      :drawio-url="effectiveDrawioUrl"
+      :pdf-worker-url="props.config.pdfWorkerUrl || null"
+      :viewer-base-url="props.config.viewerBaseUrl || null"
+      @close="quickLookOpen = false"
+      @nav="quickLookNav"
+      @open-full="quickLookOpenFull"
+    />
+    <!-- /wiring:c2 -->
+    <!-- wiring:c4 — onboarding coach-mark tour (teleports itself to body) -->
+    <OnboardingTour
+      :open="showTour"
+      :locale="locale"
+      :root="rootEl"
+      :theme="config.theme || 'auto'"
+      @close="onTourClose"
+    />
+    <!-- /wiring:c4 -->
   </div>
 </template>
 

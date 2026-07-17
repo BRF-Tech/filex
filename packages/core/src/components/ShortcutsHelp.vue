@@ -2,14 +2,16 @@
 /**
  * ShortcutsHelp — "?" cheat-sheet modal.
  *
- * Renders the SHORTCUTS table exported by useKeyboardShortcuts (single
- * source of truth) grouped by section. Modal.vue supplies Esc handling,
- * backdrop, focus and the close button.
+ * wiring:c2 — renders the live shortcut registry (useShortcutList) so
+ * user remaps show up here too, grouped by section. Unbound actions are
+ * listed with an "unassigned" chip. The footer carries a "Customize"
+ * button that asks the host to open ShortcutSettings. Modal.vue
+ * supplies Esc handling, backdrop, focus and the close button.
  */
 import { computed } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { SHORTCUTS, type ShortcutDef } from '../composables/useKeyboardShortcuts';
+import { useShortcutList, type ShortcutView } from '../composables/useKeyboardShortcuts';
 import Modal from '../modals/Modal.vue';
 
 const props = defineProps<{
@@ -19,14 +21,17 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  (e: 'customize'): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
 
+const list = useShortcutList();
+
 const groups = computed(() => {
   const order: string[] = [];
-  const map = new Map<string, ShortcutDef[]>();
-  for (const s of SHORTCUTS) {
+  const map = new Map<string, ShortcutView[]>();
+  for (const s of list.value) {
     if (!map.has(s.groupKey)) {
       map.set(s.groupKey, []);
       order.push(s.groupKey);
@@ -43,17 +48,33 @@ const groups = computed(() => {
       <section v-for="g in groups" :key="g.key" class="fe-shortcuts__group">
         <h3 class="fe-shortcuts__heading">{{ t(g.key) }}</h3>
         <div class="fe-shortcuts__table">
-          <div v-for="s in g.items" :key="s.labelKey" class="fe-shortcuts__row">
+          <div v-for="s in g.items" :key="s.id" class="fe-shortcuts__row">
             <span class="fe-shortcuts__keys">
-              <template v-for="(combo, i) in s.keys" :key="combo">
+              <template v-if="s.keys.length === 0">
+                <span class="fe-shortcuts__unbound">{{ t('shortcuts.settings.unbound') }}</span>
+              </template>
+              <template v-for="(combo, i) in s.keys" v-else :key="combo">
                 <kbd class="fe-kbd">{{ combo }}</kbd>
                 <span v-if="i < s.keys.length - 1" class="fe-shortcuts__or" aria-hidden="true">/</span>
               </template>
             </span>
-            <span class="fe-shortcuts__desc">{{ t(s.labelKey) }}</span>
+            <span class="fe-shortcuts__desc">
+              {{ t(s.labelKey) }}
+              <span
+                v-if="s.overridden"
+                class="fe-shortcuts__custom"
+                :title="t('shortcuts.settings.customized')"
+              >●</span>
+            </span>
           </div>
         </div>
       </section>
     </div>
+    <template #actions>
+      <button type="button" class="fe-btn fe-btn--primary" @click="emit('customize')">
+        ⌨ {{ t('shortcuts.customize') }}
+      </button>
+      <button type="button" class="fe-btn" @click="emit('close')">{{ t('viewer.close') }}</button>
+    </template>
   </Modal>
 </template>
