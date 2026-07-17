@@ -11,10 +11,10 @@
  * Presentational only — all logic (rename, share, …) lives in
  * FileExplorer.vue, which listens for `action` emits.
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ViewMode } from '../types/FileNode';
-import type { LocaleCode } from '../types/ExplorerConfig';
-import type { ContextAction } from './ContextMenu.vue';
+import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
+import ContextMenu, { type ContextAction } from './ContextMenu.vue';
 import { useLocale } from '../composables/useLocale';
 
 export type SelectionMode = 'none' | 'single-file' | 'single-dir' | 'multi';
@@ -58,6 +58,19 @@ const props = defineProps<{
    */
   canWrite?: boolean;
   locale: LocaleCode;
+  /**
+   * bag:b4 — narrow/embed mini mode. When true the toolbar collapses to
+   * [↑?] [🔍] [⬆] [⋯]: secondary actions (New Folder, Refresh, density,
+   * view switcher, selection actions, Paste) move into the "⋯" overflow
+   * menu and search expands from an icon to a full-width input. When
+   * absent/false the classic wide layout renders unchanged.
+   */
+  narrow?: boolean;
+  /**
+   * bag:b4 — resolved theme, forwarded to the teleported overflow menu
+   * (which loses the `.fe` variable scope under <body>).
+   */
+  theme?: ThemeMode;
 }>();
 
 const emit = defineEmits<{
@@ -114,7 +127,12 @@ function onSearchInput(ev: Event) {
   debounce = setTimeout(() => emit('update:searchQuery', v), 200);
 }
 
-function focusSearch() {
+async function focusSearch() {
+  /* bag:b4 — in narrow mode the input is collapsed behind the icon. */
+  if (props.narrow && !searchOpen.value) {
+    searchOpen.value = true;
+    await nextTick();
+  }
   searchEl.value?.focus();
   searchEl.value?.select();
 }
@@ -132,10 +150,120 @@ const toolbarItems = computed(() => props.actions.filter((a) => !a.divider && !a
 function fire(key: string) {
   emit('action', key);
 }
+
+/* === bag:b4 — narrow-mode state: expandable search + "⋯" overflow menu === */
+
+const searchOpen = ref(false);
+// Leaving narrow mode discards the transient expanded-search state so the
+// wide layout always comes back exactly as it was.
+watch(
+  () => props.narrow,
+  (n) => {
+    if (!n) searchOpen.value = false;
+  },
+);
+
+async function openSearch() {
+  searchOpen.value = true;
+  await nextTick();
+  searchEl.value?.focus();
+}
+function closeSearch() {
+  // Keep the query (it still filters the listing); the icon shows an
+  // active state while a query is set.
+  searchOpen.value = false;
+}
+
+// Coarse-pointer detection — the overflow menu renders as a bottom sheet on
+// touch devices, matching the file context menu.
+const coarse = ref(false);
+let coarseMq: MediaQueryList | undefined;
+function syncCoarse(e?: MediaQueryListEvent | MediaQueryList) {
+  coarse.value = !!(e && 'matches' in e && e.matches);
+}
+onMounted(() => {
+  if (typeof window === 'undefined' || !window.matchMedia) return;
+  coarseMq = window.matchMedia('(pointer: coarse)');
+  syncCoarse(coarseMq);
+  coarseMq.addEventListener?.('change', syncCoarse);
+});
+onBeforeUnmount(() => {
+  coarseMq?.removeEventListener?.('change', syncCoarse);
+});
+
+const moreBtnEl = ref<HTMLElement | null>(null);
+const moreRef = ref<InstanceType<typeof ContextMenu> | null>(null);
+
+// Everything the wide toolbar renders as standalone buttons, folded into one
+// action list: folder-level writes (New Folder / Paste), the shared
+// selection actions, then the view utilities (Refresh / density / view mode).
+const moreActions = computed<ContextAction[]>(() => {
+  const list: ContextAction[] = [];
+  const writable =
+    !props.trashActive && !props.atVirtualRoot && props.canWrite !== false;
+  if (mode.value === 'none' && writable) {
+    list.push({ key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' });
+    if (props.pasteEnabled) list.push({ key: 'paste', label: t('ctx.paste'), icon: '📋' });
+  }
+  list.push(...toolbarItems.value);
+  if (list.length) list.push({ divider: true, key: 'bag-sep', label: '' });
+  list.push({ key: 'refresh', label: t('toolbar.refresh'), icon: '↻' });
+  list.push({
+    key: 'density',
+    label:
+      density.value === 'compact'
+        ? t('toolbar.density.comfortable')
+        : t('toolbar.density.compact'),
+    icon: '⇅',
+  });
+  list.push(
+    props.viewMode === 'list'
+      ? { key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' }
+      : { key: 'view-list', label: t('toolbar.view.list'), icon: '☰' },
+  );
+  return list;
+});
+
+function openMore() {
+  const r = moreBtnEl.value?.getBoundingClientRect();
+  moreRef.value?.show({ clientX: r ? r.right : 0, clientY: r ? r.bottom + 4 : 0 }, []);
+}
+
+function onMoreSelect(a: ContextAction) {
+  switch (a.key) {
+    case 'new-folder':
+      emit('new-folder');
+      break;
+    case 'refresh':
+      emit('refresh');
+      break;
+    case 'density':
+      toggleDensity();
+      break;
+    case 'view-list':
+      emit('update:viewMode', 'list');
+      break;
+    case 'view-grid':
+      emit('update:viewMode', 'grid');
+      break;
+    default:
+      fire(a.key);
+  }
+}
+
+/* === /bag:b4 === */
 </script>
 
 <template>
-  <div class="fe-toolbar">
+  <div
+    class="fe-toolbar"
+    :class="{
+      'fe-toolbar--narrow': narrow /* bag:b4 */,
+      'fe-toolbar--searching': narrow && searchOpen /* bag:b4 */,
+    }"
+  >
+    <!-- bag:b4 — wide layout, untouched; renders exactly as before when not narrow -->
+    <template v-if="!narrow">
     <div class="fe-toolbar__primary">
       <button
         v-if="canGoUp"
@@ -280,5 +408,88 @@ function fire(key: string) {
         <span class="fe-icon">▦</span>
       </button>
     </div>
+    </template>
+
+    <!-- bag:b4 — narrow layout: [↑?] ... [🔍] [⬆] [⋯], search expands full-width -->
+    <template v-else>
+      <template v-if="searchOpen">
+        <div class="fe-search fe-search--full">
+          <input
+            ref="searchEl"
+            type="search"
+            class="fe-search__input"
+            :placeholder="t('toolbar.search.placeholder')"
+            :value="localSearch"
+            :aria-label="t('toolbar.search')"
+            @input="onSearchInput"
+            @keydown.esc.stop.prevent="closeSearch"
+          />
+        </div>
+        <button
+          type="button"
+          class="fe-btn fe-btn--icon-only"
+          :title="t('toolbar.search.close')"
+          :aria-label="t('toolbar.search.close')"
+          @click="closeSearch"
+        >
+          <span class="fe-icon">✕</span>
+        </button>
+      </template>
+      <template v-else>
+        <button
+          v-if="canGoUp"
+          type="button"
+          class="fe-btn fe-btn--icon-only"
+          :title="t('toolbar.go_up')"
+          :aria-label="t('toolbar.go_up')"
+          @click="emit('go-up')"
+        >
+          <span class="fe-icon">↑</span>
+        </button>
+
+        <div class="fe-toolbar__spacer" />
+
+        <button
+          type="button"
+          class="fe-btn fe-btn--icon-only fe-toolbar__search-toggle"
+          :class="{ 'is-active': !!localSearch }"
+          :title="t('toolbar.search')"
+          :aria-label="t('toolbar.search')"
+          @click="openSearch"
+        >
+          <span class="fe-icon">🔍</span>
+        </button>
+        <button
+          v-if="!atVirtualRoot && canWrite !== false"
+          type="button"
+          class="fe-btn fe-btn--icon-only"
+          :title="t('toolbar.upload')"
+          :aria-label="t('toolbar.upload')"
+          @click="emit('upload')"
+        >
+          <span class="fe-icon">⬆</span>
+        </button>
+        <button
+          ref="moreBtnEl"
+          type="button"
+          class="fe-btn fe-btn--icon-only fe-toolbar__more"
+          :title="t('toolbar.more')"
+          :aria-label="t('toolbar.more')"
+          aria-haspopup="menu"
+          @click="openMore"
+        >
+          <span class="fe-icon">⋯</span>
+        </button>
+      </template>
+
+      <ContextMenu
+        ref="moreRef"
+        :locale="locale"
+        :theme="theme || 'auto'"
+        :sheet="coarse"
+        :actions="moreActions"
+        @select="onMoreSelect"
+      />
+    </template>
   </div>
 </template>

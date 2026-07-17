@@ -3,12 +3,19 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -19,9 +26,11 @@ import (
 // background goroutine — callers do not block on the upstream POST.
 type Service interface {
 	// Send fans the event out to (a) the in-app history table and
-	// (b) the configured webhook. Errors from webhook delivery are
-	// recorded against the row, not bubbled up — webhook failure
-	// should never break the originating request.
+	// (b) every configured webhook destination: the legacy global
+	// webhook plus each enabled, event-matching webhook_targets row.
+	// Errors from webhook delivery are recorded against the row, not
+	// bubbled up — webhook failure should never break the originating
+	// request.
 	Send(ctx context.Context, e Event) (id int64, err error)
 
 	// List + Mark + Settings just delegate to the store; they're on
@@ -44,6 +53,18 @@ type Service interface {
 	// never echoed back).
 	WebhookConfig() (url string, tokenSet bool)
 
+	// TestTarget synchronously fires a sample event at one webhook
+	// target (single attempt, no retries) and returns the outcome.
+	// Backs the admin "Test" button; the result is also recorded as
+	// the target's in-memory last-delivery status.
+	TestTarget(ctx context.Context, target *model.WebhookTarget) TargetDeliveryStatus
+
+	// TargetStatuses returns the last-delivery status per target id.
+	// In-memory only (process lifetime) — the schema stays at the
+	// frozen webhook_targets contract, so per-target status is not
+	// persisted; the notifications table remains the durable audit.
+	TargetStatuses() map[int64]TargetDeliveryStatus
+
 	// Wait blocks until any in-flight webhook deliveries return. Used
 	// by tests; production calls Stop() instead which cancels the
 	// dispatch context AND waits.
@@ -51,6 +72,14 @@ type Service interface {
 
 	// Stop cancels in-flight dispatches and waits for them to finish.
 	Stop()
+}
+
+// TargetDeliveryStatus is the outcome of the most recent delivery (or
+// admin test fire) to one webhook target.
+type TargetDeliveryStatus struct {
+	Status string    `json:"status"` // "sent" | "failed"
+	Error  string    `json:"error,omitempty"`
+	At     time.Time `json:"at"`
 }
 
 // Config bootstraps a Service. WebhookURL and WebhookToken are
@@ -76,10 +105,11 @@ func New(store db.Store, cfg Config) Service {
 		}
 	}
 	s := &service{
-		store:    store,
-		http:     &http.Client{Timeout: cfg.HTTPTimeout},
-		backoffs: cfg.RetryBackoffs,
-		stopCh:   make(chan struct{}),
+		store:        store,
+		http:         &http.Client{Timeout: cfg.HTTPTimeout},
+		backoffs:     cfg.RetryBackoffs,
+		stopCh:       make(chan struct{}),
+		targetStatus: make(map[int64]TargetDeliveryStatus),
 	}
 	s.SetWebhook(cfg.WebhookURL, cfg.WebhookToken)
 	return s
@@ -97,6 +127,31 @@ type service struct {
 	stopOnce   sync.Once
 	stopCh     chan struct{}
 	inflightWG sync.WaitGroup
+
+	// targetStatus caches the last delivery outcome per webhook target
+	// id (guarded by tsMu). Feeds the admin list's "last status" column.
+	tsMu         sync.Mutex
+	targetStatus map[int64]TargetDeliveryStatus
+}
+
+// destination is one webhook endpoint a single event is delivered to —
+// either the legacy global webhook (targetID 0, bearer auth) or one
+// webhook_targets row (HMAC signing when secret is set).
+type destination struct {
+	targetID int64
+	name     string
+	url      string
+	bearer   string
+	secret   string
+}
+
+// Signature computes the X-Filex-Signature header value for a payload
+// signed with secret: "sha256=" + hex(HMAC-SHA256(secret, body)).
+// Exported so receivers/tests can verify deliveries.
+func Signature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 // Send persists then async-delivers.
@@ -107,16 +162,15 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	if e.TS.IsZero() {
 		e.TS = time.Now().UTC()
 	}
+	if e.At.IsZero() {
+		e.At = e.TS
+	}
 	if e.Title == "" {
 		e.Title = string(e.Event)
 	}
-	metaJSON := []byte("{}")
-	if len(e.Meta) > 0 {
-		j, err := json.Marshal(e.Meta)
-		if err != nil {
-			return 0, fmt.Errorf("notify: marshal meta: %w", err)
-		}
-		metaJSON = j
+	metaJSON, err := marshalMeta(e)
+	if err != nil {
+		return 0, fmt.Errorf("notify: marshal meta: %w", err)
 	}
 	id, err := s.store.InsertNotification(ctx, &model.NotificationInput{
 		Event:    string(e.Event),
@@ -133,8 +187,34 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	return id, nil
 }
 
-// dispatch fires off the webhook attempt chain. The function returns
-// immediately; the goroutine updates webhook_status when finished.
+// marshalMeta folds the structured Node/Share/Actor refs into the
+// persisted meta_json next to the free-form Meta map, so the in-app
+// history keeps the event context without extra columns.
+func marshalMeta(e Event) ([]byte, error) {
+	if len(e.Meta) == 0 && e.Node == nil && e.Share == nil && e.Actor == nil {
+		return []byte("{}"), nil
+	}
+	m := make(map[string]any, len(e.Meta)+3)
+	for k, v := range e.Meta {
+		m[k] = v
+	}
+	if e.Node != nil {
+		m["node"] = e.Node
+	}
+	if e.Share != nil {
+		m["share"] = e.Share
+	}
+	if e.Actor != nil {
+		m["actor"] = e.Actor
+	}
+	return json.Marshal(m)
+}
+
+// dispatch fires off the webhook fan-out. The function returns
+// immediately; a background goroutine resolves the destination set
+// (legacy global webhook + matching webhook_targets rows), runs each
+// destination's retry chain in parallel, and writes one aggregated
+// webhook_status back on the notification row.
 //
 // We deliberately do NOT propagate the request ctx — short-lived HTTP
 // handlers don't extend their lifetime to the webhook call. Instead a
@@ -142,16 +222,10 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 // and Stop() cancels via stopCh.
 func (s *service) dispatch(id int64, e Event) {
 	s.mu.RLock()
-	url := s.webhookURL
+	legacyURL := s.webhookURL
 	token := s.bearer
 	backoffs := append([]time.Duration(nil), s.backoffs...)
 	s.mu.RUnlock()
-
-	if url == "" {
-		// No webhook configured — still record the skip for the audit.
-		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "no webhook URL configured")
-		return
-	}
 
 	body, err := json.Marshal(e)
 	if err != nil {
@@ -172,49 +246,171 @@ func (s *service) dispatch(id int64, e Event) {
 			}
 		}()
 
-		var lastErr string
-		for attempt, wait := 0, time.Duration(0); attempt <= len(backoffs); attempt++ {
-			if attempt > 0 {
-				wait = backoffs[attempt-1]
-			}
-			if wait > 0 {
-				select {
-				case <-time.After(wait):
-				case <-ctx.Done():
-					_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusFailed), "service stopped mid-retry")
-					return
-				}
-			}
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-			if err != nil {
-				lastErr = "build request: " + err.Error()
-				break // don't retry — no chance the URL will magically parse
-			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", "filex-webhook/1.0")
-			if token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			resp, err := s.http.Do(req)
-			if err != nil {
-				lastErr = err.Error()
+		dests := make([]destination, 0, 4)
+		if legacyURL != "" {
+			dests = append(dests, destination{url: legacyURL, bearer: token})
+		}
+		targets, err := s.store.ListWebhookTargets(ctx)
+		if err != nil {
+			// Degrade to the legacy destination rather than dropping the
+			// event on the floor; the admin list will surface DB errors.
+			slog.Warn("notify: list webhook targets", slog.String("err", err.Error()))
+		}
+		for _, t := range targets {
+			if !t.Enabled || !t.MatchesEvent(string(e.Event)) {
 				continue
 			}
-			func() {
-				defer resp.Body.Close()
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSent), "")
-					lastErr = ""
-				} else {
-					lastErr = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			dests = append(dests, destination{targetID: t.ID, name: t.Name, url: t.URL, secret: t.Secret})
+		}
+		if len(dests) == 0 {
+			// No webhook configured — still record the skip for the audit.
+			_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "no webhook URL configured")
+			return
+		}
+
+		var (
+			wg    sync.WaitGroup
+			errMu sync.Mutex
+			errs  []string
+		)
+		for _, d := range dests {
+			wg.Add(1)
+			go func(d destination) {
+				defer wg.Done()
+				err := s.deliver(ctx, d, string(e.Event), body, backoffs)
+				if d.targetID != 0 {
+					s.recordTargetStatus(d.targetID, err)
 				}
-			}()
-			if lastErr == "" {
-				return
+				if err != nil {
+					errMu.Lock()
+					if d.targetID == 0 {
+						errs = append(errs, err.Error())
+					} else {
+						errs = append(errs, d.name+": "+err.Error())
+					}
+					errMu.Unlock()
+				}
+			}(d)
+		}
+		wg.Wait()
+
+		if len(errs) == 0 {
+			_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSent), "")
+		} else {
+			_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusFailed), strings.Join(errs, "; "))
+		}
+	}()
+}
+
+// deliver runs the retry chain against one destination. Every attempt
+// of one delivery shares a single X-Filex-Delivery id (mint-per-
+// delivery, GitHub-style) so receivers can deduplicate retries.
+func (s *service) deliver(ctx context.Context, d destination, eventName string, body []byte, backoffs []time.Duration) error {
+	deliveryID := uuid.NewString()
+	var lastErr string
+	for attempt, wait := 0, time.Duration(0); attempt <= len(backoffs); attempt++ {
+		if attempt > 0 {
+			wait = backoffs[attempt-1]
+		}
+		if wait > 0 {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return errors.New("service stopped mid-retry")
 			}
 		}
-		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusFailed), lastErr)
-	}()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(body))
+		if err != nil {
+			return errors.New("build request: " + err.Error()) // don't retry — the URL won't magically parse
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "filex-webhook/1.0")
+		req.Header.Set("X-Filex-Event", eventName)
+		req.Header.Set("X-Filex-Delivery", deliveryID)
+		if d.bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+d.bearer)
+		}
+		if d.secret != "" {
+			req.Header.Set("X-Filex-Signature", Signature(d.secret, body))
+		}
+		resp, err := s.http.Do(req)
+		if err != nil {
+			lastErr = err.Error()
+			continue
+		}
+		func() {
+			defer resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				lastErr = ""
+			} else {
+				lastErr = fmt.Sprintf("HTTP %d", resp.StatusCode)
+			}
+		}()
+		if lastErr == "" {
+			return nil
+		}
+	}
+	return errors.New(lastErr)
+}
+
+// recordTargetStatus stores the outcome of the newest delivery to a
+// target for the admin UI's "last status" column.
+func (s *service) recordTargetStatus(targetID int64, err error) {
+	st := TargetDeliveryStatus{Status: "sent", At: time.Now().UTC()}
+	if err != nil {
+		st.Status = "failed"
+		st.Error = err.Error()
+	}
+	s.tsMu.Lock()
+	s.targetStatus[targetID] = st
+	s.tsMu.Unlock()
+}
+
+// TestTarget fires a synthetic event at one target with a single
+// attempt (no retries) and returns the outcome synchronously.
+func (s *service) TestTarget(ctx context.Context, target *model.WebhookTarget) TargetDeliveryStatus {
+	now := time.Now().UTC()
+	sample := Event{
+		Event:    "webhook_test",
+		Severity: SeverityInfo,
+		Title:    "filex webhook test",
+		Body:     "Sample delivery fired from the admin panel to verify this webhook target.",
+		Meta:     map[string]any{"source": "webhook_test", "target": target.Name},
+		TS:       now,
+		At:       now,
+		Node: &NodeRef{
+			StorageID: 0,
+			Path:      "/example/hello.txt",
+			Name:      "hello.txt",
+			Size:      11,
+		},
+	}
+	body, err := json.Marshal(sample)
+	if err != nil {
+		return TargetDeliveryStatus{Status: "failed", Error: "marshal event: " + err.Error(), At: now}
+	}
+	d := destination{targetID: target.ID, name: target.Name, url: target.URL, secret: target.Secret}
+	deliverErr := s.deliver(ctx, d, string(sample.Event), body, nil)
+	if target.ID != 0 {
+		s.recordTargetStatus(target.ID, deliverErr)
+	}
+	st := TargetDeliveryStatus{Status: "sent", At: time.Now().UTC()}
+	if deliverErr != nil {
+		st.Status = "failed"
+		st.Error = deliverErr.Error()
+	}
+	return st
+}
+
+// TargetStatuses returns a copy of the in-memory last-status map.
+func (s *service) TargetStatuses() map[int64]TargetDeliveryStatus {
+	s.tsMu.Lock()
+	defer s.tsMu.Unlock()
+	out := make(map[int64]TargetDeliveryStatus, len(s.targetStatus))
+	for k, v := range s.targetStatus {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *service) List(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {

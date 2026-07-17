@@ -195,4 +195,10 @@ export const tr: Record<string, string> = {
   'palette.save': 'Aramayı kaydet',
   'palette.saved.delete': 'Kayıtlı aramayı sil',
   'search.in_content': 'İçerikte',
+
+  /* === bag:b4 === */
+  'toolbar.more': 'Diğer işlemler',
+  'toolbar.search.close': 'Aramayı kapat',
+  'sheet.menu': 'İşlemler',
+  'sheet.close': 'Kapat',
 };

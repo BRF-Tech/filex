@@ -443,6 +443,40 @@ const ctxRef = ref<InstanceType<typeof ContextMenu> | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
 const toolbarRef = ref<InstanceType<typeof Toolbar> | null>(null);
 
+/* bag:b4 — narrow/embed mini mode.
+ * isNarrow: container width < 560px (ResizeObserver on the .fe root, so it
+ * tracks the EMBED container, not the viewport) → root gets `fe--narrow`,
+ * the toolbar collapses and the upload FAB appears.
+ * isCoarse: touch-first device → context menus render as a bottom sheet. */
+const isNarrow = ref(false);
+const isCoarse = ref(false);
+let narrowRO: ResizeObserver | undefined;
+let coarseMq: MediaQueryList | undefined;
+function syncCoarsePointer(e?: MediaQueryListEvent | MediaQueryList) {
+  isCoarse.value = !!(e && 'matches' in e && e.matches);
+}
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && rootEl.value) {
+    narrowRO = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width ?? rootEl.value?.clientWidth ?? 0;
+      isNarrow.value = w > 0 && w < 560;
+    });
+    narrowRO.observe(rootEl.value);
+  }
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    coarseMq = window.matchMedia('(pointer: coarse)');
+    syncCoarsePointer(coarseMq);
+    coarseMq.addEventListener?.('change', syncCoarsePointer);
+  }
+});
+onBeforeUnmount(() => {
+  narrowRO?.disconnect();
+  narrowRO = undefined;
+  coarseMq?.removeEventListener?.('change', syncCoarsePointer);
+  coarseMq = undefined;
+});
+/* /bag:b4 */
+
 // Toast (tiny, no lib). Evolved into a snackbar: plain messages keep the old
 // 2.5s auto-hide; messages carrying an action ("Geri Al") stay 8s and can be
 // dismissed by click or Esc.
@@ -1964,6 +1998,7 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       'fe--theme-dark': config.theme === 'dark',
       'fe--is-dragover': dragOver,
       'fe--density-compact': density === 'compact' /* cila:a density */,
+      'fe--narrow': isNarrow /* bag:b4 */,
     }"
     tabindex="-1"
     @dragenter="onDragEnter"
@@ -1985,6 +2020,8 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :at-virtual-root="atVirtualRoot"
       :can-write="canWriteHere"
       :locale="locale"
+      :narrow="isNarrow /* bag:b4 */"
+      :theme="config.theme || 'auto' /* bag:b4 */"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"
       @update:density="density = $event"
@@ -2230,10 +2267,35 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       @dismiss="(id) => pendingOps.dismiss(id)"
     />
 
+    <!-- bag:b4 — narrow-mode upload FAB (hidden in trash / read-only /
+         virtual root; PendingOpsTray+UploadProgress shift up via CSS). -->
+    <button
+      v-if="isNarrow && emptyCanUpload"
+      type="button"
+      class="fe-fab"
+      :title="t('toolbar.upload')"
+      :aria-label="t('toolbar.upload')"
+      @click="triggerUpload"
+    >
+      <svg
+        class="fe-ficon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.2"
+        stroke-linecap="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </button>
+
     <ContextMenu
       ref="ctxRef"
       :locale="locale"
       :theme="config.theme || 'auto'"
+      :sheet="isCoarse /* bag:b4 */"
       :actions="contextActions"
       @select="onContextAction"
     />

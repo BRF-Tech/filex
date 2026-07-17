@@ -52,6 +52,13 @@ type Config struct {
 	Demo             DemoConfig   `yaml:"demo"`
 	Sentry           SentryConfig `yaml:"sentry"`
 	Seed             SeedConfig   `yaml:"seed"`
+	DAV              DAVConfig    `yaml:"dav"`
+}
+
+// DAVConfig — the WebDAV server surface at /dav (v0.3 "Bağlan"). ON by
+// default; FILEX_DAV=0 is the kill switch (the handler then answers 404).
+type DAVConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // SeedConfig holds one-time bootstrap values applied to the DB on first boot,
@@ -313,6 +320,9 @@ func Default() Config {
 		Notify: NotifyConfig{
 			Enabled: true,
 		},
+		DAV: DAVConfig{
+			Enabled: true,
+		},
 		Demo: DemoConfig{
 			Mode: false,
 			User: "demo@demo.com",
@@ -516,6 +526,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_NOTIFY_ENABLED"); v != "" {
 		c.Notify.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_DAV"); v != "" {
+		c.DAV.Enabled = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_WEBHOOK_URL"); v != "" {
 		c.Notify.WebhookURL = v

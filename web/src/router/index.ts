@@ -177,6 +177,13 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.notifications' },
       },
       {
+        // bag:b3 — webhook v2 target CRUD (multi-destination, signed).
+        path: 'webhooks',
+        name: 'webhooks',
+        component: () => import('@/views/Webhooks.vue'),
+        meta: { breadcrumb: 'nav.webhooks' },
+      },
+      {
         path: 'about',
         name: 'about',
         component: () => import('@/views/About.vue'),

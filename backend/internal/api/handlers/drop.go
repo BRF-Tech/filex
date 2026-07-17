@@ -338,15 +338,24 @@ func (h *Drop) notifyOwner(ctx context.Context, sh *model.Share, node *model.Nod
 	body := fmt.Sprintf("%s, \"%s\" klasörüne %d dosya bıraktı (%s).", who, node.Name, count, sub)
 
 	if h.Notify != nil {
-		_, _ = h.Notify.Send(ctx, notify.Event{
-			Event:    notify.EventType("file_dropped"),
+		/* bag:b3 event */
+		// Canonical webhook-v2 event name (was the ad-hoc "file_dropped")
+		// with the structured node/share payload. Delivered off the request
+		// path: the anonymous uploader's response must not wait on (or
+		// cancel) the owner notification + webhook fan-out.
+		ev := notify.Event{
+			Event:    notify.EventDropReceived,
 			Severity: notify.SeverityInfo,
 			Title:    title,
 			Body:     body,
-			Meta:     map[string]any{"folder": node.Name, "count": count, "submission": sub},
+			Meta:     map[string]any{"folder": node.Name, "count": count, "submission": sub, "uploader": uploaderName},
 			TS:       time.Now(),
+			Node:     &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name},
+			Share:    &notify.ShareRef{Token: sh.Token, Path: node.Path},
 			UserID:   sh.CreatedBy,
-		})
+		}
+		c := context.WithoutCancel(ctx)
+		go func() { _, _ = h.Notify.Send(c, ev) }()
 	}
 	if h.Mailer != nil && sh.CreatedBy != nil {
 		if u, err := h.Store.GetUser(ctx, *sh.CreatedBy); err == nil && u != nil && strings.TrimSpace(u.Email) != "" {

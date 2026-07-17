@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/confine"
+	"github.com/brf-tech/filex/backend/internal/dav"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/notify"
@@ -212,6 +213,12 @@ func BuildRouter(d *Deps) http.Handler {
 	// a nil emitter (unwired) is a safe no-op.
 	hub := realtime.NewHub()
 	handlers.SetChangeEmitter(hub)
+
+	/* bag:b3 event */
+	// Wire the notify sink so the mutation handlers can emit canonical
+	// file/share events (file.uploaded, share.created, …) to webhook v2
+	// targets. Nil-safe: an unwired sink disables emission.
+	handlers.SetNotifySink(d.Notify)
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 
@@ -510,6 +517,18 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/webhook-config", notifH.AdminUpdateWebhookConfig)
 			})
 
+			// Webhook v2 targets — multi-destination, event-filtered,
+			// HMAC-signed deliveries (migration 00017). The legacy single
+			// global webhook stays on /notifications/webhook-config above.
+			webhooksAdmH := handlers.NewWebhooksAdmin(d.Store, d.Notify)
+			r.Route("/webhooks", func(r chi.Router) {
+				r.Get("/", webhooksAdmH.List)
+				r.Post("/", webhooksAdmH.Create)
+				r.Patch("/{id}", webhooksAdmH.Update)
+				r.Delete("/{id}", webhooksAdmH.Delete)
+				r.Post("/{id}/test", webhooksAdmH.Test)
+			})
+
 			r.Route("/replica", func(r chi.Router) {
 				r.Route("/rules", func(r chi.Router) {
 					r.Get("/", replicaH.ListRules)
@@ -616,6 +635,9 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Use(auth.AuditMiddleware(d.Store))
 		r.With(auth.RequireScope("write")).Post("/upload", sxUploadH.Upload)
 	})
+
+	// ────── WebDAV (/dav/<storage>/<path>, Basic auth — see internal/dav) ──────
+	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, Index: d.Index, Thumbs: d.Thumbs, MultiTenant: d.Cfg.MultiTenant}))
 
 	// ────── healthz ──────
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {

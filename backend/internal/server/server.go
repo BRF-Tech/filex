@@ -507,6 +507,16 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Mailer:          srvObj.mailer,
 		ZipCache:        zipCache,
 	}
+	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
+	// is composed inside api.BuildRouter (single Mount line, see
+	// internal/dav). FILEX_DAV=0 disables the surface; log the state so the
+	// kill switch is visible in boot output.
+	if cfg.DAV.Enabled {
+		slog.Info("webdav: enabled", slog.String("prefix", "/dav"))
+	} else {
+		slog.Info("webdav: disabled (FILEX_DAV=0)")
+	}
+
 	router := api.BuildRouter(deps)
 
 	srvObj.srv = &http.Server{

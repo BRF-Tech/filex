@@ -88,6 +88,7 @@
     "replica": "Replikasyon",
     "queue": "Kuyruk",
     "notifications": "Bildirimler",
+    "webhooks": "Webhook'lar",
     "about": "Hakkında",
     "adminFiles": "Dosya geçmişi",
     "profile": "Profilim",
@@ -810,5 +811,37 @@
     "colEtag": "ETag",
     "emptyTitle": "Yinelenen dosya yok",
     "emptyDescription": "Aynı boyut ve etag'e sahip birden fazla kopya bulunamadı."
+  },
+  "webhooks": {
+    "title": "Webhook'lar",
+    "subtitle": "Dosya olaylarını (yükleme, silme, paylaşım, drop) dış uçlara POST'lar. Her gönderim X-Filex-Event ve X-Filex-Delivery başlıklarını taşır; secret tanımlı hedefler X-Filex-Signature (HMAC-SHA256) ile imzalanır.",
+    "add": "Yeni webhook",
+    "edit": "Webhook düzenle",
+    "empty": "Henüz webhook hedefi yok. Bildirimler sayfasındaki eski tekil webhook çalışmaya devam eder.",
+    "namePlaceholder": "örn. ops-alarmlari",
+    "allEvents": "Tüm olaylar",
+    "eventsHint": "Hiçbirini işaretlemezsen tüm olaylar gönderilir.",
+    "secretSet": "Secret tanımlı",
+    "secretUnset": "Secret yok",
+    "secretPlaceholder": "İsteğe bağlı imza secret'ı",
+    "secretKeepPlaceholder": "Mevcut secret'ı korumak için boş bırak",
+    "secretHint": "Salt-yazılır: secret bir daha gösterilmez. Her gönderimi sha256=<hex HMAC-SHA256(gövde)> olarak imzalar.",
+    "clearSecret": "Kayıtlı secret'ı temizle",
+    "test": "Test",
+    "testOk": "\"{name}\" hedefine test gönderimi başarılı",
+    "testFail": "Test gönderimi başarısız: {error}",
+    "statusSent": "gönderildi",
+    "statusFailed": "başarısız",
+    "saved": "Webhook kaydedildi",
+    "deleted": "Webhook silindi",
+    "deleteConfirm": "\"{name}\" webhook'u silinsin mi?",
+    "errNameUrl": "İsim ve URL zorunlu",
+    "fields": {
+      "events": "Olaylar",
+      "secret": "Secret",
+      "lastStatus": "Son gönderim",
+      "enabled": "Etkin",
+      "actions": "İşlemler"
+    }
   }
 }

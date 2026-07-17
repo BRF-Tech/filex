@@ -88,6 +88,7 @@
     "replica": "Replica",
     "queue": "Queue",
     "notifications": "Notifications",
+    "webhooks": "Webhooks",
     "about": "About",
     "adminFiles": "File history",
     "profile": "My profile",
@@ -810,5 +811,37 @@
     "colEtag": "ETag",
     "emptyTitle": "No duplicate files",
     "emptyDescription": "No multiple copies with the same size and etag were found."
+  },
+  "webhooks": {
+    "title": "Webhooks",
+    "subtitle": "POST file events (uploads, deletes, shares, drops) to external endpoints. Each delivery carries X-Filex-Event and X-Filex-Delivery headers; targets with a secret are signed with X-Filex-Signature (HMAC-SHA256).",
+    "add": "New webhook",
+    "edit": "Edit webhook",
+    "empty": "No webhook targets yet. The legacy single webhook on the Notifications page keeps working.",
+    "namePlaceholder": "e.g. ops-alerts",
+    "allEvents": "All events",
+    "eventsHint": "Leave everything unchecked to receive every event.",
+    "secretSet": "Secret set",
+    "secretUnset": "No secret",
+    "secretPlaceholder": "Optional signing secret",
+    "secretKeepPlaceholder": "Leave empty to keep the current secret",
+    "secretHint": "Write-only: the secret is never shown again. It signs each delivery as sha256=<hex HMAC-SHA256(body)>.",
+    "clearSecret": "Clear the stored secret",
+    "test": "Test",
+    "testOk": "Test delivery to \"{name}\" succeeded",
+    "testFail": "Test delivery failed: {error}",
+    "statusSent": "sent",
+    "statusFailed": "failed",
+    "saved": "Webhook saved",
+    "deleted": "Webhook deleted",
+    "deleteConfirm": "Delete webhook \"{name}\"?",
+    "errNameUrl": "Name and URL are required",
+    "fields": {
+      "events": "Events",
+      "secret": "Secret",
+      "lastStatus": "Last delivery",
+      "enabled": "Enabled",
+      "actions": "Actions"
+    }
   }
 }

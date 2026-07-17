@@ -275,6 +275,16 @@ type Store interface {
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertNotificationSettings(ctx context.Context, s *model.NotificationSettings) error
 
+	// Webhook targets (webhook v2, migration 00017) — additional POST
+	// destinations next to the legacy single global webhook. Update
+	// replaces the full mutable row (name/url/secret/events/enabled);
+	// partial-PATCH merging happens in the handler.
+	CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget) (*model.WebhookTarget, error)
+	GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error)
+	ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error)
+	UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget) error
+	DeleteWebhookTarget(ctx context.Context, id int64) error
+
 	// Replica rules + failures + report + settings
 	ListReplicaRules(ctx context.Context) ([]*model.ReplicaRule, error)
 	GetReplicaRule(ctx context.Context, id int64) (*model.ReplicaRule, error)

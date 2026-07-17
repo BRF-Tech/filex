@@ -2484,6 +2484,107 @@ func (s *Store) UpdateWebhookStatus(ctx context.Context, id int64, status, errMs
 	return nil
 }
 
+// ─────────────────── Webhook targets (webhook v2) ───────────────────
+
+// CreateWebhookTarget inserts a new delivery destination and returns
+// the stored row (with id + created_at filled in).
+func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget) (*model.WebhookTarget, error) {
+	if t == nil || t.Name == "" || t.URL == "" {
+		return nil, errors.New("sqlite: webhook target missing name/url")
+	}
+	enabled := 0
+	if t.Enabled {
+		enabled = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO webhook_targets (name, url, secret, events, enabled)
+		 VALUES (?,?,?,?,?)`,
+		t.Name, t.URL, t.Secret, t.Events, enabled)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: insert webhook target: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return s.GetWebhookTarget(ctx, id)
+}
+
+// GetWebhookTarget returns a single target by id.
+func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, url, secret, events, enabled, created_at
+		 FROM webhook_targets WHERE id=?`, id)
+	return scanWebhookTarget(row)
+}
+
+// ListWebhookTargets returns every target ordered by id. Enabled/event
+// filtering happens in the notify dispatcher, not in SQL — the table is
+// tiny and the admin list needs disabled rows too.
+func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, secret, events, enabled, created_at
+		 FROM webhook_targets ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list webhook targets: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.WebhookTarget
+	for rows.Next() {
+		t, err := scanWebhookTarget(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// UpdateWebhookTarget replaces the mutable columns of a target row.
+func (s *Store) UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget) error {
+	if t == nil || t.ID == 0 || t.Name == "" || t.URL == "" {
+		return errors.New("sqlite: webhook target missing id/name/url")
+	}
+	enabled := 0
+	if t.Enabled {
+		enabled = 1
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE webhook_targets SET name=?, url=?, secret=?, events=?, enabled=? WHERE id=?`,
+		t.Name, t.URL, t.Secret, t.Events, enabled, t.ID)
+	if err != nil {
+		return fmt.Errorf("sqlite: update webhook target: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteWebhookTarget removes a target row.
+func (s *Store) DeleteWebhookTarget(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM webhook_targets WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete webhook target: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// scanWebhookTarget accepts both *sql.Row and *sql.Rows. Enabled is
+// scanned through an int so the same code serves SQLite (INTEGER) and
+// MySQL (TINYINT) via the wrapping driver.
+func scanWebhookTarget(rs interface {
+	Scan(...any) error
+}) (*model.WebhookTarget, error) {
+	t := &model.WebhookTarget{}
+	var enabled int
+	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &enabled, &t.CreatedAt); err != nil {
+		return nil, err
+	}
+	t.Enabled = enabled != 0
+	return t, nil
+}
+
 // GetNotificationSettings returns the per-user toggle. A missing row
 // is treated as the default (in_app_enabled=true, no muted events).
 func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error) {

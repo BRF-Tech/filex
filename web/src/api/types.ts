@@ -347,6 +347,46 @@ export interface WebhookConfig {
   token_set: boolean;
 }
 
+// ─── Webhook v2 targets (bag:b3) ─────────────────────────────
+
+export interface WebhookTargetLastStatus {
+  status: 'sent' | 'failed';
+  error?: string;
+  at: string;
+}
+
+export interface WebhookTarget {
+  id: number;
+  name: string;
+  url: string;
+  secret_set: boolean;
+  events: string[];
+  enabled: boolean;
+  created_at: string;
+  last_status?: WebhookTargetLastStatus | null;
+}
+
+export interface WebhookTargetCreatePayload {
+  name: string;
+  url: string;
+  secret?: string;
+  events?: string[];
+  enabled?: boolean;
+}
+
+export interface WebhookTargetPatchPayload {
+  name?: string;
+  url?: string;
+  secret?: string; // absent = keep, '' = clear, value = replace
+  events?: string[];
+  enabled?: boolean;
+}
+
+export interface WebhookTargetTestResult {
+  ok: boolean;
+  result: WebhookTargetLastStatus;
+}
+
 // ─── Replica ─────────────────────────────────────────────────
 
 export type ReplicaMode = 'mirror' | 'append_only' | 'skip';

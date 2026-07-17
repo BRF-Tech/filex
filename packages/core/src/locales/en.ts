@@ -195,4 +195,10 @@ export const en: Record<string, string> = {
   'palette.save': 'Save search',
   'palette.saved.delete': 'Delete saved search',
   'search.in_content': 'In content',
+
+  /* === bag:b4 === */
+  'toolbar.more': 'More actions',
+  'toolbar.search.close': 'Close search',
+  'sheet.menu': 'Actions',
+  'sheet.close': 'Close',
 };

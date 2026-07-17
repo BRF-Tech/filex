@@ -19,6 +19,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -219,6 +220,9 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
+	/* bag:b3 event */
+	emitNodeEvent(r.Context(), notify.EventFileMoved, current.ID, normalizeDBPath(dstRel), body.Name, 0,
+		map[string]any{"from": normalizeDBPath(srcRel), "to": normalizeDBPath(dstRel), "rename": true})
 	// Live: an item was renamed in this directory.
 	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "rename", Name: path.Base(srcRel), NewName: body.Name})
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
@@ -293,6 +297,9 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
+		/* bag:b3 event */
+		emitNodeEvent(r.Context(), notify.EventFileMoved, current.ID, normalizeDBPath(dstRel), path.Base(dstRel), 0,
+			map[string]any{"from": normalizeDBPath(srcRel), "to": normalizeDBPath(dstRel)})
 		srcDirs[path.Dir(srcRel)] = struct{}{}
 	}
 
@@ -378,6 +385,9 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
 				h.removeFromIndex(r.Context(), existing.ID)
 			}
+			/* bag:b3 event */
+			emitNodeEvent(r.Context(), notify.EventFileDeleted, current.ID, origClean, path.Base(srcRel), 0,
+				map[string]any{"purged": true})
 			continue
 		}
 
@@ -397,6 +407,8 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+			/* bag:b3 event */
+			emitNodeEvent(r.Context(), notify.EventFileDeleted, current.ID, normalizeDBPath(srcRel), base, 0, nil)
 		} else {
 			if err := mover.Move(r.Context(), srcRel, trashRel); err != nil {
 				if !errors.Is(err, storage.ErrNotFound) {
@@ -414,6 +426,9 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
+			/* bag:b3 event */
+			emitNodeEvent(r.Context(), notify.EventFileTrashed, current.ID, normalizeDBPath(srcRel), base, 0,
+				map[string]any{"trash_path": normalizeDBPath(trashRel)})
 		}
 
 		// Update DB: store the original path in storage_key so Restore
@@ -526,6 +541,9 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = src.Close()
+
+		/* bag:b3 event */
+		emitNodeEvent(r.Context(), notify.EventFileUploaded, current.ID, normalizeDBPath(fullRel), name, fh.Size, nil)
 
 		if parentLookupErr != nil {
 			continue

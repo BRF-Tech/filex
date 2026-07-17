@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
@@ -266,6 +267,12 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("upload: node upsert failed",
 			slog.String("path", cu.StorageKey),
 			slog.String("err", err.Error()))
+	}
+
+	if node != nil {
+		/* bag:b3 event */
+		emitNodeEvent(r.Context(), notify.EventFileUploaded, cu.StorageID, node.Path, node.Name, node.Size,
+			map[string]any{"chunked": true})
 	}
 
 	_ = u.Store.DeleteChunkedUpload(r.Context(), cu.ID)

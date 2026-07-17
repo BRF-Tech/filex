@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -230,10 +231,23 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:    sh.ExpiresAt,
 		MaxDownloads: sh.MaxDownloads,
 	}
-	if node, _ := h.Store.GetNode(r.Context(), nodeID); node != nil {
+	node, _ := h.Store.GetNode(r.Context(), nodeID)
+	if node != nil {
 		inner.Filename = node.Name
 		inner.Path = node.Path
 	}
+
+	/* bag:b3 event */
+	shareEv := notify.Event{
+		Event: notify.EventShareCreated,
+		Body:  inner.Path,
+		Share: &notify.ShareRef{Token: sh.Token, Path: inner.Path},
+		Meta:  map[string]any{"kind": sh.Kind, "has_pin": sh.PinHash != ""},
+	}
+	if node != nil {
+		shareEv.Node = &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name, Size: node.Size}
+	}
+	emitFileEvent(r.Context(), shareEv)
 
 	// Dual envelope: nested `share` for the SFC + flat fields at the
 	// top level for legacy embed.js. Cheap to ship both.

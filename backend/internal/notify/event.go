@@ -50,6 +50,41 @@ const (
 	EventDiskFull             EventType = "disk_full"
 )
 
+// Canonical file/share events (webhook v2 — "Bağlan" wave). Emitted
+// asynchronously from the API mutation handlers; webhook targets filter
+// on these names via their per-target events allow-list.
+const (
+	EventFileUploaded EventType = "file.uploaded"
+	EventFileDeleted  EventType = "file.deleted"
+	EventFileMoved    EventType = "file.moved"
+	EventFileTrashed  EventType = "file.trashed"
+	EventShareCreated EventType = "share.created"
+	EventDropReceived EventType = "drop.received"
+)
+
+// NodeRef identifies the file/folder an event is about (webhook v2
+// payload `node` object).
+type NodeRef struct {
+	StorageID int64  `json:"storage_id"`
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	Size      int64  `json:"size,omitempty"`
+}
+
+// ShareRef identifies the share link an event is about (webhook v2
+// payload `share` object).
+type ShareRef struct {
+	Token string `json:"token"`
+	Path  string `json:"path,omitempty"`
+}
+
+// ActorRef identifies who triggered the event, best-effort (webhook v2
+// payload `actor` object). Anonymous surfaces (public drop) omit it.
+type ActorRef struct {
+	ID    int64  `json:"id,omitempty"`
+	Email string `json:"email,omitempty"`
+}
+
 // Event is the in-memory shape that subsystems hand to Service.Send.
 //
 // On the wire (webhook payload) and in the DB it is encoded as JSON
@@ -61,6 +96,18 @@ type Event struct {
 	Body     string         `json:"body"`
 	Meta     map[string]any `json:"meta,omitempty"`
 	TS       time.Time      `json:"ts"`
+
+	// At mirrors TS under the webhook-v2 documented field name; Send
+	// fills it from TS so the wire payload always carries `at`.
+	At time.Time `json:"at"`
+
+	// Structured webhook-v2 payload objects (all optional). Node points
+	// at the file/folder the event concerns, Share at the public link,
+	// Actor at the triggering user. Send also folds them into the
+	// persisted meta_json so the in-app history keeps the context.
+	Node  *NodeRef  `json:"node,omitempty"`
+	Share *ShareRef `json:"share,omitempty"`
+	Actor *ActorRef `json:"actor,omitempty"`
 
 	// UserID, when non-nil, scopes the in-app notification to a single
 	// user. Otherwise the row is broadcast (admin-visible to everyone

@@ -2393,6 +2393,88 @@ func (s *Store) UpdateWebhookStatus(ctx context.Context, id int64, status, errMs
 	return nil
 }
 
+// ─────────────────── Webhook targets (webhook v2) ───────────────────
+
+// CreateWebhookTarget inserts a new delivery destination and returns
+// the stored row (with id + created_at filled in).
+func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget) (*model.WebhookTarget, error) {
+	if t == nil || t.Name == "" || t.URL == "" {
+		return nil, errors.New("postgres: webhook target missing name/url")
+	}
+	var id int64
+	if err := s.db.QueryRowContext(ctx,
+		`INSERT INTO webhook_targets (name, url, secret, events, enabled)
+		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+		t.Name, t.URL, t.Secret, t.Events, t.Enabled,
+	).Scan(&id); err != nil {
+		return nil, fmt.Errorf("postgres: insert webhook target: %w", err)
+	}
+	return s.GetWebhookTarget(ctx, id)
+}
+
+// GetWebhookTarget returns a single target by id.
+func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, name, url, secret, events, enabled, created_at
+		 FROM webhook_targets WHERE id=$1`, id)
+	t := &model.WebhookTarget{}
+	if err := row.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// ListWebhookTargets returns every target ordered by id. Enabled/event
+// filtering happens in the notify dispatcher, not in SQL — the table is
+// tiny and the admin list needs disabled rows too.
+func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, url, secret, events, enabled, created_at
+		 FROM webhook_targets ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list webhook targets: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.WebhookTarget
+	for rows.Next() {
+		t := &model.WebhookTarget{}
+		if err := rows.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// UpdateWebhookTarget replaces the mutable columns of a target row.
+func (s *Store) UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget) error {
+	if t == nil || t.ID == 0 || t.Name == "" || t.URL == "" {
+		return errors.New("postgres: webhook target missing id/name/url")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE webhook_targets SET name=$1, url=$2, secret=$3, events=$4, enabled=$5 WHERE id=$6`,
+		t.Name, t.URL, t.Secret, t.Events, t.Enabled, t.ID)
+	if err != nil {
+		return fmt.Errorf("postgres: update webhook target: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// DeleteWebhookTarget removes a target row.
+func (s *Store) DeleteWebhookTarget(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM webhook_targets WHERE id=$1`, id)
+	if err != nil {
+		return fmt.Errorf("postgres: delete webhook target: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 // GetNotificationSettings returns the per-user toggle (default-on
 // when no row exists).
 func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error) {

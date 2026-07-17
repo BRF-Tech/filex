@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.2.0 below.)
+(Nothing yet — see v0.3.0 below.)
+
+## [0.3.0] - 2026-07-17
+
+### Added
+
+- **WebDAV server**: mount your filex as a network drive. `/dav/<storage>/...`
+  speaks class-2 WebDAV (Windows map-drive, macOS Finder, rclone, davfs2) with
+  HTTP Basic auth (account password or API token), full RBAC enforcement,
+  read-only storage protection and best-effort DB/search-index sync — files
+  written over WebDAV show up in the UI and in content search. Kill-switch:
+  `FILEX_DAV=0`. See `docs/WEBDAV.md`.
+- **`filex client` CLI**: `login`, `ls`, `upload`, `download`, `mkdir`, `rm`,
+  `mv`, `search` (content-aware) and `share` subcommands against any remote
+  filex — flags/env/`~/.filex/cli.yaml` (0600) config, streaming uploads,
+  `--json` output. See `docs/CLI.md`.
+- **Webhook targets**: multiple webhook endpoints with per-target event
+  filters and HMAC signing (`X-Filex-Signature: sha256=…`, plus
+  `X-Filex-Event` / `X-Filex-Delivery` headers). New file events fire on
+  uploads, moves, deletes, trash, share creation and file-drop receipts.
+  Admin UI for target CRUD + test deliveries; the legacy global webhook keeps
+  working unchanged.
+- **Narrow / embed mini mode**: below 560px the explorer collapses its
+  toolbar behind a "⋯" menu, search expands from an icon, touch devices get a
+  bottom-sheet context menu and a floating upload button — wide layouts are
+  pixel-for-pixel unchanged.
+
+### Fixed
+
+- WebDAV extension verbs (PROPFIND & friends) are registered with the router
+  so they survive `chi` method filtering.
 
 ## [0.2.0] - 2026-07-17
 

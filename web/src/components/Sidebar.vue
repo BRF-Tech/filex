@@ -20,6 +20,7 @@ import {
   X,
   ListChecks,
   Bell,
+  Webhook,
   GitBranch,
   FolderOpen,
   History,
@@ -87,6 +88,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'replica' }, label: t('nav.replica'), icon: GitBranch, group: 'ops' },
   { to: { name: 'queue' }, label: t('nav.queue'), icon: ListChecks, group: 'ops' },
   { to: { name: 'notifications' }, label: t('nav.notifications'), icon: Bell, group: 'ops' },
+  { to: { name: 'webhooks' }, label: t('nav.webhooks'), icon: Webhook, group: 'ops' } /* bag:b3 */,
   { to: { name: 'audit' }, label: t('nav.audit'), icon: ScrollText, group: 'ops' },
 
   { to: { name: 'about' }, label: t('nav.about'), icon: Info, group: 'meta' },

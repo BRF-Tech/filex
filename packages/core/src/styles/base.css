@@ -1931,3 +1931,140 @@ filex-explorer {
 .fe-list__snippet {
   max-width: 100%;
 }
+
+/* === bag:b4 — narrow/embed mini mode === */
+/* Everything below is scoped to `.fe--narrow`, `.fe-toolbar--narrow`,
+ * `.fe-fab` or `.fe-sheet` — none of which exist in the wide desktop
+ * layout, so the classic look is untouched when the mode is off. */
+
+/* Narrow toolbar: a single non-wrapping row of icon buttons. */
+.fe-toolbar--narrow {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+.fe-toolbar--narrow .fe-btn.is-active {
+  background: var(--fe-bg-selected);
+}
+/* Expanded search: the input takes the whole row. */
+.fe-toolbar--narrow .fe-search--full {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-toolbar--narrow .fe-search--full .fe-search__input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Upload FAB — bottom-right corner of the explorer (narrow mode only). */
+.fe-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--fe-shadow);
+  cursor: pointer;
+  z-index: 45;
+  transition: background 0.15s, transform 0.15s;
+}
+.fe-fab:hover {
+  background: var(--fe-primary-hover);
+}
+.fe-fab:active {
+  transform: scale(0.94);
+}
+.fe-fab:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 3px;
+}
+/* Keep the corner trays clear of the FAB while narrow. */
+.fe--narrow .fe-upload,
+.fe--narrow .fe-ops {
+  bottom: 84px;
+}
+
+/* Bottom sheet (ContextMenu sheet variant, coarse-pointer devices). */
+.fe-ctx-backdrop--sheet {
+  background: rgba(13, 19, 27, 0.42);
+}
+.fe-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  border: 1px solid var(--fe-border);
+  border-bottom: 0;
+  border-top-left-radius: var(--fe-radius-lg);
+  border-top-right-radius: var(--fe-radius-lg);
+  box-shadow: 0 -10px 32px rgba(15, 23, 42, 0.28);
+  padding: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  outline: none;
+  z-index: 90;
+}
+.fe-sheet__handle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0 8px;
+  cursor: grab;
+  touch-action: none;
+}
+.fe-sheet__handle::before {
+  content: '';
+  width: 40px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--fe-border-strong);
+}
+.fe-sheet__items {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* Big touch targets (≥44px) on sheet entries. */
+.fe-sheet__item {
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 15px;
+  gap: 12px;
+}
+/* Sheet transitions: backdrop fades, panel slides up from the bottom. */
+.fe-sheet-enter-active,
+.fe-sheet-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fe-sheet-enter-active .fe-sheet,
+.fe-sheet-leave-active .fe-sheet {
+  transition: transform 0.22s ease;
+}
+.fe-sheet-enter-from,
+.fe-sheet-leave-to {
+  opacity: 0;
+}
+.fe-sheet-enter-from .fe-sheet,
+.fe-sheet-leave-to .fe-sheet {
+  transform: translateY(100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-sheet-enter-active,
+  .fe-sheet-leave-active,
+  .fe-sheet-enter-active .fe-sheet,
+  .fe-sheet-leave-active .fe-sheet,
+  .fe-fab {
+    transition: none;
+  }
+}

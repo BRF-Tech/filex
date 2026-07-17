@@ -9,6 +9,7 @@
 //	filex admin random-password [--email]
 //	filex storage list | add | remove
 //	filex thumb backfill [--storage <id|name>] [--limit N] [--retry-failed]
+//	filex client login | ls | upload | download | mkdir | rm | mv | search | share
 //	filex --version
 package main
 
@@ -56,6 +57,7 @@ func main() {
 		adminCmd(),
 		storageCmd(),
 		thumbCmd(),
+		clientCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
