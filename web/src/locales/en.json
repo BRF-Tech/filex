@@ -97,7 +97,8 @@
     "theme": "Theme",
     "themeAuto": "Auto",
     "themeLight": "Light",
-    "themeDark": "Dark"
+    "themeDark": "Dark",
+    "protection": "Protection"
   },
   "login": {
     "title": "Sign in",
@@ -211,7 +212,17 @@
     "resetPasswordOk": "Password reset",
     "createdOk": "User created",
     "updatedOk": "User updated",
-    "deletedOk": "User deleted"
+    "deletedOk": "User deleted",
+    "quota": {
+      "title": "Storage quota",
+      "limitLabel": "Quota (GB)",
+      "limitHint": "0 = unlimited",
+      "errMin": "Enter a number greater than or equal to 0",
+      "savedOk": "Quota updated",
+      "recompute": "Recompute usage",
+      "recomputeOk": "Usage recomputed",
+      "noRead": "The server does not support reading the current quota; usage appears after you save."
+    }
   },
   "profile": {
     "title": "My profile",
@@ -439,7 +450,8 @@
     "deleteConfirm": "Permanently delete this share?",
     "revokedOk": "Share revoked",
     "deletedOk": "Share deleted",
-    "noResults": "No active shares"
+    "noResults": "No active shares",
+    "linkCopied": "Share link copied to clipboard"
   },
   "search": {
     "title": "Search index",
@@ -842,6 +854,32 @@
       "lastStatus": "Last delivery",
       "enabled": "Enabled",
       "actions": "Actions"
+    }
+  },
+  "protection": {
+    "title": "Protection",
+    "subtitle": "Trash retention, version policy and antivirus status",
+    "unsupported": "The server does not support this version — the protection settings API was not found. This page activates after a backend update.",
+    "savedOk": "Protection settings saved",
+    "trash": {
+      "title": "Trash retention",
+      "desc": "Deleted files are kept in the trash for the number of days set here, then purged permanently.",
+      "label": "Retention (days)",
+      "hint": "Minimum 1 day",
+      "errMin": "Enter an integer greater than or equal to 1"
+    },
+    "versions": {
+      "title": "Version policy",
+      "desc": "Number of versions kept per file. When the limit is exceeded, the oldest versions are removed by the daily cleanup job.",
+      "label": "Versions to keep",
+      "hint": "0 = unlimited (no cleanup)",
+      "errMin": "Enter an integer greater than or equal to 0"
+    },
+    "av": {
+      "title": "Antivirus",
+      "desc": "Uploaded files are scanned in the background with ClamAV; infected files are moved to the trash and a file.infected event is emitted. Scanning never blocks uploads.",
+      "binary": "Scanner binary",
+      "setupHint": "ClamAV not found. For installation and configuration see:"
     }
   }
 }

@@ -89,6 +89,19 @@ export interface UserSuggestion {
   display_name: string;
   role: string;
 }
+
+/* === koru:k1 — version history (inspector panel) === */
+
+/** Mirrors backend `model.NodeVersion` (GET /api/files/versions?node_id=…). */
+export interface NodeVersion {
+  id: number;
+  node_id: number;
+  version_n: number;
+  storage_key?: string;
+  size: number;
+  etag?: string;
+  created_at: string;
+}
 export interface UserSearchResponse {
   users: UserSuggestion[];
 }
@@ -686,6 +699,48 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /* === koru:k1 — version history (inspector panel) ===
+   * Derived from the manager endpoint by swapping `/manager` for `/versions`
+   * (same trick permissionsUrl/globalSearch use) so embedded proxies that
+   * forward the whole /api/files/* subtree keep working.
+   *   GET  /api/files/versions?node_id=N       → {versions, node_id}
+   *   POST /api/files/versions/restore         → {node_id, version_id, snapshot_current}
+   *   POST /api/files/versions/snapshot        → {node_id}   (may not exist on older backends)
+   */
+  function versionsUrl(sub = ''): string {
+    const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/versions');
+    return base + sub;
+  }
+  async function listVersions(nodeId: number): Promise<NodeVersion[]> {
+    const data = await jsonFetch<{ versions?: NodeVersion[] | null }>(
+      versionsUrl() + '?node_id=' + encodeURIComponent(String(nodeId)),
+    );
+    return Array.isArray(data?.versions) ? data.versions : [];
+  }
+  async function restoreVersion(
+    nodeId: number,
+    versionId: number,
+    snapshotCurrent = true,
+  ): Promise<void> {
+    await jsonFetch(versionsUrl('/restore'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        node_id: nodeId,
+        version_id: versionId,
+        snapshot_current: snapshotCurrent,
+      }),
+    });
+  }
+  async function snapshotVersion(nodeId: number): Promise<void> {
+    await jsonFetch(versionsUrl('/snapshot'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_id: nodeId }),
+    });
+  }
+  /* === /koru:k1 === */
+
   // Mint a short-lived WebSocket auth ticket for the realtime layer. Derived
   // from the manager URL (so it flows through the same host proxy) and uses the
   // same auth/creds as every other call. Returns null on any failure (a backend
@@ -731,6 +786,10 @@ export function useFileApi(config: ExplorerConfig) {
     archiveList,
     archiveExtract,
     archiveAdd,
+    // Version history (koru:k1 inspector)
+    listVersions,
+    restoreVersion,
+    snapshotVersion,
     // Permissions (RBAC panel)
     listPermissions,
     resolveEmail,

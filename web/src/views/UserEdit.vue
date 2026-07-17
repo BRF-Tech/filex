@@ -2,13 +2,15 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ArrowLeft, Save, KeyRound, Trash2 } from 'lucide-vue-next';
+import { ArrowLeft, Save, KeyRound, Trash2, Database, RefreshCcw } from 'lucide-vue-next';
 
 import { UsersApi } from '@/api/users';
+import { quotaApi, type QuotaSnapshot } from '@/api/quota';
 import { useUsersStore } from '@/stores/users';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
+import { formatBytes } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
@@ -18,7 +20,7 @@ import Modal from '@/components/ui/Modal.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const users = useUsersStore();
@@ -108,7 +110,84 @@ const roleOptions = [
   { value: 'viewer', label: t('users.roles.viewer') },
 ];
 
-onMounted(load);
+// ── koru:k3 — storage quota card ─────────────────────────────────
+// GB inputs use the same 1000-base as formatBytes so "10 GB" here
+// matches the "10 GB" the widget renders.
+const GB = 1_000_000_000;
+
+const quotaSnap = ref<QuotaSnapshot | null>(null);
+const quotaGb = ref<number>(0);
+const quotaErr = ref<string | null>(null);
+const quotaSaving = ref(false);
+const quotaRecomputing = ref(false);
+// False when the backend has no admin quota read endpoint (older builds):
+// the card still lets the admin set a new limit; usage shows after save.
+const quotaReadable = ref(true);
+
+async function loadQuota() {
+  try {
+    applySnap(await quotaApi.adminGet(id.value));
+    quotaReadable.value = true;
+  } catch {
+    quotaReadable.value = false;
+  }
+}
+
+function applySnap(snap: QuotaSnapshot) {
+  quotaSnap.value = snap;
+  quotaGb.value = snap.quota_bytes > 0 ? Math.round((snap.quota_bytes / GB) * 100) / 100 : 0;
+}
+
+const quotaBarClass = computed(() => {
+  const p = quotaSnap.value?.percent_used ?? 0;
+  if (p >= 90) return 'bg-rose-500';
+  if (p >= 75) return 'bg-amber-500';
+  return 'bg-emerald-500';
+});
+
+async function saveQuota() {
+  quotaErr.value = null;
+  const gb = quotaGb.value;
+  if (typeof gb !== 'number' || !Number.isFinite(gb) || gb < 0) {
+    quotaErr.value = t('users.quota.errMin');
+    return;
+  }
+  quotaSaving.value = true;
+  try {
+    applySnap(await quotaApi.adminSet(id.value, Math.round(gb * GB)));
+    quotaReadable.value = true;
+    toast.success(t('users.quota.savedOk'));
+  } catch (e: unknown) {
+    quotaErr.value = extractError(e, t('errors.generic'));
+  } finally {
+    quotaSaving.value = false;
+  }
+}
+
+async function recomputeQuota() {
+  quotaRecomputing.value = true;
+  try {
+    const used = await quotaApi.adminRecompute(id.value);
+    if (quotaSnap.value) {
+      const limit = quotaSnap.value.quota_bytes;
+      quotaSnap.value = {
+        ...quotaSnap.value,
+        used_bytes: used,
+        percent_used: limit > 0 ? (used / limit) * 100 : 0,
+      };
+    }
+    toast.success(`${t('users.quota.recomputeOk')} — ${formatBytes(used, locale.value)}`);
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    quotaRecomputing.value = false;
+  }
+}
+
+onMounted(() => {
+  load();
+  loadQuota();
+});
 </script>
 
 <template>
@@ -156,6 +235,65 @@ onMounted(load);
         </div>
       </div>
     </form>
+
+    <!-- koru:k3 — storage quota -->
+    <div class="card card-body space-y-3">
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="flex items-center gap-2 text-base font-semibold">
+          <Database class="h-4 w-4" /> {{ t('users.quota.title') }}
+        </h2>
+        <Badge v-if="quotaSnap?.unlimited" tone="sky">{{ t('quota.unlimited') }}</Badge>
+      </div>
+
+      <template v-if="quotaSnap">
+        <div
+          v-if="!quotaSnap.unlimited"
+          class="relative h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700"
+          aria-hidden="true"
+        >
+          <span
+            class="absolute inset-y-0 left-0 transition-all duration-300"
+            :class="quotaBarClass"
+            :style="{ width: `${Math.min(100, quotaSnap.percent_used)}%` }"
+          />
+        </div>
+        <p class="text-sm text-zinc-600 dark:text-zinc-300 tabular-nums">
+          <template v-if="quotaSnap.unlimited">
+            {{ t('quota.used') }}: {{ formatBytes(quotaSnap.used_bytes, locale) }}
+          </template>
+          <template v-else>
+            {{ t('quota.used') }}: {{ formatBytes(quotaSnap.used_bytes, locale) }} /
+            {{ formatBytes(quotaSnap.quota_bytes, locale) }}
+            ({{ quotaSnap.percent_used.toFixed(quotaSnap.percent_used < 10 ? 1 : 0) }}%)
+          </template>
+        </p>
+      </template>
+      <p v-else-if="!quotaReadable" class="text-xs text-zinc-500 dark:text-zinc-400">
+        {{ t('users.quota.noRead') }}
+      </p>
+
+      <div class="flex items-end gap-2 flex-wrap">
+        <Input
+          :model-value="quotaGb"
+          type="number"
+          :min="0"
+          :step="0.5"
+          :label="t('users.quota.limitLabel')"
+          :hint="t('users.quota.limitHint')"
+          :error="quotaErr"
+          class="w-48"
+          @update:model-value="(v) => ((quotaGb = v as number), (quotaErr = null))"
+        />
+        <Button type="button" :loading="quotaSaving" @click="saveQuota">
+          <Save class="h-4 w-4" />
+          {{ t('common.save') }}
+        </Button>
+        <Button type="button" variant="outline" :loading="quotaRecomputing" @click="recomputeQuota">
+          <RefreshCcw class="h-4 w-4" />
+          {{ t('users.quota.recompute') }}
+        </Button>
+      </div>
+    </div>
 
     <!-- Reset password -->
     <Modal

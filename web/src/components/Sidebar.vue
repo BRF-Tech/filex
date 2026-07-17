@@ -20,6 +20,7 @@ import {
   X,
   ListChecks,
   Bell,
+  Shield /* koru:k3 */,
   Webhook,
   GitBranch,
   FolderOpen,
@@ -84,6 +85,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'api-mcp' }, label: t('nav.apiMcp'), icon: KeyRound, group: 'access' },
 
   { to: { name: 'settings' }, label: t('nav.settings'), icon: Settings, group: 'ops' },
+  { to: { name: 'protection' }, label: t('nav.protection'), icon: Shield, group: 'ops' } /* koru:k3 */,
   { to: { name: 'external' }, label: t('nav.external'), icon: PlugZap, group: 'ops' },
   { to: { name: 'replica' }, label: t('nav.replica'), icon: GitBranch, group: 'ops' },
   { to: { name: 'queue' }, label: t('nav.queue'), icon: ListChecks, group: 'ops' },

@@ -7,6 +7,7 @@
 package api
 
 import (
+	"context"
 	"embed"
 	"net/http"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/dav"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -70,6 +72,12 @@ type Deps struct {
 	Mailer *mailer.Service
 	// ZipCache caches folder-share ZIPs (shared with the background warmer).
 	ZipCache *sharezip.Cache
+	/* koru:k2 av */
+	// AVScan enqueues an async ClamAV scan for a freshly written node
+	// (v0.4 "Koru"). Wired by the server bootstrap only when a ClamAV
+	// binary and the persistent queue are both available; nil disables
+	// scanning entirely.
+	AVScan func(ctx context.Context, n *model.Node)
 }
 
 // BuildRouter constructs the chi router with all routes wired up.
@@ -219,6 +227,12 @@ func BuildRouter(d *Deps) http.Handler {
 	// file/share events (file.uploaded, share.created, …) to webhook v2
 	// targets. Nil-safe: an unwired sink disables emission.
 	handlers.SetNotifySink(d.Notify)
+
+	/* koru:k2 av */
+	// Wire the async antivirus-scan sink the upload surfaces call after a
+	// write (upload finalize, manager vfUpload, public drop). Nil-safe:
+	// unwired (no ClamAV binary / no queue) disables scanning.
+	handlers.SetAntivirusEnqueue(d.AVScan)
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 
@@ -370,6 +384,7 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/versions", func(r chi.Router) {
 				r.Get("/", versionsH.List)
 				r.Post("/restore", versionsH.Restore)
+				r.Post("/snapshot", versionsH.Snapshot)
 			})
 		})
 	})
@@ -431,6 +446,13 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Put("/{key}", seth.Set)
 			})
 
+			// Protection settings ("Koru" v0.4): trash retention + version
+			// keep count + antivirus status, frozen contract for the admin
+			// SPA (see handlers/protection.go).
+			protH := handlers.NewProtection(d.Store)
+			r.Get("/protection", protH.Get)
+			r.Patch("/protection", protH.Patch)
+
 			// Tenant lifecycle (multi-tenancy). In multi-tenant mode only the
 			// supertenant's admins pass the handler's internal gate.
 			r.Route("/providers", func(r chi.Router) {
@@ -477,6 +499,7 @@ func BuildRouter(d *Deps) http.Handler {
 			})
 
 			r.Route("/quota", func(r chi.Router) {
+				r.Get("/{user_id}", quotaH.AdminGet)
 				r.Post("/{user_id}", quotaH.AdminSet)
 				r.Post("/{user_id}/recompute", quotaH.AdminRecompute)
 			})

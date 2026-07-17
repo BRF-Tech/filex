@@ -45,6 +45,7 @@ import GridView from './components/GridView.vue';
 import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
 import PendingOpsTray from './components/PendingOpsTray.vue';
+import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
 /* cila:c wiring */
 import CommandPalette from './components/CommandPalette.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
@@ -409,6 +410,55 @@ const showConvert = ref(false);
 const convertTarget = ref<FileNode | null>(null);
 const showPerm = ref(false);
 const permTarget = ref<FileNode | null>(null);
+
+/* === koru:k1 — inspector (details) panel ===
+ * Open/closed preference persists under `filex.inspector`; the panel itself
+ * mounts with v-if so the closed state leaves zero DOM behind. */
+const INSPECTOR_LS_KEY = 'filex.inspector';
+const showInspector = ref<boolean>(
+  (() => {
+    try {
+      return localStorage.getItem(INSPECTOR_LS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  })(),
+);
+function persistInspector(v: boolean) {
+  try {
+    localStorage.setItem(INSPECTOR_LS_KEY, v ? '1' : '0');
+  } catch {
+    /* quota / private mode */
+  }
+}
+function toggleInspector() {
+  showInspector.value = !showInspector.value;
+  persistInspector(showInspector.value);
+}
+function openInspector() {
+  if (!showInspector.value) {
+    showInspector.value = true;
+    persistInspector(true);
+  }
+}
+function closeInspector() {
+  if (showInspector.value) {
+    showInspector.value = false;
+    persistInspector(false);
+  }
+}
+// Folder summary label for the no-selection state.
+const inspectorDirLabel = computed(() => {
+  if (trashMode.value) return t('node.trash');
+  const p = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
+  if (!p) return adapter.value || t('breadcrumb.root');
+  return p.split('/').pop() || p;
+});
+function onInspectorManage(n: FileNode) {
+  permTarget.value = n;
+  showPerm.value = true;
+}
+/* === /koru:k1 === */
 
 // RBAC helpers. '' means ACL is not enforced on this storage → full access
 // (the pre-RBAC default). Otherwise 'editor'/'owner' may write; only 'owner'
@@ -1025,6 +1075,9 @@ useKeyboardShortcuts(rootEl, {
     showPreview.value = false;
     ctxRef.value?.hide();
     dismissToast();
+    /* koru:k1 — Esc closes the narrow-mode inspector overlay only; the wide
+       side panel is a persistent surface toggled by `i` / the toolbar. */
+    if (isNarrow.value) closeInspector();
   },
   onFocusSearch: () => toolbarRef.value?.focusSearch(),
   onCut: () => cut(),
@@ -1039,6 +1092,7 @@ useKeyboardShortcuts(rootEl, {
     showShortcutsHelp.value = true;
   },
   /* /cila:c wiring */
+  onToggleInspector: () => toggleInspector() /* koru:k1 */,
   hasSelection: () => !selection.isEmpty.value,
 });
 
@@ -1337,6 +1391,7 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
     { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w, disabled: !isFile },
     { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w },
+    { key: 'details', label: t('ctx.details'), icon: 'ℹ', hidden: !any } /* koru:k1 */,
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '', hidden: !w },
     { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single || !w, disabled: !single },
@@ -1412,6 +1467,9 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
         permTarget.value = targets[0];
         showPerm.value = true;
       }
+      break;
+    case 'details' /* koru:k1 */:
+      openInspector();
       break;
     case 'copy-id':
       if (targets[0] && typeof targets[0].id === 'number') {
@@ -2022,6 +2080,8 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :locale="locale"
       :narrow="isNarrow /* bag:b4 */"
       :theme="config.theme || 'auto' /* bag:b4 */"
+      :inspector-open="showInspector /* koru:k1 */"
+      @toggle-inspector="toggleInspector /* koru:k1 */"
       @update:view-mode="viewMode = $event"
       @update:search-query="searchQuery = $event"
       @update:density="density = $event"
@@ -2063,6 +2123,10 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       </span>
     </div>
 
+    <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
+         as flex siblings (row). Without the inspector open it is visually
+         identical to the previous direct-child fe__body. -->
+    <div class="fe__main">
     <div class="fe__body" @click.self="selection.clear()">
       <!-- Initial load: skeleton ghosts (view-mode aware) instead of an
            empty/"no files" flash. Only when there's nothing yet — navigation
@@ -2246,6 +2310,26 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
         @item-drop-into="onItemDropInto"
       />
     </div>
+
+    <!-- koru:k1 — inspector (details) panel; v-if keeps the closed state
+         free of any DOM. Narrow mode renders it as a full-size overlay. -->
+    <InspectorPanel
+      v-if="showInspector"
+      :api="api"
+      :nodes="selection.nodes.value"
+      :dir-label="inspectorDirLabel"
+      :dir-count="files.length"
+      :dir-perm="dirPerm"
+      :locale="locale"
+      :narrow="isNarrow"
+      :thumb-src="thumbs.src"
+      @close="closeInspector"
+      @manage-permissions="onInspectorManage"
+      @toast="flashToast"
+      @changed="() => load()"
+    />
+    </div>
+    <!-- /koru:k1 fe__main -->
 
     <div v-if="dragOver" class="fe__dragover">
       <div class="fe__dragover-card">

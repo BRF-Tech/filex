@@ -60,6 +60,11 @@ const (
 	EventFileTrashed  EventType = "file.trashed"
 	EventShareCreated EventType = "share.created"
 	EventDropReceived EventType = "drop.received"
+	/* koru:k2 av */
+	// EventFileInfected fires when the async ClamAV scan flags an
+	// uploaded file; the payload carries the node plus a `signature`
+	// meta field, and the file is quarantined into trash.
+	EventFileInfected EventType = "file.infected"
 )
 
 // NodeRef identifies the file/folder an event is about (webhook v2

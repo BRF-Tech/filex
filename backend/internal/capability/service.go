@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search/extract"
@@ -180,6 +181,10 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	// extractor (FILEX_TESSERACT_BIN authoritative, else $PATH) so the
 	// advertised flag and the actual pipeline can never disagree.
 	caps.OCR = extract.TesseractBin() != ""
+	// Optional ClamAV upload scanning (v0.4 "Koru") — same shared-resolution
+	// pattern via internal/antivirus (FILEX_CLAMAV kill-switch,
+	// FILEX_CLAMAV_BIN authoritative, else $PATH clamdscan/clamscan).
+	caps.Antivirus = antivirus.ResolveBin() != ""
 
 	// External services from DB.
 	if list, err := s.store.ListExternalServices(ctx); err == nil {

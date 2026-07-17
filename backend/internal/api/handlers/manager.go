@@ -1010,6 +1010,9 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 			"mime_type": n.Mime,
 			"storage":   adapter,
 		}
+		if n.Etag != "" {
+			entry["etag"] = n.Etag
+		}
 		if set != nil {
 			entry["perm"] = set.Effective(acl.CleanRel(n.Path)).String()
 		}

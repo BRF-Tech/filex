@@ -22,6 +22,7 @@ export interface ShortcutHandlers {
   onPathJump?: () => void; // Cmd+K / Ctrl+K
   onGoUp?: () => void; // Alt+Up / Backspace (when nothing selected)
   onShowHelp?: () => void; // ? (Shift+/ on most layouts)
+  onToggleInspector?: () => void; // i (koru:k1 details panel)
   hasSelection?: () => boolean; // disambiguates Backspace
 }
 
@@ -45,6 +46,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: ['Alt+↑', 'Backspace'], labelKey: 'shortcuts.go_up', groupKey: 'shortcuts.group.nav' },
   { keys: ['Enter'], labelKey: 'shortcuts.open', groupKey: 'shortcuts.group.nav' },
   { keys: ['Esc'], labelKey: 'shortcuts.close', groupKey: 'shortcuts.group.nav' },
+  { keys: ['I'], labelKey: 'shortcuts.inspector', groupKey: 'shortcuts.group.nav' } /* koru:k1 */,
   { keys: ['?'], labelKey: 'shortcuts.help', groupKey: 'shortcuts.group.nav' },
   // Selection
   { keys: ['Ctrl+A'], labelKey: 'shortcuts.select_all', groupKey: 'shortcuts.group.selection' },
@@ -158,6 +160,15 @@ export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: 
         if (ctrl && handlers.onDuplicate) {
           e.preventDefault();
           handlers.onDuplicate();
+        }
+        break;
+      /* koru:k1 — plain `i` toggles the inspector (details) panel. Ctrl+I /
+         Alt+I stay untouched so browser/OS combos keep working. */
+      case 'i':
+      case 'I':
+        if (!ctrl && !e.altKey && handlers.onToggleInspector) {
+          e.preventDefault();
+          handlers.onToggleInspector();
         }
         break;
       case 'k':

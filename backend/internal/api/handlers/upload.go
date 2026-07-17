@@ -273,6 +273,7 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 		/* bag:b3 event */
 		emitNodeEvent(r.Context(), notify.EventFileUploaded, cu.StorageID, node.Path, node.Name, node.Size,
 			map[string]any{"chunked": true})
+		enqueueAntivirusScan(r.Context(), node) /* koru:k2 av */
 	}
 
 	_ = u.Store.DeleteChunkedUpload(r.Context(), cu.ID)

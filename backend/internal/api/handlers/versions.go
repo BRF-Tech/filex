@@ -57,6 +57,32 @@ type restoreReq struct {
 	SnapshotCurrent bool  `json:"snapshot_current,omitempty"`
 }
 
+// snapshotReq is the POST /api/files/versions/snapshot body.
+type snapshotReq struct {
+	NodeID int64 `json:"node_id"`
+}
+
+// Snapshot records the node's current content as a new version on demand
+// (the inspector's "take a version now" button; writes normally snapshot
+// implicitly, this is the explicit user-triggered path).
+func (h *Versions) Snapshot(w http.ResponseWriter, r *http.Request) {
+	var req snapshotReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if req.NodeID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		return
+	}
+	v, err := h.Service.Snapshot(r.Context(), req.NodeID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": v})
+}
+
 // Restore replaces the live content with a recorded version.
 func (h *Versions) Restore(w http.ResponseWriter, r *http.Request) {
 	var req restoreReq

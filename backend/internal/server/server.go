@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authapitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
@@ -73,6 +74,7 @@ type Server struct {
 	replicaCron     *replica.CronScheduler
 	replicaReloader *replica.RulesReloader
 	trash           *trash.Service
+	versions        *versioning.Service
 	quota           *quota.Service
 	srv             *http.Server
 	idx             *search.Index
@@ -396,6 +398,26 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		})
 	}
 
+	/* koru:k2 av */
+	// Optional ClamAV upload scanning ("Koru" v0.4). Only wired when a
+	// binary resolved (FILEX_CLAMAV_BIN > $PATH clamdscan/clamscan,
+	// FILEX_CLAMAV=0 kill-switch) AND the persistent queue is up — the
+	// scan is an async job (content_index pattern) and must never sit on
+	// the upload path. avEnqueue stays nil otherwise, which disables the
+	// handlers' emission sink entirely.
+	var avEnqueue func(ctx context.Context, n *model.Node)
+	if srvObj.qpool != nil {
+		if avScanner := antivirus.New(); avScanner.Supports() {
+			avJob := queue.NewAntivirusScanner(store, resolver, avScanner, srvObj.notify, idx, antivirus.MaxScanBytes())
+			srvObj.qpool.Register(queue.TypeAntivirusScan, avJob.Handle)
+			qd := srvObj.queue
+			avEnqueue = func(ctx context.Context, n *model.Node) {
+				avJob.Enqueue(ctx, qd, n)
+			}
+			slog.Info("antivirus: enabled", slog.String("bin", avScanner.Bin()))
+		}
+	}
+
 	// Replica orchestration. The wrapper Driver itself is created
 	// lazily by the resolver — when a primary storage with a
 	// matching replica row exists. v0.1 does not auto-discover the
@@ -439,8 +461,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Versioning service — snapshots before destructive writes; the API
 	// layer exposes list/restore/hard-delete via /api/files/versions and
-	// /api/admin/versions.
+	// /api/admin/versions. Its daily retention loop (versions.keep_n)
+	// starts in Start().
 	versionsSvc := versioning.New(store, versioning.StorageResolver(resolver))
+	srvObj.versions = versionsSvc
 
 	// Mailer for invite/share notices — verified periodically in Start().
 	srvObj.mailer = mailer.New(store)
@@ -506,6 +530,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		OIDCAuth:        oidcDrv,
 		Mailer:          srvObj.mailer,
 		ZipCache:        zipCache,
+		AVScan:          avEnqueue, /* koru:k2 av */
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see
@@ -599,6 +624,19 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.replicaCron != nil {
 		s.replicaCron.Start()
 		_ = s.replicaCron.Reload(ctx)
+	}
+
+	// Retention crons ("Koru" v0.4). The trash purge loop existed as
+	// trash.Service.RunDailyLoop but was never started anywhere — the
+	// documented daily purge (docs/TRASH-VERSIONING.md) only ran via the
+	// admin "empty" button. Wire it, plus the new version-retention loop
+	// (versions.keep_n; 0 = disabled). Both tick daily, first tick one
+	// interval after boot.
+	if s.trash != nil {
+		go s.trash.RunDailyLoop(ctx, 24*time.Hour)
+	}
+	if s.versions != nil {
+		go s.versions.RunRetentionLoop(ctx, 24*time.Hour)
 	}
 
 	// SMTP config verification — run once on boot, then every 5 minutes. The

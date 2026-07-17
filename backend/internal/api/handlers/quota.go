@@ -45,9 +45,26 @@ type setQuotaReq struct {
 	QuotaBytes int64 `json:"quota_bytes"`
 }
 
+// AdminGet returns the target user's current quota + usage snapshot.
+// (The admin routes bind {user_id}; reading "id" here was a long-standing
+// mismatch that made these endpoints always 400 — fixed alongside.)
+func (h *Quota) AdminGet(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "user_id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	snap, err := h.Service.Get(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
+}
+
 // AdminSet writes a new quota_bytes for the target user.
 func (h *Quota) AdminSet(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	id, err := strconv.ParseInt(chi.URLParam(r, "user_id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
@@ -71,7 +88,7 @@ func (h *Quota) AdminSet(w http.ResponseWriter, r *http.Request) {
 
 // AdminRecompute rescans nodes owned by id and rewrites usage_bytes.
 func (h *Quota) AdminRecompute(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	id, err := strconv.ParseInt(chi.URLParam(r, "user_id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return

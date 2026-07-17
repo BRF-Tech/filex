@@ -293,11 +293,12 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		if err != nil {
 			continue
 		}
-		_, err = h.Manager.IngestFile(r.Context(), st, subRel, fh.Filename, src, fh.Size)
+		ingested, err := h.Manager.IngestFile(r.Context(), st, subRel, fh.Filename, src, fh.Size)
 		_ = src.Close()
 		if err != nil {
 			continue
 		}
+		enqueueAntivirusScan(r.Context(), ingested) /* koru:k2 av */
 		saved++
 	}
 	if saved == 0 {

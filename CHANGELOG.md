@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.3.0 below.)
+(Nothing yet — see v0.4.0 below.)
+
+## [0.4.0] - 2026-07-17
+
+### Added
+
+- **Inspector panel**: press `i` (or the toolbar toggle) for a details
+  sidebar on the selected item — metadata, copyable path/etag, **version
+  history** (list, restore with optional pre-restore snapshot, take a
+  version on demand), effective permission with a jump to the permissions
+  dialog, and the item's share links. Full-screen overlay in narrow mode.
+- **Optional antivirus scanning**: with `clamscan`/`clamdscan` on the host
+  (`FILEX_CLAMAV_BIN` or PATH), uploads are scanned asynchronously;
+  infected files are quarantined to the trash and a new **`file.infected`**
+  event fires through webhooks and in-app notifications. Capability
+  endpoint reports `antivirus`. See `docs/PROTECTION.md`.
+- **Protection settings**: `GET/PATCH /api/admin/protection` + a new admin
+  "Protection" page — trash retention days, version retention (`keep N`),
+  antivirus status at a glance.
+- **Version retention cron**: with `versions.keep_n` set, a daily sweep
+  trims old versions per node.
+- **Admin quota UI**: user edit screen gains a storage-quota card with a
+  usage bar, limit editor and recompute action; new
+  `GET /api/admin/quota/{user_id}` endpoint backs it.
+- Shares admin view: sortable download counts and a copy-link row action.
+- `POST /api/files/versions/snapshot` records an on-demand version (the
+  service existed; the endpoint was never wired).
+- File listings now include `etag` when the backend knows it.
+
+### Fixed
+
+- **Admin quota endpoints always returned 400** since introduction — the
+  routes bound `{user_id}` while the handlers read `{id}`.
+- **Daily trash purge never actually ran** — the retention loop existed
+  but was never started; it now runs daily. NOTE: after upgrading,
+  soft-deleted files older than the retention window (default 30 days)
+  will be permanently purged on the first sweep.
 
 ## [0.3.0] - 2026-07-17
 

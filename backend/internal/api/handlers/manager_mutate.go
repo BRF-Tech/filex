@@ -560,6 +560,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 				// the stored thumb is stale. Mark it pending and let
 				// the pipeline regenerate.
 				h.dispatchThumb(fresh)
+				enqueueAntivirusScan(r.Context(), fresh) /* koru:k2 av */
 			}
 			continue
 		}
@@ -582,6 +583,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.indexNode(r.Context(), created)
 			h.dispatchThumb(created)
+			enqueueAntivirusScan(r.Context(), created) /* koru:k2 av */
 		}
 	}
 

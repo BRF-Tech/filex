@@ -71,6 +71,8 @@ const props = defineProps<{
    * (which loses the `.fe` variable scope under <body>).
    */
   theme?: ThemeMode;
+  /* koru:k1 — inspector (details panel) toggle state, for the pressed style. */
+  inspectorOpen?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -83,6 +85,7 @@ const emit = defineEmits<{
   (e: 'action', key: string): void;
   (e: 'open-recents'): void;
   (e: 'update:density', v: Density): void;
+  (e: 'toggle-inspector'): void /* koru:k1 */;
 }>();
 
 // Density toggle — the toolbar owns the persisted preference; the parent
@@ -221,6 +224,8 @@ const moreActions = computed<ContextAction[]>(() => {
       ? { key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' }
       : { key: 'view-list', label: t('toolbar.view.list'), icon: '☰' },
   );
+  /* koru:k1 — inspector toggle also reachable from the narrow overflow menu */
+  list.push({ key: 'inspector', label: t('toolbar.inspector'), icon: 'ℹ' });
   return list;
 });
 
@@ -245,6 +250,9 @@ function onMoreSelect(a: ContextAction) {
       break;
     case 'view-grid':
       emit('update:viewMode', 'grid');
+      break;
+    case 'inspector' /* koru:k1 */:
+      emit('toggle-inspector');
       break;
     default:
       fire(a.key);
@@ -381,6 +389,32 @@ function onMoreSelect(a: ContextAction) {
         focusable="false"
       >
         <path d="M4 5.5h16M4 12h16M4 18.5h16" />
+      </svg>
+    </button>
+
+    <!-- koru:k1 — inspector (details panel) toggle -->
+    <button
+      type="button"
+      class="fe-btn fe-btn--icon-only fe-toolbar__inspector"
+      :class="{ 'is-active': inspectorOpen }"
+      :aria-pressed="!!inspectorOpen"
+      :title="t('toolbar.inspector')"
+      :aria-label="t('toolbar.inspector')"
+      @click="emit('toggle-inspector')"
+    >
+      <svg
+        class="fe-ficon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5" />
+        <circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none" />
       </svg>
     </button>
 

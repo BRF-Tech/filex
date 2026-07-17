@@ -97,7 +97,8 @@
     "theme": "Tema",
     "themeAuto": "Otomatik",
     "themeLight": "Aydınlık",
-    "themeDark": "Karanlık"
+    "themeDark": "Karanlık",
+    "protection": "Koruma"
   },
   "login": {
     "title": "Oturum aç",
@@ -211,7 +212,17 @@
     "resetPasswordOk": "Şifre sıfırlandı",
     "createdOk": "Kullanıcı oluşturuldu",
     "updatedOk": "Kullanıcı güncellendi",
-    "deletedOk": "Kullanıcı silindi"
+    "deletedOk": "Kullanıcı silindi",
+    "quota": {
+      "title": "Depolama kotası",
+      "limitLabel": "Kota (GB)",
+      "limitHint": "0 = sınırsız",
+      "errMin": "0 veya daha büyük bir sayı girin",
+      "savedOk": "Kota güncellendi",
+      "recompute": "Kullanımı yeniden hesapla",
+      "recomputeOk": "Kullanım yeniden hesaplandı",
+      "noRead": "Sunucu mevcut kota bilgisini okumayı desteklemiyor; güncel kullanım kaydettikten sonra görünür."
+    }
   },
   "profile": {
     "title": "Profilim",
@@ -439,7 +450,8 @@
     "deleteConfirm": "Bu paylaşım kalıcı olarak silinsin mi?",
     "revokedOk": "Paylaşım iptal edildi",
     "deletedOk": "Paylaşım silindi",
-    "noResults": "Aktif paylaşım yok"
+    "noResults": "Aktif paylaşım yok",
+    "linkCopied": "Paylaşım linki panoya kopyalandı"
   },
   "search": {
     "title": "Arama indeksi",
@@ -842,6 +854,32 @@
       "lastStatus": "Son gönderim",
       "enabled": "Etkin",
       "actions": "İşlemler"
+    }
+  },
+  "protection": {
+    "title": "Koruma",
+    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası ve antivirüs durumu",
+    "unsupported": "Sunucu bu sürümü desteklemiyor — koruma ayarları API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
+    "savedOk": "Koruma ayarları kaydedildi",
+    "trash": {
+      "title": "Çöp kutusu saklama",
+      "desc": "Silinen dosyalar çöp kutusunda burada belirtilen gün sayısı kadar tutulur, süre dolunca kalıcı olarak temizlenir.",
+      "label": "Saklama süresi (gün)",
+      "hint": "En az 1 gün",
+      "errMin": "1 veya daha büyük bir tam sayı girin"
+    },
+    "versions": {
+      "title": "Sürüm politikası",
+      "desc": "Dosya başına saklanacak sürüm sayısı. Limit aşıldığında en eski sürümler günlük temizlik işiyle silinir.",
+      "label": "Saklanacak sürüm sayısı",
+      "hint": "0 = sınırsız (temizlik yapılmaz)",
+      "errMin": "0 veya daha büyük bir tam sayı girin"
+    },
+    "av": {
+      "title": "Antivirüs",
+      "desc": "Yüklenen dosyalar arka planda ClamAV ile taranır; virüslü dosyalar çöp kutusuna taşınır ve file.infected bildirimi üretilir. Tarama yüklemeyi asla engellemez.",
+      "binary": "Tarayıcı komutu",
+      "setupHint": "ClamAV bulunamadı. Kurulum ve yapılandırma için:"
     }
   }
 }

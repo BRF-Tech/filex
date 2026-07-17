@@ -1824,6 +1824,25 @@ func (s *Store) DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep in
 	return doomed, nil
 }
 
+// ListNodeIDsWithVersions returns the distinct node ids holding at least
+// one version row — the work list for the daily retention job.
+func (s *Store) ListNodeIDsWithVersions(ctx context.Context) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT node_id FROM node_versions ORDER BY node_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // ─────────────────── Quota ───────────────────
 
 // GetUserUsage returns (used_bytes, quota_bytes).

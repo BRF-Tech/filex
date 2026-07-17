@@ -14,4 +14,30 @@ export const quotaApi = {
     const res = await api.get<QuotaSnapshot>('/files/quota/me');
     return res.data;
   },
+
+  // ── koru:k3 — admin quota surface (Users → edit) ─────────────────
+  // Registered backend routes (internal/api/routes.go):
+  //   POST /api/admin/quota/{user_id}            → set quota_bytes, returns Snapshot
+  //   POST /api/admin/quota/{user_id}/recompute  → rescan usage, returns {used_bytes}
+  // There is no admin GET today; adminGet is speculative so the edit page can
+  // show current usage once the backend adds it — callers must tolerate 404/405.
+
+  async adminGet(userId: number): Promise<QuotaSnapshot> {
+    const res = await api.get<QuotaSnapshot>(`/admin/quota/${userId}`);
+    return res.data;
+  },
+
+  async adminSet(userId: number, quotaBytes: number): Promise<QuotaSnapshot> {
+    const res = await api.post<QuotaSnapshot>(`/admin/quota/${userId}`, {
+      quota_bytes: quotaBytes,
+    });
+    return res.data;
+  },
+
+  async adminRecompute(userId: number): Promise<number> {
+    const res = await api.post<{ ok: boolean; used_bytes: number }>(
+      `/admin/quota/${userId}/recompute`,
+    );
+    return res.data.used_bytes;
+  },
 };

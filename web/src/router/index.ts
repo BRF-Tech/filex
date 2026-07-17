@@ -140,6 +140,14 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.trash' },
       },
       {
+        // koru:k3 — data-protection settings (trash retention, version
+        // policy, antivirus status).
+        path: 'protection',
+        name: 'protection',
+        component: () => import('@/views/Protection.vue'),
+        meta: { breadcrumb: 'nav.protection' },
+      },
+      {
         path: 'search',
         name: 'search',
         component: () => import('@/views/SearchTest.vue'),

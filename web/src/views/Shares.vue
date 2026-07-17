@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { RefreshCcw, Trash2, Ban } from 'lucide-vue-next';
+import { RefreshCcw, Trash2, Ban, Link2 } from 'lucide-vue-next';
 
 import { SharesApi } from '@/api/shares';
 import type { PaginatedResponse, Share } from '@/api/types';
@@ -107,6 +107,49 @@ function shareUrl(s: Share): string {
   return `${window.location.origin}/s/${s.token}`;
 }
 
+// koru:k3 — explicit "copy link" row action (clipboard + toast). The
+// token-cell CopyButton stays for inline use; this one confirms via toast.
+async function copyShareLink(s: Share) {
+  const url = shareUrl(s);
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    // Fallback: hidden textarea + execCommand (same pattern as CopyButton).
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } catch {
+      document.body.removeChild(ta);
+      toast.error(t('errors.generic'));
+      return;
+    }
+    document.body.removeChild(ta);
+  }
+  toast.success(t('shares.linkCopied'));
+}
+
+// koru:k3 — client-side sort for the downloads column. The backend list
+// endpoint has no sort params, so we order the loaded page locally; the
+// Table component only ever emits the sort intent.
+const sortState = ref<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+function onSort(p: { key: string; dir: 'asc' | 'desc' }) {
+  sortState.value = p;
+}
+const displayRows = computed(() => {
+  const items = shares.value.items;
+  const s = sortState.value;
+  if (!s || s.key !== 'download_count') return items;
+  const mul = s.dir === 'asc' ? 1 : -1;
+  return [...items].sort(
+    (a, b) => ((shareOf(a).download_count ?? 0) - (shareOf(b).download_count ?? 0)) * mul,
+  );
+});
+
 const columns = computed<Column<Share>[]>(() => [
   { key: 'token', label: t('shares.fields.token'), cell: 'slot' },
   {
@@ -121,6 +164,7 @@ const columns = computed<Column<Share>[]>(() => [
     key: 'download_count',
     label: t('shares.fields.downloads'),
     align: 'right',
+    sortable: true /* koru:k3 */,
     format: (r) => {
       const s = shareOf(r);
       const max = s.max_downloads ?? null;
@@ -150,7 +194,7 @@ onMounted(load);
 
     <Table
       :columns="columns"
-      :rows="shares.items"
+      :rows="displayRows"
       :loading="loading"
       :empty="t('shares.noResults')"
       :page="page"
@@ -158,6 +202,7 @@ onMounted(load);
       :total="shares.total"
       row-key="id"
       @page="(p) => ((page = p), load())"
+      @sort="onSort"
     >
       <template #toolbar>
         <Input v-model="q" :placeholder="t('common.search')" size="sm" class="w-60" />
@@ -220,6 +265,14 @@ onMounted(load);
 
       <template #cell-actions="{ row }">
         <div class="flex items-center justify-end gap-1">
+          <Button
+            size="xs"
+            variant="ghost"
+            :title="t('shares.copyLink')"
+            @click="copyShareLink(shareOf(row))"
+          >
+            <Link2 class="h-3.5 w-3.5" />
+          </Button>
           <Button
             v-if="!shareOf(row).revoked_at && !shareOf(row).revoked"
             size="xs"

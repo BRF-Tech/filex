@@ -25,6 +25,11 @@ type Capabilities struct {
 	// content search index (v0.2 "Bul").
 	OCR bool `json:"ocr"`
 
+	// Antivirus reports whether an optional ClamAV binary was found
+	// (FILEX_CLAMAV_BIN or $PATH clamdscan/clamscan; FILEX_CLAMAV=0
+	// kill-switch) — async upload scanning (v0.4 "Koru").
+	Antivirus bool `json:"antivirus"`
+
 	// Per-storage capability probe — keyed by storage ID (string for JSON).
 	Storage map[string]StorageCapabilities `json:"storage,omitempty"`
 

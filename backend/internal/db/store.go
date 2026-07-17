@@ -215,6 +215,10 @@ type Store interface {
 	NextNodeVersionNumber(ctx context.Context, nodeID int64) (int, error)
 	DeleteNodeVersion(ctx context.Context, id int64) error
 	DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep int) ([]*model.NodeVersion, error)
+	// ListNodeIDsWithVersions returns the distinct node ids that have at
+	// least one node_versions row — the work list for the daily version
+	// retention job (v0.4 "Koru").
+	ListNodeIDsWithVersions(ctx context.Context) ([]int64, error)
 
 	// Sync conflicts (admin views)
 	ListSyncConflictsByRun(ctx context.Context, runID int64) ([]*model.SyncConflict, error)

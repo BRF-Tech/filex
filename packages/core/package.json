@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex-core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "filex core — Vue 3 source of truth for the filex file manager (FileExplorer SFC + composables + types)",
   "type": "module",
   "main": "./dist/filex-core.umd.cjs",
