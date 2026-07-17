@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -78,6 +79,19 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 	if !ok {
 		return errors.New("thumb: no driver attached for storage")
 	}
+	/* wiring:e2 — files under an E2E-encrypted folder are ciphertext the
+	   server cannot (and must not try to) render: skip before any byte is
+	   read. Wasted CPU aside, a plaintext file mistakenly written into an
+	   encrypted subtree via DAV/CLI would otherwise leak a readable thumb.
+	   Upsert (not SetState — that is UPDATE-only) so the skip records even
+	   though the pending row was never created. */
+	if e2e.UnderEncrypted(ctx, p.store, node.StorageID, node.Path) {
+		_ = p.store.UpsertThumbnail(ctx, &model.Thumbnail{
+			NodeID: node.ID, State: "skipped", Error: "e2e-encrypted folder",
+		})
+		return ErrSkipped
+	}
+	/* /wiring:e2 */
 	t := &model.Thumbnail{NodeID: node.ID, State: "pending"}
 	_ = p.store.UpsertThumbnail(ctx, t)
 

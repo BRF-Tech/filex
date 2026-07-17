@@ -250,8 +250,12 @@ type FolderPageEntry struct {
 // FolderPageData feeds the folder browse template. Style and Footer are
 // injected by the handler (single-source public page chrome).
 type FolderPageData struct {
-	Style    template.HTML
-	Footer   template.HTML
+	Style  template.HTML
+	Footer template.HTML
+	// Brand is the optional branding header (logo + display name) rendered
+	// above the card — injected by the handler like Style/Footer, empty when
+	// the instance has no branding configured. /* wiring:e1 */
+	Brand    template.HTML
 	Name     string // shared folder display name
 	SubPath  string // rel subdir being browsed ("" = share root)
 	UpHref   string // one-level-up href ("" hides the button)
@@ -319,6 +323,7 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 </style>
 </head><body>
 <main class="wrap">
+{{.Brand}}
 <div class="card card--folder">
 <div class="fhead">
 <div class="icon-badge">` + folderPageIconFolder + `</div>

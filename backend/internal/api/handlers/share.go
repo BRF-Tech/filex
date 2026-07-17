@@ -42,7 +42,16 @@ type Share struct {
 	// signature) so downloads don't re-zip the whole folder every time. A nil
 	// or disabled cache falls back to streaming a fresh zip. See serveFolderZip.
 	Zip *sharezip.Cache
+	// Branding resolves the public pages' identity (logo/name/accent/footer)
+	// from settings (wiring:e1). Nil-safe: unwired = stock filex chrome.
+	Branding *BrandingSource
 }
+
+// AttachBranding wires the shared branding source (wiring:e1).
+func (h *Share) AttachBranding(b *BrandingSource) { h.Branding = b }
+
+// chrome computes the branded page fragments for one request (wiring:e1).
+func (h *Share) chrome(r *http.Request) publicChrome { return publicChromeFor(h.Branding, r) }
 
 // AttachACL wires the RBAC resolver so minting a public share link requires
 // ≥editor on the target node (sharing grants outside access — a write action).
@@ -493,13 +502,13 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
 	if err != nil {
-		h.renderErrorPage(w, http.StatusNotFound,
+		h.renderErrorPage(w, r, http.StatusNotFound,
 			"Not found",
 			"This share link does not exist or has been removed.")
 		return
 	}
 	if sh.IsExpired(time.Now()) {
-		h.renderErrorPage(w, http.StatusNotFound,
+		h.renderErrorPage(w, r, http.StatusNotFound,
 			"Share expired",
 			"This share link has expired or reached its download limit.")
 		return
@@ -507,7 +516,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// PIN required path: render the form on GET when no PIN supplied.
 	if sh.PinHash != "" && pin == "" {
-		h.renderPINForm(w, tok, "")
+		h.renderPINForm(w, r, tok, "")
 		return
 	}
 
@@ -515,16 +524,16 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	resolved, err := h.Service.Resolve(r.Context(), tok, pin)
 	switch {
 	case errors.Is(err, share.ErrExpired):
-		h.renderErrorPage(w, http.StatusNotFound,
+		h.renderErrorPage(w, r, http.StatusNotFound,
 			"Share expired",
 			"This share link has expired or reached its download limit.")
 		return
 	case errors.Is(err, share.ErrBadPIN):
 		// Re-render with a friendly error rather than a flat 401.
-		h.renderPINForm(w, tok, "Wrong PIN — try again.")
+		h.renderPINForm(w, r, tok, "Wrong PIN — try again.")
 		return
 	case err != nil:
-		h.renderErrorPage(w, http.StatusNotFound,
+		h.renderErrorPage(w, r, http.StatusNotFound,
 			"Not found",
 			"This share link does not exist or has been removed.")
 		return
@@ -538,7 +547,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// the PIN matched before the browser hijacks the page with an
 	// `attachment` Content-Disposition.
 	if sh.PinHash != "" && r.URL.Query().Get("confirmed") != "1" && r.Method == http.MethodPost {
-		h.renderUnlockedPage(w, tok, pin)
+		h.renderUnlockedPage(w, r, tok, pin)
 		return
 	}
 
@@ -739,7 +748,7 @@ func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *ht
 	default:
 		// Cold cache → kick off the build and show a progress page.
 		h.Zip.StartOrGet(cachePath, files, nodeID, drv)
-		h.renderZipWaitPage(w, name, pin)
+		h.renderZipWaitPage(w, r, name, pin)
 	}
 }
 
@@ -767,19 +776,23 @@ func serveZipFile(w http.ResponseWriter, cachePath, name string) error {
 // progress and, once ready, navigates to ?zip=wait to download. pin (when the
 // share is PIN-protected) is threaded through so the poll/download requests stay
 // authenticated — the viewer already proved it, so embedding it here is safe.
-func (h *Share) renderZipWaitPage(w http.ResponseWriter, name, pin string) {
+func (h *Share) renderZipWaitPage(w http.ResponseWriter, r *http.Request, name, pin string) {
 	pinQuery := ""
 	if pin != "" {
 		pinQuery = "&pin=" + url.QueryEscape(pin)
 	}
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	// PinQuery is used only inside a JS string (html/template JS-escapes it); the
 	// static href works for no-PIN shares and the script rewrites it with the pin
 	// for PIN shares (which already require JS via the unlock page).
 	_ = zipWaitTemplate.Execute(w, map[string]any{
-		"Name":     name,
-		"PinQuery": pinQuery,
+		"Name":      name,
+		"PinQuery":  pinQuery,
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterTR,
 	})
 }
 
@@ -791,6 +804,7 @@ var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype htm
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dosya hazırlanıyor…</title>
 ` + publicPageStyle + `
+{{.BrandCSS}}
 <style>
 .track { height: 10px; border-radius: 999px; background: var(--px-line); overflow: hidden; }
 .bar { height: 100%; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--px-accent), var(--px-accent-hover)); transition: width 0.4s ease; }
@@ -801,6 +815,7 @@ var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype htm
 </style>
 </head><body>
 <main class="wrap">
+{{.BrandHead}}
 <div class="card">
 <div class="icon-badge">` + publicIconFolderZip + `</div>
 <h1>Dosya hazırlanıyor…</h1>
@@ -809,7 +824,7 @@ var zipWaitTemplate = template.Must(template.New("zipwait").Parse(`<!doctype htm
 <div class="pct"><span id="pct">%0</span></div>
 <p class="hint">İndirme hazır olduğunda otomatik başlayacak. Başlamazsa <a id="dl" href="?zip=wait">buraya tıklayın</a>.</p>
 </div>
-` + publicFooterTR + `
+{{.Footer}}
 </main>
 <script>
 (function(){
@@ -924,6 +939,12 @@ h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 .spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; vertical-align: -2px; animation: px-spin 0.8s linear infinite; opacity: 0.5; margin-right: 8px; }
 @keyframes px-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .btn { transition: none; } }
+/* wiring:e1 — branding chrome (logo/name header + custom footer) */
+.pbrand { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; }
+.pbrand__logo { height: 34px; max-width: 200px; object-fit: contain; display: block; }
+.pbrand__name { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pfoot { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.pfoot__custom { color: var(--px-muted); font-size: 0.78rem; text-align: center; max-width: 480px; overflow-wrap: anywhere; }
 </style>`
 
 // publicBrandMark is the tiny inline filex logo used in the public-page
@@ -954,12 +975,14 @@ var pinFormTemplate = template.Must(template.New("pin").Parse(`<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Enter PIN</title>
 ` + publicPageStyle + `
+{{.BrandCSS}}
 <style>
 .pin-input { width: 100%; padding: 13px 12px; font-size: 1.45rem; letter-spacing: 0.35em; text-align: center; border: 1.5px solid var(--px-line); border-radius: 10px; background: transparent; color: inherit; font-family: inherit; }
 .pin-input:focus { outline: none; border-color: var(--px-accent); box-shadow: 0 0 0 3px var(--px-accent-soft); }
 </style>
 </head><body>
 <main class="wrap">
+{{.BrandHead}}
 <form class="card" method="post" action="{{.Action}}">
 <div class="icon-badge">` + publicIconLock + `</div>
 <h1>This share is PIN-protected</h1>
@@ -968,11 +991,12 @@ var pinFormTemplate = template.Must(template.New("pin").Parse(`<!doctype html>
 {{if .Error}}<div class="error" role="alert">{{.Error}}</div>{{end}}
 <button class="btn" type="submit">Unlock</button>
 </form>
-` + publicFooterEN + `
+{{.Footer}}
 </main>
 </body></html>`))
 
-func (h *Share) renderPINForm(w http.ResponseWriter, token, errMsg string) {
+func (h *Share) renderPINForm(w http.ResponseWriter, r *http.Request, token, errMsg string) {
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -980,8 +1004,11 @@ func (h *Share) renderPINForm(w http.ResponseWriter, token, errMsg string) {
 		w.WriteHeader(http.StatusOK)
 	}
 	_ = pinFormTemplate.Execute(w, map[string]any{
-		"Action": shareURLPath(token),
-		"Error":  errMsg,
+		"Action":    shareURLPath(token),
+		"Error":     errMsg,
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterEN,
 	})
 }
 
@@ -990,24 +1017,32 @@ func (h *Share) renderPINForm(w http.ResponseWriter, token, errMsg string) {
 // this the browser jumps straight from the PIN form to a streamed
 // attachment and the user has no indication of whether their PIN
 // was accepted.
-func (h *Share) renderUnlockedPage(w http.ResponseWriter, token, pin string) {
+func (h *Share) renderUnlockedPage(w http.ResponseWriter, r *http.Request, token, pin string) {
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = unlockedTemplate.Execute(w, map[string]any{
-		"Action": shareURLPath(token) + "?confirmed=1",
-		"PIN":    pin,
+		"Action":    shareURLPath(token) + "?confirmed=1",
+		"PIN":       pin,
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterTR,
 	})
 }
 
 // renderErrorPage shows a styled HTML error page (404 / expired)
 // instead of plain text.
-func (h *Share) renderErrorPage(w http.ResponseWriter, status int, title, body string) {
+func (h *Share) renderErrorPage(w http.ResponseWriter, r *http.Request, status int, title, body string) {
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_ = errorPageTemplate.Execute(w, map[string]any{
-		"Title": title,
-		"Body":  body,
-		"Code":  status,
+		"Title":     title,
+		"Body":      body,
+		"Code":      status,
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterEN,
 	})
 }
 
@@ -1017,8 +1052,10 @@ var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype h
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PIN accepted</title>
 ` + publicPageStyle + `
+{{.BrandCSS}}
 </head><body>
 <main class="wrap">
+{{.BrandHead}}
 <div class="card">
 <div class="icon-badge ok">` + publicIconCheck + `</div>
 <h1>PIN doğru</h1>
@@ -1028,7 +1065,7 @@ var unlockedTemplate = template.Must(template.New("unlocked").Parse(`<!doctype h
 </form>
 <script>setTimeout(function(){document.getElementById('f').submit();}, 700);</script>
 </div>
-` + publicFooterTR + `
+{{.Footer}}
 </main>
 </body></html>`))
 
@@ -1038,17 +1075,19 @@ var errorPageTemplate = template.Must(template.New("err").Parse(`<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 ` + publicPageStyle + `
+{{.BrandCSS}}
 <style>
 .code { display: inline-block; margin-bottom: 14px; padding: 3px 10px; border: 1px solid var(--px-line); border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; color: var(--px-muted); font-variant-numeric: tabular-nums; }
 </style>
 </head><body>
 <main class="wrap">
+{{.BrandHead}}
 <div class="card">
 <div class="icon-badge err">` + publicIconAlert + `</div>
 <div class="code">{{.Code}}</div>
 <h1>{{.Title}}</h1>
 <p class="sub" style="margin-bottom:0">{{.Body}}</p>
 </div>
-` + publicFooterEN + `
+{{.Footer}}
 </main>
 </body></html>`))

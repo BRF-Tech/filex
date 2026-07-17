@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.6.0 below.)
+(Nothing yet — see v0.7.0 below.)
+
+## [0.7.0] - 2026-07-18
+
+### Added
+
+- **Branding**: settings-driven identity for the public share/PIN/drop and
+  folder-browse pages plus the admin login — display name, logo, accent
+  color and footer text, with per-tenant overrides in multi-tenant mode
+  (a new admin "Branding" page with live preview, and a public
+  `GET /api/branding`). The "shared with filex" footer stays by default
+  and can be turned off.
+- **End-to-end encrypted folders (MVP)**: create a password-protected
+  folder whose contents are encrypted in the browser (WebCrypto,
+  PBKDF2 + AES-256-GCM) — the server never sees the password, a key or
+  plaintext. Transparent upload/download/preview once unlocked, lock
+  badge + unlock screen, and server-side blind spots closed (no
+  thumbnails, no content indexing, no convert/OnlyOffice on encrypted
+  blobs). There is NO recovery — a lost password means lost data; see
+  docs/E2E-ENCRYPTION.md for the threat model and trade-offs.
+- **Cloud readiness (preparation only)**: a `FILEX_CLOUD` master flag
+  (default OFF — zero behavior change while off) gating a self-signup
+  skeleton wired to multi-tenant provisioning, config-driven plans,
+  Stripe stubs that answer 503 until configured, and provider
+  plan/limits columns (migration 00021). See docs/CLOUD.md.
 
 ## [0.6.0] - 2026-07-17
 

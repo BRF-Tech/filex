@@ -133,3 +133,24 @@ export type { TabState, TabSplit, TabsApi } from './composables/useTabs';
 export { default as TabBar } from './components/TabBar.vue';
 export { default as SecondaryPane } from './components/SecondaryPane.vue';
 /* /wiring:d1 */
+/* wiring:e2 — uçtan uca şifreli klasörler (WebCrypto; docs/E2E-ENCRYPTION.md) */
+export {
+  E2E_MARKER_NAME,
+  E2E_MAGIC,
+  E2E_VERSION,
+  E2E_DEFAULT_ITERATIONS,
+  E2E_MAX_FILE_BYTES,
+  E2E_MIN_PASSWORD_LEN,
+  E2eDecryptError,
+  deriveKek,
+  createMarker,
+  parseMarker,
+  verifyPassword,
+  hasMagic,
+  encryptFile,
+  decryptFile,
+  createKeyRing,
+} from './lib/e2ecrypto';
+export type { E2eMarker, E2eKeyRing } from './lib/e2ecrypto';
+export { default as EncryptedFolderModal } from './components/EncryptedFolderModal.vue';
+/* /wiring:e2 */

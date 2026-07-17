@@ -71,6 +71,20 @@ import TabBar from './components/TabBar.vue';
 import SecondaryPane from './components/SecondaryPane.vue';
 import { useTabs, type TabState } from './composables/useTabs';
 /* /wiring:d1 */
+/* wiring:e2 — uçtan uca şifreli klasörler (docs/E2E-ENCRYPTION.md) */
+import EncryptedFolderModal from './components/EncryptedFolderModal.vue';
+import {
+  createKeyRing,
+  createMarker,
+  parseMarker,
+  verifyPassword,
+  encryptFile,
+  decryptFile,
+  hasMagic,
+  E2E_MARKER_NAME,
+  E2E_MAX_FILE_BYTES,
+} from './lib/e2ecrypto';
+/* /wiring:e2 */
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import RenameModal from './modals/RenameModal.vue';
@@ -671,6 +685,7 @@ async function load(path?: string) {
       currentPath.value = '';
       adapter.value = '';
       dirname.value = '';
+      e2eRoot.value = ''; /* wiring:e2 — sanal kökte kilit ekranı olmaz */
       files.value = virtualStorageRows();
       return;
     }
@@ -685,11 +700,16 @@ async function load(path?: string) {
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
+    /* wiring:e2 — backend tells us when this dir sits inside an encrypted
+       subtree; '' resets on every plain folder. Drives the lock screen. */
+    e2eRoot.value = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';
+    /* /wiring:e2 */
     files.value = (resp.files || []).filter((f) => {
       if (f.path.includes('.thumbs')) return false;
       if (f.path.includes('.versions') || f.basename === '.versions') return false;
       if (f.basename === '.trash') return false;
       if (f.basename === '.keepdir') return false;
+      if (f.basename === E2E_MARKER_NAME) return false; /* wiring:e2 — marker gizli */
       return true;
     });
     // Inject virtual `.trash` entry at root only.
@@ -725,6 +745,7 @@ async function load(path?: string) {
       // show the dedicated not-found state instead of a toast over a stale
       // listing that reads as "this folder is empty".
       notFoundPath.value = String(requested);
+      e2eRoot.value = ''; /* wiring:e2 — ölü linkte kilit ekranı kalmasın */
       files.value = [];
       emit('error', { message: e, context: { path } });
       return;
@@ -791,6 +812,7 @@ async function loadTrash() {
   loading.value = true;
   trashOrigin.value = adapter.value || '';
   trashMode.value = true;
+  e2eRoot.value = ''; /* wiring:e2 — çöp görünümü şifreli bağlamın dışındadır */
   selection.clear();
   try {
     const { entries } = await api.listTrash();
@@ -1173,6 +1195,15 @@ function openNode(n: FileNode) {
     void load(target);
     return;
   }
+  /* wiring:e2 — şifreli klasörde dosya açma: kilit açıksa çöz + salt-okunur
+     önizleme (blob URL mevcut viewer'lara gider); kilitliyken hiçbir şey
+     açılmaz (kilit ekranı zaten listeyi kapatır). */
+  if (e2eUnlocked.value && n.type === 'file') {
+    void e2eOpenPreview(n);
+    return;
+  }
+  if (e2eLocked.value && n.type === 'file') return;
+  /* /wiring:e2 */
   // "Aç" / double-click contract: open in a new tab against the
   // standalone editor route, regardless of file type. The editor page
   // picks the right viewer (OnlyOffice for office, Monaco for code/
@@ -1248,6 +1279,12 @@ async function restoreSelection(targets?: FileNode[]) {
 }
 
 function previewNode(n: FileNode) {
+  /* wiring:e2 — önizleme de çözülmüş blob'dan beslenir */
+  if (e2eUnlocked.value && n.type === 'file') {
+    void e2eOpenPreview(n);
+    return;
+  }
+  /* /wiring:e2 */
   previewMode.value = 'view';
   previewTarget.value = n;
   showPreview.value = true;
@@ -1269,6 +1306,13 @@ function openNodeInNewTab(n: FileNode) {
     void load(target);
     return;
   }
+  /* wiring:e2 — standalone editör rotası sunucudan HAM (şifreli) baytı
+     çeker; şifreli klasörde her "Aç" in-page çözülmüş önizlemeye iner. */
+  if (e2eActive.value) {
+    if (e2eUnlocked.value) void e2eOpenPreview(n);
+    return;
+  }
+  /* /wiring:e2 */
   // RBAC: a viewer (no edit on this item) can't use the editable "Aç"
   // surface — drop to the read-only in-page preview instead.
   if (!permCanEdit((n.perm as string) ?? dirPerm.value)) {
@@ -1428,8 +1472,8 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — klasörü yeni sekmede aç */,
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
-    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w, disabled: !isFile },
-    { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w },
+    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w || e2eActive.value /* wiring:e2 — convert ciphertext'e anlamsız */, disabled: !isFile },
+    { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w || e2eActive.value /* wiring:e2 — paylaşım MVP'de kapalı (link ciphertext verir) */ },
     { key: 'details', label: t('ctx.details'), icon: 'ℹ', hidden: !any } /* koru:k1 */,
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '', hidden: !w },
@@ -1611,6 +1655,13 @@ async function duplicate(n: FileNode) {
 }
 
 function downloadFile(n: FileNode) {
+  /* wiring:e2 — şifreli klasörde indirme: baytları çek, çöz, orijinal adla
+     kaydet (ham ciphertext'i kullanıcıya vermek anlamsız). */
+  if (e2eUnlocked.value) {
+    void e2eDownload(n);
+    return;
+  }
+  /* /wiring:e2 */
   // Keep `<adapter>://<rel>` so backend resolves the right storage
   // (stripping it would default to the first storage, which 404s for
   // any non-default storage like S3/SFTP/WebDAV).
@@ -1763,6 +1814,18 @@ function onFilePicked(ev: Event) {
 
 async function uploadFiles(list: File[]) {
   if (list.length === 0) return;
+  /* wiring:e2 — şifreli klasörde upload şeffaf şifrelenir. Kilitliyken
+     yükleme yok (düz metin sızdırma kapısı olurdu); 200MB üstü MVP
+     tek-shot sınırına takılır ve uyarıyla atlanır. */
+  if (e2eLocked.value) {
+    flashToast(t('e2e.upload.locked'));
+    return;
+  }
+  if (e2eUnlocked.value) {
+    list = await e2eEncryptUploads(list);
+    if (list.length === 0) return;
+  }
+  /* /wiring:e2 */
   const canChunk = !!(api.endpoints.uploadInit && api.endpoints.uploadFinalize);
   for (const f of list) {
     // Chunked (S3 multipart) only when the endpoints exist AND the file is
@@ -2169,6 +2232,23 @@ function quickLookToggle() {
   const sel = selection.nodes.value;
   const n = sel.length === 1 ? sel[0] : null;
   if (!n || n.type !== 'file' || n.basename === '.trash') return;
+  /* wiring:e2 — Space peek şifreli klasörde önce çözer, sonra açar */
+  if (e2eActive.value) {
+    if (!e2eUnlocked.value) return;
+    void (async () => {
+      try {
+        await e2eFetchDecrypted(n);
+      } catch {
+        flashToast(t('e2e.decrypt_failed'));
+        return;
+      }
+      quickLookTarget.value = n;
+      quickLookOpen.value = true;
+      void markRecent(n);
+    })();
+    return;
+  }
+  /* /wiring:e2 */
   quickLookTarget.value = n;
   quickLookOpen.value = true;
   void markRecent(n);
@@ -2196,6 +2276,21 @@ watch(
   (nodes) => {
     if (!quickLookOpen.value) return;
     const n = nodes.length === 1 && nodes[0].type === 'file' ? nodes[0] : null;
+    /* wiring:e2 — ok tuşlarıyla gezerken de hedef atanmadan ÖNCE çöz,
+       yoksa viewer bir anlığına ham ciphertext URL'i alır. */
+    if (n && n.path !== quickLookTarget.value?.path && e2eUnlocked.value) {
+      void (async () => {
+        try {
+          await e2eFetchDecrypted(n);
+        } catch {
+          /* çözülemedi — hedefi yine de değiştir, viewer hata gösterir */
+        }
+        quickLookTarget.value = n;
+        void markRecent(n);
+      })();
+      return;
+    }
+    /* /wiring:e2 */
     if (n && n.path !== quickLookTarget.value?.path) {
       quickLookTarget.value = n;
       void markRecent(n);
@@ -2532,6 +2627,225 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
   void transferItems(p.sources, p.targetWire, p.originWire);
 }
 /* === /wiring:d1 === */
+
+/* === wiring:e2 — uçtan uca şifreli klasörler ===
+ *
+ * Kripto şeması + tehdit modeli: docs/E2E-ENCRYPTION.md ve lib/e2ecrypto.ts.
+ * Burada yalnız orkestrasyon var: backend listing yanıtındaki `e2e_root`
+ * kilit ekranını sürer; parola marker'a karşı TARAYICIDA doğrulanır (sunucuya
+ * hiçbir şey gitmez); türetilen klasör anahtarı (KEK) YALNIZ bellekte yaşar
+ * (`e2eRing`) — localStorage/sessionStorage'a asla yazılmaz. Upload şeffaf
+ * şifrelenir, önizleme/indirme şeffaf çözülür (blob URL mevcut viewer'lara).
+ */
+const e2eRing = createKeyRing();
+// Map'ler reaktif değil — sürüm sayacı computed'ları tetikler.
+const e2eRingVer = ref(0);
+// İçinde bulunulan şifreli kökün wire yolu ('' = şifreli bağlam yok).
+const e2eRoot = ref('');
+// path → çözülmüş blob objectURL (önizleme). Kilitleme/unmount'ta revoke.
+const e2eUrls = new Map<string, string>();
+
+const e2eActive = computed(() => !!e2eRoot.value && !trashMode.value);
+const e2eUnlocked = computed(() => {
+  void e2eRingVer.value;
+  return e2eActive.value && e2eRing.has(e2eRoot.value);
+});
+const e2eLocked = computed(() => {
+  void e2eRingVer.value;
+  return e2eActive.value && !e2eRing.has(e2eRoot.value);
+});
+
+// Kilit ekranı formu.
+const e2ePw = ref('');
+const e2eUnlockBusy = ref(false);
+const e2eUnlockErr = ref('');
+// Şifreli klasör oluşturma modalı.
+const showEncFolder = ref(false);
+const e2eCreateBusy = ref(false);
+
+function e2eKek(): CryptoKey | null {
+  return e2eRing.get(e2eRoot.value) ?? null;
+}
+
+function e2eRevokeAll() {
+  for (const url of e2eUrls.values()) URL.revokeObjectURL(url);
+  e2eUrls.clear();
+}
+onBeforeUnmount(e2eRevokeAll);
+
+/** Kilidi aç: marker'ı kökten çek, parolayı YERELDE doğrula, KEK'i belleğe koy. */
+async function e2eUnlock() {
+  if (!e2ePw.value || e2eUnlockBusy.value || !e2eRoot.value) return;
+  e2eUnlockBusy.value = true;
+  e2eUnlockErr.value = '';
+  try {
+    let markerText = '';
+    try {
+      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME));
+      URL.revokeObjectURL(url);
+      markerText = await blob.text();
+    } catch {
+      e2eUnlockErr.value = t('e2e.unlock.marker_missing');
+      return;
+    }
+    const marker = parseMarker(markerText);
+    if (!marker) {
+      e2eUnlockErr.value = t('e2e.unlock.marker_missing');
+      return;
+    }
+    const kek = await verifyPassword(marker, e2ePw.value);
+    if (!kek) {
+      e2eUnlockErr.value = t('e2e.unlock.wrong');
+      return;
+    }
+    e2eRing.set(e2eRoot.value, kek);
+    e2eRingVer.value++;
+    e2ePw.value = '';
+  } finally {
+    e2eUnlockBusy.value = false;
+  }
+}
+
+/** "Kilitle": bellekteki anahtarı ve çözülmüş blob'ları at. */
+function e2eLock() {
+  if (!e2eRoot.value) return;
+  e2eRing.lock(e2eRoot.value);
+  e2eRingVer.value++;
+  e2eRevokeAll();
+  flashToast(t('e2e.locked_toast'));
+}
+
+// Uzantı → önizleme MIME'ı: çözülmüş blob'un <img>/<video>/<object>
+// etiketlerinde doğru render'ı için (sunucu şifreli dosyayı octet-stream
+// bilir, oradan gelen tip işe yaramaz).
+const E2E_MIME: Record<string, string> = {
+  txt: 'text/plain', md: 'text/markdown', log: 'text/plain', csv: 'text/csv',
+  json: 'application/json', xml: 'application/xml', html: 'text/html',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  webp: 'image/webp', bmp: 'image/bmp', avif: 'image/avif', svg: 'image/svg+xml',
+  pdf: 'application/pdf',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4',
+  mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
+  m4a: 'audio/mp4', aac: 'audio/aac', opus: 'audio/opus',
+};
+function e2eMimeFor(n: FileNode): string {
+  const ext = (n.extension || '').toLowerCase();
+  return E2E_MIME[ext] || 'application/octet-stream';
+}
+
+/**
+ * Dosyayı çek + çöz + objectURL'ini cache'le. Magic'siz (ör. DAV'la düz
+ * yazılmış) dosyada null döner — çağıran normal ham akışa düşer. Yanlış
+ * anahtar/bozuk veri E2eDecryptError fırlatır (çağıran toast'lar).
+ */
+async function e2eFetchDecrypted(n: FileNode): Promise<string | null> {
+  const cached = e2eUrls.get(n.path);
+  if (cached) return cached;
+  const kek = e2eKek();
+  if (!kek) return null;
+  const buf = await api.fetchArrayBuffer(n.path);
+  if (!hasMagic(buf)) return null;
+  const plain = await decryptFile(kek, buf);
+  const url = URL.createObjectURL(new Blob([plain], { type: e2eMimeFor(n) }));
+  e2eUrls.set(n.path, url);
+  return url;
+}
+
+/** PreviewModal/QuickLook'a giden URL sağlayıcı: çözülmüş blob > ham URL. */
+function e2ePreviewSrc(p: string): string {
+  return e2eUrls.get(p) ?? api.previewUrl(p);
+}
+
+/** Çöz + salt-okunur in-page önizleme (openNode/previewNode buraya iner). */
+async function e2eOpenPreview(n: FileNode) {
+  try {
+    await e2eFetchDecrypted(n);
+  } catch {
+    flashToast(t('e2e.decrypt_failed'));
+    return;
+  }
+  previewMode.value = 'view';
+  previewTarget.value = n;
+  showPreview.value = true;
+  emit('file-opened', { path: n.path, basename: n.basename });
+  void markRecent(n);
+}
+
+/** Çöz + orijinal adla indir. Magic'siz dosya olduğu gibi iner. */
+async function e2eDownload(n: FileNode) {
+  try {
+    const buf = await api.fetchArrayBuffer(n.path);
+    const kek = e2eKek();
+    let out = buf;
+    if (hasMagic(buf)) {
+      if (!kek) throw new Error('locked');
+      out = await decryptFile(kek, buf);
+    }
+    const url = URL.createObjectURL(new Blob([out], { type: e2eMimeFor(n) }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = n.basename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch {
+    flashToast(t('e2e.download.failed'));
+  }
+}
+
+/** Upload listesi → şifreli File listesi (200MB üstü + marker adı atlanır). */
+async function e2eEncryptUploads(list: File[]): Promise<File[]> {
+  const kek = e2eKek();
+  if (!kek) return [];
+  const out: File[] = [];
+  for (const f of list) {
+    if (f.name === E2E_MARKER_NAME) continue;
+    if (f.size > E2E_MAX_FILE_BYTES) {
+      flashToast(t('e2e.upload.too_big'));
+      continue;
+    }
+    try {
+      const ct = await encryptFile(kek, await f.arrayBuffer());
+      out.push(new File([ct], f.name, { type: 'application/octet-stream' }));
+    } catch (err) {
+      emit('error', { message: (err as Error).message, context: { op: 'e2e-encrypt', file: f.name } });
+    }
+  }
+  return out;
+}
+
+/** EncryptedFolderModal submit'i: klasörü aç + marker'ı yükle + kilidi açık bırak. */
+async function submitEncryptedFolder(payload: { name: string; password: string }) {
+  if (e2eActive.value) {
+    // İç içe şifreli klasör kök tespitini bulanıklaştırır — MVP'de yok.
+    flashToast(t('e2e.create.nested'));
+    return;
+  }
+  e2eCreateBusy.value = true;
+  try {
+    const dirWire = qualify(currentPath.value);
+    await api.newFolder(dirWire, payload.name);
+    const { marker, kek } = await createMarker(payload.password);
+    const markerFile = new File([JSON.stringify(marker)], E2E_MARKER_NAME, {
+      type: 'application/json',
+    });
+    const newDirWire = wireJoin(dirWire, payload.name);
+    await api.uploadMultipart(newDirWire, [markerFile]);
+    // Oluşturan oturumda kilit açık başlar (parolayı az önce kendisi girdi).
+    e2eRing.set(newDirWire, kek);
+    e2eRingVer.value++;
+    showEncFolder.value = false;
+    flashToast(t('e2e.create.done'));
+    await load();
+  } catch (err) {
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-create' } });
+    flashToast(t('e2e.create.failed'));
+  } finally {
+    e2eCreateBusy.value = false;
+  }
+}
+/* === /wiring:e2 === */
 </script>
 
 <template>
@@ -2627,6 +2941,17 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
       </span>
     </div>
 
+    <!-- wiring:e2 — kilit açık şeridi: şifreli klasörde anahtar bellekteyken
+         görünür; "Kilitle" anahtarı ve çözülmüş blob'ları atar. -->
+    <div v-if="e2eUnlocked" class="fe-e2e-strip" role="status">
+      <span class="fe-e2e-strip__icon" aria-hidden="true">🔒</span>
+      <span class="fe-e2e-strip__label">{{ t('e2e.strip.label') }}</span>
+      <button type="button" class="fe-btn fe-e2e-strip__btn" @click="e2eLock">
+        {{ t('e2e.strip.lock') }}
+      </button>
+    </div>
+    <!-- /wiring:e2 -->
+
     <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
          as flex siblings (row). Without the inspector open it is visually
          identical to the previous direct-child fe__body. -->
@@ -2720,6 +3045,49 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
         </details>
         <!-- /wiring:c4 -->
       </div>
+      <!-- wiring:e2 — şifreli klasör kilit ekranı: parola doğru girilene dek
+           listeleme render edilmez. Parola tarayıcıda marker'a karşı
+           doğrulanır; sunucuya gitmez. -->
+      <div v-else-if="e2eLocked" class="fe-state fe-e2e-lock">
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="38" y="44" width="44" height="34" rx="6" />
+          <path d="M46 44v-8a14 14 0 0 1 28 0v8" />
+          <circle cx="60" cy="59" r="3" fill="currentColor" stroke="none" />
+          <path d="M60 62v7" />
+        </svg>
+        <p class="fe-state__title">{{ t('e2e.locked.title') }}</p>
+        <p class="fe-state__hint">{{ t('e2e.locked.hint') }}</p>
+        <form class="fe-e2e-lock__form" @submit.prevent="e2eUnlock">
+          <input
+            v-model="e2ePw"
+            type="password"
+            class="fe-input fe-e2e-lock__input"
+            :placeholder="t('e2e.locked.pw_placeholder')"
+            autocomplete="current-password"
+            :disabled="e2eUnlockBusy"
+          />
+          <button
+            type="submit"
+            class="fe-btn fe-btn--primary"
+            :disabled="e2eUnlockBusy || !e2ePw"
+          >
+            {{ e2eUnlockBusy ? t('e2e.locked.busy') : t('e2e.locked.unlock') }}
+          </button>
+        </form>
+        <p v-if="e2eUnlockErr" class="fe-form__error" role="alert">{{ e2eUnlockErr }}</p>
+      </div>
+      <!-- /wiring:e2 -->
       <!-- Search with zero hits — its own message, not "folder is empty". -->
       <div v-else-if="!loading && files.length === 0 && searchQuery" class="fe-state">
         <svg
@@ -2960,9 +3328,20 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
     <NewFolderModal
       :open="showNewFolder"
       :locale="locale"
+      :encrypted-option="!e2eActive /* wiring:e2 — iç içe şifreli klasör yok */"
       @close="showNewFolder = false"
       @submit="submitNewFolder"
+      @encrypted="showNewFolder = false; showEncFolder = true /* wiring:e2 */"
     />
+    <!-- wiring:e2 — şifreli klasör oluşturma modalı -->
+    <EncryptedFolderModal
+      :open="showEncFolder"
+      :locale="locale"
+      :busy="e2eCreateBusy"
+      @close="showEncFolder = false"
+      @submit="submitEncryptedFolder"
+    />
+    <!-- /wiring:e2 -->
     <RenameModal
       :open="showRename"
       :locale="locale"
@@ -2990,11 +3369,12 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
       :locale="locale"
       :file="previewTarget"
       :theme="config.theme || 'auto'"
-      :preview-url="(p) => api.previewUrl(p)"
-      :download-url="(p) => api.downloadUrl(p)"
-      :only-office-base="effectiveOnlyOfficeBase"
+      :preview-url="(p) => e2ePreviewSrc(p) /* wiring:e2 — çözülmüş blob > ham URL */"
+      :download-url="(p) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
+      :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO ciphertext açamaz */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
-      :save-text-endpoint="api.endpoints.saveText || null"
+      :new-tab-enabled="!e2eActive /* wiring:e2 — standalone rota ham baytı çeker */"
+      :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — düz metin kaydı sızıntı olur */"
       :open-mode="previewMode"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"
@@ -3165,9 +3545,9 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
       :locale="locale"
       :file="quickLookTarget"
       :theme="config.theme || 'auto'"
-      :preview-url="(p: string) => api.previewUrl(p)"
-      :download-url="(p: string) => api.downloadUrl(p)"
-      :only-office-base="effectiveOnlyOfficeBase"
+      :preview-url="(p: string) => e2ePreviewSrc(p) /* wiring:e2 */"
+      :download-url="(p: string) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
+      :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"

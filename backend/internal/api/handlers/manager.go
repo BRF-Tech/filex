@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -510,15 +511,49 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"adapter":   s.Name,
 		"storages":  storageNames,
 		"dirname":   joinAdapterPath(s.Name, dirname),
 		"read_only": s.ReadOnly,
 		"perm":      permString(set, rel),
 		"files":     files,
-	})
+	}
+	/* wiring:e2 — E2E-encrypted folder awareness: badge encrypted dir rows
+	   (e2e:true) and, when the listed dir sits inside an encrypted subtree,
+	   tell the client where the marker lives (e2e_root) so it can show the
+	   lock screen + fetch the marker. Server stays crypto-blind. */
+	h.annotateE2e(r.Context(), s, rel, files, resp)
+	/* /wiring:e2 */
+	writeJSON(w, http.StatusOK, resp)
 }
+
+/* wiring:e2 — listing-level encrypted-folder annotations (see vfIndex). */
+func (h *Manager) annotateE2e(ctx context.Context, s *model.Storage, rel string, files []map[string]any, resp map[string]any) {
+	// Dir rows: one indexed marker lookup per subdirectory. Realistic dir
+	// counts keep this cheap (same N+1 budget as the thumbnail hydration
+	// above); the lookup is a PK-style path_hash hit.
+	for _, entry := range files {
+		if entry["type"] != "dir" {
+			continue
+		}
+		p, _ := entry["path"].(string)
+		_, childRel := splitAdapterPath(p)
+		if childRel == "" {
+			continue
+		}
+		if root, ok := e2e.FindRoot(ctx, h.Store, s.ID, childRel); ok && root == strings.Trim(childRel, "/") {
+			entry["e2e"] = true
+		}
+	}
+	// Current dir: inside (or at the root of) an encrypted subtree?
+	if root, ok := e2e.FindRoot(ctx, h.Store, s.ID, rel); ok {
+		resp["e2e"] = root == strings.Trim(rel, "/")
+		resp["e2e_root"] = joinAdapterPath(s.Name, root)
+	}
+}
+
+/* /wiring:e2 */
 
 // permString is the caller's effective level on rel as a string ("" when ACL
 // is unwired). Fed to the FileExplorer SFC so it can gate edit/convert/manage
@@ -573,14 +608,34 @@ func (h *Manager) vfIndexFromDriver(w http.ResponseWriter, r *http.Request, s *m
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return true
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"adapter":   s.Name,
 		"storages":  storageNames,
 		"dirname":   joinAdapterPath(s.Name, clean),
 		"read_only": s.ReadOnly,
 		"perm":      permString(set, clean),
 		"files":     files,
-	})
+	}
+	/* wiring:e2 — cold-cache fallback: a freshly-created encrypted folder
+	   (marker uploaded seconds ago, sync not yet run) must still present
+	   its lock screen. The marker object is right there in the driver
+	   listing, so flag directly; ancestor detection additionally goes
+	   through the DB walk in case parents ARE cached. */
+	for _, o := range objs {
+		if o.Name == e2e.MarkerName {
+			resp["e2e"] = true
+			resp["e2e_root"] = joinAdapterPath(s.Name, clean)
+			break
+		}
+	}
+	if _, ok := resp["e2e_root"]; !ok {
+		if root, found := e2e.FindRoot(r.Context(), h.Store, s.ID, clean); found {
+			resp["e2e"] = root == clean
+			resp["e2e_root"] = joinAdapterPath(s.Name, root)
+		}
+	}
+	/* /wiring:e2 */
+	writeJSON(w, http.StatusOK, resp)
 	return true
 }
 
@@ -607,6 +662,12 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 		if o.Name == ".filex-trash" || strings.Contains(o.Path, ".filex-trash") {
 			continue
 		}
+		/* wiring:e2 — hide the encrypted-folder marker (same contract as
+		   the DB projector; detection flags come from the response). */
+		if o.Name == e2e.MarkerName {
+			continue
+		}
+		/* /wiring:e2 */
 		rel := o.Path
 		if rel == "" {
 			rel = path.Join(dir, o.Name)
@@ -987,6 +1048,14 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 			strings.Contains(n.Path, "/.versions") || strings.Contains(n.Path, "/.thumbs") {
 			continue
 		}
+		/* wiring:e2 — the encrypted-folder marker is an implementation
+		   detail: hidden from every listing/search projection (the client
+		   detects encryption via the response-level e2e/e2e_root flags and
+		   reads the marker itself through the preview endpoint). */
+		if n.Name == e2e.MarkerName {
+			continue
+		}
+		/* /wiring:e2 */
 		// RBAC: drop entries the caller isn't allowed to see.
 		if set != nil && !set.CanSee(n.Path) {
 			continue

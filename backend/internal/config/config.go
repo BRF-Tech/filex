@@ -53,6 +53,31 @@ type Config struct {
 	Sentry           SentryConfig `yaml:"sentry"`
 	Seed             SeedConfig   `yaml:"seed"`
 	DAV              DAVConfig    `yaml:"dav"`
+	/* kimlik:e3 cloud */
+	Cloud CloudConfig `yaml:"cloud"`
+}
+
+// CloudConfig — self-serve cloud/SaaS PREPARATION (v0.7 "Kimlik" E3, see
+// docs/CLOUD.md). Master-gated by Enabled (FILEX_CLOUD): while it is false —
+// the default — nothing in the cloud package is constructed, no /api/cloud
+// route registers, capabilities carry no cloud field and the migration-00021
+// columns stay untouched. This is a skeleton for a FUTURE hosted offering,
+// not a live service.
+type CloudConfig struct {
+	// Enabled is the master flag (FILEX_CLOUD=1). Default false.
+	Enabled bool `yaml:"enabled"`
+	// PlansJSON is the config-driven plan catalog (FILEX_CLOUD_PLANS), a JSON
+	// array of {id,name,price_monthly,stripe_price_id,limits:{storage_bytes,
+	// max_users}}. Empty → a single built-in "free" skeleton plan.
+	PlansJSON string `yaml:"plans"`
+	// StripeSecret is the Stripe API secret key (STRIPE_SECRET /
+	// FILEX_STRIPE_SECRET). Empty → billing endpoints answer 503
+	// "not configured".
+	StripeSecret string `yaml:"stripe_secret"`
+	// BaseHost, when set (FILEX_CLOUD_BASE_HOST, e.g. "filex.cloud"), derives
+	// each signed-up tenant's host as <slug>.<BaseHost>. Empty → the tenant is
+	// provisioned without a host (operator assigns one later).
+	BaseHost string `yaml:"base_host"`
 }
 
 // DAVConfig — the WebDAV server surface at /dav (v0.3 "Bağlan"). ON by
@@ -413,6 +438,19 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_COOKIE_DOMAIN"); v != "" {
 		c.CookieDomain = v
+	}
+	/* kimlik:e3 cloud */
+	if v := os.Getenv("FILEX_CLOUD"); v != "" {
+		c.Cloud.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_CLOUD_PLANS"); v != "" {
+		c.Cloud.PlansJSON = v
+	}
+	if v := getenvFirst("STRIPE_SECRET", "FILEX_STRIPE_SECRET"); v != "" {
+		c.Cloud.StripeSecret = v
+	}
+	if v := os.Getenv("FILEX_CLOUD_BASE_HOST"); v != "" {
+		c.Cloud.BaseHost = v
 	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v

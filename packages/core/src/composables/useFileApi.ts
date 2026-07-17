@@ -55,6 +55,13 @@ export interface ManagerResponse {
   /** RBAC effective level for the current user on this directory ('' when ACL
    *  is not enforced on the storage). Gates the folder-level write actions. */
   perm?: 'none' | 'viewer' | 'editor' | 'owner';
+  /* wiring:e2 — E2E-encrypted folder awareness: `e2e` is true when the listed
+   * dir IS an encrypted root; `e2e_root` is the adapter-qualified path of the
+   * nearest encrypted root covering this dir (set for the root itself AND for
+   * every subfolder inside the subtree). Absent on plain folders / old
+   * backends — consumers must stay undefined-safe. */
+  e2e?: boolean;
+  e2e_root?: string;
   files: FileNode[];
 }
 

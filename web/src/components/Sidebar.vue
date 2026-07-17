@@ -27,6 +27,7 @@ import {
   History,
   KeyRound,
   Copy as CopyIcon /* bul:s3 */,
+  Palette /* wiring:e1 */,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -85,6 +86,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'api-mcp' }, label: t('nav.apiMcp'), icon: KeyRound, group: 'access' },
 
   { to: { name: 'settings' }, label: t('nav.settings'), icon: Settings, group: 'ops' },
+  { to: { name: 'branding' }, label: t('nav.branding'), icon: Palette, group: 'ops' } /* wiring:e1 */,
   { to: { name: 'protection' }, label: t('nav.protection'), icon: Shield, group: 'ops' } /* koru:k3 */,
   { to: { name: 'external' }, label: t('nav.external'), icon: PlugZap, group: 'ops' },
   { to: { name: 'replica' }, label: t('nav.replica'), icon: GitBranch, group: 'ops' },

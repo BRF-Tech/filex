@@ -98,7 +98,8 @@
     "themeAuto": "Otomatik",
     "themeLight": "Aydınlık",
     "themeDark": "Karanlık",
-    "protection": "Koruma"
+    "protection": "Koruma",
+    "branding": "Kurumsal Kimlik"
   },
   "login": {
     "title": "Oturum aç",
@@ -882,5 +883,30 @@
       "binary": "Tarayıcı komutu",
       "setupHint": "ClamAV bulunamadı. Kurulum ve yapılandırma için:"
     }
+  },
+  "branding": {
+    "title": "Kurumsal Kimlik",
+    "subtitle": "Herkese açık paylaşım, yükleme ve PIN sayfaları ile oturum açma ekranında görünen kimlik",
+    "name": "Görünen ad",
+    "nameHelp": "Herkese açık sayfalarda logonun yanında, oturum açma ekranında logonun altında görünür.",
+    "logo": "Logo",
+    "logoHelp": "Bir görsel URL'si, siteye göreli bir yol ya da satır içi saklanan yüklenmiş dosya (en fazla 256 KB).",
+    "logoUpload": "Dosya yükle",
+    "logoNotImage": "Lütfen bir görsel dosyası seçin.",
+    "logoTooBig": "Görsel 256 KB satır içi sınırını aşıyor — daha küçük bir dosya kullanın ya da URL olarak barındırın.",
+    "accent": "Vurgu rengi",
+    "accentHelp": "Herkese açık sayfalarda buton ve bağlantılarda kullanılan hex renk (#rrggbb).",
+    "accentInvalid": "#4f46e5 gibi geçerli bir hex renk girin.",
+    "footerText": "Alt bilgi metni",
+    "footerHelp": "Herkese açık sayfaların alt bilgisinde gösterilen serbest metin (örn. telif satırı).",
+    "hidePoweredBy": "\"filex ile paylaşıldı\" satırını gizle",
+    "hidePoweredByHelp": "Bu satır varsayılan olarak görünür; herkese açık sayfalardan kaldırmak için etkinleştirin.",
+    "reset": "Sıfırla",
+    "resetOk": "Kurumsal kimlik varsayılanlara sıfırlandı",
+    "preview": "Canlı önizleme",
+    "previewFile": "Paylaşılan dosya",
+    "previewDownload": "İndir",
+    "poweredByLine": "filex ile paylaşıldı",
+    "previewHelp": "Geçerli değerlerle herkese açık paylaşım sayfasının yaklaşık görünümü. Uygulamak için kaydedin."
   }
 }

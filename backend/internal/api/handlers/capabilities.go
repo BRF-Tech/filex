@@ -18,6 +18,11 @@ type Capabilities struct {
 	// (docs/MULTI-TENANCY.md §12 + isolation checklist).
 	Store       db.Store
 	MultiTenant bool
+	/* kimlik:e3 cloud */
+	// CloudEnabled mirrors FILEX_CLOUD (set by BuildRouter only when the flag
+	// is on). While false — the default — the capabilities payload carries NO
+	// cloud field at all, keeping the flag-off wire format byte-identical.
+	CloudEnabled bool
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -87,6 +92,10 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		if p, _ := h.Store.GetProviderByHost(r.Context(), multioidc.RequestHost(r)); p != nil {
 			merged["tenant"] = map[string]any{"slug": p.Slug, "name": p.Name}
 		}
+	}
+	/* kimlik:e3 cloud */
+	if h.CloudEnabled {
+		merged["cloud"] = map[string]any{"enabled": true, "signup_url": "/api/cloud/signup"}
 	}
 	writeJSON(w, http.StatusOK, merged)
 }

@@ -94,13 +94,13 @@ func escapePathSegments(rel string) string {
 func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, node *model.Node, sh *model.Share, pin string) {
 	rel, ok := cleanShareRel(r.URL.Query().Get("dir"))
 	if !ok {
-		h.renderErrorPage(w, http.StatusNotFound, "Not found", "This folder does not exist in the share.")
+		h.renderErrorPage(w, r, http.StatusNotFound, "Not found", "This folder does not exist in the share.")
 		return
 	}
 	dirPath := joinShareRel(node.Path, rel)
 	objs, err := drv.List(ctx, dirPath)
 	if err != nil {
-		h.renderErrorPage(w, http.StatusNotFound, "Not found", "This folder does not exist in the share.")
+		h.renderErrorPage(w, r, http.StatusNotFound, "Not found", "This folder does not exist in the share.")
 		return
 	}
 
@@ -136,9 +136,11 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 	base := shareURLPath(sh.Token)
 
 	gallery := share.GalleryEligible(entries)
+	chrome := h.chrome(r) /* wiring:e1 — branded chrome (style+footer stay single-source) */
 	page := share.FolderPageData{
-		Style:   template.HTML(publicPageStyle),
-		Footer:  template.HTML(publicFooterTR),
+		Style:   template.HTML(publicPageStyle) + chrome.BrandCSS,
+		Footer:  chrome.FooterTR,
+		Brand:   chrome.BrandHead,
 		Name:    node.Name,
 		SubPath: rel,
 		ZipHref: base + "?zip=1" + pinAmp,

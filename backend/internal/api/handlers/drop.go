@@ -36,7 +36,15 @@ type Drop struct {
 	Mailer    *mailer.Service
 	PublicURL string
 	limiter   *ipLimiter
+	// Branding resolves the public pages' identity (wiring:e1). Nil-safe.
+	Branding *BrandingSource
 }
+
+// AttachBranding wires the shared branding source (wiring:e1).
+func (h *Drop) AttachBranding(b *BrandingSource) { h.Branding = b }
+
+// chrome computes the branded page fragments for one request (wiring:e1).
+func (h *Drop) chrome(r *http.Request) publicChrome { return publicChromeFor(h.Branding, r) }
 
 // NewDrop constructs the file-drop handler. mgr provides the shared ingest
 // path (IngestFile / EnsureDir); notify + mailer are optional (nil disables
@@ -150,7 +158,7 @@ func (h *Drop) Page(w http.ResponseWriter, r *http.Request) {
 	if sh.PinHash != "" {
 		// GET always shows the PIN form; the accepted uploader page is only
 		// reachable via a successful POST (see Upload).
-		h.renderDropPinForm(w, tok, "")
+		h.renderDropPinForm(w, r, tok, "")
 		return
 	}
 	h.renderUploader(w, r, tok, sh, "")
@@ -175,7 +183,7 @@ func (h *Drop) Upload(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	pin := r.PostForm.Get("pin")
 	if _, err := h.Service.Resolve(r.Context(), tok, pin); err != nil {
-		h.renderDropPinForm(w, tok, "Yanlış PIN — tekrar deneyin.")
+		h.renderDropPinForm(w, r, tok, "Yanlış PIN — tekrar deneyin.")
 		return
 	}
 	h.renderUploader(w, r, tok, sh, pin)
@@ -375,15 +383,15 @@ func (h *Drop) notifyOwner(ctx context.Context, sh *model.Share, node *model.Nod
 func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (*model.Share, bool) {
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
 	if err != nil {
-		h.renderDropError(w, http.StatusNotFound, "Bulunamadı", "Bu bağlantı mevcut değil veya kaldırılmış.")
+		h.renderDropError(w, r, http.StatusNotFound, "Bulunamadı", "Bu bağlantı mevcut değil veya kaldırılmış.")
 		return nil, false
 	}
 	if !sh.IsDrop() {
-		h.renderDropError(w, http.StatusNotFound, "Bulunamadı", "Bu bağlantı bir dosya yükleme bağlantısı değil.")
+		h.renderDropError(w, r, http.StatusNotFound, "Bulunamadı", "Bu bağlantı bir dosya yükleme bağlantısı değil.")
 		return nil, false
 	}
 	if sh.IsExpired(time.Now()) {
-		h.renderDropError(w, http.StatusGone, "Süresi doldu", "Bu yükleme bağlantısının süresi dolmuş veya limiti dolmuş.")
+		h.renderDropError(w, r, http.StatusGone, "Süresi doldu", "Bu yükleme bağlantısının süresi dolmuş veya limiti dolmuş.")
 		return nil, false
 	}
 	return sh, true
@@ -409,15 +417,20 @@ func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string
 		"requiresPin":   sh.PinHash != "",
 	}
 	cfgJSON, _ := json.Marshal(cfg)
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_ = dropUploaderTemplate.Execute(w, map[string]any{
-		"Folder": folderName,
-		"Config": template.JS(cfgJSON),
+		"Folder":    folderName,
+		"Config":    template.JS(cfgJSON),
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterTR,
 	})
 }
 
-func (h *Drop) renderDropPinForm(w http.ResponseWriter, token, errMsg string) {
+func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, token, errMsg string) {
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -426,19 +439,26 @@ func (h *Drop) renderDropPinForm(w http.ResponseWriter, token, errMsg string) {
 	}
 	// Reuse the shared PIN form template; Action posts back to /d/{token}.
 	_ = pinFormTemplate.Execute(w, map[string]any{
-		"Action": "/d/" + path.Clean(token),
-		"Error":  errMsg,
+		"Action":    "/d/" + path.Clean(token),
+		"Error":     errMsg,
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterEN,
 	})
 }
 
-func (h *Drop) renderDropError(w http.ResponseWriter, status int, title, body string) {
+func (h *Drop) renderDropError(w http.ResponseWriter, r *http.Request, status int, title, body string) {
+	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	// Reuse the shared error page template.
 	_ = errorPageTemplate.Execute(w, map[string]any{
-		"Title": title,
-		"Body":  body,
-		"Code":  status,
+		"Title":     title,
+		"Body":      body,
+		"Code":      status,
+		"BrandCSS":  chrome.BrandCSS,
+		"BrandHead": chrome.BrandHead,
+		"Footer":    chrome.FooterEN,
 	})
 }
 
@@ -539,6 +559,7 @@ var dropUploaderTemplate = template.Must(template.New("drop").Parse(`<!doctype h
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dosya gönder{{if .Folder}} — {{.Folder}}{{end}}</title>
 ` + publicPageStyle + `
+{{.BrandCSS}}
 <style>
 .card { width: 520px; text-align: left; }
 .drop { border: 2px dashed var(--px-line); border-radius: 12px; padding: 28px 16px; text-align: center; cursor: pointer; color: var(--px-muted); transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease; }
@@ -570,6 +591,7 @@ textarea { resize: vertical; min-height: 64px; }
 </style>
 </head><body>
 <main class="wrap">
+{{.BrandHead}}
 <div class="card" id="card">
   <h1>Dosya gönder{{if .Folder}} · {{.Folder}}{{end}}</h1>
   <p class="sub" id="sub">Aşağıya dosyaları sürükleyin veya seçin. Yalnızca yükleyebilirsiniz; klasördeki dosyalar size görünmez.</p>
@@ -596,7 +618,7 @@ textarea { resize: vertical; min-height: 64px; }
   <button class="btn" id="send" disabled>Gönder</button>
   <div class="foot" id="foot"></div>
 </div>
-` + publicFooterTR + `
+{{.Footer}}
 </main>
 
 <script>

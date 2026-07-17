@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/search/extract"
@@ -63,6 +65,11 @@ func (c *ContentIndexer) Eligible(n *model.Node) bool {
 	if n.Size <= 0 || n.Size > c.maxBytes {
 		return false
 	}
+	/* wiring:e2 — the encrypted-folder marker is metadata, never content. */
+	if n.Name == e2e.MarkerName {
+		return false
+	}
+	/* /wiring:e2 */
 	return extract.Supported(n.Mime, nodeExt(n.Name))
 }
 
@@ -103,6 +110,19 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 	if ex == nil {
 		return nil
 	}
+	/* wiring:e2 — E2E-encrypted subtree: never extract/index content. The
+	   ciphertext is meaningless (CPU waste) and skipping also closes the
+	   leak where a plaintext file written into an encrypted folder via a
+	   non-web surface (DAV/CLI/AI) would land readable text in the search
+	   index. Index EMPTY content so the fingerprint records and the node
+	   stops re-enqueueing (same convention as the extract-failure path). */
+	if lk, ok := c.store.(e2e.NodeByPathLookup); ok && e2e.UnderEncrypted(ctx, lk, n.StorageID, n.Path) {
+		if c.index == nil {
+			return nil
+		}
+		return c.index.IndexNodeContent(ctx, n, "")
+	}
+	/* /wiring:e2 */
 	drv, err := c.resolver(n.StorageID)
 	if err != nil {
 		return fmt.Errorf("content-index: resolve storage %d: %w", n.StorageID, err)
@@ -113,7 +133,22 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 	}
 	defer rc.Close()
 
-	text, err := ex.Extract(ctx, io.LimitReader(rc, c.maxBytes), extract.DefaultLimit)
+	/* wiring:e2 — belt-and-suspenders magic sniff: an encrypted file that
+	   escaped the marker walk (moved out of its folder, marker deleted
+	   later) still starts with 'filexe2e' — index it with empty content
+	   instead of feeding ciphertext to the extractor. */
+	head := make([]byte, len(e2e.MagicPrefix))
+	nRead, _ := io.ReadFull(rc, head)
+	if nRead == len(head) && e2e.HasMagicPrefix(head) {
+		if c.index == nil {
+			return nil
+		}
+		return c.index.IndexNodeContent(ctx, n, "")
+	}
+	body := io.MultiReader(bytes.NewReader(head[:nRead]), rc)
+	/* /wiring:e2 */
+
+	text, err := ex.Extract(ctx, io.LimitReader(body, c.maxBytes), extract.DefaultLimit)
 	if err != nil {
 		// Extraction error — log + index empty content anyway so the
 		// fingerprint lands and the node stops re-enqueueing.

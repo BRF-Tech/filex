@@ -345,6 +345,14 @@ type Store interface {
 	// GetProviderIDForStorage returns the (first) provider a storage is linked
 	// to — used by background workers to derive tenancy from a storage.
 	GetProviderIDForStorage(ctx context.Context, storageID int64) (int64, bool, error)
+
+	/* kimlik:e3 cloud */
+	// Provider plan metadata (cloud preparation, migration 00021 — see
+	// docs/CLOUD.md). The columns are nullable and PASSIVE: only the
+	// FILEX_CLOUD signup skeleton reads/writes them; with the flag off
+	// (default) nothing touches these methods.
+	SetProviderPlan(ctx context.Context, providerID int64, plan, limitsJSON, billingRef string) error
+	GetProviderPlan(ctx context.Context, providerID int64) (plan, limitsJSON, billingRef string, err error)
 }
 
 // ExternalService is the DB row representation. Lives in the db package so

@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/capability"
+	cloudpkg "github.com/brf-tech/filex/backend/internal/cloud" /* kimlik:e3 cloud */
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/dav"
@@ -217,6 +218,32 @@ func BuildRouter(d *Deps) http.Handler {
 	// the file-namespaced path the documented one.
 	r.Get("/api/capabilities", ch.Get)
 	r.Get("/api/files/capabilities", ch.Get)
+
+	/* ────── wiring:e1 — branding ──────
+	   Settings-driven identity for the public share/drop/PIN pages + the
+	   admin SPA login. One shared source: the Settings handler invalidates
+	   it on branding.* writes; Share/Drop render through it; GET
+	   /api/branding is public (the login page fetches it pre-session). */
+	brandingSrc := handlers.NewBrandingSource(d.Store, d.Cfg.MultiTenant)
+	sh.AttachBranding(brandingSrc)
+	dh.AttachBranding(brandingSrc)
+	seth.AttachBranding(brandingSrc)
+	r.Get("/api/branding", handlers.NewBranding(brandingSrc).Get)
+	/* ────── /wiring:e1 ────── */
+
+	/* kimlik:e3 cloud */
+	// Cloud self-signup PREPARATION (v0.7 "Kimlik", docs/CLOUD.md). Master-
+	// gated by FILEX_CLOUD: while the flag is off — the default — this block
+	// is skipped entirely, so no /api/cloud route registers, capabilities
+	// carry no cloud field and behavior is byte-identical to a build without
+	// the feature. Signup reuses the same provider-provisioning primitive as
+	// /api/admin/providers (a tenant IS a provider row).
+	if d.Cfg.Cloud.Enabled {
+		cloudSvc := cloudpkg.New(d.Store, d.Mailer, d.Cfg.Cloud.PlansJSON, d.Cfg.Cloud.BaseHost)
+		cloudH := handlers.NewCloud(cloudSvc, cloudpkg.NewStripe(d.Cfg.Cloud.StripeSecret), d.Cfg.MultiTenant)
+		r.Route("/api/cloud", cloudH.Register)
+		ch.CloudEnabled = true
+	}
 
 	// Realtime hub for live folder updates + presence over WebSocket.
 	// SetChangeEmitter wires the file-mutation handlers to broadcast into it;

@@ -3615,3 +3615,96 @@ filex-explorer {
   opacity: 0.6;
 }
 /* === /wiring:d3 === */
+
+/* === wiring:e2 — uçtan uca şifreli klasörler === */
+/* Kilit açık şeridi (presence şeridiyle aynı yatay dil). */
+.fe-e2e-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+  border-bottom: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+}
+.fe-e2e-strip__icon {
+  font-size: 13px;
+  line-height: 1;
+}
+.fe-e2e-strip__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-e2e-strip__btn {
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+/* Kilit ekranı: fe-state dilinin üstüne parola formu. */
+.fe-e2e-lock__form {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 12px;
+  width: min(340px, 100%);
+}
+.fe-e2e-lock__input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Şifreli klasör oluşturma modalı. */
+.fe-e2e-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fe-e2e-warn {
+  border: 1px solid var(--fe-danger);
+  border-radius: var(--fe-radius-sm);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--fe-text);
+  background: color-mix(in srgb, var(--fe-danger) 8%, transparent);
+}
+.fe-e2e-warn strong {
+  display: block;
+  color: var(--fe-danger);
+  margin-bottom: 2px;
+}
+.fe-e2e-warn p {
+  margin: 0;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fe-text);
+  cursor: pointer;
+}
+.fe-e2e-ack input {
+  margin-top: 2px;
+  accent-color: var(--fe-primary);
+}
+
+/* NewFolderModal içindeki "şifreli klasör" giriş linki. */
+.fe-e2e-optlink {
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fe-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.fe-e2e-optlink:hover {
+  text-decoration: underline;
+}
+/* === /wiring:e2 === */

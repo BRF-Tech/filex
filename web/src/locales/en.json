@@ -98,7 +98,8 @@
     "themeAuto": "Auto",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "protection": "Protection"
+    "protection": "Protection",
+    "branding": "Branding"
   },
   "login": {
     "title": "Sign in",
@@ -882,5 +883,30 @@
       "binary": "Scanner binary",
       "setupHint": "ClamAV not found. For installation and configuration see:"
     }
+  },
+  "branding": {
+    "title": "Branding",
+    "subtitle": "Identity shown on public share, upload and PIN pages plus the sign-in screen",
+    "name": "Display name",
+    "nameHelp": "Shown next to the logo on public pages and under the logo on the sign-in screen.",
+    "logo": "Logo",
+    "logoHelp": "An image URL, a site-relative path, or an uploaded file stored inline (max 256 KB).",
+    "logoUpload": "Upload file",
+    "logoNotImage": "Please choose an image file.",
+    "logoTooBig": "The image exceeds the 256 KB inline limit — use a smaller file or host it as a URL.",
+    "accent": "Accent color",
+    "accentHelp": "Hex color (#rrggbb) used for buttons and links on public pages.",
+    "accentInvalid": "Enter a valid hex color like #4f46e5.",
+    "footerText": "Footer text",
+    "footerHelp": "Free text shown in the footer of public pages (e.g. a copyright line).",
+    "hidePoweredBy": "Hide the \"Shared with filex\" line",
+    "hidePoweredByHelp": "The powered-by line stays visible by default; enable this to remove it from public pages.",
+    "reset": "Reset",
+    "resetOk": "Branding reset to defaults",
+    "preview": "Live preview",
+    "previewFile": "Shared file",
+    "previewDownload": "Download",
+    "poweredByLine": "Shared with filex",
+    "previewHelp": "Approximate rendering of a public share page with the current values. Save to apply."
   }
 }

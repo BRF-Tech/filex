@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -131,6 +132,24 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	/* wiring:e2 — E2E-encrypted files can never open in OnlyOffice: the DS
+	   would fetch ciphertext (and a save callback would clobber it). Sniff
+	   the 'filexe2e' magic before building a config. Read errors fall
+	   through — the fetch path will surface them as before. */
+	if node != nil && h.StorageResolver != nil {
+		if drv, derr := h.StorageResolver(node.StorageID); derr == nil {
+			if rc, rerr := drv.Read(r.Context(), node.Path); rerr == nil {
+				head := make([]byte, len(e2e.MagicPrefix))
+				n, _ := io.ReadFull(rc, head)
+				_ = rc.Close()
+				if n == len(head) && e2e.HasMagicPrefix(head) {
+					writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "file is e2e-encrypted"})
+					return
+				}
+			}
+		}
+	}
+	/* /wiring:e2 */
 	cfg, err := h.Service.BuildConfigForNode(node, user, lang, mode)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

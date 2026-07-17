@@ -493,6 +493,38 @@ func (s *Store) GetProviderIDForStorage(ctx context.Context, storageID int64) (i
 	return pid, true, nil
 }
 
+/* kimlik:e3 cloud */
+// Provider plan metadata (cloud preparation, migration 00021 — docs/CLOUD.md).
+// Kept as dedicated accessors instead of widening providerCols so the existing
+// provider CRUD SQL — and therefore flag-off behavior — stays byte-identical.
+
+func (s *Store) SetProviderPlan(ctx context.Context, providerID int64, plan, limitsJSON, billingRef string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE providers SET plan=?, limits_json=?, billing_ref=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		nullIfEmpty(plan), nullIfEmpty(limitsJSON), nullIfEmpty(billingRef), providerID)
+	return err
+}
+
+func (s *Store) GetProviderPlan(ctx context.Context, providerID int64) (string, string, string, error) {
+	var plan, limitsJSON, billingRef string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(plan,''), COALESCE(limits_json,''), COALESCE(billing_ref,'') FROM providers WHERE id=?`,
+		providerID).Scan(&plan, &limitsJSON, &billingRef)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", nil
+	}
+	return plan, limitsJSON, billingRef, err
+}
+
+// nullIfEmpty maps "" to SQL NULL so the passive cloud columns stay NULL
+// (not empty string) when unset.
+func nullIfEmpty(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE nodes SET size=?, mime=?, etag=?, backend_mtime=?, seen_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`,

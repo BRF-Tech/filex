@@ -8,6 +8,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -95,6 +96,10 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
+				/* wiring:e2 — marker dosyası ad aramasında da görünmez */
+				if n.Name == e2e.MarkerName {
+					continue
+				}
 				results = append(results, searchResult{Node: n, Snippet: hit.Snippet, Matched: hit.Matched})
 			}
 		}
@@ -105,6 +110,10 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, search.SQLLike(req.Query), req.Limit)
 		if err == nil {
 			for _, n := range fallback {
+				/* wiring:e2 — marker dosyası ad aramasında da görünmez */
+				if n.Name == e2e.MarkerName {
+					continue
+				}
 				results = append(results, searchResult{Node: n, Matched: search.MatchedName})
 			}
 		}

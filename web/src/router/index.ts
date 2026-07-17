@@ -92,6 +92,13 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.settings' },
       },
       {
+        // wiring:e1 — settings-driven branding (public pages + login).
+        path: 'branding',
+        name: 'branding',
+        component: () => import('@/views/Branding.vue'),
+        meta: { breadcrumb: 'nav.branding' },
+      },
+      {
         path: 'external',
         name: 'external',
         component: () => import('@/views/External.vue'),

@@ -46,6 +46,11 @@ const props = defineProps<{
   pdfSaveUrl?: string | null;
   /** Standalone full-screen viewer route — `?path=…&storage=…&type=…`. */
   viewerBaseUrl?: string | null;
+  /* wiring:e2 — false hides the "Düzenle" / "Yeni Sekmede Aç" buttons.
+   * The standalone route fetches RAW server bytes, which inside an
+   * E2E-encrypted folder is ciphertext (and its save path could clobber
+   * the encrypted blob) — the host disables the escape hatches there. */
+  newTabEnabled?: boolean;
   /** Drop the dialog chrome (backdrop tint, header bar, footer actions)
    *  so the viewer fills the full viewport. Used by the standalone
    *  /files/edit route where the browser tab IS the container — a
@@ -1020,13 +1025,13 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
     </div>
     <template #actions>
       <button
-        v-if="file && openMode === 'view' && canEditKind"
+        v-if="file && openMode === 'view' && canEditKind && newTabEnabled !== false /* wiring:e2 */"
         type="button"
         class="fe-btn fe-btn--primary"
         @click="openEditInNewTab"
       >✏ {{ t('viewer.edit') }}</button>
       <button
-        v-if="file"
+        v-if="file && newTabEnabled !== false /* wiring:e2 */"
         type="button"
         class="fe-btn"
         @click="openInNewTab"

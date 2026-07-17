@@ -19,6 +19,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { AuthApi } from '@/api/auth';
+import { BrandingApi, type BrandingConfig } from '@/api/branding'; /* wiring:e1 */
 
 import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
@@ -61,7 +62,24 @@ const showLocalForm = computed(
 );
 const redirecting = ref(false);
 
+/* wiring:e1 — settings-driven branding on the login screen: custom logo
+   replaces the LogoMark, the display name shows under it, and the accent
+   colors the primary CTA (inline style — the Tailwind brand palette is
+   compile-time). Fetch is public and best-effort: default look on failure. */
+const branding = ref<BrandingConfig | null>(null);
+const accentStyle = computed(() =>
+  branding.value?.accent ? { backgroundColor: branding.value.accent, borderColor: branding.value.accent } : undefined,
+);
+async function fetchBranding() {
+  try {
+    branding.value = await BrandingApi.get();
+  } catch {
+    branding.value = null;
+  }
+}
+
 onMounted(async () => {
+  void fetchBranding(); /* wiring:e1 */
   if (!caps.loaded) await caps.fetch();
   // Loop guards: never auto-redirect when the visitor explicitly asked for
   // the password form (?local=1), when the IdP round-trip just failed
@@ -232,7 +250,20 @@ function startOidc() {
     <div v-else class="min-h-screen flex flex-col items-center justify-center px-4 py-10">
       <div class="card w-full max-w-md p-8">
         <div class="flex flex-col items-center gap-1.5 mb-6 text-center">
-          <LogoMark class="h-14 w-14" />
+          <!-- wiring:e1 — branded logo/name (custom logo replaces the mark) -->
+          <img
+            v-if="branding?.logo_url"
+            :src="branding.logo_url"
+            alt=""
+            class="h-14 max-w-[220px] object-contain"
+          />
+          <LogoMark v-else class="h-14 w-14" />
+          <p
+            v-if="branding?.name"
+            class="mt-1 text-sm font-semibold text-zinc-700 dark:text-zinc-300"
+          >
+            {{ branding.name }}
+          </p>
           <h1 class="mt-2 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
             {{ t('login.title') }}
           </h1>
@@ -255,7 +286,7 @@ function startOidc() {
           </p>
 
           <!-- SSO is the primary path whenever OIDC is configured. -->
-          <Button v-if="oidcEnabled" variant="primary" size="lg" block @click="startOidc">
+          <Button v-if="oidcEnabled" variant="primary" size="lg" block :style="accentStyle" @click="startOidc">
             <KeyRound class="h-4 w-4" />
             {{ t('login.oidc') }}
           </Button>
@@ -288,7 +319,13 @@ function startOidc() {
               {{ localError }}
             </p>
 
-            <Button type="submit" :variant="oidcEnabled ? 'outline' : 'primary'" :loading="auth.loading" block>
+            <Button
+              type="submit"
+              :variant="oidcEnabled ? 'outline' : 'primary'"
+              :loading="auth.loading"
+              block
+              :style="oidcEnabled ? undefined : accentStyle"
+            >
               <Lock class="h-4 w-4" />
               {{ t('login.submit') }}
             </Button>

@@ -15,6 +15,9 @@ import (
 type Settings struct {
 	Store  db.Store
 	Mailer *mailer.Service
+	// Branding is invalidated on branding.* writes so public pages pick the
+	// new identity up immediately (wiring:e1). Nil-safe.
+	Branding *BrandingSource
 }
 
 // NewSettings constructs a Settings handler.
@@ -22,6 +25,9 @@ func NewSettings(store db.Store) *Settings { return &Settings{Store: store} }
 
 // AttachMailer wires the mailer so the SMTP "Test" button can verify / send.
 func (h *Settings) AttachMailer(m *mailer.Service) { h.Mailer = m }
+
+// AttachBranding wires the shared branding source (wiring:e1).
+func (h *Settings) AttachBranding(b *BrandingSource) { h.Branding = b }
 
 // SMTPTest verifies the SMTP config (auth handshake) and, when a `to` address
 // is given, sends a real test message end-to-end.
@@ -60,6 +66,7 @@ func (h *Settings) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redactSecretSettings(m)
+	overlayTenantBrandingSettings(r.Context(), m) /* wiring:e1 — tenant branding overlay */
 	writeJSON(w, http.StatusOK, m)
 }
 
@@ -78,6 +85,15 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
+	}
+	/* wiring:e1 — branding keys: validate + tenant-scope + cache bust */
+	if isBrandingSettingKey(key) {
+		if err := validateBrandingSetting(key, req.Value); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		key = tenantBrandingKey(r.Context(), key)
+		defer h.Branding.Invalidate()
 	}
 	if err := h.Store.UpsertSetting(r.Context(), key, req.Value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -108,6 +124,15 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		if val == "***" && isSecretSettingKey(k) {
 			continue
 		}
+		/* wiring:e1 — branding keys: validate + tenant-scope + cache bust */
+		if isBrandingSettingKey(k) {
+			if err := validateBrandingSetting(k, val); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			k = tenantBrandingKey(r.Context(), k)
+			defer h.Branding.Invalidate()
+		}
 		if err := h.Store.UpsertSetting(r.Context(), k, val); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -119,6 +144,7 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redactSecretSettings(m)
+	overlayTenantBrandingSettings(r.Context(), m) /* wiring:e1 — tenant branding overlay */
 	writeJSON(w, http.StatusOK, m)
 }
 

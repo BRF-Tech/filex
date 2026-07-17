@@ -127,6 +127,7 @@ function parentDir(path: string): string {
 function specialEmojiFor(n: FileNode): string | null {
   if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
+  if (n.type === 'dir' && n.e2e === true) return '🔒'; /* wiring:e2 — şifreli klasör rozeti */
   return null;
 }
 

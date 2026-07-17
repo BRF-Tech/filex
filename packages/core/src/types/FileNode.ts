@@ -42,6 +42,9 @@ export interface FileNode {
    *  projectFileNodes emits it when a storage has RBAC on). '' / undefined =
    *  ACL not enforced. Used to gate edit/manage affordances client-side. */
   perm?: 'none' | 'viewer' | 'editor' | 'owner';
+  /* wiring:e2 — dir rows: true when the folder is E2E-encrypted (carries a
+   * `.filex-e2e.json` marker). Drives the 🔒 badge in the listings. */
+  e2e?: boolean;
   /** Generic — any additional fields the backend wants to inline. */
   [k: string]: unknown;
 }

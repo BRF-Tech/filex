@@ -7,11 +7,17 @@ import Modal from './Modal.vue';
 const props = defineProps<{
   open: boolean;
   locale: LocaleCode;
+  /* wiring:e2 — hosts hide the encrypted option (e.g. already inside an
+   * encrypted folder / feature-gated embeds). Default: shown. */
+  encryptedOption?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'submit', name: string): void;
+  /* wiring:e2 — user picked "Create encrypted folder…" — the parent swaps
+   * this modal for EncryptedFolderModal. */
+  (e: 'encrypted'): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -51,6 +57,18 @@ function submit() {
         @keydown.enter.prevent="submit"
       />
       <p v-if="err" class="fe-form__error">{{ err }}</p>
+      <!-- wiring:e2 — encrypted-folder entry point lives inside the normal
+           new-folder flow so every trigger (toolbar / context menu / palette)
+           reaches it without extra wiring. -->
+      <button
+        v-if="encryptedOption !== false"
+        type="button"
+        class="fe-e2e-optlink"
+        @click="emit('encrypted')"
+      >
+        🔒 {{ t('e2e.create.option') }}
+      </button>
+      <!-- /wiring:e2 -->
     </form>
     <template #actions>
       <button type="button" class="fe-btn" @click="emit('close')">
