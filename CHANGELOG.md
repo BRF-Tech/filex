@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.1.84 below.)
+(Nothing yet — see v0.2.0 below.)
+
+## [0.2.0] - 2026-07-17
+
+### Added
+
+- **Content search**: filex now indexes what's *inside* your files, not just
+  their names. Plain text, Markdown, source code, CSV/JSON/YAML, PDF text
+  layers and Office documents (docx/xlsx/pptx) are extracted asynchronously
+  (never blocking writes) into the embedded Bleve index. Search hits carry a
+  highlighted `snippet` and a `matched` field (`name`/`content`/`both`), and
+  the search endpoints accept `scope=name|content|all`. Rebuild with content
+  via `POST /api/admin/search/rebuild?content=1`. Tunables:
+  `FILEX_SEARCH_CONTENT` (kill-switch) and `FILEX_SEARCH_CONTENT_MAX`.
+- **Optional OCR**: when a `tesseract` binary is available
+  (`FILEX_TESSERACT_BIN` or PATH), image files (png/jpg/webp/tiff) are OCR'd
+  into the content index; without the binary the extractor stays silent.
+  Capability endpoint now reports `ocr`.
+- **Duplicate report**: `GET /api/admin/duplicates` groups files by
+  (size, etag) and reports wasted bytes; new read-only admin view lists the
+  groups with per-group totals.
+- **Search UX**: the command palette gains an "Everywhere" section (global
+  search with content-match badges and safe highlighted snippets), list view
+  shows snippets under content matches, searches can be saved and re-run from
+  the palette, and the admin SearchTest view grows a scope selector.
+- **MCP**: `file_search` accepts a `content` flag (default on) and returns
+  snippets, so agents can find files by what they contain.
 
 ## [0.1.84] - 2026-07-17
 

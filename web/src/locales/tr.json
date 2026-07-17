@@ -83,6 +83,7 @@
     "shares": "Paylaşımlar",
     "trash": "Çöp kutusu",
     "search": "Arama",
+    "duplicates": "Yinelenenler",
     "tagged": "Etiketli dosyalar",
     "replica": "Replikasyon",
     "queue": "Kuyruk",
@@ -451,7 +452,12 @@
     "rebuildHint": "Tüm depoları gezerek dosya metadata'sını yeniden indeksler. Milyon dosya başına birkaç dakika.",
     "rebuildStarted": "Yeniden oluşturma başladı",
     "queryPlaceholder": "Dosya ara…",
-    "noResults": "Eşleşme yok"
+    "noResults": "Eşleşme yok",
+    "scope": "Arama kapsamı",
+    "scopeAll": "Tümü",
+    "scopeName": "Ad",
+    "scopeContent": "İçerik",
+    "inContent": "İçerikte"
   },
   "tagged": {
     "title": "Etiketli dosyalar",
@@ -786,5 +792,23 @@
     "retry": "Yeniden dene",
     "dismiss": "Kapat",
     "hide": "Gizle"
+  },
+  "duplicates": {
+    "title": "Yinelenen dosyalar",
+    "subtitle": "Aynı boyut + aynı etag ile gruplanmış kopyalar — salt-okunur rapor",
+    "summary": "{groups} grup, toplam {waste} israf",
+    "stats": {
+      "groups": "Yinelenen grup",
+      "copies": "Fazladan kopya",
+      "waste": "Toplam israf"
+    },
+    "copies": "{n} kopya",
+    "wasted": "{size} israf",
+    "colPath": "Dosya / yol",
+    "colStorage": "Depo",
+    "colSize": "Boyut",
+    "colEtag": "ETag",
+    "emptyTitle": "Yinelenen dosya yok",
+    "emptyDescription": "Aynı boyut ve etag'e sahip birden fazla kopya bulunamadı."
   }
 }

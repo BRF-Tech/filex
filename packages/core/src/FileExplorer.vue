@@ -24,7 +24,7 @@ import type {
   Capabilities,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
-import { useFileApi } from './composables/useFileApi';
+import { useFileApi, type GlobalSearchHit } from './composables/useFileApi';
 import { useUploadChunked, type UploadJob } from './composables/useUploadChunked';
 import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
@@ -923,6 +923,50 @@ onMounted(async () => {
 const showPalette = ref(false);
 const showShortcutsHelp = ref(false);
 /* /cila:c wiring */
+
+/* bul:s3 — palette "everywhere" search + open-hit navigation */
+
+// Debounce/min-chars live in the palette; this is just the API call.
+function paletteGlobalSearch(q: string): Promise<GlobalSearchHit[]> {
+  return api.globalSearch(q, { limit: 8, scope: 'all' });
+}
+
+/**
+ * Open a global-search hit: navigate to the file's folder, then select +
+ * preview it through the existing openNode mechanics. Hits come back as raw
+ * node rows (in-storage relative `path`, numeric `storage_id`), so the
+ * storage segment for multi-storage mode is resolved best-effort: an
+ * explicit name on the hit (future backends) > the only configured storage
+ * > the storage currently open. A wrong guess lands on the existing
+ * "folder not found" state, which is already a graceful dead-end.
+ */
+async function openSearchHit(hit: GlobalSearchHit) {
+  const rel = String(hit.path ?? '').replace(/^\/+|\/+$/g, '');
+  if (!rel) return;
+  const isDir = hit.type === 'dir';
+  const slash = rel.lastIndexOf('/');
+  const targetRel = isDir ? rel : slash === -1 ? '' : rel.slice(0, slash);
+  let target = targetRel;
+  if (multiStorageRoot.value) {
+    const configured = props.config.storages ?? [];
+    const storageName =
+      (typeof hit.storage === 'string' && hit.storage) ||
+      (typeof hit.storage_name === 'string' && hit.storage_name) ||
+      (configured.length === 1 ? configured[0].name : '') ||
+      adapter.value;
+    if (!storageName) return;
+    target = targetRel ? `${storageName}/${targetRel}` : storageName;
+  }
+  await load(target);
+  if (isDir) return;
+  const name = String(hit.name ?? rel.slice(slash + 1));
+  const node = files.value.find((f) => f.type === 'file' && f.basename === name);
+  if (node) {
+    selection.click(node.path);
+    openNode(node);
+  }
+}
+/* /bul:s3 */
 
 useKeyboardShortcuts(rootEl, {
   onDelete: () => {
@@ -2326,7 +2370,9 @@ function buildAuthHeaders(extra: Record<string, string> = {}) {
       :view-mode="viewMode"
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :can-go-up="canGoUp"
+      :global-search="paletteGlobalSearch"
       @close="showPalette = false"
+      @open-hit="openSearchHit"
       @open-node="openNode"
       @navigate="(p: string) => load(p)"
       @new-folder="showNewFolder = true"

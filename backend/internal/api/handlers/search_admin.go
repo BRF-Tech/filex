@@ -10,6 +10,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -50,10 +51,19 @@ func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 }
 
 // Rebuild drops the existing index and reindexes every node row.
+//
+// ?content=1 additionally re-enqueues content extraction for every eligible
+// node once its metadata lands — a rebuild starts from an EMPTY index, so
+// without the flag previously extracted content stays gone until each file
+// next drifts.
 func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
 	if h.Index == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search index disabled"})
 		return
+	}
+	withContent := false
+	if v := r.URL.Query().Get("content"); v == "1" || strings.EqualFold(v, "true") {
+		withContent = true
 	}
 	if !h.rebuilding.CompareAndSwap(false, true) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "rebuild already in progress"})
@@ -66,14 +76,24 @@ func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer h.rebuilding.Store(false)
 		ctx := context.Background()
-		if err := h.Index.RebuildAll(ctx, h.Store); err != nil {
+		var err error
+		if withContent {
+			err = h.Index.RebuildAllWithContent(ctx, h.Store)
+		} else {
+			err = h.Index.RebuildAll(ctx, h.Store)
+		}
+		if err != nil {
 			slog.Warn("search: rebuild failed", slog.String("err", err.Error()))
 			return
 		}
-		slog.Info("search: rebuild done")
+		slog.Info("search: rebuild done", slog.Bool("content", withContent))
 	}()
+	note := "rebuild started in background"
+	if withContent {
+		note = "rebuild started in background (content extraction re-enqueued)"
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"ok":   true,
-		"note": "rebuild started in background",
+		"note": note,
 	})
 }

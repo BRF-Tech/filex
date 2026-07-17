@@ -1,12 +1,23 @@
 import { api } from './client';
 import type { PaginatedResponse, SearchHit } from './types';
 
+/* bul:s3 — v0.2 search contract additions (older backends omit both). */
+export type SearchScope = 'name' | 'content' | 'all';
+export type SearchHitEx = SearchHit & {
+  /** Plain-text content snippet; matched words wrapped in «» (never HTML). */
+  snippet?: string;
+  /** Where the hit matched: name | content | both. */
+  matched?: 'name' | 'content' | 'both';
+};
+
 export interface SearchParams {
   q: string;
   storage_id?: number;
   mime?: string;
   page?: number;
   page_size?: number;
+  /** bul:s3 — name | content | all (backend default: all). */
+  scope?: SearchScope;
 }
 
 export interface SearchIndexStats {
@@ -17,7 +28,7 @@ export interface SearchIndexStats {
 }
 
 export const SearchApi = {
-  async query(params: SearchParams): Promise<PaginatedResponse<SearchHit>> {
+  async query(params: SearchParams): Promise<PaginatedResponse<SearchHitEx>> {
     // The backend exposes search at `/api/files/search` (admin route
     // `/admin/search` only carries stats + rebuild).
     //
@@ -35,10 +46,12 @@ export const SearchApi = {
         mime?: string;
         backend_mtime?: string | null;
         updated_at?: string;
+        snippet?: string;
+        matched?: 'name' | 'content' | 'both';
       }>;
     }>('/files/search', { params });
     const nodes = data.results ?? [];
-    const items: SearchHit[] = nodes.map((n) => ({
+    const items: SearchHitEx[] = nodes.map((n) => ({
       id: String(n.id),
       storage_id: n.storage_id,
       storage_name: '',
@@ -48,6 +61,9 @@ export const SearchApi = {
       mime: n.mime ?? '',
       modified_at: n.backend_mtime || n.updated_at || '',
       score: 0,
+      // bul:s3 — contract fields, undefined-safe on older backends.
+      snippet: typeof n.snippet === 'string' ? n.snippet : undefined,
+      matched: n.matched,
     }));
     return {
       items,

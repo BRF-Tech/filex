@@ -146,6 +146,13 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.search' },
       },
       {
+        // bul:s3 — duplicate-files report (read-only).
+        path: 'duplicates',
+        name: 'duplicates',
+        component: () => import('@/views/Duplicates.vue'),
+        meta: { breadcrumb: 'nav.duplicates' },
+      },
+      {
         path: 'tagged',
         name: 'tagged',
         component: () => import('@/views/TaggedFiles.vue'),

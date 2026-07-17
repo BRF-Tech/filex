@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex-react",
-  "version": "0.1.84",
+  "version": "0.2.0",
   "description": "filex React adapter — wraps <filex-explorer> for React idiom (props + camelCase event handlers)",
   "type": "module",
   "main": "./dist/filex-react.cjs",

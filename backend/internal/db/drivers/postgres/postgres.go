@@ -550,6 +550,34 @@ func (s *Store) StorageStats(ctx context.Context, storageID int64) (int64, int64
 	return count, size.Int64, nil
 }
 
+// ListDuplicateNodes returns every live file node whose (size, non-empty
+// etag) pair occurs more than once — the raw rows behind the admin
+// duplicate report. Mirrors the SQLite driver with $N placeholders.
+func (s *Store) ListDuplicateNodes(ctx context.Context, minSize int64) ([]db.DuplicateNode, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT n.id, n.storage_id, n.path, n.name, n.size, COALESCE(n.etag,'')
+		   FROM nodes n
+		   JOIN (SELECT size, etag FROM nodes
+		          WHERE deleted_at IS NULL AND type='file' AND COALESCE(etag,'')<>'' AND size>=$1
+		          GROUP BY size, etag HAVING COUNT(*)>1) dup
+		     ON dup.size=n.size AND dup.etag=n.etag
+		  WHERE n.deleted_at IS NULL AND n.type='file'
+		  ORDER BY n.size DESC, n.etag, n.id`, minSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []db.DuplicateNode
+	for rows.Next() {
+		var d db.DuplicateNode
+		if err := rows.Scan(&d.ID, &d.StorageID, &d.Path, &d.Name, &d.Size, &d.Etag); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error) {
 	if limit <= 0 {
 		limit = 100

@@ -33,6 +33,22 @@ type searchRequest struct {
 	StorageID int64  `json:"storage_id"`
 	Query     string `json:"query"`
 	Limit     int    `json:"limit"`
+	// Scope selects the fields consulted: "name" | "content" | "all"
+	// (default all — name hits ranked first, so pre-v0.2 clients see the
+	// same ordering they always did, plus content hits after).
+	Scope string `json:"scope"`
+}
+
+// searchResult is one hit in the response: the node row plus the v0.2
+// content-search additions. Embedding keeps the wire shape backward
+// compatible — old clients simply ignore snippet/matched.
+type searchResult struct {
+	*model.Node
+	// Snippet is a short plain-text fragment around a content match with
+	// the matched terms wrapped in « » ("" for name-only hits, never HTML).
+	Snippet string `json:"snippet"`
+	// Matched reports which side(s) hit: "name" | "content" | "both".
+	Matched string `json:"matched"`
 }
 
 // Search returns up to N matching nodes.
@@ -62,6 +78,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 				req.Limit = n
 			}
 		}
+		req.Scope = q.Get("scope")
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -71,20 +88,25 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	if req.Limit <= 0 {
 		req.Limit = 50
 	}
-	results := []*model.Node{}
+	sc := search.ParseScope(req.Scope)
+	results := []searchResult{}
 	if h.Index != nil {
-		hits := h.Index.SafeSearch(r.Context(), req.Query, req.Limit)
+		hits := h.Index.SafeSearchScoped(r.Context(), req.Query, req.Limit, sc)
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
-				results = append(results, n)
+				results = append(results, searchResult{Node: n, Snippet: hit.Snippet, Matched: hit.Matched})
 			}
 		}
 	}
-	if len(results) == 0 && req.StorageID != 0 && req.Query != "" {
+	// SQL LIKE fallback — name-only by nature, so a content-scoped query
+	// never falls back (an index-less install has no content to search).
+	if len(results) == 0 && req.StorageID != 0 && req.Query != "" && sc != search.ScopeContent {
 		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, search.SQLLike(req.Query), req.Limit)
 		if err == nil {
-			results = fallback
+			for _, n := range fallback {
+				results = append(results, searchResult{Node: n, Matched: search.MatchedName})
+			}
 		}
 	}
 	// Multi-tenant: drop hits in storages outside the caller's tenant. This is
@@ -92,28 +114,30 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// cross-tenant leak (content, not just a name). No-op unless a scope is set.
 	if scope, ok := tenant.FromContext(r.Context()); ok {
 		kept := results[:0]
-		for _, n := range results {
-			if scope.CanAccessStorage(n.StorageID) {
-				kept = append(kept, n)
+		for _, res := range results {
+			if scope.CanAccessStorage(res.StorageID) {
+				kept = append(kept, res)
 			}
 		}
 		results = kept
 	}
 
 	// RBAC: drop hits the caller can't see (per-storage grants; cached).
+	// Snippets ride on the hit, so a dropped hit drops its snippet too —
+	// content search can never leak text the caller couldn't browse to.
 	if h.ACL != nil {
 		user := auth.UserFrom(r.Context())
 		cache := map[int64]*acl.Set{}
 		kept := results[:0]
-		for _, n := range results {
-			set, ok := cache[n.StorageID]
+		for _, res := range results {
+			set, ok := cache[res.StorageID]
 			if !ok {
-				st, _ := h.Store.GetStorage(r.Context(), n.StorageID)
+				st, _ := h.Store.GetStorage(r.Context(), res.StorageID)
 				set, _ = h.ACL.LoadSet(r.Context(), user, st)
-				cache[n.StorageID] = set
+				cache[res.StorageID] = set
 			}
-			if set == nil || set.CanSee(n.Path) {
-				kept = append(kept, n)
+			if set == nil || set.CanSee(res.Path) {
+				kept = append(kept, res)
 			}
 		}
 		results = kept

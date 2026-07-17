@@ -258,6 +258,13 @@ type ThumbsConfig struct {
 type SearchConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	IndexPath string `yaml:"index_path"`
+	// Content toggles async file-content extraction into the index ("Bul"
+	// wave). ON by default; FILEX_SEARCH_CONTENT=0 is the kill-switch.
+	Content bool `yaml:"content"`
+	// ContentMaxBytes caps the SOURCE file size eligible for extraction
+	// (FILEX_SEARCH_CONTENT_MAX). <=0 falls back to 5 MiB. The extracted
+	// text itself is always capped at 200 KiB.
+	ContentMaxBytes int64 `yaml:"content_max_bytes"`
 }
 
 // CORSConfig — origin allowlist.
@@ -294,7 +301,9 @@ func Default() Config {
 			Formats: []string{"image", "video", "pdf", "office"},
 		},
 		Search: SearchConfig{
-			Enabled: true,
+			Enabled:         true,
+			Content:         true,
+			ContentMaxBytes: 5 << 20,
 		},
 		Queue: QueueConfig{
 			Driver:  "sqlite",
@@ -479,6 +488,14 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_SEARCH_ENABLED"); v != "" {
 		c.Search.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_SEARCH_CONTENT"); v != "" {
+		c.Search.Content = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_SEARCH_CONTENT_MAX"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			c.Search.ContentMaxBytes = n
+		}
 	}
 	if v := os.Getenv("FILEX_CORS_ALLOWED_ORIGINS"); v != "" {
 		c.CORS.AllowedOrigins = strings.Split(v, ",")

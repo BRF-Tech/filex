@@ -12,10 +12,20 @@
  * Keyboard: ↑/↓ move, Enter selects, Esc closes; the listener sits on the
  * document in CAPTURE phase so it wins over useKeyboardShortcuts' window
  * handler (otherwise Enter would also fire the explorer's own onOpen).
+ *
+ * bul:s3 additions:
+ *   4. "Everywhere" group — ≥3-char queries also hit the global files-search
+ *      endpoint (debounced 250ms, max 8 rows) via the `globalSearch` prop.
+ *      Content matches get an "İçerikte" badge + a «»-highlighted snippet
+ *      rendered as pure text nodes (no innerHTML).
+ *   5. Saved searches — localStorage-backed (`filex.saved-searches`, max 10);
+ *      "save current query" command + per-row delete.
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { FileNode, ViewMode } from '../types/FileNode';
+import type { GlobalSearchHit } from '../composables/useFileApi';
+import { matchedInContent, snippetSegments } from '../lib/snippet';
 import { useLocale } from '../composables/useLocale';
 
 const props = defineProps<{
@@ -27,6 +37,8 @@ const props = defineProps<{
   canWrite?: boolean;
   /** Gates the "up one level" command. */
   canGoUp?: boolean;
+  /* bul:s3 — global search callback; absent = older host, group hidden. */
+  globalSearch?: (q: string) => Promise<GlobalSearchHit[]>;
 }>();
 
 const emit = defineEmits<{
@@ -39,6 +51,8 @@ const emit = defineEmits<{
   (e: 'open-trash'): void;
   (e: 'refresh'): void;
   (e: 'go-up'): void;
+  /* bul:s3 — an "everywhere" hit was chosen. */
+  (e: 'open-hit', hit: GlobalSearchHit): void;
 }>();
 
 const { t, nodeDisplayName } = useLocale(() => props.locale);
@@ -51,7 +65,15 @@ const listEl = ref<HTMLElement | null>(null);
 type PaletteItem =
   | { kind: 'goto'; id: string; label: string; icon: string; path: string }
   | { kind: 'file'; id: string; label: string; icon: string; node: FileNode }
-  | { kind: 'command'; id: string; label: string; icon: string; command: string };
+  | { kind: 'command'; id: string; label: string; icon: string; command: string }
+  /* bul:s3 — everywhere hit / saved search / save-current-query. */
+  | { kind: 'hit'; id: string; label: string; icon: string; hit: GlobalSearchHit; crumb: string; inContent: boolean; snippet: string }
+  | { kind: 'saved'; id: string; label: string; icon: string; query: string }
+  | { kind: 'save'; id: string; label: string; icon: string; query: string };
+
+/* bul:s3 — narrowed aliases so the template doesn't need kind-guards. */
+type HitItem = Extract<PaletteItem, { kind: 'hit' }>;
+type SavedGroupItem = Extract<PaletteItem, { kind: 'saved' | 'save' }>;
 
 /**
  * Scored includes: -1 = no match; otherwise earlier + prefix matches rank
@@ -110,16 +132,141 @@ const commandItems = computed<PaletteItem[]>(() => {
     .map((d) => ({ kind: 'command' as const, id: `cmd:${d.command}`, label: d.label, icon: d.icon, command: d.command }));
 });
 
+/* === bul:s3 — "everywhere" global search ================================ */
+
+const EVERYWHERE_MIN_CHARS = 3;
+const EVERYWHERE_LIMIT = 8;
+const EVERYWHERE_DEBOUNCE_MS = 250;
+
+const everywhere = ref<GlobalSearchHit[]>([]);
+const everywhereLoading = ref(false);
+let everywhereTimer: ReturnType<typeof setTimeout> | undefined;
+let everywhereSeq = 0;
+
+function scheduleEverywhere(q: string) {
+  if (everywhereTimer) clearTimeout(everywhereTimer);
+  const fn = props.globalSearch;
+  if (!fn || q.length < EVERYWHERE_MIN_CHARS) {
+    everywhere.value = [];
+    everywhereLoading.value = false;
+    return;
+  }
+  everywhereLoading.value = true;
+  everywhereTimer = setTimeout(async () => {
+    const seq = ++everywhereSeq;
+    try {
+      const hits = await fn(q);
+      if (seq !== everywhereSeq) return; // stale response — a newer query won
+      everywhere.value = Array.isArray(hits) ? hits.slice(0, EVERYWHERE_LIMIT) : [];
+    } catch {
+      if (seq === everywhereSeq) everywhere.value = [];
+    } finally {
+      if (seq === everywhereSeq) everywhereLoading.value = false;
+    }
+  }, EVERYWHERE_DEBOUNCE_MS);
+}
+
+/** Parent-path crumb for a hit row (storage label when the hit carries one). */
+function hitCrumb(h: GlobalSearchHit): string {
+  const rel = String(h.path ?? '').replace(/^\/+|\/+$/g, '');
+  const slash = rel.lastIndexOf('/');
+  const parent = slash === -1 ? '' : rel.slice(0, slash);
+  const storage =
+    (typeof h.storage === 'string' && h.storage) ||
+    (typeof h.storage_name === 'string' && h.storage_name) ||
+    '';
+  if (storage && parent) return `${storage}/${parent}`;
+  if (storage) return storage;
+  return parent || '/';
+}
+
+const hitItems = computed<HitItem[]>(() =>
+  everywhere.value.map((h) => ({
+    kind: 'hit' as const,
+    id: `hit:${h.storage_id ?? ''}:${h.path ?? ''}:${h.id ?? ''}`,
+    label: String(h.name ?? h.path ?? ''),
+    icon: h.type === 'dir' ? '📁' : '📄',
+    hit: h,
+    crumb: hitCrumb(h),
+    inContent: matchedInContent(h.matched),
+    snippet: typeof h.snippet === 'string' ? h.snippet : '',
+  })),
+);
+
+/* === bul:s3 — saved searches (localStorage) ============================= */
+
+const SAVED_LS_KEY = 'filex.saved-searches';
+const SAVED_MAX = 10;
+
+const savedSearches = ref<string[]>([]);
+
+function readSavedSearches(): string[] {
+  try {
+    const raw = localStorage.getItem(SAVED_LS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x): x is string => typeof x === 'string' && x.trim() !== '').slice(0, SAVED_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedSearches(list: string[]) {
+  savedSearches.value = list.slice(0, SAVED_MAX);
+  try {
+    localStorage.setItem(SAVED_LS_KEY, JSON.stringify(savedSearches.value));
+  } catch {
+    /* private mode / quota — the in-memory list still works this session */
+  }
+}
+
+function saveSearch(q: string) {
+  const clean = q.trim();
+  if (!clean) return;
+  const list = savedSearches.value.filter((s) => s !== clean);
+  list.unshift(clean); // newest first; cap enforced by writeSavedSearches
+  writeSavedSearches(list);
+}
+
+function removeSavedSearch(q: string) {
+  writeSavedSearches(savedSearches.value.filter((s) => s !== q));
+  if (active.value >= flat.value.length) active.value = Math.max(0, flat.value.length - 1);
+}
+
+const savedItems = computed<SavedGroupItem[]>(() => {
+  const q = query.value.trim();
+  const out: SavedGroupItem[] = [];
+  // "Save this query" command — only when there IS a query and it isn't saved yet.
+  if (q && !savedSearches.value.includes(q)) {
+    out.push({ kind: 'save', id: `save:${q}`, label: `${t('palette.save')}: ${q}`, icon: '💾', query: q });
+  }
+  const scored = savedSearches.value
+    .map((s) => ({ s, sc: matchScore(s, q) }))
+    .filter((r) => r.sc >= 0 || !q);
+  for (const r of scored) {
+    out.push({ kind: 'saved', id: `saved:${r.s}`, label: r.s, icon: '🔖', query: r.s });
+  }
+  return out;
+});
+
+/* ======================================================================== */
+
 const flat = computed<PaletteItem[]>(() => [
   ...gotoItems.value,
   ...fileItems.value,
+  ...hitItems.value,
+  ...savedItems.value,
   ...commandItems.value,
 ]);
 const fileOffset = computed(() => gotoItems.value.length);
-const cmdOffset = computed(() => gotoItems.value.length + fileItems.value.length);
+const hitOffset = computed(() => fileOffset.value + fileItems.value.length);
+const savedOffset = computed(() => hitOffset.value + hitItems.value.length);
+const cmdOffset = computed(() => savedOffset.value + savedItems.value.length);
 
-watch(query, () => {
+watch(query, (q) => {
   active.value = 0;
+  scheduleEverywhere(q.trim()); /* bul:s3 */
 });
 
 function move(delta: number) {
@@ -134,7 +281,23 @@ function move(delta: number) {
 function choose(item?: PaletteItem) {
   const it = item ?? flat.value[active.value];
   if (!it) return;
+  /* bul:s3 — saved-search rows keep the palette OPEN: picking one re-runs
+   * the palette with that query; saving just persists it. */
+  if (it.kind === 'saved') {
+    query.value = it.query;
+    void nextTick(() => inputEl.value?.focus());
+    return;
+  }
+  if (it.kind === 'save') {
+    saveSearch(it.query);
+    void nextTick(() => inputEl.value?.focus());
+    return;
+  }
   emit('close');
+  if (it.kind === 'hit') {
+    emit('open-hit', it.hit);
+    return;
+  }
   if (it.kind === 'file') {
     emit('open-node', it.node);
   } else if (it.kind === 'goto') {
@@ -183,15 +346,23 @@ watch(
     if (v) {
       query.value = '';
       active.value = 0;
+      /* bul:s3 — fresh session state for the new groups. */
+      everywhere.value = [];
+      everywhereLoading.value = false;
+      savedSearches.value = readSavedSearches();
       document.addEventListener('keydown', onDocKeydown, true);
       void nextTick(() => inputEl.value?.focus());
     } else {
+      if (everywhereTimer) clearTimeout(everywhereTimer); /* bul:s3 */
       document.removeEventListener('keydown', onDocKeydown, true);
     }
   },
 );
 
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, true));
+onBeforeUnmount(() => {
+  if (everywhereTimer) clearTimeout(everywhereTimer); /* bul:s3 */
+  document.removeEventListener('keydown', onDocKeydown, true);
+});
 </script>
 
 <template>
@@ -269,6 +440,69 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, true
             </button>
           </template>
 
+          <!-- bul:s3 — "Everywhere" global-search hits -->
+          <template v-if="hitItems.length || everywhereLoading">
+            <div class="fe-cmdp__group">{{ t('palette.everywhere') }}</div>
+            <div v-if="everywhereLoading && !hitItems.length" class="fe-cmdp__loading">
+              {{ t('palette.searching') }}
+            </div>
+            <button
+              v-for="(it, i) in hitItems"
+              :key="it.id"
+              type="button"
+              class="fe-cmdp__item fe-cmdp__item--hit"
+              :class="{ 'is-active': hitOffset + i === active }"
+              role="option"
+              :aria-selected="hitOffset + i === active"
+              @mouseenter="active = hitOffset + i"
+              @click="choose(it)"
+            >
+              <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+              <span class="fe-cmdp__hitbody">
+                <span class="fe-cmdp__hitline">
+                  <span class="fe-cmdp__label">{{ it.label }}</span>
+                  <span v-if="it.inContent" class="fe-cmdp__badge">{{ t('search.in_content') }}</span>
+                </span>
+                <span v-if="it.crumb" class="fe-cmdp__crumb" :title="it.crumb">{{ it.crumb }}</span>
+                <!-- Snippet: «»-highlights become <mark> via TEXT segments — never innerHTML. -->
+                <span v-if="it.snippet" class="fe-cmdp__snippet">
+                  <template v-for="(seg, si) in snippetSegments(it.snippet)" :key="si">
+                    <mark v-if="seg.match" class="fe-cmdp__mark">{{ seg.text }}</mark>
+                    <template v-else>{{ seg.text }}</template>
+                  </template>
+                </span>
+              </span>
+            </button>
+          </template>
+
+          <!-- bul:s3 — saved searches -->
+          <template v-if="savedItems.length">
+            <div class="fe-cmdp__group">{{ t('palette.saved') }}</div>
+            <div
+              v-for="(it, i) in savedItems"
+              :key="it.id"
+              class="fe-cmdp__item fe-cmdp__item--saved"
+              :class="{ 'is-active': savedOffset + i === active }"
+              role="option"
+              :aria-selected="savedOffset + i === active"
+              tabindex="-1"
+              @mouseenter="active = savedOffset + i"
+              @click="choose(it)"
+              @keydown.enter.prevent="choose(it)"
+            >
+              <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+              <span class="fe-cmdp__label">{{ it.label }}</span>
+              <button
+                v-if="it.kind === 'saved'"
+                type="button"
+                class="fe-cmdp__del"
+                :title="t('palette.saved.delete')"
+                :aria-label="t('palette.saved.delete')"
+                @click.stop="removeSavedSearch(it.query)"
+              >🗑</button>
+            </div>
+          </template>
+
           <template v-if="commandItems.length">
             <div class="fe-cmdp__group">{{ t('palette.commands') }}</div>
             <button
@@ -287,7 +521,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocKeydown, true
             </button>
           </template>
 
-          <div v-if="flat.length === 0" class="fe-cmdp__empty">
+          <div v-if="flat.length === 0 && !everywhereLoading" class="fe-cmdp__empty">
             {{ t('palette.empty') }}
           </div>
         </div>

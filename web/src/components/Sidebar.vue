@@ -24,6 +24,7 @@ import {
   FolderOpen,
   History,
   KeyRound,
+  Copy as CopyIcon /* bul:s3 */,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -68,6 +69,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'shares' }, label: t('nav.shares'), icon: Share2, group: 'main' },
   { to: { name: 'trash' }, label: t('nav.trash'), icon: trashCount.value > 0 ? TrashFull : Trash2, group: 'main' },
   { to: { name: 'search' }, label: t('nav.search'), icon: Search, group: 'main' },
+  { to: { name: 'duplicates' }, label: t('nav.duplicates'), icon: CopyIcon, group: 'main' } /* bul:s3 */,
   { to: { name: 'tagged' }, label: t('nav.tagged'), icon: Tag, group: 'main' },
 
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },

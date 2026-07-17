@@ -1830,3 +1830,104 @@ filex-explorer {
   border-radius: 50%;
   background: var(--fe-warning, #f59e0b);
 }
+
+/* === bul:s3 === */
+
+/* Palette — "Everywhere" hit rows (name + crumb + snippet stack). */
+.fe-cmdp__item--hit {
+  align-items: flex-start;
+}
+.fe-cmdp__item--hit .fe-cmdp__icon {
+  margin-top: 1px;
+}
+.fe-cmdp__hitbody {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fe-cmdp__hitline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-cmdp__badge,
+.fe-list__badge {
+  flex: 0 0 auto;
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--fe-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--fe-primary) 12%, transparent);
+  color: var(--fe-primary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.fe-cmdp__crumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--fe-text-muted);
+}
+.fe-cmdp__snippet,
+.fe-list__snippet {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
+.fe-cmdp__mark,
+.fe-list__mark {
+  background: color-mix(in srgb, var(--fe-primary) 22%, transparent);
+  color: var(--fe-text);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+.fe-cmdp__loading {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+
+/* Palette — saved-search rows (div-based so the delete button nests legally). */
+.fe-cmdp__item--saved {
+  user-select: none;
+}
+.fe-cmdp__del {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.fe-cmdp__item--saved:hover .fe-cmdp__del,
+.fe-cmdp__item--saved.is-active .fe-cmdp__del {
+  opacity: 1;
+}
+.fe-cmdp__del:hover {
+  background: var(--fe-bg-elev);
+  color: var(--fe-danger, #dc2626);
+}
+.fe-cmdp__del:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+/* List view — search-result snippet line under the filename. */
+.fe-list__snippet {
+  max-width: 100%;
+}

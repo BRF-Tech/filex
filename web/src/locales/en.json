@@ -83,6 +83,7 @@
     "shares": "Shares",
     "trash": "Trash",
     "search": "Search",
+    "duplicates": "Duplicates",
     "tagged": "Tagged files",
     "replica": "Replica",
     "queue": "Queue",
@@ -451,7 +452,12 @@
     "rebuildHint": "This walks every storage and re-indexes file metadata. Takes a few minutes per million files.",
     "rebuildStarted": "Rebuild started",
     "queryPlaceholder": "Search files…",
-    "noResults": "No matches"
+    "noResults": "No matches",
+    "scope": "Search scope",
+    "scopeAll": "All",
+    "scopeName": "Name",
+    "scopeContent": "Content",
+    "inContent": "In content"
   },
   "tagged": {
     "title": "Tagged files",
@@ -786,5 +792,23 @@
     "retry": "Retry",
     "dismiss": "Dismiss",
     "hide": "Hide"
+  },
+  "duplicates": {
+    "title": "Duplicate files",
+    "subtitle": "Copies grouped by identical size + etag — read-only report",
+    "summary": "{groups} groups, {waste} wasted in total",
+    "stats": {
+      "groups": "Duplicate groups",
+      "copies": "Extra copies",
+      "waste": "Total waste"
+    },
+    "copies": "{n} copies",
+    "wasted": "{size} wasted",
+    "colPath": "File / path",
+    "colStorage": "Storage",
+    "colSize": "Size",
+    "colEtag": "ETag",
+    "emptyTitle": "No duplicate files",
+    "emptyDescription": "No multiple copies with the same size and etag were found."
   }
 }

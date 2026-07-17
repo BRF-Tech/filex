@@ -20,6 +20,11 @@ type Capabilities struct {
 	// Thumbnail backends present in the runtime.
 	Thumbs ThumbCapabilities `json:"thumbs"`
 
+	// OCR reports whether the optional `tesseract` binary was found
+	// (FILEX_TESSERACT_BIN or $PATH) — image text extraction for the
+	// content search index (v0.2 "Bul").
+	OCR bool `json:"ocr"`
+
 	// Per-storage capability probe — keyed by storage ID (string for JSON).
 	Storage map[string]StorageCapabilities `json:"storage,omitempty"`
 

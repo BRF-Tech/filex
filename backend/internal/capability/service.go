@@ -17,6 +17,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/search/extract"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -175,6 +176,10 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	if has("rsvg-convert") {
 		caps.Thumbs.SVG = true
 	}
+	// Optional OCR for content search — resolution shared with the
+	// extractor (FILEX_TESSERACT_BIN authoritative, else $PATH) so the
+	// advertised flag and the actual pipeline can never disagree.
+	caps.OCR = extract.TesseractBin() != ""
 
 	// External services from DB.
 	if list, err := s.store.ListExternalServices(ctx); err == nil {

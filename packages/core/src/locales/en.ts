@@ -187,4 +187,12 @@ export const en: Record<string, string> = {
   'toast.trashed': 'Moved to trash',
   'conn.offline': 'No live connection — changes may be delayed',
   'conn.tooltip': 'Live connection to the server is unavailable; the list refreshes periodically. This notice disappears once the connection is back.',
+
+  /* === bul:s3 === */
+  'palette.everywhere': 'Everywhere',
+  'palette.searching': 'Searching…',
+  'palette.saved': 'Saved searches',
+  'palette.save': 'Save search',
+  'palette.saved.delete': 'Delete saved search',
+  'search.in_content': 'In content',
 };

@@ -12,7 +12,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -87,7 +90,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		Title:   "filex file manager",
 		Version: version.String(),
 	}, nil)
-	registerFilexTools(srv, ops)
+	registerFilexTools(srv, ops, h.searchIndex())
 
 	// Admin tools are gated by the `admin` token scope (on top of the route's
 	// `mcp` scope). A token without `admin` never sees admin_* in tools/list.
@@ -143,7 +146,25 @@ type mcpMoveIn struct {
 
 type mcpSearchIn struct {
 	Path  string `json:"path,omitempty" jsonschema:"adapter:// scope for the search; empty = first storage"`
-	Query string `json:"query" jsonschema:"substring to match against file/dir names"`
+	Query string `json:"query" jsonschema:"term to match against file/dir names (and file contents unless content=false)"`
+	// Content is a *bool so an omitted argument defaults to TRUE (the
+	// frozen v0.2 contract) while an explicit false still turns it off.
+	Content *bool `json:"content,omitempty" jsonschema:"also match inside extracted file contents and return snippets (default true)"`
+}
+
+// mcpSearchEntry is one file_search hit: the classic entry plus the v0.2
+// content-search fields.
+type mcpSearchEntry struct {
+	aiEntry
+	// Snippet is a short plain-text fragment around a content match with
+	// matched terms wrapped in « » (empty for name-only hits, never HTML).
+	Snippet string `json:"snippet,omitempty"`
+	// Matched reports which side(s) hit: "name" | "content" | "both".
+	Matched string `json:"matched,omitempty"`
+}
+
+type mcpSearchOut struct {
+	Entries []mcpSearchEntry `json:"entries"`
 }
 
 type mcpShareIn struct {
@@ -170,8 +191,20 @@ type mcpUnzipOut struct {
 	Extracted int `json:"extracted"` // number of files written
 }
 
-// registerFilexTools wires every MCP tool onto srv, bound to ops.
-func registerFilexTools(srv *mcp.Server, ops *aiOps) {
+// searchIndex digs the shared Bleve index out of the admin surface — AIMCP's
+// constructor (frozen in routes.go for this wave) doesn't carry the index
+// directly, and the admin wrapper is built unconditionally with the same
+// *search.Index instance the whole server uses. nil = name-only search.
+func (h *AIMCP) searchIndex() *search.Index {
+	if h.admin == nil || h.admin.searchAdm == nil {
+		return nil
+	}
+	return h.admin.searchAdm.Index
+}
+
+// registerFilexTools wires every MCP tool onto srv, bound to ops. idx (may
+// be nil) powers file_search's content mode.
+func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_root",
 		Description: "Report your access scope FIRST: the confinement root you're locked to (if any) and the storage adapter names you can address. If confined, address files with bare relative paths (they resolve UNDER your root) or full adapter://root/... paths — never guess adapter names.",
@@ -275,13 +308,14 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_search",
-		Description: "Search file and folder names by substring within a storage.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSearchIn) (*mcp.CallToolResult, mcpEntriesOut, error) {
-		entries, err := ops.Search(ctx, in.Path, in.Query)
+		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSearchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
+		withContent := in.Content == nil || *in.Content
+		entries, err := mcpSearch(ctx, ops, idx, in.Path, in.Query, withContent)
 		if err != nil {
-			return toolErr[mcpEntriesOut](err)
+			return toolErr[mcpSearchOut](err)
 		}
-		return nil, mcpEntriesOut{Entries: entries}, nil
+		return nil, mcpSearchOut{Entries: entries}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -326,6 +360,75 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps) {
 		}
 		return nil, mcpUnzipOut{Extracted: n}, nil
 	})
+}
+
+// mcpSearch backs the file_search tool. Name-only mode (content=false, or
+// no live Bleve index) reuses aiOps.Search's SQL LIKE path unchanged; the
+// content mode consults the index with scope=all and re-applies the SAME
+// access filters aiOps.Search enforces — storage scoping via resolveStorage,
+// the token's confinement root, and the bound user's RBAC grants — so a
+// snippet can never leak text the caller couldn't reach by browsing.
+func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query string, withContent bool) ([]mcpSearchEntry, error) {
+	nameEntries, err := ops.Search(ctx, p, query)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mcpSearchEntry, 0, len(nameEntries))
+	if !withContent || idx == nil || !idx.Enabled() {
+		for _, e := range nameEntries {
+			out = append(out, mcpSearchEntry{aiEntry: e, Matched: search.MatchedName})
+		}
+		return out, nil
+	}
+
+	s, _, err := ops.resolveStorage(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	root, confined := confine.RootFromToken(ctx)
+	var set *acl.Set
+	if ops.acl != nil {
+		set, _ = ops.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
+	}
+
+	seen := map[string]bool{}
+	for _, hit := range idx.SafeSearchScoped(ctx, query, 200, search.ScopeAll) {
+		n, gerr := ops.store.GetNode(ctx, hit.NodeID)
+		if gerr != nil || n == nil || n.DeletedAt != nil || n.StorageID != s.ID {
+			continue
+		}
+		if confined && !root.Within(s.Name, n.Path) {
+			continue
+		}
+		if set != nil && !set.CanSee(n.Path) {
+			continue
+		}
+		typ := "file"
+		if n.Type == model.NodeTypeDirectory {
+			typ = "dir"
+		}
+		e := aiEntry{
+			Path: joinAdapterPath(s.Name, n.Path),
+			Name: n.Name,
+			Type: typ,
+			Size: n.Size,
+			Mime: n.Mime,
+		}
+		if n.BackendMtime != nil {
+			e.LastModified = n.BackendMtime.UnixMilli()
+		}
+		out = append(out, mcpSearchEntry{aiEntry: e, Snippet: hit.Snippet, Matched: hit.Matched})
+		seen[e.Path] = true
+	}
+	// Merge SQL LIKE name hits the index missed (e.g. rows written moments
+	// ago that Bleve hasn't flushed) so content mode stays a superset of
+	// the pre-v0.2 behavior.
+	for _, e := range nameEntries {
+		if !seen[e.Path] {
+			out = append(out, mcpSearchEntry{aiEntry: e, Matched: search.MatchedName})
+		}
+	}
+	return out, nil
 }
 
 // toolErr packs an error into an MCP tool error result (IsError=true) rather

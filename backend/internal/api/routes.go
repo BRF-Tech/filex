@@ -382,6 +382,8 @@ func BuildRouter(d *Deps) http.Handler {
 
 		r.Route("/api/admin", func(r chi.Router) {
 			r.Get("/dashboard", dashH.Get)
+			// Duplicate-file report — same (size, etag) grouping (v0.2 "Bul").
+			r.Get("/duplicates", handlers.NewDuplicates(d.Store).Report)
 
 			r.Route("/storages", func(r chi.Router) {
 				r.Get("/", stg.List)

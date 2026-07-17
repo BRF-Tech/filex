@@ -191,6 +191,12 @@ type Store interface {
 	ListExternalServices(ctx context.Context) ([]*ExternalService, error)
 	UpdateExternalServiceState(ctx context.Context, name string, lastCheck time.Time, state string) error
 
+	// Duplicate report — every live file node whose (size, non-empty etag)
+	// pair occurs more than once, minSize filtering applied in SQL. Rows come
+	// back ordered (size DESC, etag, id) so the handler can group them
+	// contiguously. Powers GET /api/admin/duplicates (v0.2 "Bul").
+	ListDuplicateNodes(ctx context.Context, minSize int64) ([]DuplicateNode, error)
+
 	// Cross-storage analytics for the dashboard
 	SumNodesBytesByStorage(ctx context.Context, storageID int64) (int64, error)
 	CountNodesAddedSince(ctx context.Context, storageID int64, since time.Time) (int64, error)
@@ -338,4 +344,16 @@ type ShareWithMeta struct {
 type AuditEntryWithUser struct {
 	Entry     *model.AuditEntry `json:"entry"`
 	UserEmail string            `json:"user_email,omitempty"`
+}
+
+// DuplicateNode is one row of the duplicate-file report query — a slim
+// projection of nodes (no timestamps/sync state) since the report only
+// needs identity + grouping fields.
+type DuplicateNode struct {
+	ID        int64
+	StorageID int64
+	Path      string
+	Name      string
+	Size      int64
+	Etag      string
 }

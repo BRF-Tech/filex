@@ -371,6 +371,23 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
+	// Content extraction ("Bul"): register the async content_index job and
+	// hook the search index so every metadata (re)index of an eligible file
+	// enqueues extraction — this covers the upload/write handlers AND the
+	// sync worker upserts, since both feed Index.IndexNode. Kill-switch:
+	// FILEX_SEARCH_CONTENT=0. Best-effort by design — the write path never
+	// blocks on (or fails because of) extraction.
+	if idx != nil && srvObj.qpool != nil && cfg.Search.Content {
+		contentIdx := queue.NewContentIndexer(store, resolver, idx, cfg.Search.ContentMaxBytes)
+		srvObj.qpool.Register(queue.TypeContentIndex, contentIdx.Handle)
+		qd := srvObj.queue
+		idx.SetContentHook(func(ctx context.Context, n *model.Node) {
+			// WithoutCancel: a client disconnect right after a write must
+			// not drop the enqueue mid-flight.
+			contentIdx.Enqueue(context.WithoutCancel(ctx), qd, n)
+		})
+	}
+
 	// Notifications subsystem.
 	if cfg.Notify.Enabled {
 		srvObj.notify = notify.New(store, notify.Config{

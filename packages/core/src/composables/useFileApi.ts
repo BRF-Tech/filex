@@ -101,6 +101,34 @@ export interface InviteResponse {
   emailed: boolean;
 }
 
+/* === bul:s3 — global search (GET /api/files/search) === */
+
+export type GlobalSearchScope = 'name' | 'content' | 'all';
+
+/**
+ * One hit from the dedicated files-search endpoint. The backend returns raw
+ * node rows (`{results: [...]}`), so `path` is the IN-STORAGE relative path
+ * (no `adapter://` prefix) and the storage comes back as a numeric
+ * `storage_id`. `snippet`/`matched` are the v0.2 "Bul" contract additions —
+ * older backends simply omit them, so every consumer must stay
+ * undefined-safe.
+ */
+export interface GlobalSearchHit {
+  id?: number;
+  storage_id?: number;
+  name?: string;
+  path?: string;
+  /** `file` | `dir` (backend NodeType). */
+  type?: string;
+  size?: number;
+  mime?: string;
+  /** Plain-text content snippet; matches wrapped in «» (never HTML). */
+  snippet?: string;
+  /** Where the hit matched: name | content | both. */
+  matched?: 'name' | 'content' | 'both';
+  [k: string]: unknown;
+}
+
 /**
  * Resolve a Vuefinder-compatible endpoint map from the user's config.
  * Either `apiBase` is set (auto-derive everything) or each route is
@@ -338,6 +366,22 @@ export function useFileApi(config: ExplorerConfig) {
 
   async function search(path: string, filter: string): Promise<ManagerResponse> {
     return jsonFetch<ManagerResponse>(managerUrl('search', { path, filter }));
+  }
+
+  /* === bul:s3 — global "search everywhere" ===
+   * Derived from the manager endpoint by swapping `/manager` for `/search`
+   * (same trick permissionsUrl uses), so embedded proxies that forward the
+   * whole /api/files/* subtree keep working. Errors and legacy backends
+   * degrade to an empty result list — the palette just shows nothing. */
+  async function globalSearch(
+    query: string,
+    opts: { limit?: number; scope?: GlobalSearchScope } = {},
+  ): Promise<GlobalSearchHit[]> {
+    const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/search');
+    const sep = base.includes('?') ? '&' : '?';
+    const url = `${base}${sep}${qs({ q: query, limit: opts.limit, scope: opts.scope })}`;
+    const data = await jsonFetch<{ results?: GlobalSearchHit[] | null }>(url);
+    return Array.isArray(data?.results) ? data.results : [];
   }
 
   async function subfolders(path: string): Promise<{ folders: FileNode[] }> {
@@ -661,6 +705,7 @@ export function useFileApi(config: ExplorerConfig) {
     // Manager
     index,
     search,
+    globalSearch /* bul:s3 */,
     subfolders,
     newFolder,
     rename,

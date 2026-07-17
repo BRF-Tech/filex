@@ -187,4 +187,12 @@ export const tr: Record<string, string> = {
   'toast.trashed': 'Çöpe taşındı',
   'conn.offline': 'Canlı bağlantı yok — değişiklikler gecikebilir',
   'conn.tooltip': 'Sunucuyla canlı bağlantı kurulamadı; liste belirli aralıklarla otomatik yenilenir. Bağlantı geri gelince bu uyarı kaybolur.',
+
+  /* === bul:s3 === */
+  'palette.everywhere': 'Her yerde',
+  'palette.searching': 'Aranıyor…',
+  'palette.saved': 'Kayıtlı aramalar',
+  'palette.save': 'Aramayı kaydet',
+  'palette.saved.delete': 'Kayıtlı aramayı sil',
+  'search.in_content': 'İçerikte',
 };

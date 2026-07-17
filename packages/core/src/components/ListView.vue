@@ -11,6 +11,7 @@ import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
+import { matchedInContent, snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import StarButton from './StarButton.vue';
 
 const props = defineProps<{
@@ -135,6 +136,19 @@ function parentDir(path: string): string {
   const idx = stripped.lastIndexOf('/');
   if (idx === -1) return '';
   return stripped.slice(0, idx);
+}
+
+/* bul:s3 — search-result enrichment. The v0.2 backend inlines `snippet`
+ * (plain text, «» highlights) + `matched` on search hits; regular listings
+ * never carry them, so presence-gating keeps normal rows untouched and an
+ * older backend simply renders nothing extra. */
+function rowSnippet(n: FileNode): string {
+  const s = (n as Record<string, unknown>).snippet;
+  return typeof s === 'string' ? s : '';
+}
+
+function rowInContent(n: FileNode): boolean {
+  return matchedInContent((n as Record<string, unknown>).matched);
 }
 
 // ------------------------------------------------------------------
@@ -342,12 +356,23 @@ const segments = computed<Segment[]>(() => {
           <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
           <span v-else class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconSvg(n)"></span>
           <div class="fe-list__name-wrap">
-            <span class="fe-list__name" :title="n.basename">{{ nodeDisplayName(n) }}</span>
+            <span class="fe-list__name" :title="n.basename">
+              {{ nodeDisplayName(n) }}
+              <!-- bul:s3 — content-match badge -->
+              <span v-if="rowInContent(n)" class="fe-list__badge">{{ t('search.in_content') }}</span>
+            </span>
             <span
               v-if="showParentPath"
               class="fe-list__parent"
               :title="parentDir(n.path)"
             >{{ parentDir(n.path) || '—' }}</span>
+            <!-- bul:s3 — content snippet («» → <mark> via TEXT segments, no innerHTML) -->
+            <span v-if="rowSnippet(n)" class="fe-list__snippet">
+              <template v-for="(seg, si) in snippetSegments(rowSnippet(n))" :key="si">
+                <mark v-if="seg.match" class="fe-list__mark">{{ seg.text }}</mark>
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </span>
           </div>
         </div>
         <div class="fe-list__col fe-list__col--size">

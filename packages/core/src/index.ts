@@ -57,6 +57,10 @@ export { isExternalUsable } from './types/FileNode';
 // ——— Composables (consumers can roll their own UI on top) ———
 export { useFileApi, resolveEndpoints } from './composables/useFileApi';
 export type { FileApi, ManagerResponse, PendingOpDto } from './composables/useFileApi';
+/* bul:s3 — global-search contract types + snippet helpers */
+export type { GlobalSearchHit, GlobalSearchScope } from './composables/useFileApi';
+export { snippetSegments, matchedInContent } from './lib/snippet';
+export type { SnippetSegment, SearchMatched } from './lib/snippet';
 
 export { useUploadChunked } from './composables/useUploadChunked';
 export type { UploadJob, UploadOptions } from './composables/useUploadChunked';
