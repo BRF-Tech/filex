@@ -509,8 +509,22 @@ func (s *Store) TouchNodeSeen(ctx context.Context, id int64) error {
 // rewrites path/path_hash to the supplied trash key, and stashes the
 // original path in storage_key for later Restore. The parent_id is
 // nulled so listings of the original parent forget the row.
+//
+// Directories additionally drag their whole cached subtree along (GitHub
+// issue #5): every live descendant row is rewritten to the matching
+// trash-prefixed path (path_hash recomputed, original path preserved in
+// storage_key) and soft-deleted. parent_id + name stay untouched on the
+// children so RestoreNodeAt can mirror the rewrite back. Without this the
+// children kept their ORIGINAL paths while soft-deleted, wedging the
+// unique indexes for every future sync create at the same location.
 func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, trashHash, origPath string) error {
 	base := path.Base(trashPath)
+	var nodeType string
+	var curPath string
+	var storageID int64
+	scanErr := s.db.QueryRowContext(ctx,
+		`SELECT storage_id, type, path FROM nodes WHERE id=?`, id).
+		Scan(&storageID, &nodeType, &curPath)
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE nodes
 		SET deleted_at=CURRENT_TIMESTAMP,
@@ -518,7 +532,152 @@ func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, tra
 		    parent_id=NULL,
 		    name=?, path=?, path_hash=?, storage_key=?
 		WHERE id=?`, base, trashPath, trashHash, origPath, id)
-	return err
+	if err != nil || scanErr != nil {
+		return err
+	}
+	if nodeType == string(model.NodeTypeDirectory) {
+		s.retagTrashedSubtree(ctx, storageID, []string{origPath, curPath}, trashPath)
+	}
+	return nil
+}
+
+// retagTrashedSubtree soft-deletes every live descendant under any of the
+// supplied original folder paths, rewriting each row's path to live under
+// trashPath (storage_key keeps the original path so per-row restore still
+// works). Best-effort: a failing child row is skipped — the sync worker
+// reconciles leftovers, and the partial unique index (migration 00018)
+// keeps them from wedging future creates.
+func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPaths []string, trashPath string) {
+	type childRow struct {
+		id   int64
+		path string
+	}
+	prefixes := subtreePrefixVariants(origPaths)
+	if len(prefixes) == 0 {
+		return
+	}
+	var children []childRow
+	for _, pfx := range prefixes {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT id, path FROM nodes
+			WHERE storage_id=? AND deleted_at IS NULL AND SUBSTR(path,1,?)=?`,
+			storageID, len(pfx), pfx)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var c childRow
+			if err := rows.Scan(&c.id, &c.path); err == nil {
+				children = append(children, c)
+			}
+		}
+		_ = rows.Err()
+		rows.Close()
+	}
+	seen := map[int64]bool{}
+	for _, c := range children {
+		if seen[c.id] {
+			continue
+		}
+		seen[c.id] = true
+		suffix := subtreeSuffix(c.path, prefixes)
+		if suffix == "" {
+			continue
+		}
+		newPath := strings.TrimRight(trashPath, "/") + "/" + suffix
+		newHash := nodePathHash(storageID, newPath)
+		_, _ = s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=CURRENT_TIMESTAMP,
+			    updated_at=CURRENT_TIMESTAMP,
+			    path=?, path_hash=?, storage_key=?
+			WHERE id=?`, newPath, newHash, c.path, c.id)
+	}
+}
+
+// restoreTrashedSubtree is the mirror of retagTrashedSubtree: every
+// soft-deleted descendant still parked under the folder's trash path is
+// revived at the folder's restored location (path prefix swapped back,
+// path_hash recomputed, storage_key synced to the new path). parent_id and
+// name were never touched on children so the tree re-links itself.
+func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, trashPaths []string, restoredPath string) {
+	type childRow struct {
+		id   int64
+		path string
+	}
+	prefixes := subtreePrefixVariants(trashPaths)
+	if len(prefixes) == 0 {
+		return
+	}
+	var children []childRow
+	for _, pfx := range prefixes {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT id, path FROM nodes
+			WHERE storage_id=? AND deleted_at IS NOT NULL AND SUBSTR(path,1,?)=?`,
+			storageID, len(pfx), pfx)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var c childRow
+			if err := rows.Scan(&c.id, &c.path); err == nil {
+				children = append(children, c)
+			}
+		}
+		_ = rows.Err()
+		rows.Close()
+	}
+	seen := map[int64]bool{}
+	for _, c := range children {
+		if seen[c.id] {
+			continue
+		}
+		seen[c.id] = true
+		suffix := subtreeSuffix(c.path, prefixes)
+		if suffix == "" {
+			continue
+		}
+		newPath := strings.TrimRight(restoredPath, "/") + "/" + suffix
+		newHash := nodePathHash(storageID, newPath)
+		_, _ = s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NULL,
+			    updated_at=CURRENT_TIMESTAMP,
+			    path=?, path_hash=?, storage_key=?
+			WHERE id=?`, newPath, newHash, newPath, c.id)
+	}
+}
+
+// subtreePrefixVariants normalizes candidate folder paths into the two
+// on-disk conventions the nodes.path column historically mixes (with and
+// without a leading slash), each with a trailing "/" so only strict
+// descendants match.
+func subtreePrefixVariants(paths []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range paths {
+		norm := strings.TrimRight(path.Clean("/"+strings.Trim(p, "/")), "/")
+		if norm == "" || norm == "/" {
+			continue // never treat the storage root as a subtree
+		}
+		for _, v := range []string{norm + "/", strings.TrimPrefix(norm, "/") + "/"} {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// subtreeSuffix strips the first matching prefix variant off p ("" = no match).
+func subtreeSuffix(p string, prefixes []string) string {
+	for _, pfx := range prefixes {
+		if strings.HasPrefix(p, pfx) {
+			return strings.TrimPrefix(p, pfx)
+		}
+	}
+	return ""
 }
 
 func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
@@ -2066,31 +2225,41 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	if clean == "" {
 		clean = "/"
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT storage_id FROM nodes WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT storage_id, type, path FROM nodes WHERE id=?`, id)
 	var sid int64
-	if err := row.Scan(&sid); err != nil {
+	var nodeType, trashPath string
+	if err := row.Scan(&sid, &nodeType, &trashPath); err != nil {
 		return err
 	}
 	hash := nodePathHash(sid, clean)
 	name := path.Base(clean)
 	if parentID == nil {
-		_, err := s.db.ExecContext(ctx, `
+		if _, err := s.db.ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL,
 			    updated_at=CURRENT_TIMESTAMP,
 			    parent_id=NULL,
 			    name=?, path=?, path_hash=?, storage_key=?
-			WHERE id=?`, name, clean, hash, clean, id)
-		return err
+			WHERE id=?`, name, clean, hash, clean, id); err != nil {
+			return err
+		}
+	} else {
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NULL,
+			    updated_at=CURRENT_TIMESTAMP,
+			    parent_id=?,
+			    name=?, path=?, path_hash=?, storage_key=?
+			WHERE id=?`, *parentID, name, clean, hash, clean, id); err != nil {
+			return err
+		}
 	}
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE nodes
-		SET deleted_at=NULL,
-		    updated_at=CURRENT_TIMESTAMP,
-		    parent_id=?,
-		    name=?, path=?, path_hash=?, storage_key=?
-		WHERE id=?`, *parentID, name, clean, hash, clean, id)
-	return err
+	// Restored a trashed directory → revive the descendants that were
+	// dragged into the trash with it (SoftDeleteAndRetag mirror).
+	if nodeType == string(model.NodeTypeDirectory) && trashPath != "" {
+		s.restoreTrashedSubtree(ctx, sid, []string{trashPath}, clean)
+	}
+	return nil
 }
 
 // LookupParentByPath returns parent_id (nil at root) for `fullPath`'s
@@ -2529,7 +2698,7 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 // GetWebhookTarget returns a single target by id.
 func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
 		 FROM webhook_targets WHERE id=?`, id)
 	return scanWebhookTarget(row)
 }
@@ -2539,7 +2708,7 @@ func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookT
 // tiny and the admin list needs disabled rows too.
 func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
 		 FROM webhook_targets ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list webhook targets: %w", err)
@@ -2589,6 +2758,22 @@ func (s *Store) DeleteWebhookTarget(ctx context.Context, id int64) error {
 	return nil
 }
 
+// UpdateWebhookTargetDelivery records the newest delivery outcome
+// (migration 00019). errMsg "" (success) stores NULL in last_error.
+func (s *Store) UpdateWebhookTargetDelivery(ctx context.Context, id int64, httpStatus int, errMsg string, at time.Time) error {
+	var errVal any
+	if errMsg != "" {
+		errVal = errMsg
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE webhook_targets SET last_status=?, last_error=?, last_delivery_at=? WHERE id=?`,
+		httpStatus, errVal, at.UTC(), id)
+	if err != nil {
+		return fmt.Errorf("sqlite: update webhook target delivery: %w", err)
+	}
+	return nil
+}
+
 // scanWebhookTarget accepts both *sql.Row and *sql.Rows. Enabled is
 // scanned through an int so the same code serves SQLite (INTEGER) and
 // MySQL (TINYINT) via the wrapping driver.
@@ -2596,11 +2781,28 @@ func scanWebhookTarget(rs interface {
 	Scan(...any) error
 }) (*model.WebhookTarget, error) {
 	t := &model.WebhookTarget{}
-	var enabled int
-	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &enabled, &t.CreatedAt); err != nil {
+	var (
+		enabled int
+		lastSt  sql.NullInt64
+		lastErr sql.NullString
+		lastAt  sql.NullTime
+	)
+	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &enabled, &t.CreatedAt, &lastSt, &lastErr, &lastAt); err != nil {
 		return nil, err
 	}
 	t.Enabled = enabled != 0
+	if lastSt.Valid {
+		v := int(lastSt.Int64)
+		t.LastStatus = &v
+	}
+	if lastErr.Valid {
+		v := lastErr.String
+		t.LastError = &v
+	}
+	if lastAt.Valid {
+		v := lastAt.Time
+		t.LastDeliveryAt = &v
+	}
 	return t, nil
 }
 

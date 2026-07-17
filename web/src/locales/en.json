@@ -844,6 +844,7 @@
     "testFail": "Test delivery failed: {error}",
     "statusSent": "sent",
     "statusFailed": "failed",
+    "lastDeliveryOk": "Last delivery succeeded ({at})",
     "saved": "Webhook saved",
     "deleted": "Webhook deleted",
     "deleteConfirm": "Delete webhook \"{name}\"?",

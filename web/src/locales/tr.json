@@ -844,6 +844,7 @@
     "testFail": "Test gönderimi başarısız: {error}",
     "statusSent": "gönderildi",
     "statusFailed": "başarısız",
+    "lastDeliveryOk": "Son gönderim başarılı ({at})",
     "saved": "Webhook kaydedildi",
     "deleted": "Webhook silindi",
     "deleteConfirm": "\"{name}\" webhook'u silinsin mi?",

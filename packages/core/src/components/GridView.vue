@@ -6,6 +6,7 @@ import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
+import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
 
 const props = defineProps<{
   files: FileNode[];
@@ -109,6 +110,21 @@ function specialEmojiFor(n: FileNode): string | null {
   if (n.mime_type === 'inode/storage') return '💾';
   return null;
 }
+
+/* bul:s3 — search-result enrichment, same presence-gating as ListView:
+ * only search hits carry `snippet`, so normal listings render nothing. */
+function cardSnippet(n: FileNode): string {
+  const s = (n as Record<string, unknown>).snippet;
+  return typeof s === 'string' ? s : '';
+}
+
+// Plain-text form for the title attribute — same parser as the render
+// path, guillemets dropped (no separate sanitize route).
+function snippetTitle(snippet: string): string {
+  return snippetSegments(snippet)
+    .map((seg) => seg.text)
+    .join('');
+}
 </script>
 
 <template>
@@ -163,6 +179,13 @@ function specialEmojiFor(n: FileNode): string | null {
       >{{ parentDir(n.path) || '—' }}</div>
       <div class="fe-grid__meta">
         {{ formatSize(n.size) }}
+      </div>
+      <!-- bul:s3 — content snippet («» → <mark> via TEXT segments, no innerHTML) -->
+      <div v-if="cardSnippet(n)" class="fe-grid__snippet" :title="snippetTitle(cardSnippet(n))">
+        <template v-for="(seg, si) in snippetSegments(cardSnippet(n))" :key="si">
+          <mark v-if="seg.match" class="fe-grid__mark">{{ seg.text }}</mark>
+          <template v-else>{{ seg.text }}</template>
+        </template>
       </div>
     </div>
     <div v-if="!loading && files.length === 0" class="fe-grid__empty">

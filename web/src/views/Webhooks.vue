@@ -7,7 +7,7 @@ import { WebhooksApi } from '@/api/webhooks';
 import type { WebhookTarget } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -145,6 +145,27 @@ async function removeTarget(target: WebhookTarget) {
   }
 }
 
+// Persisted last-delivery helpers (last_http_status / last_error /
+// last_delivery_at — migration 00019). 2xx = green; anything else —
+// including 0 (no HTTP response at all) — is red with the error message
+// in the tooltip.
+function deliveryOk(w: WebhookTarget): boolean {
+  return w.last_http_status != null && w.last_http_status >= 200 && w.last_http_status < 300;
+}
+
+function deliveryBadgeText(w: WebhookTarget): string {
+  const code = w.last_http_status ?? 0;
+  const rel = formatRelative(w.last_delivery_at ?? null, locale.value);
+  if (deliveryOk(w)) return `${code} · ${rel}`;
+  const label = code > 0 ? `HTTP ${code}` : t('webhooks.statusFailed');
+  return `${label} · ${rel}`;
+}
+
+function deliveryTooltip(w: WebhookTarget): string {
+  if (deliveryOk(w)) return t('webhooks.lastDeliveryOk', { at: formatDate(w.last_delivery_at ?? null, locale.value) });
+  return w.last_error || t('webhooks.statusFailed');
+}
+
 async function testTarget(target: WebhookTarget) {
   testingId.value = target.id;
   try {
@@ -217,7 +238,12 @@ async function testTarget(target: WebhookTarget) {
               <Badge v-else tone="zinc">{{ t('webhooks.secretUnset') }}</Badge>
             </td>
             <td class="px-3 py-2 text-xs">
-              <template v-if="w.last_status">
+              <template v-if="w.last_http_status != null">
+                <Badge :tone="deliveryOk(w) ? 'emerald' : 'rose'" :title="deliveryTooltip(w)">
+                  {{ deliveryBadgeText(w) }}
+                </Badge>
+              </template>
+              <template v-else-if="w.last_status">
                 <Badge :tone="w.last_status.status === 'sent' ? 'emerald' : 'rose'">
                   {{ w.last_status.status === 'sent' ? t('webhooks.statusSent') : t('webhooks.statusFailed') }}
                 </Badge>

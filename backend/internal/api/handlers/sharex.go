@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // ShareX is the token-authenticated endpoint that lets ShareX (the Windows
@@ -52,8 +53,12 @@ const shareXDefaultDir = "sharex"
 // must be non-nil for sharing to work — it is the same *share.Service the rest
 // of the app uses.
 func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *ShareX {
+	ops := newAIOps(store, resolver, shareSvc, publicURL, "")
+	// Same aiOps core, distinct writehook origin — ShareX captures stamp
+	// their file events (and AV scans) as origin "sharex", not "ai".
+	ops.origin = writehook.OriginShareX
 	return &ShareX{
-		ops:        newAIOps(store, resolver, shareSvc, publicURL, ""),
+		ops:        ops,
 		defaultDir: shareXDefaultDir,
 	}
 }

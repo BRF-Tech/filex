@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -233,14 +234,18 @@ func renderListing(w io.Writer, res *cliclient.ListResult) {
 // ─────────────────── upload / download ───────────────────
 
 func clientUploadCmd(opts *clientOpts) *cobra.Command {
+	var recursive bool
 	c := &cobra.Command{
-		Use:   "upload <local-file> <adapter://path>",
-		Short: "Upload a local file (destination: folder, or full path to rename)",
+		Use:   "upload <local-path> <adapter://path>",
+		Short: "Upload a local file, or a whole folder with -r (destination: folder, or full path to rename)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			api, err := opts.api(true)
 			if err != nil {
 				return err
+			}
+			if recursive {
+				return runUploadTree(cmd, api, opts, args[0], args[1])
 			}
 			dest, raw, err := api.Upload(cmd.Context(), args[0], args[1])
 			if err != nil {
@@ -254,7 +259,65 @@ func clientUploadCmd(opts *clientOpts) *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVarP(&recursive, "recursive", "r", false,
+		"upload a directory recursively (remote folders are created; symlinks are skipped)")
 	return quiet(c)
+}
+
+// runUploadTree drives the recursive upload: stream per-file progress,
+// then a summary. Any per-item error makes the command exit non-zero —
+// scripts must not mistake a half-uploaded tree for success.
+func runUploadTree(cmd *cobra.Command, api *cliclient.Client, opts *clientOpts, local, remote string) error {
+	out := cmd.OutOrStdout()
+	errw := cmd.ErrOrStderr()
+	progress := func(ev cliclient.TreeEvent) {
+		if opts.json {
+			return
+		}
+		switch ev.Kind {
+		case cliclient.TreeFile:
+			fmt.Fprintf(out, "Uploaded %s -> %s\n", ev.Local, ev.Remote.String())
+		case cliclient.TreeSymlink:
+			fmt.Fprintf(errw, "warning: skipping symlink %s\n", ev.Local)
+		case cliclient.TreeErr:
+			fmt.Fprintf(errw, "error: %s: %v\n", ev.Local, ev.Err)
+		}
+	}
+	rep, err := api.UploadTree(cmd.Context(), local, remote, progress)
+	if err != nil {
+		return authHint(err)
+	}
+	if opts.json {
+		type jsonErr struct {
+			Path  string `json:"path"`
+			Error string `json:"error"`
+		}
+		summary := struct {
+			Local           string    `json:"local"`
+			Remote          string    `json:"remote"`
+			Files           int       `json:"files"`
+			Dirs            int       `json:"dirs"`
+			SkippedSymlinks []string  `json:"skipped_symlinks,omitempty"`
+			Errors          []jsonErr `json:"errors,omitempty"`
+		}{Local: local, Remote: remote, Files: rep.Files, Dirs: rep.Dirs, SkippedSymlinks: rep.Symlinks}
+		for _, e := range rep.Errors {
+			summary.Errors = append(summary.Errors, jsonErr{Path: e.Local, Error: e.Err.Error()})
+		}
+		b, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, string(b))
+	} else {
+		fmt.Fprintf(out, "Done: %d file(s), %d folder(s), %d error(s)\n", rep.Files, rep.Dirs, len(rep.Errors))
+		for _, e := range rep.Errors {
+			fmt.Fprintf(errw, "  failed: %s: %v\n", e.Local, e.Err)
+		}
+	}
+	if n := len(rep.Errors); n > 0 {
+		return fmt.Errorf("recursive upload finished with %d error(s)", n)
+	}
+	return nil
 }
 
 func clientDownloadCmd(opts *clientOpts) *cobra.Command {

@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 )
@@ -110,4 +113,61 @@ func TestVersionRetention_AppliesKeepN(t *testing.T) {
 	res, err = svc.RunRetentionOnce(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, 0, res.Deleted)
+}
+
+// Regression: the snapshot path used to trim with a HARDCODED
+// DefaultRetention (20), so a configured versions.keep_n above 20 could
+// never actually retain more than 20 versions — every new snapshot clawed
+// the node straight back down. Snapshot must honor the configured keep_n.
+func TestSnapshotHonorsKeepNAbove20(t *testing.T) {
+	ctx := context.Background()
+	_, store := testutil.NewTestDB(t)
+	dir := t.TempDir()
+	drv := &local.Driver{}
+	require.NoError(t, drv.Init(ctx, map[string]any{"root": dir}))
+	st, err := store.CreateStorage(ctx, &model.Storage{
+		Name: "main", Driver: "local", MountPath: "/data", Enabled: true,
+	})
+	require.NoError(t, err)
+	svc := versioning.New(store, func(int64) (storage.Driver, error) { return drv, nil })
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "v.txt"), []byte("v"), 0o644))
+	n, err := store.CreateNode(ctx, &model.Node{
+		StorageID:  st.ID,
+		Name:       "v.txt",
+		Path:       "/v.txt",
+		PathHash:   "hash-vtxt",
+		StorageKey: "/v.txt",
+		Type:       model.NodeTypeFile,
+		Size:       1,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, store.UpsertSetting(ctx, versioning.SettingKeyKeepN, "30"))
+
+	// 25 snapshots with keep_n=30 → all 25 must survive (old code capped at 20).
+	for i := 0; i < 25; i++ {
+		_, err := svc.Snapshot(ctx, n.ID)
+		require.NoError(t, err)
+	}
+	vs, err := store.ListNodeVersions(ctx, n.ID)
+	require.NoError(t, err)
+	assert.Len(t, vs, 25, "keep_n=30 must retain more than the old hardcoded 20")
+
+	// Push past the cap: the inline trim still enforces the configured 30.
+	for i := 0; i < 10; i++ {
+		_, err := svc.Snapshot(ctx, n.ID)
+		require.NoError(t, err)
+	}
+	vs, err = store.ListNodeVersions(ctx, n.ID)
+	require.NoError(t, err)
+	assert.Len(t, vs, 30, "inline snapshot trim must enforce the configured keep_n")
+
+	// keep_n below the default is honored too (no floor at 20).
+	require.NoError(t, store.UpsertSetting(ctx, versioning.SettingKeyKeepN, "5"))
+	_, err = svc.Snapshot(ctx, n.ID)
+	require.NoError(t, err)
+	vs, err = store.ListNodeVersions(ctx, n.ID)
+	require.NoError(t, err)
+	assert.Len(t, vs, 5)
 }

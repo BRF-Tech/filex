@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.4.1 below.)
+(Nothing yet — see v0.4.2 below.)
+
+## [0.4.2] - 2026-07-17
+
+### Fixed
+
+- **Trash no longer wedges storage sync** (#5): moving a folder to trash now
+  rewrites every descendant's path along with it (restore stays symmetric),
+  and the `(storage, parent, name)` unique index ignores soft-deleted rows
+  (partial index on SQLite/Postgres, generated `is_live` column on MySQL) —
+  a trashed folder's leftovers can no longer block sync from re-creating
+  the same names forever.
+- **`versions.keep_n` above 20 now works**: the snapshot path trimmed
+  version history to a hardcoded 20 on every write, silently overriding
+  larger configured limits.
+- WebDAV `DELETE` now moves files and folders to the filex trash (matching
+  the web UI) instead of deleting permanently; drivers without rename
+  support keep the old behavior.
+
+### Added
+
+- **One post-write gate for antivirus + webhooks**: uploads, moves and
+  deletes through the AI/token surface, ShareX, WebDAV and the ops worker
+  now enqueue antivirus scans and emit `file.*` webhook events just like
+  manager uploads (payloads carry an `origin` field: `manager`, `ai`,
+  `sharex`, `dav`, `ops`).
+- **Webhook delivery status**: webhook targets persist their last delivery
+  result (`last_http_status`, `last_error`, `last_delivery_at`) and the
+  admin Webhooks page shows a green/red "last delivery" badge.
+- **Recursive CLI upload**: `filex client upload -r <dir> <storage://path>`
+  mirrors a whole folder tree (empty folders included, symlinks skipped,
+  non-zero exit on partial failure).
+- Search results in grid view now show the same highlighted content
+  snippet as list view.
 
 ## [0.4.1] - 2026-07-17
 

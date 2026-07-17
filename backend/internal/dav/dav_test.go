@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
+	"github.com/brf-tech/filex/backend/internal/trash"
 
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 )
@@ -30,9 +31,10 @@ import (
 // ───────────────────────────── test harness ───────────────────────────────
 
 type harness struct {
-	store db.Store
-	h     *Handler
-	srv   *httptest.Server
+	store    db.Store
+	h        *Handler
+	srv      *httptest.Server
+	resolver func(int64) (storage.Driver, error)
 
 	adminEmail string
 	adminPass  string
@@ -84,7 +86,7 @@ func newHarness(t *testing.T) *harness {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	return &harness{store: store, h: h, srv: srv, adminEmail: adminEmail, adminPass: adminPass}
+	return &harness{store: store, h: h, srv: srv, resolver: resolver, adminEmail: adminEmail, adminPass: adminPass}
 }
 
 // addStorage creates an enabled local storage rooted in a fresh temp dir.
@@ -280,6 +282,89 @@ func TestMkcolListDelete(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 	require.Nil(t, ha.nodeByPath(t, st.ID, "klasor/a.txt"))
 	require.Nil(t, ha.nodeByPath(t, st.ID, "klasor"))
+}
+
+// DAV DELETE lands in the filex trash (soft delete) instead of permanently
+// destroying the bytes — and stays restorable via the trash service, with
+// child paths mirrored correctly (GitHub issue #5).
+func TestDeleteMovesToTrashAndRestore(t *testing.T) {
+	ha := newHarness(t)
+	st := ha.addStorage(t, "depo", false, false)
+	ctx := context.Background()
+
+	resp := ha.req(t, "MKCOL", "/dav/depo/klasor", ha.adminEmail, ha.adminPass, "", nil)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp = ha.req(t, http.MethodPut, "/dav/depo/klasor/a.txt", ha.adminEmail, ha.adminPass, "çöp değil", nil)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	dirNode := ha.nodeByPath(t, st.ID, "klasor")
+	require.NotNil(t, dirNode)
+	fileNode := ha.nodeByPath(t, st.ID, "klasor/a.txt")
+	require.NotNil(t, fileNode)
+
+	// DELETE: gone from DAV…
+	resp = ha.req(t, http.MethodDelete, "/dav/depo/klasor", ha.adminEmail, ha.adminPass, "", nil)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	resp = ha.req(t, http.MethodGet, "/dav/depo/klasor/a.txt", ha.adminEmail, ha.adminPass, "", nil)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.Nil(t, ha.nodeByPath(t, st.ID, "klasor"))
+	require.Nil(t, ha.nodeByPath(t, st.ID, "klasor/a.txt"))
+
+	// …but the bytes are parked under .filex-trash on disk, NOT deleted.
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal(st.ConfigJSON, &cfg))
+	root := cfg["path"].(string)
+	matches, err := filepath.Glob(filepath.Join(root, ".filex-trash", "*__klasor", "a.txt"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "DAV DELETE dosyayı çöpe taşımalı, kalıcı silmemeli")
+
+	// The trash bucket stays invisible over DAV.
+	resp = ha.req(t, "PROPFIND", "/dav/depo/", ha.adminEmail, ha.adminPass, "", map[string]string{"Depth": "1"})
+	require.Equal(t, http.StatusMultiStatus, resp.StatusCode)
+	require.NotContains(t, bodyString(t, resp), ".filex-trash")
+
+	// DB rows: soft-deleted + retagged; the child followed the folder and
+	// the original paths are preserved in storage_key.
+	gotDir, err := ha.store.GetNode(ctx, dirNode.ID)
+	require.NoError(t, err)
+	require.NotNil(t, gotDir.DeletedAt)
+	require.Equal(t, "/klasor", gotDir.StorageKey)
+	gotFile, err := ha.store.GetNode(ctx, fileNode.ID)
+	require.NoError(t, err)
+	require.NotNil(t, gotFile.DeletedAt)
+	require.Equal(t, gotDir.Path+"/a.txt", gotFile.Path)
+	require.Equal(t, "/klasor/a.txt", gotFile.StorageKey)
+
+	// Restore via the trash service brings everything back.
+	trashSvc := trash.New(ha.store, ha.resolver, nil)
+	require.NoError(t, trashSvc.Restore(ctx, dirNode.ID))
+
+	resp = ha.req(t, http.MethodGet, "/dav/depo/klasor/a.txt", ha.adminEmail, ha.adminPass, "", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "çöp değil", bodyString(t, resp))
+
+	restored := ha.nodeByPath(t, st.ID, "klasor/a.txt")
+	require.NotNil(t, restored)
+	require.Equal(t, fileNode.ID, restored.ID)
+	require.Nil(t, restored.DeletedAt)
+}
+
+// A second DELETE cycle at the SAME path must not conflict with the trashed
+// rows of the first cycle (unique indexes are soft-delete-aware).
+func TestDeleteRecreateDeleteAgain(t *testing.T) {
+	ha := newHarness(t)
+	st := ha.addStorage(t, "depo", false, false)
+
+	for i := 0; i < 2; i++ {
+		resp := ha.req(t, "MKCOL", "/dav/depo/tekrar", ha.adminEmail, ha.adminPass, "", nil)
+		require.Equal(t, http.StatusCreated, resp.StatusCode, "cycle %d", i)
+		resp = ha.req(t, http.MethodPut, "/dav/depo/tekrar/x.txt", ha.adminEmail, ha.adminPass, "v", nil)
+		require.Equal(t, http.StatusCreated, resp.StatusCode, "cycle %d", i)
+		require.NotNil(t, ha.nodeByPath(t, st.ID, "tekrar/x.txt"), "cycle %d", i)
+		resp = ha.req(t, http.MethodDelete, "/dav/depo/tekrar", ha.adminEmail, ha.adminPass, "", nil)
+		require.Equal(t, http.StatusNoContent, resp.StatusCode, "cycle %d", i)
+	}
+	_ = st
 }
 
 func TestMoveRoundTrip(t *testing.T) {

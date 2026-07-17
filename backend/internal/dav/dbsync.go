@@ -19,6 +19,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // normalizeDBPath / nodePathHash mirror handlers.normalizeDBPath +
@@ -56,6 +57,7 @@ func (h *Handler) syncWrite(ctx context.Context, st *model.Storage, rel string, 
 		existing.Mime = mime
 		h.indexNode(ctx, existing)
 		h.dispatchThumb(existing)
+		writehook.OnFileWritten(ctx, st.ID, existing, writehook.OriginDAV)
 		return
 	}
 
@@ -84,6 +86,7 @@ func (h *Handler) syncWrite(ctx context.Context, st *model.Storage, rel string, 
 	}
 	h.indexNode(ctx, node)
 	h.dispatchThumb(node)
+	writehook.OnFileWritten(ctx, st.ID, node, writehook.OriginDAV)
 }
 
 // syncMkdir upserts the dir node chain for a created collection.
@@ -92,6 +95,32 @@ func (h *Handler) syncMkdir(ctx context.Context, st *model.Storage, rel string) 
 	if _, err := h.ensureDirChain(ctx, st, normalizeDBPath(rel)); err != nil {
 		slog.Warn("dav: mkdir sync", slog.String("path", rel), slog.String("err", err.Error()))
 	}
+}
+
+// syncTrash retags the node row to its `.filex-trash/` location (original
+// path preserved in storage_key) and soft-deletes it — the DB half of the
+// DAV DELETE → trash flow, identical to the manager's vfDelete bookkeeping.
+// Directories drag their cached subtree along inside SoftDeleteAndRetag;
+// here we only collect the subtree UP FRONT (children are still live) so
+// every affected row can be dropped from the search index afterwards.
+func (h *Handler) syncTrash(ctx context.Context, st *model.Storage, rel, trashRel string) {
+	defer h.recoverSync("trash", st, rel)
+	clean := normalizeDBPath(rel)
+	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, nodePathHash(st.ID, clean))
+	if node == nil {
+		return
+	}
+	subtree := h.collectSubtree(ctx, st.ID, node)
+	trashClean := normalizeDBPath(trashRel)
+	if err := h.cfg.Store.SoftDeleteAndRetag(ctx, node.ID, trashClean,
+		nodePathHash(st.ID, trashClean), clean); err != nil {
+		slog.Warn("dav: node trash", slog.Int64("id", node.ID), slog.String("err", err.Error()))
+		return
+	}
+	for _, n := range subtree {
+		h.removeFromIndex(ctx, n.ID)
+	}
+	writehook.OnFileTrashed(ctx, st.ID, clean, node.Name, trashClean, writehook.OriginDAV)
 }
 
 // syncDelete soft-deletes the node row (and, for directories, every cached
@@ -110,6 +139,7 @@ func (h *Handler) syncDelete(ctx context.Context, st *model.Storage, rel string)
 		}
 		h.removeFromIndex(ctx, n.ID)
 	}
+	writehook.OnFileDeleted(ctx, st.ID, clean, node.Name, writehook.OriginDAV)
 }
 
 // syncMove re-homes the node row (and cached descendants) to the new path
@@ -148,6 +178,9 @@ func (h *Handler) syncMove(ctx context.Context, st *model.Storage, srcRel, dstRe
 		n.PathHash = newHash
 		n.Name = path.Base(newPath)
 		h.indexNode(ctx, n)
+	}
+	if node.Path == dstClean {
+		writehook.OnFileMoved(ctx, st.ID, srcClean, dstClean, path.Base(dstClean), writehook.OriginDAV)
 	}
 }
 

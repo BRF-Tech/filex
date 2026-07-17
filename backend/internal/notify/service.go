@@ -277,9 +277,9 @@ func (s *service) dispatch(id int64, e Event) {
 			wg.Add(1)
 			go func(d destination) {
 				defer wg.Done()
-				err := s.deliver(ctx, d, string(e.Event), body, backoffs)
+				code, err := s.deliver(ctx, d, string(e.Event), body, backoffs)
 				if d.targetID != 0 {
-					s.recordTargetStatus(d.targetID, err)
+					s.recordTargetStatus(d.targetID, code, err)
 				}
 				if err != nil {
 					errMu.Lock()
@@ -305,9 +305,16 @@ func (s *service) dispatch(id int64, e Event) {
 // deliver runs the retry chain against one destination. Every attempt
 // of one delivery shares a single X-Filex-Delivery id (mint-per-
 // delivery, GitHub-style) so receivers can deduplicate retries.
-func (s *service) deliver(ctx context.Context, d destination, eventName string, body []byte, backoffs []time.Duration) error {
+//
+// The returned int is the FINAL attempt's HTTP status code — 0 when the
+// request never got a response (DNS/connect/timeout/bad URL). It feeds
+// the persisted per-target last_status column.
+func (s *service) deliver(ctx context.Context, d destination, eventName string, body []byte, backoffs []time.Duration) (int, error) {
 	deliveryID := uuid.NewString()
-	var lastErr string
+	var (
+		lastErr  string
+		lastCode int
+	)
 	for attempt, wait := 0, time.Duration(0); attempt <= len(backoffs); attempt++ {
 		if attempt > 0 {
 			wait = backoffs[attempt-1]
@@ -316,12 +323,12 @@ func (s *service) deliver(ctx context.Context, d destination, eventName string, 
 			select {
 			case <-time.After(wait):
 			case <-ctx.Done():
-				return errors.New("service stopped mid-retry")
+				return lastCode, errors.New("service stopped mid-retry")
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(body))
 		if err != nil {
-			return errors.New("build request: " + err.Error()) // don't retry — the URL won't magically parse
+			return 0, errors.New("build request: " + err.Error()) // don't retry — the URL won't magically parse
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "filex-webhook/1.0")
@@ -336,10 +343,12 @@ func (s *service) deliver(ctx context.Context, d destination, eventName string, 
 		resp, err := s.http.Do(req)
 		if err != nil {
 			lastErr = err.Error()
+			lastCode = 0
 			continue
 		}
 		func() {
 			defer resp.Body.Close()
+			lastCode = resp.StatusCode
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				lastErr = ""
 			} else {
@@ -347,23 +356,33 @@ func (s *service) deliver(ctx context.Context, d destination, eventName string, 
 			}
 		}()
 		if lastErr == "" {
-			return nil
+			return lastCode, nil
 		}
 	}
-	return errors.New(lastErr)
+	return lastCode, errors.New(lastErr)
 }
 
 // recordTargetStatus stores the outcome of the newest delivery to a
-// target for the admin UI's "last status" column.
-func (s *service) recordTargetStatus(targetID int64, err error) {
-	st := TargetDeliveryStatus{Status: "sent", At: time.Now().UTC()}
+// target — both in the in-memory map (sync Test responses) and in the
+// webhook_targets last_* columns (migration 00019) so the admin list
+// survives restarts. httpStatus is the final attempt's status code
+// (0 = no response). Best-effort: a DB error only logs.
+func (s *service) recordTargetStatus(targetID int64, httpStatus int, err error) {
+	now := time.Now().UTC()
+	st := TargetDeliveryStatus{Status: "sent", At: now}
+	errMsg := ""
 	if err != nil {
 		st.Status = "failed"
 		st.Error = err.Error()
+		errMsg = err.Error()
 	}
 	s.tsMu.Lock()
 	s.targetStatus[targetID] = st
 	s.tsMu.Unlock()
+	if uerr := s.store.UpdateWebhookTargetDelivery(context.Background(), targetID, httpStatus, errMsg, now); uerr != nil {
+		slog.Warn("notify: persist target delivery status",
+			slog.Int64("target", targetID), slog.String("err", uerr.Error()))
+	}
 }
 
 // TestTarget fires a synthetic event at one target with a single
@@ -390,9 +409,9 @@ func (s *service) TestTarget(ctx context.Context, target *model.WebhookTarget) T
 		return TargetDeliveryStatus{Status: "failed", Error: "marshal event: " + err.Error(), At: now}
 	}
 	d := destination{targetID: target.ID, name: target.Name, url: target.URL, secret: target.Secret}
-	deliverErr := s.deliver(ctx, d, string(sample.Event), body, nil)
+	code, deliverErr := s.deliver(ctx, d, string(sample.Event), body, nil)
 	if target.ID != 0 {
-		s.recordTargetStatus(target.ID, deliverErr)
+		s.recordTargetStatus(target.ID, code, deliverErr)
 	}
 	st := TargetDeliveryStatus{Status: "sent", At: time.Now().UTC()}
 	if deliverErr != nil {

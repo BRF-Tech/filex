@@ -107,8 +107,16 @@ func (s *Service) Snapshot(ctx context.Context, nodeID int64) (*model.NodeVersio
 		return nil, fmt.Errorf("versioning: persist row: %w", err)
 	}
 
-	// Trim retention asynchronously is overkill — do it inline.
-	if _, err := s.Cleanup(ctx, nodeID, DefaultRetention); err != nil {
+	// Trim retention inline. Honor the admin-configured versions.keep_n when
+	// set — the previous hardcoded DefaultRetention silently clawed every
+	// node back to 20 versions on the next snapshot, so keep_n > 20 could
+	// never actually retain more than 20. keep_n = 0 (unlimited/disabled)
+	// keeps the documented DefaultRetention safety trim.
+	keep := s.KeepN(ctx)
+	if keep <= 0 {
+		keep = DefaultRetention
+	}
+	if _, err := s.Cleanup(ctx, nodeID, keep); err != nil {
 		// Don't fail the snapshot path on cleanup error.
 		_ = err
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
 // hiddenNames are filex-internal buckets never exposed over WebDAV.
@@ -246,13 +247,54 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	del, ok := drv.(storage.Deleter)
-	if !ok {
-		return storage.ErrUnsupported
-	}
 	obj, err := drv.Stat(ctx, rel)
 	if err != nil {
 		return mapErr(err)
+	}
+
+	// DAV DELETE is a SOFT delete, mirroring the manager UI: rename the
+	// object into `.filex-trash/<key>` so it stays restorable via the trash
+	// service. Drivers without Move keep the legacy permanent delete.
+	if mv, ok := drv.(storage.Mover); ok {
+		trashRel := trash.NewKey(path.Base(strings.TrimRight(rel, "/")))
+		if merr := mv.Move(ctx, rel, trashRel); merr != nil {
+			switch {
+			case errors.Is(merr, storage.ErrNotFound):
+				// Source already gone (stale index / out-of-band delete):
+				// just drop the cache rows.
+				f.h.syncDelete(ctx, st, rel)
+				return nil
+			case obj.Kind == storage.KindDirectory:
+				// Directory Move failed (driver-dependent on object stores)
+				// — move each file under the prefix instead (Rename's
+				// fallback pattern), then clean leftover markers.
+				files, werr := walkFiles(ctx, drv, rel)
+				if werr != nil {
+					return mapErr(merr)
+				}
+				prefix := strings.TrimRight(rel, "/") + "/"
+				for _, fp := range files {
+					if ferr := mv.Move(ctx, fp, trashRel+"/"+strings.TrimPrefix(fp, prefix)); ferr != nil &&
+						!errors.Is(ferr, storage.ErrNotFound) {
+						return mapErr(ferr)
+					}
+				}
+				if del, ok := drv.(storage.Deleter); ok {
+					_ = del.Delete(ctx, rel)
+					_ = del.Delete(ctx, prefix)
+				}
+			default:
+				return mapErr(merr)
+			}
+		}
+		f.h.syncTrash(ctx, st, rel, trashRel)
+		return nil
+	}
+
+	// Legacy hard delete for drivers without Move capability.
+	del, ok := drv.(storage.Deleter)
+	if !ok {
+		return storage.ErrUnsupported
 	}
 	if obj.Kind == storage.KindDirectory {
 		// Per-file walk: object stores have no real "directory" object, a

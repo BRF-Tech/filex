@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // This file implements ops.DBSync on *Manager. The async ops worker
@@ -17,11 +18,20 @@ import (
 // manager handlers (vfMove/vfDelete) perform, so the two code paths can never
 // drift again. `src`/`dst` are bare storage-relative paths (no adapter
 // prefix), matching what the ops worker holds.
+//
+// Each sync also routes through the writehook gate with origin "ops", so
+// worker-driven copies/moves/deletes emit the same canonical file events
+// (and, for copies, the same antivirus enqueue) the synchronous manager
+// paths do. The ops worker runs on a background context with no request
+// actor — the events simply carry no actor, like other system activity.
 
 // SyncMove updates the moved node's path/parent. Delegates to the same
 // helper vfMove uses.
 func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string) {
 	h.applyDBMove(ctx, storageID, src, dst)
+	/* bag:b3 event */
+	writehook.OnFileMoved(ctx, storageID, normalizeDBPath(src), normalizeDBPath(dst), path.Base(normalizeDBPath(dst)),
+		writehook.OriginOps)
 }
 
 // SyncSoftDelete flags the node deleted and retags it to the trash path,
@@ -30,6 +40,9 @@ func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string
 func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, trashRel string) {
 	origClean := normalizeDBPath(src)
 	origHash := managerPathHash(storageID, origClean)
+	/* bag:b3 event — the worker already moved the bytes into the trash */
+	writehook.OnFileTrashed(ctx, storageID, origClean, path.Base(origClean),
+		normalizeDBPath(trashRel), writehook.OriginOps)
 	existing, err := h.Store.GetNodeByPath(ctx, storageID, origHash)
 	if err != nil || existing == nil {
 		return
@@ -49,6 +62,8 @@ func (h *Manager) SyncHardDelete(ctx context.Context, storageID int64, src strin
 	if existing, err := h.Store.GetNodeByPath(ctx, storageID, origHash); err == nil && existing != nil {
 		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
 		h.removeFromIndex(ctx, existing.ID)
+		/* bag:b3 event — only when the index actually reflected the file */
+		writehook.OnFileDeleted(ctx, storageID, origClean, path.Base(origClean), writehook.OriginOps)
 	}
 }
 
@@ -83,5 +98,9 @@ func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string
 	}
 	if created, err := h.Store.CreateNode(ctx, n); err == nil && created != nil {
 		h.indexNode(ctx, created)
+		/* bag:b3 event + koru:k2 av — a copy writes fresh bytes; the gate
+		   itself skips directories, so folder-copy rows stay silent. */
+		writehook.OnFileWritten(ctx, storageID, created, writehook.OriginOps,
+			map[string]any{"copy": true, "from": srcClean})
 	}
 }

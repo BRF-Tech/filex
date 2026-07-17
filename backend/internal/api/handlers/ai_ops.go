@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // aiOps is the storage-facing core shared by the AI REST handler and the
@@ -39,6 +40,7 @@ type aiOps struct {
 	convertURL string          // external converter URL (empty = not configured)
 	acl        *acl.Resolver   // RBAC — nil disables per-user grant enforcement
 	thumbs     *thumb.Pipeline // optional — nil skips thumbnail dispatch (manager-upload parity)
+	origin     string          // writehook origin stamp — "ai" by default, "sharex" for the ShareX wrapper
 }
 
 // allow reports whether the bound user has at least `need` on rel within s.
@@ -56,7 +58,7 @@ func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need ac
 }
 
 func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *aiOps {
-	return &aiOps{store: store, resolver: resolver, share: shareSvc, publicURL: publicURL, convertURL: convertURL}
+	return &aiOps{store: store, resolver: resolver, share: shareSvc, publicURL: publicURL, convertURL: convertURL, origin: writehook.OriginAI}
 }
 
 // aiEntry is the JSON-shaped directory/file row returned to AI callers.
@@ -436,6 +438,8 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 			_ = deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/")
 		}
 		a.trashRetagCache(ctx, s.ID, rel, trashRel)
+		/* bag:b3 event */
+		writehook.OnFileTrashed(ctx, s.ID, normalizeDBPath(rel), base, normalizeDBPath(trashRel), a.origin)
 		return nil
 	}
 
@@ -459,6 +463,8 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 			}
 		}
 		a.trashRetagCache(ctx, s.ID, rel, trashRel)
+		/* bag:b3 event */
+		writehook.OnFileTrashed(ctx, s.ID, normalizeDBPath(rel), base, normalizeDBPath(trashRel), a.origin)
 		return nil
 	}
 
@@ -473,6 +479,8 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	if existing, gerr := a.store.GetNodeByPath(ctx, s.ID, origHash); gerr == nil && existing != nil {
 		_ = a.store.SoftDeleteNode(ctx, existing.ID)
 	}
+	/* bag:b3 event */
+	writehook.OnFileDeleted(ctx, s.ID, normalizeDBPath(rel), base, a.origin)
 	return nil
 }
 
@@ -553,6 +561,8 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 		return nil, err
 	}
 	a.cacheMove(ctx, sSrc, relSrc, relDst)
+	/* bag:b3 event */
+	writehook.OnFileMoved(ctx, sSrc.ID, normalizeDBPath(relSrc), normalizeDBPath(relDst), path.Base(relDst), a.origin)
 	return &aiEntry{
 		Path: joinAdapterPath(sDst.Name, relDst),
 		Name: path.Base(relDst),
@@ -996,24 +1006,41 @@ func (a *aiOps) cacheUpsertFile(ctx context.Context, s *model.Storage, rel strin
 		existing.Size = size
 		existing.Mime = mime
 		a.dispatchThumb(existing)
+		/* bag:b3 event + koru:k2 av — single post-write gate */
+		writehook.OnFileWritten(ctx, s.ID, existing, a.origin)
 		return
 	}
-	if perr != nil {
-		return
+	var node *model.Node
+	if perr == nil {
+		node, _ = a.store.CreateNode(ctx, &model.Node{
+			StorageID:  s.ID,
+			ParentID:   parentID,
+			Name:       path.Base(clean),
+			Path:       clean,
+			PathHash:   hash,
+			StorageKey: clean,
+			Type:       model.NodeTypeFile,
+			Size:       size,
+			Mime:       mime,
+			SyncState:  model.SyncStateSynced,
+		})
+		a.dispatchThumb(node)
 	}
-	node, _ := a.store.CreateNode(ctx, &model.Node{
-		StorageID:  s.ID,
-		ParentID:   parentID,
-		Name:       path.Base(clean),
-		Path:       clean,
-		PathHash:   hash,
-		StorageKey: clean,
-		Type:       model.NodeTypeFile,
-		Size:       size,
-		Mime:       mime,
-		SyncState:  model.SyncStateSynced,
-	})
-	a.dispatchThumb(node)
+	if node == nil {
+		// Cache mirror failed (unindexed parent / insert error) — the bytes
+		// ARE on storage, so still emit file.uploaded with a transient node;
+		// the writehook skips the AV enqueue for id-less rows.
+		node = &model.Node{
+			StorageID: s.ID,
+			Name:      path.Base(clean),
+			Path:      clean,
+			Type:      model.NodeTypeFile,
+			Size:      size,
+			Mime:      mime,
+		}
+	}
+	/* bag:b3 event + koru:k2 av — single post-write gate */
+	writehook.OnFileWritten(ctx, s.ID, node, a.origin)
 }
 
 // dispatchThumb fires async thumbnail generation for a freshly written file —

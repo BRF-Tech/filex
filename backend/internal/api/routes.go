@@ -40,6 +40,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // Deps is the bundle of services every handler needs.
@@ -233,6 +234,12 @@ func BuildRouter(d *Deps) http.Handler {
 	// write (upload finalize, manager vfUpload, public drop). Nil-safe:
 	// unwired (no ClamAV binary / no queue) disables scanning.
 	handlers.SetAntivirusEnqueue(d.AVScan)
+
+	// Writehook — the single post-write side-effect gate (AV enqueue +
+	// canonical file event) every write surface routes through with its
+	// origin stamp (manager/ai/sharex/dav/ops). Same sinks as above; both
+	// nil-safe.
+	writehook.Configure(d.AVScan, d.Notify)
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 

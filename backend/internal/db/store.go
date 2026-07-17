@@ -288,6 +288,11 @@ type Store interface {
 	ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error)
 	UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget) error
 	DeleteWebhookTarget(ctx context.Context, id int64) error
+	// UpdateWebhookTargetDelivery records the outcome of the most recent
+	// delivery attempt to one target (migration 00019): the final
+	// attempt's HTTP status (0 = no response at all), the aggregated
+	// error message ("" on success → stored NULL) and the attempt time.
+	UpdateWebhookTargetDelivery(ctx context.Context, id int64, httpStatus int, errMsg string, at time.Time) error
 
 	// Replica rules + failures + report + settings
 	ListReplicaRules(ctx context.Context) ([]*model.ReplicaRule, error)

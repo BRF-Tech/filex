@@ -91,6 +91,32 @@ An existing remote **folder** target keeps the local basename; otherwise the
 last path segment becomes the uploaded filename. The body is streamed
 (multipart), so large files don't load into memory.
 
+#### Recursive upload (`-r` / `--recursive`)
+
+```bash
+filex client upload -r ./proje docs://reports/       # -> docs://reports/proje/…
+filex client upload -r ./proje docs://reports/arsiv  # rename form: tree lands AT arsiv/
+```
+
+```
+Uploaded proje/a.txt -> docs://reports/proje/a.txt
+Uploaded proje/sub/b.txt -> docs://reports/proje/sub/b.txt
+Done: 2 file(s), 3 folder(s), 0 error(s)
+```
+
+- Destination semantics mirror the single-file form: an existing remote
+  folder (or trailing `/`) receives the local folder **by name**; a
+  non-existing target becomes the new remote folder name.
+- Remote folders are created as needed — **empty local folders included**.
+  The destination's *parent* must already exist (same as `mkdir`).
+- **Symlinks are skipped** with a warning on stderr; they are never
+  followed, so link cycles can't loop the walk.
+- A failed folder creation skips that subtree; a failed file is recorded
+  and the walk continues. The summary lists every failure and the command
+  exits **non-zero** when anything failed — safe for scripts.
+- With `--json` the command prints one summary object instead:
+  `{"local":…,"remote":…,"files":2,"dirs":3,"skipped_symlinks":[…],"errors":[…]}`.
+
 ### download
 
 ```bash

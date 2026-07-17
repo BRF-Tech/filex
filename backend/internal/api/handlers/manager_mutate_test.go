@@ -31,6 +31,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
 // newMutateFixture spins up a temp-dir backed local driver, registers a
@@ -230,6 +231,139 @@ func TestManagerMutate_Delete_OK(t *testing.T) {
 	got, err := store.GetNode(context.Background(), created.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, got.DeletedAt)
+}
+
+// ---------- delete folder → trash (GitHub issue #5) ----------
+
+// seedTrashFolderFixture creates alpha/ + alpha/a.txt on disk and as
+// parent-linked DB rows, returning (dirNode, childNode).
+func seedTrashFolderFixture(t *testing.T, store db.Store, st *model.Storage, root string) (*model.Node, *model.Node) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "alpha"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "alpha", "a.txt"), []byte("x"), 0o644))
+	dir, err := store.CreateNode(ctx, &model.Node{
+		StorageID: st.ID,
+		Name:      "alpha",
+		Path:      "/alpha",
+		PathHash:  mutTestPathHash(st.ID, "/alpha"),
+		Type:      model.NodeTypeDirectory,
+	})
+	require.NoError(t, err)
+	child, err := store.CreateNode(ctx, &model.Node{
+		StorageID: st.ID,
+		ParentID:  &dir.ID,
+		Name:      "a.txt",
+		Path:      "/alpha/a.txt",
+		PathHash:  mutTestPathHash(st.ID, "/alpha/a.txt"),
+		Type:      model.NodeTypeFile,
+		Size:      1,
+	})
+	require.NoError(t, err)
+	return dir, child
+}
+
+// Regression for issue #5.1: trashing a folder must drag the cached child
+// rows into the trash path-wise — previously only the folder row was
+// retagged while children kept their ORIGINAL paths as soft-deleted rows.
+func TestManagerMutate_DeleteFolder_RetagsChildren(t *testing.T) {
+	mh, store, _, st, root := newMutateFixture(t)
+	ctx := context.Background()
+	dir, child := seedTrashFolderFixture(t, store, st, root)
+
+	rec := callMutate(t, mh, "delete", map[string]any{
+		"path":  "main://",
+		"items": []map[string]any{{"path": "main://alpha"}},
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// On disk: alpha moved (not deleted) under .filex-trash, child intact.
+	_, err := os.Stat(filepath.Join(root, "alpha"))
+	assert.True(t, os.IsNotExist(err))
+	matches, err := filepath.Glob(filepath.Join(root, ".filex-trash", "*__alpha", "a.txt"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "child file must follow the folder into the trash")
+
+	// Folder row: soft-deleted + retagged, original path in storage_key.
+	gotDir, err := store.GetNode(ctx, dir.ID)
+	require.NoError(t, err)
+	require.NotNil(t, gotDir.DeletedAt)
+	assert.True(t, strings.HasPrefix(gotDir.Path, "/.filex-trash/"), gotDir.Path)
+	assert.Equal(t, "/alpha", gotDir.StorageKey)
+
+	// Child row: FOLLOWED the folder (issue #5.1) — trash-prefixed path,
+	// original path preserved in storage_key, parent link intact.
+	gotChild, err := store.GetNode(ctx, child.ID)
+	require.NoError(t, err)
+	require.NotNil(t, gotChild.DeletedAt)
+	assert.Equal(t, gotDir.Path+"/a.txt", gotChild.Path)
+	assert.Equal(t, "/alpha/a.txt", gotChild.StorageKey)
+	require.NotNil(t, gotChild.ParentID)
+	assert.Equal(t, dir.ID, *gotChild.ParentID)
+
+	// The original path_hash slot is free again.
+	live, _ := store.GetNodeByPath(ctx, st.ID, mutTestPathHash(st.ID, "/alpha/a.txt"))
+	assert.Nil(t, live)
+
+	// Regression for issue #5.2: even with the soft-deleted child still
+	// holding (storage, parent, name), the sync worker must be able to
+	// create a fresh live row at the same (parent, name) — the unique
+	// index is soft-delete-aware since migration 00018.
+	relive, err := store.CreateNode(ctx, &model.Node{
+		StorageID: st.ID,
+		ParentID:  &dir.ID,
+		Name:      "a.txt",
+		Path:      "/alpha/a.txt",
+		PathHash:  mutTestPathHash(st.ID, "/alpha/a.txt"),
+		Type:      model.NodeTypeFile,
+	})
+	require.NoError(t, err, "issue #5.2: soft-deleted (parent,name) row must not block a fresh create")
+	require.NotNil(t, relive)
+}
+
+// Round trip: trash a folder with a child, then restore it via the trash
+// service — bytes and DB rows must land back at the original locations.
+func TestManagerMutate_DeleteFolder_RestoreRoundTrip(t *testing.T) {
+	mh, store, drv, st, root := newMutateFixture(t)
+	ctx := context.Background()
+	dir, child := seedTrashFolderFixture(t, store, st, root)
+
+	rec := callMutate(t, mh, "delete", map[string]any{
+		"path":  "main://",
+		"items": []map[string]any{{"path": "main://alpha"}},
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	trashSvc := trash.New(store, func(id int64) (storage.Driver, error) {
+		if id != st.ID {
+			return nil, fmt.Errorf("unknown id %d", id)
+		}
+		return drv, nil
+	}, nil)
+	require.NoError(t, trashSvc.Restore(ctx, dir.ID))
+
+	// Bytes are back at the original location.
+	b, err := os.ReadFile(filepath.Join(root, "alpha", "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "x", string(b))
+
+	// Rows are live again at their original paths (same ids).
+	gotDir, err := store.GetNode(ctx, dir.ID)
+	require.NoError(t, err)
+	assert.Nil(t, gotDir.DeletedAt)
+	assert.Equal(t, "/alpha", gotDir.Path)
+	gotChild, err := store.GetNode(ctx, child.ID)
+	require.NoError(t, err)
+	assert.Nil(t, gotChild.DeletedAt)
+	assert.Equal(t, "/alpha/a.txt", gotChild.Path)
+	assert.Equal(t, mutTestPathHash(st.ID, "/alpha/a.txt"), gotChild.PathHash)
+	require.NotNil(t, gotChild.ParentID)
+	assert.Equal(t, dir.ID, *gotChild.ParentID)
+
+	// Live lookups resolve again.
+	liveChild, _ := store.GetNodeByPath(ctx, st.ID, mutTestPathHash(st.ID, "/alpha/a.txt"))
+	require.NotNil(t, liveChild)
+	assert.Equal(t, child.ID, liveChild.ID)
 }
 
 // ---------- upload ----------

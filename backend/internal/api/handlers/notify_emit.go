@@ -59,17 +59,6 @@ func emitFileEvent(ctx context.Context, e notify.Event) {
 	}()
 }
 
-// emitNodeEvent is the one-line wrapper the mutation handlers call for
-// an event about a single node. meta may be nil.
-func emitNodeEvent(ctx context.Context, ev notify.EventType, storageID int64, path, name string, size int64, meta map[string]any) {
-	emitFileEvent(ctx, notify.Event{
-		Event: ev,
-		Body:  path,
-		Meta:  meta,
-		Node:  &notify.NodeRef{StorageID: storageID, Path: path, Name: name, Size: size},
-	})
-}
-
 // eventActor extracts the acting user from the request context,
 // best-effort (nil for anonymous/public surfaces).
 func eventActor(ctx context.Context) *notify.ActorRef {

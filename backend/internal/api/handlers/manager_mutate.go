@@ -19,9 +19,9 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // cryptoRead is a tiny indirection so randHex6 can be tested deterministically.
@@ -221,8 +221,8 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 
 	h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
 	/* bag:b3 event */
-	emitNodeEvent(r.Context(), notify.EventFileMoved, current.ID, normalizeDBPath(dstRel), body.Name, 0,
-		map[string]any{"from": normalizeDBPath(srcRel), "to": normalizeDBPath(dstRel), "rename": true})
+	writehook.OnFileMoved(r.Context(), current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), body.Name,
+		writehook.OriginManager, map[string]any{"rename": true})
 	// Live: an item was renamed in this directory.
 	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "rename", Name: path.Base(srcRel), NewName: body.Name})
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
@@ -298,8 +298,8 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		}
 		h.applyDBMove(r.Context(), current.ID, srcRel, dstRel)
 		/* bag:b3 event */
-		emitNodeEvent(r.Context(), notify.EventFileMoved, current.ID, normalizeDBPath(dstRel), path.Base(dstRel), 0,
-			map[string]any{"from": normalizeDBPath(srcRel), "to": normalizeDBPath(dstRel)})
+		writehook.OnFileMoved(r.Context(), current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), path.Base(dstRel),
+			writehook.OriginManager)
 		srcDirs[path.Dir(srcRel)] = struct{}{}
 	}
 
@@ -386,8 +386,8 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				h.removeFromIndex(r.Context(), existing.ID)
 			}
 			/* bag:b3 event */
-			emitNodeEvent(r.Context(), notify.EventFileDeleted, current.ID, origClean, path.Base(srcRel), 0,
-				map[string]any{"purged": true})
+			writehook.OnFileDeleted(r.Context(), current.ID, origClean, path.Base(srcRel),
+				writehook.OriginManager, map[string]any{"purged": true})
 			continue
 		}
 
@@ -408,7 +408,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			/* bag:b3 event */
-			emitNodeEvent(r.Context(), notify.EventFileDeleted, current.ID, normalizeDBPath(srcRel), base, 0, nil)
+			writehook.OnFileDeleted(r.Context(), current.ID, normalizeDBPath(srcRel), base, writehook.OriginManager)
 		} else {
 			if err := mover.Move(r.Context(), srcRel, trashRel); err != nil {
 				if !errors.Is(err, storage.ErrNotFound) {
@@ -427,16 +427,24 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			/* bag:b3 event */
-			emitNodeEvent(r.Context(), notify.EventFileTrashed, current.ID, normalizeDBPath(srcRel), base, 0,
-				map[string]any{"trash_path": normalizeDBPath(trashRel)})
+			writehook.OnFileTrashed(r.Context(), current.ID, normalizeDBPath(srcRel), base,
+				normalizeDBPath(trashRel), writehook.OriginManager)
 		}
 
 		// Update DB: store the original path in storage_key so Restore
 		// can find it; flip deleted_at; rewrite path/path_hash to the
 		// trash location so a fresh upload at the original path works.
+		// Directory rows drag their cached subtree into the trash inside
+		// SoftDeleteAndRetag (issue #5) — collect the subtree ids UP
+		// FRONT (children are still live) so the search index forgets
+		// them too.
 		origClean := normalizeDBPath(srcRel)
 		origHash := managerPathHash(current.ID, origClean)
 		if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
+			var subtreeIDs []int64
+			if existing.Type == model.NodeTypeDirectory {
+				subtreeIDs = h.collectSubtreeIDs(r.Context(), current.ID, existing.ID)
+			}
 			if mover != nil {
 				newClean := normalizeDBPath(trashRel)
 				newHash := managerPathHash(current.ID, newClean)
@@ -445,6 +453,9 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				_ = h.Store.SoftDeleteNode(r.Context(), existing.ID)
 			}
 			h.removeFromIndex(r.Context(), existing.ID)
+			for _, cid := range subtreeIDs {
+				h.removeFromIndex(r.Context(), cid)
+			}
 		}
 	}
 
@@ -456,6 +467,35 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 // trashPrefix is the in-storage directory where soft-deleted files are
 // renamed to. Listings filter it out; trash.Service.Restore renames out.
 const trashPrefix = ".filex-trash"
+
+// collectSubtreeIDs walks the live cached descendants of a directory node
+// (DFS via ListNodesByParent) and returns their ids — used to purge the
+// search index when a folder is trashed (the DB rows themselves are
+// retagged inside Store.SoftDeleteAndRetag).
+func (h *Manager) collectSubtreeIDs(ctx context.Context, storageID, rootID int64) []int64 {
+	var out []int64
+	var walk func(parentID int64, depth int)
+	walk = func(parentID int64, depth int) {
+		if depth > 64 {
+			return
+		}
+		children, err := h.Store.ListNodesByParent(ctx, storageID, &parentID)
+		if err != nil {
+			return
+		}
+		for _, c := range children {
+			if c.DeletedAt != nil {
+				continue
+			}
+			out = append(out, c.ID)
+			if c.Type == model.NodeTypeDirectory {
+				walk(c.ID, depth+1)
+			}
+		}
+	}
+	walk(rootID, 0)
+	return out
+}
 
 // randHex6 returns a 6-char lowercase hex string for trash key uniqueness.
 func randHex6() string {
@@ -542,10 +582,18 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = src.Close()
 
-		/* bag:b3 event */
-		emitNodeEvent(r.Context(), notify.EventFileUploaded, current.ID, normalizeDBPath(fullRel), name, fh.Size, nil)
-
 		if parentLookupErr != nil {
+			/* bag:b3 event — DB mirror unavailable; the bytes ARE on
+			   storage, so still announce the write. Transient (unsaved)
+			   node → the writehook skips the AV enqueue. */
+			writehook.OnFileWritten(r.Context(), current.ID, &model.Node{
+				StorageID: current.ID,
+				Name:      name,
+				Path:      normalizeDBPath(fullRel),
+				Type:      model.NodeTypeFile,
+				Size:      fh.Size,
+				Mime:      mime,
+			}, writehook.OriginManager)
 			continue
 		}
 		clean := normalizeDBPath(fullRel)
@@ -560,7 +608,8 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 				// the stored thumb is stale. Mark it pending and let
 				// the pipeline regenerate.
 				h.dispatchThumb(fresh)
-				enqueueAntivirusScan(r.Context(), fresh) /* koru:k2 av */
+				/* bag:b3 event + koru:k2 av — single post-write gate */
+				writehook.OnFileWritten(r.Context(), current.ID, fresh, writehook.OriginManager)
 			}
 			continue
 		}
@@ -583,7 +632,8 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.indexNode(r.Context(), created)
 			h.dispatchThumb(created)
-			enqueueAntivirusScan(r.Context(), created) /* koru:k2 av */
+			/* bag:b3 event + koru:k2 av — single post-write gate */
+			writehook.OnFileWritten(r.Context(), current.ID, created, writehook.OriginManager)
 		}
 	}
 

@@ -74,3 +74,18 @@ func TestRenderListing(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	assert.Len(t, lines, 3, "header + 2 rows")
 }
+
+// TestClientUploadCmd_RecursiveFlag pins the -r/--recursive wiring: the
+// flag must exist on upload (and only there) with the short form.
+func TestClientUploadCmd_RecursiveFlag(t *testing.T) {
+	c := clientCmd()
+	up, _, err := c.Find([]string{"upload"})
+	require.NoError(t, err)
+	f := up.Flags().Lookup("recursive")
+	require.NotNil(t, f, "upload must expose --recursive")
+	assert.Equal(t, "r", f.Shorthand)
+
+	dl, _, err := c.Find([]string{"download"})
+	require.NoError(t, err)
+	assert.Nil(t, dl.Flags().Lookup("recursive"), "download stays non-recursive")
+}

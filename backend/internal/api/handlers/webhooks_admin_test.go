@@ -6,6 +6,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -238,4 +239,82 @@ func TestAdminWebhooks_TestFire(t *testing.T) {
 	require.Len(t, list.Items, 1)
 	require.NotNil(t, list.Items[0].LastStatus)
 	assert.Equal(t, "sent", list.Items[0].LastStatus.Status)
+}
+
+// TestAdminWebhooks_PersistedLastDelivery — the list must carry the
+// persisted last-delivery columns (migration 00019): HTTP status code,
+// error message and timestamp, surviving across service instances (the
+// in-memory map only lives for the process).
+func TestAdminWebhooks_PersistedLastDelivery(t *testing.T) {
+	srv, client, store := testutil.NewTestServerWith(t, nil, func(d *api.Deps) {
+		d.Notify = notify.New(d.Store, notify.Config{HTTPTimeout: 2 * time.Second, RetryBackoffs: []time.Duration{}})
+	})
+	email, pw := testutil.SeedAdmin(t, store)
+	testutil.LoginAs(t, srv, client, email, pw)
+
+	resp := whDoJSON(t, client, http.MethodPost, srv.URL+"/api/admin/webhooks", map[string]any{
+		"name": "persisted", "url": "https://example.com/hook",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	testutil.ReadJSON(t, resp, &created)
+	resp.Body.Close()
+
+	// Fresh target → no last-delivery fields at all.
+	resp = whDoJSON(t, client, http.MethodGet, srv.URL+"/api/admin/webhooks", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	type row struct {
+		LastHTTPStatus *int    `json:"last_http_status"`
+		LastError      *string `json:"last_error"`
+		LastDeliveryAt *string `json:"last_delivery_at"`
+	}
+	var list struct {
+		Items []row `json:"items"`
+	}
+	testutil.ReadJSON(t, resp, &list)
+	resp.Body.Close()
+	require.Len(t, list.Items, 1)
+	assert.Nil(t, list.Items[0].LastHTTPStatus)
+	assert.Nil(t, list.Items[0].LastError)
+	assert.Nil(t, list.Items[0].LastDeliveryAt)
+
+	// Simulate a recorded failed delivery straight through the store —
+	// exactly what notify.recordTargetStatus persists.
+	require.NoError(t, store.UpdateWebhookTargetDelivery(
+		context.Background(), created.ID, 503, "HTTP 503", time.Now().UTC()))
+
+	resp = whDoJSON(t, client, http.MethodGet, srv.URL+"/api/admin/webhooks", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	// Fresh struct per read: unmarshal into a reused one would keep stale
+	// pointers for omitted (omitempty) fields.
+	var failed struct {
+		Items []row `json:"items"`
+	}
+	testutil.ReadJSON(t, resp, &failed)
+	resp.Body.Close()
+	require.Len(t, failed.Items, 1)
+	require.NotNil(t, failed.Items[0].LastHTTPStatus)
+	assert.Equal(t, 503, *failed.Items[0].LastHTTPStatus)
+	require.NotNil(t, failed.Items[0].LastError)
+	assert.Equal(t, "HTTP 503", *failed.Items[0].LastError)
+	require.NotNil(t, failed.Items[0].LastDeliveryAt)
+
+	// A success overwrites the failure and clears the error.
+	require.NoError(t, store.UpdateWebhookTargetDelivery(
+		context.Background(), created.ID, 200, "", time.Now().UTC()))
+
+	resp = whDoJSON(t, client, http.MethodGet, srv.URL+"/api/admin/webhooks", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var succeeded struct {
+		Items []row `json:"items"`
+	}
+	testutil.ReadJSON(t, resp, &succeeded)
+	resp.Body.Close()
+	require.Len(t, succeeded.Items, 1)
+	require.NotNil(t, succeeded.Items[0].LastHTTPStatus)
+	assert.Equal(t, 200, *succeeded.Items[0].LastHTTPStatus)
+	assert.Nil(t, succeeded.Items[0].LastError, "success clears last_error")
+	require.NotNil(t, succeeded.Items[0].LastDeliveryAt)
 }

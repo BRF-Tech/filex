@@ -31,6 +31,11 @@ func NewWebhooksAdmin(store db.Store, svc notify.Service) *WebhooksAdmin {
 
 // webhookTargetResp is the API projection of a target. The secret is
 // NEVER echoed back — only a set/unset flag (write-only credential).
+//
+// Last-delivery info comes in two shapes: the persisted columns
+// (last_http_status / last_error / last_delivery_at, migration 00019 —
+// survive restarts, the admin UI's source of truth) plus the legacy
+// in-memory last_status object kept for older UI builds.
 type webhookTargetResp struct {
 	ID         int64                        `json:"id"`
 	Name       string                       `json:"name"`
@@ -40,6 +45,10 @@ type webhookTargetResp struct {
 	Enabled    bool                         `json:"enabled"`
 	CreatedAt  string                       `json:"created_at"`
 	LastStatus *notify.TargetDeliveryStatus `json:"last_status,omitempty"`
+
+	LastHTTPStatus *int    `json:"last_http_status,omitempty"`
+	LastError      *string `json:"last_error,omitempty"`
+	LastDeliveryAt *string `json:"last_delivery_at,omitempty"`
 }
 
 func toWebhookTargetResp(t *model.WebhookTarget, statuses map[int64]notify.TargetDeliveryStatus) webhookTargetResp {
@@ -55,6 +64,18 @@ func toWebhookTargetResp(t *model.WebhookTarget, statuses map[int64]notify.Targe
 		Events:    events,
 		Enabled:   t.Enabled,
 		CreatedAt: t.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if t.LastStatus != nil {
+		v := *t.LastStatus
+		resp.LastHTTPStatus = &v
+	}
+	if t.LastError != nil {
+		v := *t.LastError
+		resp.LastError = &v
+	}
+	if t.LastDeliveryAt != nil {
+		v := t.LastDeliveryAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+		resp.LastDeliveryAt = &v
 	}
 	if statuses != nil {
 		if st, ok := statuses[t.ID]; ok {

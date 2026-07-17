@@ -59,6 +59,15 @@ type WebhookTarget struct {
 	Events    string    `json:"events"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
+
+	// Last-delivery persistence (migration 00019). All nil until the
+	// first delivery attempt (real dispatch or admin test-fire).
+	// LastStatus is the HTTP status code of the final attempt — 0 means
+	// the request never got a response (DNS/connect/timeout). LastError
+	// is nil after a success, the aggregated error message otherwise.
+	LastStatus     *int       `json:"last_status,omitempty"`
+	LastError      *string    `json:"last_error,omitempty"`
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
 }
 
 // EventList splits the CSV allow-list into trimmed, non-empty names.

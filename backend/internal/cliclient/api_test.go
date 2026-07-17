@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,8 +31,16 @@ type fakeServer struct {
 	uploadDest   string
 	uploadName   string
 	uploadBytes  []byte
+	uploads      []uploadRecord // every upload, in arrival order
 	downloadBody []byte
 	dirs         map[string]bool // adapter://rel → is a listable dir
+}
+
+// uploadRecord is one received upload (dest dir + filename + content).
+type uploadRecord struct {
+	Dest string
+	Name string
+	Body []byte
 }
 
 func newFakeServer(t *testing.T) (*fakeServer, *httptest.Server) {
@@ -118,6 +127,27 @@ func (fs *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			defer f.Close()
 			fs.uploadBytes, err = io.ReadAll(f)
 			require.NoError(fs.t, err)
+			fs.uploads = append(fs.uploads, uploadRecord{Dest: fs.uploadDest, Name: fs.uploadName, Body: fs.uploadBytes})
+			fs.writeJSON(w, 200, map[string]any{"adapter": "docs", "files": []any{}})
+		case r.Method == http.MethodPost && action == "newfolder":
+			// Recorded like the generic verbs AND registered in dirs so a
+			// later index probe sees the freshly created folder (the
+			// recursive-upload tests depend on that). "yasak" is the
+			// designated always-fails name for error-path tests.
+			fs.lastAction = action
+			fs.lastBody = map[string]any{}
+			_ = json.NewDecoder(r.Body).Decode(&fs.lastBody)
+			parent, _ := fs.lastBody["path"].(string)
+			name, _ := fs.lastBody["name"].(string)
+			if name == "yasak" {
+				fs.writeJSON(w, 403, map[string]string{"error": "forbidden folder name"})
+				return
+			}
+			full := parent + "/" + name
+			if strings.HasSuffix(parent, "://") {
+				full = parent + name
+			}
+			fs.dirs[full] = true
 			fs.writeJSON(w, 200, map[string]any{"adapter": "docs", "files": []any{}})
 		case r.Method == http.MethodPost:
 			fs.lastAction = action

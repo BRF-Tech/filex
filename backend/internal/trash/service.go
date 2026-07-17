@@ -8,11 +8,14 @@ package trash
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -23,6 +26,20 @@ import (
 
 // SettingKey is the settings table row that stores the retention days value.
 const SettingKey = "trash.retention_days"
+
+// Prefix is the in-storage directory soft-deleted objects are renamed into.
+// It mirrors the manager's unexported trashPrefix; listings everywhere filter
+// it out and Restore renames back out of it.
+const Prefix = ".filex-trash"
+
+// NewKey returns a fresh storage-relative trash key for base:
+// `.filex-trash/<unix>-<rand>__<base>` — the exact shape vfDelete mints, so
+// every surface (manager, AI, DAV) lands deletions in the same trash layout.
+func NewKey(base string) string {
+	var b [3]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%s/%d-%s__%s", Prefix, time.Now().Unix(), hex.EncodeToString(b[:]), base)
+}
 
 // DefaultRetentionDays is used when the setting is missing or unparseable.
 const DefaultRetentionDays = 30
@@ -292,8 +309,16 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time) (PurgeRe
 
 // purgeOne deletes the storage object (best effort), decrements quota, and
 // hard-deletes the DB row.
+//
+// Directories first purge their trashed descendants explicitly: the nodes
+// table cascades parent_id on hard delete, so removing the folder row first
+// would silently drop the child rows BEFORE their storage objects and quota
+// were reclaimed (leaked `.filex-trash/` objects).
 func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
-	if s.Resolver != nil && n.Type == model.NodeTypeFile {
+	if n.Type == model.NodeTypeDirectory {
+		s.purgeDirDescendants(ctx, n)
+	}
+	if s.Resolver != nil {
 		if drv, err := s.Resolver(n.StorageID); err == nil {
 			if d, ok := drv.(storage.Deleter); ok {
 				// `n.Path` is the actual on-disk location for trashed
@@ -302,12 +327,19 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 				// Restore can put the file back — purging that would
 				// look at the wrong key, miss, and leak the trash file.
 				key := n.Path
-				if err := d.Delete(ctx, key); err != nil && !errors.Is(err, storage.ErrNotFound) {
-					// Continue anyway — DB row removal still happens, but
-					// log the leftover-object warning.
-					slog.Warn("trash storage delete failed",
-						slog.Int64("node_id", n.ID),
-						slog.String("err", err.Error()))
+				if n.Type == model.NodeTypeFile {
+					if err := d.Delete(ctx, key); err != nil && !errors.Is(err, storage.ErrNotFound) {
+						// Continue anyway — DB row removal still happens, but
+						// log the leftover-object warning.
+						slog.Warn("trash storage delete failed",
+							slog.Int64("node_id", n.ID),
+							slog.String("err", err.Error()))
+					}
+				} else {
+					// Directory/marker cleanup is best-effort — object
+					// stores may have a "<key>/" marker, local FS a dir.
+					_ = d.Delete(ctx, key)
+					_ = d.Delete(ctx, strings.TrimRight(key, "/")+"/")
 				}
 			}
 		}
@@ -320,4 +352,72 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 		_ = s.Quota.SubUsage(ctx, *owner, n.Size)
 	}
 	return nil
+}
+
+// purgeDirDescendants hard-purges every trashed row still parked under a
+// trashed directory's `.filex-trash/...` path (SoftDeleteAndRetag rewrites
+// descendants to live there). Files get their storage object deleted and
+// quota reclaimed; rows are removed explicitly rather than left to the FK
+// cascade. Best-effort throughout.
+func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
+	prefixes := prefixVariants(dir.Path)
+	if len(prefixes) == 0 {
+		return
+	}
+	var descendants []*model.Node
+	for offset := 0; ; {
+		batch, _, err := s.Store.ListTrashed(ctx, &dir.StorageID, 500, offset)
+		if err != nil || len(batch) == 0 {
+			break
+		}
+		for _, c := range batch {
+			if c.ID == dir.ID {
+				continue
+			}
+			for _, pfx := range prefixes {
+				if strings.HasPrefix(c.Path, pfx) {
+					descendants = append(descendants, c)
+					break
+				}
+			}
+		}
+		if len(batch) < 500 {
+			break
+		}
+		offset += len(batch)
+	}
+	var drv storage.Driver
+	if s.Resolver != nil {
+		drv, _ = s.Resolver(dir.StorageID)
+	}
+	for _, c := range descendants {
+		if c.Type == model.NodeTypeFile && drv != nil {
+			if d, ok := drv.(storage.Deleter); ok {
+				if err := d.Delete(ctx, c.Path); err != nil && !errors.Is(err, storage.ErrNotFound) {
+					slog.Warn("trash storage delete failed",
+						slog.Int64("node_id", c.ID),
+						slog.String("err", err.Error()))
+				}
+			}
+		}
+		owner, _ := s.Store.GetNodeOwner(ctx, c.ID)
+		if err := s.Store.HardDeleteNode(ctx, c.ID); err != nil {
+			continue
+		}
+		if owner != nil && s.Quota != nil && c.Type == model.NodeTypeFile {
+			_ = s.Quota.SubUsage(ctx, *owner, c.Size)
+		}
+	}
+}
+
+// prefixVariants returns p as a strict-descendant prefix in both path
+// conventions the nodes.path column historically mixes (with/without a
+// leading slash).
+func prefixVariants(p string) []string {
+	norm := strings.TrimRight(path.Clean("/"+strings.Trim(p, "/")), "/")
+	if norm == "" || norm == "/" {
+		return nil
+	}
+	rel := strings.TrimPrefix(norm, "/")
+	return []string{norm + "/", rel + "/"}
 }

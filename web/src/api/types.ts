@@ -363,7 +363,15 @@ export interface WebhookTarget {
   events: string[];
   enabled: boolean;
   created_at: string;
+  /** Legacy in-memory last delivery (process lifetime only). */
   last_status?: WebhookTargetLastStatus | null;
+  /** Persisted last delivery (migration 00019) — survives restarts.
+   *  HTTP status code of the final attempt; 0 = no response at all. */
+  last_http_status?: number | null;
+  /** Aggregated error message; absent after a successful delivery. */
+  last_error?: string | null;
+  /** Timestamp of the newest delivery attempt (RFC3339, UTC). */
+  last_delivery_at?: string | null;
 }
 
 export interface WebhookTargetCreatePayload {

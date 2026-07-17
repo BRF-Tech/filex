@@ -486,14 +486,152 @@ func (s *Store) TouchNodeSeen(ctx context.Context, id int64) error {
 }
 
 // SoftDeleteAndRetag — see store.go interface for semantics.
+//
+// Directories drag their cached subtree into the trash with them (GitHub
+// issue #5) — see the sqlite driver's SoftDeleteAndRetag doc comment.
 func (s *Store) SoftDeleteAndRetag(ctx context.Context, id int64, trashPath, trashHash, origPath string) error {
 	base := path.Base(trashPath)
+	var storageID int64
+	var nodeType, curPath string
+	scanErr := s.db.QueryRowContext(ctx,
+		`SELECT storage_id, type, path FROM nodes WHERE id=$1`, id).
+		Scan(&storageID, &nodeType, &curPath)
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE nodes
 		SET deleted_at=NOW(), updated_at=NOW(), parent_id=NULL,
 		    name=$1, path=$2, path_hash=$3, storage_key=$4
 		WHERE id=$5`, base, trashPath, trashHash, origPath, id)
-	return err
+	if err != nil || scanErr != nil {
+		return err
+	}
+	if nodeType == string(model.NodeTypeDirectory) {
+		s.retagTrashedSubtree(ctx, storageID, []string{origPath, curPath}, trashPath)
+	}
+	return nil
+}
+
+// retagTrashedSubtree / restoreTrashedSubtree — postgres twins of the sqlite
+// driver helpers (see there for semantics). Best-effort by design.
+func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPaths []string, trashPath string) {
+	type childRow struct {
+		id   int64
+		path string
+	}
+	prefixes := pgSubtreePrefixVariants(origPaths)
+	if len(prefixes) == 0 {
+		return
+	}
+	var children []childRow
+	for _, pfx := range prefixes {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT id, path FROM nodes
+			WHERE storage_id=$1 AND deleted_at IS NULL AND SUBSTR(path,1,$2)=$3`,
+			storageID, len(pfx), pfx)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var c childRow
+			if err := rows.Scan(&c.id, &c.path); err == nil {
+				children = append(children, c)
+			}
+		}
+		_ = rows.Err()
+		rows.Close()
+	}
+	seen := map[int64]bool{}
+	for _, c := range children {
+		if seen[c.id] {
+			continue
+		}
+		seen[c.id] = true
+		suffix := pgSubtreeSuffix(c.path, prefixes)
+		if suffix == "" {
+			continue
+		}
+		newPath := strings.TrimRight(trashPath, "/") + "/" + suffix
+		newHash := pgNodePathHash(storageID, newPath)
+		_, _ = s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NOW(), updated_at=NOW(),
+			    path=$1, path_hash=$2, storage_key=$3
+			WHERE id=$4`, newPath, newHash, c.path, c.id)
+	}
+}
+
+func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, trashPaths []string, restoredPath string) {
+	type childRow struct {
+		id   int64
+		path string
+	}
+	prefixes := pgSubtreePrefixVariants(trashPaths)
+	if len(prefixes) == 0 {
+		return
+	}
+	var children []childRow
+	for _, pfx := range prefixes {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT id, path FROM nodes
+			WHERE storage_id=$1 AND deleted_at IS NOT NULL AND SUBSTR(path,1,$2)=$3`,
+			storageID, len(pfx), pfx)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var c childRow
+			if err := rows.Scan(&c.id, &c.path); err == nil {
+				children = append(children, c)
+			}
+		}
+		_ = rows.Err()
+		rows.Close()
+	}
+	seen := map[int64]bool{}
+	for _, c := range children {
+		if seen[c.id] {
+			continue
+		}
+		seen[c.id] = true
+		suffix := pgSubtreeSuffix(c.path, prefixes)
+		if suffix == "" {
+			continue
+		}
+		newPath := strings.TrimRight(restoredPath, "/") + "/" + suffix
+		newHash := pgNodePathHash(storageID, newPath)
+		_, _ = s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NULL, updated_at=NOW(),
+			    path=$1, path_hash=$2, storage_key=$3
+			WHERE id=$4`, newPath, newHash, newPath, c.id)
+	}
+}
+
+// pgSubtreePrefixVariants — postgres copy of the sqlite driver helper.
+func pgSubtreePrefixVariants(paths []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range paths {
+		norm := strings.TrimRight(path.Clean("/"+strings.Trim(p, "/")), "/")
+		if norm == "" || norm == "/" {
+			continue
+		}
+		for _, v := range []string{norm + "/", strings.TrimPrefix(norm, "/") + "/"} {
+			if !seen[v] {
+				seen[v] = true
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+func pgSubtreeSuffix(p string, prefixes []string) string {
+	for _, pfx := range prefixes {
+		if strings.HasPrefix(p, pfx) {
+			return strings.TrimPrefix(p, pfx)
+		}
+	}
+	return ""
 }
 
 func (s *Store) SoftDeleteNode(ctx context.Context, id int64) error {
@@ -1982,32 +2120,42 @@ func (s *Store) ListTrashed(ctx context.Context, storageID *int64, limit, offset
 }
 
 // RestoreNodeAt flips deleted_at and reverts the path/parent in one shot.
+// Trashed directories also revive the descendants dragged in with them
+// (SoftDeleteAndRetag mirror).
 func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, origPath string) error {
 	clean := strings.TrimRight(path.Clean("/"+strings.Trim(origPath, "/")), "/")
 	if clean == "" {
 		clean = "/"
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT storage_id FROM nodes WHERE id=$1`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT storage_id, type, path FROM nodes WHERE id=$1`, id)
 	var sid int64
-	if err := row.Scan(&sid); err != nil {
+	var nodeType, trashPath string
+	if err := row.Scan(&sid, &nodeType, &trashPath); err != nil {
 		return err
 	}
 	hash := pgNodePathHash(sid, clean)
 	name := path.Base(clean)
 	if parentID == nil {
-		_, err := s.db.ExecContext(ctx, `
+		if _, err := s.db.ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL, updated_at=NOW(), parent_id=NULL,
 			    name=$1, path=$2, path_hash=$3, storage_key=$4
-			WHERE id=$5`, name, clean, hash, clean, id)
-		return err
+			WHERE id=$5`, name, clean, hash, clean, id); err != nil {
+			return err
+		}
+	} else {
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE nodes
+			SET deleted_at=NULL, updated_at=NOW(), parent_id=$1,
+			    name=$2, path=$3, path_hash=$4, storage_key=$5
+			WHERE id=$6`, *parentID, name, clean, hash, clean, id); err != nil {
+			return err
+		}
 	}
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE nodes
-		SET deleted_at=NULL, updated_at=NOW(), parent_id=$1,
-		    name=$2, path=$3, path_hash=$4, storage_key=$5
-		WHERE id=$6`, *parentID, name, clean, hash, clean, id)
-	return err
+	if nodeType == string(model.NodeTypeDirectory) && trashPath != "" {
+		s.restoreTrashedSubtree(ctx, sid, []string{trashPath}, clean)
+	}
+	return nil
 }
 
 // LookupParentByPath walks the cache one segment at a time to resolve the
@@ -2434,13 +2582,9 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 // GetWebhookTarget returns a single target by id.
 func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
 		 FROM webhook_targets WHERE id=$1`, id)
-	t := &model.WebhookTarget{}
-	if err := row.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt); err != nil {
-		return nil, err
-	}
-	return t, nil
+	return pgScanWebhookTarget(row)
 }
 
 // ListWebhookTargets returns every target ordered by id. Enabled/event
@@ -2448,7 +2592,7 @@ func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookT
 // tiny and the admin list needs disabled rows too.
 func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
 		 FROM webhook_targets ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list webhook targets: %w", err)
@@ -2456,13 +2600,42 @@ func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget,
 	defer rows.Close()
 	var out []*model.WebhookTarget
 	for rows.Next() {
-		t := &model.WebhookTarget{}
-		if err := rows.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt); err != nil {
+		t, err := pgScanWebhookTarget(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// pgScanWebhookTarget accepts both *sql.Row and *sql.Rows and maps the
+// nullable last-delivery columns (migration 00019) into pointers.
+func pgScanWebhookTarget(rs interface {
+	Scan(...any) error
+}) (*model.WebhookTarget, error) {
+	t := &model.WebhookTarget{}
+	var (
+		lastSt  sql.NullInt64
+		lastErr sql.NullString
+		lastAt  sql.NullTime
+	)
+	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt, &lastSt, &lastErr, &lastAt); err != nil {
+		return nil, err
+	}
+	if lastSt.Valid {
+		v := int(lastSt.Int64)
+		t.LastStatus = &v
+	}
+	if lastErr.Valid {
+		v := lastErr.String
+		t.LastError = &v
+	}
+	if lastAt.Valid {
+		v := lastAt.Time
+		t.LastDeliveryAt = &v
+	}
+	return t, nil
 }
 
 // UpdateWebhookTarget replaces the mutable columns of a target row.
@@ -2490,6 +2663,22 @@ func (s *Store) DeleteWebhookTarget(ctx context.Context, id int64) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// UpdateWebhookTargetDelivery records the newest delivery outcome
+// (migration 00019). errMsg "" (success) stores NULL in last_error.
+func (s *Store) UpdateWebhookTargetDelivery(ctx context.Context, id int64, httpStatus int, errMsg string, at time.Time) error {
+	var errVal any
+	if errMsg != "" {
+		errVal = errMsg
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE webhook_targets SET last_status=$1, last_error=$2, last_delivery_at=$3 WHERE id=$4`,
+		httpStatus, errVal, at.UTC(), id)
+	if err != nil {
+		return fmt.Errorf("postgres: update webhook target delivery: %w", err)
 	}
 	return nil
 }

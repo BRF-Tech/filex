@@ -17,9 +17,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // Upload handles browser to S3 multipart uploads.
@@ -270,10 +270,9 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if node != nil {
-		/* bag:b3 event */
-		emitNodeEvent(r.Context(), notify.EventFileUploaded, cu.StorageID, node.Path, node.Name, node.Size,
+		/* bag:b3 event + koru:k2 av — single post-write gate */
+		writehook.OnFileWritten(r.Context(), cu.StorageID, node, writehook.OriginManager,
 			map[string]any{"chunked": true})
-		enqueueAntivirusScan(r.Context(), node) /* koru:k2 av */
 	}
 
 	_ = u.Store.DeleteChunkedUpload(r.Context(), cu.ID)

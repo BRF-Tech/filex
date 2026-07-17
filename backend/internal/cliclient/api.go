@@ -142,13 +142,8 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 	if err != nil {
 		return RemotePath{}, nil, err
 	}
-	f, err := os.Open(localPath)
-	if err != nil {
-		return RemotePath{}, nil, err
-	}
-	defer f.Close()
-	if fi, err := f.Stat(); err == nil && fi.IsDir() {
-		return RemotePath{}, nil, fmt.Errorf("%s is a directory — upload takes a single file", localPath)
+	if fi, err := os.Stat(localPath); err == nil && fi.IsDir() {
+		return RemotePath{}, nil, fmt.Errorf("%s is a directory — upload takes a single file (pass -r/--recursive to upload the folder)", localPath)
 	}
 
 	destDir := rp
@@ -157,6 +152,23 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 		destDir = rp.Dir()
 		name = rp.Base()
 	}
+
+	raw, err := c.uploadFile(ctx, destDir, name, localPath)
+	if err != nil {
+		return RemotePath{}, nil, err
+	}
+	return destDir.Join(name), raw, nil
+}
+
+// uploadFile streams one local file into destDir under name. The shared
+// core behind Upload and UploadTree — no destination probing here, the
+// caller already resolved destDir.
+func (c *Client) uploadFile(ctx context.Context, destDir RemotePath, name, localPath string) ([]byte, error) {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
 
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
@@ -181,14 +193,10 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 	q.Set("action", "upload")
 	req, err := c.newRequest(ctx, http.MethodPost, managerPath, q, pr)
 	if err != nil {
-		return RemotePath{}, nil, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	raw, err := c.doJSON(req)
-	if err != nil {
-		return RemotePath{}, nil, err
-	}
-	return destDir.Join(name), raw, nil
+	return c.doJSON(req)
 }
 
 // ───────────────────────── download ─────────────────────────
