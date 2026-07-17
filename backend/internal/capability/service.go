@@ -2,7 +2,10 @@
 // tools (ffmpeg, gs, libreoffice, vips) and external HTTP services
 // (OnlyOffice, Drawio).
 //
-// Results are cached for 1h so the /api/capabilities endpoint is cheap.
+// Results are cached so the /api/capabilities endpoint is cheap: 1h after
+// a fully-successful probe round, but only 2 minutes when any external
+// probe failed — a transient outage must not pin an "unreachable" banner
+// in the UI for a whole hour.
 package capability
 
 import (
@@ -12,6 +15,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +35,13 @@ type Service struct {
 	until           time.Time
 	storageResolver func(int64) (storage.Driver, error)
 
+	// Asymmetric cache TTLs (fields so tests can shorten them): a snapshot
+	// where every enabled external probe succeeded lives okTTL (1h); one
+	// with any failed probe lives only failTTL (2m) so the next Get
+	// re-probes soon and a transient outage clears itself quickly.
+	okTTL   time.Duration
+	failTTL time.Duration
+
 	// Static fields filled by the bootstrap that don't need probing.
 	authDrivers      []string
 	storageDrivers   []string
@@ -45,7 +56,13 @@ type Service struct {
 }
 
 // New constructs a Service.
-func New(store db.Store) *Service { return &Service{store: store} }
+func New(store db.Store) *Service {
+	return &Service{
+		store:   store,
+		okTTL:   time.Hour,
+		failTTL: 2 * time.Minute,
+	}
+}
 
 // SetStaticInventory wires the boot-time-known fields into the
 // Capabilities response. Safe to call once before the first Get().
@@ -82,8 +99,9 @@ func (s *Service) AttachStorageResolver(resolver func(int64) (storage.Driver, er
 	s.mu.Unlock()
 }
 
-// Get returns the current Capabilities snapshot, refreshing if cache
-// expired (1h).
+// Get returns the current Capabilities snapshot, refreshing if the cache
+// expired (okTTL after a clean probe round, failTTL when any external
+// probe failed).
 func (s *Service) Get(ctx context.Context) (*model.Capabilities, error) {
 	s.mu.RLock()
 	if s.cached != nil && time.Now().Before(s.until) {
@@ -121,7 +139,7 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 		st.State = "disabled"
 	case es.URL == "":
 		st.State = "unconfigured"
-	case probeHTTP(es.URL):
+	case probeHTTP(externalProbeURL(name, es.URL)):
 		st.State = "ok"
 	default:
 		st.State = "unreachable"
@@ -187,6 +205,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.Antivirus = antivirus.ResolveBin() != ""
 
 	// External services from DB.
+	probeFailed := false
 	if list, err := s.store.ListExternalServices(ctx); err == nil {
 		for _, es := range list {
 			st := model.ExternalServiceState{
@@ -196,11 +215,12 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 				LastCheck: es.LastCheck,
 			}
 			if es.Enabled && es.URL != "" {
-				if probeHTTP(es.URL) {
+				if probeHTTP(externalProbeURL(es.Name, es.URL)) {
 					st.State = "ok"
 					_ = s.store.UpdateExternalServiceState(ctx, es.Name, time.Now(), "ok")
 				} else {
 					st.State = "unreachable"
+					probeFailed = true
 					_ = s.store.UpdateExternalServiceState(ctx, es.Name, time.Now(), "unreachable")
 				}
 			} else {
@@ -232,9 +252,15 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 		}
 	}
 
+	// Asymmetric TTL: a snapshot carrying a failed probe expires quickly so
+	// a transient outage banners the UI for at most failTTL, not okTTL.
+	ttl := s.okTTL
+	if probeFailed {
+		ttl = s.failTTL
+	}
 	s.mu.Lock()
 	s.cached = caps
-	s.until = time.Now().Add(time.Hour)
+	s.until = time.Now().Add(ttl)
 	s.mu.Unlock()
 	return caps, nil
 }
@@ -264,6 +290,28 @@ func probeStorage(drv storage.Driver) model.StorageCapabilities {
 func has(bin string) bool {
 	_, err := exec.LookPath(bin)
 	return err == nil
+}
+
+// externalHealthPaths maps external service names to their dedicated
+// health endpoints. Probing these instead of the app root avoids false
+// "unreachable" verdicts from services whose root URL redirects or 4xxes
+// while the service itself is healthy. Services without an entry (drawio)
+// keep the raw-URL probe.
+var externalHealthPaths = map[string]string{
+	"onlyoffice": "/healthcheck",
+	"convert":    "/healthz",
+}
+
+// externalProbeURL returns the URL to probe for the named service — the
+// configured base URL joined with the service's health path when one is
+// known. Trailing slashes on the base collapse so `http://x/` and
+// `http://x` both yield `http://x/healthcheck`.
+func externalProbeURL(name, rawURL string) string {
+	p, ok := externalHealthPaths[name]
+	if !ok {
+		return rawURL
+	}
+	return strings.TrimRight(rawURL, "/") + p
 }
 
 // probeHTTP returns true if the URL responds with 2xx within 3 seconds.

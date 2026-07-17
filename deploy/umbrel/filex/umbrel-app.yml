@@ -1,0 +1,38 @@
+manifestVersion: 1
+id: filex
+category: files
+name: filex
+version: "0.4.0"
+tagline: Self-hosted file manager for all your storages
+description: >-
+  filex is a fast, self-hosted file manager with a single-binary backend and a
+  modern web UI. Browse, upload, preview, rename, share and edit files across
+  pluggable storage backends — local folders, S3/MinIO, SFTP, WebDAV and FTP.
+
+
+  Highlights: public share links with PIN and expiry, file-drop upload links,
+  full-text search, image/video/PDF thumbnails, trash and file versioning,
+  role-based access control, TOTP 2FA, optional SSO (OIDC/LDAP), an embeddable
+  web component, and an AI/MCP API for agents. OnlyOffice and draw.io can be
+  connected for in-browser document and diagram editing.
+
+
+  On Umbrel, filex stores its database in the app data directory and manages a
+  dedicated files folder out of the box. Sign in with the username and password
+  shown by Umbrel, then add more storages in the admin UI.
+developer: BRF-Tech
+website: https://filex.sh
+dependencies: []
+repo: https://github.com/BRF-Tech/filex
+support: https://github.com/BRF-Tech/filex/issues
+port: 5212
+gallery:
+  - 1.jpg
+  - 2.jpg
+  - 3.jpg
+path: ""
+defaultUsername: admin@local
+deterministicPassword: true
+torOnly: false
+submitter: BRF-Tech
+submission: https://github.com/getumbrel/umbrel-apps

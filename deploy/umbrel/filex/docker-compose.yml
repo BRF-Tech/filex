@@ -1,0 +1,36 @@
+# filex on Umbrel — app-proxy pattern.
+#
+# Umbrel injects APP_DATA_DIR / APP_PASSWORD / DEVICE_DOMAIN_NAME and fronts
+# the app with app_proxy on the manifest `port` (5212). The admin password is
+# the deterministic one Umbrel shows in the app's "Show password" dialog
+# (deterministicPassword: true in umbrel-app.yml).
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: filex_server_1
+      APP_PORT: 5212
+
+  server:
+    image: ghcr.io/brf-tech/filex:v0.4.0
+    restart: on-failure
+    stop_grace_period: 1m
+    environment:
+      # The URL users open in the browser — share links, OIDC redirects and
+      # OnlyOffice callbacks are built from it.
+      FILEX_PUBLIC_URL: "http://${DEVICE_DOMAIN_NAME}:5212"
+      # First admin — password comes from Umbrel (shown in the app UI).
+      FILEX_ADMIN_EMAIL: admin@local
+      FILEX_ADMIN_PASSWORD: ${APP_PASSWORD}
+      # Seed a local storage on first boot so uploads work immediately.
+      FILEX_DEFAULT_STORAGE_DRIVER: local
+      FILEX_DEFAULT_STORAGE_PATH: /srv/files
+    volumes:
+      # SQLite DB + search index + thumbnail cache.
+      - ${APP_DATA_DIR}/data:/data
+      # The default storage folder (app-scoped).
+      - ${APP_DATA_DIR}/files:/srv/files
+      # Umbrel's shared storage folder (downloads from other apps). Add it in
+      # the filex admin UI as an extra "local" storage at /srv/umbrel.
+      - ${UMBREL_ROOT}/data/storage:/srv/umbrel

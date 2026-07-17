@@ -1,0 +1,40 @@
+/**
+ * filex brand accent for the VitePress default theme.
+ * Colors match the product UI (`packages/core/src/styles/variables.css`):
+ * primary #3b82f6, hover #2563eb, dark-mode primary #60a5fa.
+ */
+
+:root {
+  --vp-c-brand-1: #2563eb;
+  --vp-c-brand-2: #3b82f6;
+  --vp-c-brand-3: #60a5fa;
+  --vp-c-brand-soft: rgba(59, 130, 246, 0.14);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #2563eb 30%, #60a5fa);
+  --vp-home-hero-image-background-image: linear-gradient(
+    -45deg,
+    rgba(37, 99, 235, 0.35) 50%,
+    rgba(96, 165, 250, 0.35) 50%
+  );
+  --vp-home-hero-image-filter: blur(44px);
+}
+
+.dark {
+  --vp-c-brand-1: #60a5fa;
+  --vp-c-brand-2: #3b82f6;
+  --vp-c-brand-3: #2563eb;
+  --vp-c-brand-soft: rgba(96, 165, 250, 0.16);
+}
+
+@media (min-width: 640px) {
+  :root {
+    --vp-home-hero-image-filter: blur(56px);
+  }
+}
+
+@media (min-width: 960px) {
+  :root {
+    --vp-home-hero-image-filter: blur(68px);
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schemas.runtipi.io/v2/dynamic-compose.json",
+  "schemaVersion": 2,
+  "services": [
+    {
+      "name": "filex",
+      "image": "ghcr.io/brf-tech/filex:v0.4.0",
+      "isMain": true,
+      "internalPort": 5212,
+      "environment": [
+        {
+          "key": "FILEX_PUBLIC_URL",
+          "value": "${APP_PROTOCOL:-http}://${APP_DOMAIN}"
+        },
+        {
+          "key": "FILEX_ADMIN_EMAIL",
+          "value": "${FILEX_ADMIN_EMAIL}"
+        },
+        {
+          "key": "FILEX_ADMIN_PASSWORD",
+          "value": "${FILEX_ADMIN_PASSWORD}"
+        },
+        {
+          "key": "FILEX_DEFAULT_STORAGE_DRIVER",
+          "value": "local"
+        },
+        {
+          "key": "FILEX_DEFAULT_STORAGE_PATH",
+          "value": "/srv/files"
+        }
+      ],
+      "volumes": [
+        {
+          "hostPath": "${APP_DATA_DIR}/data/filex",
+          "containerPath": "/data"
+        },
+        {
+          "hostPath": "${APP_DATA_DIR}/data/files",
+          "containerPath": "/srv/files"
+        }
+      ]
+    }
+  ]
+}

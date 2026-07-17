@@ -4,7 +4,7 @@
 
 image:
   repository: ghcr.io/brf-tech/filex
-  tag: ""                 # defaults to .Chart.appVersion
+  tag: ""                 # defaults to .Chart.appVersion (e.g. "v0.4.0")
   pullPolicy: IfNotPresent
 
 # The external URL users open. REQUIRED — it is baked into share links, the OIDC

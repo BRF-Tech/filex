@@ -7,6 +7,7 @@ Pick the path that matches how far you want to go:
 | [**Minimal**](#minimal) | One container, SQLite, a local folder. No external services. | Trying it out, small/personal use |
 | [**Full stack (Compose)**](#full-stack-docker-compose) | filex + PostgreSQL + Redis + OnlyOffice + MinIO + Caddy (auto‑HTTPS). | Real self‑hosting, teams |
 | [**Kubernetes (Helm)**](#kubernetes-helm) | Helm chart with toggles for the same components. | Clusters |
+| [**App stores**](#app-stores) | Ready-made packages for Umbrel, CasaOS, Runtipi, Unraid, Portainer. | Home servers / NAS |
 | [**Binary**](#binary) | A single static binary. | No Docker, systemd, edge devices |
 
 All paths end at the same place: the admin UI at `…/admin`, with a first‑run
@@ -134,6 +135,27 @@ Key `values.yaml` toggles: `postgresql.enabled`, `redis.enabled`,
 > so a fresh release boots fully configured with no admin‑UI setup. See
 > [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero‑touch seeding) and
 > the [`deploy/helm/filex/`](../deploy/helm/filex/) values examples.
+
+---
+
+## App stores
+
+Ready-made packages for the common home-server platforms live under
+[`deploy/`](../deploy/) — each directory has a README with install steps.
+All of them run the same single container (SQLite + local storage) and end at
+the same [first run](#first-run).
+
+- **Umbrel** — [`deploy/umbrel/filex/`](../deploy/umbrel/filex/): community
+  app-store package (app-proxy pattern); login is `admin@local` + the password
+  Umbrel shows in the app dialog.
+- **CasaOS** — [`deploy/casaos/`](../deploy/casaos/): compose with the
+  `x-casaos` store metadata; paste it via *Install a customized app*.
+- **Runtipi** — [`deploy/runtipi/filex/`](../deploy/runtipi/filex/): dynamic
+  compose app; the install form asks for the (optional) first admin.
+- **Unraid** — [`deploy/unraid/`](../deploy/unraid/): Community Applications
+  template XML; map a share to `/srv/files` and set the Public URL.
+- **Portainer** — [`deploy/portainer/`](../deploy/portainer/): App Templates
+  v3 JSON; add the raw URL under *Settings → App Templates*.
 
 ---
 

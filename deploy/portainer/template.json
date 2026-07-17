@@ -1,0 +1,61 @@
+{
+  "version": "3",
+  "templates": [
+    {
+      "id": 1,
+      "type": 1,
+      "title": "filex",
+      "name": "filex",
+      "description": "Fast, self-hosted file manager: browse, upload, preview, share and edit files across local folders, S3/MinIO, SFTP, WebDAV and FTP. Share links with PIN and expiry, file-drop upload links, full-text search, thumbnails, trash and versioning, RBAC, TOTP 2FA, optional SSO (OIDC/LDAP) and an AI/MCP API for agents.",
+      "categories": ["storage", "tools"],
+      "platform": "linux",
+      "logo": "https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png",
+      "image": "ghcr.io/brf-tech/filex:latest",
+      "ports": ["5212:5212/tcp"],
+      "volumes": [
+        {
+          "container": "/data"
+        },
+        {
+          "container": "/srv/files"
+        }
+      ],
+      "env": [
+        {
+          "name": "FILEX_PUBLIC_URL",
+          "label": "Public URL",
+          "description": "The URL users open in the browser — share links and SSO redirects are built from it.",
+          "default": "http://localhost:5212"
+        },
+        {
+          "name": "FILEX_ADMIN_EMAIL",
+          "label": "Admin email (optional)",
+          "description": "Preset the first admin account. Leave empty for admin@local.",
+          "default": ""
+        },
+        {
+          "name": "FILEX_ADMIN_PASSWORD",
+          "label": "Admin password (optional)",
+          "description": "Leave empty for a random password printed once in the container logs (also saved to /data/.first-run.txt).",
+          "default": ""
+        },
+        {
+          "name": "FILEX_DEFAULT_STORAGE_DRIVER",
+          "label": "Default storage driver",
+          "description": "Storage seeded on first boot. Keep 'local' to use the /srv/files volume; empty seeds nothing.",
+          "default": "local",
+          "preset": true
+        },
+        {
+          "name": "FILEX_DEFAULT_STORAGE_PATH",
+          "label": "Default storage path",
+          "description": "Container path of the seeded local storage.",
+          "default": "/srv/files",
+          "preset": true
+        }
+      ],
+      "restart_policy": "unless-stopped",
+      "note": "Sign in at <b>/admin</b>. First run creates an admin account and prints the password <b>once</b> in the container logs unless FILEX_ADMIN_EMAIL/FILEX_ADMIN_PASSWORD are set. The /data volume holds the SQLite DB, search index and thumbnails; /srv/files is the managed files folder — edit the volume mappings to bind them to host paths."
+    }
+  ]
+}

@@ -728,6 +728,13 @@ function stripAdapter(p: string): string {
 // confined rootFloor on embeds, so this is safe everywhere.
 function leaveNotFound() {
   notFoundPath.value = '';
+  // Cold-load on a dead deep link: currentPath is still '' (the 404 never
+  // committed it), so navigating to root doesn't change it and the
+  // watch(currentPath) persistence never fires — the dead hash would
+  // survive and a reload would land on the 404 again. Clear it explicitly;
+  // if load('') clamps to a confined floor path, the watch fires with the
+  // new path and rewrites the hash correctly anyway.
+  writePersistedPath('');
   void load('');
 }
 

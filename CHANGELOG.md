@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.4.0 below.)
+(Nothing yet — see v0.4.1 below.)
+
+## [0.4.1] - 2026-07-17
+
+### Added
+
+- **App-store packaging**: ready-to-submit manifests for Umbrel, CasaOS,
+  Runtipi, Unraid (Community Applications) and Portainer templates under
+  `deploy/`, plus a refreshed Helm chart (appVersion now tracks a real
+  image tag).
+- **Documentation site**: a VitePress site over `docs/` (see `docs-site/`)
+  with local search, feature landing page and dark mode — published at
+  https://docs.filex.sh.
+
+### Fixed
+
+- External-service capability probes now hit real health endpoints
+  (OnlyOffice `/healthcheck`, converter `/healthz`) and failures are only
+  cached for 2 minutes instead of an hour — a transient outage no longer
+  pins a "configured but unreachable" banner for the rest of the hour.
+- Returning to the root from a dead deep link now clears the stale hash,
+  so a reload lands on the root instead of the 404 screen again.
 
 ## [0.4.0] - 2026-07-17
 

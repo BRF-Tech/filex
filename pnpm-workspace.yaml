@@ -2,3 +2,4 @@ packages:
   - "packages/*"
   - "web"
   - "e2e"
+  - "docs-site"

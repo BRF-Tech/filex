@@ -2,8 +2,10 @@ apiVersion: v2
 name: filex
 description: Self-hosted file manager — Go backend + Vue/React/Web Component frontend, pluggable storage/auth/DB drivers.
 type: application
-version: 0.1.0
-appVersion: "0.1.56"
+version: 0.2.0
+# Image tags on ghcr.io carry the "v" prefix (ghcr.io/brf-tech/filex:v0.4.0) —
+# keep it here so the default image ref (filex.image helper) resolves.
+appVersion: "v0.4.0"
 home: https://github.com/BRF-Tech/filex
 sources:
   - https://github.com/BRF-Tech/filex

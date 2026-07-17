@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>filex</Name>
+  <Repository>ghcr.io/brf-tech/filex:latest</Repository>
+  <Registry>https://github.com/BRF-Tech/filex/pkgs/container/filex</Registry>
+  <Network>bridge</Network>
+  <Support>https://github.com/BRF-Tech/filex/issues</Support>
+  <Project>https://github.com/BRF-Tech/filex</Project>
+  <Overview>filex is a fast, self-hosted file manager: browse, upload, preview, share and edit files across local folders, S3/MinIO, SFTP, WebDAV and FTP. Public share links with PIN and expiry, file-drop upload links, full-text search, image/video/PDF thumbnails, trash and versioning, role-based access control, TOTP 2FA, optional SSO (OIDC/LDAP) and an AI/MCP API for agents.&#10;&#10;First start: an admin account (admin@local) is created and its password is printed ONCE in the container log (also saved to /data/.first-run.txt) — unless you preset Admin Email + Admin Password below. Sign in at /admin.</Overview>
+  <Category>Cloud: Tools: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:5212]/admin/</WebUI>
+  <Icon>https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/BRF-Tech/filex/main/deploy/unraid/filex.xml</TemplateURL>
+  <ExtraParams/>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Config Name="WebUI Port" Target="5212" Default="5212" Mode="tcp" Description="filex web UI + API port" Type="Port" Display="always" Required="true" Mask="false">5212</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/filex" Mode="rw" Description="Database (SQLite), search index, thumbnail cache and the one-time first-run admin secret" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/filex</Config>
+  <Config Name="Files" Target="/srv/files" Default="" Mode="rw" Description="The share/folder filex manages — seeded as the default local storage on first boot (e.g. /mnt/user/files). Add more storages later in the admin UI." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Public URL" Target="FILEX_PUBLIC_URL" Default="" Mode="" Description="The URL users open in the browser, e.g. http://TOWER:5212 or your reverse-proxy https://files.example.com — share links and SSO redirects are built from it" Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Admin Email" Target="FILEX_ADMIN_EMAIL" Default="" Mode="" Description="Optional: preset the first admin account. Leave empty for admin@local." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Admin Password" Target="FILEX_ADMIN_PASSWORD" Default="" Mode="" Description="Optional: preset the first admin password. Leave empty for a random password printed once in the container log." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Default Storage Driver" Target="FILEX_DEFAULT_STORAGE_DRIVER" Default="local" Mode="" Description="Storage seeded on first boot. Keep 'local' for the Files path above; set empty to seed nothing (configure storages in the admin UI instead)." Type="Variable" Display="advanced" Required="false" Mask="false">local</Config>
+  <Config Name="Default Storage Path" Target="FILEX_DEFAULT_STORAGE_PATH" Default="/srv/files" Mode="" Description="Container path of the seeded local storage — matches the Files mapping above." Type="Variable" Display="advanced" Required="false" Mask="false">/srv/files</Config>
+</Container>

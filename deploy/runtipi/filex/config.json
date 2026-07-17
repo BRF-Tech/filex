@@ -1,0 +1,37 @@
+{
+  "$schema": "../app-info-schema.json",
+  "name": "filex",
+  "available": true,
+  "exposable": true,
+  "dynamic_config": true,
+  "port": 5212,
+  "id": "filex",
+  "tipi_version": 1,
+  "version": "0.4.0",
+  "categories": ["utilities", "data"],
+  "description": "filex is a fast, self-hosted file manager: browse, upload, preview, share and edit files across local folders, S3/MinIO, SFTP, WebDAV and FTP. Public share links with PIN and expiry, file-drop upload links, full-text search, thumbnails, trash and versioning, RBAC, TOTP 2FA, optional SSO (OIDC/LDAP) and an AI/MCP API for agents. Leave the admin fields empty to get a random admin@local password printed once in the app logs (also saved to /data/.first-run.txt).",
+  "short_desc": "Self-hosted file manager for all your storages",
+  "author": "BRF-Tech",
+  "website": "https://filex.sh",
+  "source": "https://github.com/BRF-Tech/filex",
+  "form_fields": [
+    {
+      "type": "text",
+      "label": "Admin email",
+      "required": false,
+      "hint": "First admin account. Leave empty to use admin@local.",
+      "env_variable": "FILEX_ADMIN_EMAIL"
+    },
+    {
+      "type": "password",
+      "label": "Admin password",
+      "required": false,
+      "hint": "Leave empty to get a random password, printed once in the app logs.",
+      "env_variable": "FILEX_ADMIN_PASSWORD"
+    }
+  ],
+  "supported_architectures": ["amd64", "arm64"],
+  "created_at": 1784246400000,
+  "updated_at": 1784246400000,
+  "min_tipi_version": "4.5.0"
+}

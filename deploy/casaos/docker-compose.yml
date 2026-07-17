@@ -1,0 +1,99 @@
+# filex on CasaOS — compose with the x-casaos store extension.
+# Schema modelled on the official CasaOS AppStore entries
+# (github.com/IceWhaleTech/CasaOS-AppStore, e.g. Apps/Nextcloud).
+#
+# Install: CasaOS UI -> App Store -> "Install a customized app" -> paste this
+# file (or drop the folder into a CasaOS app store repo).
+name: filex
+services:
+  filex:
+    image: ghcr.io/brf-tech/filex:v0.4.0
+    container_name: filex
+    network_mode: bridge
+    restart: unless-stopped
+    ports:
+      - target: 5212
+        published: "5212"
+        protocol: tcp
+    environment:
+      # Set to the URL you actually open, e.g. http://<NAS-IP>:5212 — share
+      # links and SSO redirects are built from it.
+      FILEX_PUBLIC_URL: http://localhost:5212
+      # Seed a local storage on first boot so uploads work immediately.
+      FILEX_DEFAULT_STORAGE_DRIVER: local
+      FILEX_DEFAULT_STORAGE_PATH: /srv/files
+      # Optional: preset the first admin instead of a random password.
+      # FILEX_ADMIN_EMAIL: admin@example.com
+      # FILEX_ADMIN_PASSWORD: change-me
+    volumes:
+      - type: bind
+        source: /DATA/AppData/$AppID/data
+        target: /data
+      - type: bind
+        source: /DATA/AppData/$AppID/files
+        target: /srv/files
+      - type: bind
+        source: /DATA
+        target: /media/DATA
+    x-casaos:
+      envs:
+        - container: FILEX_PUBLIC_URL
+          description:
+            en_US: The URL users open in the browser (http://<NAS-IP>:5212). Share links and SSO redirects are built from it.
+      ports:
+        - container: "5212"
+          description:
+            en_US: Web UI + API port
+      volumes:
+        - container: /data
+          description:
+            en_US: filex database (SQLite), search index and thumbnail cache.
+        - container: /srv/files
+          description:
+            en_US: Default storage folder, seeded on first boot.
+        - container: /media/DATA
+          description:
+            en_US: Whole CasaOS /DATA folder — add it as an extra "local" storage in the filex admin UI to manage your NAS files.
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: filex
+  author: BRF-Tech
+  developer: BRF-Tech
+  category: Cloud
+  description:
+    en_US: >-
+      filex is a fast, self-hosted file manager: browse, upload, preview,
+      share and edit files across local folders, S3/MinIO, SFTP, WebDAV and
+      FTP. Public share links with PIN and expiry, file-drop upload links,
+      full-text search, thumbnails, trash and versioning, RBAC, TOTP 2FA,
+      optional SSO (OIDC/LDAP) and an AI/MCP API for agents. On first start it
+      creates an admin account and prints the password once in the container
+      logs (also saved to /data/.first-run.txt), unless FILEX_ADMIN_EMAIL /
+      FILEX_ADMIN_PASSWORD are set.
+  tagline:
+    en_US: Self-hosted file manager for all your storages
+  title:
+    en_US: filex
+  icon: https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png
+  thumbnail: https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/social-preview.png
+  screenshot_link:
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/explorer-grid-light.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/admin-dashboard.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/share-modal.png
+  tips:
+    before_install:
+      en_US: >-
+        After install, check the container logs for the one-time admin@local
+        password (or set FILEX_ADMIN_EMAIL / FILEX_ADMIN_PASSWORD before
+        starting). Set FILEX_PUBLIC_URL to the address you really use.
+  index: /
+  port_map: "5212"
+  scheme: http
+  store_app_id: filex
+  version: "0.4.0"
+  website: https://filex.sh
+  repo: https://github.com/BRF-Tech/filex
+  support: https://github.com/BRF-Tech/filex/issues

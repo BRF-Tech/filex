@@ -7,6 +7,9 @@
 /packages/*/dist/
 /web/dist/
 /demo/dist/
+/docs-site/.vitepress/dist/
+/docs-site/.vitepress/cache/
+/docs-site-dist.zip
 
 # --- Go ---
 *.exe
