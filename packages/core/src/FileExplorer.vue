@@ -1341,9 +1341,11 @@ function openNodeInNewTab(n: FileNode) {
   void markRecent(n);
 }
 
-type ContextMode = 'selection' | 'breadcrumb';
+type ContextMode = 'selection' | 'breadcrumb' | 'pane' /* ui-fix — yan panel sağ-tık */;
 const ctxMode = ref<ContextMode>('selection');
 const breadcrumbCtxPath = ref<string>('');
+/* ui-fix — yan panel sağ-tık menüsünün hedef node'ları (pane selection). */
+const paneCtxTargets = ref<FileNode[]>([]);
 const breadcrumbCtxLabel = ref<string>('');
 
 const selectionMode = computed<SelectionMode>(() => {
@@ -1388,12 +1390,70 @@ function onCrumbContext(payload: { x: number; y: number; adapterPath: string; la
   ctxRef.value?.show({ clientX: payload.x, clientY: payload.y }, []);
 }
 
+/* ui-fix — yan (ikincil) panelde sağ-tık: pane'i aktifleştir, seçili
+ * node'lara göre menüyü aç. Pane "hafif" olduğundan (delete/rename modal'ları
+ * ana panelde) menü aç/yeni-sekme/indir/kopyala/kes/yapıştır ile sınırlı;
+ * hepsi pane-route'lu (dispatchPaneAction). */
+function onPaneContext(node: FileNode | null, ev: MouseEvent) {
+  activePane.value = 'split';
+  const sel = splitPaneRef.value?.selectedNodes() ?? [];
+  // node=null (boş alana sağ-tık): seçimsiz menü (yalnız Yapıştır). Aksi
+  // halde pane seçimi (yoksa tıklanan node) hedeftir.
+  paneCtxTargets.value = node ? (sel.length > 0 ? sel : [node]) : [];
+  ctxMode.value = 'pane';
+  ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
+}
+
+function paneActionList(sel: FileNode[]): ContextAction[] {
+  const single = sel.length === 1;
+  const isFile = single && sel[0]?.type === 'file';
+  const isDir = single && sel[0]?.type === 'dir';
+  const any = sel.length > 0;
+  return [
+    { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
+    { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !isDir } /* wiring:d1 */,
+    { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
+    { divider: true, key: 'psep', label: '', hidden: !any },
+    { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any },
+    { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any },
+    { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+  ];
+}
+
+async function dispatchPaneAction(key: string, targets: FileNode[]) {
+  switch (key) {
+    case 'open':
+      if (targets[0]) openNodeInNewTab(targets[0]);
+      break;
+    case 'open-tab':
+      if (targets[0]) {
+        tabsApi.openTab(paneToUser(targets[0].path), { viewMode: viewMode.value, background: true });
+      }
+      break;
+    case 'download':
+      if (targets[0]) downloadFile(targets[0]);
+      break;
+    case 'copy':
+      paneCopy();
+      break;
+    case 'cut':
+      paneCut();
+      break;
+    case 'paste':
+      await panePaste();
+      break;
+  }
+}
+
 const contextActions = computed<ContextAction[]>(() => {
   if (ctxMode.value === 'breadcrumb') {
     return [
       { key: 'open', label: t('ctx.open'), icon: '↗' },
       { key: 'copy-path', label: t('breadcrumb.copy_path'), icon: '📋' },
     ];
+  }
+  if (ctxMode.value === 'pane' /* ui-fix — yan panel menüsü */) {
+    return paneActionList(paneCtxTargets.value);
   }
 
   const sel = selection.nodes.value;
@@ -1515,6 +1575,10 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
     } else if (action.key === 'copy-path') {
       await onCopyPath(breadcrumbCtxPath.value);
     }
+    return;
+  }
+  if (ctxMode.value === 'pane' /* ui-fix — yan panel aksiyonları pane-route */) {
+    await dispatchPaneAction(action.key, paneCtxTargets.value);
     return;
   }
   await dispatchItemAction(action.key, targets);
@@ -2930,6 +2994,18 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       @open-recents="showRecents = true"
     />
 
+    <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
+         as flex siblings (row). Without the inspector open it is visually
+         identical to the previous direct-child fe__body. -->
+    <div class="fe__main" :class="{ 'fe__main--split': splitVisible } /* wiring:d1 */">
+    <!-- ui-fix — sol panelin başlığı (breadcrumb + durum şeritleri + body)
+         tek bir sarmalda: split modunda bu sarmal sol yarıya sığar, böylece
+         breadcrumb tüm sayfayı değil kendi panelini kaplar (SecondaryPane'in
+         kendi kırıntısıyla simetrik). Aktif-panel vurgusu da bu sarmalda. -->
+    <div
+      class="fe__primary"
+      :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — aktif panel vurgusu */"
+    >
     <Breadcrumb
       :dirname="dirname"
       :adapter="adapter"
@@ -2971,13 +3047,8 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     </div>
     <!-- /wiring:e2 -->
 
-    <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
-         as flex siblings (row). Without the inspector open it is visually
-         identical to the previous direct-child fe__body. -->
-    <div class="fe__main" :class="{ 'fe__main--split': splitVisible } /* wiring:d1 */">
     <div
       class="fe__body"
-      :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — aktif panel vurgusu */"
       @pointerdown.capture="setPaneMain() /* wiring:d1 */"
       @click.self="selection.clear()"
     >
@@ -3230,6 +3301,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       />
       <!-- /wiring:d2 -->
     </div>
+    </div><!-- /fe__primary ui-fix -->
 
     <!-- wiring:d1 — tab başına split: sağ ikincil panel (dar modda kapalı).
          :key tab kimliğine bağlı — tab geçişinde pane kendi konumuyla temiz
@@ -3256,6 +3328,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       @close="closeSplit"
       @open-tab="(p: string) => tabsApi.openTab(p, { viewMode: viewMode, background: true })"
       @transfer="onPaneTransfer"
+      @context="onPaneContext /* ui-fix — yan panel sağ-tık menüsü */"
     />
     <!-- /wiring:d1 -->
 

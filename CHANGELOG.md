@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.1 below.)
+(Nothing yet — see v0.7.2 below.)
+
+## [0.7.2] - 2026-07-18
+
+### Fixed
+
+- **Split view breadcrumb**: in split view the main (left) panel's
+  breadcrumb spanned the whole width instead of just its own half — it now
+  sits in the left half, mirroring the secondary pane's breadcrumb. The
+  breadcrumb, presence and lock strips moved into a `.fe__primary` wrapper
+  that occupies the left half when split (and the active-panel accent moved
+  with them).
+- **Split view context menu**: right-clicking a row in the secondary pane
+  now opens a menu (Open / Open in new tab / Download / Copy / Cut / Paste)
+  — previously it only selected the row. All actions target the secondary
+  pane. Right-clicking empty space in the pane shows a Paste-only menu, so
+  you can paste into an empty folder there.
 
 ## [0.7.1] - 2026-07-18
 

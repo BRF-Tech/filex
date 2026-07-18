@@ -65,6 +65,9 @@ const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'open-tab', path: string): void;
   (e: 'transfer', p: { sources: string[]; targetWire: string; originWire?: string }): void;
+  /* ui-fix — yan panelde sağ-tık: menü ana bileşende (FileExplorer) açılır.
+   * node=null → boş alana sağ-tık (seçimsiz, yalnız Yapıştır). */
+  (e: 'context', node: FileNode | null, ev: MouseEvent): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -168,14 +171,26 @@ function onViewClick(n: FileNode, mod: { ctrl: boolean; shift: boolean }) {
   selected.value = next;
 }
 
-/* ui-fix — right-click on a pane item: activate + select it, no menu
- * (the pane has no item menu; letting the main panel's menu open here
- * would act on the WRONG panel's selection). */
+/* ui-fix — right-click on a pane item: activate + select it, then let the
+ * host open the pane context menu (its actions are pane-routed). Selecting
+ * first keeps the menu's targets on THIS pane, not the main panel. */
 function onViewContext(n: FileNode, ev: MouseEvent) {
   ev.preventDefault();
   ev.stopPropagation();
   emit('activate');
   if (!selected.value.has(n.path)) selected.value = new Set([n.path]);
+  emit('context', n, ev);
+}
+
+/* ui-fix — boş alana (arka plan) sağ-tık: seçimsiz menü (yalnız Yapıştır)
+ * → boş klasöre / mevcut klasöre dosya yapıştırma. Satır menüsü stopProp
+ * ettiğinden bu yalnız gerçek boş alanda tetiklenir. */
+function onBgContext(ev: MouseEvent) {
+  ev.preventDefault();
+  ev.stopPropagation(); // FileExplorer kökündeki canvas menüsüne bubble etmesin
+  emit('activate');
+  selected.value = new Set();
+  emit('context', null, ev);
 }
 
 /* ui-fix — drop-into from the shared views: same payload path as the
@@ -344,6 +359,7 @@ defineExpose({ reload, goUp, selectAll, openSelected, selectedNodes, getPath });
       class="fe-split__body"
       :class="{ 'is-dropover': dropBg }"
       @click.self="clearSelection"
+      @contextmenu="onBgContext"
       @dragover="onBgDragOver"
       @dragleave="onBgDragLeave"
       @drop="onBgDrop"

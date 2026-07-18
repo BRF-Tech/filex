@@ -3220,9 +3220,23 @@ filex-explorer {
   display: none;
 }
 
+/* ui-fix — sol panel sarmalı: breadcrumb + durum şeritleri + body bir
+   flex-column. Split olmadan tüm genişlik; split olunca sol yarı (böylece
+   breadcrumb kendi panelini kaplar, SecondaryPane ile simetrik). */
+.fe__primary {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.fe__primary > .fe__body {
+  min-width: 0;
+}
+
 /* Split layout — equal halves inside fe__main; the inspector (koru:k1)
    keeps its fixed width to the right of both. */
-.fe__main--split > .fe__body {
+.fe__main--split > .fe__primary {
   flex: 1 1 50%;
 }
 .fe-split {
@@ -3236,11 +3250,11 @@ filex-explorer {
   color: var(--fe-text);
 }
 /* Active-panel accent: a thin top line on whichever pane owns the keyboard. */
-.fe__main--split > .fe__body,
+.fe__main--split > .fe__primary,
 .fe-split {
   box-shadow: inset 0 2px 0 transparent;
 }
-.fe__main--split > .fe__body.fe-pane--focus,
+.fe__main--split > .fe__primary.fe-pane--focus,
 .fe-split.fe-pane--focus {
   box-shadow: inset 0 2px 0 var(--fe-primary);
 }
