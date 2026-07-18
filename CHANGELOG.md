@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.3 below.)
+(Nothing yet — see v0.7.4 below.)
+
+## [0.7.4] - 2026-07-18
+
+### Fixed
+
+- **Split view: the trash bin now renders in the secondary pane too**. The
+  virtual "Trash" row was injected only by the main panel, so in split view
+  the right pane started one row higher and the two panes' rows were
+  visually offset. The trash-row synthesis and the internal-entry filter
+  are now a single shared source (`lib/listing.ts`) used by both panes, so
+  they always list identical rows. Opening the trash row in the secondary
+  pane opens the trash view (with restore actions) in the main panel.
+- **Standalone file manager: tall listings scroll inside the pane, not the
+  whole page**. The standalone Explore page wrapper was `min-h-screen`
+  (min-height), which lets the page grow past the viewport when the listing
+  is taller than the screen (e.g. grid view / split view) — so the root
+  `.fe` grew with it and its internal `overflow: auto` never engaged,
+  scrolling the entire page. It is now `h-screen` (height), which caps the
+  shell to the viewport so each pane's listing scrolls internally.
 
 ## [0.7.3] - 2026-07-18
 

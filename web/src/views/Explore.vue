@@ -199,7 +199,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950">
+  <!-- ui-fix — h-screen (was min-h-screen): min-height lets the page GROW past
+       the viewport when the explorer content is tall (e.g. grid view / split),
+       so .fe (height:100%) grows with it and .fe__body's internal overflow:auto
+       never engages → the whole PAGE scrolls. height:100vh caps the shell so the
+       listing scrolls INSIDE each pane instead. -->
+  <div class="h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950">
     <header
       class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur px-4 sm:px-6"
     >

@@ -86,6 +86,15 @@ import {
 } from './lib/e2ecrypto';
 /* /wiring:e2 */
 
+/* ui-fix — listing helpers shared with SecondaryPane (single source: the
+   internal-entry filter + virtual `.trash` row must be identical in both
+   panes or split view shows mismatched rows). */
+import {
+  filterInternalEntries,
+  injectTrashRow,
+  hydrateTrashRow as hydrateTrashRowShared,
+} from './lib/listing';
+
 import NewFolderModal from './modals/NewFolderModal.vue';
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
@@ -707,33 +716,11 @@ async function load(path?: string) {
        subtree; '' resets on every plain folder. Drives the lock screen. */
     e2eRoot.value = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';
     /* /wiring:e2 */
-    files.value = (resp.files || []).filter((f) => {
-      if (f.path.includes('.thumbs')) return false;
-      if (f.path.includes('.versions') || f.basename === '.versions') return false;
-      if (f.basename === '.trash') return false;
-      if (f.basename === '.keepdir') return false;
-      if (f.basename === E2E_MARKER_NAME) return false; /* wiring:e2 — marker gizli */
-      return true;
-    });
-    // Inject virtual `.trash` entry at root only.
-    const dirRel = stripAdapter(resp.dirname);
-    const inRoot = dirRel === 'fileman' || dirRel === '';
-    const isTrashListing = dirRel.startsWith('fileman/.trash');
-    const trashEntryEnabled = props.config.trashVisible !== false;
-    if (!isTrashListing && inRoot && trashEntryEnabled) {
-      files.value.unshift({
-        type: 'dir',
-        path: `${resp.adapter}://fileman/.trash`,
-        basename: '.trash',
-        extension: '',
-        storage: resp.adapter,
-        visibility: 'private',
-        size: 0,
-        file_size: 0,
-        mime_type: 'inode/directory',
-        extra_metadata: {},
-      } as unknown as FileNode);
-      void hydrateTrashRow(resp.adapter);
+    files.value = filterInternalEntries(resp.files);
+    // Inject virtual `.trash` entry at root only — shared helper so the
+    // split-view secondary pane shows the exact same row (no row-offset).
+    if (injectTrashRow(files.value, resp.adapter, resp.dirname, props.config.trashVisible !== false)) {
+      void hydrateTrashRowShared(files.value, resp.adapter, api);
     }
     // currentPath is the user-facing form: `s3-test/example` in
     // multi-storage mode, the bare relative path otherwise.
@@ -784,28 +771,7 @@ function leaveNotFound() {
   void load('');
 }
 
-// hydrateTrashRow — the virtual `.trash` row is synthesized with no size/date;
-// fill both from the backend trash listing (total bytes + newest deletion) so
-// the row reads like a real folder instead of "— / —". Best-effort and
-// non-blocking: the row appears immediately and updates when the listing lands.
-async function hydrateTrashRow(storage: string) {
-  try {
-    const { entries } = await api.listTrash(storage);
-    const row = files.value.find((f) => f.basename === '.trash');
-    if (!row) return;
-    let total = 0;
-    let newest = 0;
-    for (const e of entries) {
-      total += e.size || 0;
-      const ts = Date.parse(e.deleted_at);
-      if (!Number.isNaN(ts) && ts > newest) newest = ts;
-    }
-    row.size = total;
-    if (newest > 0) row.last_modified = newest;
-  } catch {
-    /* keep the bare row */
-  }
-}
+// (hydrateTrashRow moved to lib/listing.ts — shared with SecondaryPane.)
 
 // loadTrash — show the backend trash (soft-deleted nodes) as a flat listing.
 // Entered by opening the virtual `.trash` row. Each row keeps its node `id`
@@ -2616,6 +2582,12 @@ function closeSplit() {
 function onPaneNavigate(p: string) {
   tabsApi.setSplit({ ...(activeSplit.value ?? {}), path: p });
 }
+/* ui-fix — çöp kutusu satırı yan panelde açılınca: trash görünümü (geri
+ * yükleme aksiyonlarıyla) ana panele aittir → ana paneli aktif edip aç. */
+function onPaneOpenTrash() {
+  activePane.value = 'main';
+  void loadTrash();
+}
 /* ui-fix — pane'in KENDİ görünüm modu: split açılırken ana panelinkini
  * devralır, sonrasında bağımsız. Toolbar'ın görünüm değiştiricisi ve palet
  * toggle'ı AKTİF panele yazar (Burak: "B tıklıyken ikon değiştir dersem
@@ -3349,12 +3321,14 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :active="paneIsActive"
       :view-mode="paneViewMode /* ui-fix */"
       :thumb-src="thumbs.src /* ui-fix */"
+      :trash-visible="config.trashVisible !== false /* ui-fix — çöp satırı simetrisi */"
       @navigate="onPaneNavigate"
       @activate="activePane = 'split'"
       @close="closeSplit"
       @open-tab="(p: string) => tabsApi.openTab(p, { viewMode: viewMode, background: true })"
       @transfer="onPaneTransfer"
       @context="onPaneContext /* ui-fix — yan panel sağ-tık menüsü */"
+      @open-trash="onPaneOpenTrash /* ui-fix — çöp kutusu ana panelde açılır */"
     />
     <!-- /wiring:d1 -->
 

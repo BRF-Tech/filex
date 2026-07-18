@@ -21,6 +21,7 @@ import type { FileApi } from '../composables/useFileApi';
 import type { FileNode, ViewMode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { filterInternalEntries, injectTrashRow, hydrateTrashRow } from '../lib/listing';
 import ListView from './ListView.vue';
 import GridView from './GridView.vue';
 import GalleryView from './GalleryView.vue';
@@ -57,6 +58,9 @@ const props = defineProps<{
   viewMode?: ViewMode;
   /** ui-fix — authenticated thumb resolver, forwarded to grid/gallery. */
   thumbSrc?: (n: FileNode) => string | null;
+  /** ui-fix — mirror the main panel's virtual `.trash` row at storage root
+   *  so both split panes list identical rows (no row-offset). Defaults on. */
+  trashVisible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -68,6 +72,9 @@ const emit = defineEmits<{
   /* ui-fix — yan panelde sağ-tık: menü ana bileşende (FileExplorer) açılır.
    * node=null → boş alana sağ-tık (seçimsiz, yalnız Yapıştır). */
   (e: 'context', node: FileNode | null, ev: MouseEvent): void;
+  /* ui-fix — çöp kutusu satırı açıldığında: trash görünümü ana panele aittir
+   * (geri yükleme aksiyonlarıyla), host loadTrash() ile açar. */
+  (e: 'open-trash'): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -101,14 +108,12 @@ async function loadPane(target?: string): Promise<void> {
       return;
     }
     const resp = await props.api.index(props.qualify(requested));
-    // Same internal-entry filter as the main listing.
-    files.value = (resp.files || []).filter((f) => {
-      if (f.path.includes('.thumbs')) return false;
-      if (f.path.includes('.versions') || f.basename === '.versions') return false;
-      if (f.basename === '.trash') return false;
-      if (f.basename === '.keepdir') return false;
-      return true;
-    });
+    // Same internal-entry filter + virtual `.trash` row as the main panel
+    // (shared helpers → both split panes list identical rows, no offset).
+    files.value = filterInternalEntries(resp.files);
+    if (injectTrashRow(files.value, resp.adapter, resp.dirname, props.trashVisible !== false)) {
+      void hydrateTrashRow(files.value, resp.adapter, props.api);
+    }
     path.value = props.toUser(resp.dirname);
     selected.value = new Set();
     emit('navigate', path.value);
@@ -204,6 +209,13 @@ function onViewDropInto(target: FileNode, ev: DragEvent) {
 
 function onRowDbl(n: FileNode) {
   if (n.type !== 'dir') return;
+  // The virtual `.trash` row opens the backend trash listing (restore
+  // actions) — that view lives in the main panel; let the host open it.
+  if (n.basename === '.trash') {
+    emit('activate');
+    emit('open-trash');
+    return;
+  }
   void loadPane(isStorageRow(n) ? n.path : props.toUser(n.path));
 }
 
@@ -217,7 +229,7 @@ function clearSelection() {
 
 function onRowDragStart(n: FileNode, ev: DragEvent) {
   if (!ev.dataTransfer) return;
-  if (isStorageRow(n) || atVirtualRoot.value) {
+  if (isStorageRow(n) || atVirtualRoot.value || n.basename === '.trash') {
     ev.preventDefault();
     return;
   }
