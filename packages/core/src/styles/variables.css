@@ -13,7 +13,7 @@
   --fe-text: #1a1e27;
   --fe-text-muted: #5a6475;
   --fe-text-on-primary: #ffffff;
-  --fe-primary: #3b82f6;
+  --fe-primary: #2f6fe0; /* ui-fix: beyaz metinle WCAG AA (eski #3b82f6 = 3.68) */
   --fe-primary-hover: #2563eb;
   --fe-danger: #dc2626;
   --fe-danger-hover: #b91c1c;
@@ -102,7 +102,7 @@
   --fe-icon-archive: #78716c;
   --fe-icon-code: #4f46e5;
   --fe-icon-text: #64748b;
-  --fe-icon-unknown: #94a3b8;
+  --fe-icon-unknown: #64748b; /* ui-fix: acik temada 3:1 UI kontrasti */
 }
 
 /* Dark values — same selector strategy as the palette blocks above. */

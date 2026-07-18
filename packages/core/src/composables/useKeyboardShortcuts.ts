@@ -341,6 +341,12 @@ export function useKeyboardShortcuts(rootEl: Ref<HTMLElement | null>, handlers: 
     const root = rootEl.value;
     if (!root) return;
 
+    /* ui-fix — while a context menu is open, global shortcuts stay quiet
+     * (except Esc, which the menu scopes itself). Otherwise e.g. Delete
+     * opens a modal UNDER the menu backdrop and the UI wedges: the
+     * backdrop intercepts every click on the new dialog. */
+    if (e.key !== 'Escape' && document.querySelector('.fe-ctx-backdrop')) return;
+
     // Skip when the event originates inside a form control — don't
     // want `Delete` while editing a filename, `/` while typing in the
     // search box, etc. Escape always goes through so modals can close.

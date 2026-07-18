@@ -30,6 +30,9 @@ import type { ViewMode } from '../types/FileNode';
 /** Per-tab split state — the secondary pane's own location. */
 export interface TabSplit {
   path: string;
+  /** ui-fix — the pane's OWN view mode (list/grid/gallery); undefined
+   *  inherits the main panel's mode at split time. */
+  viewMode?: ViewMode;
 }
 
 export interface TabState {
@@ -82,10 +85,16 @@ export function useTabs(opts: UseTabsOptions) {
         // gallery wave) must survive a round-trip through an older schema.
         const vm =
           typeof t.viewMode === 'string' && t.viewMode ? (t.viewMode as ViewMode) : 'list';
-        const rawSplit = t.split as { path?: unknown } | null | undefined;
+        const rawSplit = t.split as { path?: unknown; viewMode?: unknown } | null | undefined;
         const split =
           rawSplit && typeof rawSplit === 'object' && typeof rawSplit.path === 'string'
-            ? { path: rawSplit.path }
+            ? {
+                path: rawSplit.path,
+                viewMode:
+                  typeof rawSplit.viewMode === 'string' && rawSplit.viewMode
+                    ? (rawSplit.viewMode as ViewMode)
+                    : undefined,
+              }
             : null;
         clean.push({
           id: typeof t.id === 'string' && t.id ? t.id : makeId(),

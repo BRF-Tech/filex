@@ -152,6 +152,74 @@ const mode = computed<SelectionMode>(() => props.selectionMode ?? 'none');
 // context menu uses, the two menus are guaranteed to match.
 const toolbarItems = computed(() => props.actions.filter((a) => !a.divider && !a.hidden));
 
+/* === ui-fix — wide-mode action folding ===============================
+ * Long selection-action rows used to wrap the whole toolbar and push the
+ * search / view controls onto a second line. The row is now single-line:
+ * actions that do not fit fold into a "⋯" menu. Widths come from a
+ * hidden measurement strip (all actions always rendered there), so the
+ * calculation never mutates what it measures. */
+const primaryEl = ref<HTMLElement | null>(null);
+const measureEl = ref<HTMLElement | null>(null);
+const wideMoreBtnEl = ref<HTMLElement | null>(null);
+const wideMoreRef = ref<InstanceType<typeof ContextMenu> | null>(null);
+const visibleActionCount = ref(Number.MAX_SAFE_INTEGER);
+const visibleToolbarItems = computed(() => toolbarItems.value.slice(0, visibleActionCount.value));
+const overflowToolbarItems = computed(() => toolbarItems.value.slice(visibleActionCount.value));
+const WIDE_MORE_BTN_W = 40;
+
+function recalcFold() {
+  if (props.narrow) return;
+  const cont = primaryEl.value;
+  const meas = measureEl.value;
+  if (!cont || !meas) {
+    visibleActionCount.value = toolbarItems.value.length;
+    return;
+  }
+  const gap = parseFloat(getComputedStyle(cont).gap) || 8;
+  let fixed = 0;
+  for (const child of Array.from(cont.children) as HTMLElement[]) {
+    if (child === meas || child === wideMoreBtnEl.value) continue;
+    if (child.classList.contains('fe-btn--fold')) continue;
+    if (child.offsetWidth > 0) fixed += child.offsetWidth + gap;
+  }
+  const widths = (Array.from(meas.children) as HTMLElement[]).map((c) => c.offsetWidth + gap);
+  const total = widths.reduce((s, w) => s + w, 0);
+  const avail = cont.clientWidth - fixed;
+  if (total <= avail) {
+    visibleActionCount.value = widths.length;
+    return;
+  }
+  let used = WIDE_MORE_BTN_W + gap;
+  let count = 0;
+  for (const w of widths) {
+    if (used + w > avail) break;
+    used += w;
+    count += 1;
+  }
+  visibleActionCount.value = count;
+}
+
+let foldRo: ResizeObserver | undefined;
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && primaryEl.value) {
+    foldRo = new ResizeObserver(() => recalcFold());
+    foldRo.observe(primaryEl.value);
+  }
+  void nextTick(recalcFold);
+});
+onBeforeUnmount(() => foldRo?.disconnect());
+watch(
+  () => [toolbarItems.value, props.narrow, props.trashActive, mode.value] as const,
+  () => void nextTick(recalcFold),
+  { deep: false },
+);
+
+function openWideMore() {
+  const r = wideMoreBtnEl.value?.getBoundingClientRect();
+  wideMoreRef.value?.show({ clientX: r ? r.right : 0, clientY: r ? r.bottom + 4 : 0 } as MouseEvent, []);
+}
+/* === /ui-fix ========================================================= */
+
 function fire(key: string) {
   emit('action', key);
 }
@@ -291,7 +359,7 @@ function onMoreSelect(a: ContextAction) {
   >
     <!-- bag:b4 — wide layout, untouched; renders exactly as before when not narrow -->
     <template v-if="!narrow">
-    <div class="fe-toolbar__primary">
+    <div ref="primaryEl" class="fe-toolbar__primary">
       <button
         v-if="canGoUp"
         type="button"
@@ -315,10 +383,10 @@ function onMoreSelect(a: ContextAction) {
       </button>
 
       <button
-        v-for="a in toolbarItems"
+        v-for="a in visibleToolbarItems"
         :key="a.key"
         type="button"
-        class="fe-btn"
+        class="fe-btn fe-btn--fold"
         :class="{ 'fe-btn--danger': a.danger, 'is-disabled': a.disabled }"
         :disabled="a.disabled"
         :title="a.label"
@@ -327,6 +395,36 @@ function onMoreSelect(a: ContextAction) {
         <span class="fe-icon">{{ a.icon }}</span>
         <span class="fe-btn__label">{{ a.label }}</span>
       </button>
+
+      <!-- ui-fix — sığmayan aksiyonlar tek satırı korumak için ⋯ menüsüne
+           katlanır (arama/görünüm kontrolleri artık alt satıra düşmez). -->
+      <button
+        v-if="overflowToolbarItems.length > 0"
+        ref="wideMoreBtnEl"
+        type="button"
+        class="fe-btn fe-btn--icon-only"
+        :title="t('toolbar.more')"
+        :aria-label="t('toolbar.more')"
+        aria-haspopup="menu"
+        @click="openWideMore"
+      >
+        <span class="fe-icon">⋯</span>
+      </button>
+
+      <!-- Görünmez ölçüm şeridi: TÜM aksiyonlar her zaman burada render
+           edilir; katlama hesabı gerçek genişliklerden yapılır. -->
+      <div ref="measureEl" class="fe-toolbar__measure" aria-hidden="true">
+        <button
+          v-for="a in toolbarItems"
+          :key="'m-' + a.key"
+          type="button"
+          class="fe-btn"
+          tabindex="-1"
+        >
+          <span class="fe-icon">{{ a.icon }}</span>
+          <span class="fe-btn__label">{{ a.label }}</span>
+        </button>
+      </div>
 
       <button
         v-if="pasteEnabled && mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
@@ -589,5 +687,16 @@ function onMoreSelect(a: ContextAction) {
         @select="onMoreSelect"
       />
     </template>
+
+    <!-- ui-fix — wide modda katlanan aksiyonların ⋯ menüsü -->
+    <ContextMenu
+      v-if="!narrow"
+      ref="wideMoreRef"
+      :locale="locale"
+      :theme="theme || 'auto'"
+      :sheet="false"
+      :actions="overflowToolbarItems"
+      @select="(a) => fire(a.key)"
+    />
   </div>
 </template>

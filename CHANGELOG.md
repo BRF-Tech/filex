@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.0 below.)
+(Nothing yet — see v0.7.1 below.)
+
+## [0.7.1] - 2026-07-18
+
+### Fixed
+
+- **The explorer no longer overflows its host by 2px** (`.fe` was
+  content-box, so its borders pushed past `height:100%`) — the outer page
+  scrollbar that this produced in embeds is gone, and toasts stay visible
+  at the bottom of the explorer instead of drifting out of view.
+- The tab strip no longer shows a scrollbar under the tabs when many tabs
+  are open — overflow still scrolls (wheel/drag), just without the strip.
+- **Split view**: the secondary pane now renders with the same view
+  components as the main panel (list / grid / gallery) instead of its own
+  flat list; the pane keeps its own view mode (inherited from the main
+  panel when you split) and the toolbar's view switcher applies to
+  whichever pane is focused.
+- **Split view**: pasting from the context menu now targets the focused
+  pane — copying in the left pane and right-click → Paste in the right
+  pane pastes into the right pane's folder (keyboard paste already did).
+- Long action rows in the toolbar no longer wrap the whole toolbar onto a
+  second line: the row is single-line and actions that do not fit fold
+  into a "⋯" menu.
+- Global shortcuts stay quiet while a context menu is open — pressing
+  Delete with a menu open used to open the confirm dialog underneath the
+  menu backdrop, wedging the UI.
+- Default accent color darkened (`#3b82f6` → `#2f6fe0`) so white text on
+  primary buttons meets WCAG AA (4.7:1); the unknown-file icon color in
+  the light theme now meets the 3:1 UI-contrast bar too.
 
 ## [0.7.0] - 2026-07-18
 

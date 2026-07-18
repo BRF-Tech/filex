@@ -4,6 +4,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   min-height: 420px;
   height: 100%;
   background: var(--fe-bg);
@@ -3099,7 +3100,12 @@ filex-explorer {
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  /* Tab overflow scrolls (wheel / drag / keyboard) but never shows a
+   * scrollbar strip under the tabs — the 30px bar cannot fit one. */
+  scrollbar-width: none;
+}
+.fe-tabs__scroll::-webkit-scrollbar {
+  display: none;
 }
 .fe-tabs__tab {
   display: flex;
@@ -3708,3 +3714,29 @@ filex-explorer {
   text-decoration: underline;
 }
 /* === /wiring:e2 === */
+
+/* === ui-fix — toolbar tek satır + katlama + ölçüm şeridi ============= */
+.fe:not(.fe--narrow) .fe-toolbar {
+  flex-wrap: nowrap;
+}
+.fe:not(.fe--narrow) .fe-toolbar__primary {
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  position: relative;
+}
+.fe-toolbar__measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  height: 0;
+  overflow: hidden;
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+.fe-toolbar__measure .fe-btn {
+  flex: none;
+}
+/* === /ui-fix ========================================================= */

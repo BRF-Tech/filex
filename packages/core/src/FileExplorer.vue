@@ -1581,7 +1581,10 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       flashToast('Kopyala → Yapıştır hazır');
       break;
     case 'paste':
-      await paste();
+      /* ui-fix — sağ-klik menüsünden yapıştırma da aktif panele gider
+       * (klavye kısayolu zaten pane-route'luydu; menü değildi). */
+      if (paneIsActive.value) await panePaste();
+      else await paste();
       break;
     case 'delete':
       showDelete.value = true;
@@ -2518,14 +2521,30 @@ function toggleSplit() {
     return;
   }
   if (isNarrow.value) return;
-  tabsApi.setSplit({ path: currentPath.value ?? '' });
+  tabsApi.setSplit({ path: currentPath.value ?? '', viewMode: viewMode.value });
 }
 function closeSplit() {
   tabsApi.setSplit(null);
   activePane.value = 'main';
 }
 function onPaneNavigate(p: string) {
-  tabsApi.setSplit({ path: p });
+  tabsApi.setSplit({ ...(activeSplit.value ?? {}), path: p });
+}
+/* ui-fix — pane'in KENDİ görünüm modu: split açılırken ana panelinkini
+ * devralır, sonrasında bağımsız. Toolbar'ın görünüm değiştiricisi ve palet
+ * toggle'ı AKTİF panele yazar (Burak: "B tıklıyken ikon değiştir dersem
+ * B'nin değişmesi lazım"). */
+const paneViewMode = computed<ViewMode>(() => activeSplit.value?.viewMode ?? viewMode.value);
+function setPaneViewMode(v: ViewMode) {
+  if (!activeSplit.value) return;
+  tabsApi.setSplit({ ...activeSplit.value, viewMode: v });
+}
+const displayedViewMode = computed<ViewMode>(() =>
+  paneIsActive.value ? paneViewMode.value : viewMode.value,
+);
+function setDisplayedViewMode(v: ViewMode) {
+  if (paneIsActive.value) setPaneViewMode(v);
+  else viewMode.value = v;
 }
 
 // Aktif panel: kısayollar aktif panele gider; panel tıklamayla aktifleşir.
@@ -2883,7 +2902,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     <!-- /wiring:d1 -->
     <Toolbar
       ref="toolbarRef"
-      :view-mode="viewMode"
+      :view-mode="displayedViewMode /* ui-fix — aktif panelin modu */"
       :search-query="searchQuery"
       :trash-active="trashActive"
       :actions="toolbarActions"
@@ -2899,7 +2918,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :inspector-open="showInspector /* koru:k1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
-      @update:view-mode="viewMode = $event"
+      @update:view-mode="setDisplayedViewMode($event) /* ui-fix — aktif panele */"
       @update:search-query="searchQuery = $event"
       @update:density="density = $event"
       @open-shortcut-settings="showShortcutSettings = true /* wiring:c2 */"
@@ -3230,6 +3249,8 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :multi-root="multiStorageRoot"
       :virtual-rows="virtualStorageRows"
       :active="paneIsActive"
+      :view-mode="paneViewMode /* ui-fix */"
+      :thumb-src="thumbs.src /* ui-fix */"
       @navigate="onPaneNavigate"
       @activate="activePane = 'split'"
       @close="closeSplit"
@@ -3476,7 +3497,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       @navigate="(p: string) => load(p)"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
-      @toggle-view="viewMode = viewMode === 'list' ? 'grid' : viewMode === 'grid' ? 'gallery' : 'list' /* wiring:d2 — 3 mod döngüsü */"
+      @toggle-view="setDisplayedViewMode(displayedViewMode === 'list' ? 'grid' : displayedViewMode === 'grid' ? 'gallery' : 'list') /* wiring:d2 + ui-fix — 3 mod döngüsü, aktif panele */"
       @open-trash="loadTrash"
       @refresh="() => load()"
       @go-up="goUp"

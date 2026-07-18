@@ -18,10 +18,12 @@
  */
 import { computed, ref } from 'vue';
 import type { FileApi } from '../composables/useFileApi';
-import type { FileNode } from '../types/FileNode';
+import type { FileNode, ViewMode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { fileIconSvg } from '../lib/fileIcons';
+import ListView from './ListView.vue';
+import GridView from './GridView.vue';
+import GalleryView from './GalleryView.vue';
 
 // Same literals ListView/GridView already hardcode for the internal DnD
 // channel; `-src` carries the origin directory so the host can move (and
@@ -50,6 +52,11 @@ const props = defineProps<{
   virtualRows?: () => FileNode[];
   /** Active-panel highlight (keyboard target). */
   active?: boolean;
+  /** ui-fix — the pane renders the SAME view components as the main
+   *  panel (list/grid/gallery) instead of its own flat list. */
+  viewMode?: ViewMode;
+  /** ui-fix — authenticated thumb resolver, forwarded to grid/gallery. */
+  thumbSrc?: (n: FileNode) => string | null;
 }>();
 
 const emit = defineEmits<{
@@ -60,7 +67,7 @@ const emit = defineEmits<{
   (e: 'transfer', p: { sources: string[]; targetWire: string; originWire?: string }): void;
 }>();
 
-const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
+const { t } = useLocale(() => props.locale);
 
 const path = ref<string>('');
 const files = ref<FileNode[]>([]);
@@ -149,35 +156,40 @@ function crumbGo(target: string) {
 // Selection + navigation
 // ------------------------------------------------------------------
 
-function onRowClick(n: FileNode, ev: MouseEvent) {
+/* ui-fix — adapter for the shared view components' click contract
+ * ({ctrl, shift} mod object instead of a MouseEvent). Shift behaves as
+ * ctrl here: the pane keeps a simple Set, no range anchor. */
+function onViewClick(n: FileNode, mod: { ctrl: boolean; shift: boolean }) {
   emit('activate');
-  const multi = ev.ctrlKey || ev.metaKey;
+  const multi = mod.ctrl || mod.shift;
   const next = new Set<string>(multi ? selected.value : []);
   if (multi && next.has(n.path)) next.delete(n.path);
   else next.add(n.path);
   selected.value = next;
 }
 
+/* ui-fix — right-click on a pane item: activate + select it, no menu
+ * (the pane has no item menu; letting the main panel's menu open here
+ * would act on the WRONG panel's selection). */
+function onViewContext(n: FileNode, ev: MouseEvent) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  emit('activate');
+  if (!selected.value.has(n.path)) selected.value = new Set([n.path]);
+}
+
+/* ui-fix — drop-into from the shared views: same payload path as the
+ * old flat rows (dir check + wire-qualified row paths). */
+function onViewDropInto(target: FileNode, ev: DragEvent) {
+  dropBg.value = false;
+  if (target.type !== 'dir' || isStorageRow(target)) return;
+  if (!acceptDrag(ev)) return;
+  handleDropPayload(ev, target.path);
+}
+
 function onRowDbl(n: FileNode) {
   if (n.type !== 'dir') return;
   void loadPane(isStorageRow(n) ? n.path : props.toUser(n.path));
-}
-
-// Middle-button mousedown must be cancelled on rows: in a scrollable body
-// Chromium's autoscroll takes over and auxclick is never generated.
-function onRowMiddleDown(ev: MouseEvent) {
-  if (ev.button === 1) ev.preventDefault();
-}
-
-// Middle-click on a folder opens it in a NEW TAB (same convention as the
-// main listing). stopPropagation keeps the host's delegated auxclick
-// listener from double-handling it.
-function onRowAux(n: FileNode, ev: MouseEvent) {
-  if (ev.button !== 1) return;
-  ev.preventDefault();
-  ev.stopPropagation();
-  if (n.type !== 'dir') return;
-  emit('open-tab', isStorageRow(n) ? n.path : props.toUser(n.path));
 }
 
 function clearSelection() {
@@ -212,7 +224,6 @@ function onRowDragStart(n: FileNode, ev: DragEvent) {
 // Drop target (dir rows + pane background)
 // ------------------------------------------------------------------
 
-const dropPath = ref<string | null>(null);
 const dropBg = ref(false);
 
 function acceptDrag(ev: DragEvent): boolean {
@@ -238,28 +249,6 @@ function handleDropPayload(ev: DragEvent, targetWire: string) {
   emit('transfer', { sources, targetWire, originWire: origin });
 }
 
-function onRowDragOver(n: FileNode, ev: DragEvent) {
-  if (n.type !== 'dir' || isStorageRow(n)) return;
-  if (!acceptDrag(ev)) return;
-  ev.preventDefault();
-  ev.stopPropagation();
-  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
-  dropPath.value = n.path;
-  dropBg.value = false;
-}
-
-function onRowDragLeave(n: FileNode) {
-  if (dropPath.value === n.path) dropPath.value = null;
-}
-
-function onRowDrop(n: FileNode, ev: DragEvent) {
-  dropPath.value = null;
-  dropBg.value = false;
-  if (n.type !== 'dir' || isStorageRow(n)) return;
-  if (!acceptDrag(ev)) return;
-  handleDropPayload(ev, n.path); // real rows are wire-qualified
-}
-
 function onBgDragOver(ev: DragEvent) {
   if (!acceptDrag(ev) || atVirtualRoot.value) return;
   ev.preventDefault();
@@ -274,7 +263,6 @@ function onBgDragLeave() {
 
 function onBgDrop(ev: DragEvent) {
   dropBg.value = false;
-  dropPath.value = null;
   if (!acceptDrag(ev) || atVirtualRoot.value) return;
   handleDropPayload(ev, props.qualify(path.value));
 }
@@ -313,10 +301,6 @@ function getPath(): string {
 }
 
 defineExpose({ reload, goUp, selectAll, openSelected, selectedNodes, getPath });
-
-function specialEmojiFor(n: FileNode): string | null {
-  return isStorageRow(n) ? '💾' : null;
-}
 </script>
 
 <template>
@@ -376,36 +360,46 @@ function specialEmojiFor(n: FileNode): string | null {
       <div v-else-if="files.length === 0" class="fe-split__state">
         {{ t('empty.folder') }}
       </div>
-      <div v-else class="fe-split__list" role="listbox" aria-multiselectable="true">
-        <div
-          v-for="n in files"
-          :key="n.path"
-          class="fe-split__row"
-          :class="{
-            'is-selected': selected.has(n.path),
-            'is-dir': n.type === 'dir',
-            'is-droptarget': dropPath === n.path,
-          }"
-          role="option"
-          :aria-selected="selected.has(n.path) ? 'true' : 'false'"
-          tabindex="0"
-          draggable="true"
-          @click="onRowClick(n, $event)"
-          @dblclick="onRowDbl(n)"
-          @mousedown="onRowMiddleDown($event)"
-          @auxclick="onRowAux(n, $event)"
-          @dragstart="onRowDragStart(n, $event)"
-          @dragover="onRowDragOver(n, $event)"
-          @dragleave="onRowDragLeave(n)"
-          @drop="onRowDrop(n, $event)"
-        >
-          <span v-if="specialEmojiFor(n)" class="fe-split__icon" aria-hidden="true">{{ specialEmojiFor(n) }}</span>
-          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-          <span v-else class="fe-split__icon" aria-hidden="true" v-html="fileIconSvg(n)"></span>
-          <span class="fe-split__name" :title="n.basename">{{ nodeDisplayName(n) }}</span>
-          <span class="fe-split__size">{{ n.type === 'dir' ? '' : formatSize(n.size) }}</span>
-        </div>
-      </div>
+      <!-- ui-fix — aynı görünüm bileşenleri (list/grid/gallery), pane'in
+           kendi viewMode'uyla; eski düz fe-split__list kalktı. -->
+      <ListView
+        v-else-if="(viewMode ?? 'list') === 'list'"
+        :files="files"
+        :selected="selected"
+        :locale="locale"
+        :loading="loading"
+        @click-row="onViewClick"
+        @dbl-row="onRowDbl"
+        @context-row="onViewContext"
+        @item-drag-start="onRowDragStart"
+        @item-drop-into="onViewDropInto"
+      />
+      <GridView
+        v-else-if="viewMode === 'grid'"
+        :files="files"
+        :selected="selected"
+        :locale="locale"
+        :loading="loading"
+        :thumb-src="thumbSrc"
+        @click-card="onViewClick"
+        @dbl-card="onRowDbl"
+        @context-card="onViewContext"
+        @item-drag-start="onRowDragStart"
+        @item-drop-into="onViewDropInto"
+      />
+      <GalleryView
+        v-else
+        :files="files"
+        :selected="selected"
+        :locale="locale"
+        :loading="loading"
+        :thumb-src="thumbSrc"
+        @click-card="onViewClick"
+        @dbl-card="onRowDbl"
+        @context-card="onViewContext"
+        @item-drag-start="onRowDragStart"
+        @item-drop-into="onViewDropInto"
+      />
     </div>
   </section>
 </template>
