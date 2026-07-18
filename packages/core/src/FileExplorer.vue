@@ -438,6 +438,9 @@ const showDelete = ref(false);
 const showShare = ref(false);
 const showPreview = ref(false);
 const renameTarget = ref<FileNode | null>(null);
+/* ui-fix — açık olan rename/delete/new-folder modal'ı yan panele mi ait?
+ * (menü ana panelle aynı; mutasyonlar doğru panele yönlensin diye.) */
+const mutationInPane = ref(false);
 const shareTarget = ref<FileNode | null>(null);
 const activeShare = ref<(ShareInfo & { url: string; filename?: string }) | null>(null);
 const previewTarget = ref<FileNode | null>(null);
@@ -891,6 +894,20 @@ function wireParent(p: string): string {
   return slash === -1 ? prefix : prefix + rel.slice(0, slash);
 }
 
+/* ui-fix — iki wire yolun AYNI dizini gösterip göstermediği (trailing-slash
+ * ve kök `adapter://` güvenli). Bir öğeyi ZATEN bulunduğu klasöre bırakma
+ * (source parent === target) no-op olmalı; aksi halde backend "kendine
+ * kopyala" 400'ü döner. */
+function sameDir(a: string, b: string): boolean {
+  const norm = (s: string) => {
+    const i = s.indexOf('://');
+    const pre = i === -1 ? '' : s.slice(0, i + 3);
+    const rel = (i === -1 ? s : s.slice(i + 3)).replace(/\/+$/, '');
+    return pre + rel;
+  };
+  return norm(a) === norm(b);
+}
+
 function wireJoin(dir: string, name: string): string {
   if (!dir) return name;
   return dir.endsWith('://') || dir.endsWith('/') ? dir + name : `${dir}/${name}`;
@@ -1105,11 +1122,30 @@ async function openSearchHit(hit: GlobalSearchHit) {
 
 useKeyboardShortcuts(rootEl, {
   onDelete: () => {
-    if (!selection.isEmpty.value) showDelete.value = true;
+    /* ui-fix — kısayol da aktif panele gider (menüyle tutarlı). */
+    if (paneIsActive.value) {
+      const psel = splitPaneRef.value?.selectedNodes() ?? [];
+      if (psel.length) {
+        paneCtxTargets.value = psel;
+        mutationInPane.value = true;
+        showDelete.value = true;
+      }
+    } else if (!selection.isEmpty.value) {
+      mutationInPane.value = false;
+      showDelete.value = true;
+    }
   },
   onRename: () => {
-    if (selection.nodes.value.length === 1) {
+    if (paneIsActive.value) {
+      const psel = splitPaneRef.value?.selectedNodes() ?? [];
+      if (psel.length === 1) {
+        renameTarget.value = psel[0];
+        mutationInPane.value = true;
+        showRename.value = true;
+      }
+    } else if (selection.nodes.value.length === 1) {
       renameTarget.value = selection.nodes.value[0];
+      mutationInPane.value = false;
       showRename.value = true;
     }
   },
@@ -1390,59 +1426,17 @@ function onCrumbContext(payload: { x: number; y: number; adapterPath: string; la
   ctxRef.value?.show({ clientX: payload.x, clientY: payload.y }, []);
 }
 
-/* ui-fix — yan (ikincil) panelde sağ-tık: pane'i aktifleştir, seçili
- * node'lara göre menüyü aç. Pane "hafif" olduğundan (delete/rename modal'ları
- * ana panelde) menü aç/yeni-sekme/indir/kopyala/kes/yapıştır ile sınırlı;
- * hepsi pane-route'lu (dispatchPaneAction). */
+/* ui-fix — yan (ikincil) panelde sağ-tık: pane'i aktifleştir + menüyü aç.
+ * Menü ana panelle BİREBİR aynı (selectionActionList tek kaynak); aksiyonlar
+ * dispatchItemAction'a gider ve ctxMode==='pane' iken pane-route'lanır. */
 function onPaneContext(node: FileNode | null, ev: MouseEvent) {
   activePane.value = 'split';
   const sel = splitPaneRef.value?.selectedNodes() ?? [];
-  // node=null (boş alana sağ-tık): seçimsiz menü (yalnız Yapıştır). Aksi
-  // halde pane seçimi (yoksa tıklanan node) hedeftir.
+  // node=null (boş alana sağ-tık): seçimsiz menü (Yeni Klasör + Yapıştır).
+  // Aksi halde pane seçimi (yoksa tıklanan node) hedeftir.
   paneCtxTargets.value = node ? (sel.length > 0 ? sel : [node]) : [];
   ctxMode.value = 'pane';
   ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
-}
-
-function paneActionList(sel: FileNode[]): ContextAction[] {
-  const single = sel.length === 1;
-  const isFile = single && sel[0]?.type === 'file';
-  const isDir = single && sel[0]?.type === 'dir';
-  const any = sel.length > 0;
-  return [
-    { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
-    { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !isDir } /* wiring:d1 */,
-    { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
-    { divider: true, key: 'psep', label: '', hidden: !any },
-    { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any },
-    { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any },
-    { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
-  ];
-}
-
-async function dispatchPaneAction(key: string, targets: FileNode[]) {
-  switch (key) {
-    case 'open':
-      if (targets[0]) openNodeInNewTab(targets[0]);
-      break;
-    case 'open-tab':
-      if (targets[0]) {
-        tabsApi.openTab(paneToUser(targets[0].path), { viewMode: viewMode.value, background: true });
-      }
-      break;
-    case 'download':
-      if (targets[0]) downloadFile(targets[0]);
-      break;
-    case 'copy':
-      paneCopy();
-      break;
-    case 'cut':
-      paneCut();
-      break;
-    case 'paste':
-      await panePaste();
-      break;
-  }
 }
 
 const contextActions = computed<ContextAction[]>(() => {
@@ -1452,8 +1446,16 @@ const contextActions = computed<ContextAction[]>(() => {
       { key: 'copy-path', label: t('breadcrumb.copy_path'), icon: '📋' },
     ];
   }
-  if (ctxMode.value === 'pane' /* ui-fix — yan panel menüsü */) {
-    return paneActionList(paneCtxTargets.value);
+  if (ctxMode.value === 'pane' /* ui-fix — yan panel menüsü ana panelle BİREBİR aynı */) {
+    const psel = paneCtxTargets.value;
+    if (psel.length === 0) {
+      // Boş alana sağ-tık: ana paneldeki canvas menüsüyle aynı.
+      return [
+        { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
+        { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+      ];
+    }
+    return selectionActionList(psel);
   }
 
   const sel = selection.nodes.value;
@@ -1577,8 +1579,8 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
     }
     return;
   }
-  if (ctxMode.value === 'pane' /* ui-fix — yan panel aksiyonları pane-route */) {
-    await dispatchPaneAction(action.key, paneCtxTargets.value);
+  if (ctxMode.value === 'pane' /* ui-fix — yan panel: aynı dispatch, pane-route */) {
+    await dispatchItemAction(action.key, paneCtxTargets.value);
     return;
   }
   await dispatchItemAction(action.key, targets);
@@ -1633,30 +1635,40 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'rename':
       if (targets[0]) {
         renameTarget.value = targets[0];
+        mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
         showRename.value = true;
       }
       break;
     case 'cut':
-      clipboard.value = { mode: 'cut', items: targets, sourcePath: currentPath.value };
-      flashToast('Kes → Yapıştır hazır');
+      /* ui-fix — pane bağlamında pano kaynağı pane'in dizini olmalı. */
+      if (ctxMode.value === 'pane') paneCut();
+      else {
+        clipboard.value = { mode: 'cut', items: targets, sourcePath: currentPath.value };
+        flashToast('Kes → Yapıştır hazır');
+      }
       break;
     case 'copy':
-      clipboard.value = { mode: 'copy', items: targets, sourcePath: currentPath.value };
-      flashToast('Kopyala → Yapıştır hazır');
+      if (ctxMode.value === 'pane') paneCopy();
+      else {
+        clipboard.value = { mode: 'copy', items: targets, sourcePath: currentPath.value };
+        flashToast('Kopyala → Yapıştır hazır');
+      }
       break;
     case 'paste':
       /* ui-fix — sağ-klik menüsünden yapıştırma da aktif panele gider
        * (klavye kısayolu zaten pane-route'luydu; menü değildi). */
-      if (paneIsActive.value) await panePaste();
+      if (ctxMode.value === 'pane' || paneIsActive.value) await panePaste();
       else await paste();
       break;
     case 'delete':
+      mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
       showDelete.value = true;
       break;
     case 'restore':
       if (targets.length > 0) await restoreSelection(targets);
       break;
     case 'new-folder':
+      mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
       showNewFolder.value = true;
       break;
     case 'duplicate':
@@ -1739,10 +1751,13 @@ function downloadFile(n: FileNode) {
 // ------- Modals -------
 
 async function submitNewFolder(name: string) {
+  const inPane = mutationInPane.value; /* ui-fix — yan panelde yeni klasör */
   try {
-    await api.newFolder(qualify(currentPath.value), name);
+    const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
+    await api.newFolder(dirWire, name);
     showNewFolder.value = false;
-    await load();
+    if (inPane) await splitPaneRef.value?.reload();
+    else await load();
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'newfolder' } });
   }
@@ -1751,14 +1766,16 @@ async function submitNewFolder(name: string) {
 async function submitRename(name: string) {
   const target = renameTarget.value;
   if (!target) return;
+  const inPane = mutationInPane.value; /* ui-fix — yan panelden yeniden adlandırma */
   try {
-    const dirWire = qualify(currentPath.value);
+    const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     const oldPath = target.path; // qualified
     const oldName = target.basename;
     await api.rename(dirWire, oldPath, name);
     showRename.value = false;
     renameTarget.value = null;
-    await load();
+    if (inPane) await splitPaneRef.value?.reload();
+    else await load();
     // Clean inverse: rename the new path back to the old basename.
     if (name && name !== oldName) {
       const newPath = wireJoin(wireParent(oldPath), name);
@@ -1780,7 +1797,10 @@ async function confirmDelete() {
     flashToast('Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.');
     return;
   }
-  const targets = selection.nodes.value;
+  /* ui-fix — yan panelden silme: hedefler + dizin + tazeleme pane'e ait. */
+  const inPane = mutationInPane.value;
+  const targets = inPane ? paneCtxTargets.value : selection.nodes.value;
+  const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
   const items = targets.map((n) => n.path);
   if (items.length === 0) {
     showDelete.value = false;
@@ -1801,19 +1821,21 @@ async function confirmDelete() {
       : null;
   try {
     if (api.endpoints.deleteAsync) {
-      const { op } = await api.deleteAsync(items, qualify(currentPath.value));
+      const { op } = await api.deleteAsync(items, dirWire);
       if (restoreUndo) {
         opUndo.set(op.id, { message: t('toast.trashed'), fn: restoreUndo });
       }
       pendingOps.register(op);
       flashToast('Silme kuyruğa alındı');
     } else {
-      await api.deleteItems(qualify(currentPath.value), items);
-      await load();
+      await api.deleteItems(dirWire, items);
+      if (inPane) await splitPaneRef.value?.reload();
+      else await load();
       if (restoreUndo) undoToast(t('toast.trashed'), restoreUndo);
     }
     showDelete.value = false;
-    selection.clear();
+    if (inPane) void splitPaneRef.value?.reload();
+    else selection.clear();
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'delete' } });
   }
@@ -2180,11 +2202,10 @@ async function onItemDropInto(target: FileNode, ev: DragEvent) {
   const targetDir = target.path; // qualified
   const sources = items
     .map((i) => i.path)
-    .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/'));
-  if (sources.length === 0) {
-    flashToast('Aynı klasöre taşınamaz');
-    return;
-  }
+    // ui-fix — öğe zaten targetDir'in içindeyse (parent===target) atla: yerinde
+    // bırakma no-op, backend "kendine kopyala" 400'ü tetiklemez.
+    .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/') && !sameDir(wireParent(p), targetDir));
+  if (sources.length === 0) return; // sessiz no-op (yerinde bırakma)
   await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — depo-farkında aktarım */
 }
 
@@ -2202,7 +2223,8 @@ async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
   const targetDir = adapterPath; // already qualified by breadcrumb
   const sources = items
     .map((i) => i.path)
-    .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/'));
+    // ui-fix — kırıntıya (aynı klasöre) yerinde bırakma no-op.
+    .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/') && !sameDir(wireParent(p), targetDir));
   if (sources.length === 0) return;
   await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — depo-farkında aktarım */
 }
@@ -2686,7 +2708,11 @@ async function transferItems(
   originWire?: string,
   forceCopy = false,
 ): Promise<void> {
-  const list = sources.filter((p) => p && p !== targetWire && !targetWire.startsWith(p + '/'));
+  // ui-fix — yerinde bırakma (source parent === target) no-op: backend
+  // "kendine kopyala" 400'ü engellenir (paneller arası + pano yolu).
+  const list = sources.filter(
+    (p) => p && p !== targetWire && !targetWire.startsWith(p + '/') && !sameDir(wireParent(p), targetWire),
+  );
   if (list.length === 0 || !targetWire) return;
   const targetAdapter = wireAdapterOf(targetWire);
   const cross = list.some((p) => wireAdapterOf(p) !== targetAdapter);

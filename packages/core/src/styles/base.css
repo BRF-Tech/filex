@@ -266,6 +266,9 @@ filex-explorer {
   gap: 4px;
   flex-wrap: wrap;
   padding: 6px 12px;
+  /* ui-fix — split'te yan panel .fe-split__crumbs ile aynı yükseklik (ana
+     panelin "Yola Git" ✏ butonu yoksa da satırlar aynı y'den başlasın). */
+  min-height: 37px;
   background: var(--fe-bg);
   border-bottom: 1px solid var(--fe-border);
   font-size: 13px;
@@ -3262,11 +3265,14 @@ filex-explorer {
 .fe-split__crumbs {
   display: flex;
   align-items: center;
-  gap: 2px;
+  /* ui-fix — ana panel .fe-breadcrumb ile BİREBİR aynı ölçüler (gap/padding/
+     font) → split'te iki breadcrumb tam hizalı, ince kayma yok. */
+  gap: 4px;
   flex: 0 0 auto;
-  padding: 6px 8px;
+  padding: 6px 12px;
+  min-height: 37px; /* ui-fix — ana panel .fe-breadcrumb ile aynı yükseklik */
   border-bottom: 1px solid var(--fe-border);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--fe-text-muted);
   overflow: hidden;
   white-space: nowrap;
@@ -3276,8 +3282,8 @@ filex-explorer {
   background: transparent;
   color: inherit;
   font: inherit;
-  padding: 2px 5px;
-  border-radius: 5px;
+  padding: 2px 6px; /* ui-fix — .fe-breadcrumb__crumb ile aynı */
+  border-radius: var(--fe-radius-sm);
   cursor: pointer;
   max-width: 140px;
   overflow: hidden;

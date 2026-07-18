@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.2 below.)
+(Nothing yet — see v0.7.3 below.)
+
+## [0.7.3] - 2026-07-18
+
+### Fixed
+
+- **Split view context menu now matches the main panel exactly**: the
+  secondary pane's right-click menu was a separate, shorter list (missing
+  rename, delete, share, convert, tags…). Both panels now render the single
+  `selectionActionList` source, and pane actions (including rename / delete /
+  new folder) are routed to the pane. Right-click and the keyboard shortcuts
+  for delete/rename follow the focused pane.
+- **Dropping a file onto its own folder no longer errors**: dragging an item
+  onto the folder it already lives in (its own breadcrumb or the same
+  listing) used to fire a move that the backend rejected with an S3
+  "copy object to itself" 400. It is now a silent no-op.
+- **Split view breadcrumb alignment**: the secondary pane's breadcrumb used a
+  slightly different padding, font size and height than the main one, so the
+  two panels were subtly misaligned. They now share identical metrics.
 
 ## [0.7.2] - 2026-07-18
 
