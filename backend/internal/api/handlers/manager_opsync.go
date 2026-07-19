@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -39,7 +40,7 @@ func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string
 // move the bytes back. Mirrors vfDelete's soft-delete DB branch.
 func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, trashRel string) {
 	origClean := normalizeDBPath(src)
-	origHash := managerPathHash(storageID, origClean)
+	origHash := pathkey.Hash(storageID, origClean)
 	/* bag:b3 event — the worker already moved the bytes into the trash */
 	writehook.OnFileTrashed(ctx, storageID, origClean, path.Base(origClean),
 		normalizeDBPath(trashRel), writehook.OriginOps)
@@ -48,7 +49,7 @@ func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, tras
 		return
 	}
 	trashClean := normalizeDBPath(trashRel)
-	trashHash := managerPathHash(storageID, trashClean)
+	trashHash := pathkey.Hash(storageID, trashClean)
 	_ = h.Store.SoftDeleteAndRetag(ctx, existing.ID, trashClean, trashHash, origClean)
 	h.removeFromIndex(ctx, existing.ID)
 }
@@ -58,7 +59,7 @@ func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, tras
 // branch.
 func (h *Manager) SyncHardDelete(ctx context.Context, storageID int64, src string) {
 	origClean := normalizeDBPath(src)
-	origHash := managerPathHash(storageID, origClean)
+	origHash := pathkey.Hash(storageID, origClean)
 	if existing, err := h.Store.GetNodeByPath(ctx, storageID, origHash); err == nil && existing != nil {
 		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
 		h.removeFromIndex(ctx, existing.ID)
@@ -72,12 +73,12 @@ func (h *Manager) SyncHardDelete(ctx context.Context, storageID int64, src strin
 // later background sync would reconcile anyway).
 func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string) {
 	dstClean := normalizeDBPath(dst)
-	dstHash := managerPathHash(storageID, dstClean)
+	dstHash := pathkey.Hash(storageID, dstClean)
 	if existing, _ := h.Store.GetNodeByPath(ctx, storageID, dstHash); existing != nil {
 		return
 	}
 	srcClean := normalizeDBPath(src)
-	srcHash := managerPathHash(storageID, srcClean)
+	srcHash := pathkey.Hash(storageID, srcClean)
 	srcNode, err := h.Store.GetNodeByPath(ctx, storageID, srcHash)
 	if err != nil || srcNode == nil {
 		return

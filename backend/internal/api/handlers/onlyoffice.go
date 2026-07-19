@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -183,7 +184,7 @@ func (h *OnlyOffice) resolveNodeByPath(ctx context.Context, raw string) (*model.
 	if st == nil {
 		st = storages[0]
 	}
-	hash := managerPathHash(st.ID, rel)
+	hash := pathkey.Hash(st.ID, rel)
 	node, err := h.Store.GetNodeByPath(ctx, st.ID, hash)
 	if err != nil || node == nil {
 		return nil, errors.New("not found")

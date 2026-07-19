@@ -13,10 +13,8 @@ package postgres
 
 import (
 	"context"
-	"crypto/md5"
 	"database/sql"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +26,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 
 	postgres_migrations "github.com/brf-tech/filex/backend/db/migrations/postgres"
 )
@@ -582,7 +581,7 @@ func (s *Store) retagTrashedSubtree(ctx context.Context, storageID int64, origPa
 			continue
 		}
 		newPath := strings.TrimRight(trashPath, "/") + "/" + suffix
-		newHash := pgNodePathHash(storageID, newPath)
+		newHash := pathkey.Hash(storageID, newPath)
 		_, _ = s.db.ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NOW(), updated_at=NOW(),
@@ -629,7 +628,7 @@ func (s *Store) restoreTrashedSubtree(ctx context.Context, storageID int64, tras
 			continue
 		}
 		newPath := strings.TrimRight(restoredPath, "/") + "/" + suffix
-		newHash := pgNodePathHash(storageID, newPath)
+		newHash := pathkey.Hash(storageID, newPath)
 		_, _ = s.db.ExecContext(ctx, `
 			UPDATE nodes
 			SET deleted_at=NULL, updated_at=NOW(),
@@ -2165,7 +2164,7 @@ func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, or
 	if err := row.Scan(&sid, &nodeType, &trashPath); err != nil {
 		return err
 	}
-	hash := pgNodePathHash(sid, clean)
+	hash := pathkey.Hash(sid, clean)
 	name := path.Base(clean)
 	if parentID == nil {
 		if _, err := s.db.ExecContext(ctx, `
@@ -2227,14 +2226,6 @@ func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPat
 		parentPtr = &id
 	}
 	return parentPtr, nil
-}
-
-func pgNodePathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ─────────────────── User-scoped node meta ───────────────────

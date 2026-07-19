@@ -3,9 +3,7 @@ package handlers
 import (
 	"archive/zip"
 	"context"
-	"crypto/md5"
 	cryptoRand "crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +24,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -386,22 +385,12 @@ func (h *Share) resolveNodeIDFromPath(ctx context.Context, fullPath string) (int
 	if clean == "" {
 		return 0, fmt.Errorf("share target path is empty")
 	}
-	hash := sharePathHash(st.ID, clean)
+	hash := pathkey.Hash(st.ID, clean)
 	node, err := h.Store.GetNodeByPath(ctx, st.ID, hash)
 	if err != nil || node == nil {
 		return 0, fmt.Errorf("file not found: %s", fullPath)
 	}
 	return node.ID, nil
-}
-
-// sharePathHash mirrors managerPathHash so the share lookup hits the
-// same cache row the manager handler created.
-func sharePathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // randomPIN returns an n-char numeric PIN (digits only — easier to type

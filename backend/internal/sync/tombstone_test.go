@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 )
 
 // TestGuardOK_ColdStart — when the previous run had 0 seen nodes (first
@@ -40,14 +42,14 @@ func TestGuardOK_AbortOnSharpDrop(t *testing.T) {
 // TestPathHash_Stable — the same (storage, path) pair must produce the
 // same hash across calls; different storages must differ.
 func TestPathHash_Stable(t *testing.T) {
-	a := pathHash(1, "/foo/bar.txt")
-	b := pathHash(1, "/foo/bar.txt")
+	a := pathkey.Hash(1, "/foo/bar.txt")
+	b := pathkey.Hash(1, "/foo/bar.txt")
 	assert.Equal(t, a, b)
 
-	c := pathHash(2, "/foo/bar.txt")
+	c := pathkey.Hash(2, "/foo/bar.txt")
 	assert.NotEqual(t, a, c, "different storage IDs must hash to different values")
 
-	d := pathHash(1, "/foo/baz.txt")
+	d := pathkey.Hash(1, "/foo/baz.txt")
 	assert.NotEqual(t, a, d, "different paths must hash to different values")
 }
 
@@ -55,7 +57,7 @@ func TestPathHash_Stable(t *testing.T) {
 // produce the same hash (path.Clean takes care of it).
 func TestPathHash_PathNormalization(t *testing.T) {
 	assert.Equal(t,
-		pathHash(1, "/foo/bar/"),
-		pathHash(1, "/foo/bar"),
+		pathkey.Hash(1, "/foo/bar/"),
+		pathkey.Hash(1, "/foo/bar"),
 		"trailing slash should not affect hash")
 }

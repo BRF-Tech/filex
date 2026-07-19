@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
@@ -602,7 +603,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "sharing is not enabled"})
 		return
 	}
-	hash := managerPathHash(st.ID, normalizeDBPath(rel))
+	hash := pathkey.Hash(st.ID, normalizeDBPath(rel))
 	node, nerr := h.Store.GetNodeByPath(r.Context(), st.ID, hash)
 	if nerr != nil || node == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "item not indexed yet — open it once, then retry"})

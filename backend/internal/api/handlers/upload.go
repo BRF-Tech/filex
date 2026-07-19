@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -335,7 +334,7 @@ func (u *Upload) Abort(w http.ResponseWriter, r *http.Request) {
 // dispatch follow-up work (thumbnails, indexing).
 func (u *Upload) upsertNode(ctx context.Context, storageID int64, p string, size int64, mime, etag string, mtime time.Time) (*model.Node, error) {
 	clean := "/" + strings.TrimLeft(path.Clean("/"+p), "/")
-	hash := uploadPathHash(storageID, clean)
+	hash := pathkey.Hash(storageID, clean)
 	if existing, err := u.Store.GetNodeByPath(ctx, storageID, hash); err == nil && existing != nil {
 		_ = u.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, etag, mtime)
 		existing.Size = size
@@ -363,14 +362,4 @@ func (u *Upload) upsertNode(ctx context.Context, storageID int64, p string, size
 		return nil, fmt.Errorf("create node: %w", err)
 	}
 	return created, nil
-}
-
-// uploadPathHash mirrors sync.pathHash but is duplicated here to avoid
-// pulling the sync package into every handler.
-func uploadPathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
 }

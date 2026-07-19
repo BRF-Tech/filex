@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.4 below.)
+(Nothing yet — see v0.7.5 below.)
+
+## [0.7.5] - 2026-07-19
+
+### Changed
+
+- **Internal refactor (no behavior change): the storage-scoped path hash is now
+  a single `internal/pathkey.Hash()`**. The `md5(cleaned path) + NUL +
+  little-endian storage id` body had been copy-pasted across nine call sites
+  (handlers, e2e, sync, DAV, and both DB drivers) — the same file could map to
+  different rows if any copy drifted. The body is moved verbatim (byte-identical
+  output, existing `path_hash` values unaffected), and a hash-equivalence test
+  pins it against the previous implementation.
 
 ## [0.7.4] - 2026-07-18
 

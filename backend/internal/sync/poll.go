@@ -2,16 +2,13 @@ package sync
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"path"
-	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -91,7 +88,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			return count, ctx.Err()
 		default:
 		}
-		hash := pathHash(s.storage.ID, obj.Path)
+		hash := pathkey.Hash(s.storage.ID, obj.Path)
 		existing, _ := s.store.GetNodeByPath(ctx, s.storage.ID, hash)
 		if existing == nil {
 			// Maybe a soft-deleted row at the same path? UNIQUE
@@ -218,14 +215,6 @@ func guardOK(seen, prev int) bool {
 	}
 	threshold := float64(prev) * 0.7
 	return float64(seen) >= threshold
-}
-
-func pathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func decodeJSON(b []byte, out any) error {

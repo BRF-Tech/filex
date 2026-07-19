@@ -15,12 +15,11 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"path"
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 )
 
 // MarkerName is the folder marker filename dropped by the client at the
@@ -41,17 +40,6 @@ type NodeByPathLookup interface {
 	GetNodeByPath(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
 }
 
-// pathHash mirrors handlers.managerPathHash / sync.pathHash (unexported
-// there — same duplication precedent as internal/dav/dbsync.go) so the
-// marker lookup collides with the rows the sync worker + manager write.
-func pathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 // markerAt reports whether dir (relative, any leading-slash form) contains
 // a live `.filex-e2e.json` node in the DB cache.
 func markerAt(ctx context.Context, lk NodeByPathLookup, storageID int64, dir string) bool {
@@ -65,7 +53,7 @@ func markerAt(ctx context.Context, lk NodeByPathLookup, storageID int64, dir str
 	} else {
 		markerPath = rel + "/" + MarkerName
 	}
-	n, err := lk.GetNodeByPath(ctx, storageID, pathHash(storageID, markerPath))
+	n, err := lk.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, markerPath))
 	return err == nil && n != nil && n.DeletedAt == nil
 }
 

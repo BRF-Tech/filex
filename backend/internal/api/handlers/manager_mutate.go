@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
 	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -124,7 +124,7 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 			slog.String("err", err.Error()))
 	} else {
 		clean := normalizeDBPath(fullRel)
-		hash := managerPathHash(current.ID, clean)
+		hash := pathkey.Hash(current.ID, clean)
 		if existing, _ := h.Store.GetNodeByPath(r.Context(), current.ID, hash); existing == nil {
 			n := &model.Node{
 				StorageID:  current.ID,
@@ -380,7 +380,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			origClean := normalizeDBPath(srcRel)
-			hash := managerPathHash(current.ID, origClean)
+			hash := pathkey.Hash(current.ID, origClean)
 			if existing, err := h.Store.GetNodeByPathIncludingDeleted(r.Context(), current.ID, hash); err == nil && existing != nil {
 				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
 				h.removeFromIndex(r.Context(), existing.ID)
@@ -419,7 +419,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 				// drop the cache row and continue so one missing item doesn't
 				// fail the whole delete batch.
 				origClean := normalizeDBPath(srcRel)
-				origHash := managerPathHash(current.ID, origClean)
+				origHash := pathkey.Hash(current.ID, origClean)
 				if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
 					_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
 					h.removeFromIndex(r.Context(), existing.ID)
@@ -439,7 +439,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		// FRONT (children are still live) so the search index forgets
 		// them too.
 		origClean := normalizeDBPath(srcRel)
-		origHash := managerPathHash(current.ID, origClean)
+		origHash := pathkey.Hash(current.ID, origClean)
 		if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
 			var subtreeIDs []int64
 			if existing.Type == model.NodeTypeDirectory {
@@ -447,7 +447,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			}
 			if mover != nil {
 				newClean := normalizeDBPath(trashRel)
-				newHash := managerPathHash(current.ID, newClean)
+				newHash := pathkey.Hash(current.ID, newClean)
 				_ = h.Store.SoftDeleteAndRetag(r.Context(), existing.ID, newClean, newHash, origClean)
 			} else {
 				_ = h.Store.SoftDeleteNode(r.Context(), existing.ID)
@@ -597,7 +597,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		clean := normalizeDBPath(fullRel)
-		hash := managerPathHash(current.ID, clean)
+		hash := pathkey.Hash(current.ID, clean)
 		if existing, _ := h.Store.GetNodeByPath(r.Context(), current.ID, hash); existing != nil {
 			_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, fh.Size, mime, existing.Etag, time.Now())
 			// Refresh the row pointer so the index entry carries the
@@ -700,7 +700,7 @@ func (h *Manager) lookupDirID(ctx context.Context, storageID int64, rel string) 
 	if rel == "" {
 		return nil, nil
 	}
-	hash := managerPathHash(storageID, normalizeDBPath(rel))
+	hash := pathkey.Hash(storageID, normalizeDBPath(rel))
 	n, err := h.Store.GetNodeByPath(ctx, storageID, hash)
 	if err != nil || n == nil {
 		// Walk the parent chain — the DB might lag the driver.
@@ -747,8 +747,8 @@ func (h *Manager) walkDirID(ctx context.Context, storageID int64, rel string) (*
 func (h *Manager) applyDBMove(ctx context.Context, storageID int64, srcRel, dstRel string) {
 	srcClean := normalizeDBPath(srcRel)
 	dstClean := normalizeDBPath(dstRel)
-	srcHash := managerPathHash(storageID, srcClean)
-	dstHash := managerPathHash(storageID, dstClean)
+	srcHash := pathkey.Hash(storageID, srcClean)
+	dstHash := pathkey.Hash(storageID, dstClean)
 
 	existing, err := h.Store.GetNodeByPath(ctx, storageID, srcHash)
 	if err != nil || existing == nil {
@@ -815,16 +815,6 @@ func normalizeDBPath(rel string) string {
 	return strings.TrimRight(clean, "/")
 }
 
-// managerPathHash mirrors sync.pathHash so the manager handler reads
-// the same cache rows the sync worker writes.
-func managerPathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 // IngestFile writes one uploaded file into destRel/filename on the given
 // storage and upserts + indexes + thumbnails its node. It is the shared
 // ingest path behind the authenticated multipart upload (vfUpload's loop) and
@@ -862,7 +852,7 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 	}
 
 	clean := normalizeDBPath(fullRel)
-	hash := managerPathHash(st.ID, clean)
+	hash := pathkey.Hash(st.ID, clean)
 	if existing, _ := h.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
 		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
 		if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
@@ -913,7 +903,7 @@ func (h *Manager) EnsureDir(ctx context.Context, st *model.Storage, rel string) 
 		// no-op is fine, the files written under the prefix stand on their own.
 		_ = mk.Mkdir(ctx, strings.TrimPrefix(clean, "/"))
 	}
-	hash := managerPathHash(st.ID, clean)
+	hash := pathkey.Hash(st.ID, clean)
 	if existing, _ := h.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
 		id := existing.ID
 		return &id, nil

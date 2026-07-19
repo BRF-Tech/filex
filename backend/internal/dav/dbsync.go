@@ -10,34 +10,25 @@ package dav
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"log/slog"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
-// normalizeDBPath / nodePathHash mirror handlers.normalizeDBPath +
-// handlers.managerPathHash (unexported there) — the cache rows written here
-// must collide with the ones the sync worker and the manager write, or the
-// same file would appear twice after the next sync run.
+// normalizeDBPath canonicalises a path the way the shared pathkey.Hash key
+// expects (handlers.normalizeDBPath twin) — the cache rows written here must
+// collide with the ones the sync worker and the manager write, or the same
+// file would appear twice after the next sync run.
 func normalizeDBPath(rel string) string {
 	rel = strings.Trim(rel, "/")
 	clean := path.Clean("/" + rel)
 	return strings.TrimRight(clean, "/")
-}
-
-func nodePathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // syncWrite upserts the node row for a written file, indexes it (which also
@@ -46,7 +37,7 @@ func nodePathHash(storageID int64, p string) string {
 func (h *Handler) syncWrite(ctx context.Context, st *model.Storage, rel string, size int64, mime string) {
 	defer h.recoverSync("write", st, rel)
 	clean := normalizeDBPath(rel)
-	hash := nodePathHash(st.ID, clean)
+	hash := pathkey.Hash(st.ID, clean)
 
 	if existing, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
 		if err := h.cfg.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now()); err != nil {
@@ -106,14 +97,14 @@ func (h *Handler) syncMkdir(ctx context.Context, st *model.Storage, rel string) 
 func (h *Handler) syncTrash(ctx context.Context, st *model.Storage, rel, trashRel string) {
 	defer h.recoverSync("trash", st, rel)
 	clean := normalizeDBPath(rel)
-	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, nodePathHash(st.ID, clean))
+	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, clean))
 	if node == nil {
 		return
 	}
 	subtree := h.collectSubtree(ctx, st.ID, node)
 	trashClean := normalizeDBPath(trashRel)
 	if err := h.cfg.Store.SoftDeleteAndRetag(ctx, node.ID, trashClean,
-		nodePathHash(st.ID, trashClean), clean); err != nil {
+		pathkey.Hash(st.ID, trashClean), clean); err != nil {
 		slog.Warn("dav: node trash", slog.Int64("id", node.ID), slog.String("err", err.Error()))
 		return
 	}
@@ -128,7 +119,7 @@ func (h *Handler) syncTrash(ctx context.Context, st *model.Storage, rel, trashRe
 func (h *Handler) syncDelete(ctx context.Context, st *model.Storage, rel string) {
 	defer h.recoverSync("delete", st, rel)
 	clean := normalizeDBPath(rel)
-	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, nodePathHash(st.ID, clean))
+	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, clean))
 	if node == nil {
 		return
 	}
@@ -149,7 +140,7 @@ func (h *Handler) syncMove(ctx context.Context, st *model.Storage, srcRel, dstRe
 	defer h.recoverSync("move", st, srcRel)
 	srcClean := normalizeDBPath(srcRel)
 	dstClean := normalizeDBPath(dstRel)
-	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, nodePathHash(st.ID, srcClean))
+	node, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, srcClean))
 	if node == nil {
 		return
 	}
@@ -164,7 +155,7 @@ func (h *Handler) syncMove(ctx context.Context, st *model.Storage, srcRel, dstRe
 		if n.ID != node.ID {
 			newPath = dstClean + strings.TrimPrefix(n.Path, srcClean)
 		}
-		newHash := nodePathHash(st.ID, newPath)
+		newHash := pathkey.Hash(st.ID, newPath)
 		pid := n.ParentID
 		if n.ID == node.ID {
 			pid = parentID
@@ -203,7 +194,7 @@ func (h *Handler) ensureDirChain(ctx context.Context, st *model.Storage, rel str
 		} else {
 			built += "/" + seg
 		}
-		hash := nodePathHash(st.ID, built)
+		hash := pathkey.Hash(st.ID, built)
 		if existing, _ := h.cfg.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
 			id := existing.ID
 			parent = &id

@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -475,7 +476,7 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	if err := deleter.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return err
 	}
-	origHash := managerPathHash(s.ID, normalizeDBPath(rel))
+	origHash := pathkey.Hash(s.ID, normalizeDBPath(rel))
 	if existing, gerr := a.store.GetNodeByPath(ctx, s.ID, origHash); gerr == nil && existing != nil {
 		_ = a.store.SoftDeleteNode(ctx, existing.ID)
 	}
@@ -519,10 +520,10 @@ func (a *aiOps) listAllFiles(ctx context.Context, drv storage.Driver, root strin
 // location so Restore can find it and a fresh write at the original path works.
 func (a *aiOps) trashRetagCache(ctx context.Context, storageID int64, rel, trashRel string) {
 	origClean := normalizeDBPath(rel)
-	origHash := managerPathHash(storageID, origClean)
+	origHash := pathkey.Hash(storageID, origClean)
 	if existing, gerr := a.store.GetNodeByPath(ctx, storageID, origHash); gerr == nil && existing != nil {
 		newClean := normalizeDBPath(trashRel)
-		newHash := managerPathHash(storageID, newClean)
+		newHash := pathkey.Hash(storageID, newClean)
 		_ = a.store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
 	}
 }
@@ -677,7 +678,7 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 	if rel == "" {
 		return nil, errors.New("share target path required (cannot share a storage root)")
 	}
-	node, err := a.store.GetNodeByPath(ctx, s.ID, sharePathHash(s.ID, rel))
+	node, err := a.store.GetNodeByPath(ctx, s.ID, pathkey.Hash(s.ID, rel))
 	if err != nil || node == nil {
 		return nil, fmt.Errorf("not indexed yet: %s — write or list it first so filex caches the entry", joinAdapterPath(s.Name, rel))
 	}
@@ -1000,7 +1001,7 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 func (a *aiOps) cacheUpsertFile(ctx context.Context, s *model.Storage, rel string, size int64, mime string) {
 	parentID, perr := a.walkParent(ctx, s.ID, rel)
 	clean := normalizeDBPath(rel)
-	hash := managerPathHash(s.ID, clean)
+	hash := pathkey.Hash(s.ID, clean)
 	if existing, _ := a.store.GetNodeByPath(ctx, s.ID, hash); existing != nil {
 		_ = a.store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
 		existing.Size = size
@@ -1075,7 +1076,7 @@ func (a *aiOps) cacheUpsertDir(ctx context.Context, s *model.Storage, rel string
 		return
 	}
 	clean := normalizeDBPath(rel)
-	hash := managerPathHash(s.ID, clean)
+	hash := pathkey.Hash(s.ID, clean)
 	if existing, _ := a.store.GetNodeByPath(ctx, s.ID, hash); existing != nil {
 		return
 	}
@@ -1092,13 +1093,13 @@ func (a *aiOps) cacheUpsertDir(ctx context.Context, s *model.Storage, rel string
 }
 
 func (a *aiOps) cacheMove(ctx context.Context, s *model.Storage, srcRel, dstRel string) {
-	srcHash := managerPathHash(s.ID, normalizeDBPath(srcRel))
+	srcHash := pathkey.Hash(s.ID, normalizeDBPath(srcRel))
 	existing, err := a.store.GetNodeByPath(ctx, s.ID, srcHash)
 	if err != nil || existing == nil {
 		return
 	}
 	dstClean := normalizeDBPath(dstRel)
-	dstHash := managerPathHash(s.ID, dstClean)
+	dstHash := pathkey.Hash(s.ID, dstClean)
 	parentID, _ := a.walkParent(ctx, s.ID, dstRel)
 	if merr := a.store.MoveNode(ctx, existing.ID, parentID, path.Base(dstClean), dstClean, dstHash); merr != nil {
 		_ = a.store.SoftDeleteNode(ctx, existing.ID)

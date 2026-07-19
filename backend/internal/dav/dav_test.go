@@ -21,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -154,7 +155,7 @@ func bodyString(t *testing.T, resp *http.Response) string {
 
 func (ha *harness) nodeByPath(t *testing.T, storageID int64, rel string) *model.Node {
 	t.Helper()
-	n, _ := ha.store.GetNodeByPath(context.Background(), storageID, nodePathHash(storageID, normalizeDBPath(rel)))
+	n, _ := ha.store.GetNodeByPath(context.Background(), storageID, pathkey.Hash(storageID, normalizeDBPath(rel)))
 	return n
 }
 

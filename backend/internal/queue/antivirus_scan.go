@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"crypto/md5"
 	crand "crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -158,7 +158,7 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 		quarantined = true
 		origClean := avNormalizePath(n.Path)
 		trashClean := avNormalizePath(trashRel)
-		if err := a.store.SoftDeleteAndRetag(ctx, n.ID, trashClean, avPathHash(n.StorageID, trashClean), origClean); err != nil {
+		if err := a.store.SoftDeleteAndRetag(ctx, n.ID, trashClean, pathkey.Hash(n.StorageID, trashClean), origClean); err != nil {
 			slog.Warn("antivirus: quarantine retag failed",
 				slog.Int64("node", n.ID), slog.String("err", err.Error()))
 		}
@@ -200,22 +200,13 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 	return nil
 }
 
-// avNormalizePath / avPathHash mirror handlers.normalizeDBPath +
-// handlers.managerPathHash (unexported there — same duplication precedent
-// as internal/dav/dbsync.go): the retagged trash row must collide with
-// the rows the manager and sync worker write.
+// avNormalizePath canonicalises a path the way the shared pathkey.Hash key
+// expects (handlers.normalizeDBPath twin): the retagged trash row must
+// collide with the rows the manager and sync worker write.
 func avNormalizePath(rel string) string {
 	rel = strings.Trim(rel, "/")
 	clean := path.Clean("/" + rel)
 	return strings.TrimRight(clean, "/")
-}
-
-func avPathHash(storageID int64, p string) string {
-	h := md5.New()
-	_, _ = h.Write([]byte(strings.TrimRight(path.Clean("/"+p), "/")))
-	_, _ = h.Write([]byte{'\x00'})
-	_, _ = h.Write([]byte{byte(storageID), byte(storageID >> 8), byte(storageID >> 16), byte(storageID >> 24)})
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // avRandHex6 returns a 6-char lowercase hex string for trash-key

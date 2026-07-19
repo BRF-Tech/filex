@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 )
 
 // fakeLookup answers GetNodeByPath from a set of known path hashes.
@@ -18,7 +19,7 @@ func (f *fakeLookup) GetNodeByPath(_ context.Context, storageID int64, hash stri
 		return nil, nil
 	}
 	for p, ok := range f.paths {
-		if ok && pathHash(storageID, p) == hash {
+		if ok && pathkey.Hash(storageID, p) == hash {
 			return &model.Node{ID: 1, StorageID: storageID, Path: "/" + p}, nil
 		}
 	}

@@ -27,6 +27,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -144,7 +145,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	// write. The cache row's `clean`/`hash` derivation also feeds the
 	// post-write metadata refresh below.
 	clean := strings.TrimRight(path.Clean("/"+rel), "/")
-	hash := managerPathHash(storageID, clean)
+	hash := pathkey.Hash(storageID, clean)
 	var existing *model.Node
 	if n, err := h.Store.GetNodeByPath(r.Context(), storageID, hash); err == nil {
 		existing = n

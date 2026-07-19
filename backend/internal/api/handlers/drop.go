@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
 )
@@ -286,7 +287,7 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	}
 	sub := stamp + "_" + who
 	subRel := path.Join(node.Path, sub)
-	if existing, _ := h.Store.GetNodeByPath(r.Context(), node.StorageID, managerPathHash(node.StorageID, normalizeDBPath(subRel))); existing != nil {
+	if existing, _ := h.Store.GetNodeByPath(r.Context(), node.StorageID, pathkey.Hash(node.StorageID, normalizeDBPath(subRel))); existing != nil {
 		sub = sub + "-" + randHex6()
 		subRel = path.Join(node.Path, sub)
 	}
