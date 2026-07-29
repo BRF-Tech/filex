@@ -7,7 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.6 below.)
+(Nothing yet — see v0.8.0 below.)
+
+## [0.8.0] - 2026-07-29
+
+### Added
+
+- **Updates: filex now knows which releases exist, and can install them.**
+  Behaviour is decided by which part of `x.y.z` moved — `z` applies itself
+  (when the policy allows), `y` is announced and applied with one click, `x` is
+  announced with upgrade instructions. Full documentation:
+  [docs/UPDATES.md](docs/UPDATES.md).
+
+  - **Nothing moves until you opt in.** The default is `policy: manual` —
+    check and announce only. `AUTO_UPGRADE=true` selects the patch policy;
+    `FILEX_UPDATE_CHECK=0` stops every outbound request.
+  - **Admin → Updates page**: running version, what is available, why filex is
+    or is not taking it, the releases being skipped over, and — when it cannot
+    act itself — the exact commands for this install shape.
+  - **`filex self-update`** (`--check`, `--to <version>`) for binary/systemd
+    installs.
+  - **Container installs never self-apply, by design.** An image layer is
+    immutable: a binary replaced inside a running container disappears at the
+    next `docker compose up` and the version silently reverts. filex refuses
+    and prints the image-upgrade steps instead. It does not ask for
+    `/var/run/docker.sock`.
+  - **Release manifest** (`FILEX_UPDATE_MANIFEST_URL`, default
+    `https://filex.sh/updates/stable.json`) carries two things a git tag
+    cannot: `auto_ok` — a kill switch that pulls a bad release out of automatic
+    distribution without deleting it — and `migrations`, which makes "patches
+    carry no schema changes" checkable rather than a promise. A patch that
+    declares a migration is never applied automatically.
+  - **Safety sequence on apply**: SHA-256 verification against the manifest →
+    unpack beside the current binary (atomic rename, same filesystem) →
+    **smoke-test the new binary** (`filex --version`) → **database snapshot**
+    (`VACUUM INTO` for sqlite, `FILEX_UPDATE_PRE_COMMAND` for external
+    engines; a failure aborts the upgrade) → keep the old binary as
+    `filex.bak-<version>` → swap → restart via systemd if present, otherwise
+    report "restart required". Everything before the swap is undone by doing
+    nothing.
+  - `0.x` guard: while filex is pre-1.0, minor releases are never automatic
+    even under `policy: minor` — semver gives them no compatibility promise.
+  - New notification events `update_available` (once per version) and
+    `update_applied`.
+  - `scripts/gen-update-manifest.py` builds the manifest from the published
+    GitHub releases, taking digests from goreleaser's `checksums.txt`.
+
+### Changed
+
+- The update check sends exactly one identifying header,
+  `User-Agent: filex-updater/<version>` — no hostname, license, instance id or
+  usage data. It is an update check, not telemetry.
 
 ## [0.7.6] - 2026-07-29
 

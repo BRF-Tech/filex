@@ -49,7 +49,6 @@
     "healthy": "Healthy",
     "unreachable": "Unreachable",
     "running": "Running",
-    "ok": "OK",
     "error": "Error",
     "pending": "Pending",
     "neverRan": "Never ran",
@@ -99,7 +98,8 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "protection": "Protection",
-    "branding": "Branding"
+    "branding": "Branding",
+    "updates": "Updates"
   },
   "login": {
     "title": "Sign in",
@@ -539,7 +539,12 @@
     "root": "Root",
     "empty": "This folder is empty.",
     "download": "Download",
-    "cols": { "name": "Name", "size": "Size", "mime": "Type", "modified": "Modified" },
+    "cols": {
+      "name": "Name",
+      "size": "Size",
+      "mime": "Type",
+      "modified": "Modified"
+    },
     "myAccount": "My account",
     "apiKeys": "API keys",
     "logout": "Log out"
@@ -582,7 +587,9 @@
   },
   "queue": {
     "title": "Queue",
-    "filter": { "status": "Status" },
+    "filter": {
+      "status": "Status"
+    },
     "fields": {
       "id": "ID",
       "type": "Type",
@@ -908,5 +915,38 @@
     "previewDownload": "Download",
     "poweredByLine": "Shared with filex",
     "previewHelp": "Approximate rendering of a public share page with the current values. Save to apply."
+  },
+  "updates": {
+    "title": "Updates",
+    "subtitle": "Tracks published releases and applies what the policy allows",
+    "current": "Running version",
+    "available": "New version",
+    "upToDate": "Up to date — nothing to do",
+    "checkNow": "Check now",
+    "checkedAt": "Last checked",
+    "checkFailed": "Check failed",
+    "applyNow": "Upgrade now",
+    "applied": "{version} installed",
+    "applyFailed": "Upgrade failed",
+    "willAutoApply": "Will be applied automatically (inside the maintenance window)",
+    "restartRequired": "{version} is installed on disk, but this process is still the old build — restart filex to activate it.",
+    "howTo": "How to upgrade",
+    "releaseNotes": "Release notes",
+    "includes": "This upgrade also includes",
+    "security": "security",
+    "migrations": "schema change",
+    "policyLabel": "policy",
+    "disabled": "Update checking is off",
+    "unsupported": "This server does not support the update API yet. The page activates after a backend upgrade.",
+    "step": {
+      "none": "—",
+      "patch": "patch (z)",
+      "minor": "minor (y)",
+      "major": "major (x)"
+    },
+    "mode": {
+      "binary": "binary install",
+      "docker": "container install"
+    }
   }
 }

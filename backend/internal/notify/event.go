@@ -48,6 +48,14 @@ const (
 	EventQueueStuck           EventType = "queue_stuck"
 	EventAuthFailSpike        EventType = "auth_fail_spike"
 	EventDiskFull             EventType = "disk_full"
+	// EventUpdateAvailable fires ONCE per newly published release — the
+	// "already announced" mark is persisted, so a restart loop cannot turn it
+	// into a stream.
+	EventUpdateAvailable EventType = "update_available"
+	// EventUpdateApplied fires after a self-upgrade replaced the binary. The
+	// version moving is exactly the kind of change an operator must find in
+	// the log even if nobody was watching when it happened.
+	EventUpdateApplied EventType = "update_applied"
 )
 
 // Canonical file/share events (webhook v2 — "Bağlan" wave). Emitted

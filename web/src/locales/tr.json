@@ -49,7 +49,6 @@
     "healthy": "Sağlıklı",
     "unreachable": "Erişilemiyor",
     "running": "Çalışıyor",
-    "ok": "Tamam",
     "error": "Hata",
     "pending": "Bekliyor",
     "neverRan": "Hiç çalışmadı",
@@ -99,7 +98,8 @@
     "themeLight": "Aydınlık",
     "themeDark": "Karanlık",
     "protection": "Koruma",
-    "branding": "Kurumsal Kimlik"
+    "branding": "Kurumsal Kimlik",
+    "updates": "Güncellemeler"
   },
   "login": {
     "title": "Oturum aç",
@@ -539,7 +539,12 @@
     "root": "Kök",
     "empty": "Bu klasör boş.",
     "download": "İndir",
-    "cols": { "name": "Ad", "size": "Boyut", "mime": "Tür", "modified": "Değiştirildi" },
+    "cols": {
+      "name": "Ad",
+      "size": "Boyut",
+      "mime": "Tür",
+      "modified": "Değiştirildi"
+    },
     "myAccount": "Hesabım",
     "apiKeys": "API anahtarları",
     "logout": "Çıkış yap"
@@ -582,7 +587,9 @@
   },
   "queue": {
     "title": "Kuyruk",
-    "filter": { "status": "Durum" },
+    "filter": {
+      "status": "Durum"
+    },
     "fields": {
       "id": "ID",
       "type": "Tür",
@@ -908,5 +915,38 @@
     "previewDownload": "İndir",
     "poweredByLine": "filex ile paylaşıldı",
     "previewHelp": "Geçerli değerlerle herkese açık paylaşım sayfasının yaklaşık görünümü. Uygulamak için kaydedin."
+  },
+  "updates": {
+    "title": "Güncellemeler",
+    "subtitle": "Yayınlanan sürümleri izler; politikanın izin verdiği kadarını uygular",
+    "current": "Çalışan sürüm",
+    "available": "Yeni sürüm",
+    "upToDate": "Güncel — yapılacak bir şey yok",
+    "checkNow": "Şimdi kontrol et",
+    "checkedAt": "Son kontrol",
+    "checkFailed": "Kontrol başarısız",
+    "applyNow": "Şimdi yükselt",
+    "applied": "{version} kuruldu",
+    "applyFailed": "Yükseltme başarısız",
+    "willAutoApply": "Politika gereği kendiliğinden yüklenecek (bakım penceresinde)",
+    "restartRequired": "{version} diske kuruldu, ama çalışan süreç hâlâ eski sürüm — etkinleşmesi için filex'i yeniden başlatın.",
+    "howTo": "Nasıl yükseltilir",
+    "releaseNotes": "Sürüm notları",
+    "includes": "Bu yükseltme şunları da kapsıyor",
+    "security": "güvenlik",
+    "migrations": "şema değişikliği",
+    "policyLabel": "politika",
+    "disabled": "Sürüm kontrolü kapalı",
+    "unsupported": "Sunucu bu sürümü desteklemiyor — güncelleme API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
+    "step": {
+      "none": "—",
+      "patch": "yama (z)",
+      "minor": "ara sürüm (y)",
+      "major": "ana sürüm (x)"
+    },
+    "mode": {
+      "binary": "ikili kurulum",
+      "docker": "container kurulumu"
+    }
   }
 }

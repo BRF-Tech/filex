@@ -290,6 +290,26 @@ off.
 
 ---
 
+## Updates
+
+Release awareness and — on installs that own their binary — self-upgrade.
+Full behaviour, including everything that is checked before anything is applied
+automatically, is in [UPDATES.md](./UPDATES.md).
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_UPDATE_CHECK` | `1` | Master switch for the periodic check. `0` = no outbound request, ever. |
+| `FILEX_UPDATE_POLICY` | `manual` | `off` · `manual` · `patch` · `minor` — how far filex may move on its own. The default announces only. |
+| `AUTO_UPGRADE` | — | Shorthand for `FILEX_UPDATE_POLICY=patch` (z-moves apply themselves; y and x are announced). An explicit policy set afterwards wins. |
+| `FILEX_UPDATE_CHANNEL` | `stable` | Release channel. |
+| `FILEX_UPDATE_MANIFEST_URL` | `https://filex.sh/updates/stable.json` | Release index location — point it at your own mirror for air-gapped installs. |
+| `FILEX_UPDATE_WINDOW` | — | Daily maintenance window for automatic upgrades, e.g. `03:00-05:00` (server local time). Empty = any time. |
+| `FILEX_UPDATE_INTERVAL` | `24h` | Time between checks. Anything under `1h` is raised to `1h`. |
+| `FILEX_UPDATE_PRE_COMMAND` | — | Shell command run immediately before a self-upgrade (database dump for postgres/mysql). **A non-zero exit aborts the upgrade.** sqlite is snapshotted by filex itself with `VACUUM INTO`. |
+| `FILEX_INSTALL_MODE` | auto-detected | `binary` or `docker`, when detection is wrong for your setup. Container installs never self-apply — the image layer is immutable, so a replaced binary reverts at the next `up`. |
+
+---
+
 ## Demo mode
 
 | Env var | Default | Description |

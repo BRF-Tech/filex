@@ -53,8 +53,35 @@ type Config struct {
 	Sentry           SentryConfig `yaml:"sentry"`
 	Seed             SeedConfig   `yaml:"seed"`
 	DAV              DAVConfig    `yaml:"dav"`
+	Update           UpdateConfig `yaml:"update"`
 	/* kimlik:e3 cloud */
 	Cloud CloudConfig `yaml:"cloud"`
+}
+
+// UpdateConfig — release awareness and (where the install owns its binary)
+// self-upgrade. See docs/UPDATES.md.
+//
+// The default is "check and tell me, change nothing": Enabled=true with
+// Policy="manual". Nothing moves on its own until the operator opts in with
+// AUTO_UPGRADE=true (= policy "patch"). Checking can be turned off entirely
+// with FILEX_UPDATE_CHECK=0, which stops all outbound requests.
+type UpdateConfig struct {
+	// Enabled controls the periodic check. False = no outbound request at all.
+	Enabled bool `yaml:"enabled"`
+	// Policy: off | manual | patch | minor. Which part of x.y.z may be applied
+	// without asking. "patch" is what AUTO_UPGRADE=true selects.
+	Policy string `yaml:"policy"`
+	// Channel selects the manifest flavor ("stable").
+	Channel string `yaml:"channel"`
+	// ManifestURL overrides the default release index (mirrors, forks,
+	// air-gapped installs that publish their own).
+	ManifestURL string `yaml:"manifest_url"`
+	// Window is a daily maintenance window for automatic upgrades,
+	// "03:00-05:00" in the server's local time. Empty = any time.
+	Window string `yaml:"window"`
+	// Interval between checks. Zero → 24h; anything under an hour is raised to
+	// an hour (a self-hosted install has no reason to poll harder).
+	Interval time.Duration `yaml:"interval"`
 }
 
 // CloudConfig — self-serve cloud/SaaS PREPARATION (v0.7 "Kimlik" E3, see
@@ -348,6 +375,12 @@ func Default() Config {
 		DAV: DAVConfig{
 			Enabled: true,
 		},
+		Update: UpdateConfig{
+			Enabled:  true,
+			Policy:   "manual",
+			Channel:  "stable",
+			Interval: 24 * time.Hour,
+		},
 		Demo: DemoConfig{
 			Mode: false,
 			User: "demo@demo.com",
@@ -567,6 +600,38 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DAV"); v != "" {
 		c.DAV.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	// ── updates ──
+	// AUTO_UPGRADE is the friendly shorthand people reach for; it selects the
+	// patch policy (z moves by itself, y and x are announced). An explicit
+	// FILEX_UPDATE_POLICY set afterwards wins, so the precise knob always
+	// overrides the shorthand.
+	if v := os.Getenv("AUTO_UPGRADE"); v != "" {
+		if v == "1" || strings.EqualFold(v, "true") {
+			c.Update.Policy = "patch"
+		} else {
+			c.Update.Policy = "manual"
+		}
+	}
+	if v := os.Getenv("FILEX_UPDATE_CHECK"); v != "" {
+		c.Update.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_UPDATE_POLICY"); v != "" {
+		c.Update.Policy = v
+	}
+	if v := os.Getenv("FILEX_UPDATE_CHANNEL"); v != "" {
+		c.Update.Channel = v
+	}
+	if v := os.Getenv("FILEX_UPDATE_MANIFEST_URL"); v != "" {
+		c.Update.ManifestURL = v
+	}
+	if v := os.Getenv("FILEX_UPDATE_WINDOW"); v != "" {
+		c.Update.Window = v
+	}
+	if v := os.Getenv("FILEX_UPDATE_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Update.Interval = d
+		}
 	}
 	if v := os.Getenv("FILEX_WEBHOOK_URL"); v != "" {
 		c.Notify.WebhookURL = v

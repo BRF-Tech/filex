@@ -58,6 +58,7 @@ func main() {
 		storageCmd(),
 		thumbCmd(),
 		clientCmd(),
+		selfUpdateCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

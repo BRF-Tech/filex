@@ -40,6 +40,7 @@ import (
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -80,6 +81,10 @@ type Deps struct {
 	// binary and the persistent queue are both available; nil disables
 	// scanning entirely.
 	AVScan func(ctx context.Context, n *model.Node)
+	// Updater tracks published releases and (on installs that own their
+	// binary) applies them. Nil = the feature is off; the admin endpoints then
+	// report a "disabled" status instead of disappearing. See docs/UPDATES.md.
+	Updater *update.Service
 }
 
 // BuildRouter constructs the chi router with all routes wired up.
@@ -518,6 +523,13 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/{id}", aiTokensH.Update)
 				r.Delete("/{id}", aiTokensH.Delete)
 			})
+
+			// Release awareness / self-upgrade. GET is cached (never touches
+			// the network), /check forces a fetch, /apply installs.
+			updateH := handlers.NewUpdate(d.Updater)
+			r.Get("/update", updateH.Status)
+			r.Post("/update/check", updateH.Check)
+			r.Post("/update/apply", updateH.Apply)
 
 			// Global RBAC permissions overview — who has what, where.
 			r.Get("/grants", grantsH.AdminList)

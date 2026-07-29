@@ -117,6 +117,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.apiMcp' },
       },
       {
+        path: 'updates',
+        name: 'updates',
+        component: () => import('@/views/Updates.vue'),
+        meta: { breadcrumb: 'nav.updates' },
+      },
+      {
         path: 'grants',
         name: 'grants',
         component: () => import('@/views/AdminGrants.vue'),

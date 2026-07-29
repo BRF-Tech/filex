@@ -43,6 +43,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/version"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 
@@ -506,9 +507,62 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		func(f string, a ...any) { slog.Info(fmt.Sprintf(f, a...)) },
 	)
 
+	// Release awareness. Constructed even when checking is disabled so the
+	// admin endpoints can report WHY there is no information, instead of the
+	// page looking broken. Nothing is applied here — Run() only learns, and
+	// only a policy that allows it (plus a binary install) ever calls Apply.
+	updater := update.New(update.Config{
+		Enabled:        cfg.Update.Enabled,
+		Policy:         update.ParsePolicy(cfg.Update.Policy),
+		Channel:        cfg.Update.Channel,
+		ManifestURL:    cfg.Update.ManifestURL,
+		Window:         update.ParseWindow(cfg.Update.Window),
+		Interval:       cfg.Update.Interval,
+		StateDir:       cfg.DataDir,
+		CurrentVersion: version.Version,
+	})
+	// Announce a newly published release once, through the same notification
+	// pipeline as everything else operational.
+	if srvObj.notify != nil {
+		updater.OnNewRelease = func(d update.Decision) {
+			sev := notify.SeverityInfo
+			if d.Target.IsSecurity() {
+				sev = notify.SeverityWarning
+			}
+			_, _ = srvObj.notify.Send(context.Background(), notify.Event{
+				Event:    notify.EventUpdateAvailable,
+				Severity: sev,
+				Title:    "filex " + d.Target.Version + " available",
+				Body:     d.Reason,
+				Meta: map[string]any{
+					"version": d.Target.Version,
+					"current": version.Version,
+					"step":    string(d.Step),
+					"action":  string(d.Action),
+					"notes":   d.Target.NotesURL,
+				},
+			})
+		}
+	}
+	// A self-upgrade must never be the reason a database becomes unrecoverable:
+	// snapshot before the binary is swapped, and abort the upgrade if that
+	// fails. Down migrations do not exist, so the backup IS the rollback.
+	updater.SetPreApply(func(ctx context.Context, target update.Release) error {
+		return snapshotBeforeUpgrade(ctx, cfg, target.Version)
+	})
+	if updater.Enabled() {
+		go updater.Run(ctx)
+		slog.Info("updates: checking enabled",
+			slog.String("policy", cfg.Update.Policy),
+			slog.String("mode", string(updater.Mode())))
+	} else {
+		slog.Info("updates: checking disabled")
+	}
+
 	deps := &api.Deps{
 		Cfg:             cfg,
 		Store:           scopedStore,
+		Updater:         updater,
 		Worker:          worker,
 		Index:           idx,
 		Caps:            caps,

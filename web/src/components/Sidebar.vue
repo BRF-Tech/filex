@@ -28,6 +28,7 @@ import {
   KeyRound,
   Copy as CopyIcon /* bul:s3 */,
   Palette /* wiring:e1 */,
+  ArrowUpCircle,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -94,6 +95,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'notifications' }, label: t('nav.notifications'), icon: Bell, group: 'ops' },
   { to: { name: 'webhooks' }, label: t('nav.webhooks'), icon: Webhook, group: 'ops' } /* bag:b3 */,
   { to: { name: 'audit' }, label: t('nav.audit'), icon: ScrollText, group: 'ops' },
+  { to: { name: 'updates' }, label: t('nav.updates'), icon: ArrowUpCircle, group: 'ops' },
 
   { to: { name: 'about' }, label: t('nav.about'), icon: Info, group: 'meta' },
 ]);

@@ -56,7 +56,8 @@ export default defineConfig({
         items: [
           { text: 'Installation', link: '/INSTALLATION' },
           { text: 'Docker', link: '/DOCKER' },
-          { text: 'Deployment', link: '/DEPLOYMENT' }
+          { text: 'Deployment', link: '/DEPLOYMENT' },
+          { text: 'Updates', link: '/UPDATES' }
         ]
       },
       {
