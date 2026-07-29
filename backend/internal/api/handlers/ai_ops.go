@@ -79,6 +79,22 @@ var errAINoStorage = errors.New("no storage configured")
 // for a mutating AI op (read denials surface from resolveStorage instead).
 var errAIForbidden = errors.New("access denied: insufficient permission")
 
+// deniedErr carries a caller-facing message while still matching a sentinel via
+// errors.Is, so aiStatus can map denials to 403. Without it a confinement or
+// permission refusal falls through to mapDriverErr's 500 default — and a 5xx
+// tells automation "server glitch, retry" when the refusal is in fact permanent.
+type deniedErr struct {
+	error
+	sentinel error
+}
+
+func (e deniedErr) Unwrap() error { return e.sentinel }
+
+// denied wraps msg so that errors.Is(err, sentinel) holds.
+func denied(sentinel error, format string, args ...any) error {
+	return deniedErr{error: fmt.Errorf(format, args...), sentinel: sentinel}
+}
+
 // resolveStorage maps an adapter://path to (storage, relativePath). When the
 // path carries no adapter prefix the first enabled storage is used.
 func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, string, error) {
@@ -105,7 +121,7 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 		np, err := root.EnforcePath(p)
 		if err != nil {
 			q := root.Adapter + "://" + root.Rel
-			return nil, "", fmt.Errorf("%q is outside your confined root %s — use a bare relative path (e.g. \"sub/file.txt\") or a path under %s (call file_root to see your root)", p, q, q)
+			return nil, "", denied(confine.ErrOutOfRoot, "%q is outside your confined root %s — use a bare relative path (e.g. \"sub/file.txt\") or a path under %s (call file_root to see your root)", p, q, q)
 		}
 		p = np
 	}
@@ -131,7 +147,7 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 			// confine + ACL gating), so reads are denied here and writes assert
 			// ≥editor in their own methods.
 			if !a.allow(ctx, s, clean, acl.LevelViewer) {
-				return nil, "", fmt.Errorf("access denied: no permission for %s", joinAdapterPath(s.Name, clean))
+				return nil, "", denied(errAIForbidden, "access denied: no permission for %s", joinAdapterPath(s.Name, clean))
 			}
 			return s, clean, nil
 		}

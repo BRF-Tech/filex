@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.7.5 below.)
+(Nothing yet — see v0.7.6 below.)
+
+## [0.7.6] - 2026-07-29
+
+### Fixed
+
+- **AI surface: denials now answer `403`, not `500`.** A confined token
+  (`root:<adapter>://<path>` scope) writing or listing outside its root, and a
+  bound user without the required grant level, both returned **500**:
+  `resolveStorage` surfaced them as plain `fmt.Errorf` values, so `aiStatus`
+  fell through to `mapDriverErr`'s server-error default. `errAIForbidden` was
+  unmapped as well, so mutating permission denials answered 500 too. Both
+  refusals are now wrapped so `errors.Is` matches `confine.ErrOutOfRoot` /
+  `errAIForbidden`, and `aiStatus` maps them to `403`. The caller-facing hint
+  ("… is outside your confined root … call file_root to see your root") is
+  unchanged.
+
+  Why it matters: a `5xx` reads as "server glitch, retry" — scripts, agents and
+  HTTP clients retry a request that can never succeed, while the real cause
+  (wrong path, missing grant) hides behind a generic server error.
 
 ## [0.7.5] - 2026-07-19
 

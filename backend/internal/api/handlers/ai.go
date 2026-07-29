@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -314,6 +315,12 @@ func aiStatus(err error) int {
 	}
 	if errors.Is(err, errAINoStorage) {
 		return http.StatusServiceUnavailable
+	}
+	// Permanent refusals, not server faults: a confined token reaching outside
+	// its root, or the bound user lacking the grant level. These must NOT fall
+	// through to mapDriverErr's 500 — a 5xx reads as "retry" to any client.
+	if errors.Is(err, confine.ErrOutOfRoot) || errors.Is(err, errAIForbidden) {
+		return http.StatusForbidden
 	}
 	if errors.Is(err, storage.ErrNotFound) {
 		return http.StatusNotFound
