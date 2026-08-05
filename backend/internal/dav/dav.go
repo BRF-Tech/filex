@@ -44,6 +44,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
@@ -129,6 +130,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="`+h.cfg.Realm+`", charset="UTF-8"`)
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
+	}
+
+	// /dav authenticates itself (Basic), so it sits outside the chain where
+	// auth.TenantResolver runs: no tenant scope ever reached the scoped store,
+	// ListEnabledStorages saw an unscoped context, and the root listed every
+	// tenant's storages. Attach the scope the middleware would have.
+	//
+	// Until this, a tenant admin who mounted /dav got all ten olivov tenants
+	// read-write — and DELETE over WebDAV is permanent, it does not go to
+	// trash (H4, 2026-08-05).
+	if h.cfg.MultiTenant {
+		r = r.WithContext(tenant.WithScope(r.Context(),
+			auth.ScopeForUser(r.Context(), h.cfg.Store, p.user)))
 	}
 
 	if status, msg := h.preGate(r, p); status != 0 {

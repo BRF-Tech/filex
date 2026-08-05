@@ -158,6 +158,14 @@ WebDAV enforces exactly the same authorization model as the web UI:
 - Changes made over WebDAV are indexed **best-effort right away** (node
   cache, search, thumbnails); if anything hiccups, the storage's scheduled
   sync run reconciles later.
-- Multi-tenant installs: `/dav` currently resolves storages **globally by
-  name** (host-based tenant scoping does not apply to this surface yet).
+- Multi-tenant installs: `/dav` is **tenant-scoped**. The scope comes from the
+  authenticated user's provider — not the request Host — so it matches what
+  the JSON API and the web UI apply. A caller sees only their own provider's
+  storages in the root, and any path under another provider's storage answers
+  `404` (a foreign storage is indistinguishable from one that isn't there).
+  Admins of the **supertenant** provider stay confine-exempt and see
+  everything; `role: admin` on a regular tenant means admin *of that tenant*.
   Suspended-tenant users are refused at login.
+
+  Before this, `/dav` resolved storages globally by name, so any tenant admin
+  could list, read, write and permanently delete every other tenant's files.

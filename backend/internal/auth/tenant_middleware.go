@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
@@ -35,20 +37,29 @@ func TenantResolver(store db.Store, multiTenant bool) func(http.Handler) http.Ha
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Authenticated request in multi-tenant mode: ALWAYS attach a scope so
-			// the scoped store filters. A user whose provider is missing or
-			// unknown gets tenant.DenyAll (sees nothing) — fail closed, never a
-			// silent fall-through to "see everything".
-			scope := tenant.DenyAll
-			if u.ProviderID != nil {
-				if p, err := store.GetProvider(r.Context(), *u.ProviderID); err == nil && p != nil {
-					scope = &tenant.Scope{ProviderID: p.ID, Slug: p.Slug, IsSupertenant: p.IsSupertenant}
-					if !p.IsSupertenant {
-						scope.StorageIDs, _ = store.ListProviderStorageIDs(r.Context(), p.ID)
-					}
-				}
-			}
-			next.ServeHTTP(w, r.WithContext(tenant.WithScope(r.Context(), scope)))
+			next.ServeHTTP(w, r.WithContext(tenant.WithScope(r.Context(), ScopeForUser(r.Context(), store, u))))
 		})
 	}
+}
+
+// ScopeForUser resolves a user's tenant scope. Callers that authenticate
+// outside the middleware chain — /dav does its own Basic auth — use this to
+// attach the same scope the HTTP middleware would have.
+//
+// ALWAYS returns a non-nil scope so the scoped store filters. A user whose
+// provider is missing or unknown gets tenant.DenyAll (sees nothing) — fail
+// closed, never a silent fall-through to "see everything".
+func ScopeForUser(ctx context.Context, store db.Store, u *model.User) *tenant.Scope {
+	if u == nil || u.ProviderID == nil {
+		return tenant.DenyAll
+	}
+	p, err := store.GetProvider(ctx, *u.ProviderID)
+	if err != nil || p == nil {
+		return tenant.DenyAll
+	}
+	scope := &tenant.Scope{ProviderID: p.ID, Slug: p.Slug, IsSupertenant: p.IsSupertenant}
+	if !p.IsSupertenant {
+		scope.StorageIDs, _ = store.ListProviderStorageIDs(ctx, p.ID)
+	}
+	return scope
 }
