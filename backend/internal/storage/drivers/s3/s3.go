@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -95,6 +96,8 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
 		))
 	}
+	loadOpts = append(loadOpts, awsconfig.WithRetryer(newRetryer))
+
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("s3: aws config: %w", err)
@@ -108,6 +111,25 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 	})
 	d.presigner = s3.NewPresignClient(d.client)
 	return nil
+}
+
+// newRetryer widens the retry budget past the SDK default of 3 attempts.
+//
+// Object stores answer a transient 503 ServiceUnavailable under load, and three
+// attempts inside a couple of seconds is not enough to ride one out: the whole
+// sync run then dies on a single listing page and the catalogue stays stale
+// until the next scheduled run (15 min by default). Measured against Hetzner
+// Object Storage — "sync: run failed … ListObjectsV2, exceeded maximum number
+// of attempts, 3 … 503" recurred 12 times over a month.
+//
+// 6 attempts with a 10s backoff cap bounds one request at roughly half a
+// minute: a brief upstream wobble is absorbed, while a sustained outage still
+// fails fast enough that a sync run cannot stall for minutes.
+func newRetryer() aws.Retryer {
+	return retry.NewStandard(func(o *retry.StandardOptions) {
+		o.MaxAttempts = 6
+		o.MaxBackoff = 10 * time.Second
+	})
 }
 
 // Capabilities — S3 supports everything except Watch (notifications go via

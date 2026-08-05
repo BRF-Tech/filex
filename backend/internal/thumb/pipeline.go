@@ -129,8 +129,14 @@ func (p *Pipeline) GenerateThumb(ctx context.Context, node *model.Node) error {
 	}
 	if err != nil {
 		_ = p.store.SetThumbnailState(ctx, node.ID, "failed", err.Error())
+		// Report the PATH, not just the node id. A decode failure almost always
+		// means the stored bytes are damaged, and the next question is always
+		// "which file?" — with only a node id that costs a manual lookup in the
+		// catalogue database before the investigation can even start.
 		slog.Warn("thumb generate failed",
 			slog.Int64("node", node.ID),
+			slog.String("path", node.Path),
+			slog.Int64("size", node.Size),
 			slog.String("mime", mime),
 			slog.String("err", err.Error()))
 		return err
