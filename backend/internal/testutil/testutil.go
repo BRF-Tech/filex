@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
@@ -173,8 +174,13 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 	}
 
 	deps := &api.Deps{
-		Cfg:             cfg,
-		Store:           store,
+		Cfg:   cfg,
+		Store: store,
+		// Quota is wired by default: with it nil the service short-circuits
+		// to "unlimited, no error", so the whole /api/admin/quota surface
+		// answered 200 in tests no matter what the DB said and the H5
+		// no-rows-is-a-500 bug was invisible here.
+		Quota:           quota.New(store),
 		Worker:          worker,
 		Caps:            caps,
 		Share:           share.NewService(store),

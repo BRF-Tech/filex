@@ -487,6 +487,15 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Patch("/{id}", ush.Update)
 				r.Delete("/{id}", ush.Delete)
 				r.Post("/{id}/reset-password", usersAdmH.ResetPassword)
+				// Per-user quota, nested where callers look for it first.
+				// The flat /api/admin/quota/{user_id} below predates this and
+				// still works; handlers/quota.go has documented this nested
+				// shape since before it existed, which sent olivov hunting
+				// for a provider-quota endpoint that was never there (G2).
+				r.Get("/{id}/quota", quotaH.AdminGet)
+				r.Post("/{id}/quota", quotaH.AdminSet)
+				r.Patch("/{id}/quota", quotaH.AdminSet)
+				r.Post("/{id}/quota/recompute", quotaH.AdminRecompute)
 			})
 
 			r.Route("/settings", func(r chi.Router) {
