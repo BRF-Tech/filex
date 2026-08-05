@@ -1921,9 +1921,16 @@ async function legacyUpload(file: File) {
     patch({ percent: 100, uploadedBytes: file.size, status: 'done' });
     emit('upload-progress', { uploadId: id, percent: 100, done: true });
   } catch (err) {
-    patch({ status: 'error' });
+    // Tell the USER, not just the embedding app. `emit('error')` alone left a
+    // standalone deployment silent: the progress bar ran to 100% (the bytes
+    // do go out — the server rejects them afterwards), the row flipped to an
+    // error state carrying no message, and nothing else appeared. olivov lost
+    // ten days of uploads to that silence (H2, 2026-08-05).
+    const message = (err as Error).message;
+    patch({ status: 'error', error: message });
+    flashToast(t('upload.failed', { name: file.name }));
     emit('error', {
-      message: (err as Error).message,
+      message,
       context: { op: 'upload', file: file.name },
     });
   }
@@ -2390,6 +2397,7 @@ function retryUploadJob(job: UploadJob) {
     })
     .catch((err: Error) => {
       patchRetry({ status: 'error', error: err.message });
+      flashToast(t('upload.failed', { name: file.name }));
       emit('error', { message: err.message, context: { op: 'upload-retry', file: file.name } });
     });
 }

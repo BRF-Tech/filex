@@ -54,6 +54,7 @@ export const tr: Record<string, string> = {
   'upload.progress': 'Yükleniyor',
   'upload.done': 'Tamamlandı',
   'upload.error': 'Hata',
+  'upload.failed': '“{name}” yüklenemedi',
   'upload.aborted': 'İptal edildi',
   'upload.cancel': 'İptal',
 

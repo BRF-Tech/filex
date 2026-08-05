@@ -54,6 +54,7 @@ export const en: Record<string, string> = {
   'upload.progress': 'Uploading',
   'upload.done': 'Done',
   'upload.error': 'Error',
+  'upload.failed': 'Could not upload “{name}”',
   'upload.aborted': 'Aborted',
   'upload.cancel': 'Cancel',
 
