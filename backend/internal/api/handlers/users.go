@@ -162,6 +162,8 @@ type userUpdateReq struct {
 	// ProviderID re-homes the user into another tenant. Supertenant only —
 	// see Update.
 	ProviderID *int64 `json:"provider_id,omitempty"`
+	// Enabled gates whether the account may start a session.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // Update modifies a user. Only fields present in the body are touched.
@@ -189,6 +191,15 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "cannot demote the last admin"})
 				return
 			}
+		}
+	}
+	// Disabling the final admin locks everyone out of the admin surface just
+	// as surely as deleting or demoting them, both of which are already
+	// refused above.
+	if req.Enabled != nil && !*req.Enabled {
+		if last, err := h.isLastAdmin(r.Context(), id); err == nil && last {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "cannot disable the last admin"})
+			return
 		}
 	}
 	// Re-homing a user between tenants is a platform-operator action, so it is
@@ -225,6 +236,12 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Role != nil {
 		_ = h.Store.UpdateUserRole(r.Context(), id, *req.Role)
+	}
+	if req.Enabled != nil {
+		if err := h.Store.SetUserEnabled(r.Context(), id, *req.Enabled); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	if req.Locale != nil || req.Timezone != nil {
 		// Fetch current to fill in the missing field.

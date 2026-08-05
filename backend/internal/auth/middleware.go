@@ -35,6 +35,19 @@ func Middleware(required bool) func(http.Handler) http.Handler {
 				}
 			}
 
+			// A disabled account (migration 00022) is refused even when a driver
+			// happily resolved it. A session minted before the switch would
+			// otherwise keep working until it expired, which makes "disabled"
+			// mean "disabled tomorrow".
+			if user != nil && !user.Enabled {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": "this account is disabled",
+				})
+				return
+			}
+
 			if user == nil && required {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)

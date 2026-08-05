@@ -55,6 +55,10 @@ type User struct {
 	// /quota request per row.
 	QuotaBytes int64 `json:"quota_bytes"`
 	UsageBytes int64 `json:"used_bytes"`
+	// Enabled (migration 00022) gates whether the account may start a
+	// session — local login, OIDC and /dav alike. Disabling is not a soft
+	// delete: files, quota and grants are untouched.
+	Enabled bool `json:"enabled"`
 }
 
 // IsAdmin returns true if the user has the admin role.

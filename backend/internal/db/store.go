@@ -231,6 +231,9 @@ type Store interface {
 	GetUserUsage(ctx context.Context, userID int64) (used, limit int64, err error)
 	IncrementUserUsage(ctx context.Context, userID int64, delta int64) error
 	SetUserQuota(ctx context.Context, userID int64, bytes int64) error
+	// SetUserEnabled flips the account on/off (migration 00022). A disabled
+	// user cannot start a session; nothing they own is touched.
+	SetUserEnabled(ctx context.Context, userID int64, enabled bool) error
 	RecomputeUserUsage(ctx context.Context, userID int64) (int64, error)
 
 	// Node owner

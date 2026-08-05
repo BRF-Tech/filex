@@ -123,7 +123,7 @@ func (a *AIAdmin) elevatedPrincipal(u *model.User) *model.User {
 	if u != nil && u.IsAdmin() {
 		return u
 	}
-	cp := model.User{Role: model.RoleAdmin, Email: "ai-admin-token"}
+	cp := model.User{Role: model.RoleAdmin, Email: "ai-admin-token", Enabled: true}
 	if u != nil {
 		cp = *u
 		cp.Role = model.RoleAdmin

@@ -781,7 +781,7 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, ` +
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
 	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
-	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0)`
+	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE)`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	// New users default to the always-present "default" provider (the
@@ -1477,7 +1477,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled); err != nil {
 		return nil, err
 	}
 	if recoveryJSON != "" {
@@ -2034,6 +2034,13 @@ func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int6
 }
 
 // SetUserQuota writes the quota_bytes value (0 = unlimited).
+// SetUserEnabled flips the account on/off. Files, quota and grants are
+// untouched -- this is an access switch, not a soft delete.
+func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET enabled=$1 WHERE id=$2`, enabled, userID)
+	return err
+}
+
 func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) error {
 	if bytes < 0 {
 		bytes = 0

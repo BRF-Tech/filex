@@ -72,7 +72,7 @@ func TestOIDCCallback_MultiTenant_RedirectsToTenantHost(t *testing.T) {
 	// Set-Cookie), the session cookie scoped to the tenant apex (derived from
 	// the provider host), and a relative /admin/ target that stays on the
 	// tenant host that served the callback.
-	a = handlers.NewAuth(store, nil, &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant-a.test"}, token: "tkn"}, "https://operator.test", true, "")
+	a = handlers.NewAuth(store, nil, &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant-a.test", Enabled: true}, token: "tkn"}, "https://operator.test", true, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
 	req.Host = "files.tenant-a.test"
 	rec := httptest.NewRecorder()
@@ -98,7 +98,7 @@ func TestOIDCCallback_MultiTenant_ExplicitCookieDomain_EmitsSetCookie(t *testing
 	})
 	tok := "aB3-cD_9xyZ012ABCdef-gh_"
 	a := handlers.NewAuth(store, nil,
-		&fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant.example"}, token: tok},
+		&fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant.example", Enabled: true}, token: tok},
 		"https://operator.example", true, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
@@ -121,7 +121,7 @@ func TestOIDCCallback_MultiTenant_ExplicitCookieDomain_EmitsSetCookie(t *testing
 // strips the callback's Set-Cookie in multi-tenant mode.
 func TestRouter_OIDCCallback_MultiTenant_EmitsSetCookie(t *testing.T) {
 	tok := "aB3-cD_9xyZ012ABCdef-gh_"
-	fake := &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant.example"}, token: tok}
+	fake := &fakeOIDC{user: &model.User{ID: 1, Email: "u@tenant.example", Enabled: true}, token: tok}
 	srv, client, store := testutil.NewTestServerWith(t,
 		func(c *config.Config) { c.MultiTenant = true },
 		func(d *api.Deps) { d.OIDCAuth = fake },

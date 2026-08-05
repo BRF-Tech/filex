@@ -116,6 +116,14 @@ func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.
 				if tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw)); err == nil && tok != nil {
 					if tok.ExpiresAt == nil || tok.ExpiresAt.After(time.Now()) {
 						if user, err := store.GetUser(ctx, tok.UserID); err == nil && user != nil {
+							// A token outlives its owner's account status, so the
+							// disabled check (migration 00022) belongs here too:
+							// otherwise disabling a user leaves every token they
+							// ever minted working.
+							if !user.Enabled {
+								writeAuthErr(w, http.StatusForbidden, "this account is disabled")
+								return
+							}
 							// A username outside the token's allow-list is a hard
 							// error even on this hybrid chain — falling through to
 							// session auth would silently ignore the caller's

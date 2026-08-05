@@ -18,11 +18,23 @@ import (
 //     single-tenant install is unaffected — its only provider IS the
 //     supertenant.
 //
-// It fails toward availability: a NULL provider (bootstrap/legacy admin) or an
-// unresolvable provider is allowed, so an operator is never locked out by a
-// glitch. Only a resolvable, non-supertenant tenant is ever refused.
+// One user-level gate:
+//   - DISABLED ACCOUNT: users.enabled = false (migration 00022) refuses the
+//     session outright, in both modes, with files/quota/grants untouched.
+//     Checked first so it holds in a plain single-tenant install too.
+//
+// Otherwise it fails toward availability: a NULL provider (bootstrap/legacy
+// admin) or an unresolvable provider is allowed, so an operator is never
+// locked out by a glitch. Only a resolvable, non-supertenant tenant is ever
+// refused.
 func LoginAllowed(ctx context.Context, store db.Store, multiTenant bool, u *model.User) bool {
-	if u == nil || u.ProviderID == nil {
+	if u == nil {
+		return true
+	}
+	if !u.Enabled {
+		return false
+	}
+	if u.ProviderID == nil {
 		return true
 	}
 	p, err := store.GetProvider(ctx, *u.ProviderID)

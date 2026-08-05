@@ -1783,7 +1783,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0)`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1)`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
@@ -1791,10 +1791,12 @@ func scanUser(r rowScanner) (*model.User, error) {
 	var totpEnabled int
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes); err != nil {
+	var enabled int
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1
+	u.Enabled = enabled == 1
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
 	}
@@ -2132,6 +2134,17 @@ func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int6
 }
 
 // SetUserQuota sets the quota_bytes value for a user (0 = unlimited).
+// SetUserEnabled flips the account on/off. Files, quota and grants are
+// untouched -- this is an access switch, not a soft delete.
+func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET enabled=? WHERE id=?`, v, userID)
+	return err
+}
+
 func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) error {
 	if bytes < 0 {
 		bytes = 0

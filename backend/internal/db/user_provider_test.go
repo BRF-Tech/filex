@@ -53,7 +53,7 @@ func TestUserProviderAndMaintenanceMode(t *testing.T) {
 	assert.False(t, auth.LoginAllowed(ctx, store, false, got))
 	// ...but mode-on allows it, and a nil-provider bootstrap admin is always ok.
 	assert.True(t, auth.LoginAllowed(ctx, store, true, got))
-	assert.True(t, auth.LoginAllowed(ctx, store, false, &model.User{}))
+	assert.True(t, auth.LoginAllowed(ctx, store, false, &model.User{Enabled: true}))
 
 	// SUSPEND: a disabled tenant's users cannot log in — in either mode.
 	p.Enabled = false

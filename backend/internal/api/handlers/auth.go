@@ -66,6 +66,17 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
+	// A disabled account is refused on its own terms. Folding it into the
+	// maintenance branch below would tell the user the whole platform is
+	// locked down when in fact only their account is.
+	if !user.Enabled {
+		_ = h.Store.DeleteSession(r.Context(), token)
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":    "this account is disabled",
+			"disabled": true,
+		})
+		return
+	}
 	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, user) {
 		// Maintenance mode: multi-tenant is off but tenants exist — only the
 		// supertenant may sign in. See docs/MULTI-TENANCY.md.
