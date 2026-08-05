@@ -48,6 +48,17 @@ import (
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
+// scopeOf returns the request's tenant scope. A nil scope means "unscoped"
+// (single-tenant mode, background work) and reaches everything, matching
+// tenant.Scope's own contract.
+func scopeOf(ctx context.Context) *tenant.Scope {
+	s, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil
+	}
+	return s
+}
+
 // Prefix is the URL prefix the handler is mounted at.
 const Prefix = "/dav"
 
@@ -317,8 +328,12 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	}
 
 	ctx := r.Context()
+	// Same tenant gate the FileSystem applies (GetStorageByName is not one of
+	// the methods tenantstore confines). Without it the pre-gate stays an
+	// oracle even though the data path is closed: a foreign read-only storage
+	// would answer 403 "read-only" where a non-existent one answers 404.
 	st, err := h.cfg.Store.GetStorageByName(ctx, name)
-	if err != nil || st == nil || !st.Enabled {
+	if err != nil || st == nil || !st.Enabled || !scopeOf(ctx).CanAccessStorage(st.ID) {
 		return http.StatusNotFound, "storage not found"
 	}
 	if status, msg := h.gateWrite(ctx, p, st, rel, r.Method); status != 0 {
@@ -342,7 +357,8 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		}
 		dst := st
 		if dname != name {
-			if dst, err = h.cfg.Store.GetStorageByName(ctx, dname); err != nil || dst == nil || !dst.Enabled {
+			if dst, err = h.cfg.Store.GetStorageByName(ctx, dname); err != nil || dst == nil || !dst.Enabled ||
+				!scopeOf(ctx).CanAccessStorage(dst.ID) {
 				return http.StatusConflict, "destination storage not found"
 			}
 		}

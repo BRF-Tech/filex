@@ -76,20 +76,37 @@ func (h *Grants) resolvePath(w http.ResponseWriter, r *http.Request, raw string)
 		return nil, "", false
 	}
 	adapter, rel := splitAdapterPath(raw)
+	// Elsewhere in the API an unqualified path falls back to storages[0], but
+	// a grant is durable authorization state and guessing its storage is not
+	// recoverable by looking again. olivov posted {"path":"/deneme"} and
+	// watched the grant land on a different tenant's storage; adding a
+	// `storage` / `storage_id` field to the body changed nothing, because no
+	// such field is read (H6, 2026-08-05). Say which storage.
 	if adapter == "" {
-		storages, err := h.Store.ListEnabledStorages(r.Context())
-		if err != nil || len(storages) == 0 {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no storages"})
-			return nil, "", false
-		}
-		adapter = storages[0].Name
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": `path must name a storage, e.g. "Dosyalar://klasor"`,
+		})
+		return nil, "", false
 	}
 	st, err := h.Store.GetStorageByName(r.Context(), adapter)
-	if err != nil || st == nil {
+	// GetStorageByName is not one of the methods tenantstore confines, so the
+	// tenant gate is applied here. Out-of-tenant reads as unknown — same
+	// answer as a name that doesn't exist, so this isn't an existence oracle.
+	if err != nil || st == nil || !scopeOf(r.Context()).CanAccessStorage(st.ID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
 		return nil, "", false
 	}
 	return st, acl.CleanRel(rel), true
+}
+
+// scopeOf returns the request's tenant scope; a nil scope means "unscoped"
+// (single-tenant mode) and reaches everything, per tenant.Scope's contract.
+func scopeOf(ctx context.Context) *tenant.Scope {
+	s, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil
+	}
+	return s
 }
 
 // requireEditor reports whether the caller may write/share at (st, rel):

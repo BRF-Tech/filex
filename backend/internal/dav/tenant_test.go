@@ -153,6 +153,17 @@ func TestDAV_TenantScoping(t *testing.T) {
 		resp := ha.req(t, http.MethodPut, "/dav/"+ownSt.Name+"/mine.txt", me, pass, "hello", nil)
 		require.Equal(t, http.StatusCreated, resp.StatusCode)
 	})
+
+	// COPY resolves its Destination separately from the request path, in the
+	// pre-gate as well as the FileSystem. Both have to apply the tenant gate,
+	// or a caller could stream their own file into someone else's storage.
+	t.Run("cannot copy out to a foreign storage", func(t *testing.T) {
+		resp := ha.req(t, "COPY", "/dav/"+ownSt.Name+"/mine.txt", me, pass, "", map[string]string{
+			"Destination": "/dav/" + otherSt.Name + "/leaked.txt",
+		})
+		require.GreaterOrEqual(t, resp.StatusCode, 400,
+			"a copy whose destination is another tenant's storage must be refused")
+	})
 }
 
 // TestDAV_SupertenantSeesAll — "admin sees everything" stays true for an

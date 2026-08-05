@@ -12,7 +12,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
-	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
@@ -72,7 +71,7 @@ func (f *davFS) storageByName(ctx context.Context, name string) (*model.Storage,
 	// gate has to be applied here. ErrNotExist rather than ErrPermission
 	// keeps the no-exists-oracle rule — a foreign storage is indistinguishable
 	// from one that isn't there.
-	if !f.scope(ctx).CanAccessStorage(st.ID) {
+	if !scopeOf(ctx).CanAccessStorage(st.ID) {
 		return nil, nil, os.ErrNotExist
 	}
 	set, err := f.aclSet(ctx, st)
@@ -83,17 +82,6 @@ func (f *davFS) storageByName(ctx context.Context, name string) (*model.Storage,
 		return nil, nil, os.ErrNotExist
 	}
 	return st, set, nil
-}
-
-// scope returns the request's tenant scope. A nil scope means "unscoped"
-// (single-tenant mode, background work) and reaches everything, matching
-// tenant.Scope's own contract.
-func (f *davFS) scope(ctx context.Context) *tenant.Scope {
-	s, ok := tenant.FromContext(ctx)
-	if !ok {
-		return nil
-	}
-	return s
 }
 
 func (f *davFS) aclSet(ctx context.Context, st *model.Storage) (*acl.Set, error) {
@@ -440,7 +428,7 @@ func (f *davFS) rootDir(ctx context.Context) (webdav.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	scope := f.scope(ctx)
+	scope := scopeOf(ctx)
 	infos := make([]os.FileInfo, 0, len(storages))
 	for _, st := range storages {
 		// ListEnabledStorages is already tenant-confined when the store is
