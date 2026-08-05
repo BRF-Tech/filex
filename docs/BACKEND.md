@@ -429,26 +429,108 @@ Validates the connection without persisting.
 ## Admin: users
 
 ### `GET /api/admin/users` ![admin](https://img.shields.io/badge/-admin-red)
-List users. `?q=…` for search, `?role=admin|user` filter.
+List users. In multi-tenant mode the list is confined to the caller's tenant
+(the supertenant sees all). Each row carries `used_bytes` and `quota_bytes`
+(`0` = unlimited) and `enabled`, so a usage table costs one call.
+
+### `GET /api/admin/users/{id}` ![admin](https://img.shields.io/badge/-admin-red)
 
 ### `POST /api/admin/users` ![admin](https://img.shields.io/badge/-admin-red)
 ```json
 {
   "email": "newuser@example.com",
-  "username": "newuser",
+  "display_name": "New User",
   "role": "user",
-  "password": "..."
+  "password": "...",
+  "provider_id": 3
 }
 ```
-For OIDC users, omit password.
+`provider_id` homes the user in a tenant. Omit it and the user lands in the
+**caller's** tenant. A tenant admin may only name their own provider (`403`
+otherwise); an id that matches no provider is `400`. There is no foreign key
+behind the column, so it is validated here.
 
-### `PUT /api/admin/users/:id` ![admin](https://img.shields.io/badge/-admin-red)
-Partial update (role, disabled, password reset).
+### `PATCH /api/admin/users/{id}` ![admin](https://img.shields.io/badge/-admin-red)
+Partial update — only the fields present in the body are touched:
+`password`, `display_name`, `role`, `locale`, `timezone`, `enabled`,
+`provider_id`.
 
-### `DELETE /api/admin/users/:id` ![admin](https://img.shields.io/badge/-admin-red)
+`enabled: false` cuts access without deleting anything: the account cannot
+log in (local, OIDC or `/dav`), existing sessions stop working, and every API
+token it minted is refused. Files, quota and grants are untouched. Disabling
+— like deleting or demoting — the **last admin** is refused with `409`.
 
-### `POST /api/admin/users/:id/disable` ![admin](https://img.shields.io/badge/-admin-red)
-### `POST /api/admin/users/:id/enable` ![admin](https://img.shields.io/badge/-admin-red)
+`provider_id` re-homes the user into another tenant. Restricted to an
+unscoped or supertenant caller (`403` otherwise).
+
+### `GET|POST|PATCH /api/admin/users/{id}/quota` ![admin](https://img.shields.io/badge/-admin-red)
+Read or set one user's quota — see [Admin: quota](#admin-quota). `POST
+/api/admin/users/{id}/quota/recompute` rebuilds `used_bytes` from node sizes.
+
+### `DELETE /api/admin/users/{id}` ![admin](https://img.shields.io/badge/-admin-red)
+Deletes the account row. The last remaining admin cannot be deleted (`409`),
+not even by itself.
+
+**What happens to their files: nothing.** No storage object is ever removed.
+The node rows survive and `nodes.owner_id` becomes `NULL`, so the files
+become **unowned** — still present, still listed, still reachable by anyone
+whose access does not depend on that user. Deletion is not a way to reclaim
+space; move or delete the files first if that is the intent.
+
+Precisely, on `DELETE`:
+
+| Kept, with the user dropped (`SET NULL`) | Removed with the user (`CASCADE`) |
+| --- | --- |
+| `nodes.owner_id` — the files themselves | `sessions` |
+| `shares.created_by` — see below | `api_tokens` |
+| `file_grants.created_by` | `file_grants.user_id` — access granted **to** them |
+| `audit_log.user_id` — history stays readable | `notifications`, `user_node_meta`, `node_comments` |
+
+Share links the user created **stay live**: public resolution never looks at
+`created_by`. But revoking one does, and a `NULL` creator matches nobody — so
+an orphaned link can only be revoked by an admin, via
+`DELETE /api/admin/shares/{id}`. Audit those before deleting a user who
+shared a lot.
+
+Their `usage_bytes` row goes with the account, so those bytes stop counting
+toward any per-user total while the files remain on storage. To keep the
+account's history and quota intact, prefer `enabled: false` over deletion.
+
+---
+
+## Admin: quota
+
+Quota is **per user**. There is no per-provider (tenant) quota — see
+[MULTI-TENANCY.md](MULTI-TENANCY.md). Every id in this section is a **user
+id**; passing a provider id answers `404`.
+
+Two spellings, same handlers:
+
+| Nested (preferred) | Flat (original) |
+| --- | --- |
+| `GET /api/admin/users/{id}/quota` | `GET /api/admin/quota/{user_id}` |
+| `POST` / `PATCH /api/admin/users/{id}/quota` | `POST /api/admin/quota/{user_id}` |
+| `POST /api/admin/users/{id}/quota/recompute` | `POST /api/admin/quota/{user_id}/recompute` |
+
+### `GET …/quota` ![admin](https://img.shields.io/badge/-admin-red)
+```json
+{ "used_bytes": 1234, "quota_bytes": 5368709120, "percent_used": 0.00002, "unlimited": false }
+```
+A user who has never had a quota set reads back `quota_bytes: 0`,
+`unlimited: true` — that is not an error. An id that names no user is `404`.
+
+### `POST|PATCH …/quota` ![admin](https://img.shields.io/badge/-admin-red)
+```json
+{ "quota_bytes": 5368709120 }
+```
+`0` means unlimited; negative is `400`. Returns the fresh snapshot.
+
+### `POST …/quota/recompute` ![admin](https://img.shields.io/badge/-admin-red)
+Rebuilds `used_bytes` from the summed size of the nodes the user owns.
+Worth running after bulk imports, or after deleting a user whose files were
+left behind (their bytes stop being attributed to anyone).
+
+The caller's own snapshot is at `GET /api/files/quota/me`.
 
 ---
 
