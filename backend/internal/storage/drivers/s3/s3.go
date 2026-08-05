@@ -209,6 +209,20 @@ func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 	})
 	if err != nil {
 		if isS3NotFound(err) {
+			// S3 has no directories. A folder is a prefix — for an empty one,
+			// a prefix carrying nothing but the hidden .empty marker — so
+			// there is no object at the bare key to HeadObject. Falling
+			// straight through to ErrNotFound made every folder look missing:
+			// WebDAV stats the parent before a PUT and maps a miss to 409, so
+			// olivov could write to a storage root but into no subfolder, and
+			// PROPFIND on a folder 404'd (H3, 2026-08-05).
+			if d.hasChildren(ctx, p) {
+				return storage.Object{
+					Path: p,
+					Name: path.Base(p),
+					Kind: storage.KindDirectory,
+				}, nil
+			}
 			return storage.Object{}, storage.ErrNotFound
 		}
 		return storage.Object{}, fmt.Errorf("s3: head: %w", err)
@@ -456,9 +470,17 @@ func (d *Driver) copyDir(ctx context.Context, src, dst string, del bool) error {
 // isDir reports whether p is a directory: no object exists at the exact key but
 // ≥1 object exists under the p/ prefix. A real object at the key ⇒ file.
 func (d *Driver) isDir(ctx context.Context, p string) bool {
-	if _, err := d.Stat(ctx, p); err == nil {
+	obj, err := d.Stat(ctx, p)
+	if err != nil {
 		return false
 	}
+	return obj.Kind == storage.KindDirectory
+}
+
+// hasChildren reports whether any object lives under p's prefix. This is the
+// only thing that makes a folder "exist" on an object store. Kept separate
+// from isDir so Stat can use it without the two recursing into each other.
+func (d *Driver) hasChildren(ctx context.Context, p string) bool {
 	keys, _ := d.listKeysUnder(ctx, p)
 	return len(keys) > 0
 }
