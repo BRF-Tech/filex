@@ -50,6 +50,11 @@ type User struct {
 	// immutably at JIT login. OIDCSubject pins the OIDC identity per provider.
 	ProviderID  *int64 `json:"provider_id,omitempty"`
 	OIDCSubject string `json:"-"`
+	// Storage accounting (migration 00003). QuotaBytes == 0 means unlimited.
+	// Carried on the user so an admin table costs one call instead of one
+	// /quota request per row.
+	QuotaBytes int64 `json:"quota_bytes"`
+	UsageBytes int64 `json:"used_bytes"`
 }
 
 // IsAdmin returns true if the user has the admin role.
