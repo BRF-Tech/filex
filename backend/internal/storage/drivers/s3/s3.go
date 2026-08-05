@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -267,13 +268,64 @@ func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 }
 
 // Write implements storage.Writer.
+//
+// The body MUST go out with a Content-Length. When the SDK can't measure it
+// — a plain io.Reader with no Seeker, which is what the upload handler
+// produces after mime-sniffing — it falls back to Transfer-Encoding:
+// chunked. AWS and MinIO accept that, but the S3 spec leaves it to the
+// provider, and DT Cloud S3 answers `411 MissingContentLength`, which broke
+// every browser upload while WebDAV and MCP (both of which hand over a
+// seekable body) kept working. So: declare the length we were given, and
+// when the caller genuinely doesn't know it, measure the body first.
 func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) error {
-	_, err := d.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(d.bucket),
-		Key:    aws.String(d.key(p)),
-		Body:   r,
+	body, size, release, err := measuredBody(r, size)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = d.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(d.bucket),
+		Key:           aws.String(d.key(p)),
+		Body:          body,
+		ContentLength: aws.Int64(size),
 	})
 	return err
+}
+
+// measuredBody returns a reader whose length is known, so PutObject can send
+// a Content-Length instead of a chunked body.
+//
+// A caller that already knows the size gets its reader back untouched — the
+// common path, no copying. A caller passing size < 0 ("I don't know") gets
+// the body spooled to a temp file so the length can be measured; this mirrors
+// what the WebDAV surface already does on its own before calling in.
+func measuredBody(r io.Reader, size int64) (io.Reader, int64, func(), error) {
+	noop := func() {}
+	if size >= 0 {
+		return r, size, noop, nil
+	}
+
+	tmp, err := os.CreateTemp("", "filex-s3-put-*")
+	if err != nil {
+		return nil, 0, noop, fmt.Errorf("s3: spool: %w", err)
+	}
+	release := func() {
+		name := tmp.Name()
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}
+
+	n, err := io.Copy(tmp, r)
+	if err != nil {
+		release()
+		return nil, 0, noop, fmt.Errorf("s3: spool: %w", err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		release()
+		return nil, 0, noop, fmt.Errorf("s3: spool rewind: %w", err)
+	}
+	return tmp, n, release, nil
 }
 
 // emptyMarker is the hidden 0-byte object filex writes inside a folder so an

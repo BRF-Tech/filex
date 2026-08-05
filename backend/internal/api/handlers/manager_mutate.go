@@ -562,20 +562,28 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Sniff the first 512 bytes for mime detection, then prepend
-		// them back so the driver receives the full payload. ZIP-based
+		// Sniff the first 512 bytes for mime detection, then rewind. ZIP-based
 		// office formats get refined via storage.RefineOfficeMime so
 		// pptx/docx/odt don't end up tagged "application/zip" — see
 		// internal/storage/mime.go for the OnlyOffice mismatch story.
+		//
+		// Rewind rather than io.MultiReader(sniff, src): multipart.File is an
+		// io.Seeker, and handing the driver a seekable body keeps the S3 SDK
+		// able to measure and to replay it on retry. Wrapping it cost us both
+		// and put every upload on the chunked path (olivov H1, 2026-08-05).
 		var sniff [512]byte
 		n, _ := io.ReadFull(src, sniff[:])
 		mime := ""
 		if n > 0 {
 			mime = storage.RefineOfficeMime(http.DetectContentType(sniff[:n]), name)
 		}
-		merged := io.MultiReader(bytes.NewReader(sniff[:n]), src)
+		if _, err := src.Seek(0, io.SeekStart); err != nil {
+			_ = src.Close()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rewind part: " + err.Error()})
+			return
+		}
 
-		if err := wr.Write(r.Context(), fullRel, merged, fh.Size); err != nil {
+		if err := wr.Write(r.Context(), fullRel, src, fh.Size); err != nil {
 			_ = src.Close()
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
 			return
