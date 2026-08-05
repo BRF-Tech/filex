@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Users handles /api/admin/users.
@@ -56,6 +57,43 @@ type userCreateReq struct {
 	Role        string `json:"role"`
 	Locale      string `json:"locale"`
 	Timezone    string `json:"timezone"`
+	// ProviderID homes the new user in a tenant. Optional; when absent the
+	// caller's own tenant is used.
+	ProviderID *int64 `json:"provider_id,omitempty"`
+}
+
+// resolveProvider decides which provider a created/updated user belongs to
+// and whether the caller may put them there. It returns the provider id to
+// write (0 = leave the store's own default alone), or an HTTP status + message.
+//
+// Store.CreateUser defaults provider_id to 1, and provider 1 (`default`) is
+// the SUPERTENANT — so "unspecified" used to mean "confine-exempt, sees every
+// tenant's storages". A tenant admin's new users therefore default to that
+// admin's own tenant, and only a supertenant caller may name an arbitrary one
+// (olivov G1, 2026-08-05).
+func (h *Users) resolveProvider(ctx context.Context, requested *int64) (int64, int, string) {
+	scope, scoped := tenant.FromContext(ctx)
+	confined := scoped && !scope.IsSupertenant
+
+	var target int64
+	if confined {
+		target = scope.ProviderID
+	}
+	if requested != nil {
+		if confined && *requested != scope.ProviderID {
+			return 0, http.StatusForbidden, "cannot assign a user to another tenant"
+		}
+		target = *requested
+	}
+	if target == 0 {
+		return 0, 0, "" // single-tenant / unscoped and nothing asked for
+	}
+	// provider_id carries no foreign key, so an unchecked value would strand
+	// the user in a tenant that does not exist.
+	if p, err := h.Store.GetProvider(ctx, target); err != nil || p == nil {
+		return 0, http.StatusBadRequest, "unknown provider_id"
+	}
+	return target, 0, ""
 }
 
 // Create makes a new user.
@@ -83,6 +121,13 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
 	}
+	// Resolve the tenant BEFORE creating anything, so a rejected provider_id
+	// doesn't leave a half-provisioned user behind.
+	providerID, status, msg := h.resolveProvider(r.Context(), req.ProviderID)
+	if status != 0 {
+		writeJSON(w, status, map[string]string{"error": msg})
+		return
+	}
 	hash, err := local.HashPassword(req.Password)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -92,6 +137,13 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if providerID != 0 {
+		if err := h.Store.SetUserProvider(r.Context(), u.ID, providerID, ""); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		u.ProviderID = &providerID
 	}
 	if name := strings.TrimSpace(req.DisplayName); name != "" {
 		if err := h.Store.UpdateUserDisplayName(r.Context(), u.ID, name); err == nil {
@@ -107,6 +159,9 @@ type userUpdateReq struct {
 	Role        *string `json:"role,omitempty"`
 	Locale      *string `json:"locale,omitempty"`
 	Timezone    *string `json:"timezone,omitempty"`
+	// ProviderID re-homes the user into another tenant. Supertenant only —
+	// see Update.
+	ProviderID *int64 `json:"provider_id,omitempty"`
 }
 
 // Update modifies a user. Only fields present in the body are touched.
@@ -134,6 +189,27 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "cannot demote the last admin"})
 				return
 			}
+		}
+	}
+	// Re-homing a user between tenants is a platform-operator action, so it is
+	// restricted to an unscoped or supertenant caller. Letting a tenant admin
+	// do it would be an escalation in the other direction: Update has no
+	// ownership check on its target, so they could pull another tenant's user
+	// into their own tenant. It exists to repair accounts stranded in
+	// provider 1 by the create-side bug (G1).
+	if req.ProviderID != nil {
+		scope, scoped := tenant.FromContext(r.Context())
+		if scoped && !scope.IsSupertenant {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the supertenant may move a user between tenants"})
+			return
+		}
+		if p, err := h.Store.GetProvider(r.Context(), *req.ProviderID); err != nil || p == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider_id"})
+			return
+		}
+		if err := h.Store.SetUserProvider(r.Context(), id, *req.ProviderID, ""); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
 		}
 	}
 	if req.Password != nil {
