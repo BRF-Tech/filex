@@ -274,12 +274,26 @@ const trashMode = ref(false);
 const trashOrigin = ref<string>('');
 const trashActive = computed(() => trashMode.value);
 
+// When the caller can see exactly ONE storage, the multi-storage root is a
+// one-row list that carries no information — the user clicks through it every
+// single time. Treat that storage as the floor instead: open it directly and
+// stop offering an "up" that only leads back to the one row.
+//
+// Empty string means "not in that situation" (single-storage mode, or more
+// than one storage visible), which leaves every existing path untouched.
+const soleStorageName = computed(() => {
+  if (!multiStorageRoot.value) return '';
+  const list = props.config.storages ?? [];
+  return list.length === 1 ? list[0].name : '';
+});
+
 // canGoUp/goUp — toolbar's "↑ Up one level" button. In single-storage
 // mode "" means the storage root; in multi-storage mode "" means
 // the global root (storage list). Both → no parent → button hidden.
 const canGoUp = computed(() => {
   const p = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   if (rootFloor && p === rootFloor) return false; // at the confined floor — nowhere above
+  if (soleStorageName.value && p === soleStorageName.value) return false;
   return p.length > 0;
 });
 
@@ -300,6 +314,8 @@ function goUp() {
   }
   const cur = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   if (!cur || cur === rootFloor) return;
+  // The button is hidden here, but Alt+↑ / Backspace still route through.
+  if (soleStorageName.value && cur === soleStorageName.value) return;
   const idx = cur.lastIndexOf('/');
   let parent = idx === -1 ? '' : cur.slice(0, idx);
   // Never step above the confined floor.
@@ -694,6 +710,10 @@ async function load(path?: string) {
     // Multi-storage virtual root — synthesize a list of storages
     // instead of calling the backend.
     if (multiStorageRoot.value && !virtualToWire(requested)) {
+      // One visible storage → skip the one-row list and open it. Recursion is
+      // bounded: the recursive call carries a non-empty path, so
+      // virtualToWire() resolves and this branch is not re-entered.
+      if (soleStorageName.value) return await load(soleStorageName.value);
       currentPath.value = '';
       adapter.value = '';
       dirname.value = '';
