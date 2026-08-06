@@ -7,7 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.8.0 below.)
+(Nothing yet — see v0.9.0 below.)
+
+## [0.9.0] - 2026-08-06
+
+Closes the ten items the olivov deployment (multi-tenant, 10 providers, DT
+Cloud S3) filed against v0.8.0, plus one follow-up found while reviewing them.
+
+### Security
+
+- **A tenant admin could reach every other tenant over WebDAV.** `/dav`
+  performs its own Basic authentication, so it is mounted outside the chain
+  that runs the tenant resolver — no scope ever reached the scoped store, and
+  the WebDAV root listed every tenant's storages. A second hole ran in
+  parallel: storage lookup by name goes through `GetStorageByName`, which the
+  scoped store does not wrap. The result was cross-tenant **read, write and
+  delete** — and `DELETE` over WebDAV is permanent, it does not go to trash.
+  Foreign storages now answer `404`, which keeps a storage that exists
+  indistinguishable from one that does not. Supertenant operators stay
+  confine-exempt. **Only multi-tenant installs (`FILEX_MULTI_TENANT`) were
+  affected**; a single-tenant install has no second tenant to reach.
+
+- **A tenant admin could read, modify and delete another tenant's users.**
+  Only the user *list* was tenant-confined; `GET`, `PATCH` and `DELETE` on
+  `/api/admin/users/{id}` acted on any id in the install — so a foreign
+  account could be read, re-passworded (account takeover), disabled or
+  deleted. All three now refuse out-of-tenant ids with `404`.
+
+- **New users silently became platform operators.** `POST /api/admin/users`
+  ignored `provider_id`, so every account fell to the store default of
+  provider 1 — and provider 1 (`default`) is the *supertenant*. Accounts meant
+  for one tenant came out confine-exempt and saw every tenant's storages.
+  Absent, a new user now lands in the caller's own tenant; a tenant admin
+  naming another gets `403`; an unknown id gets `400`. `PATCH` can re-home a
+  user — supertenant only — which is the repair path for accounts already
+  stranded in provider 1.
+
+- **An unqualified grant path wrote the grant to an arbitrary storage.** It
+  fell back to `storages[0]`. Elsewhere that fallback is harmless because a
+  wrong guess shows up in the next listing; a grant is durable authorization
+  state written where nobody looks again. It is now `400`, and the same
+  tenant gate applies to the lookup.
+
+### Fixed
+
+- **Uploads failed on strict S3 providers (DT Cloud, and any provider that
+  requires a length).** The S3 driver accepted a `size` argument and dropped
+  it; with a non-seekable body the SDK framed the request chunked with no
+  `Content-Length`. AWS and MinIO accept that — the S3 specification leaves it
+  to the provider — and DT Cloud S3 answers `411 MissingContentLength`. WebDAV,
+  MCP and the empty-folder marker kept working throughout, because all three
+  hand the driver a seekable body. The upload handler now rewinds the
+  multipart part after mime-sniffing rather than wrapping it, which is what
+  destroyed seekability in the first place.
+
+- **Upload failures were invisible.** The browser reported a failed upload
+  only through an `error` event, which a standalone deployment has nothing
+  listening for; the progress bar still ran to 100%, because the bytes really
+  are sent and the server rejects them afterwards. Failures now raise a toast
+  and carry the message into the upload row.
+
+- **WebDAV could not create or browse subfolders on S3.** `Stat` only issued
+  `HeadObject`, but on an object store a folder is a prefix, so every folder
+  looked missing and the pre-`PUT` parent check failed with `409`. `Stat` now
+  resolves a prefix as a directory, the way listing already did.
+
+- **`GET /api/admin/quota/{id}` answered `500` for an unknown user**, and set
+  and recompute were worse — both ran an `UPDATE` matching nothing and
+  answered `200`. Unknown users are now `404`.
+
+- **Creating a user could leave a supertenant account behind.** If homing the
+  new user in its tenant failed, the handler returned `500` and left the row
+  in provider 1. The half-created account is now removed; if that cleanup also
+  fails, the error names the id that needs fixing by hand.
+
+### Added
+
+- **Per-user enable/disable switch** (`users.enabled`, migration 00022,
+  defaults to enabled so every existing account keeps working). Refusing the
+  next login is not enough — a session minted before the switch and every API
+  token the user ever created both outlive it, so all three paths refuse a
+  disabled account. Files, quota and grants are untouched: this is an access
+  switch, not a soft delete. Disabling the last admin is refused.
+
+- **Per-user quota is served where it was already documented**
+  (`/api/admin/users/{id}/quota`); the original flat path keeps working. Usage
+  and quota now ride on the user object, so an admin table costs one call
+  instead of one request per row.
 
 ## [0.8.0] - 2026-07-29
 
