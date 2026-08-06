@@ -331,6 +331,13 @@ func (r *ReplicatedDriver) replicateWrite(path string) {
 		r.recordFail(ctx, path, op, "REPLICA_NO_WRITER", fmt.Errorf("replica driver lacks Writer interface"))
 		return
 	}
+	// Same reason as replicateCopy: the replica is where a file-onto-folder
+	// collision does the real damage, because the prefix stops listing and its
+	// objects leave the backup without a word. Record it instead.
+	if err := EnsureFileTarget(ctx, r.replica, path); err != nil {
+		r.recordFail(ctx, path, op, "REPLICA_KIND_CONFLICT", err)
+		return
+	}
 	if err := rw.Write(ctx, path, rc, stat.Size); err != nil {
 		r.recordFail(ctx, path, op, "REPLICA_WRITE_FAIL", err)
 		return
@@ -416,6 +423,14 @@ func (r *ReplicatedDriver) replicateCopy(src, dst string) {
 	stat, err := r.replica.Stat(ctx, src)
 	if err != nil {
 		r.recordFail(ctx, dst, op, "REPLICA_COPY_STAT_FAIL", err)
+		return
+	}
+	// Do not reproduce a file-onto-folder collision on the replica: that is the
+	// side where it does the real damage — a prefix that stops listing takes
+	// its objects out of the backup silently. Recorded as a failure so it is
+	// visible instead of quietly corrupting the mirror.
+	if err := EnsureFileTarget(ctx, r.replica, dst); err != nil {
+		r.recordFail(ctx, dst, op, "REPLICA_KIND_CONFLICT", err)
 		return
 	}
 	if err := wr.Write(ctx, dst, rc, stat.Size); err != nil {

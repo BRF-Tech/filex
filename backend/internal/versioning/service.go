@@ -237,6 +237,12 @@ func versionKey(nodeID int64, versionN int) string {
 
 // copyOrStream uses Copier when available, otherwise streams Read→Write.
 func copyOrStream(ctx context.Context, drv storage.Driver, src, dst string) error {
+	// A path that has since become a folder must not take a restored file on
+	// top of it (storage.ErrKindConflict). Checked before the Copier fast path
+	// too — a server-side copy lands the same colliding key.
+	if err := storage.EnsureFileTarget(ctx, drv, dst); err != nil {
+		return err
+	}
 	if cp, ok := drv.(storage.Copier); ok {
 		if err := cp.Copy(ctx, src, dst); err == nil {
 			return nil

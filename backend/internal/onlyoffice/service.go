@@ -276,6 +276,11 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		return map[string]any{"error": 1, "message": "fetch saved doc http " + strconv.Itoa(resp.StatusCode)}, nil
 	}
 
+	// Saving back onto a name that has since become a folder would leave `X`
+	// and `X/…` side by side on an object store (storage.ErrKindConflict).
+	if err := storage.EnsureFileTarget(r.Context(), drv, node.Path); err != nil {
+		return map[string]any{"error": 1, "message": "write back: " + err.Error()}, nil
+	}
 	if err := writer.Write(r.Context(), node.Path, resp.Body, resp.ContentLength); err != nil {
 		return map[string]any{"error": 1, "message": "write back: " + err.Error()}, nil
 	}

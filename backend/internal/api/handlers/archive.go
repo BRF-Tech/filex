@@ -195,8 +195,20 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.HasSuffix(f.Name, "/") {
 			if mkdirer != nil {
+				if kerr := storage.EnsureDirTarget(r.Context(), drv, target); kerr != nil {
+					slog.Warn("archive: skipped folder colliding with a file",
+						slog.String("target", target), slog.String("err", kerr.Error()))
+					continue
+				}
 				_ = mkdirer.Mkdir(r.Context(), target)
 			}
+			continue
+		}
+		// An archive carrying both `X` and `X/y` would recreate the collision
+		// this guard exists to stop — skip the member, extract the rest.
+		if kerr := storage.EnsureFileTarget(r.Context(), drv, target); kerr != nil {
+			slog.Warn("archive: skipped member colliding with a folder",
+				slog.String("target", target), slog.String("err", kerr.Error()))
 			continue
 		}
 		rc, err := f.Open()
@@ -343,6 +355,12 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stat, _ := tmp.Stat()
+	// Writing the archive onto an existing folder name would leave `X` and
+	// `X/…` side by side on an object store (storage.ErrKindConflict).
+	if err := storage.EnsureFileTarget(r.Context(), drv, req.Path); err != nil {
+		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
+		return
+	}
 	if err := writer.Write(r.Context(), req.Path, tmp, stat.Size()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.10.1 below.)
+(Nothing yet — see v0.10.2 below.)
+
+## [0.10.2] - 2026-08-06
+
+### Fixed
+
+- **The v0.10.1 guard did not cover every write.** A sweep of the codebase —
+  rather than the endpoints the bug report named — found four more places that
+  could still write a file onto a folder: browser archive extraction and
+  archive creation, the OnlyOffice save-back, and version restore. Replication
+  is now guarded too, on both its write and copy paths: the replica is where
+  the collision does its real damage, so a refusal there is recorded as a
+  replication failure instead of quietly corrupting the mirror.
+
+  v0.10.1 remains a genuine fix for the paths the report named; this closes the
+  rest of the class.
 
 ## [0.10.1] - 2026-08-06
 
