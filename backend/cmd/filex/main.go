@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/observability"
 	"github.com/brf-tech/filex/backend/internal/server"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/version"
 
 	embedded "github.com/brf-tech/filex/backend/embed"
@@ -298,8 +300,92 @@ func storageCmd() *cobra.Command {
 		},
 		storageAddCmd(),
 		storageRemoveCmd(),
+		storageScanCollisionsCmd(),
 	)
 	return c
+}
+
+// storageScanCollisionsCmd reports names that exist as BOTH a file and a
+// folder — damage that predates the write guards (storage.ErrKindConflict).
+//
+// It only REPORTS. Fixing means choosing which of the two to keep, and that is
+// a judgement call about someone's data: the stray file may be the accident, or
+// the folder may be. Printing them is what lets a human decide.
+func storageScanCollisionsCmd() *cobra.Command {
+	var name, root string
+	c := &cobra.Command{
+		Use:   "scan-collisions",
+		Short: "Report paths that exist as both a file and a folder",
+		Long: "An object store accepts `X` and `X/…` side by side; a directory-backed\n" +
+			"mirror (MinIO) cannot represent it, so the prefix stops listing and the\n" +
+			"objects under it silently lose their backup. This finds those names.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return storageScanCollisions(name, root)
+		},
+	}
+	c.Flags().StringVar(&name, "storage", "", "storage name (default: every enabled storage)")
+	c.Flags().StringVar(&root, "path", "", "subtree to scan (default: storage root)")
+	return c
+}
+
+func storageScanCollisions(only, root string) error {
+	ctx := context.Background()
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	dbDrv, err := db.Get(cfg.DB.Driver)
+	if err != nil {
+		return err
+	}
+	conn, err := dbDrv.Open(ctx, cfg.DB.DSN)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	store := dbDrv.NewStore(conn)
+
+	list, err := store.ListEnabledStorages(ctx)
+	if err != nil {
+		return err
+	}
+	total := 0
+	for _, st := range list {
+		if only != "" && st.Name != only {
+			continue
+		}
+		drv, err := storage.Get(st.Driver)
+		if err != nil {
+			fmt.Printf("%-20s  SKIP (%v)\n", st.Name, err)
+			continue
+		}
+		scfg := map[string]any{}
+		if len(st.ConfigJSON) > 0 {
+			_ = json.Unmarshal(st.ConfigJSON, &scfg)
+		}
+		if err := drv.Init(ctx, scfg); err != nil {
+			fmt.Printf("%-20s  SKIP (init: %v)\n", st.Name, err)
+			continue
+		}
+		hits, err := storage.ScanKindCollisions(ctx, drv, root)
+		if err != nil {
+			fmt.Printf("%-20s  ERROR %v\n", st.Name, err)
+			continue
+		}
+		if len(hits) == 0 {
+			fmt.Printf("%-20s  clean\n", st.Name)
+			continue
+		}
+		for _, h := range hits {
+			fmt.Printf("%-20s  COLLISION  %s\n", st.Name, h.Path)
+		}
+		total += len(hits)
+	}
+	if total > 0 {
+		fmt.Printf("\n%d collision(s). Each name is both a file and a folder;\n"+
+			"decide which one to keep, then remove the other.\n", total)
+	}
+	return nil
 }
 
 func storageList() error {

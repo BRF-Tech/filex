@@ -111,6 +111,12 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullRel := path.Join(parentRel, body.Name)
+	// A folder opened on top of an existing file name is the same collision
+	// from the other side (storage.ErrKindConflict).
+	if err := storage.EnsureDirTarget(r.Context(), drv, fullRel); err != nil {
+		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
+		return
+	}
 	if err := mk.Mkdir(r.Context(), fullRel); err != nil {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": "mkdir: " + err.Error()})
 		return
@@ -582,6 +588,13 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rewind part: " + err.Error()})
 			return
 		}
+		// A file named exactly like an existing subfolder would leave `X` and
+		// `X/…` side by side on an object store (storage.ErrKindConflict).
+		if err := storage.EnsureFileTarget(r.Context(), drv, fullRel); err != nil {
+			_ = src.Close()
+			writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
+			return
+		}
 
 		if err := wr.Write(r.Context(), fullRel, src, fh.Size); err != nil {
 			_ = src.Close()
@@ -805,6 +818,11 @@ func mapDriverErr(err error) int {
 	if errors.Is(err, os.ErrExist) {
 		return http.StatusConflict
 	}
+	// The target exists as the other kind (file vs folder). A conflict, not a
+	// server fault — and not a 4xx the client can fix by retrying.
+	if errors.Is(err, storage.ErrKindConflict) {
+		return http.StatusConflict
+	}
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "exists") || strings.Contains(msg, "already") {
 		return http.StatusConflict
@@ -844,18 +862,36 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 		return nil, storage.ErrUnsupported
 	}
 	fullRel := path.Join(destRel, name)
+	// A file named exactly like an existing subfolder would leave `X` and `X/…`
+	// side by side on an object store (storage.ErrKindConflict).
+	if err := storage.EnsureFileTarget(ctx, drv, fullRel); err != nil {
+		return nil, err
+	}
 
-	// Sniff the first 512 bytes for mime, then replay them into the write so
-	// the driver still receives the full payload (see vfUpload for the
-	// OnlyOffice office-format refinement rationale).
+	// Sniff the first 512 bytes for mime, then REWIND — see vfUpload for the
+	// OnlyOffice office-format refinement rationale.
+	//
+	// Rewinding rather than io.MultiReader(sniff, src) is not a style choice:
+	// wrapping the body destroys its Seeker, the S3 SDK can then neither
+	// measure nor replay it, and the request goes out chunked with no
+	// Content-Length. Providers that require one answer 411 — which is exactly
+	// how browser uploads broke for ten days (H1). vfUpload was fixed then;
+	// this path, which serves the PUBLIC file-drop link, was missed and kept
+	// failing. A caller whose reader is not seekable still gets the old
+	// behaviour rather than an error.
 	var sniff [512]byte
 	n, _ := io.ReadFull(src, sniff[:])
 	mime := ""
 	if n > 0 {
 		mime = storage.RefineOfficeMime(http.DetectContentType(sniff[:n]), name)
 	}
-	merged := io.MultiReader(bytes.NewReader(sniff[:n]), src)
-	if err := wr.Write(ctx, fullRel, merged, size); err != nil {
+	body := io.Reader(io.MultiReader(bytes.NewReader(sniff[:n]), src))
+	if s, ok := src.(io.Seeker); ok && n > 0 {
+		if _, err := s.Seek(0, io.SeekStart); err == nil {
+			body = src
+		}
+	}
+	if err := wr.Write(ctx, fullRel, body, size); err != nil {
 		return nil, err
 	}
 

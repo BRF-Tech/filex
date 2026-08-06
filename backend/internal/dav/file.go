@@ -272,6 +272,12 @@ func (w *writeFile) Close() error {
 	// WithoutCancel: a client that drops the connection right after the last
 	// body byte must not abort the backend flush halfway through.
 	ctx := context.WithoutCancel(w.ctx)
+	// A PUT onto an existing collection would leave `X` and `X/…` side by side
+	// on an object store (storage.ErrKindConflict). macOS writing sidecars over
+	// /dav is exactly the traffic that produces these names.
+	if err := storage.EnsureFileTarget(ctx, w.drv, w.rel); err != nil {
+		return mapErr(err)
+	}
 	if err := wr.Write(ctx, w.rel, w.tmp, w.size); err != nil {
 		return mapErr(err)
 	}

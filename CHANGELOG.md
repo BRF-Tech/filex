@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.10.0 below.)
+(Nothing yet — see v0.10.1 below.)
+
+## [0.10.1] - 2026-08-06
+
+### Fixed
+
+- **A file could be written onto a folder, corrupting the storage.** Passing a
+  folder as the upload target wrote a single object at that exact key, leaving
+  `X` (a file) and `X/…` (a folder) side by side. A real filesystem refuses
+  this — the OS does it for us — so it never appeared locally; an object store
+  has no such rule and accepted it silently.
+
+  The damage showed up far from the cause. On a directory-backed mirror the
+  colliding prefix can never settle, so `mc mirror` re-copied it on every run:
+  2760 syncs in 24 hours, 1016 versions of a single PNG, a 43 MiB folder
+  occupying 45 GB, and a disk at 96%. Quieter and worse, the colliding object
+  made everything underneath it unlistable — 314 objects had no backup at all
+  and nothing reported it.
+
+  Every write surface now refuses the collision with `409`: the AI/MCP upload,
+  the browser upload, the public file-drop link, text save, WebDAV `PUT`, and
+  archive extraction. The reverse is refused too — a folder created on top of
+  an existing file. Overwriting a file with a file is unchanged; it was never
+  the problem. The check fails **open** if the backend cannot answer, because
+  one flaky listing must not become an upload outage.
+
+- **Uploads through the public file-drop link still failed on strict S3
+  providers.** v0.9.0 fixed this for the browser upload but missed the shared
+  ingest path behind the file-drop link, which kept wrapping the body and so
+  kept sending it chunked with no `Content-Length` — the exact shape DT Cloud
+  S3 answers `411` to.
+
+### Added
+
+- **`filex storage scan-collisions`** reports names that already exist as both
+  a file and a folder, for damage that predates the guards above. It only
+  reports: choosing which of the two to keep is a judgement about the data, not
+  something a command should decide.
 
 ## [0.10.0] - 2026-08-06
 

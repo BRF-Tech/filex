@@ -140,6 +140,12 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "driver does not support write"})
 		return
 	}
+	// Saving text onto an existing folder name would leave `X` and `X/…` side
+	// by side on an object store (storage.ErrKindConflict).
+	if err := storage.EnsureFileTarget(r.Context(), drv, rel); err != nil {
+		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
+		return
+	}
 	// Look up the existing node FIRST so we can snapshot the
 	// pre-edit bytes into the version history before the destructive
 	// write. The cache row's `clean`/`hash` derivation also feeds the

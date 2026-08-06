@@ -24,6 +24,9 @@ type fakeDriver struct {
 	files   map[string][]byte
 	stats   map[string]Object
 	deleted map[string]bool
+	// listings is opt-in per-directory List output; nil keeps the original
+	// "every directory is empty" behaviour every pre-existing test relies on.
+	listings map[string][]Object
 
 	readErr   error
 	writeErr  error
@@ -55,9 +58,14 @@ func (f *fakeDriver) Init(_ context.Context, _ map[string]any) error { return ni
 func (f *fakeDriver) Capabilities() Capabilities {
 	return Capabilities{Read: true, Write: true, Move: true, Copy: true, Delete: true, Mkdir: true}
 }
-func (f *fakeDriver) List(_ context.Context, _ string) ([]Object, error) {
+func (f *fakeDriver) List(_ context.Context, p string) ([]Object, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listings != nil {
+		return f.listings[p], nil
 	}
 	return nil, nil
 }

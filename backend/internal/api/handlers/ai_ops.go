@@ -373,6 +373,12 @@ func (a *aiOps) Write(ctx context.Context, p string, data []byte) (*aiEntry, err
 	if !ok {
 		return nil, storage.ErrUnsupported
 	}
+	// A caller that passes a FOLDER as `path` used to get a file written at
+	// that exact key, leaving `X` and `X/…` side by side on an object store.
+	// See storage.ErrKindConflict for what that did to the DR mirror.
+	if err := storage.EnsureFileTarget(ctx, drv, rel); err != nil {
+		return nil, err
+	}
 
 	mime := ""
 	if len(data) > 0 {
@@ -610,6 +616,11 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	if !ok {
 		return nil, storage.ErrUnsupported
 	}
+	// The same collision from the other side: a folder opened on top of an
+	// existing file name.
+	if err := storage.EnsureDirTarget(ctx, drv, rel); err != nil {
+		return nil, err
+	}
 	if err := mk.Mkdir(ctx, rel); err != nil {
 		return nil, err
 	}
@@ -835,6 +846,9 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 		return nil, err
 	}
 	size := stat.Size()
+	if err := storage.EnsureFileTarget(ctx, drvDest, relDest); err != nil {
+		return nil, err
+	}
 	if err := wr.Write(ctx, relDest, tmp, size); err != nil {
 		return nil, err
 	}
@@ -990,9 +1004,21 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 		}
 		if strings.HasSuffix(f.Name, "/") {
 			if mkdirer != nil {
+				if kerr := storage.EnsureDirTarget(ctx, drv, target); kerr != nil {
+					slog.Warn("ai unzip: skipped folder colliding with a file",
+						slog.String("target", target), slog.String("err", kerr.Error()))
+					continue
+				}
 				_ = mkdirer.Mkdir(ctx, target)
 				a.cacheUpsertDir(ctx, sDst, target)
 			}
+			continue
+		}
+		// An archive carrying both `X` and `X/y` would reproduce the very
+		// collision this guard exists to stop — skip the member, keep the rest.
+		if kerr := storage.EnsureFileTarget(ctx, drv, target); kerr != nil {
+			slog.Warn("ai unzip: skipped member colliding with a folder",
+				slog.String("target", target), slog.String("err", kerr.Error()))
 			continue
 		}
 		frc, oerr := f.Open()
