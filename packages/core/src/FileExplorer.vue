@@ -90,7 +90,9 @@ import {
    internal-entry filter + virtual `.trash` row must be identical in both
    panes or split view shows mismatched rows). */
 import {
-  filterInternalEntries,
+  filterListing,
+  showHiddenFiles,
+  setShowHiddenFiles,
   injectTrashRow,
   hydrateTrashRow as hydrateTrashRowShared,
 } from './lib/listing';
@@ -674,6 +676,16 @@ function virtualStorageRows(): FileNode[] {
   } as unknown as FileNode));
 }
 
+// Flip dot-file visibility. Both panes filter at load time rather than in a
+// computed, so the listings are re-fetched instead of re-filtered — that keeps
+// selection and the operations that read `files` working on exactly what is
+// on screen.
+function toggleHiddenFiles() {
+  setShowHiddenFiles(!showHiddenFiles.value);
+  void load();
+  void splitPaneRef.value?.reload();
+}
+
 async function load(path?: string) {
   loading.value = true;
   // Any normal navigation exits trash mode (the trash view is entered only
@@ -716,7 +728,7 @@ async function load(path?: string) {
        subtree; '' resets on every plain folder. Drives the lock screen. */
     e2eRoot.value = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';
     /* /wiring:e2 */
-    files.value = filterInternalEntries(resp.files);
+    files.value = filterListing(resp.files);
     // Inject virtual `.trash` entry at root only — shared helper so the
     // split-view secondary pane shows the exact same row (no row-offset).
     if (injectTrashRow(files.value, resp.adapter, resp.dirname, props.config.trashVisible !== false)) {
@@ -1147,6 +1159,7 @@ useKeyboardShortcuts(rootEl, {
   },
   /* /cila:c wiring */
   onQuickLook: () => quickLookToggle() /* wiring:c2 */,
+  onToggleHidden: () => toggleHiddenFiles(),
   onToggleInspector: () => toggleInspector() /* koru:k1 */,
   /* wiring:d1 — sekme aksiyonları (registry: tab-new/close/next/prev) */
   onTabNew: () => newTabHere(),
@@ -1463,10 +1476,20 @@ const contextActions = computed<ContextAction[]>(() => {
   // Empty background right-click: folder-level actions only. Viewers (no edit
   // on this dir) get nothing here.
   if (!any) {
-    if (!permCanEdit(dirPerm.value)) return [];
+    // Showing hidden files is a VIEW preference, so it stays available to
+    // viewers too — the edit gate below only covers the mutating actions.
+    const view: ContextAction[] = [
+      {
+        key: 'toggle-hidden',
+        label: showHiddenFiles.value ? t('ctx.hide_hidden') : t('ctx.show_hidden'),
+        icon: showHiddenFiles.value ? '🙈' : '👁',
+      },
+    ];
+    if (!permCanEdit(dirPerm.value)) return view;
     return [
       { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
       { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+      ...view,
     ];
   }
 
@@ -1632,6 +1655,9 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       break;
     case 'restore':
       if (targets.length > 0) await restoreSelection(targets);
+      break;
+    case 'toggle-hidden':
+      toggleHiddenFiles();
       break;
     case 'new-folder':
       mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
