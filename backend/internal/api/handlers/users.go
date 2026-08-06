@@ -33,6 +33,36 @@ func (h *Users) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, users)
 }
 
+// tenantGate resolves the target user and reports whether the caller may act
+// on it, returning an HTTP status + message when it may not.
+//
+// Only LIST was tenant-confined: ListUsers goes through tenantstore, but
+// tenantstore wraps exactly three methods (ListStorages, ListEnabledStorages,
+// ListUsers) — GetUser and every mutation take a raw id. So a tenant admin
+// could read, rename, re-password, disable and DELETE another tenant's users
+// by id, including that tenant's last admin. Same class as the /dav leak
+// (H4), and the reason this gate exists (olivov follow-up, 2026-08-05).
+//
+// Out-of-tenant answers 404, not 403: a foreign id must be indistinguishable
+// from one that does not exist, the same no-exists-oracle rule /dav and the
+// grant path already follow.
+func (h *Users) tenantGate(ctx context.Context, id int64) (*model.User, int, string) {
+	u, err := h.Store.GetUser(ctx, id)
+	if err != nil || u == nil {
+		return nil, http.StatusNotFound, "not found"
+	}
+	scope, scoped := tenant.FromContext(ctx)
+	if !scoped || scope.IsSupertenant {
+		return u, 0, ""
+	}
+	// A user with no provider is a bootstrap/legacy account; it belongs to no
+	// tenant, so a confined caller must not reach it either.
+	if u.ProviderID == nil || *u.ProviderID != scope.ProviderID {
+		return nil, http.StatusNotFound, "not found"
+	}
+	return u, 0, ""
+}
+
 // Get returns a single user by id. The admin UI's UserEdit page
 // hits this when the row is clicked; without it chi returned 405
 // (only PATCH/DELETE were wired).
@@ -42,9 +72,9 @@ func (h *Users) Get(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	u, err := h.Store.GetUser(r.Context(), id)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	u, status, msg := h.tenantGate(r.Context(), id)
+	if status != 0 {
+		writeJSON(w, status, map[string]string{"error": msg})
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
@@ -140,6 +170,18 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if providerID != 0 {
 		if err := h.Store.SetUserProvider(r.Context(), u.ID, providerID, ""); err != nil {
+			// CreateUser has already landed the row in provider 1 — the
+			// SUPERTENANT. Returning 500 and leaving it there would mint
+			// exactly the confine-exempt account G1 exists to prevent, so the
+			// half-created user is removed before reporting the failure.
+			if delErr := h.Store.DeleteUser(r.Context(), u.ID); delErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "could not home the user in its tenant (" + err.Error() +
+						") and could not remove the half-created account (" + delErr.Error() +
+						"); user id " + strconv.FormatInt(u.ID, 10) + " is in the supertenant and must be fixed by hand",
+				})
+				return
+			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -176,6 +218,13 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	var req userUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	// Before ANY mutation: a confined caller may only touch its own tenant's
+	// users. Runs first so a refused request cannot have written half of the
+	// body's fields already.
+	if _, status, msg := h.tenantGate(r.Context(), id); status != 0 {
+		writeJSON(w, status, map[string]string{"error": msg})
 		return
 	}
 	// Reject an unknown role up-front, and refuse to demote the last admin
@@ -272,9 +321,9 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	target, err := h.Store.GetUser(r.Context(), id)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	target, status, msg := h.tenantGate(r.Context(), id)
+	if status != 0 {
+		writeJSON(w, status, map[string]string{"error": msg})
 		return
 	}
 	if target.IsAdmin() {

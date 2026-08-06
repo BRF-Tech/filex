@@ -2033,7 +2033,6 @@ func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int6
 	return err
 }
 
-// SetUserQuota writes the quota_bytes value (0 = unlimited).
 // SetUserEnabled flips the account on/off. Files, quota and grants are
 // untouched -- this is an access switch, not a soft delete.
 func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) error {
@@ -2041,6 +2040,7 @@ func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) 
 	return err
 }
 
+// SetUserQuota writes the quota_bytes value (0 = unlimited).
 func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) error {
 	if bytes < 0 {
 		bytes = 0
