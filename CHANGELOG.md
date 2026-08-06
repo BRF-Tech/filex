@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.9.0 below.)
+(Nothing yet — see v0.10.0 below.)
+
+## [0.10.0] - 2026-08-06
+
+Two interface fixes reported by olivov, whose tenants mount WebDAV from macOS.
+
+Released as a minor rather than a patch on purpose: both change what the
+explorer does on screen, and the update engine may apply a *patch* by itself
+when the policy allows it. A release that changes the interface has to be one
+the operator opts into.
+
+### Added
+
+- **Hidden (dot-prefixed) files can be shown or hidden; hidden by default.**
+  They were listed like any other file, and most of them are not the user's
+  files at all: a Mac mounting `/dav` leaves a `.DS_Store` in every folder it
+  opens and an AppleDouble `._name` beside every file carrying extended
+  attributes. Finder hides its own litter locally, so watching it reappear in
+  the web UI reads as corruption — upload `4.jpeg`, find `4.jpeg` and
+  `._4.jpeg` next to it.
+
+  A toggle rather than a silent filter, because these *are* real files:
+  hiding them outright would leave the ones already uploaded both invisible
+  and undeletable, since the UI is the only way most people reach them.
+  Right-click empty space, or `Ctrl+Shift+.`; the choice is remembered. It
+  stays available to read-only viewers — what you can see is a view
+  preference, not a change to anything.
+
+### Changed
+
+- **With exactly one storage visible, that storage now opens directly.** The
+  storage list was a one-row page that carried no information and had to be
+  clicked through on every visit; "up" is no longer offered where it would
+  only lead back to that single row. Installs with more than one visible
+  storage — and single-storage mode — are unaffected.
 
 ## [0.9.0] - 2026-08-06
 
