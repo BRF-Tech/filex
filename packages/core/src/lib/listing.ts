@@ -6,6 +6,8 @@
  * must be identical in both, otherwise split view shows mismatched rows
  * (the trash row missing on one side → visible row-offset).
  */
+import { ref } from 'vue';
+
 import type { FileNode } from '../types/FileNode';
 import { E2E_MARKER_NAME } from './e2ecrypto';
 
@@ -29,6 +31,52 @@ export function filterInternalEntries(files: FileNode[]): FileNode[] {
     if (f.basename === E2E_MARKER_NAME) return false;
     return true;
   });
+}
+
+const SHOW_HIDDEN_LS_KEY = 'filex.showHidden';
+
+function readShowHidden(): boolean {
+  try {
+    return localStorage.getItem(SHOW_HIDDEN_LS_KEY) === '1';
+  } catch {
+    return false; // private mode / no storage → hidden, the safe default
+  }
+}
+
+/**
+ * Whether dot-prefixed entries are listed. Off by default, like every other
+ * file manager. Shared by both panes so split view can't disagree with itself.
+ */
+export const showHiddenFiles = ref(readShowHidden());
+
+export function setShowHiddenFiles(v: boolean): void {
+  showHiddenFiles.value = v;
+  try {
+    localStorage.setItem(SHOW_HIDDEN_LS_KEY, v ? '1' : '0');
+  } catch {
+    /* preference just won't persist */
+  }
+}
+
+/**
+ * Hide dot-prefixed entries unless the user asked to see them.
+ *
+ * These are mostly not the user's files at all: a Mac writing over WebDAV
+ * leaves a `.DS_Store` in every folder it opens and an AppleDouble `._name`
+ * beside every file carrying extended attributes. Finder hides its own litter
+ * locally, so seeing it reappear in the web UI reads as corruption.
+ *
+ * A toggle rather than a blocklist, because they ARE real files: hiding them
+ * outright would leave the ones already uploaded unreachable and undeletable.
+ */
+export function filterHiddenEntries(files: FileNode[], showHidden: boolean): FileNode[] {
+  if (showHidden) return files || [];
+  return (files || []).filter((f) => !(f.basename || '').startsWith('.'));
+}
+
+/** filterInternalEntries + filterHiddenEntries — what both panes render. */
+export function filterListing(files: FileNode[]): FileNode[] {
+  return filterHiddenEntries(filterInternalEntries(files), showHiddenFiles.value);
 }
 
 /** True when `dirname` (adapter-qualified) is the storage root, where the

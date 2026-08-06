@@ -37,6 +37,7 @@ export interface ShortcutHandlers {
   onGoUp?: () => void; // Alt+Up / Backspace (when nothing selected)
   onShowHelp?: () => void; // ? (Shift+/ on most layouts)
   onToggleInspector?: () => void; // i (koru:k1 details panel)
+  onToggleHidden?: () => void; // Ctrl+Shift+. — dot-file visibility
   onQuickLook?: () => void; // Space (wiring:c2 quick-look overlay)
   /* wiring:d1 — tab strip actions */
   onTabNew?: () => void; // Ctrl+T
@@ -85,6 +86,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'close', defaultCombo: 'Esc', customizable: false, prevent: false, inForms: true, labelKey: 'shortcuts.close', groupKey: 'shortcuts.group.nav' },
   { id: 'inspector', defaultCombo: 'I', labelKey: 'shortcuts.inspector', groupKey: 'shortcuts.group.nav' } /* koru:k1 */,
   { id: 'help', defaultCombo: '?', labelKey: 'shortcuts.help', groupKey: 'shortcuts.group.nav' },
+  { id: 'toggle-hidden', defaultCombo: 'Ctrl+Shift+.', labelKey: 'shortcuts.toggle_hidden', groupKey: 'shortcuts.group.nav' },
   // Selection
   { id: 'select-all', defaultCombo: 'Ctrl+A', labelKey: 'shortcuts.select_all', groupKey: 'shortcuts.group.selection' },
   // File operations
@@ -112,6 +114,7 @@ const HANDLER_KEY: Record<string, keyof ShortcutHandlers> = {
   quicklook: 'onQuickLook',
   close: 'onClose',
   inspector: 'onToggleInspector',
+  'toggle-hidden': 'onToggleHidden',
   help: 'onShowHelp',
   'select-all': 'onSelectAll',
   rename: 'onRename',

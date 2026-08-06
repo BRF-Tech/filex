@@ -21,7 +21,7 @@ import type { FileApi } from '../composables/useFileApi';
 import type { FileNode, ViewMode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { filterInternalEntries, injectTrashRow, hydrateTrashRow } from '../lib/listing';
+import { filterListing, injectTrashRow, hydrateTrashRow } from '../lib/listing';
 import ListView from './ListView.vue';
 import GridView from './GridView.vue';
 import GalleryView from './GalleryView.vue';
@@ -110,7 +110,7 @@ async function loadPane(target?: string): Promise<void> {
     const resp = await props.api.index(props.qualify(requested));
     // Same internal-entry filter + virtual `.trash` row as the main panel
     // (shared helpers → both split panes list identical rows, no offset).
-    files.value = filterInternalEntries(resp.files);
+    files.value = filterListing(resp.files);
     if (injectTrashRow(files.value, resp.adapter, resp.dirname, props.trashVisible !== false)) {
       void hydrateTrashRow(files.value, resp.adapter, props.api);
     }
