@@ -37,7 +37,13 @@ const config = {
 
   locale: 'tr',            // 'tr' | 'en'
   theme: 'auto',           // 'light' | 'dark' | 'auto'
-  multiStorageRoot: true,  // show a "drives" root listing every storage
+  // ⚠ Show a "drives" root listing every storage — and PAIR IT WITH `storages`.
+  // The explorer MIRRORS the list you hand it; it does not go and discover the
+  // server's storages by itself. Set this to true without `storages` and the
+  // root is empty and no listing request is ever made — which looks exactly
+  // like a broken connection rather than a missing option.
+  multiStorageRoot: true,
+  storages: [{ name: 'docs' }, { name: 'media', label: 'Media', readOnly: true }],
   trashVisible: true,      // show the Trash entry (list + restore)
 };
 ```

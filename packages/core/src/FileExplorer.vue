@@ -360,7 +360,13 @@ async function loadStarred() {
     const base = props.config.apiBase ?? '';
     const res = await fetch(`${base}/api/files/manager/star/list?limit=500`, {
       headers,
-      credentials: 'include',
+      // ⚠ NOT 'include'. With a bearer token the request is cross-origin for
+      // every embedder that serves the UI from a different origin to the API
+      // (the desktop app is one), and a credentialed request may not be
+      // answered with `Access-Control-Allow-Origin: *` — which is what filex
+      // sends. This one line made starred files fail silently in every such
+      // install while the rest of the explorer worked.
+      credentials: api.credentialsMode(),
     });
     if (!res.ok) return;
     const body = await res.json();
@@ -392,7 +398,7 @@ async function markRecent(n: FileNode) {
     await fetch(`${base}/api/files/manager/recent`, {
       method: 'POST',
       headers: await buildAuthHeaders({ 'Content-Type': 'application/json' }),
-      credentials: 'include',
+      credentials: api.credentialsMode(),
       body: JSON.stringify({ node_id: n.id }),
     });
     recentRefreshKey.value += 1;
@@ -3313,6 +3319,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         :starred-ids="starredIds"
         :api-base="props.config.apiBase ?? ''"
         :auth-headers="() => buildAuthHeaders()"
+        :auth-credentials="api.credentialsMode()"
         @click-row="(n, m) => selection.click(n.path, m)"
         @dbl-row="openNode"
         @context-row="onContextTarget"
@@ -3574,6 +3581,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
           <RecentlyOpened
             :api-base="props.config.apiBase ?? ''"
             :auth-headers="() => buildAuthHeaders()"
+            :auth-credentials="api.credentialsMode()"
             :limit="20"
             :refresh-key="recentRefreshKey"
             @open="onRecentOpen"
@@ -3602,6 +3610,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
               :node-id="tagPickerNode.id"
               :api-base="props.config.apiBase ?? ''"
               :auth-headers="() => buildAuthHeaders()"
+              :auth-credentials="api.credentialsMode()"
               @error="(msg: string) => emit('error', { message: msg, context: { op: 'tags' } })"
             />
           </div>

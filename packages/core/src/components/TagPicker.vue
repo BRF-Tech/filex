@@ -14,6 +14,11 @@ const props = defineProps<{
   nodeId: number;
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Credentials mode, from the explorer's auth kind. ⚠ Defaults to
+   *  'same-origin': a credentialed cross-origin request cannot be answered
+   *  with ACAO:* , so hardcoding 'include' broke this call in every embed
+   *  served from a different origin to the API. */
+  authCredentials?: RequestCredentials;
   /** Optional list of palette swatches; one is picked per tag deterministically. */
   palette?: string[];
 }>();
@@ -50,7 +55,7 @@ async function load() {
     const base = props.apiBase ?? '';
     const res = await fetch(`${base}/api/files/manager/tags?node_id=${props.nodeId}`, {
       headers: await buildHeaders(),
-      credentials: 'include',
+      credentials: props.authCredentials ?? 'same-origin',
     });
     if (res.ok) {
       const body = await res.json();
@@ -71,7 +76,7 @@ async function persist(next: string[]) {
     const res = await fetch(`${base}/api/files/manager/tags`, {
       method: 'POST',
       headers: await buildHeaders({ 'Content-Type': 'application/json' }),
-      credentials: 'include',
+      credentials: props.authCredentials ?? 'same-origin',
       body: JSON.stringify({ node_id: props.nodeId, tags: next }),
     });
     if (!res.ok) throw new Error(`tag save failed: ${res.status}`);

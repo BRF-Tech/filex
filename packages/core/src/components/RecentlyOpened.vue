@@ -17,6 +17,11 @@ interface RecentNode {
 const props = defineProps<{
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Credentials mode, from the explorer's auth kind. ⚠ Defaults to
+   *  'same-origin': a credentialed cross-origin request cannot be answered
+   *  with ACAO:* , so hardcoding 'include' broke this call in every embed
+   *  served from a different origin to the API. */
+  authCredentials?: RequestCredentials;
   limit?: number;
   /** Optional refresh trigger — incrementing this re-fetches. */
   refreshKey?: number | string;
@@ -38,7 +43,7 @@ async function load() {
     const limit = props.limit ?? 20;
     const res = await fetch(`${base}/api/files/manager/recent?limit=${limit}`, {
       headers,
-      credentials: 'include',
+      credentials: props.authCredentials ?? 'same-origin',
     });
     if (res.ok) {
       const body = await res.json();

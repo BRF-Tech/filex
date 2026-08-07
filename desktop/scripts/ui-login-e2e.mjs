@@ -132,16 +132,16 @@ try {
   }
   check('no application menu', (await appWindow.evaluate(() => document.title)) !== null);
 
-  const runtime = await appWindow.evaluate(() => ({
-    token: typeof window.__FILEX_RUNTIME__?.bearerToken === 'string',
-    api: window.__FILEX_RUNTIME__?.apiBaseUrl,
-    creds: window.__FILEX_RUNTIME__?.useCredentials,
-    settings: typeof window.filexDesktop?.openSettings === 'function',
-    sync: typeof window.filexDesktop?.openSyncFolders === 'function',
+  // The bridge, in its new shape: accounts + sync, and a token that has to be
+  // ASKED for rather than one handed to the page up front.
+  const bridge = await appWindow.evaluate(() => ({
+    token: typeof window.filexApp?.token,
+    accounts: typeof window.filexApp?.signOut === 'function',
+    sync: typeof window.filexApp?.addSync === 'function',
+    admin: typeof window.filexApp?.openAdmin === 'function',
   }));
-  check('runtime seam injected', runtime.token === true, `api=${runtime.api}`);
-  check('credentials disabled for app://', runtime.creds === false);
-  check('Settings + Sync folders bridges exposed', runtime.settings && runtime.sync);
+  check('the app bridge is exposed', bridge.accounts && bridge.sync && bridge.admin);
+  check('the token is fetched per call, not pushed in', bridge.token === 'function', bridge.token);
 
   // The product test: the APP's own requests must all succeed and it must be
   // signed in. A hand-rolled fetch here would only measure my assumptions.
@@ -157,25 +157,11 @@ try {
 
   await appWindow.screenshot({ path: path.join(REPO, 'desktop-app.png') });
 
-  // ── settings + sync folders ───────────────────────────────────────
-  await appWindow.evaluate(() => window.filexDesktop.openSettings());
-  const settings = await app.waitForEvent('window', { timeout: 30_000 });
-  await settings.waitForLoadState('domcontentloaded');
-  await settings.waitForTimeout(600);
-  const st = await settings.evaluate(() => window.filexShell.getState());
+  // ── the account is really stored ──────────────────────────────────
+  const st = await appWindow.evaluate(() => window.filexApp.getState());
   check('account stored after exchange', st.accounts.length === 1,
     st.accounts[0] ? `${st.accounts[0].email} @ ${st.accounts[0].serverUrl}` : 'none');
   check('renderer never sees the token', st.accounts[0] && !('token' in st.accounts[0]));
-  check('settings lists the signed-in account',
-    (await settings.locator('text=' + EMAIL).count()) > 0);
-  check('background + start-at-login are offered',
-    (await settings.locator('#bg').count()) === 1 && (await settings.locator('#login').count()) === 1);
-  await settings.screenshot({ path: path.join(REPO, 'desktop-settings.png') });
-
-  await settings.evaluate(() => { location.hash = '#/sync'; });
-  await settings.waitForTimeout(600);
-  check('sync folders screen renders', (await settings.locator('#remote').count()) === 1);
-  await settings.screenshot({ path: path.join(REPO, 'desktop-sync.png') });
 } catch (e) {
   check('flow completed', false, String(e && e.message).split('\n')[0]);
 } finally {

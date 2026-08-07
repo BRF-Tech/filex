@@ -94,6 +94,24 @@ export async function addPair(local: string, remote: string, accountId: string):
   await run(['sync', 'add', local, remote, '--account', accountId]);
 }
 
+export interface TrashItem {
+  pair: string;
+  rel: string;
+  deleted: string;
+  size: number;
+}
+
+/** What sync removed from this machine and can still put back. */
+export async function listTrash(pairId?: string): Promise<TrashItem[]> {
+  try {
+    const args = ['sync', 'trash', '--json'];
+    if (pairId) args.push('--pair', pairId);
+    return JSON.parse(await run(args)) as TrashItem[];
+  } catch {
+    return [];
+  }
+}
+
 export async function removePair(id: string): Promise<void> {
   await run(['sync', 'remove', id]);
 }

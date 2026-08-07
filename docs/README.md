@@ -29,7 +29,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Features
 
-- [Desktop app & folder sync](SYNC.md) — a folder on your PC kept in step with the server
+- [Desktop app](DESKTOP.md) — Windows/Linux app: multiple accounts, background sync
+- [Folder sync](SYNC.md) — how a folder on your PC is kept in step with the server
 - [Sharing & file requests](SHARING.md) — public download links + upload/file‑drop
 - [Thumbnails](thumbnails.md) — image / video / pdf / office previews
 - [Search](SEARCH.md) — embedded full‑text index

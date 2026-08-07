@@ -353,7 +353,7 @@ async function fetchText(url: string): Promise<void> {
     const headers: Record<string, string> = {};
     if (props.authHeaders) Object.assign(headers, props.authHeaders());
     const res = await fetch(url, {
-      credentials: props.authCredentials || 'include',
+      credentials: props.authCredentials || 'same-origin',
       headers,
     });
     if (!res.ok) {

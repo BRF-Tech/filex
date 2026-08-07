@@ -56,7 +56,7 @@ async function load(): Promise<void> {
   try {
     const res = await fetch('/api/files/archive/list', {
       method: 'POST',
-      credentials: props.authCredentials || 'include',
+      credentials: props.authCredentials || 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         ...(props.authHeaders ? props.authHeaders() : {}),

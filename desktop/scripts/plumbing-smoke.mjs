@@ -4,8 +4,9 @@
 // Electron process:
 //   1. config-store: safeStorage encrypts a session and round-trips it back
 //      (the security-critical "token never in plaintext" contract).
-//   2. app:// protocol + preload-app injection: a window loading app://filex/
-//      receives window.__FILEX_RUNTIME__ (apiBaseUrl + token) and filexDesktop.
+//   2. app:// protocol + preload-app bridge: a window loading app://filex/ gets
+//      a real origin and the `filexApp` bridge, and that bridge does NOT hand
+//      over a token by default — the explorer asks for one call by call.
 //
 // Run: xvfb-run -a electron scripts/plumbing-smoke.mjs
 // The window step is best-effort: if the renderer can't start on this host
@@ -105,20 +106,18 @@ async function windowStep() {
       sandbox: true,
     },
   });
-  await win.loadURL('app://filex/admin/');
+  await win.loadURL('app://filex/');
   // Fixture writes its findings into the document title.
   const title = win.webContents.getTitle();
   const payload = title.startsWith('SMOKE:') ? JSON.parse(title.slice(6)) : {};
-  check('app:// serves the embedded bundle', payload.origin === 'app://filex', `origin=${payload.origin}`);
-  check('preload injects __FILEX_RUNTIME__', payload.hasRuntime === true);
-  check('injected apiBaseUrl is the server /api', payload.apiBaseUrl === `${FAKE.serverUrl}/api`, String(payload.apiBaseUrl));
-  check('injected bearer token present', payload.hasToken === true);
-  check('filexDesktop bridge exposed', payload.isDesktop === true);
-  // The single setting that decides whether the app can talk to a server at
-  // all: with credentials on, the browser rejects every cross-origin response
-  // because filex answers ACAO:* — the app looks completely dead.
-  check('credentials disabled for the app:// origin', payload.useCredentials === false,
-    `useCredentials=${payload.useCredentials}`);
+  check('app:// gives the window a real origin', payload.origin === 'app://filex', `origin=${payload.origin}`);
+  check('filexApp bridge exposed', payload.isDesktop === true);
+  // ⚠ The bridge must NOT carry a credential. The explorer is given a `token()`
+  // FUNCTION, so the value is fetched per request and never sits in the page.
+  // A token pushed in up front would live in the renderer for the whole session.
+  check('no token is pushed into the renderer', payload.tokenIsFunction === true,
+    `token=${payload.tokenType}`);
+  check('the bridge offers accounts + sync, not server admin', payload.hasAccountApi === true);
   win.destroy();
 }
 

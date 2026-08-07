@@ -14,6 +14,11 @@ const props = defineProps<{
   apiBase?: string;
   /** Auth header builder injected by the parent file explorer. */
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Credentials mode, from the explorer's auth kind. ⚠ Defaults to
+   *  'same-origin': a credentialed cross-origin request cannot be answered
+   *  with ACAO:* , so hardcoding 'include' broke this call in every embed
+   *  served from a different origin to the API. */
+  authCredentials?: RequestCredentials;
   /** Compact mode for grid view (no label, just the icon). */
   compact?: boolean;
 }>();
@@ -38,7 +43,7 @@ async function toggle() {
     const res = await fetch(`${base}/api/files/manager/star`, {
       method: 'POST',
       headers,
-      credentials: 'include',
+      credentials: props.authCredentials ?? 'same-origin',
       body: JSON.stringify({ node_id: props.nodeId, starred: next }),
     });
     if (!res.ok) throw new Error(`star toggle failed: ${res.status}`);

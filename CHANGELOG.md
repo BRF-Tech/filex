@@ -7,7 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.12.0 below.)
+(Nothing yet — see v0.13.0 below.)
+
+## [0.13.0] - 2026-08-07
+
+### Fixed
+
+- **The desktop app opened the admin console.** Signing in landed you on the
+  server's dashboard — users, storages, server settings — because the shell
+  embedded the whole admin SPA. It now shows the **file explorer and nothing
+  else**: the same `<filex-explorer>` component this project ships to
+  embedders, pointed at your server with the token the browser sign-in handed
+  back.
+
+  Around it: an **account rail** down the left (click to switch, Slack-style),
+  and a gear for **this app's** settings — accounts, synced folders, background
+  running, start-at-login. Your server's admin panel is a link that opens in
+  your browser, where a web console belongs.
+
+- ⭐ **Starred files, recently-opened, starring and tags were broken in every
+  cross-origin embed** — silently. Four calls in the core hardcoded
+  `credentials: 'include'` while every other request used the configured mode.
+  A credentialed cross-origin request may not be answered with
+  `Access-Control-Allow-Origin: *`, which is what filex sends, so the browser
+  rejected those four before the response was read: empty lists, no error. Two
+  more defaulted to `'include'` when the host passed no prop. All six now take
+  the mode from `useFileApi`.
+
+  This affected **any** deployment serving the UI from a different origin to
+  the API, not only the desktop app.
+
+- **The explorer's multi-storage root mirrors a storage list the host provides**
+  — it does not discover storages by itself. Undocumented, and easy to get
+  wrong: the desktop window sat on an empty `/` and never issued a listing
+  request at all. `docs/INTEGRATION.md` now says so.
+
+### Changed
+
+- **Desktop packages are no longer versioned in the filename**
+  (`filex-desktop-x64.exe`, `filex-desktop-amd64.deb`,
+  `filex-desktop-x86_64.AppImage`). `releases/latest/download/<name>` only
+  resolves for a fixed filename, so the web app can now link straight at the
+  right file instead of dropping people on a release page with ten assets and
+  no indication of which is an installer and which is portable. The app reports
+  its version in Settings.
+
+- **The download offer says what each file does** — installer vs portable, and
+  roughly how large. macOS says plainly that no build exists yet rather than
+  offering a button that 404s.
+
+### Added
+
+- **[docs/DESKTOP.md](docs/DESKTOP.md)** — install per platform, how sign-in
+  works and what to do when the browser cannot come back, where tokens and sync
+  state live, and the unsigned-package warning stated rather than buried.
+- `filex sync trash --json`.
+
 
 ## [0.12.0] - 2026-08-07
 

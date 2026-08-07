@@ -2,19 +2,25 @@
 <html>
   <head><meta charset="utf-8" /><title>boot</title></head>
   <body>
-    <!-- Smoke fixture standing in for the embedded web bundle. Reports what the
-         preload injected so the smoke can assert the runtime seam is present. -->
+    <!-- Smoke fixture standing in for the app page. Reports what the preload
+         exposed so the smoke can assert the bridge's shape — in particular that
+         it does NOT contain a credential. -->
     <script>
-      const rt = window.__FILEX_RUNTIME__ || {};
+      const api = window.filexApp || {};
       const out = {
-        hasRuntime: !!window.__FILEX_RUNTIME__,
-        apiBaseUrl: rt.apiBaseUrl || null,
-        hasToken: typeof rt.bearerToken === 'string' && rt.bearerToken.length > 0,
-        // Must be exactly false: a credentialed cross-origin request cannot be
-        // answered with `Access-Control-Allow-Origin: *` (filex's default), so
-        // leaving cookies on makes every API call from app:// fail.
-        useCredentials: rt.useCredentials,
-        isDesktop: !!(window.filexDesktop && window.filexDesktop.isDesktop),
+        isDesktop: !!api.isDesktop,
+        // ⚠ Must be a function, not a string. The explorer is handed
+        // `token: () => …` so the credential is fetched per request instead of
+        // living in the renderer for the whole session.
+        tokenIsFunction: typeof api.token === 'function',
+        tokenType: typeof api.token,
+        // The bridge's job is accounts + sync + app settings. Anything the
+        // server's admin console does belongs in the browser.
+        hasAccountApi:
+          typeof api.signOut === 'function' &&
+          typeof api.switchAccount === 'function' &&
+          typeof api.addSync === 'function' &&
+          typeof api.openAdmin === 'function',
         origin: location.origin,
       };
       document.title = 'SMOKE:' + JSON.stringify(out);

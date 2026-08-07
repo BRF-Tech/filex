@@ -127,18 +127,19 @@ try {
   }, adminToken).catch(() => {});
 
   // ── the sync panel ────────────────────────────────────────────────
-  await appWindow.evaluate(() => window.filexDesktop.openSyncFolders());
-  const sync = await app.waitForEvent('window', { timeout: 30_000 });
-  await sync.waitForLoadState('domcontentloaded');
-  await sync.waitForTimeout(800);
+  // Settings lives INSIDE the app window now (the gear at the bottom of the
+  // account rail), not in a separate window.
+  await appWindow.evaluate(() => document.querySelectorAll('#rail .rail-btn')[1].click());
+  await appWindow.waitForTimeout(800);
+  const sync = appWindow;
 
-  const st0 = await sync.evaluate(() => window.filexShell.getState());
+  const st0 = await sync.evaluate(() => window.filexApp.getState());
   check('the app found the bundled sync engine', st0.syncEngine === 'bundled', st0.syncEngine);
   check('no folders paired to begin with', st0.syncFolders.length === 0);
 
   // A remote without a storage name is ambiguous and must be refused.
   const refused = await sync.evaluate(async () => {
-    try { await window.filexShell.addSyncFolder('just-a-path'); return null; }
+    try { await window.filexApp.addSync('just-a-path'); return null; }
     catch (e) { return String(e.message || e); }
   });
   check('a remote with no storage is refused', /storage:\/\/path/.test(refused ?? ''), refused ?? 'accepted!');
@@ -146,11 +147,12 @@ try {
   // Put a file in the folder BEFORE pairing, so the first run has work to do.
   fs.writeFileSync(path.join(syncFolder, 'from-desktop.txt'), 'written on the PC');
 
-  await sync.locator('#remote').fill(REMOTE);
-  await sync.locator('#add').click();
+  // The picker walks the server; feed it the remote path directly here since
+  // the browsing itself is covered by shell-e2e.
+  await sync.evaluate((remote) => window.filexApp.addSync(remote), REMOTE);
   await sync.waitForTimeout(1500);
 
-  const st1 = await sync.evaluate(() => window.filexShell.getState());
+  const st1 = await sync.evaluate(() => window.filexApp.getState());
   check('the pair is recorded', st1.syncFolders.length === 1,
     st1.syncFolders[0] ? `${st1.syncFolders[0].localPath} -> ${st1.syncFolders[0].remotePath}` : 'none');
   check('the pair carries the signed-in account',
@@ -184,18 +186,18 @@ try {
   }
 
   // ── the panel reports what happened ───────────────────────────────
-  await sync.evaluate(() => window.filexShell.refreshSync());
+  await sync.evaluate(() => window.filexApp.getState());
   await sync.waitForTimeout(600);
-  const st2 = await sync.evaluate(() => window.filexShell.getState());
+  const st2 = await sync.evaluate(() => window.filexApp.getState());
   const status = (st2.syncStatuses ?? [])[0];
   check('the panel shows a live watcher', status?.running === true,
     status ? `${status.lastLine}` : 'no status at all');
   await sync.screenshot({ path: path.join(REPO, 'desktop-sync-live.png') });
 
   // ── unpairing leaves the files alone ──────────────────────────────
-  await sync.evaluate((id) => window.filexShell.removeSyncFolder(id), st2.syncFolders[0].id);
+  await sync.evaluate((id) => window.filexApp.removeSync(id), st2.syncFolders[0].id);
   await sync.waitForTimeout(1200);
-  const st3 = await sync.evaluate(() => window.filexShell.getState());
+  const st3 = await sync.evaluate(() => window.filexApp.getState());
   check('the pair is gone', st3.syncFolders.length === 0);
   check('unpairing did not delete the local files', fs.existsSync(localCopy));
 } catch (e) {

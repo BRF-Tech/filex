@@ -324,6 +324,7 @@ func syncTrashCmd() *cobra.Command {
 	var (
 		pairID  string
 		restore string
+		asJSON  bool
 	)
 	c := &cobra.Command{
 		Use:   "trash",
@@ -337,6 +338,32 @@ func syncTrashCmd() *cobra.Command {
 			pairs, err := st.LoadPairs()
 			if err != nil {
 				return err
+			}
+			// The desktop app reads this; parsing the human table would break
+			// the moment a column moved.
+			if asJSON && restore == "" {
+				type row struct {
+					Pair    string `json:"pair"`
+					Rel     string `json:"rel"`
+					Deleted string `json:"deleted"`
+					Size    int64  `json:"size"`
+				}
+				out := []row{}
+				for _, p := range pairs {
+					if pairID != "" && p.ID != pairID {
+						continue
+					}
+					items, err := st.ListTrash(p.ID)
+					if err != nil {
+						return err
+					}
+					for _, it := range items {
+						out = append(out, row{p.ID, it.Rel, it.Deleted.Format(time.RFC3339), it.Size})
+					}
+				}
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 			shown := 0
@@ -388,5 +415,6 @@ func syncTrashCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&pairID, "pair", "", "limit to one pair")
 	c.Flags().StringVar(&restore, "restore", "", "put this path back into its sync folder")
+	c.Flags().BoolVar(&asJSON, "json", false, "print the recoverable items as JSON")
 	return quiet(c)
 }

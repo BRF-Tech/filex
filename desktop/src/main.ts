@@ -35,14 +35,17 @@ import {
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
-import { SyncSupervisor, addPair, cliPath, listPairs, removePair, type Pair } from './sync.js';
+import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'app');
 const UI_ROOT = path.join(__dirname, '..', 'ui');
 const APP_SCHEME = 'app';
 const APP_ORIGIN = `${APP_SCHEME}://filex`;
-const START_URL = `${APP_ORIGIN}/admin/`;
+// The main window is OUR page (rail + explorer + app settings), not the admin
+// SPA. app.html lives in ui/, the explorer bundle in app/ — both served from
+// this one origin so the page can `import './filex.js'` as a same-origin module.
+const START_URL = `${APP_ORIGIN}/`;
 const DEEP_LINK_SCHEME = 'filex';
 // Packaged, build/ is not copied — electron-builder bakes the icon into the
 // executable — so fall back to the source path for `electron .` runs.
@@ -64,25 +67,36 @@ protocol.registerSchemesAsPrivileged([
 
 // ─────────────────────────── embedded bundle ───────────────────────────
 
-function resolveEmbedded(root: string, urlPath: string, stripPrefix: RegExp): string {
-  let rel = urlPath.replace(stripPrefix, '').replace(/^\/+/, '');
-  if (rel === '' || !path.extname(rel)) rel = 'index.html';
-  const resolved = path.normalize(path.join(root, rel));
-  if (!resolved.startsWith(root)) return path.join(root, 'index.html');
-  return resolved;
+function safeJoin(root: string, rel: string): string | null {
+  const resolved = path.normalize(path.join(root, rel.replace(/^\/+/, '')));
+  return resolved.startsWith(root) ? resolved : null;
 }
 
 function registerAppProtocol(): void {
   protocol.handle(APP_SCHEME, async (request) => {
     const { host, pathname } = new URL(request.url);
-    // Two surfaces on one scheme: app://filex/... is the web bundle,
-    // app://shell/... is our own chrome (connect / settings / sync folders).
-    const root = host === 'shell' ? UI_ROOT : WEB_ROOT;
-    const strip = host === 'shell' ? /^\// : /^\/admin\//;
-    const file = resolveEmbedded(root, decodeURIComponent(pathname), strip);
-    const res = await net.fetch(pathToFileURL(file).toString());
-    if (res.ok) return res;
-    return net.fetch(pathToFileURL(path.join(root, 'index.html')).toString());
+    const rel = decodeURIComponent(pathname);
+
+    // app://shell/  — the pre-login chrome (connect + waiting screens).
+    if (host === 'shell') {
+      const file = rel === '/' || !path.extname(rel)
+        ? path.join(UI_ROOT, 'index.html')
+        : safeJoin(UI_ROOT, rel) ?? path.join(UI_ROOT, 'index.html');
+      return net.fetch(pathToFileURL(file).toString());
+    }
+
+    // app://filex/ — the app itself. The root is our page; every other path is
+    // an asset of the explorer bundle. Serving both from one origin is what
+    // lets app.html import the component as a module without CORS games.
+    if (rel === '/' || rel === '/index.html') {
+      return net.fetch(pathToFileURL(path.join(UI_ROOT, 'app.html')).toString());
+    }
+    const asset = safeJoin(WEB_ROOT, rel);
+    if (asset) {
+      const res = await net.fetch(pathToFileURL(asset).toString());
+      if (res.ok) return res;
+    }
+    return new Response('not found', { status: 404 });
   });
 }
 
@@ -177,8 +191,13 @@ function refreshTray(): void {
       { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : 'Not signed in', enabled: false },
       { type: 'separator' },
       { label: 'Open filex', click: () => route() },
-      { label: 'Sync folders…', click: () => openShell('/sync', 'filex — Sync folders') },
-      { label: 'Settings…', click: () => openShell('/settings', 'filex — Settings') },
+      {
+        label: 'Settings…',
+        click: () => {
+          route();
+          mainWindow?.webContents.send('app:open-settings');
+        },
+      },
       { type: 'separator' },
       {
         label: 'Quit filex',
@@ -242,6 +261,11 @@ function publicState() {
     syncEngine: cliPath() ? 'bundled' : 'missing',
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
+    // What the OS actually did with the request, not what we asked for. Login
+    // items are refused often enough (policy, sandboxing, a user unticking it
+    // elsewhere) that reporting our own intent back would be a lie.
+    launchAtLoginEffective: app.getLoginItemSettings().openAtLogin,
+    appVersion: app.getVersion(),
   };
 }
 
@@ -297,13 +321,91 @@ function wireIpc(): void {
       state.activeId = id;
       saveState(state);
       refreshTray();
-      // Reload rather than reuse: the runtime seam is injected at preload time,
-      // so a different account means a fresh document.
-      mainWindow?.destroy();
-      mainWindow = null;
-      openMainWindow();
+      // No window reload: the page re-mounts the explorer against the new
+      // account itself. Tearing the window down would throw away the whole
+      // explorer state on every click of the rail.
     }
     return publicState();
+  });
+
+  // The explorer talks to the server directly, so it needs a credential. It is
+  // handed over one call at a time, for one account, rather than being pushed
+  // into the page's state up front — `auth.token` accepts a function precisely
+  // so the value does not have to sit in the renderer between requests.
+  ipcMain.handle('account:token', (_e, id: string) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('unknown account');
+    return acc.token;
+  });
+
+  // The server's own admin panel opens in the BROWSER. It is a web console, it
+  // wants the user's real session, and burying it inside a desktop file manager
+  // is how the file manager stops looking like a file manager.
+  ipcMain.handle('account:openAdmin', (_e, id: string) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('unknown account');
+    void shell.openExternal(new URL('/admin/', acc.serverUrl).toString());
+  });
+
+  ipcMain.handle('auth:add', () => {
+    openShell('/connect', 'filex — Add an account');
+  });
+
+  // ⚠ The explorer's multi-storage root does NOT discover storages by itself —
+  // it mirrors the list the embedder hands it. Without this the window opened on
+  // an empty "/" and never issued a single listing request, which looks exactly
+  // like a broken connection. Measured before the fix: capabilities, ops and
+  // ws-ticket were all requested; `manager?action=index` never was.
+  ipcMain.handle('remote:storages', async (_e, accountId: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    const url = new URL('/api/files/manager', acc.serverUrl);
+    url.searchParams.set('action', 'index');
+    const res = await net.fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${acc.token}` },
+    });
+    if (!res.ok) throw new Error(`server said ${res.status}`);
+    const body = (await res.json()) as { storages?: string[] };
+    return (body.storages ?? []).map((name) => ({ name }));
+  });
+
+  // Walks the server's real folder tree for the sync picker. Typing
+  // `storage://some/path` by hand is a guess about someone else's server.
+  ipcMain.handle('remote:browse', async (_e, accountId: string, remotePath: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    const url = new URL('/api/files/manager', acc.serverUrl);
+    url.searchParams.set('action', 'index');
+    if (remotePath) url.searchParams.set('path', remotePath);
+    const res = await net.fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${acc.token}` },
+    });
+    if (!res.ok) throw new Error(`server said ${res.status}`);
+    const body = (await res.json()) as {
+      storages?: string[];
+      files?: { basename: string; type: string }[];
+    };
+    // At the root the server lists storages, not files; inside one it lists
+    // entries. Both are folders as far as this picker is concerned.
+    if (!remotePath) {
+      return (body.storages ?? []).map((s) => ({ name: s, path: `${s}://` }));
+    }
+    const base = remotePath.endsWith('://') || remotePath.endsWith('/') ? remotePath : `${remotePath}/`;
+    return (body.files ?? [])
+      .filter((f) => f.type === 'dir')
+      .map((f) => ({ name: f.basename, path: `${base}${f.basename}` }));
+  });
+
+  ipcMain.handle('sync:trash', async () => {
+    const out: { rel: string; deleted: string }[] = [];
+    for (const p of knownPairs) {
+      for (const it of await listTrash(p.id)) out.push({ rel: it.rel, deleted: it.deleted });
+    }
+    return out;
+  });
+
+  ipcMain.handle('shell:openPath', (_e, target: string) => {
+    void shell.openPath(target);
   });
 
   ipcMain.handle('settings:set', (_e, patch: Partial<DesktopState>) => {
@@ -361,23 +463,6 @@ function wireIpc(): void {
     return publicState();
   });
 
-  ipcMain.handle('shell:open', (_e, r: string) => {
-    const titles: Record<string, string> = {
-      '/settings': 'filex — Settings',
-      '/sync': 'filex — Sync folders',
-      '/connect': 'filex — Connect',
-    };
-    openShell(r, titles[r] ?? 'filex');
-  });
-
-  // The app preload reads this synchronously so window.__FILEX_RUNTIME__ exists
-  // before the bundle's first request.
-  ipcMain.on('session:runtime', (e) => {
-    const acc = activeAccount(state);
-    e.returnValue = acc
-      ? { apiBaseUrl: `${acc.serverUrl}/api`, bearerToken: acc.token, useCredentials: false }
-      : {};
-  });
 }
 
 // ─────────────────────────── lifecycle ───────────────────────────

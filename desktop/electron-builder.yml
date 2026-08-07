@@ -36,7 +36,14 @@ files:
 # the .deb is built as "@brftech/filex-desktop_0.1.0_amd64.deb" — a scoped npm
 # name is not a legal Debian package name (it contains a slash), so the file is
 # both wrong and awkward to install.
-artifactName: ${productName}-${version}-${arch}.${ext}
+#
+# ⚠ NO VERSION in the filename, deliberately. The web app links straight to
+# `releases/latest/download/<name>`, which GitHub only resolves for a FIXED
+# filename — with the version baked in, every download link would 404 the moment
+# a new release went out, and the alternative (pointing at the release page) is
+# what made people ask "which of these ten files do I want?". The app reports
+# its own version in Settings.
+artifactName: ${productName}-desktop-${arch}.${ext}
 
 linux:
   target:

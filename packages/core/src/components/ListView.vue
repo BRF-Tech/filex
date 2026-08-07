@@ -38,6 +38,7 @@ const props = defineProps<{
    *  hides itself. */
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  authCredentials?: RequestCredentials;
 }>();
 
 const emit = defineEmits<{
@@ -382,6 +383,7 @@ const segments = computed<Segment[]>(() => {
             :node-id="n.id"
             :api-base="apiBase"
             :auth-headers="authHeaders"
+            :auth-credentials="authCredentials"
             compact
             @change="(val: boolean) => emit('star-change', n, val)"
           />

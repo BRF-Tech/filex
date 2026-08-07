@@ -1,35 +1,43 @@
-// Preload for the MAIN window (the embedded filex explorer).
+// Preload for the MAIN window — the app's own page (account rail + explorer +
+// app settings).
 //
-// Two jobs, both minimal — the attack surface of a preload holding a live token
-// must stay tiny:
-//   1. Inject the runtime seam BEFORE the web bundle boots, so the app talks to
-//      the account's server with its token. window.__FILEX_RUNTIME__ is exactly
-//      what web/src/api/runtimeConfig.ts reads on init.
-//   2. Expose the desktop-only entry points the web app cannot provide:
-//      Settings (accounts) and Sync folders.
+// The page is ours, but it is still a renderer, so the bridge stays narrow and
+// nothing here hands over a token by default. `token()` fetches one credential
+// for one account at call time, which is what `<filex-explorer>`'s
+// `auth: { kind: 'bearer', token: fn }` form is for — the value never has to sit
+// in the page between requests.
 import { contextBridge, ipcRenderer } from 'electron';
 
-// Synchronous so the global exists before any app script runs.
-const runtime = ipcRenderer.sendSync('session:runtime') as {
-  apiBaseUrl?: string;
-  bearerToken?: string;
-  useCredentials?: boolean;
-};
-
-contextBridge.exposeInMainWorld('__FILEX_RUNTIME__', {
-  apiBaseUrl: runtime.apiBaseUrl,
-  bearerToken: runtime.bearerToken,
-  // MUST be false. The renderer lives on `app://`, so every call to the server
-  // is cross-origin, and filex answers `Access-Control-Allow-Origin: *` by
-  // default. A credentialed request may not be answered with a wildcard origin
-  // (Fetch spec), so the browser would reject every response and the app would
-  // look completely dead. We authenticate with the bearer token above and have
-  // no cookie jar, so dropping credentials costs nothing.
-  useCredentials: false,
-});
-
-contextBridge.exposeInMainWorld('filexDesktop', {
+contextBridge.exposeInMainWorld('filexApp', {
   isDesktop: true,
-  openSettings: () => ipcRenderer.invoke('shell:open', '/settings'),
-  openSyncFolders: () => ipcRenderer.invoke('shell:open', '/sync'),
+
+  getState: () => ipcRenderer.invoke('state:get'),
+  token: (accountId: string) => ipcRenderer.invoke('account:token', accountId),
+
+  // accounts
+  addAccount: () => ipcRenderer.invoke('auth:add'),
+  signOut: (id: string) => ipcRenderer.invoke('auth:signOut', id),
+  switchAccount: (id: string) => ipcRenderer.invoke('auth:switch', id),
+  /** Opens the SERVER's admin panel in the system browser, not in here. */
+  openAdmin: (id: string) => ipcRenderer.invoke('account:openAdmin', id),
+
+  // files
+  storages: (accountId: string) => ipcRenderer.invoke('remote:storages', accountId),
+
+  // sync
+  browse: (accountId: string, remotePath: string) =>
+    ipcRenderer.invoke('remote:browse', accountId, remotePath),
+  addSync: (remotePath: string) => ipcRenderer.invoke('sync:add', remotePath),
+  removeSync: (id: string) => ipcRenderer.invoke('sync:remove', id),
+  syncTrash: () => ipcRenderer.invoke('sync:trash'),
+  openLocal: (p: string) => ipcRenderer.invoke('shell:openPath', p),
+
+  // app settings
+  setSettings: (patch: unknown) => ipcRenderer.invoke('settings:set', patch),
+
+  // Transfers happen in a background process and accounts can change from the
+  // tray, so the page is told when to repaint rather than only being right at
+  // the moment it opened.
+  onChanged: (fn: () => void) => ipcRenderer.on('sync:changed', () => fn()),
+  onOpenSettings: (fn: () => void) => ipcRenderer.on('app:open-settings', () => fn()),
 });

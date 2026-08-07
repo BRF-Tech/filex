@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>filex</title>
+    <!--
+      The desktop app's own chrome. Deliberately small and deliberately vanilla:
+      the only heavy thing in this window is <filex-explorer>, which is the same
+      component this project ships to embedders. Nothing here re-implements file
+      handling — it mounts the explorer and gets out of the way.
+
+      Layout:
+        • a narrow rail down the left with the signed-in accounts (click to
+          switch), an "add account" button and a gear for the app's settings
+        • everything else is the explorer for the active account
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --rail: 64px;
+        --bg: #ffffff;
+        --bg-2: #f6f7f9;
+        --line: #e3e6ea;
+        --fg: #14181d;
+        --muted: #6b7482;
+        --accent: #2f6df6;
+        --danger: #c0392b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14181d;
+          --bg-2: #1b2027;
+          --line: #2a313a;
+          --fg: #e8ecf1;
+          --muted: #97a1ae;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        font: 14px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        overflow: hidden;
+      }
+
+      /* ── account rail ────────────────────────────────────────── */
+      #rail {
+        width: var(--rail);
+        flex: 0 0 var(--rail);
+        background: var(--bg-2);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 10px 0;
+        gap: 8px;
+        -webkit-app-region: drag;      /* the rail doubles as the title bar */
+      }
+      #rail * { -webkit-app-region: no-drag; }
+      .avatar {
+        width: 42px; height: 42px;
+        border-radius: 13px;
+        border: 0;
+        display: grid;
+        place-items: center;
+        font-weight: 650;
+        font-size: 15px;
+        cursor: pointer;
+        background: #d7dee8;
+        color: #2c3644;
+        position: relative;
+        transition: border-radius .12s ease, transform .12s ease;
+      }
+      @media (prefers-color-scheme: dark) { .avatar { background: #2f3846; color: #dbe3ee; } }
+      .avatar:hover { border-radius: 10px; }
+      .avatar.active { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--accent); border-radius: 10px; }
+      /* A dot when that account has sync running, so the rail says whether the
+         thing that works in the background is actually working. */
+      .avatar .dot {
+        position: absolute; right: -2px; bottom: -2px;
+        width: 12px; height: 12px; border-radius: 50%;
+        border: 2px solid var(--bg-2);
+      }
+      .dot.ok { background: #2eb872; }
+      .dot.err { background: var(--danger); }
+      .rail-btn {
+        width: 42px; height: 42px; border-radius: 13px; border: 1px dashed var(--line);
+        background: transparent; color: var(--muted); font-size: 20px; cursor: pointer;
+        display: grid; place-items: center;
+      }
+      .rail-btn:hover { color: var(--fg); border-color: var(--muted); }
+      .spacer { flex: 1; }
+
+      /* ── main ────────────────────────────────────────────────── */
+      #main { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
+      filex-explorer { display: block; flex: 1; min-height: 0; }
+      #settings {
+        position: absolute; inset: 0; background: var(--bg);
+        overflow: auto; padding: 26px 30px 40px; display: none;
+      }
+      #settings.open { display: block; }
+
+      h1 { font-size: 19px; margin: 0 0 4px; }
+      h2 { font-size: 14px; margin: 26px 0 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+      .sub { color: var(--muted); margin: 0 0 18px; }
+      .card {
+        border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+        margin-bottom: 10px; background: var(--bg-2);
+      }
+      .between { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .muted { color: var(--muted); font-size: 13px; }
+      .err { color: var(--danger); }
+      .ok { color: #2eb872; }
+      code { background: rgba(127,127,127,.16); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+      button {
+        font: inherit; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--line);
+        background: var(--bg); color: var(--fg); cursor: pointer;
+      }
+      button:hover { border-color: var(--muted); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.danger { color: var(--danger); }
+      button.link { border: 0; background: none; color: var(--accent); padding: 4px 2px; text-decoration: underline; }
+      input[type="text"] {
+        font: inherit; padding: 7px 10px; border-radius: 8px;
+        border: 1px solid var(--line); background: var(--bg); color: var(--fg); min-width: 260px;
+      }
+      .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 10px; }
+      .close { position: absolute; top: 18px; right: 22px; }
+
+      /* remote folder browser */
+      #picker { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; place-items: center; z-index: 20; }
+      #picker.open { display: grid; }
+      #picker .panel {
+        width: min(520px, 92vw); max-height: 76vh; background: var(--bg);
+        border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column;
+      }
+      #picker ul { list-style: none; margin: 10px 0; padding: 0; overflow: auto; flex: 1; }
+      #picker li { padding: 7px 9px; border-radius: 7px; cursor: pointer; }
+      #picker li:hover { background: var(--bg-2); }
+    </style>
+  </head>
+  <body>
+    <nav id="rail"></nav>
+    <div id="main">
+      <div id="explorer-host" style="flex:1;min-height:0;display:flex"></div>
+      <section id="settings"></section>
+    </div>
+
+    <div id="picker"><div class="panel">
+      <div class="between"><strong id="pk-title">Choose a folder on the server</strong><button id="pk-close">✕</button></div>
+      <div class="muted" id="pk-path" style="margin-top:6px"></div>
+      <ul id="pk-list"></ul>
+      <div class="row" style="justify-content:flex-end">
+        <button id="pk-up">Up</button>
+        <button class="primary" id="pk-use">Sync this folder</button>
+      </div>
+    </div></div>
+
+    <script type="module">
+      import './filex.js';
+
+      const $ = (sel, root = document) => root.querySelector(sel);
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const host = (u) => { try { return new URL(u).host; } catch { return u; } };
+      const initials = (email) => (email || '?').replace(/@.*/, '').slice(0, 2).toUpperCase();
+
+      let state = { accounts: [], activeId: null, syncFolders: [], syncStatuses: [] };
+      let explorer = null;
+      let mountedFor = null;
+
+      // ── the explorer ──────────────────────────────────────────
+      // Mounted once per account. `auth.token` is a FUNCTION, which the component
+      // supports: the credential is fetched from the main process at call time
+      // rather than being handed to this page up front and kept lying around.
+      async function mountExplorer(account) {
+        const slot = $('#explorer-host');
+        if (!account) {
+          slot.innerHTML = '<div class="empty" style="margin:20px">No account is signed in.</div>';
+          explorer = null; mountedFor = null;
+          return;
+        }
+        if (mountedFor === account.id) return;
+        mountedFor = account.id;
+        slot.innerHTML = '<div class="empty" style="margin:20px">Connecting…</div>';
+
+        // ⚠ The drives root mirrors the list we hand over — it does NOT go and
+        // find the storages itself. Mounting without this produced an empty "/"
+        // that never even asked the server for a listing, which reads as a dead
+        // connection rather than a missing option.
+        let storages = [];
+        try {
+          storages = await window.filexApp.storages(account.id);
+        } catch (e) {
+          slot.innerHTML = `<div class="empty err" style="margin:20px">Could not reach ${esc(host(account.serverUrl))}: ${esc(e.message || e)}</div>`;
+          return;
+        }
+        if (mountedFor !== account.id) return;   // switched away while loading
+
+        slot.innerHTML = '';
+        explorer = document.createElement('filex-explorer');
+        explorer.style.cssText = 'display:block;flex:1;min-height:0';
+        explorer.config = {
+          apiBase: account.serverUrl,
+          auth: { kind: 'bearer', token: () => window.filexApp.token(account.id) },
+          storages,
+          multiStorageRoot: storages.length > 1,
+          // One storage does not deserve a drive-picker in front of it: open the
+          // files. More than one, and the root listing is the useful landing.
+          initialPath: storages.length === 1 ? `${storages[0].name}://` : undefined,
+          // ⚠ Deliberately not persisted. The stored path is a single global
+          // key, so remembering it would try to open account A's folder after a
+          // switch to account B.
+          pathPersist: 'none',
+          trashVisible: true,
+          theme: 'auto',
+        };
+        explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
+        slot.appendChild(explorer);
+      }
+
+      // ── rail ──────────────────────────────────────────────────
+      function renderRail() {
+        const rail = $('#rail');
+        const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
+        rail.innerHTML = '';
+        for (const a of state.accounts) {
+          const st = statusOf[a.id];
+          const b = document.createElement('button');
+          b.className = 'avatar' + (a.id === state.activeId ? ' active' : '');
+          b.title = `${a.email}\n${host(a.serverUrl)}`;
+          b.innerHTML = esc(initials(a.email)) +
+            (st ? `<span class="dot ${st.lastError ? 'err' : st.running ? 'ok' : ''}"></span>` : '');
+          b.addEventListener('click', async () => {
+            state = await window.filexApp.switchAccount(a.id);
+            render();
+          });
+          rail.appendChild(b);
+        }
+        const add = document.createElement('button');
+        add.className = 'rail-btn'; add.textContent = '+'; add.title = 'Add another account';
+        add.addEventListener('click', () => window.filexApp.addAccount());
+        rail.appendChild(add);
+
+        const sp = document.createElement('div'); sp.className = 'spacer'; rail.appendChild(sp);
+
+        const gear = document.createElement('button');
+        gear.className = 'rail-btn'; gear.textContent = '⚙'; gear.title = 'Settings';
+        gear.addEventListener('click', () => toggleSettings());
+        rail.appendChild(gear);
+      }
+
+      // ── settings (the APP's settings, not the server's) ───────
+      function settingsHtml() {
+        const active = state.accounts.find((a) => a.id === state.activeId);
+        const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
+
+        const accounts = state.accounts.length ? state.accounts.map((a) => `
+          <div class="card"><div class="between">
+            <div>
+              <div><strong>${esc(a.email)}</strong></div>
+              <div class="muted">${esc(a.serverUrl)}</div>
+            </div>
+            <div class="row">
+              <button class="link" data-admin="${a.id}">Admin panel ↗</button>
+              <button class="danger" data-signout="${a.id}">Sign out</button>
+            </div>
+          </div></div>`).join('') : '<div class="empty">No accounts.</div>';
+
+        const pairs = state.syncFolders.length ? state.syncFolders.map((f) => {
+          const acc = state.accounts.find((a) => a.id === f.accountId);
+          const st = statusOf[f.accountId];
+          let line = 'waiting to start', cls = 'muted';
+          if (st && st.lastError) { line = st.lastError; cls = 'err'; }
+          else if (st && st.running) { line = st.lastLine || 'watching for changes'; cls = 'ok'; }
+          else if (st) { line = 'stopped'; cls = 'err'; }
+          return `
+          <div class="card"><div class="between">
+            <div style="min-width:0">
+              <div><code>${esc(f.remotePath)}</code></div>
+              <div class="muted" style="overflow-wrap:anywhere">↔ ${esc(f.localPath)}</div>
+              <div class="muted">${esc(acc ? acc.email : 'unknown account')}</div>
+              <div class="${cls}" style="font-size:13px">${esc(line)}</div>
+            </div>
+            <div class="row">
+              <button data-openlocal="${esc(f.localPath)}">Open folder</button>
+              <button class="danger" data-rmsync="${f.id}">Stop syncing</button>
+            </div>
+          </div></div>`;
+        }).join('') : '<div class="empty">No folders are syncing yet.</div>';
+
+        const engineWarning = state.syncEngine === 'missing'
+          ? '<div class="card err">The sync engine is missing from this build, so nothing will transfer.</div>' : '';
+
+        return `
+          <button class="close" id="close-settings">✕</button>
+          <h1>Settings</h1>
+          <p class="sub">These are this app's settings. Your server's own settings live in its admin panel.</p>
+
+          <h2>Accounts</h2>
+          ${accounts}
+          <div class="row"><button id="add-account">Add another account</button></div>
+
+          <h2>Synced folders</h2>
+          ${engineWarning}
+          ${pairs}
+          <div class="row" style="margin-top:6px">
+            <button class="primary" id="add-sync" ${active ? '' : 'disabled'}>Sync a folder…</button>
+            <button id="sync-trash">Recently deleted</button>
+          </div>
+          <p class="muted" style="margin-top:10px">
+            The first sync of a folder merges both sides and deletes nothing. After that deletes
+            carry across; anything removed from this computer is kept for 30 days.
+          </p>
+
+          <h2>This app</h2>
+          <div class="card"><div class="between">
+            <div><strong>Keep running in the background</strong>
+              <div class="muted">Closing the window leaves filex in the tray so folders keep syncing.</div></div>
+            <button id="bg">${state.runInBackground ? 'On' : 'Off'}</button>
+          </div></div>
+          <div class="card"><div class="between">
+            <div><strong>Start when I sign in</strong>
+              <div class="muted">${state.launchAtLoginEffective === false && state.launchAtLogin
+                ? 'Requested, but the system did not accept it.' : 'Launches minimised to the tray.'}</div></div>
+            <button id="login-item">${state.launchAtLogin ? 'On' : 'Off'}</button>
+          </div></div>
+          <p class="muted">filex ${esc(state.appVersion || '')}</p>`;
+      }
+
+      function toggleSettings(force) {
+        const el = $('#settings');
+        const open = force ?? !el.classList.contains('open');
+        el.classList.toggle('open', open);
+        // ⚠ Hide the explorer, don't just cover it. Its onboarding tour and any
+        // open menu are fixed-position overlays that sit ABOVE this panel — the
+        // tour card was landing in the middle of Settings.
+        $('#explorer-host').style.display = open ? 'none' : 'flex';
+        if (open) renderSettings();
+      }
+
+      function renderSettings() {
+        const el = $('#settings');
+        el.innerHTML = settingsHtml();
+        $('#close-settings', el).addEventListener('click', () => toggleSettings(false));
+        el.querySelectorAll('[data-signout]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.signOut(b.dataset.signout); render(); renderSettings();
+        }));
+        el.querySelectorAll('[data-admin]').forEach((b) => b.addEventListener('click', () =>
+          window.filexApp.openAdmin(b.dataset.admin)));
+        el.querySelectorAll('[data-openlocal]').forEach((b) => b.addEventListener('click', () =>
+          window.filexApp.openLocal(b.dataset.openlocal)));
+        el.querySelectorAll('[data-rmsync]').forEach((b) => b.addEventListener('click', async () => {
+          try { state = await window.filexApp.removeSync(b.dataset.rmsync); }
+          catch (e) { alert(String(e.message || e)); }
+          render(); renderSettings();
+        }));
+        $('#add-account', el).addEventListener('click', () => window.filexApp.addAccount());
+        const addSync = $('#add-sync', el);
+        if (addSync) addSync.addEventListener('click', () => openPicker());
+        $('#sync-trash', el).addEventListener('click', async () => {
+          const items = await window.filexApp.syncTrash();
+          alert(items.length
+            ? `Kept for 30 days:\n\n${items.slice(0, 25).map((i) => `${i.rel}  (${new Date(i.deleted).toLocaleDateString()})`).join('\n')}`
+            : 'Nothing has been removed by sync.');
+        });
+        $('#bg', el).addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ runInBackground: !state.runInBackground });
+          renderSettings();
+        });
+        $('#login-item', el).addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ launchAtLogin: !state.launchAtLogin });
+          renderSettings();
+        });
+      }
+
+      // ── remote folder picker ──────────────────────────────────
+      // Typing `storage://some/path` by hand is a guess about someone else's
+      // server. This walks the real listing instead.
+      let pkPath = '';
+      async function openPicker(path = '') {
+        pkPath = path;
+        $('#picker').classList.add('open');
+        const list = $('#pk-list');
+        list.innerHTML = '<li class="muted">Loading…</li>';
+        $('#pk-path').textContent = path || 'Storages on this server';
+        try {
+          const entries = await window.filexApp.browse(state.activeId, path);
+          list.innerHTML = '';
+          if (!entries.length) list.innerHTML = '<li class="muted">No folders here.</li>';
+          for (const e of entries) {
+            const li = document.createElement('li');
+            li.textContent = `📁 ${e.name}`;
+            li.addEventListener('click', () => openPicker(e.path));
+            list.appendChild(li);
+          }
+        } catch (e) {
+          list.innerHTML = `<li class="err">${esc(e.message || e)}</li>`;
+        }
+      }
+      $('#pk-close').addEventListener('click', () => $('#picker').classList.remove('open'));
+      $('#pk-up').addEventListener('click', () => {
+        if (!pkPath) return;
+        const i = pkPath.lastIndexOf('/');
+        openPicker(i > pkPath.indexOf('://') + 2 ? pkPath.slice(0, i) : '');
+      });
+      $('#pk-use').addEventListener('click', async () => {
+        if (!pkPath) { alert('Open a storage first, then choose a folder inside it.'); return; }
+        try {
+          state = await window.filexApp.addSync(pkPath);
+          $('#picker').classList.remove('open');
+          render(); renderSettings();
+        } catch (e) { alert(String(e.message || e)); }
+      });
+
+      // ── boot ──────────────────────────────────────────────────
+      function render() {
+        renderRail();
+        void mountExplorer(state.accounts.find((a) => a.id === state.activeId));
+      }
+
+      async function refresh() {
+        state = await window.filexApp.getState();
+        render();
+        if ($('#settings').classList.contains('open')) renderSettings();
+      }
+
+      window.filexApp.onChanged(() => refresh());
+      window.filexApp.onOpenSettings(() => toggleSettings(true));
+      refresh();
+    </script>
+  </body>
+</html>
