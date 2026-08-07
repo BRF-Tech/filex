@@ -215,6 +215,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 - [Installation](docs/INSTALLATION.md)
 - [Configuration](docs/CONFIGURATION.md)
+- [Desktop app & folder sync](docs/SYNC.md)
 - [Integration / embedding](docs/INTEGRATION.md)
 - [AI & MCP](docs/MCP.md)
 - [RBAC & permissions](docs/RBAC.md)

@@ -29,6 +29,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Features
 
+- [Desktop app & folder sync](SYNC.md) — a folder on your PC kept in step with the server
 - [Sharing & file requests](SHARING.md) — public download links + upload/file‑drop
 - [Thumbnails](thumbnails.md) — image / video / pdf / office previews
 - [Search](SEARCH.md) — embedded full‑text index
@@ -50,6 +51,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [HTTP / component API](API.md)
 - [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component
 - [AI & MCP](MCP.md) — API tokens, scopes, and the MCP endpoint for agents
+- [Migration](MIGRATION.md)
 
 ---
 
