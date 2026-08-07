@@ -7,7 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.11.0 below.)
+(Nothing yet — see v0.12.0 below.)
+
+## [0.12.0] - 2026-08-07
+
+### Added
+
+- **Selective folder sync.** A folder on your computer and a folder on a filex
+  server are kept in step in both directions, in the background — the desktop
+  app's "Sync folders" panel now actually transfers files rather than only
+  recording pairings.
+
+  The engine ships as `filex sync` in the CLI, and the desktop app runs that
+  same binary. One implementation, two front ends: a terminal and the app read
+  and write the same `~/.filex/sync/pairs.json`, so they can never disagree
+  about what is paired.
+
+  ```
+  filex sync add ~/Documents/work docs://work
+  filex sync run --watch 30s
+  filex sync trash              # what sync removed from this machine
+  ```
+
+  How it decides, in short:
+
+  - **The first sync of a pair deletes nothing.** With no record of a previous
+    run there is no way to tell "you deleted this" from "you have not
+    downloaded it yet", and guessing wrong empties a folder. Both sides are
+    merged instead.
+  - **A delete never beats an edit.** If a file was removed on one side but
+    changed on the other since the last sync, the change wins and the file is
+    restored.
+  - **Changed in both places keeps both.** Your file keeps its name; the
+    server's copy lands beside it as `report (server copy 2026-08-07 14-05).xlsx`.
+  - **Anything sync removes from your machine is kept for 30 days**
+    (`filex sync trash --restore <path>`). The engine never calls delete on
+    local content directly.
+  - Local and server timestamps are never compared to each other — only
+    against what that side looked like at the end of the last run — so clock
+    skew and the new mtime an upload gets cannot make files look permanently
+    conflicted.
+  - Paths in a server listing are validated before anything is written, so a
+    listing containing `..` cannot write outside the sync folder.
+  - Interrupted downloads are written to a temporary file and renamed, so a
+    half-transferred file is never mistaken for a complete one.
+
+- **`filex sync run --dry-run`** prints exactly what would happen before
+  anything is touched, and `--account` limits a run to one signed-in server
+  (one token cannot speak for two).
+
+### Fixed
+
+- **Pairing a folder to a server path that did not exist yet failed on every
+  run.** The listing cannot walk a missing directory, so nothing ever synced
+  and the folder had to be created by hand in the web UI first. Found against a
+  live server, not in a unit test.
+
 
 ## [0.11.0] - 2026-08-07
 

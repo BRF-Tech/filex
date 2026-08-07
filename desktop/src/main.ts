@@ -35,6 +35,7 @@ import {
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
+import { SyncSupervisor, addPair, cliPath, listPairs, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'app');
@@ -55,6 +56,7 @@ let shellWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let pendingAuth: PendingAuth | null = null;
 let quitting = false;
+let supervisor: SyncSupervisor | null = null;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -226,10 +228,30 @@ function publicState() {
   return {
     accounts: state.accounts.map(({ token, ...rest }) => rest), // never hand the token to a renderer
     activeId: state.activeId,
-    syncFolders: state.syncFolders,
+    // Pairings come from the CLI's own state file, not from a copy kept here.
+    // Two records of what is paired is two records that can disagree, and the
+    // one the engine reads would win silently.
+    syncFolders: knownPairs.map((p) => ({
+      id: p.id,
+      accountId: p.account ?? '',
+      remotePath: p.remote,
+      localPath: p.local,
+      enabled: !p.paused,
+    })),
+    syncStatuses: supervisor?.statuses() ?? [],
+    syncEngine: cliPath() ? 'bundled' : 'missing',
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
   };
+}
+
+/** Cache of the CLI's pairs, refreshed whenever they change. Reading the file
+ *  through the CLI on every IPC call would fork a process per keystroke. */
+let knownPairs: Pair[] = [];
+
+async function refreshPairs(): Promise<void> {
+  knownPairs = await listPairs();
+  await supervisor?.reconcile(state.accounts, (id) => state.accounts.find((a) => a.id === id)?.token ?? null);
 }
 
 function wireIpc(): void {
@@ -297,31 +319,37 @@ function wireIpc(): void {
   ipcMain.handle('sync:add', async (_e, remotePath: string) => {
     const acc = activeAccount(state);
     if (!acc) throw new Error('no active account');
-    const picked = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
-    if (picked.canceled || !picked.filePaths[0]) return publicState();
-    state.syncFolders.push({
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      accountId: acc.id,
-      remotePath: remotePath || '/',
-      localPath: picked.filePaths[0],
-      enabled: true,
-      lastSyncAt: null,
-      status: 'never',
-    });
-    saveState(state);
+    const remote = String(remotePath || '').trim();
+    // The remote side must name a storage. A bare path is ambiguous the moment
+    // a server hosts more than one, and guessing would pair the wrong folder.
+    if (!remote.includes('://')) {
+      throw new Error('Enter the server folder as storage://path, for example docs://reports');
+    }
+    // The folder picker is OS chrome that an automated run cannot reach. Rather
+    // than let the sync path go untested, the same env flag that suppresses the
+    // browser also supplies the folder — so the test drives the REAL handler,
+    // and this hook is unreachable in a normal run.
+    const preset =
+      process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
+    let localDir = preset;
+    if (!localDir) {
+      const picked = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+      if (picked.canceled || !picked.filePaths[0]) return publicState();
+      localDir = picked.filePaths[0];
+    }
+    await addPair(localDir, remote, acc.id);
+    await refreshPairs();
     return publicState();
   });
 
-  ipcMain.handle('sync:remove', (_e, id: string) => {
-    state.syncFolders = state.syncFolders.filter((f) => f.id !== id);
-    saveState(state);
+  ipcMain.handle('sync:remove', async (_e, id: string) => {
+    await removePair(id);
+    await refreshPairs();
     return publicState();
   });
 
-  ipcMain.handle('sync:toggle', (_e, id: string) => {
-    const f = state.syncFolders.find((x) => x.id === id);
-    if (f) f.enabled = !f.enabled;
-    saveState(state);
+  ipcMain.handle('sync:refresh', async () => {
+    await refreshPairs();
     return publicState();
   });
 
@@ -386,9 +414,16 @@ if (!app.requestSingleInstanceLock()) {
 
     registerAppProtocol();
     state = loadState();
+    // The supervisor keeps a `filex sync run --watch` alive per account. It is
+    // started here, not when the Sync folders window opens: syncing that only
+    // happens while a panel is on screen is not syncing.
+    supervisor = new SyncSupervisor(() => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+    });
     wireIpc();
     buildTray();
     route();
+    void refreshPairs();
 
     // Windows/Linux deliver the launch deep link as an argv entry.
     const initial = process.argv.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
@@ -399,6 +434,10 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     quitting = true;
+    // Kill the watchers explicitly. Orphaned CLI processes would keep syncing
+    // after the app is gone, which is both surprising and impossible to stop
+    // from the UI that no longer exists.
+    supervisor?.stopAll();
   });
 
   app.on('window-all-closed', () => {

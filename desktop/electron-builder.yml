@@ -13,6 +13,15 @@ directories:
 extraResources:
   - from: build/icon.png
     to: icon.png
+  # The sync engine. It is the same `filex` binary the project releases as a
+  # CLI, not a cut-down copy: syncing is `filex sync run`, so the app and a
+  # terminal act on one implementation and one pairing file. Built per platform
+  # by scripts/fetch-cli.mjs before packaging.
+  - from: build/bin
+    to: bin
+    filter:
+      - filex
+      - filex.exe
 
 files:
   - dist/**/*

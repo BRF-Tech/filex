@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('filexShell', {
   setSettings: (patch: unknown) => ipcRenderer.invoke('settings:set', patch),
   addSyncFolder: (remotePath: string) => ipcRenderer.invoke('sync:add', remotePath),
   removeSyncFolder: (id: string) => ipcRenderer.invoke('sync:remove', id),
-  toggleSyncFolder: (id: string) => ipcRenderer.invoke('sync:toggle', id),
+  refreshSync: () => ipcRenderer.invoke('sync:refresh'),
+  // Transfers happen in a background process, so the panel has to be told when
+  // something moved rather than only showing whatever was true when it opened.
+  onSyncChanged: (fn: () => void) => ipcRenderer.on('sync:changed', () => fn()),
   __testDeepLink: (url: string) => ipcRenderer.invoke('test:deepLink', url),
 });

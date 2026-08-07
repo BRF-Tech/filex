@@ -60,6 +60,7 @@ func main() {
 		storageCmd(),
 		thumbCmd(),
 		clientCmd(),
+		syncCmd(),
 		selfUpdateCmd(),
 	)
 

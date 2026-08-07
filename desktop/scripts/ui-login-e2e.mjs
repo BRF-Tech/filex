@@ -115,8 +115,21 @@ try {
 
   // ── the app window ────────────────────────────────────────────────
   const appWindow = await app.waitForEvent('window', { timeout: 60_000 });
+  // The window event fires at CREATION, while the document is still the blank
+  // one Electron starts with (origin "null"). Sampling the origin right here
+  // measures that blank frame, not the app — wait for the real navigation.
+  await appWindow.waitForURL(/^app:\/\/filex/, { timeout: 30_000 }).catch(() => {});
   await appWindow.waitForLoadState('domcontentloaded');
-  check('explorer window opens on app://', (await appWindow.evaluate(() => location.origin)) === 'app://filex');
+  const origin = await appWindow.evaluate(() => location.origin);
+  check('explorer window opens on app://', origin === 'app://filex', `${origin} url=${appWindow.url()}`);
+  // ⚠ Stop here if it did not load. The preload runs on Chromium's error page
+  // too, so __FILEX_RUNTIME__ is present and no password field is visible —
+  // every check below would report PASS against a window showing nothing at
+  // all. Measured: a missing web bundle produced 6 green checks on
+  // chrome-error://chromewebdata/.
+  if (origin !== 'app://filex') {
+    throw new Error(`the explorer never loaded (${appWindow.url()}) — run \`pnpm run build\` first`);
+  }
   check('no application menu', (await appWindow.evaluate(() => document.title)) !== null);
 
   const runtime = await appWindow.evaluate(() => ({

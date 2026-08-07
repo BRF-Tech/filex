@@ -154,9 +154,18 @@
 
       function syncView() {
         const byId = Object.fromEntries(state.accounts.map((a) => [a.id, a]));
+        const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
         const rows = state.syncFolders.length
           ? state.syncFolders.map((f) => {
               const acc = byId[f.accountId];
+              const st = statusOf[f.accountId];
+              // Report what the engine actually said. A row that always reads
+              // "synced" is worse than no row: it is a claim nobody measured.
+              let line = 'waiting to start';
+              let cls = '';
+              if (st && st.lastError) { line = st.lastError; cls = 'err'; }
+              else if (st && st.running) { line = st.lastLine || 'watching for changes'; cls = 'on'; }
+              else if (st) { line = 'stopped'; cls = 'err'; }
               return `
                 <div class="card">
                   <div class="between">
@@ -164,12 +173,12 @@
                       <div><code>${esc(f.remotePath)}</code> → <code>${esc(f.localPath)}</code></div>
                       <div class="muted">
                         ${esc(acc ? acc.email : 'unknown account')} · ${esc(acc ? new URL(acc.serverUrl).host : '—')}
-                        · ${f.lastSyncAt ? 'last sync ' + esc(f.lastSyncAt) : 'never synced'}
+                        ${st && st.lastRunAt ? '· ' + esc(new Date(st.lastRunAt).toLocaleTimeString()) : ''}
                       </div>
+                      <div class="muted ${cls}" data-syncline="${f.id}">${esc(line)}</div>
                     </div>
                     <div class="row">
-                      <span class="pill ${f.enabled ? 'on' : ''}">${f.enabled ? 'enabled' : 'paused'}</span>
-                      <button class="ghost" data-toggle="${f.id}">${f.enabled ? 'Pause' : 'Resume'}</button>
+                      <span class="pill ${cls === 'on' ? 'on' : ''}">${cls === 'on' ? 'syncing' : cls === 'err' ? 'attention' : 'idle'}</span>
                       <button class="danger" data-rmsync="${f.id}">Remove</button>
                     </div>
                   </div>
@@ -177,16 +186,26 @@
             }).join('')
           : '<div class="empty">No folders paired yet.</div>';
 
+        const engineWarning = state.syncEngine === 'missing'
+          ? '<div class="card err">The sync engine is not bundled with this build, so nothing will transfer.</div>'
+          : '';
+
         return `
           ${nav('/sync')}
           <h1>Sync folders</h1>
-          <p class="sub">Folders kept on this computer, and which account they belong to.</p>
+          <p class="sub">Folders kept in step between this computer and your servers.</p>
+          ${engineWarning}
           ${rows}
           <div class="row" style="margin-top:6px">
-            <input id="remote" type="text" placeholder="Remote folder, e.g. Dosyalar://projects" />
+            <input id="remote" type="text" placeholder="Server folder, e.g. docs://projects" />
             <button id="add" style="white-space:nowrap">Choose local folder…</button>
           </div>
-          <p class="muted" style="margin-top:14px">Pairings are recorded here; the transfer engine is a separate piece of work and is not running yet.</p>`;
+          <p class="muted" style="margin-top:14px">
+            The first sync of a folder merges both sides and deletes nothing. After that,
+            deletes carry across — anything removed from this computer is kept for
+            ${esc(String(30))} days and can be restored with <code>filex sync trash</code>.
+            When a file changed in both places, both versions are kept.
+          </p>`;
       }
 
       async function render() {
@@ -253,10 +272,11 @@
           b.addEventListener('click', async () => { await window.filexShell.signOut(b.dataset.signout); render(); }));
         root.querySelectorAll('[data-switch]').forEach((b) =>
           b.addEventListener('click', async () => { await window.filexShell.switchAccount(b.dataset.switch); render(); }));
-        root.querySelectorAll('[data-toggle]').forEach((b) =>
-          b.addEventListener('click', async () => { await window.filexShell.toggleSyncFolder(b.dataset.toggle); render(); }));
         root.querySelectorAll('[data-rmsync]').forEach((b) =>
-          b.addEventListener('click', async () => { await window.filexShell.removeSyncFolder(b.dataset.rmsync); render(); }));
+          b.addEventListener('click', async () => {
+            try { await window.filexShell.removeSyncFolder(b.dataset.rmsync); } catch (e) { alert(String(e.message || e)); }
+            render();
+          }));
 
         const bg = root.querySelector('#bg');
         if (bg) bg.addEventListener('click', async () => {
@@ -268,8 +288,17 @@
         });
         const add = root.querySelector('#add');
         if (add) add.addEventListener('click', async () => {
-          await window.filexShell.addSyncFolder(root.querySelector('#remote').value); render();
+          // Pairing can be refused for good reasons — an overlapping folder, a
+          // remote that names no storage. Say which instead of doing nothing.
+          try { await window.filexShell.addSyncFolder(root.querySelector('#remote').value); }
+          catch (e) { alert(String(e.message || e)); }
+          render();
         });
+      }
+
+      // The engine runs in a background process; repaint when it reports.
+      if (window.filexShell.onSyncChanged) {
+        window.filexShell.onSyncChanged(() => { if (routeOf() === '/sync') render(); });
       }
 
       window.addEventListener('hashchange', render);
