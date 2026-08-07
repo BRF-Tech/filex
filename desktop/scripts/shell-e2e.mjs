@@ -59,9 +59,19 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-shell-e2e-'));
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
 const cli = path.join(DESKTOP, 'build', 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex');
 
+// FILEX_APP_BINARY points at a PACKAGED build (release2/win-unpacked/filex.exe,
+// or the AppImage's unpacked binary). Worth running: `electron .` loads files
+// straight off disk, so it cannot catch anything that goes wrong at packaging
+// time — a file missing from the asar, a resource path that only resolves in
+// the source tree. The installed app is what the user actually runs.
+//
+// ⚠ The hermetic --user-data-dir also keeps the single-instance lock separate,
+// so this never hijacks or kills an app the operator has open.
+const packaged = process.env.FILEX_APP_BINARY;
 const app = await _electron.launch({
-  args: [DESKTOP, `--user-data-dir=${profile}`],
-  cwd: DESKTOP,
+  ...(packaged
+    ? { executablePath: packaged, args: [`--user-data-dir=${profile}`] }
+    : { args: [DESKTOP, `--user-data-dir=${profile}`], cwd: DESKTOP }),
   env: {
     ...process.env,
     FILEX_NO_BROWSER: '1',
@@ -70,6 +80,7 @@ const app = await _electron.launch({
     ...(fs.existsSync(cli) ? { FILEX_CLI: cli } : {}),
   },
 });
+if (packaged) console.log(`(driving the PACKAGED app: ${packaged})`);
 
 try {
   // ── sign in ───────────────────────────────────────────────────────
