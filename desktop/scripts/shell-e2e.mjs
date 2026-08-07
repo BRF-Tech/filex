@@ -158,11 +158,22 @@ try {
   check('settings offers start-at-login', /Start when I sign in/i.test(settings.text));
   check('the admin panel is a LINK OUT, not a screen in here',
     /Admin panel/.test(settings.text));
-  // The explorer's own overlays (onboarding tour, open menus) are fixed-position
-  // and sat ON TOP of this panel until it was hidden rather than covered.
-  const explorerHidden = await win.evaluate(() =>
-    getComputedStyle(document.querySelector('#explorer-host')).display === 'none');
-  check('the explorer is hidden behind settings, not just covered', explorerHidden);
+  // ⚠ Ask what is ACTUALLY on top, not whether the element I chose to hide is
+  // hidden. The earlier version of this check asserted `#explorer-host` was
+  // display:none — it was, and it passed, while the explorer's onboarding tour
+  // (a child of <body>, not of the host) carried on sitting in the middle of
+  // Settings. The screenshot showed it; the test did not. elementFromPoint is
+  // the browser's own answer to "what would the user click here".
+  const onTop = await win.evaluate(() => {
+    const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    return { inSettings: !!el?.closest('#settings'), got: el?.className?.toString?.().slice(0, 40) ?? el?.tagName };
+  });
+  check('nothing overlays the settings panel', onTop.inSettings, `topmost = ${onTop.got}`);
+  const tourVisible = await win.evaluate(() => {
+    const t = document.querySelector('.fe-tour');
+    return !!t && getComputedStyle(t).display !== 'none';
+  });
+  check("the explorer's onboarding tour is not on top of settings", !tourVisible);
 
   await win.screenshot({ path: path.join(REPO, 'desktop-shell-settings.png') });
 

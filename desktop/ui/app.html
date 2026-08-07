@@ -99,8 +99,16 @@
       #settings {
         position: absolute; inset: 0; background: var(--bg);
         overflow: auto; padding: 26px 30px 40px; display: none;
+        /* ⚠ Above anything the explorer puts on the page. Its onboarding tour is
+           appended to document.body at z-index 96 and its menus are fixed too,
+           so a panel in the normal stacking order gets covered by them. */
+        z-index: 200;
       }
       #settings.open { display: block; }
+      /* ⚠ Hiding #explorer-host is NOT enough: .fe-tour is a child of <body>,
+         not of the explorer, so it survives its host being hidden and lands in
+         the middle of Settings — measured, twice. */
+      body.settings-open .fe-tour { display: none !important; }
 
       h1 { font-size: 19px; margin: 0 0 4px; }
       h2 { font-size: 14px; margin: 26px 0 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -335,10 +343,11 @@
         const el = $('#settings');
         const open = force ?? !el.classList.contains('open');
         el.classList.toggle('open', open);
-        // ⚠ Hide the explorer, don't just cover it. Its onboarding tour and any
-        // open menu are fixed-position overlays that sit ABOVE this panel — the
-        // tour card was landing in the middle of Settings.
+        // Hide the explorer, don't just cover it. The body class additionally
+        // hides overlays the explorer parents to <body> — hiding the host alone
+        // left the tour card sitting in the middle of Settings.
         $('#explorer-host').style.display = open ? 'none' : 'flex';
+        document.body.classList.toggle('settings-open', open);
         if (open) renderSettings();
       }
 

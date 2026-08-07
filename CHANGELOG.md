@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.13.0 below.)
+(Nothing yet — see v0.13.1 below.)
+
+## [0.13.1] - 2026-08-07
+
+### Fixed
+
+- **The explorer's onboarding tour sat on top of the desktop app's Settings
+  panel.** The tour is appended to `<body>`, not to the explorer, so hiding the
+  explorer left it exactly where it was — in the middle of Settings.
+
+  ⚠ The v0.13.0 test for this passed while the bug was on screen: it asserted
+  that the element *we* hide was hidden, which was true and beside the point.
+  It now asks the browser what is actually topmost
+  (`document.elementFromPoint`) — which fails on the old code and passes on the
+  new, both measured.
+
 
 ## [0.13.0] - 2026-08-07
 
