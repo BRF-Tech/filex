@@ -1,0 +1,53 @@
+appId: sh.brf.filex.desktop
+productName: filex
+copyright: © BRF Tech
+
+directories:
+  output: release
+  buildResources: build
+
+# What ends up inside the packaged app: the compiled main/preload (dist),
+# the embedded web bundle (app), and our own chrome (ui: connect/settings/sync).
+# The tray reads the icon at runtime, so it has to exist next to the app as
+# well as being baked into the executable.
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
+files:
+  - dist/**/*
+  - app/**/*
+  - ui/**/*
+  - package.json
+
+# First release is UNSIGNED (Dilim 2, trap #4): Windows SmartScreen and macOS
+# Gatekeeper will warn. This is a deliberate, separate decision (a code-signing
+# certificate is paid + its own task) — not a bug.
+# Artifact names come from productName, not the npm package name. Without this
+# the .deb is built as "@brftech/filex-desktop_0.1.0_amd64.deb" — a scoped npm
+# name is not a legal Debian package name (it contains a slash), so the file is
+# both wrong and awkward to install.
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+  # Required by the deb target; without it electron-builder refuses to build.
+  maintainer: BRF Tech <security@brf.sh>
+  # The binary users actually type, and what the Debian package is named after.
+  # Defaults to the npm name otherwise, which would be "@brftech/filex-desktop"
+  # — not a legal Debian package name.
+  executableName: filex
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

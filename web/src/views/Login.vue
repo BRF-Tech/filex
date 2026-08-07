@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
@@ -80,6 +81,10 @@ async function fetchBranding() {
 
 onMounted(async () => {
   void fetchBranding(); /* wiring:e1 */
+  // Desktop hand-off: remember it NOW. The OIDC round-trip wipes the query
+  // string, so reading these later would only ever work for password logins —
+  // i.e. exactly the case the desktop flow does not need.
+  stashDesktopHandoff(route.query.desktop_state, route.query.desktop_challenge);
   if (!caps.loaded) await caps.fetch();
   // Loop guards: never auto-redirect when the visitor explicitly asked for
   // the password form (?local=1), when the IdP round-trip just failed

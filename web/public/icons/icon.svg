@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="filex">
+  <!-- Full-bleed background so the icon is safe as a maskable PWA icon:
+       all meaningful content stays inside the centre 80% safe zone. -->
+  <rect width="512" height="512" fill="#4f46e5"/>
+  <!-- Folder body -->
+  <g fill="none" stroke="#ffffff" stroke-width="22" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M136 168 h84 l28 34 h128 a12 12 0 0 1 12 12 v130 a12 12 0 0 1 -12 12 H136 a12 12 0 0 1 -12 -12 V180 a12 12 0 0 1 12 -12 z" fill="#ffffff" fill-opacity="0.14"/>
+  </g>
+  <!-- "fx" wordmark, centred -->
+  <text x="256" y="322" text-anchor="middle" font-family="'Segoe UI', system-ui, sans-serif"
+        font-size="150" font-weight="700" fill="#ffffff" letter-spacing="-6">fx</text>
+</svg>

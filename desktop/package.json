@@ -1,0 +1,31 @@
+{
+  "name": "@brftech/filex-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "filex desktop shell — embeds the filex web app in an Electron window with a native login + secure token storage (Dilim 2)",
+  "author": "BRF Tech <security@brf.sh>",
+  "license": "MIT",
+  "homepage": "https://filex.sh",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "sync-web": "node scripts/sync-web.mjs",
+    "build:main": "tsc -p tsconfig.json",
+    "build": "pnpm run sync-web && pnpm run build:main",
+    "dev": "pnpm run build && electron .",
+    "smoke": "electron scripts/plumbing-smoke.mjs",
+    "dist": "pnpm run build && electron-builder",
+    "dist:linux": "pnpm run build && electron-builder --linux",
+    "dist:win": "pnpm run build && electron-builder --win",
+    "dist:mac": "pnpm run build && electron-builder --mac",
+    "clean": "rimraf dist app",
+    "e2e:ui": "node scripts/ui-login-e2e.mjs",
+    "icon": "electron scripts/make-icon.mjs"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3"
+  }
+}

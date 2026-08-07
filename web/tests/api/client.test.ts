@@ -86,6 +86,39 @@ describe('api/client', () => {
     expect(out.headers.Authorization).toBe('Bearer tkn-1');
   });
 
+  it('request interceptor sets config.baseURL to /api by default (web unchanged)', async () => {
+    const { api, installAxiosInterceptors } = await freshClient();
+    installAxiosInterceptors({ router: fakeRouter() });
+
+    const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string>; baseURL?: string }) => unknown }> }).handlers;
+    const handler = handlers[handlers.length - 1];
+    const out = (await handler.fulfilled({
+      method: 'get',
+      headers: {} as Record<string, string>,
+    })) as { baseURL?: string };
+    expect(out.baseURL).toBe('/api');
+  });
+
+  it('request interceptor honours a runtime API base override (Electron path)', async () => {
+    vi.resetModules();
+    const runtime = await import('@/api/runtimeConfig');
+    runtime.setApiBaseUrl('https://fm.brf.sh/api');
+    // client.ts must import the SAME runtimeConfig module instance so the
+    // override is visible; freshClient()'s resetModules would give it a
+    // different one, so import client without resetting here.
+    const { api, installAxiosInterceptors } = await import('@/api/client');
+    installAxiosInterceptors({ router: fakeRouter() });
+
+    const handlers = (api.interceptors.request as unknown as { handlers: Array<{ fulfilled: (cfg: { method?: string; headers?: Record<string, string>; baseURL?: string }) => unknown }> }).handlers;
+    const handler = handlers[handlers.length - 1];
+    const out = (await handler.fulfilled({
+      method: 'get',
+      headers: {} as Record<string, string>,
+    })) as { baseURL?: string };
+    expect(out.baseURL).toBe('https://fm.brf.sh/api');
+    runtime.setApiBaseUrl(''); // reset so later tests see the default
+  });
+
   it('response interceptor calls onUnauthorized for 401 outside login', async () => {
     const { api, installAxiosInterceptors } = await freshClient();
     const onUnauthorized = vi.fn();

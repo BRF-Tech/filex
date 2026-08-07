@@ -4,6 +4,17 @@
     "tagline": "Self-hosted file manager",
     "admin": "Admin"
   },
+  "install": {
+    "title": "Install filex",
+    "subtitle": "Add it to your device for quick, app-like access.",
+    "install": "Install",
+    "iosInstructions": "Tap the Share button, then “Add to Home Screen”.",
+    "updateAvailable": "A new version is available.",
+    "reload": "Reload",
+    "desktopTitle": "Get the filex desktop app",
+    "desktopSubtitle": "Sync folders to this computer and keep them up to date in the background. Available for {platform}.",
+    "desktopDownload": "Download for {platform}"
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",
@@ -948,5 +959,11 @@
       "binary": "binary install",
       "docker": "container install"
     }
+  },
+  "desktop": {
+    "handoff": "You can return to the desktop app — authorization complete.",
+    "codeHint": "If the app did not open, copy this code into its waiting screen:",
+    "copy": "Copy",
+    "copied": "Copied"
   }
 }

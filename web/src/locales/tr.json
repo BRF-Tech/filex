@@ -4,6 +4,17 @@
     "tagline": "Self-hosted dosya yöneticisi",
     "admin": "Yönetim"
   },
+  "install": {
+    "title": "filex'i yükle",
+    "subtitle": "Uygulama gibi hızlı erişim için cihazına ekle.",
+    "install": "Yükle",
+    "iosInstructions": "Paylaş düğmesine dokun, ardından “Ana Ekrana Ekle”yi seç.",
+    "updateAvailable": "Yeni bir sürüm mevcut.",
+    "reload": "Yenile",
+    "desktopTitle": "filex masaüstü uygulamasını edinin",
+    "desktopSubtitle": "Klasörleri bu bilgisayara eşitleyin, arka planda güncel kalsınlar. {platform} için mevcut.",
+    "desktopDownload": "{platform} için indir"
+  },
   "common": {
     "save": "Kaydet",
     "cancel": "İptal",
@@ -948,5 +959,11 @@
       "binary": "ikili kurulum",
       "docker": "container kurulumu"
     }
+  },
+  "desktop": {
+    "handoff": "Masaüstü uygulamasına dönebilirsiniz — yetkilendirme tamamlandı.",
+    "codeHint": "Uygulama açılmadıysa bu kodu bekleme ekranına yapıştırın:",
+    "copy": "Kopyala",
+    "copied": "Kopyalandı"
   }
 }

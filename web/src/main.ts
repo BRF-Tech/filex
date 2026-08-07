@@ -7,8 +7,14 @@ import { i18n, applyStoredLocale } from './i18n';
 import { applyStoredTheme } from './lib/theme';
 import { useToastStore } from './stores/toast';
 import { installAxiosInterceptors } from './api/client';
+import { initRuntimeConfig } from './api/runtimeConfig';
 
 import './styles/main.css';
+
+// Pick up any injected runtime config (Electron preload sets the API base +
+// token before the bundle boots). No-op in the plain web build. Must run before
+// the first request fires from the router guard.
+initRuntimeConfig();
 
 // Apply theme + locale before mount so we never flash the wrong palette.
 applyStoredTheme();

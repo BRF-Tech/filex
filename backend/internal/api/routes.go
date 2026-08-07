@@ -186,6 +186,7 @@ func BuildRouter(d *Deps) http.Handler {
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
 	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL)
+	desktopAuthH := handlers.NewDesktopAuth(d.Store)
 
 	// ────── public viewer ──────
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
@@ -212,6 +213,9 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Get("/oidc/start", authh.OIDCStart)
 		r.Get("/oidc/callback", authh.OIDCCallback)
 		r.Get("/whoami", authh.WhoAmI)
+		// Desktop authorization, app half. Unauthenticated on purpose: the
+		// desktop has no session yet — holding the PKCE verifier IS the proof.
+		r.Post("/desktop/exchange", desktopAuthH.Exchange)
 	})
 
 	// ────── thumbs (auth-light: signed URL accepted without session) ──────
@@ -319,6 +323,12 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/api/tokens", selfTokensH.Create)
 		r.Patch("/api/tokens/{id}", selfTokensH.Update)
 		r.Delete("/api/tokens/{id}", selfTokensH.Delete)
+
+		// Desktop authorization, browser half. Session-authenticated: the SPA
+		// calls this AFTER the user signed in however this install does it
+		// (local, OIDC, passkey), which is the whole point — a native form in
+		// the desktop app could never reach an SSO identity.
+		r.Post("/api/auth/desktop/complete", desktopAuthH.Complete)
 
 		// Per-user notifications (bell + history + read/unread).
 		r.Route("/api/notifications", func(r chi.Router) {

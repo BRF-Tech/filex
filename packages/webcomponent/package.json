@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "filex Web Component — drop-in <filex-explorer> custom element (Vue 3 runtime bundled)",
   "type": "module",
   "main": "./dist/filex.umd.cjs",
@@ -53,11 +53,11 @@
     "custom-element",
     "brftech"
   ],
-  "author": "BRF Tech <hello@example.com>",
+  "author": "BRF Tech <hello@brf.sh>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brf-tech/filex.git",
+    "url": "git+https://gitlab.com/brftech/filemanager.git",
     "directory": "packages/webcomponent"
   }
 }

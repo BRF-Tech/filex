@@ -6,6 +6,10 @@
 /backend/embed/admin/
 /packages/*/dist/
 /web/dist/
+/web/dev-dist/
+/desktop/dist/
+/desktop/app/
+/desktop/release/
 /demo/dist/
 /docs-site/.vitepress/dist/
 /docs-site/.vitepress/cache/
@@ -86,3 +90,9 @@ NUL
 *.tar.gz
 *.tgz
 .pnp.*
+.rid
+
+# Locally built test binary (see desktop e2e: a server carrying unreleased
+# endpoints has to be run before the desktop flow can be exercised).
+/backend/filex-test
+/backend/filex-test.exe

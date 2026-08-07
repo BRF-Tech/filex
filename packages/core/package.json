@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex-core",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "filex core — Vue 3 source of truth for the filex file manager (FileExplorer SFC + composables + types)",
   "type": "module",
   "main": "./dist/filex-core.umd.cjs",
@@ -103,11 +103,11 @@
     "vue3",
     "brftech"
   ],
-  "author": "BRF Tech <hello@example.com>",
+  "author": "BRF Tech <hello@brf.sh>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brf-tech/filex.git",
+    "url": "git+https://gitlab.com/brftech/filemanager.git",
     "directory": "packages/core"
   }
 }

@@ -7,7 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.10.2 below.)
+(Nothing yet — see v0.11.0 below.)
+
+## [0.11.0] - 2026-08-07
+
+### Added
+
+- **Desktop app (Windows, Linux).** An Electron shell that runs the same web UI
+  this repo already ships, so there is one file explorer, not two. Sign-in
+  happens **in the user's browser**: the app opens the server's own login page
+  and waits, so installs that authenticate through an identity provider (OIDC,
+  SSO, passkeys, MFA) work — a native username/password form in the app would
+  have locked all of those out. The browser hands back a **one-time code** over
+  a `filex://` deep link and the app exchanges it for a token using a PKCE
+  verifier that never leaves the process; only the code ever travels in a URL.
+
+  When the deep link cannot work — no browser registered the scheme, a
+  locked-down machine, or the user finished signing in on their phone — the
+  waiting screen shows a copyable sign-in URL and accepts the code by hand.
+
+  Multiple accounts on multiple servers, a background tray (closing the window
+  keeps it running), optional start-at-login, and tokens held in the OS
+  keychain (`safeStorage`). The app refuses to store a token in plaintext if
+  the keychain is unavailable rather than silently downgrading.
+
+- **`POST /api/auth/desktop/complete` and `/api/auth/desktop/exchange`.** The
+  server half of that flow. `complete` requires an authenticated session and
+  mints a scoped API token; `exchange` is public but one-time, expires in ten
+  minutes, and constant-time compares both the code and the PKCE challenge.
+  Nothing else about the auth surface changed.
+
+- **Install prompts for both shapes of client.** On a phone or tablet the web
+  app offers to install itself as a PWA; on a PC it offers the desktop
+  download for the running platform (`.exe`, `.AppImage`, `.deb`) instead of a
+  PWA it does not want.
+
+### Fixed
+
+- **The web app could not be embedded cross-origin.** It sent
+  `X-Requested-With` on every request, which is not a CORS-safelisted header,
+  so browsers preflighted — and go-chi/cors fails the *entire* preflight when
+  one requested header is outside its allow-list. Any deployment serving the UI
+  from a different origin to the API (the desktop app is one, but so is any
+  reverse-proxy split) got a network error on every call. The header carried
+  nothing the backend read.
+
+- **Runtime API base URL, bearer token and credential mode are now
+  configurable** at load time instead of being fixed at build time, which is
+  what lets one bundle serve both the hosted site and the packaged app.
+
+- **The service worker tried to precache ~19 MB**, including the Monaco editor
+  chunks, and silently exceeded workbox's per-asset limit. Precache is now 224
+  entries / 6.6 MB; the editor loads on demand as before.
+
 
 ## [0.10.2] - 2026-08-06
 

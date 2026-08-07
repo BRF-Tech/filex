@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8" /><title>boot</title></head>
+  <body>
+    <!-- Smoke fixture standing in for the embedded web bundle. Reports what the
+         preload injected so the smoke can assert the runtime seam is present. -->
+    <script>
+      const rt = window.__FILEX_RUNTIME__ || {};
+      const out = {
+        hasRuntime: !!window.__FILEX_RUNTIME__,
+        apiBaseUrl: rt.apiBaseUrl || null,
+        hasToken: typeof rt.bearerToken === 'string' && rt.bearerToken.length > 0,
+        // Must be exactly false: a credentialed cross-origin request cannot be
+        // answered with `Access-Control-Allow-Origin: *` (filex's default), so
+        // leaving cookies on makes every API call from app:// fail.
+        useCredentials: rt.useCredentials,
+        isDesktop: !!(window.filexDesktop && window.filexDesktop.isDesktop),
+        origin: location.origin,
+      };
+      document.title = 'SMOKE:' + JSON.stringify(out);
+    </script>
+  </body>
+</html>

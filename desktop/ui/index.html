@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>filex</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 28px 30px;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #0b0b0f; color: #e7e7ea;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.sub { margin: 0 0 22px; color: #9a9aa4; font-size: 13px; }
+      label { display: block; font-size: 12px; color: #b8b8c0; margin: 14px 0 6px; }
+      input[type=text] {
+        width: 100%; padding: 10px 12px; border-radius: 8px;
+        border: 1px solid #2a2a33; background: #14141a; color: #e7e7ea; font-size: 14px;
+      }
+      input[type=text]:focus { outline: 2px solid #6366f1; outline-offset: 1px; border-color: transparent; }
+      button {
+        border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+        background: #6366f1; color: #fff; cursor: pointer;
+      }
+      button.ghost { background: #1c1c24; color: #d7d7de; border: 1px solid #2a2a33; }
+      button.danger { background: #2a1416; color: #fca5a5; border: 1px solid #4a1f24; }
+      button:hover { filter: brightness(1.1); }
+      .row { display: flex; align-items: center; gap: 10px; }
+      .between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .card { border: 1px solid #23232c; background: #121218; border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+      .muted { color: #8b8b95; font-size: 12px; }
+      .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1c1c24; color: #b8b8c0; border: 1px solid #2a2a33; }
+      .pill.on { background: #10231a; color: #86efac; border-color: #1f4030; }
+      .empty { color: #8b8b95; font-size: 13px; padding: 18px 0; }
+      .err { color: #fca5a5; font-size: 13px; margin-top: 12px; min-height: 18px; }
+      nav { display: flex; gap: 6px; margin-bottom: 20px; }
+      nav button { background: #14141a; color: #b8b8c0; border: 1px solid #23232c; }
+      nav button.active { background: #6366f1; color: #fff; border-color: transparent; }
+      code { background: #14141a; padding: 1px 5px; border-radius: 4px; font-size: 12px; color: #c7c7d1; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script>
+      const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; };
+      const root = document.getElementById('root');
+      const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+      let state = null;
+      let waiting = null; // { authUrl, serverUrl } once a sign-in is in flight
+
+      const routeOf = () => (location.hash || '#/connect').slice(1);
+
+      function nav(current) {
+        if (current === '/connect') return '';
+        return `
+          <nav>
+            <button data-go="/settings" class="${current === '/settings' ? 'active' : ''}">Settings</button>
+            <button data-go="/sync" class="${current === '/sync' ? 'active' : ''}">Sync folders</button>
+          </nav>`;
+      }
+
+      // ── Connect: the ONLY thing asked for is where the server is. Credentials
+      //    are typed into the server's own login page, in the real browser.
+      function connectView() {
+        if (waiting) return waitingView();
+        return `
+          ${nav('/connect')}
+          <h1>Connect to filex</h1>
+          <p class="sub">Enter your server address. Sign-in opens in your browser, so single sign-on, passkeys and MFA all work exactly as they do on the web.</p>
+          <label for="server">Server address</label>
+          <input id="server" type="text" placeholder="https://app.filex.com" autofocus />
+          <div class="row" style="margin-top:16px">
+            <button id="go">Continue in browser</button>
+            ${state && state.accounts.length ? '<button class="ghost" data-go="/settings">Back to accounts</button>' : ''}
+          </div>
+          <div class="err" id="err"></div>
+          <p class="muted" style="margin-top:18px">After signing in, your browser hands the app back a one-time code. Your password is never typed into this window.</p>`;
+      }
+
+      // Everything on this screen exists because the happy path can fail in
+      // ordinary ways: no browser installed, a portable browser the OS has no
+      // handler for, a locked-down machine, or finishing sign-in on a phone.
+      // The link is copyable and the code can be typed in by hand.
+      function waitingView() {
+        return `
+          <h1>Waiting for your browser</h1>
+          <p class="sub">Finish signing in to <strong>${esc(waiting.serverUrl)}</strong>. This window continues by itself once your browser hands the code back.</p>
+
+          <label>Didn't a browser open? Open this address yourself</label>
+          <div class="row">
+            <input id="authurl" type="text" readonly value="${esc(waiting.authUrl)}" />
+            <button class="ghost" id="copyurl" style="white-space:nowrap">Copy</button>
+          </div>
+
+          <label style="margin-top:22px">Browser couldn't return to the app? Paste the code it showed you</label>
+          <div class="row">
+            <input id="code" type="text" placeholder="Paste the code here" />
+            <button id="usecode" style="white-space:nowrap">Sign in</button>
+          </div>
+
+          <div class="err" id="err"></div>
+          <div class="row" style="margin-top:18px">
+            <button class="ghost" id="cancel">Cancel</button>
+          </div>`;
+      }
+
+      function settingsView() {
+        const accounts = state.accounts.length
+          ? state.accounts.map((a) => `
+              <div class="card">
+                <div class="between">
+                  <div>
+                    <div>${esc(a.email)} ${a.id === state.activeId ? '<span class="pill on">active</span>' : ''}</div>
+                    <div class="muted">${esc(a.serverUrl)}</div>
+                  </div>
+                  <div class="row">
+                    ${a.id === state.activeId ? '' : `<button class="ghost" data-switch="${a.id}">Use</button>`}
+                    <button class="danger" data-signout="${a.id}">Sign out</button>
+                  </div>
+                </div>
+              </div>`).join('')
+          : '<div class="empty">No accounts yet.</div>';
+
+        return `
+          ${nav('/settings')}
+          <h1>Accounts</h1>
+          <p class="sub">This is a desktop app — keep as many servers or identities as you need and switch between them.</p>
+          ${accounts}
+          <button class="ghost" data-go="/connect">Add account</button>
+
+          <h1 style="margin-top:28px">Behaviour</h1>
+          <div class="card between">
+            <div>
+              <div>Keep running in the background</div>
+              <div class="muted">Closing the window parks filex in the tray so folders keep syncing.</div>
+            </div>
+            <button class="ghost" id="bg">${state.runInBackground ? 'On' : 'Off'}</button>
+          </div>
+          <div class="card between">
+            <div>
+              <div>Start at login</div>
+              <div class="muted">Launch filex automatically when you sign in to this computer.</div>
+            </div>
+            <button class="ghost" id="login">${state.launchAtLogin ? 'On' : 'Off'}</button>
+          </div>`;
+      }
+
+      function syncView() {
+        const byId = Object.fromEntries(state.accounts.map((a) => [a.id, a]));
+        const rows = state.syncFolders.length
+          ? state.syncFolders.map((f) => {
+              const acc = byId[f.accountId];
+              return `
+                <div class="card">
+                  <div class="between">
+                    <div>
+                      <div><code>${esc(f.remotePath)}</code> → <code>${esc(f.localPath)}</code></div>
+                      <div class="muted">
+                        ${esc(acc ? acc.email : 'unknown account')} · ${esc(acc ? new URL(acc.serverUrl).host : '—')}
+                        · ${f.lastSyncAt ? 'last sync ' + esc(f.lastSyncAt) : 'never synced'}
+                      </div>
+                    </div>
+                    <div class="row">
+                      <span class="pill ${f.enabled ? 'on' : ''}">${f.enabled ? 'enabled' : 'paused'}</span>
+                      <button class="ghost" data-toggle="${f.id}">${f.enabled ? 'Pause' : 'Resume'}</button>
+                      <button class="danger" data-rmsync="${f.id}">Remove</button>
+                    </div>
+                  </div>
+                </div>`;
+            }).join('')
+          : '<div class="empty">No folders paired yet.</div>';
+
+        return `
+          ${nav('/sync')}
+          <h1>Sync folders</h1>
+          <p class="sub">Folders kept on this computer, and which account they belong to.</p>
+          ${rows}
+          <div class="row" style="margin-top:6px">
+            <input id="remote" type="text" placeholder="Remote folder, e.g. Dosyalar://projects" />
+            <button id="add" style="white-space:nowrap">Choose local folder…</button>
+          </div>
+          <p class="muted" style="margin-top:14px">Pairings are recorded here; the transfer engine is a separate piece of work and is not running yet.</p>`;
+      }
+
+      async function render() {
+        state = await window.filexShell.getState();
+        const r = routeOf();
+        root.innerHTML = '';
+        root.appendChild($(`<div>${r === '/settings' ? settingsView() : r === '/sync' ? syncView() : connectView()}</div>`));
+        wire();
+      }
+
+      function wire() {
+        root.querySelectorAll('[data-go]').forEach((b) =>
+          b.addEventListener('click', () => { location.hash = '#' + b.dataset.go; }));
+
+        const go = root.querySelector('#go');
+        if (go) {
+          const submit = async () => {
+            const err = root.querySelector('#err');
+            err.textContent = '';
+            try {
+              const r = await window.filexShell.beginAuth(root.querySelector('#server').value);
+              waiting = { serverUrl: r.serverUrl, authUrl: r.authUrl || r.serverUrl + '/admin/login' };
+              render();
+            } catch (e) {
+              err.textContent = String(e && e.message ? e.message : e);
+            }
+          };
+          go.addEventListener('click', submit);
+          root.querySelector('#server').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+        }
+
+        const copyurl = root.querySelector('#copyurl');
+        if (copyurl) copyurl.addEventListener('click', async () => {
+          const f = root.querySelector('#authurl');
+          f.select();
+          try { await navigator.clipboard.writeText(f.value); copyurl.textContent = 'Copied'; }
+          catch { document.execCommand('copy'); copyurl.textContent = 'Copied'; }
+          setTimeout(() => { copyurl.textContent = 'Copy'; }, 1500);
+        });
+
+        const usecode = root.querySelector('#usecode');
+        if (usecode) {
+          const submitCode = async () => {
+            const err = root.querySelector('#err');
+            err.textContent = '';
+            usecode.disabled = true;
+            try {
+              await window.filexShell.completeManual(root.querySelector('#code').value);
+              // On success the main process closes this window.
+            } catch (e) {
+              err.textContent = String(e && e.message ? e.message : e);
+            } finally {
+              usecode.disabled = false;
+            }
+          };
+          usecode.addEventListener('click', submitCode);
+          root.querySelector('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitCode(); });
+        }
+
+        const cancel = root.querySelector('#cancel');
+        if (cancel) cancel.addEventListener('click', () => { waiting = null; render(); });
+
+        root.querySelectorAll('[data-signout]').forEach((b) =>
+          b.addEventListener('click', async () => { await window.filexShell.signOut(b.dataset.signout); render(); }));
+        root.querySelectorAll('[data-switch]').forEach((b) =>
+          b.addEventListener('click', async () => { await window.filexShell.switchAccount(b.dataset.switch); render(); }));
+        root.querySelectorAll('[data-toggle]').forEach((b) =>
+          b.addEventListener('click', async () => { await window.filexShell.toggleSyncFolder(b.dataset.toggle); render(); }));
+        root.querySelectorAll('[data-rmsync]').forEach((b) =>
+          b.addEventListener('click', async () => { await window.filexShell.removeSyncFolder(b.dataset.rmsync); render(); }));
+
+        const bg = root.querySelector('#bg');
+        if (bg) bg.addEventListener('click', async () => {
+          await window.filexShell.setSettings({ runInBackground: !state.runInBackground }); render();
+        });
+        const li = root.querySelector('#login');
+        if (li) li.addEventListener('click', async () => {
+          await window.filexShell.setSettings({ launchAtLogin: !state.launchAtLogin }); render();
+        });
+        const add = root.querySelector('#add');
+        if (add) add.addEventListener('click', async () => {
+          await window.filexShell.addSyncFolder(root.querySelector('#remote').value); render();
+        });
+      }
+
+      window.addEventListener('hashchange', render);
+      render();
+    </script>
+  </body>
+</html>
