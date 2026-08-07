@@ -96,7 +96,16 @@ NUL
 .pnp.*
 .rid
 
-# Locally built test binary (see desktop e2e: a server carrying unreleased
-# endpoints has to be run before the desktop flow can be exercised).
+# Locally built server binaries. ⚠ These are ~160 MB each and `go build` in
+# backend/ drops one here by default — a plain `git add` then fails the push on
+# GitHub's blob limit, after the commit is already made. Cheaper to ignore them
+# than to rewrite history again.
+/backend/filex
+/backend/filex.exe
 /backend/filex-test
 /backend/filex-test.exe
+
+# Screenshots taken while checking the UI. They belong in the project's filex
+# folder (see CLAUDE.md), never in the repo.
+/shots/
+/desktop-*.png

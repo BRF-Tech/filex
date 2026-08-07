@@ -86,6 +86,25 @@ short:
 
 ---
 
+## Sharing
+
+The share dialog is the same one the web app has — **Share / Permissions** on any
+file or folder. Create a link, copy it, email it, or hand it to the system with
+**📤 Share**.
+
+⚠ What that last button does depends on the platform, and it is worth saying
+plainly rather than implying more than is there:
+
+| Platform | Pressing 📤 Share opens |
+|---|---|
+| macOS | The **real system share sheet** — AirDrop, Messages, whatever you have. |
+| Windows / Linux | A **native menu**: copy the link, copy the whole message, send by email, open in a browser. |
+| Phone / browser | The OS share sheet, as always — this is where it has worked all along. |
+
+The Windows share sheet needs WinRT, which Electron does not expose. Rather than
+draw an imitation of it, the app offers the two things people actually do with a
+link.
+
 ## Running in the background
 
 Closing the window leaves filex in the tray and **sync keeps running** — that is
