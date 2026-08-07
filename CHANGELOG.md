@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.13.2 below.)
+(Nothing yet — see v0.13.3 below.)
+
+## [0.13.3] - 2026-08-07
+
+### Added
+
+- **The share button now works in the desktop app.** The explorer has always
+  had one, gated on `typeof navigator.share === 'function'` — and Electron
+  ships no Web Share API, so in the desktop app it simply never appeared.
+
+  Rather than add a second share UI beside the product's own, the app
+  polyfills the standard API onto a native handler, and the existing button
+  lights up. On macOS that is the real system share sheet; on Windows and Linux
+  it is a native menu (copy link, copy the message, email, open in browser),
+  because the OS share sheet needs WinRT, which Electron does not expose. Said
+  plainly rather than dressed up as something it is not.
+
+### Fixed
+
+- **The sync engine was reported missing when the app ran from source.** The
+  bundled binary lives at `desktop/build/bin`, and the lookup only checked the
+  packaged location and one level too high. ⚠ The suites passed throughout
+  because they *told* the app where its engine was via `FILEX_CLI` — they no
+  longer do, so the resolution itself is now under test, unpackaged and
+  packaged.
+- **The "choose a folder" dialog opened behind the settings panel** that
+  launched it — present in the DOM, invisible on screen.
+- **The rail icons were off-centre.** `⚙` and `+` were text glyphs, laid out
+  against the font baseline, so centring the line box left the shape low and
+  left. They are icons now, and the suite measures the offset (0.00 px) rather
+  than trusting an eye.
+
 
 ## [0.13.2] - 2026-08-07
 

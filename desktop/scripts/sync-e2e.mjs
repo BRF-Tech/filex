@@ -80,6 +80,8 @@ const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
 const syncFolder = path.join(fakeHome, 'synced');
 fs.mkdirSync(syncFolder, { recursive: true });
 
+// ⚠ The path is checked but NOT passed to the app: the app has to find its own
+// engine. Passing FILEX_CLI is what let a broken resolution ship.
 const cli = path.join(DESKTOP, 'build', 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex');
 if (!fs.existsSync(cli)) {
   console.log(`FAIL  the CLI must be built first — run \`pnpm run fetch-cli\` (looked in ${cli})`);
@@ -92,7 +94,6 @@ const app = await _electron.launch({
   env: {
     ...process.env,
     FILEX_NO_BROWSER: '1',
-    FILEX_CLI: cli,
     HOME: fakeHome,
     USERPROFILE: fakeHome,
     // Pick the folder without a native dialog: showOpenDialog is OS chrome

@@ -49,10 +49,18 @@ const WATCH_INTERVAL = '30s';
  */
 export function cliPath(): string | null {
   const exe = process.platform === 'win32' ? 'filex.exe' : 'filex';
+  const appPath = app.getAppPath();
   const candidates = [
-    process.env.FILEX_CLI, // dev / tests
+    process.env.FILEX_CLI, // explicit override
+    // Packaged: electron-builder copies build/bin -> resources/bin.
     path.join(process.resourcesPath ?? '', 'bin', exe),
-    path.join(app.getAppPath(), '..', 'bin', exe),
+    // ⚠ Unpackaged (`electron .`): getAppPath() is the desktop/ folder itself,
+    // so the binary sits at desktop/build/bin — NOT one level up. Without this
+    // the app ran from source with "the sync engine is missing", while the
+    // tests passed because they set FILEX_CLI and never exercised this
+    // resolution at all.
+    path.join(appPath, 'build', 'bin', exe),
+    path.join(appPath, '..', 'bin', exe),
   ].filter(Boolean) as string[];
   return candidates.find((p) => existsSync(p)) ?? null;
 }

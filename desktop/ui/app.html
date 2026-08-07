@@ -101,10 +101,16 @@
         width: 40px; height: 40px; border-radius: 50%; border: 0;
         background: rgba(255, 255, 255, .08);
         color: rgba(255, 255, 255, .72);
-        font-size: 19px; line-height: 1; cursor: pointer;
+        cursor: pointer;
         display: grid; place-items: center;
+        padding: 0;
         transition: background .14s ease, color .14s ease, border-radius .14s ease;
       }
+      /* ⚠ SVG, not a text glyph. `⚙` and `+` are drawn against the font's own
+         baseline, so `place-items: center` centres the LINE BOX and the shape
+         still sits low and slightly left — visibly off in a 40px circle. An
+         icon with its own viewBox has no baseline to fight. */
+      .rail-btn svg { width: 18px; height: 18px; display: block; }
       .rail-btn:hover { background: rgba(255, 255, 255, .16); color: #fff; border-radius: 14px; }
       .rail-sep { width: 28px; height: 1px; background: rgba(255, 255, 255, .12); margin: 2px 0; }
       .spacer { flex: 1; }
@@ -155,7 +161,10 @@
       .close { position: absolute; top: 18px; right: 22px; }
 
       /* remote folder browser */
-      #picker { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; place-items: center; z-index: 20; }
+      /* ⚠ Above #settings (200). This picker is opened FROM settings, so a
+         lower stacking order put it behind the panel that launched it —
+         the dialog was there, just invisible under a full-screen surface. */
+      #picker { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; place-items: center; z-index: 300; }
       #picker.open { display: grid; }
       #picker .panel {
         width: min(520px, 92vw); max-height: 76vh; background: var(--bg);
@@ -185,6 +194,30 @@
 
     <script type="module">
       import './filex.js';
+
+      // ── Web Share, which Electron does not ship ───────────────
+      // The explorer already has a share button; it is gated on
+      // `typeof navigator.share === 'function'`, and Electron has no Web Share
+      // API — measured, navigator.share is undefined here. So the button that
+      // exists in the product simply never rendered in the desktop app.
+      //
+      // Polyfilling the standard API is the right seam: no second share UI, no
+      // fork of the component, and the day Electron ships Web Share this whole
+      // block can go without touching the explorer.
+      if (typeof navigator.share !== 'function') {
+        navigator.canShare = (d) => !!(d && (d.url || d.text || d.title));
+        navigator.share = (d) => window.filexApp.share(d);
+      }
+
+      // Both drawn on a 24-unit grid so they optically match at 18px.
+      const ICON_PLUS =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+        'stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+      const ICON_GEAR =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<circle cx="12" cy="12" r="3.2"/>' +
+        '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
       const $ = (sel, root = document) => root.querySelector(sel);
       const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
@@ -299,7 +332,8 @@
         }
 
         const add = document.createElement('button');
-        add.className = 'rail-btn'; add.textContent = '+';
+        add.className = 'rail-btn';
+        add.innerHTML = ICON_PLUS;
         add.title = 'Add another account';
         add.addEventListener('click', () => window.filexApp.addAccount());
         rail.appendChild(add);
@@ -309,7 +343,9 @@
         const sep = document.createElement('div'); sep.className = 'rail-sep'; rail.appendChild(sep);
 
         const gear = document.createElement('button');
-        gear.className = 'rail-btn'; gear.textContent = '⚙'; gear.title = 'Settings';
+        gear.className = 'rail-btn';
+        gear.innerHTML = ICON_GEAR;
+        gear.title = 'Settings';
         gear.addEventListener('click', () => toggleSettings());
         rail.appendChild(gear);
       }

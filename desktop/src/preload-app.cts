@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('filexApp', {
   // app settings
   setSettings: (patch: unknown) => ipcRenderer.invoke('settings:set', patch),
 
+  /** Backs the navigator.share polyfill the page installs. See main.ts. */
+  share: (data: unknown) => ipcRenderer.invoke('app:share', data),
+
   // Transfers happen in a background process and accounts can change from the
   // tray, so the page is told when to repaint rather than only being right at
   // the moment it opened.

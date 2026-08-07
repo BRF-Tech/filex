@@ -17,6 +17,7 @@ import {
   BrowserWindow,
   Menu,
   Tray,
+  clipboard,
   dialog,
   ipcMain,
   nativeImage,
@@ -412,6 +413,82 @@ function wireIpc(): void {
 
   ipcMain.handle('shell:openPath', (_e, target: string) => {
     void shell.openPath(target);
+  });
+
+  // ⚠ Electron has NO Web Share API — measured: navigator.share is undefined in
+  // this shell. The explorer already has a share button, gated on exactly that,
+  // so in the desktop app it simply never appeared. Rather than bolt a second
+  // share UI next to the product's own one, the page polyfills navigator.share
+  // onto this handler, and the existing button lights up.
+  //
+  // What "native" can honestly mean per platform:
+  //   macOS   — the real system share sheet (Electron's ShareMenu).
+  //   Windows — the OS share sheet needs WinRT, which Electron does not expose
+  //             and which no amount of wishing will summon. A native context
+  //             menu with the two things people actually do with a link is the
+  //             honest substitute; it is a real OS menu, not a drawn imitation.
+  //   Linux   — same.
+  ipcMain.handle('app:share', async (e, data: { title?: string; text?: string; url?: string }) => {
+    const url = data?.url ?? '';
+    const text = data?.text ?? '';
+    const body = [text, url].filter(Boolean).join('\n');
+    if (!body) throw new Error('nothing to share');
+
+    const win = BrowserWindow.fromWebContents(e.sender) ?? mainWindow ?? undefined;
+
+    if (process.platform === 'darwin') {
+      const { ShareMenu } = await import('electron');
+      const menu = new ShareMenu({
+        texts: text ? [text] : undefined,
+        urls: url ? [url] : undefined,
+      });
+      menu.popup({ window: win });
+      return { via: 'system-share-sheet' };
+    }
+
+    return await new Promise<{ via: string }>((resolve, reject) => {
+      let settled = false;
+      const finish = (via: string) => {
+        if (!settled) { settled = true; resolve({ via }); }
+      };
+      const menu = Menu.buildFromTemplate([
+        {
+          label: data?.title ? `Share “${data.title}”` : 'Share link',
+          enabled: false,
+        },
+        { type: 'separator' },
+        {
+          label: 'Copy link',
+          click: () => { clipboard.writeText(url || body); finish('clipboard'); },
+        },
+        {
+          label: 'Copy message with link',
+          click: () => { clipboard.writeText(body); finish('clipboard-full'); },
+        },
+        { type: 'separator' },
+        {
+          label: 'Send by email…',
+          click: () => {
+            const subject = encodeURIComponent(data?.title ?? 'filex');
+            void shell.openExternal(`mailto:?subject=${subject}&body=${encodeURIComponent(body)}`);
+            finish('mail');
+          },
+        },
+        {
+          label: 'Open in browser',
+          enabled: !!url,
+          click: () => { void shell.openExternal(url); finish('browser'); },
+        },
+      ]);
+      menu.popup({
+        window: win,
+        // Dismissing the menu is a completed interaction in the Web Share
+        // contract too — it rejects with AbortError, which the caller ignores.
+        callback: () => {
+          if (!settled) { settled = true; reject(new Error('AbortError')); }
+        },
+      });
+    });
   });
 
   ipcMain.handle('settings:set', (_e, patch: Partial<DesktopState>) => {

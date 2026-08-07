@@ -57,7 +57,9 @@ async function browserHalf(authUrl) {
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-shell-e2e-'));
 const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
-const cli = path.join(DESKTOP, 'build', 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex');
+// ⚠ FILEX_CLI is deliberately NOT set. Handing the app the path to its own
+// engine is how the suite stayed green while the app said "the sync engine is
+// missing" when launched normally — the resolution logic was never exercised.
 
 // FILEX_APP_BINARY points at a PACKAGED build (release2/win-unpacked/filex.exe,
 // or the AppImage's unpacked binary). Worth running: `electron .` loads files
@@ -77,7 +79,6 @@ const app = await _electron.launch({
     FILEX_NO_BROWSER: '1',
     HOME: fakeHome,
     USERPROFILE: fakeHome,
-    ...(fs.existsSync(cli) ? { FILEX_CLI: cli } : {}),
   },
 });
 if (packaged) console.log(`(driving the PACKAGED app: ${packaged})`);
@@ -144,6 +145,27 @@ try {
     `${rail.avatars} account(s)`);
   check('the rail offers adding another account', rail.hasAdd);
 
+  // ⚠ Optical centring, measured rather than eyeballed. A text glyph (⚙, +) is
+  // laid out against the font baseline, so `place-items: center` centres the
+  // line box while the shape itself sits low and left. Comparing the icon's own
+  // box to its button's is the only way to catch that from a script.
+  const icons = await win.evaluate(() => {
+    return [...document.querySelectorAll('#rail .rail-btn')].map((b) => {
+      const svg = b.querySelector('svg');
+      if (!svg) return { hasSvg: false, dx: 99, dy: 99 };
+      const br = b.getBoundingClientRect();
+      const ir = svg.getBoundingClientRect();
+      return {
+        hasSvg: true,
+        dx: Math.abs((ir.left + ir.width / 2) - (br.left + br.width / 2)),
+        dy: Math.abs((ir.top + ir.height / 2) - (br.top + br.height / 2)),
+      };
+    });
+  });
+  const offCentre = icons.filter((i) => !i.hasSvg || i.dx > 1 || i.dy > 1);
+  check('the rail icons are centred in their buttons', offCentre.length === 0,
+    icons.map((i) => `dx=${i.dx.toFixed(2)} dy=${i.dy.toFixed(2)}`).join('  '));
+
   // ── settings: the APP's, not the server's ─────────────────────────
   await win.evaluate(() => document.querySelectorAll('#rail .rail-btn')[1].click());
   await win.waitForTimeout(500);
@@ -189,6 +211,19 @@ try {
   });
   check('choosing a folder browses the REAL server', picker.open === true && picker.items.length > 0,
     picker.items.join(' | ') || 'nothing listed');
+
+  // ⚠ The picker is opened FROM settings, so it has to outrank the panel that
+  // launched it. It did not: the dialog rendered BEHIND a full-screen surface —
+  // present in the DOM, invisible on screen. "It exists" is not "you can see
+  // it"; ask the browser what is on top of the picker's own centre.
+  const pickerOnTop = await win.evaluate(() => {
+    const p = document.querySelector('#picker .panel');
+    if (!p) return { ok: false, got: 'no panel' };
+    const r = p.getBoundingClientRect();
+    const el = document.elementFromPoint(r.left + r.width / 2, r.top + 20);
+    return { ok: !!el?.closest('#picker'), got: el?.id || el?.className?.toString?.().slice(0, 40) };
+  });
+  check('the folder picker is on top, not behind settings', pickerOnTop.ok, `topmost = ${pickerOnTop.got}`);
   check('the storage is listed by name', picker.items.some((t) => /docs/.test(t)),
     picker.items.join(' | '));
 
