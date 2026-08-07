@@ -202,6 +202,46 @@ try {
     !document.querySelector('#settings').classList.contains('open'));
   check('closing settings returns to the files', backToFiles);
 
+  // ⚠ The dialog a user actually opens, and whether it LOOKS like a dialog.
+  // It rendered as raw unstyled HTML in every embedded surface — no box, no
+  // backdrop, browser-default inputs flowing down the page — because Vue's
+  // scoped-style hash does not survive the web-component build. Nothing threw;
+  // the functional suites were all green while it looked broken.
+  await win.evaluate((name) => {
+    const row = [...document.querySelectorAll('*')].find((e) => e.textContent?.trim() === name);
+    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }, seeded);
+  await win.waitForTimeout(500);
+  await win.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) =>
+      /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(x.textContent ?? ''));
+    b?.click();
+  });
+  await win.waitForTimeout(1500);
+
+  const dialog = await win.evaluate(() => {
+    const m = document.querySelector('.fx-perm-modal');
+    if (!m) return { present: false };
+    const cs = getComputedStyle(m);
+    return {
+      present: true,
+      background: cs.backgroundColor,
+      radius: cs.borderRadius,
+      // A transparent background with no radius is the unstyled signature.
+      styled: cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.borderRadius !== '0px',
+    };
+  });
+  check('the share dialog opens', dialog.present === true);
+  check('the share dialog is actually STYLED, not raw HTML', dialog.styled === true,
+    `background=${dialog.background} radius=${dialog.radius}`);
+
+  await win.screenshot({ path: path.join(REPO, 'desktop-shell-share.png') });
+  await win.evaluate(() => {
+    const x = [...document.querySelectorAll('button')].find((b) => /^[✕×]$/.test(b.textContent?.trim() ?? ''));
+    x?.click();
+  });
+  await win.waitForTimeout(400);
+
   await win.screenshot({ path: path.join(REPO, 'desktop-shell.png') });
 } catch (e) {
   check('flow completed', false, String(e && e.message).split('\n')[0]);

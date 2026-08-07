@@ -226,6 +226,12 @@ async function completeAuth(state_: string, code: string): Promise<void> {
   refreshTray();
   shellWindow?.close();
   openMainWindow();
+  // ⚠ Tell the window. Adding a SECOND account happens in a different window,
+  // and openMainWindow() only shows the existing one — it does not reload it.
+  // Without this the new account was stored but the rail kept showing one
+  // avatar until the app was restarted. Measured, not theorised.
+  mainWindow?.webContents.send('sync:changed');
+  void refreshPairs();
 }
 
 /** OS-delivered deep link. No UI is waiting on it, so failures surface as a

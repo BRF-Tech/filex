@@ -17,7 +17,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 const props = defineProps<{
-  /** Converter base, e.g. https://fm.example.com/convert */
+  /** Converter base, e.g. https://fm.brf.sh/convert */
   convertUrl: string;
   /** Source file name with extension, e.g. "clip.avi" */
   fileName: string;
@@ -203,7 +203,15 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
   </div>
 </template>
 
-<style scoped>
+<style>
+/* ⚠ NOT `scoped`, deliberately. Vue's scoped styles compile to
+   `.cls[data-v-HASH]`, and in the web-component build the hash baked into
+   this CSS does not match the one Vue stamps onto the DOM — so every rule
+   here silently stopped applying. Measured in the desktop app: the share
+   dialog had `position: static`, no background and no radius, i.e. raw
+   unstyled HTML, in EVERY embedded surface.
+   Safe to drop: every selector below is prefixed (fx-/fe-/filex-), so
+   there is nothing here that can leak into a host page. */
 .filex-cv__bg {
   position: fixed; inset: 0; z-index: 1000;
   background: rgba(0, 0, 0, 0.55);

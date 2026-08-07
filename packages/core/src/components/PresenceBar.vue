@@ -125,7 +125,15 @@ function label(u: PresenceUser): string {
   </div>
 </template>
 
-<style scoped>
+<style>
+/* ⚠ NOT `scoped`, deliberately. Vue's scoped styles compile to
+   `.cls[data-v-HASH]`, and in the web-component build the hash baked into
+   this CSS does not match the one Vue stamps onto the DOM — so every rule
+   here silently stopped applying. Measured in the desktop app: the share
+   dialog had `position: static`, no background and no radius, i.e. raw
+   unstyled HTML, in EVERY embedded surface.
+   Safe to drop: every selector below is prefixed (fx-/fe-/filex-), so
+   there is nothing here that can leak into a host page. */
 .fx-presence {
   display: inline-flex;
   align-items: center;
@@ -226,11 +234,11 @@ function label(u: PresenceUser): string {
   background: rgb(228 228 231); /* zinc-200 */
   color: rgb(63 63 70);
 }
-:global(.dark) .fx-presence-chip {
+.dark .fx-presence-chip {
   background: rgb(39 39 42); /* zinc-800 */
   color: rgb(212 212 216); /* zinc-300 */
 }
-:global(.dark) .fx-presence-toggle:hover {
+.dark .fx-presence-toggle:hover {
   background: rgb(39 39 42);
   color: rgb(212 212 216);
 }
@@ -246,8 +254,8 @@ function label(u: PresenceUser): string {
   color: rgb(82 82 91); /* zinc-600 */
   font-weight: 500;
 }
-:global(.dark) .fx-presence-avatar,
-:global(.dark) .fx-presence-dot {
+.dark .fx-presence-avatar,
+.dark .fx-presence-dot {
   --fx-presence-ring: #18181b; /* zinc-900 */
 }
 </style>

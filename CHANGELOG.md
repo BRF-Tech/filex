@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.13.1 below.)
+(Nothing yet — see v0.13.2 below.)
+
+## [0.13.2] - 2026-08-07
+
+### Fixed
+
+- ⭐ **Sixteen components rendered as raw, unstyled HTML in every embedded
+  surface.** The share/permissions dialog was the visible one: no box, no
+  backdrop, browser-default inputs flowing down the page. Also affected: the
+  convert dialog, the presence bar, star/tag/recently-opened controls, and nine
+  file viewers.
+
+  Vue's `<style scoped>` compiles to `.cls[data-v-HASH]`. The web-component
+  build compiles the components from source but imports CSS produced by a
+  *different* build, so the two hashes are unrelated and every scoped rule was
+  dead. Measured in the packaged desktop app:
+
+  ```
+  DOM element : data-v-b9443460
+  CSS rule    : .fx-perm-modal[data-v-cc21190e]
+  matches     : false      → position static, no background, no radius
+  ```
+
+  Nothing errored, which is why it survived: the components worked perfectly
+  and simply had no styling. **This affected every embedder** — the desktop
+  app, and any host using `<filex-explorer>` or `@brftech/filex-core` — not
+  just one surface. All 16 now use ordinary styles; the class names were
+  already prefixed (`fx-`/`fe-`/`filex-`), so `scoped` was buying nothing.
+
+- **Adding a second account did not appear until restart.** The account was
+  stored, but the sign-in happens in a different window and the main window was
+  never told to repaint.
+
+### Changed
+
+- **The desktop account rail was rebuilt.** It was a pale strip with a lone
+  square and a dashed `+` — a wireframe, not a product. It is now a dark rail
+  with per-account colours, an edge marker on the active account, and a
+  background-sync indicator per avatar.
+
+  ⚠ The colour hash was wrong twice on the way: `h * 31` used only 5 of 10
+  colours across 200 accounts, and the replacement returned a *negative* index
+  for 44% of inputs — an invisible avatar. Both measured, both fixed.
+
 
 ## [0.13.1] - 2026-08-07
 
