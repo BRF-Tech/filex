@@ -46,6 +46,7 @@ if (process.env.FILEX_CLI_BIN) {
   fs.copyFileSync(process.env.FILEX_CLI_BIN, dest);
   fs.chmodSync(dest, 0o755);
   console.log(`copied ${process.env.FILEX_CLI_BIN} -> ${path.relative(DESKTOP, dest)}`);
+  announce();
   process.exit(0);
 }
 
@@ -77,3 +78,30 @@ try {
 fs.chmodSync(dest, 0o755);
 const { size } = fs.statSync(dest);
 console.log(`built ${path.relative(DESKTOP, dest)} (${(size / 1024 / 1024).toFixed(1)} MB)`);
+announce();
+
+/** Says out loud WHICH commit is about to be packaged.
+ *
+ * ⚠ A `git checkout <tag>` that aborts (a dirty working tree is enough) leaves
+ * the build running happily against the previous commit, and every later step —
+ * including the tests — passes, because the old code is perfectly good code. It
+ * just is not the code being released. Measured: a v0.13.1 package was built
+ * from v0.13.0 and nothing said so. */
+function announce() {
+  let head = 'unknown';
+  try {
+    const rev = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: DESKTOP }).toString().trim();
+    let tag = '';
+    try {
+      tag = ' ' + execFileSync('git', ['describe', '--tags', '--always'], { cwd: DESKTOP }).toString().trim();
+    } catch {
+      /* not on a tag */
+    }
+    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: DESKTOP }).toString().trim();
+    head = `${rev}${tag}${dirty ? '  (WORKING TREE DIRTY)' : ''}`;
+  } catch {
+    /* not a git checkout — nothing to announce */
+  }
+  const version = JSON.parse(fs.readFileSync(path.join(DESKTOP, 'package.json'), 'utf8')).version;
+  console.log(`\n  packaging filex ${version} from ${head}\n`);
+}
