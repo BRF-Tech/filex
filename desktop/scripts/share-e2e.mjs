@@ -6,102 +6,84 @@
 // way a user meets it: create a link, look for the button, press it.
 //
 // Run: node scripts/share-e2e.mjs
-// Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD
+// Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD, FILEX_STORAGE
 
-import fs, { readdirSync } from 'node:fs';
-import os from 'node:os';
+import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { SHOTS, STORAGE, api, check, finish, launchApp, signIn, skipTour } from './lib/harness.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DESKTOP = path.resolve(__dirname, '..');
-const REPO = path.resolve(DESKTOP, '..');
-const SHOTS = path.join(REPO, 'shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const PNPM = path.join(REPO, 'node_modules/.pnpm');
-const pwDir = readdirSync(PNPM).find((d) => d.startsWith('playwright-core@'));
-const { _electron } = await import(
-  pathToFileURL(path.join(PNPM, pwDir, 'node_modules/playwright-core/index.mjs')).href
-);
+// The dialog needs something to share. Seeded by this run and removed after —
+// pointing the script at a file someone once left on the storage is how it came
+// to fail on every server but one.
+const NAME = `share-e2e-${Date.now()}.txt`;
+let token = null;
 
-const SERVER = process.env.FILEX_SERVER ?? 'https://fm.brf.sh';
-const EMAIL = process.env.FILEX_EMAIL ?? '';
-const PASSWORD = process.env.FILEX_PASSWORD ?? '';
+/**
+ * Clicks the first VISIBLE element whose text matches.
+ *
+ * ⚠ Visibility is not optional here. The toolbar renders every action a second
+ * time inside an `aria-hidden` measuring strip (`visibility:hidden; height:0`)
+ * so the fold calculation has real widths — those clones still have client
+ * rects and carry no click handler, so a plain text search clicks a button that
+ * does nothing at all.
+ */
+async function clickText(win, pattern) {
+  return win.evaluate((src) => {
+    const re = new RegExp(src, 'i');
+    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
+    const el = [...document.querySelectorAll('button, li, [role="menuitem"]')]
+      .filter(visible)
+      .find((x) => re.test(x.textContent ?? ''));
+    el?.click();
+    return !!el;
+  }, pattern.source ?? pattern);
+}
 
-let failures = 0;
-const check = (name, ok, detail = '') => {
-  if (!ok) failures++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
-};
-
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-share-'));
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
-const app = await _electron.launch({
-  ...(process.env.FILEX_APP_BINARY
-    ? { executablePath: process.env.FILEX_APP_BINARY, args: [`--user-data-dir=${profile}`] }
-    : { args: [DESKTOP, `--user-data-dir=${profile}`], cwd: DESKTOP }),
-  env: { ...process.env, FILEX_NO_BROWSER: '1', HOME: home, USERPROFILE: home },
-});
+const { app } = await launchApp();
 
 try {
-  const c = await app.firstWindow();
-  await c.waitForLoadState('domcontentloaded');
-  await c.locator('#server').fill(SERVER);
-  await c.locator('#go').click();
-  await c.locator('#authurl').waitFor({ timeout: 15_000 });
-  const u = new URL(await c.locator('#authurl').inputValue());
-  const login = await fetch(`${SERVER}/api/auth/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD, remember: true }),
-  });
-  const cookie = (login.headers.getSetCookie?.() ?? []).map((x) => x.split(';')[0]).join('; ');
-  const done = await fetch(`${SERVER}/api/auth/desktop/complete`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({
-      state: u.searchParams.get('desktop_state'),
-      challenge: u.searchParams.get('desktop_challenge'),
-      label: 'filex desktop — share e2e',
-    }),
-  });
-  await c.locator('#code').fill((await done.json()).code);
-  await c.locator('#usecode').click().catch(() => {});
+  const { win: w, adminToken } = await signIn(app, { label: 'filex desktop — share e2e' });
+  token = adminToken;
 
-  const w = await app.waitForEvent('window', { timeout: 60_000 });
-  await w.waitForURL(/^app:\/\/filex/, { timeout: 30_000 }).catch(() => {});
-  await w.waitForTimeout(6000);
-  await w.evaluate(() => {
-    const s = [...document.querySelectorAll('button')].find((b) => /Turu atla|Skip/i.test(b.textContent ?? ''));
-    s?.click();
-  });
+  const form = new FormData();
+  form.append('path', `${STORAGE}://`);
+  form.append('file[]', new Blob(['share e2e fixture\n'], { type: 'text/plain' }), NAME);
+  const up = await api('/api/files/manager?action=upload', { method: 'POST', body: form }, adminToken);
+  if (!up.ok) throw new Error(`could not seed a fixture file (${up.status})`);
+
+  await w.waitForTimeout(5000);
+  await skipTour(w);
+  await w.evaluate(() => document.querySelector('.fe-toolbar button[title="Refresh"], .fe-toolbar button[title="Yenile"]')?.click());
+  await w.waitForTimeout(2500);
 
   // The API the product's button is gated on must now exist.
-  const api = await w.evaluate(() => ({
+  const bridge = await w.evaluate(() => ({
     share: typeof navigator.share,
     canShare: typeof navigator.canShare,
   }));
-  check('navigator.share exists in the desktop shell', api.share === 'function', `share=${api.share}`);
+  check('navigator.share exists in the desktop shell', bridge.share === 'function', `share=${bridge.share}`);
 
   // ── open the dialog and create a link ─────────────────────────────
-  await w.evaluate(() => {
-    const row = [...document.querySelectorAll('*')].find((e) => e.textContent?.trim() === 'sozlesme.pdf');
+  const selected = await w.evaluate((name) => {
+    const row = [...document.querySelectorAll('.fe-list__row')].find((r) => r.textContent?.includes(name));
     row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
-  await w.waitForTimeout(400);
-  await w.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => /Payla[sş] \/ [İI]zinler/i.test(x.textContent ?? ''));
-    b?.click();
-  });
+    return !!row;
+  }, NAME);
+  check('the seeded file is listed and selectable', selected, NAME);
+  await w.waitForTimeout(500);
+
+  // Share sits in the "⋯" overflow when the toolbar is full.
+  if (!(await clickText(w, /Payla[sş] \/ [İI]zinler|Share \/ Permissions/))) {
+    await clickText(w, /^⋯$/);
+    await w.waitForTimeout(500);
+    await clickText(w, /Payla[sş] \/ [İI]zinler|Share \/ Permissions/);
+  }
   await w.waitForTimeout(1200);
-  await w.evaluate(() => {
-    const t = [...document.querySelectorAll('button')].find((b) => /^Ba[gğ]lant[iı]$|^Link$/i.test(b.textContent?.trim() ?? ''));
-    t?.click();
-  });
+  await clickText(w, /^Ba[gğ]lant[iı]$|^Link$/);
   await w.waitForTimeout(800);
-  await w.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => /Ba[gğ]lant[iı] olu[sş]tur|Create link/i.test(x.textContent ?? ''));
-    b?.click();
-  });
+  await clickText(w, /Ba[gğ]lant[iı] olu[sş]tur|Create link/);
   await w.waitForTimeout(2500);
 
   const buttons = await w.evaluate(() => {
@@ -128,14 +110,19 @@ try {
   await w.evaluate(() => {
     window.__shareState = 'pending';
     window.filexApp
-      .share({ title: 'sozlesme.pdf', text: 'filex', url: 'https://example.invalid/s/abc' })
+      .share({ title: 'fixture', text: 'filex', url: 'https://example.invalid/s/abc' })
       .then((r) => { window.__shareState = 'resolved:' + (r?.via ?? '?'); })
       .catch((e) => { window.__shareState = 'rejected:' + String(e?.message ?? e); });
   });
   await w.waitForTimeout(1500);
   const state = await w.evaluate(() => window.__shareState);
-  check('pressing share opens the native menu (call is still awaiting a choice)',
-    state === 'pending' || state.startsWith('resolved'), state);
+  // ⚠ `AbortError` counts as success. It is raised ONLY from the popup's own
+  // dismiss callback, so receiving it proves the native menu really opened —
+  // and a menu closes by itself the moment its window loses focus, which is
+  // exactly what happens when these suites run one after another. Treating it
+  // as a failure made this check fail on a machine, not on a bug.
+  check('pressing share opens the native menu',
+    state === 'pending' || state.startsWith('resolved') || /AbortError/.test(state), state);
   check('the handler did not refuse the payload',
     !/nothing to share|not supported|is not a function/i.test(state), state);
 
@@ -145,8 +132,14 @@ try {
 } catch (e) {
   check('flow completed', false, String(e && e.message).split('\n')[0]);
 } finally {
+  if (token) {
+    await api('/api/files/manager?action=delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ path: `${STORAGE}://${NAME}`, type: 'file' }] }),
+    }, token).catch(() => {});
+  }
   await app.close().catch(() => {});
 }
 
-console.log(`\n==== ${failures === 0 ? 'ALL PASSED' : failures + ' FAILED'} ====`);
-process.exit(failures === 0 ? 0 : 1);
+finish();

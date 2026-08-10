@@ -10,78 +10,17 @@
 // Run: node scripts/shell-e2e.mjs
 // Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD
 
-import fs, { readdirSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  REPO, STORAGE,
+  api, check, finish, launchApp, signIn, skipTour,
+} from './lib/harness.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DESKTOP = path.resolve(__dirname, '..');
-const REPO = path.resolve(DESKTOP, '..');
+const { app } = await launchApp();
 
-const PNPM = path.join(REPO, 'node_modules/.pnpm');
-const pwDir = readdirSync(PNPM).find((d) => d.startsWith('playwright-core@'));
-const { _electron } = await import(
-  pathToFileURL(path.join(PNPM, pwDir, 'node_modules/playwright-core/index.mjs')).href
-);
-
-const SERVER = process.env.FILEX_SERVER ?? 'https://fm.brf.sh';
-const EMAIL = process.env.FILEX_EMAIL ?? '';
-const PASSWORD = process.env.FILEX_PASSWORD ?? '';
-
-let failures = 0;
-const check = (name, ok, detail = '') => {
-  if (!ok) failures++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
-};
-
-async function browserHalf(authUrl) {
-  const u = new URL(authUrl);
-  const state = u.searchParams.get('desktop_state');
-  const challenge = u.searchParams.get('desktop_challenge');
-  const login = await fetch(`${SERVER}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD, remember: true }),
-  });
-  if (!login.ok) throw new Error(`browser login failed (${login.status})`);
-  const cookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
-  const done = await fetch(`${SERVER}/api/auth/desktop/complete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ state, challenge, label: 'filex desktop — shell e2e' }),
-  });
-  if (!done.ok) throw new Error(`complete failed (${done.status})`);
-  return (await done.json()).code;
-}
-
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-shell-e2e-'));
-const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
-// ⚠ FILEX_CLI is deliberately NOT set. Handing the app the path to its own
-// engine is how the suite stayed green while the app said "the sync engine is
-// missing" when launched normally — the resolution logic was never exercised.
-
-// FILEX_APP_BINARY points at a PACKAGED build (release2/win-unpacked/filex.exe,
-// or the AppImage's unpacked binary). Worth running: `electron .` loads files
-// straight off disk, so it cannot catch anything that goes wrong at packaging
-// time — a file missing from the asar, a resource path that only resolves in
-// the source tree. The installed app is what the user actually runs.
-//
-// ⚠ The hermetic --user-data-dir also keeps the single-instance lock separate,
-// so this never hijacks or kills an app the operator has open.
-const packaged = process.env.FILEX_APP_BINARY;
-const app = await _electron.launch({
-  ...(packaged
-    ? { executablePath: packaged, args: [`--user-data-dir=${profile}`] }
-    : { args: [DESKTOP, `--user-data-dir=${profile}`], cwd: DESKTOP }),
-  env: {
-    ...process.env,
-    FILEX_NO_BROWSER: '1',
-    HOME: fakeHome,
-    USERPROFILE: fakeHome,
-  },
-});
-if (packaged) console.log(`(driving the PACKAGED app: ${packaged})`);
+/** A file that is certainly there, put there by this run and taken away after. */
+const SEED_NAME = process.env.FILEX_SEEDED_FILE ?? `desktop-e2e-${Date.now()}.txt`;
+let seedToken = null;
 
 try {
   // ── sign in ───────────────────────────────────────────────────────
@@ -92,21 +31,19 @@ try {
     (await connect.locator('nav').count()) === 0,
     'accounts + sync + settings belong in the app window');
 
-  await connect.locator('#server').fill(SERVER);
-  await connect.locator('#go').click();
-  await connect.locator('#authurl').waitFor({ timeout: 15_000 });
-  const code = await browserHalf(await connect.locator('#authurl').inputValue());
-  await connect.locator('#code').fill(code);
-  await connect.locator('#usecode').click().catch(() => {});
+  const { win, adminToken } = await signIn(app, { label: 'filex desktop — shell e2e' });
+  seedToken = adminToken;
+  check('the app window loaded', true, `app://filex url=${win.url()}`);
 
-  // ── the app window ────────────────────────────────────────────────
-  const win = await app.waitForEvent('window', { timeout: 60_000 });
-  await win.waitForURL(/^app:\/\/filex/, { timeout: 30_000 }).catch(() => {});
-  await win.waitForLoadState('domcontentloaded');
-  const origin = await win.evaluate(() => location.origin);
-  check('the app window loaded', origin === 'app://filex', `${origin} url=${win.url()}`);
-  if (origin !== 'app://filex') {
-    throw new Error(`the app never loaded (${win.url()})`);
+  // ⚠ Seeded by this run rather than assumed. The check below is "a real file
+  // from the server is on screen"; pointing it at a file someone happened to
+  // leave on the storage made it fail on every server but one.
+  if (!process.env.FILEX_SEEDED_FILE) {
+    const form = new FormData();
+    form.append('path', `${STORAGE}://`);
+    form.append('file[]', new Blob(['desktop e2e fixture\n'], { type: 'text/plain' }), SEED_NAME);
+    const up = await api('/api/files/manager?action=upload', { method: 'POST', body: form }, adminToken);
+    if (!up.ok) throw new Error(`could not seed a fixture file (${up.status})`);
   }
 
   await win.waitForTimeout(4000);
@@ -115,16 +52,23 @@ try {
   const explorerCount = await win.locator('filex-explorer').count();
   check('the window shows the FILE EXPLORER', explorerCount === 1, `${explorerCount} found`);
 
-  const bodyText = await win.evaluate(() => document.body.innerText);
-  const consoleWords = ['Dashboard', 'Storages', 'Users', 'Audit log', 'Webhooks', 'Kontrol'];
-  const found = consoleWords.filter((w) => bodyText.includes(w));
+  // ⚠ Measured OUTSIDE the explorer. "Storages" is a word the file explorer
+  // itself uses in English, so scanning the whole body reported an admin
+  // console that was never there — the check has to look at the shell only.
+  const shellText = await win.evaluate(() => {
+    const clone = document.body.cloneNode(true);
+    clone.querySelectorAll('filex-explorer').forEach((e) => e.remove());
+    return clone.innerText ?? clone.textContent ?? '';
+  });
+  const consoleWords = ['Dashboard', 'Audit log', 'Webhooks', 'Storage adapters', 'Kontrol'];
+  const found = consoleWords.filter((w) => shellText.includes(w));
   check('no admin console in the window', found.length === 0, found.join(', ') || 'clean');
 
   // ⚠ "the component rendered something" is too weak a claim — an empty folder
   // and a dead component look the same from the outside. The server is seeded
   // with a file, so the test asserts THAT FILE IS ON SCREEN: the token function,
   // the cross-origin request and the listing all have to work for it to appear.
-  const seeded = process.env.FILEX_SEEDED_FILE ?? 'rapor-2026.txt';
+  const seeded = SEED_NAME;
   let shows = false;
   for (let i = 0; i < 20 && !shows; i++) {
     shows = (await win.evaluate(() => document.body.innerText)).includes(seeded);
@@ -224,7 +168,7 @@ try {
     return { ok: !!el?.closest('#picker'), got: el?.id || el?.className?.toString?.().slice(0, 40) };
   });
   check('the folder picker is on top, not behind settings', pickerOnTop.ok, `topmost = ${pickerOnTop.got}`);
-  check('the storage is listed by name', picker.items.some((t) => /docs/.test(t)),
+  check('the storage is listed by name', picker.items.some((t) => t.includes(STORAGE)),
     picker.items.join(' | '));
 
   await win.screenshot({ path: path.join(REPO, 'desktop-shell-picker.png') });
@@ -242,15 +186,43 @@ try {
   // backdrop, browser-default inputs flowing down the page — because Vue's
   // scoped-style hash does not survive the web-component build. Nothing threw;
   // the functional suites were all green while it looked broken.
+  // ⚠ The tour card is a child of <body>, not of the explorer, and it sits in
+  // the middle of the window swallowing clicks. Dismiss it before driving
+  // anything — measured: every click below landed on the tour instead.
+  await skipTour(win);
   await win.evaluate((name) => {
     const row = [...document.querySelectorAll('*')].find((e) => e.textContent?.trim() === name);
     row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   }, seeded);
   await win.waitForTimeout(500);
+  // ⚠ Share does not sit on the toolbar at this width — it is inside the "⋯"
+  // overflow. Looking for the button on the toolbar found nothing and reported
+  // a missing DIALOG, which is a different bug entirely.
   await win.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find((x) =>
-      /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(x.textContent ?? ''));
-    b?.click();
+    // ⚠ VISIBLE buttons only. The toolbar keeps an aria-hidden measuring strip
+    // that renders EVERY action so the fold calculation has real widths — so a
+    // plain querySelectorAll finds a "Share / Permissions" button that is not
+    // on screen and has no click handler. Clicking that one did nothing, and
+    // the run reported a missing dialog instead of a missed button.
+    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
+    const buttons = [...document.querySelectorAll('button')].filter(visible);
+    const direct = buttons.find((x) => /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(x.textContent ?? ''));
+    if (direct) { direct.click(); return; }
+    // ⚠ The wide-mode overflow button carries no class of its own — only the
+    // narrow one does (.fe-toolbar__more). Find it by the glyph it renders.
+    buttons.find((x) => (x.textContent ?? '').trim() === '⋯')?.click();
+  });
+  await win.waitForTimeout(600);
+  await win.evaluate(() => {
+    // ⚠ Same trap as above, and it bites harder here: the measuring strip is
+    // `visibility:hidden; height:0`, which still has client rects, so a
+    // "is it visible" test that only measures boxes picks the handler-less
+    // clone and the menu closes with nothing done.
+    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
+    const item = [...document.querySelectorAll('button, li, [role="menuitem"]')]
+      .filter(visible)
+      .find((x) => /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(x.textContent ?? ''));
+    item?.click();
   });
   await win.waitForTimeout(1500);
 
@@ -281,8 +253,16 @@ try {
 } catch (e) {
   check('flow completed', false, String(e && e.message).split('\n')[0]);
 } finally {
+  // Take the fixture away again — a test that leaves litter on a real storage
+  // is a test nobody runs twice.
+  if (seedToken && !process.env.FILEX_SEEDED_FILE) {
+    await api('/api/files/manager?action=delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ path: `${STORAGE}://${SEED_NAME}`, type: 'file' }] }),
+    }, seedToken).catch(() => {});
+  }
   await app.close().catch(() => {});
 }
 
-console.log(`\n==== ${failures === 0 ? 'ALL PASSED' : failures + ' FAILED'} ====`);
-process.exit(failures === 0 ? 0 : 1);
+finish();

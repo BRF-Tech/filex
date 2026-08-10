@@ -118,6 +118,58 @@
       /* ── main ────────────────────────────────────────────────── */
       #main { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
       filex-explorer { display: block; flex: 1; min-height: 0; }
+
+      /* ── boot surface ────────────────────────────────────────────
+         What fills the window between "the app opened" and "the files are
+         listed". It used to be a dashed grey box pinned to the top-left
+         corner of an otherwise blank white window, which reads as a broken
+         layout rather than as work in progress. It is a whole surface now,
+         centred, on the app's own background, and it says WHICH server it is
+         waiting for — the one fact that makes waiting tolerable. */
+      #boot {
+        position: absolute; inset: 0;
+        display: none;
+        place-items: center;
+        background: var(--bg);
+        padding: 24px;
+        text-align: center;
+      }
+      #boot.on { display: grid; }
+      .boot__inner { max-width: 380px; display: grid; justify-items: center; gap: 6px; }
+      .boot__mark {
+        width: 56px; height: 56px; margin-bottom: 12px;
+        display: grid; place-items: center;
+        border-radius: 16px;
+        background: linear-gradient(160deg, var(--accent), #1e4fd0);
+        box-shadow: 0 6px 18px rgba(47, 109, 246, .28);
+      }
+      .boot__mark svg { width: 30px; height: 30px; color: #fff; }
+      .boot__title { font-size: 15px; font-weight: 600; }
+      .boot__sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+      /* An indeterminate bar, not a spinner: it fills the same width as the
+         text above it, so the surface stays a single centred column. */
+      .boot__bar {
+        margin-top: 16px; width: 190px; height: 3px; border-radius: 2px;
+        background: var(--line); overflow: hidden; position: relative;
+      }
+      .boot__bar::after {
+        content: ''; position: absolute; inset: 0 auto 0 0; width: 40%;
+        border-radius: 2px; background: var(--accent);
+        animation: boot-slide 1.15s ease-in-out infinite;
+      }
+      @keyframes boot-slide {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot__bar::after { animation: none; width: 100%; opacity: .5; }
+      }
+      .boot__err {
+        margin-top: 14px; padding: 10px 12px; border-radius: 8px;
+        background: rgba(192, 57, 43, .09); border: 1px solid rgba(192, 57, 43, .28);
+        color: var(--danger); font-size: 13px; overflow-wrap: anywhere; text-align: left;
+      }
+      .boot__actions { margin-top: 16px; display: flex; gap: 8px; }
       #settings {
         position: absolute; inset: 0; background: var(--bg);
         overflow: auto; padding: 26px 30px 40px; display: none;
@@ -179,6 +231,7 @@
     <nav id="rail"></nav>
     <div id="main">
       <div id="explorer-host" style="flex:1;min-height:0;display:flex"></div>
+      <div id="boot"></div>
       <section id="settings"></section>
     </div>
 
@@ -219,6 +272,76 @@
         '<circle cx="12" cy="12" r="3.2"/>' +
         '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
+      // ── language ──────────────────────────────────────────────
+      // The explorer inside this window already speaks the user's language. A
+      // shell in English wrapped around a Turkish file list is one app
+      // pretending to be two — which is most of why this window looked wrong.
+      // The OS locale decides, and everything we do not ship falls back to
+      // English rather than to an empty string.
+      const LANG = (navigator.language || 'en').toLowerCase().startsWith('tr') ? 'tr' : 'en';
+      const STRINGS = {
+        'boot.no_account':      ['No account is signed in', 'Giriş yapılmış hesap yok'],
+        'boot.no_account_sub':  ['Add a server to start browsing your files.', 'Dosyalarını görmek için bir sunucu ekle.'],
+        'boot.add':             ['Add an account', 'Hesap ekle'],
+        'boot.connecting':      ['Connecting to {host}', '{host} sunucusuna bağlanılıyor'],
+        'boot.unreachable':     ["Can't reach {host}", '{host} sunucusuna ulaşılamıyor'],
+        'boot.unreachable_sub': ['The server did not answer. It may be offline, or this computer may be off the network.',
+                                 'Sunucu yanıt vermedi. Kapalı olabilir ya da bu bilgisayar ağ dışında olabilir.'],
+        'boot.retry':           ['Try again', 'Yeniden dene'],
+
+        'rail.add':             ['Add another account', 'Başka bir hesap ekle'],
+        'rail.settings':        ['Settings', 'Ayarlar'],
+
+        'set.title':            ['Settings', 'Ayarlar'],
+        'set.sub':              ["These are this app's settings. Your server's own settings live in its admin panel.",
+                                 'Bunlar bu uygulamanın ayarları. Sunucunun kendi ayarları onun yönetim panelinde.'],
+        'set.accounts':         ['Accounts', 'Hesaplar'],
+        'set.admin':            ['Admin panel ↗', 'Yönetim paneli ↗'],
+        'set.signout':          ['Sign out', 'Çıkış yap'],
+        'set.no_accounts':      ['No accounts.', 'Hesap yok.'],
+        'set.folders':          ['Synced folders', 'Eşitlenen klasörler'],
+        'set.no_engine':        ['The sync engine is missing from this build, so nothing will transfer.',
+                                 'Bu sürümde eşitleme motoru yok, hiçbir dosya aktarılmayacak.'],
+        'set.no_folders':       ['No folders are syncing yet.', 'Henüz eşitlenen klasör yok.'],
+        'set.open_folder':      ['Open folder', 'Klasörü aç'],
+        'set.stop_sync':        ['Stop syncing', 'Eşitlemeyi durdur'],
+        'set.add_sync':         ['Sync a folder…', 'Klasör eşitle…'],
+        'set.trash':            ['Recently deleted', 'Son silinenler'],
+        'set.sync_note':        ['The first sync of a folder merges both sides and deletes nothing. After that deletes carry across; anything removed from this computer is kept for 30 days.',
+                                 'Bir klasörün ilk eşitlemesi iki tarafı birleştirir, hiçbir şeyi silmez. Sonrasında silmeler karşı tarafa geçer; bu bilgisayardan silinen her şey 30 gün saklanır.'],
+        'set.this_app':         ['This app', 'Bu uygulama'],
+        'set.background':       ['Keep running in the background', 'Arka planda çalışmaya devam et'],
+        'set.background_sub':   ['Closing the window leaves filex in the tray so folders keep syncing.',
+                                 'Pencereyi kapatınca filex sistem tepsisinde kalır, klasörler eşitlenmeye devam eder.'],
+        'set.autostart':        ['Start when I sign in', 'Oturum açtığımda başlat'],
+        'set.autostart_refused':['Requested, but the system did not accept it.', 'İstendi ama sistem kabul etmedi.'],
+        'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
+        'set.on':               ['On', 'Açık'],
+        'set.off':              ['Off', 'Kapalı'],
+        'set.unknown_account':  ['unknown account', 'bilinmeyen hesap'],
+
+        'sync.waiting':         ['waiting to start', 'başlaması bekleniyor'],
+        'sync.watching':        ['watching for changes', 'değişiklikler izleniyor'],
+        'sync.stopped':         ['stopped', 'durdu'],
+        'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
+        'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
+
+        'pick.title':           ['Choose a folder on the server', 'Sunucuda bir klasör seç'],
+        'pick.storages':        ['Storages on this server', 'Bu sunucudaki depolar'],
+        'pick.loading':         ['Loading…', 'Yükleniyor…'],
+        'pick.empty':           ['No folders here.', 'Burada klasör yok.'],
+        'pick.up':              ['Up', 'Üst klasör'],
+        'pick.use':             ['Sync this folder', 'Bu klasörü eşitle'],
+        'pick.pick_storage':    ['Open a storage first, then choose a folder inside it.',
+                                 'Önce bir depo aç, sonra içindeki klasörü seç.'],
+      };
+      function T(key, vars) {
+        const entry = STRINGS[key];
+        let s = entry ? (LANG === 'tr' ? entry[1] : entry[0]) : key;
+        if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
+        return s;
+      }
+
       const $ = (sel, root = document) => root.querySelector(sel);
       const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -233,16 +356,43 @@
       // Mounted once per account. `auth.token` is a FUNCTION, which the component
       // supports: the credential is fetched from the main process at call time
       // rather than being handed to this page up front and kept lying around.
+      const ICON_MARK =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.4h9A1.5 1.5 0 0 1 21 9.9v7.6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>';
+
+      /** The surface shown while there is nothing else to show. */
+      function showBoot(html) {
+        const b = $('#boot');
+        b.innerHTML = `<div class="boot__inner"><div class="boot__mark">${ICON_MARK}</div>${html}</div>`;
+        b.classList.add('on');
+      }
+      function hideBoot() {
+        $('#boot').classList.remove('on');
+        $('#boot').innerHTML = '';
+      }
+
       async function mountExplorer(account) {
         const slot = $('#explorer-host');
         if (!account) {
-          slot.innerHTML = '<div class="empty" style="margin:20px">No account is signed in.</div>';
+          slot.innerHTML = '';
           explorer = null; mountedFor = null;
+          showBoot(
+            `<div class="boot__title">${esc(T('boot.no_account'))}</div>` +
+            `<div class="boot__sub">${esc(T('boot.no_account_sub'))}</div>` +
+            `<div class="boot__actions"><button class="primary" id="boot-add">${esc(T('boot.add'))}</button></div>`,
+          );
+          $('#boot-add').addEventListener('click', () => window.filexApp.addAccount());
           return;
         }
         if (mountedFor === account.id) return;
         mountedFor = account.id;
-        slot.innerHTML = '<div class="empty" style="margin:20px">Connecting…</div>';
+        slot.innerHTML = '';
+        showBoot(
+          `<div class="boot__title">${esc(T('boot.connecting', { host: host(account.serverUrl) }))}</div>` +
+          `<div class="boot__sub">${esc(account.email)}</div>` +
+          '<div class="boot__bar"></div>',
+        );
 
         // ⚠ The drives root mirrors the list we hand over — it does NOT go and
         // find the storages itself. Mounting without this produced an empty "/"
@@ -252,11 +402,21 @@
         try {
           storages = await window.filexApp.storages(account.id);
         } catch (e) {
-          slot.innerHTML = `<div class="empty err" style="margin:20px">Could not reach ${esc(host(account.serverUrl))}: ${esc(e.message || e)}</div>`;
+          if (mountedFor !== account.id) return;
+          showBoot(
+            `<div class="boot__title">${esc(T('boot.unreachable', { host: host(account.serverUrl) }))}</div>` +
+            `<div class="boot__sub">${esc(T('boot.unreachable_sub'))}</div>` +
+            `<div class="boot__err">${esc(e.message || e)}</div>` +
+            `<div class="boot__actions"><button class="primary" id="boot-retry">${esc(T('boot.retry'))}</button>` +
+            `<button id="boot-settings">${esc(T('rail.settings'))}</button></div>`,
+          );
+          $('#boot-retry').addEventListener('click', () => { mountedFor = null; void mountExplorer(account); });
+          $('#boot-settings').addEventListener('click', () => toggleSettings(true));
           return;
         }
         if (mountedFor !== account.id) return;   // switched away while loading
 
+        hideBoot();
         slot.innerHTML = '';
         explorer = document.createElement('filex-explorer');
         explorer.style.cssText = 'display:block;flex:1;min-height:0';
@@ -274,6 +434,10 @@
           pathPersist: 'none',
           trashVisible: true,
           theme: 'auto',
+          // One language for the whole window. The component defaults to
+          // Turkish, so without this an English desktop showed English chrome
+          // around a Turkish file list.
+          locale: LANG,
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
         slot.appendChild(explorer);
@@ -334,7 +498,7 @@
         const add = document.createElement('button');
         add.className = 'rail-btn';
         add.innerHTML = ICON_PLUS;
-        add.title = 'Add another account';
+        add.title = T('rail.add');
         add.addEventListener('click', () => window.filexApp.addAccount());
         rail.appendChild(add);
 
@@ -345,7 +509,7 @@
         const gear = document.createElement('button');
         gear.className = 'rail-btn';
         gear.innerHTML = ICON_GEAR;
-        gear.title = 'Settings';
+        gear.title = T('rail.settings');
         gear.addEventListener('click', () => toggleSettings());
         rail.appendChild(gear);
       }
@@ -362,68 +526,65 @@
               <div class="muted">${esc(a.serverUrl)}</div>
             </div>
             <div class="row">
-              <button class="link" data-admin="${a.id}">Admin panel ↗</button>
-              <button class="danger" data-signout="${a.id}">Sign out</button>
+              <button class="link" data-admin="${a.id}">${esc(T('set.admin'))}</button>
+              <button class="danger" data-signout="${a.id}">${esc(T('set.signout'))}</button>
             </div>
-          </div></div>`).join('') : '<div class="empty">No accounts.</div>';
+          </div></div>`).join('') : `<div class="empty">${esc(T('set.no_accounts'))}</div>`;
 
         const pairs = state.syncFolders.length ? state.syncFolders.map((f) => {
           const acc = state.accounts.find((a) => a.id === f.accountId);
           const st = statusOf[f.accountId];
-          let line = 'waiting to start', cls = 'muted';
+          let line = T('sync.waiting'), cls = 'muted';
           if (st && st.lastError) { line = st.lastError; cls = 'err'; }
-          else if (st && st.running) { line = st.lastLine || 'watching for changes'; cls = 'ok'; }
-          else if (st) { line = 'stopped'; cls = 'err'; }
+          else if (st && st.running) { line = st.lastLine || T('sync.watching'); cls = 'ok'; }
+          else if (st) { line = T('sync.stopped'); cls = 'err'; }
           return `
           <div class="card"><div class="between">
             <div style="min-width:0">
               <div><code>${esc(f.remotePath)}</code></div>
               <div class="muted" style="overflow-wrap:anywhere">↔ ${esc(f.localPath)}</div>
-              <div class="muted">${esc(acc ? acc.email : 'unknown account')}</div>
+              <div class="muted">${esc(acc ? acc.email : T('set.unknown_account'))}</div>
               <div class="${cls}" style="font-size:13px">${esc(line)}</div>
             </div>
             <div class="row">
-              <button data-openlocal="${esc(f.localPath)}">Open folder</button>
-              <button class="danger" data-rmsync="${f.id}">Stop syncing</button>
+              <button data-openlocal="${esc(f.localPath)}">${esc(T('set.open_folder'))}</button>
+              <button class="danger" data-rmsync="${f.id}">${esc(T('set.stop_sync'))}</button>
             </div>
           </div></div>`;
-        }).join('') : '<div class="empty">No folders are syncing yet.</div>';
+        }).join('') : `<div class="empty">${esc(T('set.no_folders'))}</div>`;
 
         const engineWarning = state.syncEngine === 'missing'
-          ? '<div class="card err">The sync engine is missing from this build, so nothing will transfer.</div>' : '';
+          ? `<div class="card err">${esc(T('set.no_engine'))}</div>` : '';
 
         return `
           <button class="close" id="close-settings">✕</button>
-          <h1>Settings</h1>
-          <p class="sub">These are this app's settings. Your server's own settings live in its admin panel.</p>
+          <h1>${esc(T('set.title'))}</h1>
+          <p class="sub">${esc(T('set.sub'))}</p>
 
-          <h2>Accounts</h2>
+          <h2>${esc(T('set.accounts'))}</h2>
           ${accounts}
-          <div class="row"><button id="add-account">Add another account</button></div>
+          <div class="row"><button id="add-account">${esc(T('boot.add'))}</button></div>
 
-          <h2>Synced folders</h2>
+          <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
           ${pairs}
           <div class="row" style="margin-top:6px">
-            <button class="primary" id="add-sync" ${active ? '' : 'disabled'}>Sync a folder…</button>
-            <button id="sync-trash">Recently deleted</button>
+            <button class="primary" id="add-sync" ${active ? '' : 'disabled'}>${esc(T('set.add_sync'))}</button>
+            <button id="sync-trash">${esc(T('set.trash'))}</button>
           </div>
-          <p class="muted" style="margin-top:10px">
-            The first sync of a folder merges both sides and deletes nothing. After that deletes
-            carry across; anything removed from this computer is kept for 30 days.
-          </p>
+          <p class="muted" style="margin-top:10px">${esc(T('set.sync_note'))}</p>
 
-          <h2>This app</h2>
+          <h2>${esc(T('set.this_app'))}</h2>
           <div class="card"><div class="between">
-            <div><strong>Keep running in the background</strong>
-              <div class="muted">Closing the window leaves filex in the tray so folders keep syncing.</div></div>
-            <button id="bg">${state.runInBackground ? 'On' : 'Off'}</button>
+            <div><strong>${esc(T('set.background'))}</strong>
+              <div class="muted">${esc(T('set.background_sub'))}</div></div>
+            <button id="bg">${esc(T(state.runInBackground ? 'set.on' : 'set.off'))}</button>
           </div></div>
           <div class="card"><div class="between">
-            <div><strong>Start when I sign in</strong>
-              <div class="muted">${state.launchAtLoginEffective === false && state.launchAtLogin
-                ? 'Requested, but the system did not accept it.' : 'Launches minimised to the tray.'}</div></div>
-            <button id="login-item">${state.launchAtLogin ? 'On' : 'Off'}</button>
+            <div><strong>${esc(T('set.autostart'))}</strong>
+              <div class="muted">${esc(T(state.launchAtLoginEffective === false && state.launchAtLogin
+                ? 'set.autostart_refused' : 'set.autostart_sub'))}</div></div>
+            <button id="login-item">${esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
           </div></div>
           <p class="muted">filex ${esc(state.appVersion || '')}</p>`;
       }
@@ -462,8 +623,8 @@
         $('#sync-trash', el).addEventListener('click', async () => {
           const items = await window.filexApp.syncTrash();
           alert(items.length
-            ? `Kept for 30 days:\n\n${items.slice(0, 25).map((i) => `${i.rel}  (${new Date(i.deleted).toLocaleDateString()})`).join('\n')}`
-            : 'Nothing has been removed by sync.');
+            ? `${T('sync.trash_kept')}\n\n${items.slice(0, 25).map((i) => `${i.rel}  (${new Date(i.deleted).toLocaleDateString()})`).join('\n')}`
+            : T('sync.trash_empty'));
         });
         $('#bg', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ runInBackground: !state.runInBackground });
@@ -483,12 +644,12 @@
         pkPath = path;
         $('#picker').classList.add('open');
         const list = $('#pk-list');
-        list.innerHTML = '<li class="muted">Loading…</li>';
-        $('#pk-path').textContent = path || 'Storages on this server';
+        list.innerHTML = `<li class="muted">${esc(T('pick.loading'))}</li>`;
+        $('#pk-path').textContent = path || T('pick.storages');
         try {
           const entries = await window.filexApp.browse(state.activeId, path);
           list.innerHTML = '';
-          if (!entries.length) list.innerHTML = '<li class="muted">No folders here.</li>';
+          if (!entries.length) list.innerHTML = `<li class="muted">${esc(T('pick.empty'))}</li>`;
           for (const e of entries) {
             const li = document.createElement('li');
             li.textContent = `📁 ${e.name}`;
@@ -506,7 +667,7 @@
         openPicker(i > pkPath.indexOf('://') + 2 ? pkPath.slice(0, i) : '');
       });
       $('#pk-use').addEventListener('click', async () => {
-        if (!pkPath) { alert('Open a storage first, then choose a folder inside it.'); return; }
+        if (!pkPath) { alert(T('pick.pick_storage')); return; }
         try {
           state = await window.filexApp.addSync(pkPath);
           $('#picker').classList.remove('open');
@@ -525,6 +686,12 @@
         render();
         if ($('#settings').classList.contains('open')) renderSettings();
       }
+
+      // The picker's chrome is static markup, so it is labelled once at boot
+      // rather than on every open.
+      $('#pk-title').textContent = T('pick.title');
+      $('#pk-up').textContent = T('pick.up');
+      $('#pk-use').textContent = T('pick.use');
 
       window.filexApp.onChanged(() => refresh());
       window.filexApp.onOpenSettings(() => toggleSettings(true));

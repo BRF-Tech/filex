@@ -32,7 +32,7 @@ const props = defineProps<{
   downloadUrl: (path: string) => string;
   onlyOfficeBase?: string | null;
   onlyOfficeConfigEndpoint?: string | null;
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
   drawioUrl?: string | null;
   pdfWorkerUrl?: string | null;

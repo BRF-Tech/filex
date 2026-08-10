@@ -35,6 +35,21 @@ const dest = path.join(OUT_DIR, exeName);
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
+// ⚠⚠ The obvious way to point this at an existing binary is to point it at the
+// one already sitting in build/bin — and that used to DESTROY it: the cleanup
+// below ran first, deleted the file, and the copy then failed with ENOENT on a
+// path that had existed a moment earlier. 147 MB of downloaded release binary,
+// gone, with the build broken and no obvious cause. Measured 2026-08-10.
+const sourceIsDest =
+  process.env.FILEX_CLI_BIN &&
+  path.resolve(process.env.FILEX_CLI_BIN) === path.resolve(dest);
+
+if (sourceIsDest) {
+  console.log(`FILEX_CLI_BIN is already ${path.relative(DESKTOP, dest)} — keeping it as it is`);
+  announce();
+  process.exit(0);
+}
+
 // Clear stale copies: shipping a binary for the wrong OS is worse than none,
 // because the app then looks armed and fails at spawn time on the user's
 // machine instead of on this one.

@@ -38,7 +38,7 @@ const props = defineProps<{
   onlyOfficeConfigEndpoint?: string | null;
   saveTextEndpoint?: string | null;
   openMode?: 'edit' | 'view';
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
   /** New rich-viewer config (forwarded by FileExplorer from ExplorerConfig). */
   drawioUrl?: string | null;
@@ -351,7 +351,7 @@ async function fetchText(url: string): Promise<void> {
   tooLarge.value = false;
   try {
     const headers: Record<string, string> = {};
-    if (props.authHeaders) Object.assign(headers, props.authHeaders());
+    if (props.authHeaders) Object.assign(headers, await props.authHeaders());
     const res = await fetch(url, {
       credentials: props.authCredentials || 'same-origin',
       headers,
@@ -390,14 +390,25 @@ async function fetchText(url: string): Promise<void> {
 
 const markdownHtml = ref<string>('');
 const markdownEl = ref<HTMLDivElement | null>(null);
+/**
+ * The renderer could not be loaded at all.
+ *
+ * ⚠ Tracked separately from "nothing to render". In view mode a missing
+ * renderer falls through to the raw source, which is honest; in the split
+ * editor the preview pane simply stayed BLANK — a white half-window with no
+ * explanation, measured in the desktop app on 2026-08-10.
+ */
+const markdownUnavailable = ref(false);
 
 async function renderMarkdown(text: string): Promise<void> {
   try {
     const mod = (await import(/* @vite-ignore */ 'markdown-it').catch(() => null)) as any;
     if (!mod) {
       markdownHtml.value = '';
+      markdownUnavailable.value = true;
       return;
     }
+    markdownUnavailable.value = false;
     const Md = (mod as { default: any }).default ?? (mod as any);
     // html: true so inline HTML in README.md / docs renders (the
     // GitHub / GitLab contract — operators expect `<img>`, tables,
@@ -552,6 +563,8 @@ const monacoEl = ref<HTMLDivElement | null>(null);
 let monacoEditor: any = null;
 let codeAutosaveTimer: ReturnType<typeof setTimeout> | undefined;
 const monacoReady = ref(false);
+/** Monaco resolved to nothing — the peer is not in this build at all. */
+const monacoUnavailable = ref(false);
 const saving = ref(false);
 const saveOk = ref(false);
 const saveError = ref<string | null>(null);
@@ -596,6 +609,12 @@ function monacoLanguageFor(extension: string): string {
 
 async function tryMountMonaco(text: string, extension: string): Promise<boolean> {
   const monaco = (await ensureMonaco()) as any;
+  // ⚠ "Not installed" is not "still loading". Monaco is an optional peer that
+  // most embeds do not ship, and the toolbar label was gated only on "not ready
+  // yet" — so a bundle without it showed "Editor loading…" forever, over a
+  // perfectly good read-only view. Measured in the desktop app once syntax
+  // highlighting started working and that label finally had something to sit on.
+  if (!monaco) monacoUnavailable.value = true;
   if (!monaco || !monacoEl.value) return false;
   try {
     disposeMonaco();
@@ -653,7 +672,7 @@ async function saveCode(): Promise<void> {
   try {
     const text = monacoEditor ? monacoEditor.getValue() : '';
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (props.authHeaders) Object.assign(headers, props.authHeaders());
+    if (props.authHeaders) Object.assign(headers, await props.authHeaders());
     const res = await fetch(props.saveTextEndpoint, {
       method: 'POST',
       headers,
@@ -718,7 +737,10 @@ async function runOrchestration(open: boolean, url: string, k: string): Promise<
       // kick off the Monaco load and swap it in once ready.
       if (k === 'code') await highlightCode(rawText.value, lang);
       ensureMonaco().then(async (m) => {
-        if (!m) return;
+        // ⚠ Record the "never coming" case here too. This branch returns early
+        // without ever reaching tryMountMonaco, so a build with no Monaco left
+        // the toolbar saying "Editor loading…" indefinitely.
+        if (!m) { monacoUnavailable.value = true; return; }
         if (!props.open) return;
         // Wait one tick so the placeholder DOM exists before swapping.
         await new Promise<void>((r) => setTimeout(r, 0));
@@ -770,7 +792,7 @@ async function mountOnlyOfficeEditor(): Promise<void> {
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (props.authHeaders) Object.assign(headers, props.authHeaders());
+    if (props.authHeaders) Object.assign(headers, await props.authHeaders());
     const res = await fetch(props.onlyOfficeConfigEndpoint, {
       method: 'POST',
       headers,
@@ -932,6 +954,11 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
               placeholder="# Markdown buraya…"
             />
             <div
+              v-if="markdownUnavailable"
+              class="fe-preview__md-split-output fe-preview__md"
+            >{{ t('viewer.peer_not_installed') }}</div>
+            <div
+              v-else
               ref="markdownEl"
               class="fe-preview__md-split-output fe-preview__md"
               v-html="markdownHtml"
@@ -978,7 +1005,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
           <div class="fe-preview__code-toolbar">
             <span class="fe-preview__code-lang">{{ codeLanguage }}</span>
             <span v-if="!monacoReady && codeHtml" class="fe-preview__code-status">
-              {{ saveTextEndpoint ? t('viewer.editor_loading') : t('viewer.read_only') }}
+              {{ saveTextEndpoint && !monacoUnavailable ? t('viewer.editor_loading') : t('viewer.read_only') }}
             </span>
             <span v-if="saveOk" class="fe-preview__code-status fe-preview__code-status--ok">✓ {{ t('viewer.saved') }}</span>
             <span v-if="saveError" class="fe-preview__code-status fe-preview__code-status--err" :title="saveError">✗ {{ t('viewer.save_error') }}</span>

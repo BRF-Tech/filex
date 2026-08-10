@@ -20,7 +20,7 @@ const props = defineProps<{
   mime?: string;
   ext: string;
   t?: (key: string) => string;
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
 
@@ -63,7 +63,7 @@ async function load(): Promise<void> {
     // and pass an ArrayBuffer instead.
     let source: string | ArrayBuffer = props.url;
     if (props.authHeaders) {
-      const headers = props.authHeaders();
+      const headers = await props.authHeaders();
       const res = await fetch(props.url, {
         headers,
         credentials: props.authCredentials || 'same-origin',

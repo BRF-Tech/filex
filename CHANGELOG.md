@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(Nothing yet — see v0.13.3 below.)
+### Fixed
+
+- **Office documents opened with "Config fetch 401" in the desktop app, and
+  starred files and recently-opened were silently empty.** All three had one
+  cause. The explorer accepts a bearer token as a string *or a function*, and
+  the function form is the one a desktop app needs — the credential is fetched
+  from the main process per call rather than sitting in the renderer between
+  requests. Resolving it is therefore asynchronous, and the header builder the
+  explorer handed to the preview modal and every viewer was the *synchronous*
+  one, which drops a function token entirely. The request went out with no
+  `Authorization` header at all; nothing threw, and the only symptom was a
+  feature that quietly did not work.
+
+  The builder is async now and every caller awaits it. `authHeadersSync` stays
+  for the one caller that genuinely cannot await (XMLHttpRequest's header
+  loop), but it remembers the last token it saw instead of emitting nothing —
+  a stale credential is a far better failure than an anonymous request.
+  `web/tests/api/authHeaders.test.ts` fails the build if a call loses its
+  `await` again.
+
+- **"Open in new tab" did nothing at all.** The standalone editor route is
+  root-relative (`/files/edit`), which the browser resolves against the *page* —
+  correct when the explorer is embedded in the app that serves that route, and
+  wrong for every cross-origin embed. In the desktop app the page origin is
+  `app://filex`, so the button asked the OS to open `app://filex/files/edit?…`;
+  no handler for that scheme exists, so the call returned without error and
+  without doing anything. The route is now resolved against `apiBase` when the
+  API lives on another origin.
+
+- **Markdown previewed as a blank pane.** `markdown-it` was an external in the
+  web-component build, and every consumer of that bundle loads it as a plain
+  `<script type="module">` where a bare specifier cannot resolve — so the
+  dynamic import always failed, in the desktop app, work.brf.sh and fishapp
+  alike. It is bundled now (~100 KB, lazily chunked, loaded only when a `.md`
+  is opened), and if a renderer is ever missing again the pane says so instead
+  of rendering nothing.
+
+### Added
+
+- **The desktop app follows the OS language.** Its own chrome — the connect
+  screen, settings, the folder picker — was English while the file list beside
+  it was Turkish. Both now resolve from one locale (Turkish or English).
+
+- **A real connecting screen.** Between "the window opened" and "the files are
+  listed" the app showed a dashed grey box in the top-left corner of an empty
+  white window. It is a centred surface now, naming the server it is waiting
+  for, with an honest error state and a retry. The window also opens on its own
+  background colour and only once it has something to show, instead of flashing
+  white first.
+
+- **Images, video, audio and downloads work in the desktop app.** Those
+  elements carry no headers by construction, so the app attaches the account's
+  bearer to requests bound for its own server's origin — scoped to the
+  signed-in origins, never a wildcard, and never overwriting a header the page
+  set itself. Downloads of the app's own API URLs go through that session
+  rather than being handed to a browser that may not be signed in.
+
+- **`desktop/scripts/files-e2e.mjs`** — the file surface driven end to end
+  against a real server: opening documents and media, downloading, renaming,
+  searching, starring, deleting, and one blanket rule — nothing the window asks
+  its server for may come back 401.
 
 ## [0.13.3] - 2026-08-07
 

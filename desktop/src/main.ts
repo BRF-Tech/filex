@@ -21,8 +21,10 @@ import {
   dialog,
   ipcMain,
   nativeImage,
+  nativeTheme,
   net,
   protocol,
+  session,
   shell,
 } from 'electron';
 import path from 'node:path';
@@ -101,6 +103,92 @@ function registerAppProtocol(): void {
   });
 }
 
+// ─────────────────────────── credentials on the wire ───────────────────────────
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** The credential for whoever owns this origin — the ACTIVE account first, so
+ *  two accounts on one server resolve to the one the window is showing. */
+function tokenForOrigin(origin: string | null): string | null {
+  if (!origin) return null;
+  const active = activeAccount(state);
+  if (active && originOf(active.serverUrl) === origin) return active.token;
+  return state.accounts.find((a) => originOf(a.serverUrl) === origin)?.token ?? null;
+}
+
+/**
+ * Attaches the account's bearer to requests the PAGE cannot put a header on.
+ *
+ * `<img>`, `<video>`, `<audio>` and a download link carry no headers by
+ * construction — the explorer hands those elements a plain URL. On the web that
+ * is fine because the browser has a session cookie for the same origin; in this
+ * app the page lives on `app://filex` and the only credential is a bearer
+ * token, so every image preview, media player and download came back 401.
+ *
+ * Scoped to the signed-in servers' origins only — never a wildcard — and it
+ * never overwrites an Authorization header the page set itself.
+ */
+function wireAuthHeaderInjection(): void {
+  const origins = [...new Set(state.accounts.map((a) => originOf(a.serverUrl)).filter(Boolean))] as string[];
+  // ⚠ An EMPTY url list means "every request" to Electron, which would be the
+  // opposite of what this is for. With no accounts, match nothing instead.
+  const urls = origins.length ? origins.map((o) => `${o}/*`) : ['https://filex.invalid/*'];
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, done) => {
+    const headers = details.requestHeaders;
+    if (headers.Authorization || headers.authorization) {
+      done({ requestHeaders: headers });
+      return;
+    }
+    const token = tokenForOrigin(originOf(details.url));
+    if (token) headers.Authorization = `Bearer ${token}`;
+    done({ requestHeaders: headers });
+  });
+}
+
+/** True for the account's API surface — bytes, not pages. */
+function isApiUrl(url: string, serverUrl: string): boolean {
+  const origin = originOf(serverUrl);
+  try {
+    const u = new URL(url);
+    return u.origin === origin && u.pathname.startsWith('/api/');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where a URL the app wants to "open" should actually go.
+ *
+ * ⚠ Not everything belongs in the browser. The API serves FILES: handing
+ * `…/api/files/manager?action=download` to the browser asks a browser that may
+ * not be signed in to fetch them, while this app holds the credential — so
+ * those download in place, through the session that carries the token. Pages
+ * (`/files/edit`, `/admin/`) do belong in the browser, where the user's real
+ * session and their extensions live.
+ */
+function openOutward(url: string, from?: BrowserWindow | null): void {
+  const acc = activeAccount(state);
+  if (acc && isApiUrl(url, acc.serverUrl)) {
+    (from ?? mainWindow)?.webContents.downloadURL(url);
+    return;
+  }
+  if (/^(https?|mailto):/i.test(url)) {
+    void shell.openExternal(url);
+    return;
+  }
+  // ⚠ `app://`, `blob:` and `data:` have no OS handler. Passing them to
+  // shell.openExternal returns without error and does NOTHING — which is
+  // exactly how "Open in new tab" managed to be a dead button for a whole
+  // release. Say it out loud instead of failing silently.
+  console.warn(`[filex] refusing to open a URL the OS cannot handle: ${url}`);
+}
+
 // ─────────────────────────── windows ───────────────────────────
 
 function preload(name: string): string {
@@ -137,11 +225,22 @@ function openMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
+    minWidth: 720,
+    minHeight: 520,
     title: 'filex',
     icon: ICON_PATH,
     autoHideMenuBar: true,
+    // ⚠ Both of these are about the first second of the app's life. Electron
+    // paints a window WHITE before the document has rendered, so on a dark
+    // desktop the app opened as a white rectangle and then repainted — and the
+    // window appeared before the explorer had drawn a single row, which is what
+    // made "Connecting…" the first thing anyone saw. Show it once it has
+    // something to show, on a ground that matches the app.
+    show: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14181d' : '#ffffff',
     webPreferences: { preload: preload('preload-app.cjs'), contextIsolation: true, sandbox: true },
   });
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
 
   // Closing the window parks the app in the tray instead of killing it. A sync
   // client that stops syncing the moment its window is shut is not a sync
@@ -157,8 +256,18 @@ function openMainWindow(): void {
   });
   // External links belong in the browser, not in a window with a token in it.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openOutward(url, mainWindow);
     return { action: 'deny' };
+  });
+
+  // ⚠ A plain <a href> — the preview modal's download button is one — navigates
+  // this window. Without this guard the whole app is replaced by whatever that
+  // URL returns, and there is no back button to come home with: the file
+  // manager simply becomes a JSON error page.
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (url.startsWith(APP_ORIGIN)) return;
+    e.preventDefault();
+    openOutward(url, mainWindow);
   });
 
   void mainWindow.loadURL(START_URL);
@@ -182,6 +291,14 @@ function buildTray(): void {
   tray.setToolTip('filex');
   refreshTray();
   tray.on('click', () => route());
+}
+
+/** Everything that has to follow a change to the account set: the tray label,
+ *  and the credential injector — which is filtered on the signed-in origins and
+ *  would otherwise keep serving the previous account's token. */
+function accountsChanged(): void {
+  refreshTray();
+  wireAuthHeaderInjection();
 }
 
 function refreshTray(): void {
@@ -224,7 +341,7 @@ async function completeAuth(state_: string, code: string): Promise<void> {
   pendingAuth = null;
   upsertAccount(state, { serverUrl: attempt.serverUrl, email, token });
   saveState(state);
-  refreshTray();
+  accountsChanged();
   shellWindow?.close();
   openMainWindow();
   // ⚠ Tell the window. Adding a SECOND account happens in a different window,
@@ -314,7 +431,7 @@ function wireIpc(): void {
   ipcMain.handle('auth:signOut', (_e, id: string) => {
     removeAccount(state, id);
     saveState(state);
-    refreshTray();
+    accountsChanged();
     if (!activeAccount(state)) {
       mainWindow?.destroy();
       mainWindow = null;
@@ -327,7 +444,7 @@ function wireIpc(): void {
     if (state.accounts.some((a) => a.id === id)) {
       state.activeId = id;
       saveState(state);
-      refreshTray();
+      accountsChanged();
       // No window reload: the page re-mounts the explorer against the new
       // account itself. Tearing the window down would throw away the whole
       // explorer state on every click of the rail.
@@ -582,6 +699,7 @@ if (!app.requestSingleInstanceLock()) {
 
     registerAppProtocol();
     state = loadState();
+    wireAuthHeaderInjection();
     // The supervisor keeps a `filex sync run --watch` alive per account. It is
     // started here, not when the Sync folders window opens: syncing that only
     // happens while a panel is on screen is not syncing.

@@ -11,74 +11,19 @@
 // Run: node scripts/sync-e2e.mjs
 // Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD, FILEX_STORAGE (adapter name)
 
-import fs, { readdirSync } from 'node:fs';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  DESKTOP, REPO, STORAGE,
+  api, check, finish, launchApp, signIn, sleep,
+} from './lib/harness.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DESKTOP = path.resolve(__dirname, '..');
-const REPO = path.resolve(DESKTOP, '..');
-
-const PNPM = path.join(REPO, 'node_modules/.pnpm');
-const pwDir = readdirSync(PNPM).find((d) => d.startsWith('playwright-core@'));
-const { _electron } = await import(
-  pathToFileURL(path.join(PNPM, pwDir, 'node_modules/playwright-core/index.mjs')).href
-);
-
-const SERVER = process.env.FILEX_SERVER ?? 'https://fm.brf.sh';
-const EMAIL = process.env.FILEX_EMAIL ?? '';
-const PASSWORD = process.env.FILEX_PASSWORD ?? '';
-const STORAGE = process.env.FILEX_STORAGE ?? 'docs';
 const REMOTE = `${STORAGE}://desktop-sync-e2e`;
 
-let failures = 0;
-const check = (name, ok, detail = '') => {
-  if (!ok) failures++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function api(pathname, init = {}, token) {
-  return fetch(`${SERVER}${pathname}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
-  });
-}
-
-/** Plays the browser's half of the sign-in so the app ends up authenticated. */
-async function browserHalf(authUrl) {
-  const u = new URL(authUrl);
-  const state = u.searchParams.get('desktop_state');
-  const challenge = u.searchParams.get('desktop_challenge');
-  const login = await fetch(`${SERVER}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD, remember: true }),
-  });
-  if (!login.ok) throw new Error(`browser login failed (${login.status})`);
-  const cookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
-  const done = await fetch(`${SERVER}/api/auth/desktop/complete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ state, challenge, label: 'filex desktop — sync e2e' }),
-  });
-  if (!done.ok) throw new Error(`complete failed (${done.status})`);
-  const { code } = await done.json();
-  const { token } = await (await fetch(`${SERVER}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  })).json();
-  return { code, adminToken: token };
-}
-
-// Hermetic everything: its own Electron profile AND its own HOME, so the run
-// cannot read or damage the operator's real pairings in ~/.filex/sync.
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-sync-e2e-'));
-const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
-const syncFolder = path.join(fakeHome, 'synced');
-fs.mkdirSync(syncFolder, { recursive: true });
+// The folder the pair points at. Its own temp dir — the engine's state lives in
+// the hermetic HOME the harness makes, so the two are independent.
+const syncFolder = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-synced-'));
 
 // ⚠ The path is checked but NOT passed to the app: the app has to find its own
 // engine. Passing FILEX_CLI is what let a broken resolution ship.
@@ -88,14 +33,8 @@ if (!fs.existsSync(cli)) {
   process.exit(1);
 }
 
-const app = await _electron.launch({
-  args: [DESKTOP, `--user-data-dir=${profile}`],
-  cwd: DESKTOP,
+const { app } = await launchApp({
   env: {
-    ...process.env,
-    FILEX_NO_BROWSER: '1',
-    HOME: fakeHome,
-    USERPROFILE: fakeHome,
     // Pick the folder without a native dialog: showOpenDialog is OS chrome
     // Playwright cannot reach, and stubbing the app's own code would test the
     // stub. This env hook is honoured only when FILEX_NO_BROWSER is set.
@@ -105,19 +44,10 @@ const app = await _electron.launch({
 
 let adminToken = null;
 try {
-  const connect = await app.firstWindow();
-  await connect.waitForLoadState('domcontentloaded');
-  await connect.locator('#server').fill(SERVER);
-  await connect.locator('#go').click();
-  await connect.locator('#authurl').waitFor({ timeout: 15_000 });
-  const authUrl = await connect.locator('#authurl').inputValue();
-  const half = await browserHalf(authUrl);
-  adminToken = half.adminToken;
-  await connect.locator('#code').fill(half.code);
-  await connect.locator('#usecode').click().catch(() => {});
-
-  const appWindow = await app.waitForEvent('window', { timeout: 60_000 });
-  await appWindow.waitForLoadState('domcontentloaded');
+  const { win: appWindow, adminToken: signedInToken } = await signIn(app, {
+    label: 'filex desktop — sync e2e',
+  });
+  adminToken = signedInToken;
   check('signed in', true);
 
   // Clean any leftover remote folder from a previous run.
@@ -214,5 +144,4 @@ try {
   await app.close().catch(() => {});
 }
 
-console.log(`\n==== ${failures === 0 ? 'ALL PASSED' : failures + ' FAILED'} ====`);
-process.exit(failures === 0 ? 0 : 1);
+finish();

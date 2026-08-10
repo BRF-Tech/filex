@@ -52,10 +52,18 @@ export default defineConfig({
     rollupOptions: {
       // Vue is BUNDLED IN — that's the whole point of the WC distribution.
       // Optional peers stay external; they're dynamic-imported anyway.
+      //
+      // ⚠ `markdown-it` is deliberately NOT in this list any more. Every
+      // consumer of this bundle is a raw <script type="module"> — the desktop
+      // app, work.brf.sh, fishapp — where an external BARE specifier cannot
+      // resolve at all, so `import('markdown-it')` always failed and the
+      // markdown preview pane rendered blank in every one of them (measured in
+      // the desktop app, 2026-08-10). It is ~100 KB and lazily chunked, so it
+      // costs nothing until a .md is opened. The heavier peers below stay
+      // external on purpose — monaco alone is several megabytes — and their
+      // viewers say plainly when they are missing rather than going blank.
       external: [
         'monaco-editor',
-        'highlight.js',
-        'markdown-it',
         'jszip',
         'mermaid',
         'epubjs',
@@ -72,7 +80,6 @@ export default defineConfig({
         globals: {
           'monaco-editor': 'monaco',
           'highlight.js': 'hljs',
-          'markdown-it': 'markdownit',
           jszip: 'JSZip',
           mermaid: 'mermaid',
           epubjs: 'ePub',

@@ -259,11 +259,27 @@ export function useFileApi(config: ExplorerConfig) {
   const endpoints = resolveEndpoints(config);
   const authConf = normalizeAuth(config.auth);
 
+  /**
+   * Last bearer value a function-token actually produced.
+   *
+   * ⚠ Exists for `authHeadersSync` only. A function token is resolved
+   * asynchronously (the desktop app fetches it from the main process per
+   * call), and a synchronous caller cannot wait for that — before this cache
+   * it simply emitted NO Authorization header, so the request went out
+   * anonymous and came back 401. Remembering the last value turns "no
+   * credential at all" into "the credential we last held", which is the
+   * difference between a dead feature and a stale-token retry.
+   */
+  let lastBearer: string | null = null;
+
   async function authHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
     const h: Record<string, string> = { Accept: 'application/json', ...extra };
     if (authConf.kind === 'bearer') {
       const token = await resolveToken(authConf.token);
-      if (token) h.Authorization = `Bearer ${token}`;
+      if (token) {
+        h.Authorization = `Bearer ${token}`;
+        lastBearer = token;
+      }
     } else if (authConf.kind === 'csrf') {
       h['X-CSRF-TOKEN'] = authConf.csrf;
       h['X-Requested-With'] = 'XMLHttpRequest';
@@ -275,17 +291,21 @@ export function useFileApi(config: ExplorerConfig) {
   }
 
   /**
-   * Sync auth-header builder for callers that need headers in a
-   * non-async context (XMLHttpRequest, OnlyOffice config endpoint
-   * post-mounted PreviewModal). Function-token bearers are *resolved
-   * lazily* via the async path; here we just include the cached value
-   * if any. Component code should prefer the async `authHeaders()` —
-   * this is a defensive escape hatch.
+   * Sync auth-header builder for the few callers that genuinely cannot await
+   * (XMLHttpRequest's `setRequestHeader` loop).
+   *
+   * ⚠ Prefer `authHeaders()`. A function token can only be *resolved*
+   * asynchronously, so this returns the last value one produced — which is
+   * nothing at all until the first async call has run. Measured on 2026-08-10
+   * in the desktop app: the OnlyOffice config POST, the starred list and the
+   * recently-opened POST all went out with no Authorization header and came
+   * back 401, because every one of them reached the API through this function.
    */
   function authHeadersSync(extra: Record<string, string> = {}): Record<string, string> {
     const h: Record<string, string> = { Accept: 'application/json', ...extra };
-    if (authConf.kind === 'bearer' && typeof authConf.token === 'string') {
-      h.Authorization = `Bearer ${authConf.token}`;
+    if (authConf.kind === 'bearer') {
+      const token = typeof authConf.token === 'string' ? authConf.token : lastBearer;
+      if (token) h.Authorization = `Bearer ${token}`;
     } else if (authConf.kind === 'csrf') {
       h['X-CSRF-TOKEN'] = authConf.csrf;
       h['X-Requested-With'] = 'XMLHttpRequest';

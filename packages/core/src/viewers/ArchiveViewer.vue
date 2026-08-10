@@ -22,7 +22,7 @@ const props = defineProps<{
   filePath?: string;
   ext: string;
   t?: (key: string) => string;
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
 
@@ -59,7 +59,7 @@ async function load(): Promise<void> {
       credentials: props.authCredentials || 'same-origin',
       headers: {
         'Content-Type': 'application/json',
-        ...(props.authHeaders ? props.authHeaders() : {}),
+        ...(props.authHeaders ? await props.authHeaders() : {}),
       },
       body: JSON.stringify({ path: props.filePath }),
     });

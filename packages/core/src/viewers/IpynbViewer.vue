@@ -21,7 +21,7 @@ const props = defineProps<{
   url: string;
   ext: string;
   t?: (key: string) => string;
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
 
@@ -78,7 +78,7 @@ async function load(): Promise<void> {
   try {
     raw = await fetchViewerText({
       url: props.url,
-      headers: props.authHeaders?.() ?? {},
+      headers: (await props.authHeaders?.()) ?? {},
       credentials: props.authCredentials,
     });
   } catch (err) {

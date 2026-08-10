@@ -45,7 +45,7 @@ export function preloadEditor(): void {
       });
   }
   if (!highlightPromise) {
-    highlightPromise = import(/* @vite-ignore */ 'highlight.js')
+    highlightPromise = import(/* @vite-ignore */ 'highlight.js/lib/common')
       .then((mod) => {
         highlightCached = (mod as { default?: unknown }).default ?? mod;
         return highlightCached;

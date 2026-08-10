@@ -52,6 +52,38 @@
       const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; };
       const root = document.getElementById('root');
       const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+      // Same rule as the app window: follow the OS language, fall back to
+      // English. A sign-in screen in a language the user does not read is the
+      // worst possible place to start.
+      const LANG = (navigator.language || 'en').toLowerCase().startsWith('tr') ? 'tr' : 'en';
+      const STRINGS = {
+        'connect.title':   ['Connect to filex', "filex'e bağlan"],
+        'connect.sub':     ['Enter your server address. Sign-in opens in your browser, so single sign-on, passkeys and MFA all work exactly as they do on the web.',
+                            'Sunucu adresini yaz. Giriş tarayıcında açılır; tek oturum açma, passkey ve çok adımlı doğrulama web’deki gibi çalışır.'],
+        'connect.label':   ['Server address', 'Sunucu adresi'],
+        'connect.go':      ['Continue in browser', 'Tarayıcıda devam et'],
+        'connect.note':    ['After signing in, your browser hands the app back a one-time code. Your password is never typed into this window.',
+                            'Giriş yaptıktan sonra tarayıcın uygulamaya tek kullanımlık bir kod verir. Parolan bu pencereye hiç yazılmaz.'],
+        'wait.title':      ['Waiting for your browser', 'Tarayıcın bekleniyor'],
+        'wait.sub':        ['Finish signing in to {server}. This window continues by itself once your browser hands the code back.',
+                            '{server} adresinde girişi tamamla. Tarayıcı kodu geri verdiğinde bu pencere kendiliğinden devam eder.'],
+        'wait.url_label':  ["Didn't a browser open? Open this address yourself",
+                            'Tarayıcı açılmadı mı? Bu adresi kendin aç'],
+        'wait.copy':       ['Copy', 'Kopyala'],
+        'wait.copied':     ['Copied', 'Kopyalandı'],
+        'wait.code_label': ["Browser couldn't return to the app? Paste the code it showed you",
+                            'Tarayıcı uygulamaya dönemedi mi? Sana gösterdiği kodu yapıştır'],
+        'wait.code_ph':    ['Paste the code here', 'Kodu buraya yapıştır'],
+        'wait.signin':     ['Sign in', 'Giriş yap'],
+        'wait.cancel':     ['Cancel', 'Vazgeç'],
+      };
+      function T(key, vars) {
+        const entry = STRINGS[key];
+        let s = entry ? (LANG === 'tr' ? entry[1] : entry[0]) : key;
+        if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
+        return s;
+      }
       let state = null;
       let waiting = null; // { authUrl, serverUrl } once a sign-in is in flight
 
@@ -66,15 +98,15 @@
       function connectView() {
         if (waiting) return waitingView();
         return `
-          <h1>Connect to filex</h1>
-          <p class="sub">Enter your server address. Sign-in opens in your browser, so single sign-on, passkeys and MFA all work exactly as they do on the web.</p>
-          <label for="server">Server address</label>
+          <h1>${esc(T('connect.title'))}</h1>
+          <p class="sub">${esc(T('connect.sub'))}</p>
+          <label for="server">${esc(T('connect.label'))}</label>
           <input id="server" type="text" placeholder="https://app.filex.com" autofocus />
           <div class="row" style="margin-top:16px">
-            <button id="go">Continue in browser</button>
+            <button id="go">${esc(T('connect.go'))}</button>
           </div>
           <div class="err" id="err"></div>
-          <p class="muted" style="margin-top:18px">After signing in, your browser hands the app back a one-time code. Your password is never typed into this window.</p>`;
+          <p class="muted" style="margin-top:18px">${esc(T('connect.note'))}</p>`;
       }
 
       // Everything on this screen exists because the happy path can fail in
@@ -83,24 +115,24 @@
       // The link is copyable and the code can be typed in by hand.
       function waitingView() {
         return `
-          <h1>Waiting for your browser</h1>
-          <p class="sub">Finish signing in to <strong>${esc(waiting.serverUrl)}</strong>. This window continues by itself once your browser hands the code back.</p>
+          <h1>${esc(T('wait.title'))}</h1>
+          <p class="sub">${esc(T('wait.sub', { server: waiting.serverUrl }))}</p>
 
-          <label>Didn't a browser open? Open this address yourself</label>
+          <label>${esc(T('wait.url_label'))}</label>
           <div class="row">
             <input id="authurl" type="text" readonly value="${esc(waiting.authUrl)}" />
-            <button class="ghost" id="copyurl" style="white-space:nowrap">Copy</button>
+            <button class="ghost" id="copyurl" style="white-space:nowrap">${esc(T('wait.copy'))}</button>
           </div>
 
-          <label style="margin-top:22px">Browser couldn't return to the app? Paste the code it showed you</label>
+          <label style="margin-top:22px">${esc(T('wait.code_label'))}</label>
           <div class="row">
-            <input id="code" type="text" placeholder="Paste the code here" />
-            <button id="usecode" style="white-space:nowrap">Sign in</button>
+            <input id="code" type="text" placeholder="${esc(T('wait.code_ph'))}" />
+            <button id="usecode" style="white-space:nowrap">${esc(T('wait.signin'))}</button>
           </div>
 
           <div class="err" id="err"></div>
           <div class="row" style="margin-top:18px">
-            <button class="ghost" id="cancel">Cancel</button>
+            <button class="ghost" id="cancel">${esc(T('wait.cancel'))}</button>
           </div>`;
       }
 
@@ -136,9 +168,9 @@
         if (copyurl) copyurl.addEventListener('click', async () => {
           const f = root.querySelector('#authurl');
           f.select();
-          try { await navigator.clipboard.writeText(f.value); copyurl.textContent = 'Copied'; }
-          catch { document.execCommand('copy'); copyurl.textContent = 'Copied'; }
-          setTimeout(() => { copyurl.textContent = 'Copy'; }, 1500);
+          try { await navigator.clipboard.writeText(f.value); copyurl.textContent = T('wait.copied'); }
+          catch { document.execCommand('copy'); copyurl.textContent = T('wait.copied'); }
+          setTimeout(() => { copyurl.textContent = T('wait.copy'); }, 1500);
         });
 
         const usecode = root.querySelector('#usecode');

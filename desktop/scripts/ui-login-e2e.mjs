@@ -13,30 +13,8 @@
 // Run: node scripts/ui-login-e2e.mjs
 // Env: FILEX_SERVER, FILEX_EMAIL, FILEX_PASSWORD
 
-import fs, { readdirSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DESKTOP = path.resolve(__dirname, '..');
-const REPO = path.resolve(DESKTOP, '..');
-
-const PNPM = path.join(REPO, 'node_modules/.pnpm');
-const pwDir = readdirSync(PNPM).find((d) => d.startsWith('playwright-core@'));
-const { _electron } = await import(
-  pathToFileURL(path.join(PNPM, pwDir, 'node_modules/playwright-core/index.mjs')).href
-);
-
-const SERVER = process.env.FILEX_SERVER ?? 'https://fm.brf.sh';
-const EMAIL = process.env.FILEX_EMAIL ?? '';
-const PASSWORD = process.env.FILEX_PASSWORD ?? '';
-
-let failures = 0;
-const check = (name, ok, detail = '') => {
-  if (!ok) failures++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
-};
+import { REPO, SERVER, EMAIL, PASSWORD, check, finish, launchApp } from './lib/harness.mjs';
 
 /** Plays the browser's half: sign in, then complete the desktop hand-off. */
 async function browserHalf(authUrl) {
@@ -65,12 +43,7 @@ async function browserHalf(authUrl) {
 
 // Hermetic profile: without it the run inherits whatever account is already
 // stored and silently measures nothing.
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-e2e-'));
-const app = await _electron.launch({
-  args: [DESKTOP, `--user-data-dir=${profile}`],
-  cwd: DESKTOP,
-  env: { ...process.env, FILEX_NO_BROWSER: '1' },
-});
+const { app } = await launchApp();
 
 try {
   // ── connect screen ────────────────────────────────────────────────
@@ -168,5 +141,4 @@ try {
   await app.close().catch(() => {});
 }
 
-console.log(`\n==== ${failures === 0 ? 'ALL PASSED' : failures + ' FAILED'} ====`);
-process.exit(failures === 0 ? 0 : 1);
+finish();

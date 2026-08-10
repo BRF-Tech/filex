@@ -1372,9 +1372,10 @@ function openNodeInNewTab(n: FileNode) {
   // mode so OnlyOffice / Monaco mount with write permissions.
   // Read-only inspection lives on the "Önizle" entry + the dbl-click
   // in-page modal.
-  const sep = base.includes('?') ? '&' : '?';
+  const abs = absolutePageUrl(base);
+  const sep = abs.includes('?') ? '&' : '?';
   const url =
-    `${base}${sep}path=${encodeURIComponent(n.path)}` +
+    `${abs}${sep}path=${encodeURIComponent(n.path)}` +
     `&type=${encodeURIComponent(ext)}` +
     `&mode=edit`;
   window.open(url, '_blank', 'noopener');
@@ -2287,13 +2288,49 @@ async function onCopyPath(adapterPath: string) {
   }
 }
 
-// Sync auth-headers builder for PreviewModal — fetches against the
-// OnlyOffice config endpoint and the saveText endpoint need real
-// headers, not promises. Function-token bearers will use the cached
-// token; first-call resolution happens via the async path elsewhere.
+// Auth-headers builder handed to PreviewModal, QuickLook and every viewer.
+//
+// ⚠⚠ ASYNC on purpose. This used to call `authHeadersSync`, which drops the
+// bearer entirely when the embedder supplies a token FUNCTION rather than a
+// string — the shape the desktop app uses so the credential is fetched per
+// call instead of sitting in the page. The result was an Authorization-less
+// request and a 401 on the OnlyOffice config endpoint, the starred list, the
+// recently-opened POST and every viewer that fetches its own bytes. Consumers
+// must `await` this; the guard test in web/tests/api/authHeaders.test.ts fails
+// the build if one forgets.
 function buildAuthHeaders(extra: Record<string, string> = {}) {
-  return api.authHeadersSync({ ...extra });
+  return api.authHeaders({ ...extra });
 }
+
+/** The standalone viewer/editor route the backend serves next to the API. */
+const STANDALONE_ROUTE = '/files/edit';
+
+/**
+ * Makes a page route absolute against the API host.
+ *
+ * ⚠ A root-relative route like `/files/edit` is resolved by the browser
+ * against the PAGE, not the API — which is right when the explorer is embedded
+ * in the same app that serves the route, and wrong for every embed served from
+ * a different origin. In the desktop app the page origin is `app://filex`, so
+ * "Open in new tab" asked the OS to open `app://filex/files/edit?…`: no handler
+ * for that scheme exists, so the click did nothing at all, silently. Measured
+ * 2026-08-10.
+ */
+function absolutePageUrl(base: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) return base; // already absolute
+  const api = props.config.apiBase;
+  if (!api) return base; // same-origin embed — the browser resolves it correctly
+  try {
+    return new URL(base, api.endsWith('/') ? api : `${api}/`).toString();
+  } catch {
+    return base;
+  }
+}
+
+/** Where the modal's "Open in new tab" / "Edit" buttons should land. */
+const effectiveViewerBaseUrl = computed(() =>
+  absolutePageUrl(props.config.viewerBaseUrl || STANDALONE_ROUTE),
+);
 
 /* === wiring:c1 — tema galerisi ===
  * Selected theme (shared module state, localStorage `filex.theme`) is applied
@@ -3536,7 +3573,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :drawio-url="effectiveDrawioUrl"
       :pdf-worker-url="props.config.pdfWorkerUrl || null"
       :pdf-save-url="props.config.pdfSaveUrl || null"
-      :viewer-base-url="props.config.viewerBaseUrl || null"
+      :viewer-base-url="effectiveViewerBaseUrl"
       @close="showPreview = false"
     />
     <ConvertModal
@@ -3710,7 +3747,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :auth-credentials="api.credentialsMode()"
       :drawio-url="effectiveDrawioUrl"
       :pdf-worker-url="props.config.pdfWorkerUrl || null"
-      :viewer-base-url="props.config.viewerBaseUrl || null"
+      :viewer-base-url="effectiveViewerBaseUrl"
       @close="quickLookOpen = false"
       @nav="quickLookNav"
       @open-full="quickLookOpenFull"

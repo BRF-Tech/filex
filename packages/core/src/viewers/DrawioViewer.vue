@@ -26,7 +26,7 @@ const props = defineProps<{
   saveUrl?: string;
   readOnly?: boolean;
   t?: (key: string) => string;
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
 
@@ -71,7 +71,7 @@ async function loadXml(): Promise<void> {
   try {
     pendingXml = await fetchViewerText({
       url: props.url,
-      headers: props.authHeaders?.() ?? {},
+      headers: (await props.authHeaders?.()) ?? {},
       credentials: props.authCredentials,
     });
   } catch (err) {
@@ -90,7 +90,7 @@ async function persist(xml: string): Promise<void> {
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(props.authHeaders?.() ?? {}),
+      ...((await props.authHeaders?.()) ?? {}),
     };
     const res = await fetch(props.saveUrl, {
       method: 'POST',

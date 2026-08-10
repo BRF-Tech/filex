@@ -30,7 +30,7 @@ const props = defineProps<{
   pdfWorkerUrl?: string;
   pdfSaveUrl?: string;
   t?: (key: string) => string;
-  authHeaders?: () => Record<string, string>;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
 
@@ -116,7 +116,7 @@ async function load(): Promise<void> {
   try {
     const buf = await fetchViewerArrayBuffer({
       url: props.url,
-      headers: props.authHeaders?.() ?? {},
+      headers: (await props.authHeaders?.()) ?? {},
       credentials: props.authCredentials,
     });
     if (myToken !== renderToken) return;
@@ -301,7 +301,7 @@ async function saveAnnotations(): Promise<void> {
     const base64 = btoa(String.fromCharCode(...data));
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(props.authHeaders?.() ?? {}),
+      ...((await props.authHeaders?.()) ?? {}),
     };
     const res = await fetch(props.pdfSaveUrl, {
       method: 'POST',
