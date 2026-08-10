@@ -68,6 +68,50 @@ Add more accounts with **+** on the left rail; switch between them by clicking.
 
 ---
 
+## Opening and previewing files
+
+> ⚠ **Everything in this section landed after v0.13.4.** On v0.13.4 and older,
+> opening an Office document in the app failed with a `401`, and **Open in new
+> tab** did nothing at all. Check [Releases](RELEASES.md) against the version
+> Settings reports.
+
+**Office documents open in the app.** Word, Excel and PowerPoint files open in
+the embedded OnlyOffice editor, the same one the web app uses, provided your
+server has OnlyOffice configured ([OnlyOffice](ONLYOFFICE.md)).
+
+The app authenticates with a bearer token rather than a cookie, and it hands the
+explorer a *function* that returns the current account's token — because the
+token changes when you switch accounts, and a value captured once would be the
+wrong account's. The explorer used to read that header builder synchronously,
+which quietly dropped a token supplied that way: the OnlyOffice config request,
+the starred list and recently-opened all answered `401`, and an editor that
+cannot fetch its own config simply never appears. The builder is asynchronous
+now and every viewer waits for it.
+
+**Open in new tab** opens the file in your **browser**, on your server's own
+editor page (`/files/edit`). Inside the app there is no browser tab to open, and
+a relative link resolves against the app's internal `app://filex` origin — an
+address no operating system can open, which is why the menu entry used to do
+nothing visible. It now resolves against your server first.
+
+**Images, video, audio and downloads** work the same way they do on the web. A
+`<img>`, `<video>` or download link cannot carry an `Authorization` header, so
+the app attaches the signed-in account's bearer to requests it makes to your
+server itself. This applies only to the account's own server — nothing is
+attached to any other origin.
+
+---
+
+## Language
+
+The window follows your operating system's language (Turkish or English today).
+Before this, the app's own shell — the rail, Settings, the sign-in screen — was
+English while the file listing inside it was translated, which reads as a bug
+rather than a choice. The waiting state you see before the first listing arrives
+is now a full screen of its own instead of a bare line of text.
+
+---
+
 ## Syncing folders
 
 **Settings ⚙ → Sync a folder…** picks a folder on the server by browsing it, then
@@ -148,6 +192,15 @@ you have with `FILEX_CLI=/path/to/filex`.
 **A folder shows "attention"** — the line under it is the engine's own last
 message. `filex sync run --pair <id>` in a terminal shows the same thing with
 more detail.
+
+**An Office document will not open**, or the editor area stays blank — first
+check that your server has OnlyOffice configured at all
+([OnlyOffice](ONLYOFFICE.md)); the web app in your browser is the quickest test.
+If it works there but not here, you are on v0.13.4 or older: the editor's config
+request was answered `401` because the app's token never reached it. Update.
+
+**"Open in new tab" does nothing** — same story, same fix: on v0.13.4 and older
+the app asked the OS to open an `app://filex` address, which no OS can act on.
 
 **The window opens on an admin panel** — you are on a build older than v0.13.0.
 Update.

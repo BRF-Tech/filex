@@ -10,6 +10,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 - [Installation](INSTALLATION.md) — minimal → full Compose → Helm → binary
 - [Configuration](CONFIGURATION.md) — every `FILEX_*` variable + `config.yaml`
+- [Releases](RELEASES.md) — every release with a plain‑English summary
+  (generated from the GitHub releases at build time)
+- [Updates](UPDATES.md) — how filex checks for, and installs, a new release
 
 ## Storage
 

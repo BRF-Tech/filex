@@ -9,6 +9,15 @@ This integration is **optional**. If you don't configure it, filex works
 normally — Office files just open in the built-in read-only preview instead of
 an editor (see [What happens if it isn't configured](#what-happens-if-its-not-configured)).
 
+It works in every surface that embeds the explorer — the web app, the
+[desktop app](DESKTOP.md), and any host page using `<filex-explorer>` — because
+they all open the same editor component against the same endpoints. There is
+one thing to know about token-authenticated hosts: the editor config is fetched
+with the host's credentials, and a host that supplies its token as a *function*
+(the desktop app does, because the token changes when you switch accounts) was
+dropped before the request, which answered `401` and left the editor blank.
+Fixed after v0.13.4 — see [Releases](RELEASES.md).
+
 ---
 
 ## How it works

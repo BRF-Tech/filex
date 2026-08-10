@@ -44,7 +44,8 @@ export default defineConfig({
     logo: '/logo.png',
 
     nav: [
-      { text: 'Docs', link: '/INSTALLATION', activeMatch: '^/(?!$)' },
+      { text: 'Docs', link: '/INSTALLATION', activeMatch: '^/(?!$|RELEASES)' },
+      { text: 'Releases', link: '/RELEASES', activeMatch: '^/RELEASES' },
       { text: 'Demo', link: 'https://demo.filex.sh' },
       { text: 'filex.sh', link: 'https://filex.sh' }
     ],
@@ -57,40 +58,61 @@ export default defineConfig({
           { text: 'Installation', link: '/INSTALLATION' },
           { text: 'Docker', link: '/DOCKER' },
           { text: 'Deployment', link: '/DEPLOYMENT' },
-          { text: 'Updates', link: '/UPDATES' }
+          { text: 'Configuration', link: '/CONFIGURATION' },
+          { text: 'Updates', link: '/UPDATES' },
+          { text: 'Releases', link: '/RELEASES' }
+        ]
+      },
+      {
+        text: 'Apps',
+        collapsed: false,
+        items: [
+          { text: 'Desktop app', link: '/DESKTOP' },
+          { text: 'Folder sync', link: '/SYNC' },
+          { text: 'CLI', link: '/CLI' }
         ]
       },
       {
         text: 'Features',
         collapsed: false,
         items: [
+          { text: 'Storage', link: '/STORAGE' },
           { text: 'Search', link: '/SEARCH' },
-          { text: 'Sharing', link: '/SHARING' },
+          { text: 'Sharing & file requests', link: '/SHARING' },
           { text: 'WebDAV', link: '/WEBDAV' },
-          { text: 'CLI', link: '/CLI' },
+          { text: 'Thumbnails', link: '/thumbnails' },
           { text: 'Protection & Antivirus', link: '/PROTECTION' },
           { text: 'Trash & Versioning', link: '/TRASH-VERSIONING' },
           { text: 'Notifications & Webhooks', link: '/NOTIFICATIONS' },
           { text: 'RBAC & Permissions', link: '/RBAC' },
-          { text: 'Storage', link: '/STORAGE' },
-          { text: 'Replication', link: '/REPLICATION' }
+          { text: 'End-to-end encryption', link: '/E2E-ENCRYPTION' },
+          { text: 'Replication', link: '/REPLICATION' },
+          { text: 'Multi-tenancy', link: '/MULTI-TENANCY' }
         ]
       },
       {
         text: 'Integration',
         collapsed: false,
         items: [
+          { text: 'Embedding the explorer', link: '/INTEGRATION' },
           { text: 'MCP & AI Tokens', link: '/MCP' },
-          { text: 'Convert Integration', link: '/CONVERT-INTEGRATION' },
           { text: 'OnlyOffice', link: '/ONLYOFFICE' },
+          { text: 'Convert Integration', link: '/CONVERT-INTEGRATION' },
+          { text: 'ShareX', link: '/SHAREX' },
           { text: 'SSO (OIDC)', link: '/SSO' },
           { text: 'LDAP', link: '/LDAP' }
         ]
       },
       {
-        text: 'Contributing',
-        collapsed: false,
-        items: [{ text: 'Contributing', link: '/CONTRIBUTING' }]
+        text: 'Reference',
+        collapsed: true,
+        items: [
+          { text: 'HTTP & component API', link: '/API' },
+          { text: 'Architecture', link: '/ARCHITECTURE' },
+          { text: 'Backend internals', link: '/BACKEND' },
+          { text: 'Migration', link: '/MIGRATION' },
+          { text: 'Contributing', link: '/CONTRIBUTING' }
+        ]
       }
     ],
 

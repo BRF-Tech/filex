@@ -1,0 +1,1445 @@
+{
+  "repo": "BRF-Tech/filex",
+  "generatedAt": "2026-08-10",
+  "releases": [
+    {
+      "tag": "v0.13.4",
+      "date": "2026-08-10T06:53:58Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.13.4",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Upload",
+              "text": "Multipart temp files outlived the response and filled the disk."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.13.4",
+        "ghcr.io/brf-tech/filex:full-v0.13.4"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.13.3",
+      "date": "2026-08-07T20:09:40Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.13.3",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The share button works here too, and three things found by using it."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.13.3",
+        "ghcr.io/brf-tech/filex:full-v0.13.3"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.13.2",
+      "date": "2026-08-07T18:36:40Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.13.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Core",
+              "text": "Scoped styles were dead in every embed — 16 components rendered raw."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Say out loud which commit is being packaged."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.13.2",
+        "ghcr.io/brf-tech/filex:full-v0.13.2"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.13.1",
+      "date": "2026-08-07T17:27:11Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.13.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The onboarding tour covered Settings, and the test said it did not."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Drive the PACKAGED app, not just the source tree."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.13.1",
+        "ghcr.io/brf-tech/filex:full-v0.13.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.13.0",
+      "date": "2026-08-07T16:58:36Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.13.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The window is a file manager, not the admin console."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The bundled engine no longer carries a second copy of the UI."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.13.0",
+        "ghcr.io/brf-tech/filex:full-v0.13.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.12.0",
+      "date": "2026-08-07T15:21:46Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.12.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Sync",
+              "text": "Keep a local folder and a server folder in step."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.12.0",
+        "ghcr.io/brf-tech/filex:full-v0.12.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.11.0",
+      "date": "2026-08-07T14:27:19Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.11.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": null,
+              "text": "Desktop app (Windows + Linux), browser sign-in, install prompts."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Version the app with the product, not on its own."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.11.0",
+        "ghcr.io/brf-tech/filex:full-v0.11.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.10.2",
+      "date": "2026-08-06T22:26:44Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.10.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "Refuses a file written onto a folder, on every write surface — and the reverse\n(a folder created onto a file).\n\nAn object store accepts `X` and `X/…` side by side. A directory-backed mirror\ncannot represent that: the prefix stops listing and the objects under it\nsilently lose their backup. Measured on a live DR mirror — 2760 syncs in 24h,\n1016 versions of one PNG, a 43 MiB folder occupying 45 GB. Overwriting a file\nwith a file is unchanged; that was never the problem.\n\nAlso fixes uploads through the public file-drop link on providers that require\na Content-Length (411), and adds `filex storage scan-collisions` to report\ndamage that predates the guard.\n\nFull notes: CHANGELOG.md (0.10.1 + 0.10.2).\n\nBuilt and published manually: GitHub Actions was in a major outage on release\nday, so no workflow run could be scheduled. Same steps as the release workflow\n(frontend → embed → goreleaser). Binaries verified to report `0.10.2 (c3b1c53)`\nand all six checksums verified before upload. Container images (amd64+arm64)\nwere published the same way to ghcr.io/brf-tech/filex.",
+      "images": [],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.10.0",
+      "date": "2026-08-06T15:09:18Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.10.0",
+      "prerelease": false,
+      "headline": "Dot-file toggle + single-storage direct open.",
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "UI",
+              "text": "Open the storage directly when only one is visible."
+            },
+            {
+              "scope": "UI",
+              "text": "Show/hide dot-files, off by default."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.10.0",
+        "ghcr.io/brf-tech/filex:full-v0.10.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.9.0",
+      "date": "2026-08-06T14:15:28Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.9.0",
+      "prerelease": false,
+      "headline": "Olivov multi-tenant isolation, strict-S3 uploads, user management.",
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Users",
+              "text": "Carry used_bytes and quota_bytes on the user object."
+            },
+            {
+              "scope": "Users",
+              "text": "Honour provider_id when creating a user."
+            },
+            {
+              "scope": "Users",
+              "text": "Per-user enable/disable switch."
+            }
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "WebDAV",
+              "text": "Scope /dav to the caller's tenant."
+            },
+            {
+              "scope": "Grants",
+              "text": "Require a qualified path, and apply the tenant gate."
+            },
+            {
+              "scope": "Quota",
+              "text": "404 for an unknown user, and serve quota under /users/{id}."
+            },
+            {
+              "scope": "S3",
+              "text": "Send Content-Length on PutObject so uploads work on strict providers."
+            },
+            {
+              "scope": "S3",
+              "text": "Stat a prefix as a directory."
+            },
+            {
+              "scope": "S3",
+              "text": "Transient 503 no longer kills a whole sync run + name the file that failed to thumbnail."
+            },
+            {
+              "scope": "UI",
+              "text": "Surface upload failures to the user."
+            },
+            {
+              "scope": "Users",
+              "text": "Confine Get/Update/Delete to the caller's tenant."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Backend",
+              "text": "Correct the admin users surface, document delete semantics."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.9.0",
+        "ghcr.io/brf-tech/filex:full-v0.9.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.8.0",
+      "date": "2026-07-29T12:34:03Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.8.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Update",
+              "text": "Release awareness + self-upgrade (x.y.z policy)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.8.0",
+        "ghcr.io/brf-tech/filex:full-v0.8.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.6",
+      "date": "2026-07-29T11:20:46Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.6",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "AI",
+              "text": "Map confinement and permission denials to 403 instead of 500."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.6",
+        "ghcr.io/brf-tech/filex:full-v0.7.6"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.5",
+      "date": "2026-07-19T05:03:52Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.5",
+      "prerelease": false,
+      "headline": "Path-hash single source (internal/pathkey), no behavior change.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.5",
+        "ghcr.io/brf-tech/filex:full-v0.7.5"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.4",
+      "date": "2026-07-18T19:30:28Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.4",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "UI",
+              "text": "v0.7.4 split view trash-row parity + standalone page-scroll."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.4",
+        "ghcr.io/brf-tech/filex:full-v0.7.4"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.3",
+      "date": "2026-07-18T15:16:52Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.3",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "UI",
+              "text": "v0.7.3 split view menu parity + same-dir drop no-op + breadcrumb alignment."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.3",
+        "ghcr.io/brf-tech/filex:full-v0.7.3"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.2",
+      "date": "2026-07-18T14:18:57Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "UI",
+              "text": "v0.7.2 split view breadcrumb width + secondary pane context menu."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.2",
+        "ghcr.io/brf-tech/filex:full-v0.7.2"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.1",
+      "date": "2026-07-18T09:26:10Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "UI",
+              "text": "v0.7.1 polish round."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.1",
+        "ghcr.io/brf-tech/filex:full-v0.7.1"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.7.0",
+      "date": "2026-07-17T22:09:51Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.7.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Kimlik",
+              "text": "v0.7.0 identity & trust wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.7.0",
+        "ghcr.io/brf-tech/filex:full-v0.7.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.6.0",
+      "date": "2026-07-17T20:19:22Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.6.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Calisma",
+              "text": "v0.6.0 workspace wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.6.0",
+        "ghcr.io/brf-tech/filex:full-v0.6.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.5.0",
+      "date": "2026-07-17T17:41:07Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.5.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Gorunum",
+              "text": "v0.5.0 appearance wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.5.0",
+        "ghcr.io/brf-tech/filex:full-v0.5.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.4.2",
+      "date": "2026-07-17T16:06:06Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.4.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Temizlik",
+              "text": "v0.4.2 cleanup wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.4.2",
+        "ghcr.io/brf-tech/filex:full-v0.4.2"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.4.1",
+      "date": "2026-07-17T13:51:23Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.4.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Vitrin",
+              "text": "v0.4.1 showcase wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.4.1",
+        "ghcr.io/brf-tech/filex:full-v0.4.1"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.4.0",
+      "date": "2026-07-17T12:20:25Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.4.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Koru",
+              "text": "v0.4.0 protection wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.4.0",
+        "ghcr.io/brf-tech/filex:full-v0.4.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.3.0",
+      "date": "2026-07-17T11:15:40Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.3.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Baglan",
+              "text": "v0.3.0 connectivity wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.3.0",
+        "ghcr.io/brf-tech/filex:full-v0.3.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.2.0",
+      "date": "2026-07-17T08:06:24Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.2.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Bul",
+              "text": "v0.2.0 content search wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.2.0",
+        "ghcr.io/brf-tech/filex:full-v0.2.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.84",
+      "date": "2026-07-17T06:40:15Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.84",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Cila",
+              "text": "v0.1.84 design wave."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.84",
+        "ghcr.io/brf-tech/filex:full-v0.1.84"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.83",
+      "date": "2026-07-16T21:56:06Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.83",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Embed",
+              "text": "Height-constrained embeds could not scroll."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.83",
+        "ghcr.io/brf-tech/filex:full-v0.1.83"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.82",
+      "date": "2026-07-10T13:31:47Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.82",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": null,
+              "text": "Locale-clean viewer/presence strings, AI-surface thumbnail dispatch, fresh demo landing card (#2 #3 #4)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.82",
+        "ghcr.io/brf-tech/filex:full-v0.1.82"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.81",
+      "date": "2026-07-09T11:03:12Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.81",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Tokens",
+              "text": "Per-token username identities — audit, shares and presence attribution."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.81",
+        "ghcr.io/brf-tech/filex:full-v0.1.81"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.80",
+      "date": "2026-07-09T09:32:12Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.80",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Core",
+              "text": "Authenticated grid thumbnails + expandable presence bar."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.80",
+        "ghcr.io/brf-tech/filex:full-v0.1.80"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.79",
+      "date": "2026-07-09T07:08:12Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.79",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Ws",
+              "text": "Real presence identity + confined-subscribe fixes (v0.1.79)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.79",
+        "ghcr.io/brf-tech/filex:full-v0.1.79"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.78",
+      "date": "2026-07-08T23:26:03Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.78",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Ws",
+              "text": "Resolve embedded confined subscribes to the absolute room + per-client frame paths."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.78",
+        "ghcr.io/brf-tech/filex:full-v0.1.78"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.77",
+      "date": "2026-07-08T22:20:36Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.77",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Ws",
+              "text": "Authorize ticketed subscribes as the ticket's user (RBAC)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.77",
+        "ghcr.io/brf-tech/filex:full-v0.1.77"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.76",
+      "date": "2026-07-08T21:58:05Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.76",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Ws",
+              "text": "Allow ticket-only (embedded/cross-origin) WebSocket connections."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.76",
+        "ghcr.io/brf-tech/filex:full-v0.1.76"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.75",
+      "date": "2026-07-08T17:30:31Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.75",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Realtime",
+              "text": "Embed WS live-collab in the core (ticket auth + polling fallback)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.75",
+        "ghcr.io/brf-tech/filex:full-v0.1.75"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.74",
+      "date": "2026-07-08T15:42:36Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.74",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": null,
+              "text": "Folder-share ZIP cache + warmer + progress page, ShareX uploader, live-collab WebSocket."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.74",
+        "ghcr.io/brf-tech/filex:full-v0.1.74"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.73",
+      "date": "2026-07-07T15:08:30Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.73",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Share",
+              "text": "Add GET /api/files/share list endpoint so the modal lists existing links."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.73",
+        "ghcr.io/brf-tech/filex:full-v0.1.73"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.72",
+      "date": "2026-07-07T13:28:01Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.72",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Share",
+              "text": "Native \"Paylaş\" (Web Share API) button under the mail row."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.72",
+        "ghcr.io/brf-tech/filex:full-v0.1.72"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.71",
+      "date": "2026-07-07T00:22:13Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.71",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Explorer",
+              "text": "'folder not found' for dead deep links — phantom prefixes 404, denied dirs render as not-found."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.71",
+        "ghcr.io/brf-tech/filex:full-v0.1.71"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.70",
+      "date": "2026-07-07T00:05:43Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.70",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Web",
+              "text": "Don't double the explorer hash in the login redirect."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.70",
+        "ghcr.io/brf-tech/filex:full-v0.1.70"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.69",
+      "date": "2026-07-06T23:38:11Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.69",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Explorer",
+              "text": "Address bar mirrors the current folder for copy-paste deep links."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.69",
+        "ghcr.io/brf-tech/filex:full-v0.1.69"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.68",
+      "date": "2026-07-06T11:50:04Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.68",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Auth",
+              "text": "OIDC callback lands via 200 HTML bounce so a CDN can't strip Set-Cookie."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Auth",
+              "text": "Prove OIDC callback emits Domain-scoped Set-Cookie in multi-tenant."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.68",
+        "ghcr.io/brf-tech/filex:full-v0.1.68"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.67",
+      "date": "2026-07-05T23:52:21Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.67",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Auth",
+              "text": "Mark session + OIDC state cookies Secure on HTTPS (X-Forwarded-Proto aware)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.67",
+        "ghcr.io/brf-tech/filex:full-v0.1.67"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.66",
+      "date": "2026-07-05T22:11:36Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.66",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Multi-tenant",
+              "text": "OIDC callback redirects to tenant host + per-provider cookie domain."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.66",
+        "ghcr.io/brf-tech/filex:full-v0.1.66"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.65",
+      "date": "2026-07-05T21:36:41Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.65",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Docker",
+              "text": "Multi-arch images (linux/amd64 + linux/arm64)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.65",
+        "ghcr.io/brf-tech/filex:full-v0.1.65"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.64",
+      "date": "2026-07-05T21:09:31Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.64",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Lint",
+              "text": "Drop unused adminIDFiltersIn + gofmt config/storage."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.64",
+        "ghcr.io/brf-tech/filex:full-v0.1.64"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.63",
+      "date": "2026-07-05T21:09:21Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.63",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Auth",
+              "text": "SSO-first login (FILEX_OIDC_AUTO_REDIRECT) + FILEX_COOKIE_DOMAIN."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.63",
+        "ghcr.io/brf-tech/filex:full-v0.1.63"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.62",
+      "date": "2026-07-05T12:50:38Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.62",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Explorer",
+              "text": "Empty file/folder size+date + real Trash size/date/icon."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.62",
+        "ghcr.io/brf-tech/filex:full-v0.1.62"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.61",
+      "date": "2026-07-05T09:30:47Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.61",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": null,
+              "text": "Native multi-tenancy (FILEX_MULTI_TENANT) — provider=tenant, two-layer isolation."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.61",
+        "ghcr.io/brf-tech/filex:full-v0.1.61"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.60",
+      "date": "2026-07-05T00:42:29Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.60",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Sync",
+              "text": "Backfill missing backend_mtime + split npm into its own release job."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.60",
+        "ghcr.io/brf-tech/filex:full-v0.1.60"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.59",
+      "date": "2026-07-05T00:21:39Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.59",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": null,
+              "text": "Folder \"last activity\" date + full/empty trash icon."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.59",
+        "ghcr.io/brf-tech/filex:full-v0.1.59"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.58",
+      "date": "2026-07-04T23:44:48Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.58",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": null,
+              "text": "Folder size+date in explorer (cached, N+1-free) + FILEX_DEFAULT_LOCALE."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Release",
+              "text": "Auto-publish npm packages on tag (gated on NPM_TOKEN secret)"
+            },
+            {
+              "scope": "Release",
+              "text": "Fix npm step — guard in-script (secrets not allowed in step if)"
+            },
+            {
+              "scope": "Converter",
+              "text": "Clean user guide + fix converter image name (converter-filex)"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.58",
+        "ghcr.io/brf-tech/filex:full-v0.1.58"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.1.57",
+      "date": "2026-07-04T11:44:17Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.1.57",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Storage",
+              "text": "Connect any external storage from env (sftp/webdav/ftp/s3) + fix JSON port."
+            },
+            {
+              "scope": null,
+              "text": "Zero-touch env config, selectable storage, converter fork, drop mermaid."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": null,
+              "text": "Initial public release."
+            },
+            {
+              "scope": null,
+              "text": "Deploy: reference deploy/ from README + add all external integrations as toggles."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.1.57",
+        "ghcr.io/brf-tech/filex:full-v0.1.57"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    }
+  ]
+}

@@ -3,6 +3,9 @@
 filex can tell you when a new release exists and — where it is able to — install
 it for you. What happens is decided by **which part of the version moved**:
 
+> Looking for **what changed** rather than how it is installed?
+> **[Releases](RELEASES.md)** lists every published version with a short summary.
+
 | Version part | Example | What filex does |
 |---|---|---|
 | **z** — patch | `0.7.5 → 0.7.6` | Applies it automatically (when the policy allows) |

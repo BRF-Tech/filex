@@ -18,10 +18,23 @@ hero:
       text: Live Demo
       link: https://demo.filex.sh
     - theme: alt
+      text: What's new
+      link: /RELEASES
+    - theme: alt
       text: GitHub
       link: https://github.com/BRF-Tech/filex
 
 features:
+  - icon: 🖥️
+    title: Desktop app
+    details: The same explorer in its own window on Windows and Linux — several accounts at once, and sync that keeps running when the window is closed.
+    link: /DESKTOP
+    linkText: Desktop docs
+  - icon: 🔁
+    title: Folder sync
+    details: A folder on your PC kept in step with a folder on the server, both ways. The first sync deletes nothing and a delete never beats an edit.
+    link: /SYNC
+    linkText: Sync docs
   - icon: 🔍
     title: Content search
     details: Find files by name or by what is inside them — an embedded full-text index across every mounted storage.

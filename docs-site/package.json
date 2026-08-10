@@ -5,8 +5,9 @@
   "type": "module",
   "description": "docs.filex.sh — VitePress documentation site (sources live in ../docs)",
   "scripts": {
-    "dev": "vitepress dev",
-    "build": "vitepress build",
+    "releases": "node scripts/fetch-releases.mjs",
+    "dev": "npm run releases && vitepress dev",
+    "build": "npm run releases && vitepress build",
     "preview": "vitepress preview"
   },
   "devDependencies": {
