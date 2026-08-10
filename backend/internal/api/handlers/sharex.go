@@ -74,6 +74,13 @@ func (h *ShareX) AttachThumbs(p *thumb.Pipeline) { h.ops.thumbs = p }
 // Upload accepts a ShareX multipart capture (`file`), stores + indexes it, mints
 // a public inline-viewable share, and returns {"url": …}.
 func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
+	// Spilled multipart temp files outlive the response unless dropped here —
+	// see the note in AI.Upload.
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
 		return

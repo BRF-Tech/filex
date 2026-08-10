@@ -517,6 +517,14 @@ func randHex6() string {
 // uploads should use the chunked /api/files/upload/init flow which
 // hands out S3 presigned URLs directly to the browser.
 func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
+	// Spilled multipart temp files outlive the response unless dropped here —
+	// see the note in AI.Upload. This is the browser upload path, so it is the
+	// highest-volume producer of them.
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
 		return

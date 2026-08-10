@@ -200,6 +200,14 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited"})
 		return
 	}
+	// Spilled multipart temp files outlive the response unless dropped here —
+	// see the note in AI.Upload. Anonymous drops make this the easiest surface
+	// to fill a disk from, so the cleanup runs even for rejected bodies.
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "bad multipart"})
 		return

@@ -105,6 +105,17 @@ func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if hasPrefix(ct, "multipart/form-data") {
+		// Parts above the in-memory limit are spilled to $TMPDIR as
+		// multipart-*. net/http clears those only for the request struct it
+		// holds itself, which is not the one the router hands us, so without
+		// this the files survive a 200 response and the disk fills silently
+		// (fm.brf.sh: 74 files / 29 GB in two hours, 2026-08-09). Deferred
+		// before the parse so a rejected body is cleaned up too.
+		defer func() {
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
+		}()
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
 			return
