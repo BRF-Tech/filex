@@ -18,14 +18,26 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.13.4, 10 August 2026
-A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffered to a temporary file, and those files were never removed — every request answered normally while the disk quietly drained (29 GB in two hours on a live server). Every upload surface now cleans up after itself, including requests it rejects.
+::: tip Latest — v0.14.0, 10 August 2026
+The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first three (a bearer token supplied as a function has to be awaited, and the header builder handed to the viewers was the synchronous one, so requests went out with no Authorization header), and a scheme the OS cannot open under the last. Images, video, audio and downloads work too, since those elements carry no headers of their own. Markdown and syntax highlighting now render in every embedded surface, not only in the admin app. The window follows the OS language instead of wrapping a Turkish file list in an English shell, and it opens on a real connecting screen that names the server it is waiting for.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.13.4
-docker pull ghcr.io/brf-tech/filex:full-v0.13.4
+docker pull ghcr.io/brf-tech/filex:slim-v0.14.0
+docker pull ghcr.io/brf-tech/filex:full-v0.14.0
 ```
+
+## v0.14.0
+
+<span class="filex-release-date">10 August 2026</span>
+
+The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first three (a bearer token supplied as a function has to be awaited, and the header builder handed to the viewers was the synchronous one, so requests went out with no Authorization header), and a scheme the OS cannot open under the last. Images, video, audio and downloads work too, since those elements carry no headers of their own. Markdown and syntax highlighting now render in every embedded surface, not only in the admin app. The window follows the OS language instead of wrapping a Turkish file list in an English shell, and it opens on a real connecting screen that names the server it is waiting for.
+
+**Fixed**
+
+- **Desktop** — The credential never reached three surfaces, so the app 401'd itself.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.14.0`
 
 ## v0.13.4
 
@@ -302,24 +314,13 @@ Tabs and split view. Open several locations as tabs, split the active tab into t
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.6.0) · `ghcr.io/brf-tech/filex:slim-v0.6.0`
 
-## v0.5.0
-
-<span class="filex-release-date">17 July 2026</span>
-
-A large interface release: eight built-in themes with independent light and dark variants, fully rebindable keyboard shortcuts, Quick Look (peek the selected file with Space), an operations centre that collects uploads and background jobs into one corner badge with retry, and a first-run tour. Accessibility work throughout — proper grid/listbox roles, a keyboard-navigable context menu, focus trapping in modals, and `prefers-reduced-motion` support.
-
-**New**
-
-- **Gorunum** — v0.5.0 appearance wave.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.5.0) · `ghcr.io/brf-tech/filex:slim-v0.5.0`
-
 ## Earlier releases
 
-The 33 releases before v0.5.0, in brief. Full notes are on GitHub.
+The 34 releases before v0.6.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.5.0](https://github.com/BRF-Tech/filex/releases/tag/v0.5.0) | 17 July 2026 | A large interface release: eight built-in themes with independent light and dark variants, fully rebindable keyboard shortcuts, Quick Look (peek the selected file with Space), an operations centre that collects uploads and… |
 | [v0.4.2](https://github.com/BRF-Tech/filex/releases/tag/v0.4.2) | 17 July 2026 | Cleanup release. Moving a folder to trash no longer wedges storage sync (a trashed folder's leftovers could block sync from ever re-creating those names), `versions.keep_n` above 20 works instead of being silently capped, and… |
 | [v0.4.1](https://github.com/BRF-Tech/filex/releases/tag/v0.4.1) | 17 July 2026 | Packaging and documentation. Ready-to-submit app-store manifests for Umbrel, CasaOS, Runtipi, Unraid and Portainer, a refreshed Helm chart, and this documentation site. |
 | [v0.4.0](https://github.com/BRF-Tech/filex/releases/tag/v0.4.0) | 17 July 2026 | An inspector panel (press `i`) with metadata, version history, effective permissions and share links for the selected item. |
@@ -356,4 +357,4 @@ The 33 releases before v0.5.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-10 from 53 published releases.</small>
+<small>Generated 2026-08-10 from 54 published releases.</small>
