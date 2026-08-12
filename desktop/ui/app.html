@@ -147,24 +147,42 @@
       .rail-sep { width: 28px; height: 1px; background: rgba(255, 255, 255, .12); margin: 2px 0; }
       .spacer { flex: 1; }
 
-      /* ── the server's own mark ────────────────────────────────────
-         An admin who sets a logo under Branding has said what this install is
-         called; the desktop client showing only the vendor's icon makes it look
-         like somebody else's software. It sits at the TOP of the rail, above the
-         accounts, because it identifies the SERVER — putting it on the avatars
-         would break the one job those have (telling two accounts apart, and two
-         accounts on one server carry the same logo).
-         `contain` + a light plate: logos are authored for white pages and a
-         dark-on-dark mark on the rail would be an empty square. */
-      .brand {
-        width: 38px; height: 38px; flex: 0 0 auto;
-        border-radius: 10px;
+      /* ── the application's own mark ───────────────────────────────
+         Fixed, at the top, above the servers. filex is what the window IS; the
+         rows below are WHERE you are signed in. A badge here that changed with
+         the selected account would leave nothing on screen naming the app. */
+      .appmark {
+        width: 32px; height: 32px; flex: 0 0 auto;
         display: grid; place-items: center;
-        overflow: hidden;
-        background: rgba(255, 255, 255, .92);
-        padding: 4px;
+        margin-bottom: 2px;
       }
-      .brand img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+      .appmark svg { width: 32px; height: 32px; display: block; }
+
+      /* ── a server's own logo, ON its row ──────────────────────────
+         Each row is a server (a tenant), so the logo its admin set under
+         Branding is the truest label it can carry — better than initials
+         derived from an e-mail address, which is what somebody's ACCOUNT is
+         called, not what the install is called.
+         `contain` on a light plate: logos are authored for white pages, and a
+         dark-on-dark mark against the rail would render as an empty square. */
+      .avatar--brand {
+        background: rgba(255, 255, 255, .94);
+        padding: 4px;
+        overflow: hidden;
+        /* ⚠ Always the rounded square, never the circle the initials use.
+           Logo artwork is authored square: a 50% radius eats its corners, and
+           a mark that only looks right while its row is selected is not a mark.
+           Which row is active is already said by the bar on the rail's edge. */
+        border-radius: 12px;
+      }
+      .avatar--brand img {
+        max-width: 100%; max-height: 100%;
+        object-fit: contain;
+        display: block;
+        /* The plate rounds with the avatar; without this the artwork's own
+           corners poke through the animated radius. */
+        border-radius: inherit;
+      }
 
       /* ── main ────────────────────────────────────────────────── */
       #main { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
@@ -417,6 +435,20 @@
       // Mounted once per account. `auth.token` is a FUNCTION, which the component
       // supports: the credential is fetched from the main process at call time
       // rather than being handed to this page up front and kept lying around.
+      // The application's own mark — the same folder-and-check the web app uses
+      // (web/src/components/LogoMark.vue), so the desktop and the browser are
+      // recognisably one product. Fixed: it says filex, never which server.
+      const ICON_APP =
+        '<svg viewBox="0 0 32 32" aria-hidden="true">' +
+        '<defs><linearGradient id="filex-rail-grad" x1="0" y1="0" x2="1" y2="1">' +
+        '<stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4338ca"/>' +
+        '</linearGradient></defs>' +
+        '<rect width="32" height="32" rx="8" fill="url(#filex-rail-grad)"/>' +
+        '<path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" ' +
+        'fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>' +
+        '<path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
       const ICON_MARK =
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
         'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -582,27 +614,17 @@
         const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
         rail.innerHTML = '';
 
-        const brand = brandOf(state.activeId);
-        if (brand) {
-          const mark = document.createElement('div');
-          mark.className = 'brand';
-          mark.title = brand.name || '';
-          const img = document.createElement('img');
-          img.src = brand.logoUrl;
-          img.alt = brand.name || '';
-          // ⚠ A logo URL that does not resolve would otherwise leave a blank
-          // white plate nailed to the top of the rail — worse than no logo.
-          img.addEventListener('error', () => {
-            brands.set(state.activeId, { name: brand.name, logoUrl: '' });
-            renderRail();
-            repaintBoot();
-          });
-          mark.appendChild(img);
-          rail.appendChild(mark);
-          const bsep = document.createElement('div');
-          bsep.className = 'rail-sep';
-          rail.appendChild(bsep);
-        }
+        // ── the app's own mark, fixed ─────────────────────────
+        // filex is what this WINDOW is; the rows underneath are servers. The
+        // two identities must not trade places: a rail whose top badge changed
+        // with the selected account left nothing on screen that said which
+        // application you were looking at.
+        const appMark = document.createElement('div');
+        appMark.className = 'appmark';
+        appMark.title = 'filex';
+        appMark.innerHTML = ICON_APP;
+        rail.appendChild(appMark);
+        rail.appendChild(Object.assign(document.createElement('div'), { className: 'rail-sep' }));
 
         for (const a of state.accounts) {
           const st = statusOf[a.id];
@@ -610,10 +632,36 @@
           slot.className = 'slot' + (a.id === state.activeId ? ' active' : '');
           const b = document.createElement('button');
           b.className = 'avatar';
-          b.style.background = avatarColor(a.email + a.serverUrl);
-          b.title = `${a.email}\n${host(a.serverUrl)}`;
-          b.innerHTML = esc(initials(a.email)) +
-            (st ? `<span class="dot ${st.lastError ? 'err' : st.running ? 'ok' : ''}"></span>` : '');
+          const brand = brandOf(a.id);
+          // ⭐ Each row IS a server, so the server's own logo is the truest
+          // thing to draw on it — an admin who set one under Branding has
+          // already answered "which install is this?". Initials are the
+          // fallback for servers that never set a logo, not the default.
+          if (brand) {
+            b.classList.add('avatar--brand');
+            b.title = `${brand.name || host(a.serverUrl)}\n${a.email}\n${host(a.serverUrl)}`;
+            const img = document.createElement('img');
+            img.src = brand.logoUrl;
+            img.alt = brand.name || '';
+            // ⚠ A logo URL that does not resolve would leave an empty white
+            // plate where an identifiable account used to be — worse than no
+            // logo at all. Drop back to the initials.
+            img.addEventListener('error', () => {
+              brands.set(a.id, { name: brand.name, logoUrl: '' });
+              renderRail();
+              repaintBoot();
+            });
+            b.appendChild(img);
+          } else {
+            b.style.background = avatarColor(a.email + a.serverUrl);
+            b.title = `${a.email}\n${host(a.serverUrl)}`;
+            b.appendChild(document.createTextNode(initials(a.email)));
+          }
+          if (st) {
+            const dot = document.createElement('span');
+            dot.className = `dot ${st.lastError ? 'err' : st.running ? 'ok' : ''}`;
+            b.appendChild(dot);
+          }
           b.addEventListener('click', async () => {
             state = await window.filexApp.switchAccount(a.id);
             render();
@@ -811,7 +859,10 @@
       // ── boot ──────────────────────────────────────────────────
       function render() {
         const active = state.accounts.find((a) => a.id === state.activeId);
-        void loadBrand(active);
+        // ⚠ EVERY account, not just the active one: the rail draws all of them
+        // at once, so fetching only the active server's branding left the other
+        // rows on initials until you clicked them.
+        for (const a of state.accounts) void loadBrand(a);
         renderRail();
         void mountExplorer(active);
       }

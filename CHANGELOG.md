@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-08-12
+
+### Fixed
+
+- **The account rail put the two identities the wrong way round.** 0.15.0 drew
+  the server's Branding logo as a fixed badge at the top of the rail and left
+  the accounts underneath as e-mail initials. That is backwards: each row of
+  that rail IS a server — a tenant — so the logo its admin set is the truest
+  label the row can carry, while the application's own mark is the thing that
+  must not move. The rows now carry their own server's logo (initials remain
+  the fallback for servers with no branding), and the filex mark sits fixed
+  above them.
+
+  Branding is fetched for every signed-in account rather than only the active
+  one, so a rail of three tenants paints three logos without being clicked
+  through. Branded rows keep the rounded square at all times instead of the
+  circle the initials use: logo artwork is authored square, and a 50% radius
+  eats its corners — which row is selected is already said by the bar on the
+  rail's edge.
+
 ## [0.15.0] - 2026-08-12
 
 ### Added

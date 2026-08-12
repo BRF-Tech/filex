@@ -33,22 +33,28 @@ await ensureNoTour();
 // ── the server's brand mark ──────────────────────────────────────────
 // GET /api/branding is public and fm.brf.sh serves a data: URI. The plate is
 // painted only once that request lands, so give it a moment.
-await win.waitForSelector('#rail .brand img', { timeout: 15_000 }).catch(() => {});
+await win.waitForSelector('#rail .slot.active .avatar--brand img', { timeout: 15_000 }).catch(() => {});
 const brand = await win.evaluate(() => {
-  const img = document.querySelector('#rail .brand img');
-  if (!img) return null;
+  const img = document.querySelector('#rail .slot.active .avatar--brand img');
   return {
-    src: (img.getAttribute('src') || '').slice(0, 24),
+    // The app's own mark is FIXED and leads the rail; it must not be the thing
+    // that changes with the selected account.
+    appMarkLeads: document.querySelector('#rail')?.firstElementChild?.classList.contains('appmark'),
+    src: img ? (img.getAttribute('src') || '').slice(0, 24) : null,
     // naturalWidth is the honest question: a broken URL still leaves an <img>
-    // in the DOM, and the plate would be an empty white square.
-    decoded: img.naturalWidth > 0 && img.naturalHeight > 0,
-    // The mark sits ABOVE the account avatars, not among them.
-    firstOnRail: document.querySelector('#rail')?.firstElementChild?.classList.contains('brand'),
+    // in the DOM, and the row would be an empty white plate.
+    decoded: !!img && img.naturalWidth > 0 && img.naturalHeight > 0,
+    // Rows that have no branding must keep their initials rather than going blank.
+    fallbacks: [...document.querySelectorAll('#rail .avatar:not(.avatar--brand)')]
+      .map((el) => el.textContent.trim()),
   };
 });
-check('rail carries the server brand mark', !!brand, `.brand img: ${brand ? 'present' : 'MISSING'}`);
-check('the brand image actually decoded', !!brand?.decoded, `src=${brand?.src ?? '—'}…`);
-check('the mark leads the rail', brand?.firstOnRail === true);
+check("the app's own mark leads the rail, fixed", brand.appMarkLeads === true);
+check("the active server's row carries its own logo", brand.src !== null,
+  `.avatar--brand img: ${brand.src === null ? 'MISSING' : 'present'}`);
+check('the logo actually decoded', brand.decoded, `src=${brand.src ?? '—'}…`);
+check('rows without branding keep their initials', brand.fallbacks.every((t) => t.length > 0),
+  JSON.stringify(brand.fallbacks));
 
 // ── tab strip ────────────────────────────────────────────────────────
 const strip = () => win.locator('.fe-tabs');
