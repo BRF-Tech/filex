@@ -148,20 +148,45 @@ check('…and is stored as an explicit choice, not as "unset"', m.stored === 'au
 // This runs UNPACKAGED (that is what the suite drives), so the correct outcome
 // is: the app refuses, says why, and touches nothing.
 if (process.platform === 'win32') {
+  const runKey = () =>
+    execFileSync('reg', ['query', 'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run'],
+      { encoding: 'utf8' });
+
   const before = await win.evaluate(() => window.filexApp.getState());
-  check('an unpackaged run reports the setting as unavailable',
-    before.launchAtLoginSupported === false && before.launchAtLoginEffective === false);
+  // The suite drives the source tree by default and the installed package when
+  // FILEX_APP_BINARY is set. Both cases matter and they expect OPPOSITE things,
+  // so the assertion follows what the app reports rather than what we assume.
+  const packaged = before.launchAtLoginSupported === true;
+  check(`the run under test is ${packaged ? 'packaged' : 'unpackaged'}`, true,
+    packaged ? 'driving an installed app' : 'driving the source tree');
 
-  // Ask for it anyway — through the same IPC the settings switch uses.
+  // Ask for it — through the same IPC the settings switch uses.
   const after = await win.evaluate(() => window.filexApp.setSettings({ launchAtLogin: true }));
-  check('…and asking for it still leaves the OS untouched', after.launchAtLoginEffective === false);
 
-  const run = execFileSync('reg', ['query', 'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run'],
-    { encoding: 'utf8' });
-  const stray = /electron\.app\.Electron/i.test(run) || /node_modules[\\/][\s\S]*?electron\.exe/i.test(run);
-  check('no bare electron.exe was written to the user\'s Run key', !stray,
-    stray ? 'a dev run must never register a login item' : 'clean');
-  await win.evaluate(() => window.filexApp.setSettings({ launchAtLogin: false }));
+  if (packaged) {
+    check('the installed app can actually register a login item', after.launchAtLoginEffective === true);
+    // The command Windows keeps is the whole point: an installed executable
+    // with --hidden, so the launch nobody asked for stays in the tray.
+    const line = runKey().split(/\r?\n/).find((l) => /electron\.app\.filex/i.test(l)) ?? '';
+    check('…pointing at the installed executable', /Programs[\\/]filex[\\/]filex\.exe/i.test(line), line.trim());
+    check('…and carrying --hidden', /--hidden/.test(line), line.trim());
+    check('…and never at a bare electron.exe', !/node_modules/i.test(line), line.trim());
+
+    const off = await win.evaluate(() => window.filexApp.setSettings({ launchAtLogin: false }));
+    check('turning it off removes the entry',
+      off.launchAtLoginEffective === false && !/electron\.app\.filex/i.test(runKey()));
+  } else {
+    check('an unpackaged run reports the setting as unavailable', before.launchAtLoginEffective === false);
+    check('…and asking for it still leaves the OS untouched', after.launchAtLoginEffective === false);
+    // ⚠⚠ The bug that started this round: a dev run registered
+    // node_modules/.../electron.exe with no project path, so every sign-in for
+    // months afterwards opened Electron's own welcome window.
+    const run = runKey();
+    const stray = /electron\.app\.Electron/i.test(run) || /node_modules[\\/][\s\S]*?electron\.exe/i.test(run);
+    check("no bare electron.exe was written to the user's Run key", !stray,
+      stray ? 'a dev run must never register a login item' : 'clean');
+    await win.evaluate(() => window.filexApp.setSettings({ launchAtLogin: false }));
+  }
 }
 
 // Persistence across a reload is the whole point of storing it.
