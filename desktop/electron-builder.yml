@@ -67,3 +67,19 @@ mac:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+
+# ── auto-update feed ─────────────────────────────────────────────────
+# Generic (a plain static directory), NOT the GitHub provider: this repo's
+# GitHub mirror is private, and the GitHub provider would need a token shipped
+# inside the app to read its releases. filex.sh already serves the CLI's update
+# manifest from the same static site, so the desktop feed lives beside it.
+#
+# Declaring `publish` is also what makes electron-builder WRITE `latest.yml`
+# next to the installer — without it there is nothing for the updater to read,
+# and the app would check forever and find nothing.
+publish:
+  provider: generic
+  url: https://filex.sh/desktop/
+  # We upload by hand (goreleaser owns the CLI release; these packages do not
+  # come from CI), so never let a build try to push.
+  publishAutoUpdate: true

@@ -27,6 +27,7 @@ import {
   session,
   shell,
 } from 'electron';
+import electronUpdater from 'electron-updater';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -68,6 +69,8 @@ let tray: Tray | null = null;
 let pendingAuth: PendingAuth | null = null;
 let quitting = false;
 let supervisor: SyncSupervisor | null = null;
+/** What the updater is doing, as far as the UI is concerned. */
+let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'; version?: string; percent?: number; error?: string } = { status: 'idle' };
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -314,6 +317,18 @@ function refreshTray(): void {
       { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : 'Not signed in', enabled: false },
       { type: 'separator' },
       { label: 'Open filex', click: () => route() },
+      // A downloaded update is worth one line in the menu the app lives in;
+      // without it the only way to learn about it is to open Settings.
+      ...(updateState.status === 'ready'
+        ? [{
+            label: `Restart to update (${updateState.version ?? ''})`,
+            click: () => {
+              quitting = true;
+              supervisor?.stopAll();
+              autoUpdater.quitAndInstall();
+            },
+          }]
+        : []),
       {
         label: 'Settings…',
         click: () => {
@@ -371,6 +386,69 @@ async function handleDeepLink(raw: string): Promise<void> {
 }
 
 // ─────────────────────────── ipc ───────────────────────────
+
+// ─────────────────────────── auto-update ───────────────────────────
+//
+// The app keeps itself current. A file manager that syncs folders in the
+// background is exactly the kind of program nobody thinks to go and re-download
+// — the desktop packages were being installed by hand, so every fix shipped
+// only to whoever remembered to fetch it.
+//
+// The feed is a plain static directory on filex.sh, NOT the GitHub provider:
+// the GitHub mirror of this repo is private, and that provider would need a
+// token shipped inside the app to read its releases. The CLI's update manifest
+// already lives on the same static site.
+//
+// Policy: download quietly, install on quit. An update that interrupts a file
+// transfer to restart itself is worse than an update that waits — and the app
+// is normally left running in the tray, so "on quit" is a real moment.
+// `FILEX_NO_UPDATE=1` turns the whole thing off (used by the E2E rig, which
+// must not race a download).
+
+const { autoUpdater } = electronUpdater;
+
+/** Every window that is showing state gets the new state. */
+function pushUpdateState(next: typeof updateState): void {
+  updateState = next;
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+}
+
+function wireAutoUpdate(): void {
+  // Unpackaged runs have no updater metadata and would log an error on every
+  // check; a machine told not to update must not phone home at all.
+  if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return;
+
+  autoUpdater.autoDownload = true;
+  // ⚠ The install must happen on quit, not mid-session: the sync engine is a
+  // child process moving files, and replacing the app under it is how a
+  // half-copied file becomes somebody's only copy.
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.logger = null;
+
+  autoUpdater.on('checking-for-update', () => pushUpdateState({ status: 'checking' }));
+  autoUpdater.on('update-available', (i) => pushUpdateState({ status: 'available', version: i?.version }));
+  autoUpdater.on('update-not-available', () => pushUpdateState({ status: 'idle' }));
+  autoUpdater.on('download-progress', (p) =>
+    pushUpdateState({ status: 'downloading', percent: Math.round(p?.percent ?? 0), version: updateState.version }));
+  autoUpdater.on('update-downloaded', (i) => {
+    pushUpdateState({ status: 'ready', version: i?.version });
+    refreshTray();
+  });
+  // ⚠ Silent by design. No network, a feed that 404s, a machine behind a proxy
+  // — none of that is the user's problem while the app itself works. The state
+  // is recorded so Settings can say so if anyone looks.
+  autoUpdater.on('error', (e) => pushUpdateState({ status: 'error', error: String(e?.message ?? e).slice(0, 200) }));
+
+  const check = () => {
+    autoUpdater.checkForUpdates().catch(() => {
+      /* handled by the error event above */
+    });
+  };
+  // Not at t=0: the first seconds after launch belong to the window and the
+  // sync engine, and a machine that just woke up may not have a route yet.
+  setTimeout(check, 30_000);
+  setInterval(check, 6 * 60 * 60 * 1000);
+}
 
 // ─────────────────────────── start at login ───────────────────────────
 //
@@ -475,6 +553,7 @@ function publicState() {
     // settings panel has to say WHY rather than show a switch that does nothing.
     launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
     appVersion: app.getVersion(),
+    update: updateState,
   };
 }
 
@@ -719,6 +798,24 @@ function wireIpc(): void {
     });
   });
 
+  // "Check now" from Settings — the same check the timer runs.
+  ipcMain.handle('update:check', () => {
+    if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return publicState();
+    pushUpdateState({ status: 'checking' });
+    autoUpdater.checkForUpdates().catch(() => {});
+    return publicState();
+  });
+
+  // Restart into the downloaded update. quitting=true so the window's
+  // close handler does not park the app in the tray instead of quitting.
+  ipcMain.handle('update:install', () => {
+    if (updateState.status !== 'ready') return publicState();
+    quitting = true;
+    supervisor?.stopAll();
+    autoUpdater.quitAndInstall();
+    return publicState();
+  });
+
   ipcMain.handle('settings:set', (_e, patch: Partial<DesktopState>) => {
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
     if (typeof patch.launchAtLogin === 'boolean') {
@@ -819,6 +916,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     wireIpc();
     buildTray();
+    wireAutoUpdate();
     // Re-assert the login item on every packaged start. The command stored in
     // the registry is a full path, and an install that MOVES leaves it pointing
     // at nothing — which is what an upgrade from a per-machine install to a

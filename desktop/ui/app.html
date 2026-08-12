@@ -395,6 +395,19 @@
         'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
         'set.autostart_dev':    ['Only the installed app can start at sign-in.',
                                  'Oturum açılışında yalnızca kurulu uygulama başlatılabilir.'],
+        'upd.title':            ['Updates', 'Güncellemeler'],
+        'upd.idea':             ['filex keeps itself up to date and installs the update when you quit.',
+                                 'filex kendini güncel tutar ve güncellemeyi çıkışta kurar.'],
+        'upd.check':            ['Check now', 'Şimdi denetle'],
+        'upd.checking':         ['Checking…', 'Denetleniyor…'],
+        'upd.current':          ['Up to date', 'Güncel'],
+        'upd.available':        ['Version {v} found', '{v} sürümü bulundu'],
+        'upd.downloading':      ['Downloading… %{p}', 'İndiriliyor… %{p}'],
+        'upd.ready':            ['Version {v} is ready', '{v} sürümü hazır'],
+        'upd.restart':          ['Restart and update', 'Yeniden başlat ve güncelle'],
+        'upd.error':            ['Could not check for updates', 'Güncelleme denetlenemedi'],
+        'upd.dev':              ['Only the installed app updates itself.',
+                                 'Yalnızca kurulu uygulama kendini günceller.'],
         'set.on':               ['On', 'Açık'],
         'set.off':              ['Off', 'Kapalı'],
         'set.unknown_account':  ['unknown account', 'bilinmeyen hesap'],
@@ -763,7 +776,30 @@
             <button id="login-item" ${state.launchAtLoginSupported === false ? 'disabled' : ''}>${
               esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
           </div></div>
+          <h2>${esc(T('upd.title'))}</h2>
+          ${updateCard()}
           <p class="muted">filex ${esc(state.appVersion || '')}</p>`;
+      }
+
+      /** The update row: what the app knows, plus the one button that matters. */
+      function updateCard() {
+        const u = state.update || { status: 'idle' };
+        const supported = state.launchAtLoginSupported !== false; // packaged run
+        let line = T('upd.current');
+        if (!supported) line = T('upd.dev');
+        else if (u.status === 'checking') line = T('upd.checking');
+        else if (u.status === 'available') line = T('upd.available', { v: u.version || '' });
+        else if (u.status === 'downloading') line = T('upd.downloading', { p: u.percent ?? 0 });
+        else if (u.status === 'ready') line = T('upd.ready', { v: u.version || '' });
+        else if (u.status === 'error') line = T('upd.error');
+        const btn = u.status === 'ready'
+          ? `<button class="primary" id="upd-install">${esc(T('upd.restart'))}</button>`
+          : `<button id="upd-check" ${supported ? '' : 'disabled'}>${esc(T('upd.check'))}</button>`;
+        return `<div class="card"><div class="between">
+            <div><strong>${esc(line)}</strong>
+              <div class="muted">${esc(T('upd.idea'))}</div></div>
+            ${btn}
+          </div></div>`;
       }
 
       function toggleSettings(force) {
@@ -807,6 +843,13 @@
           state = await window.filexApp.setSettings({ runInBackground: !state.runInBackground });
           renderSettings();
         });
+        const updCheck = $('#upd-check', el);
+        if (updCheck) updCheck.addEventListener('click', async () => {
+          state = await window.filexApp.checkUpdate();
+          renderSettings();
+        });
+        const updInstall = $('#upd-install', el);
+        if (updInstall) updInstall.addEventListener('click', () => window.filexApp.installUpdate());
         $('#login-item', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ launchAtLogin: !state.launchAtLogin });
           renderSettings();

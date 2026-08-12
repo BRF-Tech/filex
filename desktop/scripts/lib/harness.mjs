@@ -81,7 +81,10 @@ export async function launchApp({ env = {}, lang = 'en-US', args = [] } = {}) {
     ...(packaged
       ? { executablePath: packaged, args: common }
       : { args: [DESKTOP, ...common], cwd: DESKTOP }),
-    env: { ...process.env, FILEX_NO_BROWSER: '1', HOME: home, USERPROFILE: home, ...env },
+    // ⚠ FILEX_NO_UPDATE: a suite run must not race a real update download —
+    // and a packaged run driven by FILEX_APP_BINARY would otherwise fetch and
+    // stage an installer in the middle of the assertions.
+    env: { ...process.env, FILEX_NO_BROWSER: '1', FILEX_NO_UPDATE: '1', HOME: home, USERPROFILE: home, ...env },
   });
   if (packaged) console.log(`(driving the PACKAGED app: ${packaged})`);
   return { app, profile, home };

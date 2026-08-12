@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-12
+
+### Added
+
+- **The desktop app keeps itself up to date.** A file manager that syncs folders
+  in the background is exactly the kind of program nobody thinks to go and
+  re-download; the packages were being installed by hand, so every fix reached
+  only whoever remembered to fetch it.
+
+  The feed is a plain static directory on filex.sh — deliberately not the GitHub
+  provider, whose private repository would require a token shipped inside the
+  app. It downloads quietly and installs **on quit**: an update that interrupts
+  a transfer to restart itself is worse than one that waits, and the app
+  normally lives in the tray, so quitting is a real moment. The tray grows a
+  "Restart to update" line when one is staged, and Settings gained an Updates
+  row (state + "Check now").
+
+  Failures are silent by design — no network, a proxy, a feed that 404s: none of
+  that is the user's problem while the app works — but the state is recorded so
+  Settings can report it. `FILEX_NO_UPDATE=1` turns the whole thing off.
+
+  ⚠ This is the first version that can update itself; reaching it still needs
+  one manual install.
+
 ## [0.16.3] - 2026-08-12
 
 ### Fixed

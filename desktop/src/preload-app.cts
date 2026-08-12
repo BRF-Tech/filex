@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('filexApp', {
   // app settings
   setSettings: (patch: unknown) => ipcRenderer.invoke('settings:set', patch),
 
+  // updates — the app keeps itself current; these are the manual affordances.
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+
   /** Backs the navigator.share polyfill the page installs. See main.ts. */
   share: (data: unknown) => ipcRenderer.invoke('app:share', data),
 
