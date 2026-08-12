@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 // Share handles share creation and the public viewer endpoints.
@@ -44,10 +45,17 @@ type Share struct {
 	// Branding resolves the public pages' identity (logo/name/accent/footer)
 	// from settings (wiring:e1). Nil-safe: unwired = stock filex chrome.
 	Branding *BrandingSource
+	// Thumbs renders the gallery tiles on the public folder page. Nil-safe:
+	// unwired, that page falls back to streaming the ORIGINALS — which is what
+	// it always did, and what made a folder of photos crawl on open.
+	Thumbs *thumb.Pipeline
 }
 
 // AttachBranding wires the shared branding source (wiring:e1).
 func (h *Share) AttachBranding(b *BrandingSource) { h.Branding = b }
+
+// AttachThumbs wires the thumbnail pipeline used by the public folder page.
+func (h *Share) AttachThumbs(p *thumb.Pipeline) { h.Thumbs = p }
 
 // chrome computes the branded page fragments for one request (wiring:e1).
 func (h *Share) chrome(r *http.Request) publicChrome { return publicChromeFor(h.Branding, r) }
@@ -257,6 +265,14 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	emitFileEvent(r.Context(), shareEv)
 
+	// ⭐ Build the folder's ZIP NOW, not when somebody clicks download.
+	// The background warmer would have got to it within five minutes, but the
+	// person who just created the link is usually the next person to open it —
+	// so the five minutes were being spent watching a progress bar instead of
+	// being spent before anyone was waiting. Costs nothing new: it is the same
+	// build the warmer was going to do anyway, moved earlier.
+	h.warmFolderZip(node)
+
 	// Dual envelope: nested `share` for the SFC + flat fields at the
 	// top level for legacy embed.js. Cheap to ship both.
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -269,6 +285,94 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		"expires_at":    inner.ExpiresAt,
 		"max_downloads": inner.MaxDownloads,
 	})
+}
+
+// sharedThumbMaxSource caps what the public page will render on demand. Above
+// it, the tile falls back to the original — a visitor with a link must not be
+// able to make the server decode an arbitrarily large image per request, and a
+// file that big is not a photo somebody is browsing a wall of.
+const sharedThumbMaxSource = 64 << 20 // 64 MiB
+
+// serveSharedThumb writes the cached thumbnail for a file inside a shared
+// folder and reports whether it did. False means "no thumbnail to serve" and
+// the caller streams the original, which is what this endpoint always did.
+//
+// The thumbnail is the SAME artefact the app's own gallery uses — keyed by node
+// id, rendered once, cached on disk — so the public page costs nothing extra
+// after the first visit. When the file has never had one rendered, it is
+// rendered here rather than dispatched in the background: the visitor is
+// looking at the tile right now, and a background job would leave them staring
+// at a broken image until they reloaded.
+func (h *Share) serveSharedThumb(w http.ResponseWriter, r *http.Request, storageID int64, full string, size int64) bool {
+	if h.Thumbs == nil || h.Store == nil {
+		return false
+	}
+	ctx := r.Context()
+	n, err := h.Store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, full))
+	// An unindexed storage has no node, so no thumbnail can exist for it.
+	if err != nil || n == nil || n.Type != model.NodeTypeFile {
+		return false
+	}
+	if !h.thumbReady(ctx, n.ID) {
+		if size > sharedThumbMaxSource {
+			return false
+		}
+		if err := h.Thumbs.GenerateThumb(ctx, n); err != nil {
+			return false
+		}
+		if !h.thumbReady(ctx, n.ID) {
+			return false
+		}
+	}
+	f, err := os.Open(h.Thumbs.CachePath(n.ID))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// ⚠ Reported to the caller as handled even if the copy dies mid-stream:
+	// the headers are already out, so falling through would write a second
+	// response body into the same request.
+	_, _ = io.Copy(w, f)
+	return true
+}
+
+func (h *Share) thumbReady(ctx context.Context, nodeID int64) bool {
+	t, err := h.Store.GetThumbnail(ctx, nodeID)
+	return err == nil && t != nil && t.State == "ready"
+}
+
+// zipWarmTimeout bounds a share-creation warm. Generous — a folder share can
+// be tens of gigabytes — but bounded, so a build that wedges on a sick storage
+// backend releases its slot instead of living for the process's lifetime.
+const zipWarmTimeout = 30 * time.Minute
+
+// warmFolderZip pre-builds the ZIP for a freshly created FOLDER share.
+//
+// ⚠ Detached context on purpose: the request is about to be answered, and
+// `r.Context()` is cancelled the moment it is — a warm started on it would be
+// killed a few milliseconds in, leaving a partial build and the same wait the
+// downloader had before.
+//
+// Silent by design. This is an optimisation on top of a cache that already
+// falls back to streaming a fresh ZIP; a failure here must not fail the share
+// creation the user actually asked for.
+func (h *Share) warmFolderZip(node *model.Node) {
+	if h.Zip == nil || !h.Zip.Enabled() || node == nil || node.Type != model.NodeTypeDirectory {
+		return
+	}
+	drv, err := h.StorageResolver(node.StorageID)
+	if err != nil || drv == nil {
+		return
+	}
+	path, id := node.Path, node.ID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), zipWarmTimeout)
+		defer cancel()
+		_, _ = h.Zip.Warm(ctx, drv, path, id)
+	}()
 }
 
 // HandleList returns the current caller's active share links for one item, so

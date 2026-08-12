@@ -129,6 +129,10 @@ func BuildRouter(d *Deps) http.Handler {
 	ah.AttachACL(d.ACL)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL, d.ZipCache)
 	sh.AttachACL(d.ACL)
+	// The public folder page draws its gallery tiles from the same thumbnail
+	// cache the app uses. Unwired, those tiles fall back to the full-size
+	// originals — which is what made a shared photo folder crawl on open.
+	sh.AttachThumbs(d.Thumbs)
 	// File-drop (public upload link) handler — the inverse of Share. Reuses
 	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
 	// exactly like authenticated uploads (mime, node cache, thumbnails).

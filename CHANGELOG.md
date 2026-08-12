@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-08-12
+
+### Changed
+
+- **A shared folder's gallery served the original photos as its tiles.** The
+  public browse page marks image tiles with `?thumb=1`, and that endpoint read
+  the file and streamed it — so a folder of 5 MB photos shipped tens of
+  megabytes to paint one screen, and the page crawled until it settled. It now
+  serves the same cached thumbnail the app's own gallery uses, keyed by node id
+  and rendered once. A file that has never had one rendered gets it rendered on
+  the spot rather than dispatched to a background job, because the visitor is
+  looking at that tile right now.
+
+  Nothing is lost when there is no thumbnail to serve: an unindexed storage, a
+  format the pipeline skips, or a source above 64 MiB falls through to the
+  original exactly as before. Thumbnail fetches still do not count as downloads.
+
+- **A folder share's ZIP is built when the link is created.** It used to be
+  built when somebody clicked download — or by the background warmer, whichever
+  came first, which meant a wait of up to five minutes landed on whoever opened
+  the link. The person who just created it is usually that person. Creating a
+  folder share now starts the build immediately, asynchronously (the response
+  does not wait on a multi-gigabyte archive) and with a 30-minute ceiling so a
+  build stuck on a sick storage backend releases its slot.
+
+  This is the same build the warmer was going to do anyway, moved earlier — no
+  new class of work, and file shares are untouched.
+
 ## [0.15.1] - 2026-08-12
 
 ### Fixed

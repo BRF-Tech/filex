@@ -245,6 +245,16 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ⭐ A gallery tile is a couple of hundred pixels wide; streaming the
+	// ORIGINAL into it — which is what this endpoint did — means a folder of
+	// 5 MB photos ships tens of megabytes to paint one screen, and the page
+	// crawls until it settles. Serve the same cached thumbnail the app itself
+	// uses, and only fall through to the original when there is none to be had
+	// (storage not indexed, a format the pipeline skips, generation failed).
+	if thumb && h.serveSharedThumb(w, r, node.StorageID, full, obj.Size) {
+		return
+	}
+
 	rc, err := drv.Read(r.Context(), full)
 	if err != nil {
 		http.Error(w, "read error", http.StatusInternalServerError)
