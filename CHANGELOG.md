@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-08-12
+
+### Fixed
+
+- **The desktop package could ship without its updater.** In a pnpm workspace
+  `desktop/node_modules/<dep>` is a symlink into the repo root's store, outside
+  the app directory, and electron-builder does not follow those — so
+  `electron-updater` was absent from the asar. Adding `node_modules/**/*` to
+  `files` did not help: the installer came out byte for byte identical. The main
+  process is bundled with esbuild now (electron external), so the package
+  carries our code and nothing else and packaging no longer depends on how the
+  install happens to be linked.
+
+  The symptom was the quiet kind — the installer built, the app launched, and no
+  window ever appeared: the main process threw on the import before creating
+  one, with no dialog and no log.
+
+  `desktop/scripts/update-e2e.mjs` now points a packaged app at a local feed
+  advertising a newer version and watches it download and stage the update for
+  real. "The installer built" is not "the app works", and "latest.yml returns
+  200" is not "the app updates".
+
+  ⚠ 0.17.0's packages were built from this fix; its tag was not. Rebuilding the
+  desktop package from the 0.17.0 tag reproduces the broken one — this release
+  is the first whose tag matches what ships.
+
 ## [0.17.0] - 2026-08-12
 
 ### Added
