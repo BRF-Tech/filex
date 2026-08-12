@@ -2595,15 +2595,16 @@ const tabItems = computed(() =>
   tabsApi.tabs.value.map((tb) => ({ id: tb.id, label: tabLabel(tb.path), split: !!tb.split })),
 );
 
-// A second tab always shows the strip; `tabStrip: 'always'` keeps it there for
-// the first one too (see ExplorerConfig).
+// The strip is visible by DEFAULT, on every surface (see ExplorerConfig — the
+// default used to differ between the desktop app and the web, which is the one
+// thing a shared package must never do). `tabStrip: 'auto'` is the opt-out.
 // ⚠ Gated on there being a tab at all, not on the flag alone: tabs are seeded
-// in onMounted, so an 'always' host would otherwise paint one frame of an empty
-// strip — a lone `+` floating above the toolbar.
+// in onMounted, so the strip would otherwise paint one frame empty — a lone
+// `+` floating above the toolbar.
 const tabsVisible = computed(
   () =>
     tabsApi.hasMultiple.value ||
-    (props.config.tabStrip === 'always' && tabItems.value.length > 0),
+    (props.config.tabStrip !== 'auto' && tabItems.value.length > 0),
 );
 
 // Aktif tab kullanıcıyı izler: gezinme + görünüm değişimi snapshot'a yazılır.

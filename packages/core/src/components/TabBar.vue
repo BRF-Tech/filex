@@ -137,14 +137,18 @@ function onAux(id: string, ev: MouseEvent) {
           @click.stop="emit('close', tab.id)"
         >×</button>
       </div>
-      <button
-        type="button"
-        class="fe-tabs__new"
-        :aria-label="t('tabs.new')"
-        :title="t('tabs.new')"
-        @click="emit('new')"
-      >+</button>
     </div>
+    <!-- ⚠ OUTSIDE the scrolling area. Inside it, "new tab" scrolled away with
+         the tabs it creates: past a dozen tabs the + was off the right edge and
+         the only way back to it was scrolling a strip most people do not know
+         scrolls. Pinned here it is always where it was. -->
+    <button
+      type="button"
+      class="fe-tabs__new"
+      :aria-label="t('tabs.new')"
+      :title="t('tabs.new')"
+      @click="emit('new')"
+    >+</button>
     <button
       v-if="splitEnabled !== false"
       type="button"

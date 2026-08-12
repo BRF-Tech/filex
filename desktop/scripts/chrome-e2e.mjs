@@ -77,6 +77,67 @@ await sleep(400);
 check('closing back to one tab leaves the strip in place',
   (await tabs().count()) === 1 && (await strip().isVisible()));
 
+// ── the strip's own overflow ─────────────────────────────────────────
+// ⚠ Three separate complaints from one CSS mistake: a bar appeared beside the
+// tabs, a VERTICAL bar appeared with nothing to scroll, and enough tabs ran off
+// the edge with no way to scroll to them.
+// ⚠ The tour comes back on its own; without this the loop below spends 30s
+// being intercepted by it and reports a layout problem that is not there.
+await ensureNoTour();
+// Open tabs until the strip ACTUALLY overflows rather than a fixed count:
+// tabs shrink to a 72px floor first, so how many it takes depends on the
+// window — 25 was not enough at 1944px and would have been plenty at 1280.
+// Burak's report was "ekranı taştı, akıyor gidiyor"; this reaches that state
+// on whatever screen the suite happens to run on.
+let overflowed = false;
+for (let i = 0; i < 60 && !overflowed; i++) {
+  await win.locator('.fe-tabs__new').click();
+  await sleep(80);
+  overflowed = await win.evaluate(() => {
+    const el = document.querySelector('.fe-tabs__scroll');
+    return !!el && el.scrollWidth > el.clientWidth + 1;
+  });
+}
+await sleep(500);
+const stripBox = await win.evaluate(() => {
+  const el = document.querySelector('.fe-tabs__scroll');
+  if (!el) return null;
+  const cs = getComputedStyle(el);
+  const tabs = [...el.querySelectorAll('.fe-tabs__tab')];
+  return {
+    tabs: tabs.length,
+    tabWidth: tabs.length ? Math.round(tabs[0].getBoundingClientRect().width) : 0,
+    overflowX: cs.overflowX,
+    overflowY: cs.overflowY,
+    scrollbarWidth: cs.scrollbarWidth,
+    overflowPx: el.scrollWidth - el.clientWidth,
+    // Vertical: must be nothing. A bar down the side of a row of tabs is the
+    // bug, and `overflow-x: auto` alone computes the other axis to `auto` too.
+    scrollableY: el.scrollHeight > el.clientHeight + 1,
+    // The + must stay reachable once the tabs run off — it lives OUTSIDE the
+    // scroller for exactly that reason.
+    plusOutsideScroller: !document.querySelector('.fe-tabs__scroll .fe-tabs__new')
+      && !!document.querySelector('.fe-tabs > .fe-tabs__new'),
+  };
+});
+check('enough tabs overflow the strip', overflowed && stripBox?.overflowPx > 0,
+  `${stripBox?.tabs ?? 0} sekme · sekme genişliği ${stripBox?.tabWidth}px · taşma ${stripBox?.overflowPx}px`);
+check('…and the strip scrolls sideways with a thin bar',
+  stripBox?.overflowX === 'auto' && stripBox?.scrollbarWidth === 'thin',
+  `overflow-x=${stripBox?.overflowX} scrollbar-width=${stripBox?.scrollbarWidth}`);
+check('…and the + stays put instead of scrolling away with them',
+  stripBox?.plusOutsideScroller === true);
+check('…with no vertical axis at all', stripBox?.overflowY === 'hidden' && stripBox?.scrollableY === false,
+  `overflow-y=${stripBox?.overflowY} scrollableY=${stripBox?.scrollableY}`);
+
+// Back to one tab so the rest of the suite starts clean.
+for (let i = 0; i < 30; i++) {
+  const n = await tabs().count();
+  if (n <= 1) break;
+  await win.locator('.fe-tabs__tab').nth(n - 1).locator('.fe-tabs__close').click();
+  await sleep(120);
+}
+
 // ── scrollbars ───────────────────────────────────────────────────────
 const bars = await win.evaluate(() => {
   const root = document.querySelector('.fe');
@@ -99,6 +160,14 @@ check('…and they are the thin variant', bars.width === 'thin', bars.width);
 // inside an embedded file browser, which no embedder asked for. Cheap to
 // assert, impossible to notice by looking at this window.
 const css = fs.readFileSync(path.join(REPO, 'packages/webcomponent/dist/style.css'), 'utf8');
+// ⚠ Order matters as much as scoping: the generic block and `.fe-tabs__scroll`
+// have the SAME specificity, so whichever comes last wins. With the generic
+// block at the bottom it overrode the strip's own rules and put a scrollbar
+// under the tabs.
+const genericAt = css.indexOf('.fe ::-webkit-scrollbar');
+const stripAt = css.indexOf('.fe-tabs__scroll');
+check('the generic scrollbar block comes BEFORE the component rules',
+  genericAt >= 0 && stripAt > genericAt, `generic@${genericAt} strip@${stripAt}`);
 check('the shipped CSS scopes its scrollbar rules to .fe',
   css.includes('.fe ::-webkit-scrollbar') && !/(^|[^-\w.])\*::-webkit-scrollbar/.test(css),
   'a bare `*` rule would hijack the embedding page');

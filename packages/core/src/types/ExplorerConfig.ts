@@ -208,15 +208,17 @@ export interface ExplorerConfig {
   theme?: ThemeMode;
 
   /**
-   * When the tab strip is on screen.
+   * When the tab strip is on screen. Default `'always'`.
    *
-   * `'auto'` (default) shows it only once a second tab exists — the historical
-   * behaviour, and what a small embed wants: a fixed strip above a short panel
-   * is a lot of chrome to spend on a feature nobody has asked for yet.
+   * ⚠⚠ The default is the SAME on every surface on purpose. This package is
+   * the reason the desktop app, the web explorer and the embeds are one
+   * product; shipping a strip that appears in one of them and not the others
+   * turns it back into three. 0.16.0 defaulted this to `'auto'` and opted the
+   * desktop app in — so tabs were permanent in the app and came and went on
+   * the web, which is exactly the split the shared package exists to prevent.
    *
-   * `'always'` keeps it visible with a single tab open. That is what a full
-   * window wants, because the strip is also where `+` lives: hide it and tabs
-   * are a feature you can only find by guessing the keyboard shortcut.
+   * `'auto'` remains as a deliberate opt-OUT for an embed too short to spend
+   * a row on: it shows the strip only once a second tab exists.
    */
   tabStrip?: 'auto' | 'always';
 

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-08-12
+
+### Fixed
+
+- **The tab strip appeared in the desktop app but not on the web.** 0.16.0 added
+  `tabStrip` and defaulted it to `'auto'`, opting only the desktop app into
+  `'always'` — so tabs were permanent in the app and came and went in the web
+  explorer and the embeds. This package exists so those surfaces are one
+  product; a default that differs between them turns it back into three. The
+  default is `'always'` everywhere now, and `'auto'` remains as a deliberate
+  opt-out for an embed too short to spend a row on.
+
+- **A scrollbar appeared under the tabs.** 0.15.0's themed-scrollbar block sat
+  at the END of the stylesheet, where it outranked the strip's own
+  `scrollbar-width: none` (same specificity, later wins) and put a bar across a
+  30px row. The generic block now sits at the TOP, before the component rules —
+  a general default belongs before the exceptions that override it.
+
+- **The strip grew a vertical scrollbar with nothing to scroll.**
+  `overflow-x: auto` alone makes the other axis compute to `auto` as well, so
+  the row of tabs had a vertical scroll context it could never use.
+  `overflow-y: hidden` is explicit now.
+
+- **Enough tabs ran off the edge with no way to reach them.** The strip did not
+  overflow — it GREW: `<filex-explorer>` is almost always a flex item, a flex
+  item's default `min-width: auto` floors it at its content's min-content width,
+  and so a wide row of tabs pushed the host (and the page) sideways instead of
+  handing the overflow to the scroller inside it. Measured before: 63 tabs → a
+  3256px host inside a 1264px window, layout running off the right edge, no
+  scrollbar anywhere. The host is now `min-width: 0; max-width: 100%` and the
+  strip scrolls sideways with a thin bar. Every embedder would otherwise have
+  had to know to write that themselves.
+
+- **"New tab" scrolled away with the tabs it creates.** The `+` lived inside the
+  scrolling area; past a dozen tabs it was off the right edge, reachable only by
+  scrolling a strip most people do not know scrolls. It is pinned outside it.
+
 ## [0.16.2] - 2026-08-12
 
 ### Fixed

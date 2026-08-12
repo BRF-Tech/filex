@@ -1,5 +1,70 @@
 /* FileExplorer — unscoped stylesheet (lib consumers apply once). */
 
+/* ⚠⚠ Bu blok dosyanın BAŞINDA durur, sonunda değil. Aynı özgüllükteki
+   (`.fe *` = 0,1,0) bileşen kuralları bunun ALTINDA kalırsa kaskadda kazanır;
+   sonda dururken sekme şeridinin kendi "çubuğu gizle" kuralını ezip tabların
+   altına bir kaydırma çubuğu düşürdü (2026-08-12, Burak bildirdi). Genel
+   varsayılan önce gelir, bileşen kendi istisnasını sonra yazar. */
+
+/* === ui-fix — kaydırma çubukları ======================================
+   The platform scrollbar ignores the theme completely: on Terminal Green or
+   any dark variant it paints a wide light-grey slab down the edge of the
+   panel. Chromium/WebKit honour the -webkit pseudo-elements and Firefox the
+   two standard properties, so both are declared — the standard pair first, so
+   the rules survive an engine that drops the prefixed set.
+
+   ⚠ SCOPED TO `.fe`, never to `*`. base.css is loaded by embedders (work,
+   fishapp, the admin SPA), and a bare `*` rule would repaint the HOST page's
+   scrollbars from inside an embedded file browser. The two teleported
+   surfaces are listed explicitly because they are children of <body>, not of
+   the explorer root.
+
+   Colours come from the existing tokens rather than from new ones, so every
+   theme — including ones added later — gets a matching bar for free. */
+.fe,
+.fe *,
+.fe-ctx-backdrop,
+.fe-ctx-backdrop *,
+.fe-tour,
+.fe-tour * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fe-border-strong) transparent;
+}
+.fe ::-webkit-scrollbar,
+.fe-ctx-backdrop ::-webkit-scrollbar,
+.fe-tour ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.fe ::-webkit-scrollbar-track,
+.fe-ctx-backdrop ::-webkit-scrollbar-track,
+.fe-tour ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fe ::-webkit-scrollbar-thumb,
+.fe-ctx-backdrop ::-webkit-scrollbar-thumb,
+.fe-tour ::-webkit-scrollbar-thumb {
+  background: var(--fe-border-strong);
+  /* Inset with a transparent border instead of a narrower width: a thin thumb
+     inside a wide gutter drifts away from the content edge. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+.fe ::-webkit-scrollbar-thumb:hover,
+.fe-ctx-backdrop ::-webkit-scrollbar-thumb:hover,
+.fe-tour ::-webkit-scrollbar-thumb:hover {
+  background: var(--fe-text-muted);
+  background-clip: padding-box;
+}
+/* Unstyled, the meeting point of a vertical and a horizontal bar paints as a
+   white square in the corner of a dark panel. */
+.fe ::-webkit-scrollbar-corner,
+.fe-ctx-backdrop ::-webkit-scrollbar-corner,
+.fe-tour ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .fe {
   position: relative;
   display: flex;
@@ -41,6 +106,16 @@
 filex-explorer {
   display: block;
   height: 100%;
+  /* ⚠⚠ The host is almost always a FLEX ITEM (the desktop shell, work, the
+   * admin SPA all put it in a flex column/row). A flex item's default
+   * `min-width: auto` floors it at its content's min-content width, so a wide
+   * row of tabs pushed the host — and the whole page — sideways instead of
+   * letting the tab strip scroll: 63 tabs made a 3256px host inside a 1264px
+   * window (2026-08-12). Every embedder would otherwise have to know to write
+   * this themselves, which is the opposite of what shipping one component is
+   * for. Same reason for the width: a block that cannot exceed its box. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Live-presence strip (who else is in this folder) — shown under the breadcrumb. */
@@ -3091,6 +3166,14 @@ filex-explorer {
   align-items: stretch;
   gap: 4px;
   flex: 0 0 auto;
+  /* ⚠⚠ Without this the strip never scrolls — it GROWS. A flex item's default
+   * `min-width: auto` floors it at its min-content width, so a row of tabs
+   * wider than the window pushed the whole explorer sideways instead of
+   * overflowing into `.fe-tabs__scroll`: measured 63 tabs → a 4903px strip in
+   * a 1264px window, the layout running off the right edge with no scrollbar
+   * anywhere (2026-08-12, Burak: "ekranı taştı, akıyor gidiyor"). Allowing the
+   * strip to shrink is what hands the overflow to the scroller inside it. */
+  min-width: 0;
   padding: 4px 6px 0;
   background: var(--fe-bg-elev);
   border-bottom: 1px solid var(--fe-border);
@@ -3103,12 +3186,30 @@ filex-explorer {
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
-  /* Tab overflow scrolls (wheel / drag / keyboard) but never shows a
-   * scrollbar strip under the tabs — the 30px bar cannot fit one. */
-  scrollbar-width: none;
+  /* ⚠ EXPLICIT `hidden`, not left to default. `overflow-x: auto` alone makes
+   * the other axis compute to `auto` too, so the strip grew a VERTICAL
+   * scrollbar with nothing to scroll — a bar down the side of a row of tabs
+   * (2026-08-12, Burak reported it). */
+  overflow-y: hidden;
+  /* Enough tabs and they run off the edge; a strip that scrolls without
+   * saying so is a strip whose overflow is invisible. Thin, on its own axis,
+   * and only when there is something to scroll. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--fe-border-strong) transparent;
 }
 .fe-tabs__scroll::-webkit-scrollbar {
-  display: none;
+  height: 6px;
+  width: 0;
+}
+.fe-tabs__scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fe-tabs__scroll::-webkit-scrollbar-thumb {
+  background: var(--fe-border-strong);
+  border-radius: 6px;
+}
+.fe-tabs__scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--fe-text-muted);
 }
 .fe-tabs__tab {
   display: flex;
@@ -3761,64 +3862,6 @@ filex-explorer {
 }
 /* === /ui-fix ========================================================= */
 
-/* === ui-fix — kaydırma çubukları ======================================
-   The platform scrollbar ignores the theme completely: on Terminal Green or
-   any dark variant it paints a wide light-grey slab down the edge of the
-   panel. Chromium/WebKit honour the -webkit pseudo-elements and Firefox the
-   two standard properties, so both are declared — the standard pair first, so
-   the rules survive an engine that drops the prefixed set.
-
-   ⚠ SCOPED TO `.fe`, never to `*`. base.css is loaded by embedders (work,
-   fishapp, the admin SPA), and a bare `*` rule would repaint the HOST page's
-   scrollbars from inside an embedded file browser. The two teleported
-   surfaces are listed explicitly because they are children of <body>, not of
-   the explorer root.
-
-   Colours come from the existing tokens rather than from new ones, so every
-   theme — including ones added later — gets a matching bar for free. */
-.fe,
-.fe *,
-.fe-ctx-backdrop,
-.fe-ctx-backdrop *,
-.fe-tour,
-.fe-tour * {
-  scrollbar-width: thin;
-  scrollbar-color: var(--fe-border-strong) transparent;
-}
-.fe ::-webkit-scrollbar,
-.fe-ctx-backdrop ::-webkit-scrollbar,
-.fe-tour ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-.fe ::-webkit-scrollbar-track,
-.fe-ctx-backdrop ::-webkit-scrollbar-track,
-.fe-tour ::-webkit-scrollbar-track {
-  background: transparent;
-}
-.fe ::-webkit-scrollbar-thumb,
-.fe-ctx-backdrop ::-webkit-scrollbar-thumb,
-.fe-tour ::-webkit-scrollbar-thumb {
-  background: var(--fe-border-strong);
-  /* Inset with a transparent border instead of a narrower width: a thin thumb
-     inside a wide gutter drifts away from the content edge. */
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  border-radius: 8px;
-}
-.fe ::-webkit-scrollbar-thumb:hover,
-.fe-ctx-backdrop ::-webkit-scrollbar-thumb:hover,
-.fe-tour ::-webkit-scrollbar-thumb:hover {
-  background: var(--fe-text-muted);
-  background-clip: padding-box;
-}
-/* Unstyled, the meeting point of a vertical and a horizontal bar paints as a
-   white square in the corner of a dark panel. */
-.fe ::-webkit-scrollbar-corner,
-.fe-ctx-backdrop ::-webkit-scrollbar-corner,
-.fe-tour ::-webkit-scrollbar-corner {
-  background: transparent;
-}
 
 /* === wiring:c1 — gündüz / gece / otomatik =============================
    Lives at the top of the theme gallery: "night mode" is what people open the
