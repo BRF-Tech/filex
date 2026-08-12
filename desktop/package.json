@@ -1,7 +1,7 @@
 {
   "name": "@brftech/filex-desktop",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "filex desktop — the filex explorer in a window, with browser sign-in, background folder sync and secure token storage",
   "author": "BRF Tech <security@brf.sh>",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "dist:mac": "pnpm run build && node scripts/fetch-cli.mjs --platform darwin && electron-builder --mac",
     "clean": "rimraf dist app",
     "e2e:ui": "node scripts/ui-login-e2e.mjs",
+    "e2e:chrome": "node scripts/chrome-e2e.mjs",
     "icon": "electron scripts/make-icon.mjs"
   },
   "devDependencies": {

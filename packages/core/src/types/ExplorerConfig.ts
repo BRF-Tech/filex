@@ -207,6 +207,19 @@ export interface ExplorerConfig {
   /** Theme. */
   theme?: ThemeMode;
 
+  /**
+   * When the tab strip is on screen.
+   *
+   * `'auto'` (default) shows it only once a second tab exists — the historical
+   * behaviour, and what a small embed wants: a fixed strip above a short panel
+   * is a lot of chrome to spend on a feature nobody has asked for yet.
+   *
+   * `'always'` keeps it visible with a single tab open. That is what a full
+   * window wants, because the strip is also where `+` lives: hide it and tabs
+   * are a feature you can only find by guessing the keyboard shortcut.
+   */
+  tabStrip?: 'auto' | 'always';
+
   /** Initial path (storage-prefix included: `local://`). Default: root. */
   initialPath?: string;
 

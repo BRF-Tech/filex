@@ -25,6 +25,8 @@
         --muted: #6b7482;
         --accent: #2f6df6;
         --danger: #c0392b;
+        --scroll-thumb: rgba(20, 24, 29, .26);
+        --scroll-thumb-hover: rgba(20, 24, 29, .42);
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -33,10 +35,40 @@
           --line: #2a313a;
           --fg: #e8ecf1;
           --muted: #97a1ae;
+          --scroll-thumb: rgba(232, 236, 241, .22);
+          --scroll-thumb-hover: rgba(232, 236, 241, .38);
         }
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
+
+      /* ── scrollbars ───────────────────────────────────────────────
+         The platform default is a wide light-grey bar that ignores the theme
+         entirely: on the dark rail-side chrome it reads as a bright stripe
+         glued to the edge of a dark panel. Chromium honours BOTH the standard
+         properties and the -webkit pseudo-elements; the standard ones are
+         declared first so the rules survive a future engine that drops the
+         prefixed set, and the pseudo-elements do the fine work (rounded thumb,
+         transparent track, no arrow buttons) that `scrollbar-width` cannot
+         express. Tokenised, so the dark palette above repaints them for free. */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scroll-thumb) transparent;
+      }
+      *::-webkit-scrollbar { width: 10px; height: 10px; }
+      *::-webkit-scrollbar-track { background: transparent; }
+      *::-webkit-scrollbar-thumb {
+        background: var(--scroll-thumb);
+        /* Inset by a transparent border rather than by width: a narrower thumb
+           would sit in a wider gutter and drift away from the content edge. */
+        border: 2px solid transparent;
+        background-clip: padding-box;
+        border-radius: 8px;
+      }
+      *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+      /* Where a vertical and a horizontal bar meet — unstyled, it paints as a
+         white square in the corner of a dark panel. */
+      *::-webkit-scrollbar-corner { background: transparent; }
       body {
         display: flex;
         font: 14px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
@@ -115,6 +147,25 @@
       .rail-sep { width: 28px; height: 1px; background: rgba(255, 255, 255, .12); margin: 2px 0; }
       .spacer { flex: 1; }
 
+      /* ── the server's own mark ────────────────────────────────────
+         An admin who sets a logo under Branding has said what this install is
+         called; the desktop client showing only the vendor's icon makes it look
+         like somebody else's software. It sits at the TOP of the rail, above the
+         accounts, because it identifies the SERVER — putting it on the avatars
+         would break the one job those have (telling two accounts apart, and two
+         accounts on one server carry the same logo).
+         `contain` + a light plate: logos are authored for white pages and a
+         dark-on-dark mark on the rail would be an empty square. */
+      .brand {
+        width: 38px; height: 38px; flex: 0 0 auto;
+        border-radius: 10px;
+        display: grid; place-items: center;
+        overflow: hidden;
+        background: rgba(255, 255, 255, .92);
+        padding: 4px;
+      }
+      .brand img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
       /* ── main ────────────────────────────────────────────────── */
       #main { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
       filex-explorer { display: block; flex: 1; min-height: 0; }
@@ -144,6 +195,14 @@
         box-shadow: 0 6px 18px rgba(47, 109, 246, .28);
       }
       .boot__mark svg { width: 30px; height: 30px; color: #fff; }
+      /* The server's own logo replaces the generic mark. No gradient behind it:
+         a brand mark on top of somebody else's brand colour is two logos. */
+      .boot__mark--brand {
+        background: rgba(255, 255, 255, .94);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, .16);
+        padding: 8px;
+      }
+      .boot__mark--brand img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
       .boot__title { font-size: 15px; font-weight: 600; }
       .boot__sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
       /* An indeterminate bar, not a spinner: it fills the same width as the
@@ -316,6 +375,8 @@
         'set.autostart':        ['Start when I sign in', 'Oturum açtığımda başlat'],
         'set.autostart_refused':['Requested, but the system did not accept it.', 'İstendi ama sistem kabul etmedi.'],
         'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
+        'set.autostart_dev':    ['Only the installed app can start at sign-in.',
+                                 'Oturum açılışında yalnızca kurulu uygulama başlatılabilir.'],
         'set.on':               ['On', 'Açık'],
         'set.off':              ['Off', 'Kapalı'],
         'set.unknown_account':  ['unknown account', 'bilinmeyen hesap'],
@@ -361,13 +422,53 @@
         'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
         '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.4h9A1.5 1.5 0 0 1 21 9.9v7.6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>';
 
+      // ── the server's identity ─────────────────────────────────
+      // Branding (logo + name) is a property of the SERVER, so it is fetched per
+      // account and cached for the life of the window. One request per account,
+      // never per repaint: renderRail() runs on every sync tick.
+      const brands = new Map();
+
+      /** Cached branding for an account, or null while unknown. */
+      function brandOf(accountId) {
+        const b = brands.get(accountId);
+        return b && b.logoUrl ? b : null;
+      }
+
+      async function loadBrand(account) {
+        if (!account || brands.has(account.id)) return;
+        brands.set(account.id, { name: '', logoUrl: '' });   // claim the slot
+        try {
+          const b = await window.filexApp.branding(account.id);
+          brands.set(account.id, b || { name: '', logoUrl: '' });
+          if (b && b.logoUrl) { renderRail(); repaintBoot(); }
+        } catch {
+          // A server with no branding set, or an older build without the
+          // endpoint, is not a failure — it just has no mark to show.
+        }
+      }
+
       /** The surface shown while there is nothing else to show. */
+      let bootHtml = null;
       function showBoot(html) {
+        bootHtml = html;
+        const brand = brandOf(state.activeId);
+        // The server's own mark on the waiting screen too: this surface is
+        // showing WHICH server is being waited for, and the logo is the fastest
+        // way to say it.
+        const mark = brand
+          ? `<div class="boot__mark boot__mark--brand"><img src="${esc(brand.logoUrl)}" alt=""></div>`
+          : `<div class="boot__mark">${ICON_MARK}</div>`;
         const b = $('#boot');
-        b.innerHTML = `<div class="boot__inner"><div class="boot__mark">${ICON_MARK}</div>${html}</div>`;
+        b.innerHTML = `<div class="boot__inner">${mark}${html}</div>`;
         b.classList.add('on');
       }
+      /** Re-paints the boot surface in place — used when branding lands after
+       *  the surface is already up, which is the normal ordering. */
+      function repaintBoot() {
+        if (bootHtml !== null && $('#boot').classList.contains('on')) showBoot(bootHtml);
+      }
       function hideBoot() {
+        bootHtml = null;
         $('#boot').classList.remove('on');
         $('#boot').innerHTML = '';
       }
@@ -434,6 +535,10 @@
           pathPersist: 'none',
           trashVisible: true,
           theme: 'auto',
+          // A window this size is where tabs earn their keep, and the strip is
+          // also where the + button lives — hidden until a second tab exists,
+          // the feature is only reachable by guessing the shortcut.
+          tabStrip: 'always',
           // One language for the whole window. The component defaults to
           // Turkish, so without this an English desktop showed English chrome
           // around a Turkish file list.
@@ -476,6 +581,28 @@
         const rail = $('#rail');
         const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
         rail.innerHTML = '';
+
+        const brand = brandOf(state.activeId);
+        if (brand) {
+          const mark = document.createElement('div');
+          mark.className = 'brand';
+          mark.title = brand.name || '';
+          const img = document.createElement('img');
+          img.src = brand.logoUrl;
+          img.alt = brand.name || '';
+          // ⚠ A logo URL that does not resolve would otherwise leave a blank
+          // white plate nailed to the top of the rail — worse than no logo.
+          img.addEventListener('error', () => {
+            brands.set(state.activeId, { name: brand.name, logoUrl: '' });
+            renderRail();
+            repaintBoot();
+          });
+          mark.appendChild(img);
+          rail.appendChild(mark);
+          const bsep = document.createElement('div');
+          bsep.className = 'rail-sep';
+          rail.appendChild(bsep);
+        }
 
         for (const a of state.accounts) {
           const st = statusOf[a.id];
@@ -582,9 +709,15 @@
           </div></div>
           <div class="card"><div class="between">
             <div><strong>${esc(T('set.autostart'))}</strong>
-              <div class="muted">${esc(T(state.launchAtLoginEffective === false && state.launchAtLogin
-                ? 'set.autostart_refused' : 'set.autostart_sub'))}</div></div>
-            <button id="login-item">${esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
+              <div class="muted">${esc(T(
+                // A dev run refuses to write a login item at all (it could only
+                // register the bare electron binary), so the row says that
+                // rather than offering a switch that silently does nothing.
+                state.launchAtLoginSupported === false ? 'set.autostart_dev'
+                : state.launchAtLoginEffective === false && state.launchAtLogin
+                  ? 'set.autostart_refused' : 'set.autostart_sub'))}</div></div>
+            <button id="login-item" ${state.launchAtLoginSupported === false ? 'disabled' : ''}>${
+              esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
           </div></div>
           <p class="muted">filex ${esc(state.appVersion || '')}</p>`;
       }
@@ -677,8 +810,10 @@
 
       // ── boot ──────────────────────────────────────────────────
       function render() {
+        const active = state.accounts.find((a) => a.id === state.activeId);
+        void loadBrand(active);
         renderRail();
-        void mountExplorer(state.accounts.find((a) => a.id === state.activeId));
+        void mountExplorer(active);
       }
 
       async function refresh() {

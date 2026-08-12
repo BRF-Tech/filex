@@ -248,7 +248,11 @@ export const en: Record<string, string> = {
   /* wiring:c1 — theme gallery */
   'theme.menu': 'Theme',
   'theme.title': 'Theme Gallery',
-  'theme.hint': 'Themes only change the color palette; light/dark mode still applies separately.',
+  'theme.hint': 'A theme only changes the colour palette — day or night is the choice above.',
+  'theme.mode.label': 'Appearance',
+  'theme.mode.light': 'Day',
+  'theme.mode.dark': 'Night',
+  'theme.mode.auto': 'Automatic',
   'theme.reset': 'Reset to default',
   'theme.close': 'Close',
   'theme.selected': 'Selected',

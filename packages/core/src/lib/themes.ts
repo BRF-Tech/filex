@@ -403,6 +403,73 @@ export function useThemeState(): { themeId: Ref<string>; setTheme: (id: string) 
   return { themeId, setTheme };
 }
 
+/* ------------------------------------------------------------------ */
+/* Light / dark MODE preference                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The user's own light/dark choice — a different question from WHICH theme
+ * paints (that is `themeId` above).
+ *
+ * `'host'` is the default and means "whatever the embedder passed in
+ * `config.theme`". That is what keeps every existing embed unchanged: work and
+ * the fishapp hand the explorer the mode their own page is in, and an explorer
+ * that silently overrode it would sit as a dark rectangle inside a light page.
+ * The other three are an explicit choice by the person looking at it and
+ * outrank the host: `'auto'` follows the operating system, `'light'`/`'dark'`
+ * are fixed.
+ */
+export type ThemeModePref = 'host' | 'auto' | 'light' | 'dark';
+
+export const THEME_MODE_LS_KEY = 'filex.thememode';
+
+const MODE_VALUES: ThemeModePref[] = ['host', 'auto', 'light', 'dark'];
+
+function readStoredThemeMode(): ThemeModePref {
+  try {
+    const v = localStorage.getItem(THEME_MODE_LS_KEY) as ThemeModePref | null;
+    return v && MODE_VALUES.includes(v) ? v : 'host';
+  } catch {
+    return 'host';
+  }
+}
+
+const themeMode: Ref<ThemeModePref> = ref(
+  typeof window === 'undefined' ? 'host' : readStoredThemeMode(),
+);
+
+export function setThemeMode(mode: ThemeModePref): void {
+  const valid = MODE_VALUES.includes(mode) ? mode : 'host';
+  themeMode.value = valid;
+  try {
+    if (valid === 'host') localStorage.removeItem(THEME_MODE_LS_KEY);
+    else localStorage.setItem(THEME_MODE_LS_KEY, valid);
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** Reactive handle for components: `{ themeMode, setThemeMode }`. */
+export function useThemeModeState(): {
+  themeMode: Ref<ThemeModePref>;
+  setThemeMode: (mode: ThemeModePref) => void;
+} {
+  return { themeMode, setThemeMode };
+}
+
+// Cross-tab sync, same contract as the theme id above.
+if (typeof window !== 'undefined') {
+  try {
+    window.addEventListener('storage', (e) => {
+      if (e.key !== THEME_MODE_LS_KEY) return;
+      const v = e.newValue as ThemeModePref | null;
+      themeMode.value = v && MODE_VALUES.includes(v) ? v : 'host';
+    });
+  } catch {
+    /* non-browser env */
+  }
+}
+
 // Cross-tab sync — another tab changing the preference updates this one live.
 if (typeof window !== 'undefined') {
   try {

@@ -5,7 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.15.0] - 2026-08-12
+
+### Added
+
+- **Day / Night / Automatic in the theme gallery.** The palette picker could
+  change *which* theme painted but never whether it painted light or dark —
+  that was the embedder's call, passed in `config.theme`, with no way for the
+  person looking at the screen to override it. A three-way switch now sits at
+  the top of the gallery, which is where people already go looking for "night
+  mode". The preference is separate from the theme id, persists in
+  `localStorage` (`filex.thememode`), syncs across tabs, and defaults to
+  `'host'` — meaning existing embeds look exactly as they did until someone
+  actually chooses. `'auto'` follows the operating system.
+
+  ⚠ Every place that read `config.theme` reads the resolved mode instead. A
+  choice that reached only the token resolution would leave the root class, the
+  modals and the teleported context menus painting the old mode — a half-dark
+  window.
+
+- **`tabStrip: 'auto' | 'always'`.** The tab strip rendered only once a *second*
+  tab existed, which also hid the `+` button — so in a fresh window tabs were a
+  feature you could only reach by guessing the keyboard shortcut. `'always'`
+  keeps the strip on screen with a single tab; `'auto'` (the default) preserves
+  the old behaviour for small embeds. The desktop app opts in.
+
+- **Themed scrollbars.** The platform scrollbar ignored the theme completely: a
+  wide light-grey slab down the edge of a dark panel. Thin, rounded, transparent
+  track, colours taken from the existing `--fe-*` tokens so every theme —
+  including ones added later — gets a matching bar for free.
+
+  ⚠ Scoped to `.fe` and the two teleported surfaces, never to `*`: this
+  stylesheet is loaded by embedders, and a bare `*` rule would repaint the host
+  page's scrollbars from inside an embedded file browser.
+
+### Fixed
+
+- **The desktop app's presence entry was the token label.** A user collaborating
+  from the desktop app appeared in their own folder as `filex desktop — Win32`
+  instead of as themselves. Presence deliberately shows the token *username* for
+  API tokens, because every end user behind a shared proxy token maps to one
+  filex account and the account name would be misleading — but a token with no
+  username allow-list is not a shared proxy. It is one person's own client, and
+  that person is the account owner. Such tokens now read
+  `Burak (filex desktop)`: the person leads, the client qualifies. Shared proxy
+  tokens are untouched.
+
+- **The desktop app's "start when I sign in" registered a bare `electron.exe`.**
+  `setLoginItemSettings({ openAtLogin })` with nothing else registers
+  `process.execPath`, which in a development run is
+  `node_modules/.../electron/dist/electron.exe` — no project path, so every
+  sign-in afterwards opened Electron's own welcome window, and the entry
+  outlived the checkout it pointed at. The login item is now packaged-only (a
+  dev run says so instead of offering a dead switch), the command is written out
+  explicitly, and it carries `--hidden`, which the app honours by staying in the
+  tray — making true the promise the settings copy was already making. On Linux,
+  where Electron has no login-item API at all, an XDG autostart entry is written
+  instead of nothing.
+
+- **The server's brand mark never reached the desktop app.** An admin who sets a
+  logo under Branding has said what their install is called; the desktop client
+  showed only the vendor's icon. The active account's logo now sits at the top
+  of the rail and on the waiting screen. `GET /api/branding` is public and is
+  called without the token — it is what the login page reads before there is a
+  session.
+
+## [0.14.0] - 2026-08-10
 
 ### Fixed
 

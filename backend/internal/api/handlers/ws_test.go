@@ -352,7 +352,8 @@ func TestWSTicketIdentity(t *testing.T) {
 
 	tok := &model.APIToken{ID: 5, UserID: 1, Label: "work-panel"}
 	viaToken := mintVia(t, admin, tok, "", nil)
-	require.Equal(t, "work-panel", viaToken.Name, "no usernames configured → the label IS the default username")
+	require.Equal(t, "admin (work-panel)", viaToken.Name,
+		"no allow-list → the token is the OWNER's own client: their name leads, the label qualifies it")
 	require.Equal(t, "tok-5-work-panel", viaToken.PresenceKey,
 		"keyless token connections default to their own (token, username) identity")
 
@@ -384,6 +385,37 @@ func TestWSTicketIdentity(t *testing.T) {
 		"X-Filex-Presence-Key":  "work-8",
 	})
 	require.Equal(t, "Gökçil Ayşe (work-panel)", encoded.Name)
+}
+
+// TestWSDesktopClientPresence locks the case that sent us here: the desktop app
+// signs in with a token of its own and used to appear, in its owner's own
+// folder, as the raw token label — "filex desktop — Win32" — instead of as the
+// person sitting in front of it.
+func TestWSDesktopClientPresence(t *testing.T) {
+	burak := &model.User{ID: 3, DisplayName: "Burak", Email: "burak@brf.sh"}
+	desktop := &model.APIToken{ID: 12, UserID: 3, Label: "filex desktop — Win32"}
+
+	got := mintVia(t, burak, desktop, "", nil)
+	require.Equal(t, "Burak (filex desktop)", got.Name,
+		"the person leads; the platform detail belongs in the token list, not in the presence bar")
+
+	// A user with no display name still gets a person-shaped entry.
+	nameless := &model.User{ID: 4, Email: "gokcil@brf.sh"}
+	require.Equal(t, "gokcil (filex desktop)", mintVia(t, nameless, desktop, "", nil).Name)
+
+	// A label with nothing to trim survives whole.
+	cli := &model.APIToken{ID: 13, UserID: 3, Label: "filex cli"}
+	require.Equal(t, "Burak (filex cli)", mintVia(t, burak, cli, "", nil).Name)
+
+	// An empty label leaves the name alone rather than producing "Burak ()".
+	blank := &model.APIToken{ID: 14, UserID: 3, Label: "   "}
+	require.Equal(t, "Burak", mintVia(t, burak, blank, "", nil).Name)
+
+	// A token that DOES carry an allow-list is a shared proxy and keeps the old
+	// contract: the end users behind it are not the account owner.
+	shared := &model.APIToken{ID: 15, UserID: 3, Label: "shared", Usernames: "work,fishapp"}
+	require.Equal(t, "work", mintVia(t, burak, shared, "", nil).Name,
+		"a shared proxy token must NOT advertise the account owner's name")
 }
 
 // TestTokenUsernameResolution locks the ResolveUsername contract the auth

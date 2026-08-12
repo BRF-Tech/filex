@@ -27,6 +27,7 @@ import {
   session,
   shell,
 } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -55,6 +56,10 @@ const DEEP_LINK_SCHEME = 'filex';
 const ICON_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'icon.png')
   : path.join(__dirname, '..', 'build', 'icon.png');
+// Passed to ourselves by the login item, so a launch the USER did not ask for
+// stays in the tray instead of throwing a window at a desktop that is still
+// loading. See setLoginItem().
+const HIDDEN_FLAG = '--hidden';
 
 let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false };
 let mainWindow: BrowserWindow | null = null;
@@ -367,6 +372,83 @@ async function handleDeepLink(raw: string): Promise<void> {
 
 // ─────────────────────────── ipc ───────────────────────────
 
+// ─────────────────────────── start at login ───────────────────────────
+//
+// ⚠⚠ `app.setLoginItemSettings({ openAtLogin })` with nothing else registers
+// `process.execPath`. In a PACKAGED app that is the installed executable and is
+// correct; in a DEV run (`electron .`) it is
+// node_modules/electron/dist/electron.exe — and a bare electron.exe with no
+// project path opens Electron's own welcome window. Windows then keeps that
+// command in HKCU\…\Run forever, long after the checkout it pointed at is gone.
+// Measured on a real machine: `electron.app.Electron` →
+// `G:\filex\node_modules\.pnpm\electron@31.7.7\…\electron.exe`, which is exactly
+// what the user saw open at every sign-in.
+//
+// So: the login item is a packaged-only feature, the command is written out
+// explicitly rather than implied, and it carries HIDDEN_FLAG — which is what
+// makes the promise in the settings copy ("launches minimised to the tray")
+// true instead of decorative.
+
+/** The exact command the OS is asked to run — also the query key, because
+ *  Windows' getLoginItemSettings only recognises an entry it is asked about
+ *  with the SAME path and args it was created with. */
+function loginItemSpec(): { path: string; args: string[] } {
+  // Under an AppImage, execPath is the extracted temp mount — a path that does
+  // not survive the next launch. The image itself is what has to be run.
+  const exe = process.env.APPIMAGE || process.execPath;
+  return { path: exe, args: [HIDDEN_FLAG] };
+}
+
+/** Linux has no login-item API in Electron; XDG autostart is the equivalent.
+ *  Without this the toggle is dead on every Linux build — silently. */
+function linuxAutostartFile(): string {
+  return path.join(app.getPath('home'), '.config', 'autostart', 'filex.desktop');
+}
+
+function setLinuxAutostart(on: boolean): void {
+  const file = linuxAutostartFile();
+  if (!on) {
+    try {
+      fs.rmSync(file, { force: true });
+    } catch {
+      /* nothing to remove */
+    }
+    return;
+  }
+  const { path: exe, args } = loginItemSpec();
+  const body = [
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=filex',
+    'Comment=Keep your folders in sync',
+    `Exec="${exe}" ${args.join(' ')}`,
+    'Terminal=false',
+    'X-GNOME-Autostart-enabled=true',
+    '',
+  ].join('\n');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, body, 'utf8');
+}
+
+/** True when the OS will actually launch this app at the next sign-in — read
+ *  back from the OS, never from our own intent. */
+function loginItemActive(): boolean {
+  if (process.platform === 'linux') return fs.existsSync(linuxAutostartFile());
+  if (!app.isPackaged) return false;
+  return app.getLoginItemSettings(loginItemSpec()).openAtLogin;
+}
+
+function setLoginItem(on: boolean): void {
+  if (process.platform === 'linux') {
+    setLinuxAutostart(on);
+    return;
+  }
+  // A dev run must not write a login item at all: the only command it could
+  // write is the one described above.
+  if (!app.isPackaged) return;
+  app.setLoginItemSettings({ openAtLogin: on, ...loginItemSpec() });
+}
+
 function publicState() {
   return {
     accounts: state.accounts.map(({ token, ...rest }) => rest), // never hand the token to a renderer
@@ -388,7 +470,10 @@ function publicState() {
     // What the OS actually did with the request, not what we asked for. Login
     // items are refused often enough (policy, sandboxing, a user unticking it
     // elsewhere) that reporting our own intent back would be a lie.
-    launchAtLoginEffective: app.getLoginItemSettings().openAtLogin,
+    launchAtLoginEffective: loginItemActive(),
+    // A dev run deliberately refuses to write one (see setLoginItem), and the
+    // settings panel has to say WHY rather than show a switch that does nothing.
+    launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
     appVersion: app.getVersion(),
   };
 }
@@ -491,6 +576,32 @@ function wireIpc(): void {
     if (!res.ok) throw new Error(`server said ${res.status}`);
     const body = (await res.json()) as { storages?: string[] };
     return (body.storages ?? []).map((name) => ({ name }));
+  });
+
+  // The server's own identity — the logo and name an admin set under Branding.
+  // A desktop client that shows the vendor's mark while the server it is looking
+  // at has its own is a client that looks like it belongs to someone else.
+  //
+  // ⚠ Public endpoint, deliberately called WITHOUT the token: /api/branding is
+  // what the login page reads before there is a session, and sending a bearer
+  // to it would make the one screen that must work before sign-in depend on one.
+  // A site-relative logo is absolutised here — the page lives on app://filex, so
+  // a bare "/uploads/logo.png" would resolve against the app, not the server.
+  ipcMain.handle('remote:branding', async (_e, accountId: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    const res = await net.fetch(new URL('/api/branding', acc.serverUrl).toString());
+    if (!res.ok) throw new Error(`server said ${res.status}`);
+    const body = (await res.json()) as { name?: string; logo_url?: string; accent?: string };
+    let logo = String(body.logo_url ?? '').trim();
+    if (logo && !/^(https?:|data:)/i.test(logo)) {
+      try {
+        logo = new URL(logo, acc.serverUrl).toString();
+      } catch {
+        logo = '';
+      }
+    }
+    return { name: String(body.name ?? '').trim(), logoUrl: logo, accent: String(body.accent ?? '').trim() };
   });
 
   // Walks the server's real folder tree for the sync picker. Typing
@@ -612,7 +723,7 @@ function wireIpc(): void {
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
     if (typeof patch.launchAtLogin === 'boolean') {
       state.launchAtLogin = patch.launchAtLogin;
-      app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
+      setLoginItem(patch.launchAtLogin);
     }
     saveState(state);
     return publicState();
@@ -708,7 +819,16 @@ if (!app.requestSingleInstanceLock()) {
     });
     wireIpc();
     buildTray();
-    route();
+    // Re-assert the login item on every packaged start. The command stored in
+    // the registry is a full path, and an install that MOVES leaves it pointing
+    // at nothing — which is what an upgrade from a per-machine install to a
+    // per-user one does. Rewriting it here costs a registry write and keeps the
+    // setting honest across reinstalls.
+    if (state.launchAtLogin && !loginItemActive()) setLoginItem(true);
+    // A launch the user did not initiate stays in the tray. Opening a window at
+    // sign-in — on top of whatever else the desktop is still restoring — is the
+    // behaviour that makes people turn the setting off again.
+    if (!process.argv.includes(HIDDEN_FLAG)) route();
     void refreshPairs();
 
     // Windows/Linux deliver the launch deep link as an argv entry.

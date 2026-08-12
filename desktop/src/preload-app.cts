@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('filexApp', {
 
   // files
   storages: (accountId: string) => ipcRenderer.invoke('remote:storages', accountId),
+  /** The server's own logo + name (Branding settings), for the account rail. */
+  branding: (accountId: string) => ipcRenderer.invoke('remote:branding', accountId),
 
   // sync
   browse: (accountId: string, remotePath: string) =>

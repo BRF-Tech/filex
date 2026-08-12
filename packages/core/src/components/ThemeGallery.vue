@@ -11,9 +11,10 @@
  * Presentational only — selection state + persistence live in
  * lib/themes.ts (shared across instances); the parent forwards `select`.
  */
+import { computed } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { THEMES, DEFAULT_THEME_ID, type ThemeDef } from '../lib/themes';
+import { THEMES, DEFAULT_THEME_ID, type ThemeDef, type ThemeModePref } from '../lib/themes';
 import Modal from '../modals/Modal.vue';
 
 const props = defineProps<{
@@ -25,14 +26,36 @@ const props = defineProps<{
   dark: boolean;
   /** Currently selected theme id. */
   current: string;
+  /** The user's own light/dark preference; 'host' = never chosen. */
+  mode: ThemeModePref;
+  /** What the embedder asked for — what 'host' resolves to. */
+  hostMode: ThemeMode;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'select', id: string): void;
+  (e: 'mode', mode: ThemeModePref): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
+
+/* ---- light / dark / auto -------------------------------------------
+ * A theme says which palette; this says whether it paints its light or its
+ * dark variant. Two separate questions, one place to answer both — the theme
+ * button is where people come looking for "night mode".
+ *
+ * Only three choices are ever offered. 'host' is an internal default, not an
+ * option: when it is still in force the control highlights whichever of the
+ * three the embedder asked for, so the strip always shows the truth, and the
+ * first click pins an explicit choice. */
+const MODES: { id: Exclude<ThemeModePref, 'host'>; labelKey: string }[] = [
+  { id: 'light', labelKey: 'theme.mode.light' },
+  { id: 'dark', labelKey: 'theme.mode.dark' },
+  { id: 'auto', labelKey: 'theme.mode.auto' },
+];
+
+const shownMode = computed(() => (props.mode === 'host' ? props.hostMode : props.mode));
 
 /** Inline variables for one card — a self-contained mini `--fe-*` scope,
  *  so the preview markup can use the exact same tokens the real UI uses. */
@@ -45,6 +68,46 @@ const DEFAULT_ID = DEFAULT_THEME_ID;
 
 <template>
   <Modal :open="open" :title="t('theme.title')" size="lg" :theme="theme" @close="emit('close')">
+    <div class="fe-thememode" role="group" :aria-label="t('theme.mode.label')">
+      <span class="fe-thememode__label">{{ t('theme.mode.label') }}</span>
+      <div class="fe-thememode__seg">
+        <button
+          v-for="m in MODES"
+          :key="m.id"
+          type="button"
+          class="fe-thememode__opt"
+          :class="{ 'is-active': shownMode === m.id }"
+          :aria-pressed="shownMode === m.id"
+          @click="emit('mode', m.id)"
+        >
+          <svg
+            class="fe-ficon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <template v-if="m.id === 'light'">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </template>
+            <template v-else-if="m.id === 'dark'">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </template>
+            <template v-else>
+              <!-- Half-filled disc: the mode that is neither, decided elsewhere. -->
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" />
+            </template>
+          </svg>
+          <span>{{ t(m.labelKey) }}</span>
+        </button>
+      </div>
+    </div>
     <p class="fe-themes__hint">{{ t('theme.hint') }}</p>
     <div class="fe-themes" role="listbox" :aria-label="t('theme.title')">
       <button

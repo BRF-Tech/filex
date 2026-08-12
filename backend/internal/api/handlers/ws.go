@@ -85,12 +85,28 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 		if uname == "" {
 			uname = tok.DefaultUsername()
 		}
-		if uname != "" {
+		// The parenthesised half of a presence entry: WHICH consumer of the token
+		// this connection is.
+		qualifier := uname
+		// ⚠ A token with NO username allow-list is not a shared proxy — it is one
+		// person's own client (the desktop app, a CLI, a personal script), and
+		// that person is the account owner, so their real name is neither
+		// misleading nor unavailable. DefaultUsername() falls back to the token's
+		// LABEL for such tokens, so replacing the name with it put
+		// "filex desktop — Win32" in the presence bar of the owner's OWN folder.
+		// Their name leads and the client goes in parentheses instead —
+		// "Burak (filex desktop)", the same shape the proxy branch produces.
+		if len(tok.UsernameList()) == 0 {
+			qualifier = wsClientLabel(tok.Label)
+			if qualifier != "" {
+				name += " (" + qualifier + ")"
+			}
+		} else if uname != "" {
 			name = uname
 		}
 		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); v != "" {
-			if uname != "" {
-				name = v + " (" + uname + ")"
+			if qualifier != "" {
+				name = v + " (" + qualifier + ")"
 			} else {
 				name = v
 			}
@@ -414,6 +430,29 @@ func sanitizePresenceKey(v string) string {
 		}
 	}
 	return v
+}
+
+// wsClientLabel shortens an API token's label down to the client NAME, for the
+// parenthesised half of a presence entry.
+//
+// Labels are minted for the server's token screen, where detail is the point —
+// the desktop app asks for "filex desktop — Win32" so its owner can tell two
+// registrations apart. Next to a folder that detail is noise, so everything
+// from the first dash separator on is dropped. Capped like every other presence
+// string, because the label is user-supplied.
+func wsClientLabel(label string) string {
+	s := strings.Join(strings.Fields(label), " ")
+	for _, sep := range []string{" — ", " – ", " - ", "—", "–"} {
+		if i := strings.Index(s, sep); i > 0 {
+			s = s[:i]
+			break
+		}
+	}
+	s = strings.TrimSpace(s)
+	if runes := []rune(s); len(runes) > 32 {
+		s = strings.TrimSpace(string(runes[:32]))
+	}
+	return s
 }
 
 // wsDisplayName picks the friendliest label for presence: display name, else

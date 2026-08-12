@@ -15,7 +15,7 @@
  * the difference.
  */
 import { computed, customRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { ExplorerConfig } from './types/ExplorerConfig';
+import type { ExplorerConfig, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
   ShareInfo,
@@ -53,7 +53,13 @@ import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
 /* wiring:c1 — tema galerisi */
 import ThemeGallery from './components/ThemeGallery.vue';
-import { useThemeState, applyThemeToEl, syncThemeStyle } from './lib/themes';
+import {
+  useThemeState,
+  useThemeModeState,
+  applyThemeToEl,
+  syncThemeStyle,
+  type ThemeModePref,
+} from './lib/themes';
 /* /wiring:c1 */
 /* wiring:c2 — shortcut settings modal + Space quick-look overlay */
 import ShortcutSettings from './components/ShortcutSettings.vue';
@@ -2341,8 +2347,20 @@ const effectiveViewerBaseUrl = computed(() =>
  * WHICH variant of the theme paints. */
 const showThemeGallery = ref(false);
 const { themeId: activeThemeId, setTheme: setActiveTheme } = useThemeState();
-// Resolved mode: explicit config wins, otherwise the OS preference — the same
-// logic variables.css encodes in CSS. The inline root variables beat every
+// The light/dark MODE the person looking at it picked in the gallery. 'host'
+// (the default) defers to whatever the embedder passed, so no existing embed
+// changes appearance until someone actually chooses.
+//
+// ⚠ Everything that used to read `config.theme` reads `themeMode` instead — a
+// choice that only reached the token resolution would leave the root class, the
+// modals and the teleported menus painting the OLD mode, which is exactly the
+// half-dark UI that bug looks like.
+const { themeMode: themeModePref, setThemeMode: setThemeModePref } = useThemeModeState();
+const themeMode = computed<ThemeMode>(() =>
+  themeModePref.value === 'host' ? props.config.theme || 'auto' : themeModePref.value,
+);
+// Resolved mode: an explicit choice wins, otherwise the OS preference — the
+// same logic variables.css encodes in CSS. The inline root variables beat every
 // stylesheet rule, so they must track this resolution at runtime.
 const themeMq =
   typeof window !== 'undefined' && window.matchMedia
@@ -2355,7 +2373,7 @@ function onThemeMqChange(e: MediaQueryListEvent) {
 onMounted(() => themeMq?.addEventListener?.('change', onThemeMqChange));
 onBeforeUnmount(() => themeMq?.removeEventListener?.('change', onThemeMqChange));
 const themeResolvedDark = computed(
-  () => props.config.theme === 'dark' || (props.config.theme !== 'light' && themeOsDark.value),
+  () => themeMode.value === 'dark' || (themeMode.value !== 'light' && themeOsDark.value),
 );
 watch(
   [activeThemeId, themeResolvedDark, rootEl],
@@ -2564,7 +2582,6 @@ const tabsApi = useTabs({ storageKey: tabsStorageKey() });
 const tabsRestored = tabsApi.restore();
 const tabsActiveId = tabsApi.activeId;
 
-const tabsVisible = computed(() => tabsApi.hasMultiple.value);
 const activeSplit = computed(() => tabsApi.activeTab.value?.split ?? null);
 
 // Sekme adı OTOMATİK = güncel klasör adı (kök = depo adı / kök etiketi).
@@ -2576,6 +2593,17 @@ function tabLabel(path: string): string {
 }
 const tabItems = computed(() =>
   tabsApi.tabs.value.map((tb) => ({ id: tb.id, label: tabLabel(tb.path), split: !!tb.split })),
+);
+
+// A second tab always shows the strip; `tabStrip: 'always'` keeps it there for
+// the first one too (see ExplorerConfig).
+// ⚠ Gated on there being a tab at all, not on the flag alone: tabs are seeded
+// in onMounted, so an 'always' host would otherwise paint one frame of an empty
+// strip — a lone `+` floating above the toolbar.
+const tabsVisible = computed(
+  () =>
+    tabsApi.hasMultiple.value ||
+    (props.config.tabStrip === 'always' && tabItems.value.length > 0),
 );
 
 // Aktif tab kullanıcıyı izler: gezinme + görünüm değişimi snapshot'a yazılır.
@@ -3031,8 +3059,8 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     ref="rootEl"
     class="fe"
     :class="{
-      'fe--theme-light': config.theme === 'light',
-      'fe--theme-dark': config.theme === 'dark',
+      'fe--theme-light': themeMode === 'light',
+      'fe--theme-dark': themeMode === 'dark',
       'fe--is-dragover': dragOver,
       'fe--density-compact': density === 'compact' /* cila:a density */,
       'fe--narrow': isNarrow /* bag:b4 */,
@@ -3073,7 +3101,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :can-write="canWriteHere"
       :locale="locale"
       :narrow="isNarrow /* bag:b4 */"
-      :theme="config.theme || 'auto' /* bag:b4 */"
+      :theme="themeMode /* bag:b4 */"
       :inspector-open="showInspector /* koru:k1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
@@ -3511,7 +3539,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     <ContextMenu
       ref="ctxRef"
       :locale="locale"
-      :theme="config.theme || 'auto'"
+      :theme="themeMode"
       :sheet="isCoarse /* bag:b4 */"
       :actions="contextActions"
       @select="onContextAction"
@@ -3560,7 +3588,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :open="showPreview"
       :locale="locale"
       :file="previewTarget"
-      :theme="config.theme || 'auto'"
+      :theme="themeMode"
       :preview-url="(p) => e2ePreviewSrc(p) /* wiring:e2 — çözülmüş blob > ham URL */"
       :download-url="(p) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
       :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO ciphertext açamaz */"
@@ -3605,8 +3633,8 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         v-if="showRecents"
         class="fe fe-modal__backdrop fe-recents__backdrop"
         :class="{
-          'fe--theme-light': config.theme === 'light',
-          'fe--theme-dark': config.theme === 'dark',
+          'fe--theme-light': themeMode === 'light',
+          'fe--theme-dark': themeMode === 'dark',
         }"
         @click="showRecents = false"
       >
@@ -3693,11 +3721,14 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     <ThemeGallery
       :open="showThemeGallery"
       :locale="locale"
-      :theme="config.theme || 'auto'"
+      :theme="themeMode"
       :dark="themeResolvedDark"
       :current="activeThemeId"
+      :mode="themeModePref"
+      :host-mode="config.theme || 'auto'"
       @close="showThemeGallery = false"
       @select="setActiveTheme"
+      @mode="(m: ThemeModePref) => setThemeModePref(m)"
     />
     <!-- /wiring:c1 -->
 
@@ -3731,14 +3762,14 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     <ShortcutSettings
       :open="showShortcutSettings"
       :locale="locale"
-      :theme="config.theme || 'auto'"
+      :theme="themeMode"
       @close="showShortcutSettings = false"
     />
     <QuickLook
       :open="quickLookOpen"
       :locale="locale"
       :file="quickLookTarget"
-      :theme="config.theme || 'auto'"
+      :theme="themeMode"
       :preview-url="(p: string) => e2ePreviewSrc(p) /* wiring:e2 */"
       :download-url="(p: string) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
       :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 */"
@@ -3758,7 +3789,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :open="showTour"
       :locale="locale"
       :root="rootEl"
-      :theme="config.theme || 'auto'"
+      :theme="themeMode"
       @close="onTourClose"
     />
     <!-- /wiring:c4 -->

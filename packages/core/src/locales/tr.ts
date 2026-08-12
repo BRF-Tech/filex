@@ -248,7 +248,11 @@ export const tr: Record<string, string> = {
   /* wiring:c1 — tema galerisi */
   'theme.menu': 'Tema',
   'theme.title': 'Tema Galerisi',
-  'theme.hint': 'Tema yalnız renk paletini değiştirir; açık/koyu mod ayrı çalışmaya devam eder.',
+  'theme.hint': 'Tema yalnız renk paletini değiştirir; gündüz mü gece mi olduğu yukarıdaki seçim.',
+  'theme.mode.label': 'Görünüm',
+  'theme.mode.light': 'Gündüz',
+  'theme.mode.dark': 'Gece',
+  'theme.mode.auto': 'Otomatik',
   'theme.reset': 'Varsayılana dön',
   'theme.close': 'Kapat',
   'theme.selected': 'Seçili',

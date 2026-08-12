@@ -3760,3 +3760,128 @@ filex-explorer {
   flex: none;
 }
 /* === /ui-fix ========================================================= */
+
+/* === ui-fix — kaydırma çubukları ======================================
+   The platform scrollbar ignores the theme completely: on Terminal Green or
+   any dark variant it paints a wide light-grey slab down the edge of the
+   panel. Chromium/WebKit honour the -webkit pseudo-elements and Firefox the
+   two standard properties, so both are declared — the standard pair first, so
+   the rules survive an engine that drops the prefixed set.
+
+   ⚠ SCOPED TO `.fe`, never to `*`. base.css is loaded by embedders (work,
+   fishapp, the admin SPA), and a bare `*` rule would repaint the HOST page's
+   scrollbars from inside an embedded file browser. The two teleported
+   surfaces are listed explicitly because they are children of <body>, not of
+   the explorer root.
+
+   Colours come from the existing tokens rather than from new ones, so every
+   theme — including ones added later — gets a matching bar for free. */
+.fe,
+.fe *,
+.fe-ctx-backdrop,
+.fe-ctx-backdrop *,
+.fe-tour,
+.fe-tour * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fe-border-strong) transparent;
+}
+.fe ::-webkit-scrollbar,
+.fe-ctx-backdrop ::-webkit-scrollbar,
+.fe-tour ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.fe ::-webkit-scrollbar-track,
+.fe-ctx-backdrop ::-webkit-scrollbar-track,
+.fe-tour ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.fe ::-webkit-scrollbar-thumb,
+.fe-ctx-backdrop ::-webkit-scrollbar-thumb,
+.fe-tour ::-webkit-scrollbar-thumb {
+  background: var(--fe-border-strong);
+  /* Inset with a transparent border instead of a narrower width: a thin thumb
+     inside a wide gutter drifts away from the content edge. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+.fe ::-webkit-scrollbar-thumb:hover,
+.fe-ctx-backdrop ::-webkit-scrollbar-thumb:hover,
+.fe-tour ::-webkit-scrollbar-thumb:hover {
+  background: var(--fe-text-muted);
+  background-clip: padding-box;
+}
+/* Unstyled, the meeting point of a vertical and a horizontal bar paints as a
+   white square in the corner of a dark panel. */
+.fe ::-webkit-scrollbar-corner,
+.fe-ctx-backdrop ::-webkit-scrollbar-corner,
+.fe-tour ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* === wiring:c1 — gündüz / gece / otomatik =============================
+   Lives at the top of the theme gallery: "night mode" is what people open the
+   theme button looking for, and a palette picker that cannot answer that
+   question is the wrong place to stop. */
+.fe-thememode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.fe-thememode__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fe-text-muted);
+}
+.fe-thememode__seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  background: var(--fe-bg-elev);
+}
+.fe-thememode__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: calc(var(--fe-radius-lg) - 4px);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.fe-thememode__opt:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-thememode__opt.is-active {
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  box-shadow: var(--fe-shadow-sm);
+}
+.fe-thememode__opt .fe-ficon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+/* Under ~360px the label and the three options cannot share a line; the strip
+   takes the width and the options divide it rather than overflowing. */
+@media (max-width: 420px) {
+  .fe-thememode__seg {
+    flex: 1 1 100%;
+  }
+  .fe-thememode__opt {
+    flex: 1;
+    justify-content: center;
+  }
+}
+/* === /ui-fix ========================================================= */
