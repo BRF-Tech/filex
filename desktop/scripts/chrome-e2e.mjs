@@ -243,7 +243,14 @@ if (process.platform === 'win32') {
     // The command Windows keeps is the whole point: an installed executable
     // with --hidden, so the launch nobody asked for stays in the tray.
     const line = runKey().split(/\r?\n/).find((l) => /electron\.app\.filex/i.test(l)) ?? '';
-    check('…pointing at the installed executable', /Programs[\\/]filex[\\/]filex\.exe/i.test(line), line.trim());
+    // The command must name the app UNDER TEST — an installed app or a build
+    // output, whichever is being driven. Pinned to the install path this failed
+    // for a packaged build sitting in release/, which is a genuine packaged run
+    // and exactly what a pre-release check drives.
+    const driven = (process.env.FILEX_APP_BINARY ?? '').replace(/\//g, '\\');
+    check('…pointing at the executable under test',
+      driven ? line.toLowerCase().includes(driven.toLowerCase()) : /filex\.exe/i.test(line),
+      line.trim());
     check('…and carrying --hidden', /--hidden/.test(line), line.trim());
     check('…and never at a bare electron.exe', !/node_modules/i.test(line), line.trim());
 

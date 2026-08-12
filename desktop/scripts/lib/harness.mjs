@@ -72,10 +72,12 @@ export async function api(pathname, init = {}, token) {
  * against a Turkish UI and fail for the wrong reason. Pass `lang` to test the
  * other side of that on purpose.
  */
-export async function launchApp({ env = {}, lang = 'en-US', args = [] } = {}) {
+export async function launchApp({ env = {}, lang = 'en-US', args = [], packagedOverride } = {}) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-e2e-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-home-'));
-  const packaged = process.env.FILEX_APP_BINARY;
+  // packagedOverride drives a COPY of an install (the update suite rewrites
+  // that copy's feed URL and must not touch the operator's own app).
+  const packaged = packagedOverride ?? process.env.FILEX_APP_BINARY;
   const common = [`--user-data-dir=${profile}`, `--lang=${lang}`, ...args];
   const app = await _electron.launch({
     ...(packaged

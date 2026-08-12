@@ -23,11 +23,18 @@ extraResources:
       - filex
       - filex.exe
 
+# ⚠⚠ node_modules MUST be listed. An explicit `files` list replaces the default
+# — and the default is what pulls production dependencies in. Without this line
+# `electron-updater` was simply absent from the asar, the main process threw on
+# its import before creating a window, and the app started to nothing: no error
+# dialog, no window, just a process. Caught by scripts/update-e2e.mjs (the
+# launch timed out); a package that opens is not a package that WORKS.
 files:
   - dist/**/*
   - app/**/*
   - ui/**/*
   - package.json
+  - node_modules/**/*
 
 # First release is UNSIGNED (Dilim 2, trap #4): Windows SmartScreen and macOS
 # Gatekeeper will warn. This is a deliberate, separate decision (a code-signing
