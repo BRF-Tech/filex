@@ -19,6 +19,7 @@ instead of a poster). A full file open counts one download. */
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -94,13 +95,13 @@ func escapePathSegments(rel string) string {
 func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, node *model.Node, sh *model.Share, pin string) {
 	rel, ok := cleanShareRel(r.URL.Query().Get("dir"))
 	if !ok {
-		h.renderErrorPage(w, r, http.StatusNotFound, "Not found", "This folder does not exist in the share.")
+		h.renderErrorPage(w, r, http.StatusNotFound, "folder")
 		return
 	}
 	dirPath := joinShareRel(node.Path, rel)
 	objs, err := drv.List(ctx, dirPath)
 	if err != nil {
-		h.renderErrorPage(w, r, http.StatusNotFound, "Not found", "This folder does not exist in the share.")
+		h.renderErrorPage(w, r, http.StatusNotFound, "folder")
 		return
 	}
 
@@ -136,10 +137,13 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 	base := shareURLPath(sh.Token)
 
 	gallery := share.GalleryEligible(entries)
+	lang, t, footer := h.pub(r)
 	chrome := h.chrome(r) /* wiring:e1 — branded chrome (style+footer stay single-source) */
 	page := share.FolderPageData{
 		Style:   template.HTML(publicPageStyle) + chrome.BrandCSS,
-		Footer:  chrome.FooterTR,
+		Footer:  footer,
+		Lang:    lang,
+		T:       t,
 		Brand:   chrome.BrandHead,
 		Name:    node.Name,
 		SubPath: rel,
@@ -189,6 +193,8 @@ func (h *Share) renderFolderBrowse(ctx context.Context, w http.ResponseWriter, r
 		}
 		page.Entries = append(page.Entries, row)
 	}
+
+	page.CountsLabel = fmt.Sprintf(t["folder_counts"], page.DirCount, page.FileCnt)
 
 	_ = share.RenderFolderPage(w, page)
 }

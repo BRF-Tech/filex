@@ -202,7 +202,9 @@ func TestShare_DownloadFolder_WaitPageAndStatus(t *testing.T) {
 	rec = get("?zip=1")
 	require.Equal(t, 200, rec.Code)
 	require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
-	require.Contains(t, rec.Body.String(), "hazırlanıyor")
+	// The page speaks the visitor's language now; this fixture sends no
+	// Accept-Language, so it gets the English default.
+	require.Contains(t, rec.Body.String(), "Preparing your download")
 
 	// ?zip=status → JSON {ready, percent}; a 1-file folder becomes ready fast.
 	ready := false

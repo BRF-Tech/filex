@@ -55,6 +55,10 @@ func brandingShareFixture(t *testing.T) (*handlers.Share, *handlers.BrandingSour
 func getSharePage(t *testing.T, h *handlers.Share, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest("GET", "/s/"+token, nil)
+	// The powered-by footer follows the page language now, and these tests
+	// assert the Turkish wording — so ask for Turkish explicitly instead of
+	// depending on whatever the default happens to be.
+	req.Header.Set("Accept-Language", "tr")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("token", token)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

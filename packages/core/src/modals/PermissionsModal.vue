@@ -81,6 +81,21 @@ const expiryOptions = [
   { v: 30, l: L('30 gün', '30 days') },
 ];
 
+// ⚠ The download cap lived in the old standalone ShareModal and was left
+// behind when this panel took over link creation — the server has honoured
+// `max_downloads` the whole time, there was simply no way to set it. A select
+// rather than a number box: "let this be opened three times" is the whole use
+// case, and typing a number to say it is friction.
+const shareMaxDl = ref(0); // 0 = unlimited
+const maxDlOptions = [
+  { v: 0, l: L('Sınırsız', 'Unlimited') },
+  { v: 1, l: L('1 indirme', '1 download') },
+  { v: 3, l: L('3 indirme', '3 downloads') },
+  { v: 5, l: L('5 indirme', '5 downloads') },
+  { v: 10, l: L('10 indirme', '10 downloads') },
+  { v: 25, l: L('25 indirme', '25 downloads') },
+];
+
 // ── file-drop (public upload link) state ──
 const dropPwd = ref(false);
 const dropExpiry = ref(0); // days; 0 = never
@@ -290,6 +305,9 @@ async function createLink() {
       path: props.path,
       password: sharePwd.value,
       expires_at: expiresAtISO(),
+      // null, not 0 — the server reads 0 as "no cap given" either way, but a
+      // null says it explicitly and keeps the payload honest.
+      max_downloads: shareMaxDl.value || null,
     });
     shareResult.value = { url: r.share.url, pin: r.share.password_pin ?? null };
     await reloadShares();
@@ -616,6 +634,12 @@ async function nativeShare(body: { title: string; text: string }) {
                 <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
                 <select v-model.number="shareExpiry" class="fx-perm-sel fx-perm-sel--sm">
                   <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+                </select>
+              </label>
+              <label class="fx-perm-expiry">
+                <span class="fx-perm-muted">{{ L('İndirme limiti', 'Download limit') }}</span>
+                <select v-model.number="shareMaxDl" class="fx-perm-sel fx-perm-sel--sm">
+                  <option v-for="o in maxDlOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                 </select>
               </label>
               <button class="fx-perm-btn fx-perm-btn--primary" :disabled="shareBusy" @click="createLink">

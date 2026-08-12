@@ -133,6 +133,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// cache the app uses. Unwired, those tiles fall back to the full-size
 	// originals — which is what made a shared photo folder crawl on open.
 	sh.AttachThumbs(d.Thumbs)
+	// Fallback language for the public pages when the visitor's browser asks
+	// for neither of the two we ship (see publicLocale).
+	sh.AttachLocale(d.Cfg.DefaultLocale)
 	// File-drop (public upload link) handler — the inverse of Share. Reuses
 	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
 	// exactly like authenticated uploads (mime, node cache, thumbnails).

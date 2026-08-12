@@ -50,13 +50,24 @@ func TestGalleryEligible(t *testing.T) {
 }
 
 func TestRenderFolderPage_GalleryAndList(t *testing.T) {
+	// The strings now come from the handler (which is the layer that can see
+	// the request and therefore the visitor's language); this package only
+	// renders what it is handed.
 	base := FolderPageData{
-		Style:    template.HTML("<style>/*px*/</style>"),
-		Footer:   template.HTML(`<footer class="brand">filex ile paylaşıldı</footer>`),
-		Name:     "Tatil Fotoğrafları",
-		ZipHref:  "/s/tok?zip=1",
-		DirCount: 1,
-		FileCnt:  2,
+		Style:       template.HTML("<style>/*px*/</style>"),
+		Footer:      template.HTML(`<footer class="brand">filex ile paylaşıldı</footer>`),
+		Name:        "Tatil Fotoğrafları",
+		ZipHref:     "/s/tok?zip=1",
+		DirCount:    1,
+		FileCnt:     2,
+		Lang:        "tr",
+		CountsLabel: "1 klasör · 2 dosya",
+		T: map[string]string{
+			"folder_title_suffix": "paylaşılan klasör",
+			"folder_up":           "← Üst klasör",
+			"folder_zip":          "Tümünü indir (ZIP)",
+			"folder_empty":        "Bu klasör boş.",
+		},
 		Entries: []FolderPageEntry{
 			{Name: "alt", Kind: EntryDir, Href: "/s/tok?dir=alt"},
 			{Name: "a.jpg", Kind: EntryImage, Href: "/s/tok/f/a.jpg", ThumbSrc: "/s/tok/f/a.jpg?thumb=1", SizeLabel: "1.0 KB", DateLabel: "01.01.2026 10:00"},

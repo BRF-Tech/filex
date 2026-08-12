@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-08-12
+
+### Fixed
+
+- **A share link changed language when you entered its PIN.** The public pages
+  grew one at a time and each picked its own: the PIN gate was English, the
+  folder page behind it Turkish, and the "PIN accepted" screen managed both at
+  once — an English `<title>` over a Turkish heading.
+
+  There is no session and no user on these pages — a share link is opened by
+  strangers — so the language now comes from the request: an explicit `?lang=`,
+  then `Accept-Language`, then the server's own `default_locale`, then English.
+  It is resolved ONCE per request and handed to the template, so a page cannot
+  mix two languages. Covers the PIN gate, the wrong-PIN line, the unlocked
+  screen, the ZIP progress page, the error pages and the folder listing.
+
+  ⚠ The counts line ("1 klasör · 2 dosya" / "1 folder · 2 files") is formatted
+  by the handler: the two languages do not share a word order, so a template
+  that glued numbers to nouns could only ever be right in one of them.
+
+- **The download limit had no way to be set.** It lived in the standalone share
+  dialog, and when link creation moved into the Share / Permissions panel the
+  field was left behind — the server has honoured `max_downloads` the whole
+  time, and nothing could give it a value. It is back, next to Expiry:
+  Unlimited / 1 / 3 / 5 / 10 / 25.
+
+  `desktop/scripts/share-limit-e2e.mjs` drives the real panel and then asks the
+  SERVER what it stored, because a control that renders but never reaches the
+  API would pass a DOM-only check.
+
 ## [0.16.1] - 2026-08-12
 
 ### Changed

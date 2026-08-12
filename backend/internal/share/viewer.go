@@ -264,6 +264,16 @@ type FolderPageData struct {
 	DirCount int
 	FileCnt  int
 	Entries  []FolderPageEntry
+	// Lang / T carry the resolved language and its string table. The handler
+	// owns locale resolution (it is the one that can see the request); this
+	// package only renders what it is given, so the folder page can never end
+	// up in a different language from the PIN gate in front of it.
+	Lang string
+	T    map[string]string
+	// CountsLabel is pre-formatted by the handler: "3 klasör · 12 dosya" and
+	// "3 folders · 12 files" do not share a word order, so a template that
+	// glued numbers to nouns could only ever be right in one language.
+	CountsLabel string
 }
 
 // RenderFolderPage writes the browse page HTML.
@@ -284,10 +294,10 @@ const (
 // folderPageTemplate is the dependency-free browse page for a shared
 // folder. Turkish copy, matching the zip-wait/unlocked pages.
 var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doctype html>
-<html lang="tr"><head>
+<html lang="{{.Lang}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Name}} — paylaşılan klasör</title>
+<title>{{.Name}} — {{.T.folder_title_suffix}}</title>
 {{.Style}}
 <style>
 .card--folder { width: 880px; max-width: 100%; text-align: left; padding: 26px 24px; }
@@ -329,13 +339,13 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <div class="icon-badge">` + folderPageIconFolder + `</div>
 <h1>{{.Name}}</h1>
 </div>
-<p class="fsub">{{.DirCount}} klasör · {{.FileCnt}} dosya{{if .SubPath}} — {{.SubPath}}{{end}}</p>
+<p class="fsub">{{.CountsLabel}}{{if .SubPath}} — {{.SubPath}}{{end}}</p>
 <div class="factions">
-{{if .UpHref}}<a class="fbtn fbtn--ghost" href="{{.UpHref}}">← Üst klasör</a>{{end}}
-<a class="fbtn" href="{{.ZipHref}}">Tümünü indir (ZIP)</a>
+{{if .UpHref}}<a class="fbtn fbtn--ghost" href="{{.UpHref}}">{{.T.folder_up}}</a>{{end}}
+<a class="fbtn" href="{{.ZipHref}}">{{.T.folder_zip}}</a>
 </div>
 {{if not .Entries}}
-<div class="fempty">Bu klasör boş.</div>
+<div class="fempty">{{.T.folder_empty}}</div>
 {{else if .Gallery}}
 <div class="ggrid">
 {{range .Entries}}<a class="gtile" href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}} title="{{.Name}}{{if .SizeLabel}} — {{.SizeLabel}}{{end}}">
