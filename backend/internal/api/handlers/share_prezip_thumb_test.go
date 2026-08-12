@@ -200,3 +200,35 @@ func TestShare_FileShareDoesNotWarmZip(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, entries, "a file share has no folder to zip")
 }
+
+// TestShare_FolderThumbsWarmOnCreate: creating a folder share also renders the
+// gallery's tiles, so the FIRST visit is fast too — not just the second.
+func TestShare_FolderThumbsWarmOnCreate(t *testing.T) {
+	ctx := context.Background()
+	_, store, drv, st, root := newMutateFixture(t)
+	resolver := func(int64) (storage.Driver, error) { return drv, nil }
+
+	dir := mkdirNode(t, store, st, root, "album")
+	require.NoError(t, drv.Write(ctx, "album/pic.gif", strings.NewReader(browseTestGif), int64(len(browseTestGif))))
+	pic := mkfileNode(t, store, st, "album/pic.gif", int64(len(browseTestGif)))
+
+	pipe := thumb.New(store, t.TempDir(), thumb.Capabilities{Image: true})
+	pipe.AttachStorage(st.ID, drv)
+	h := handlers.NewShare(share.NewService(store), store, resolver, "https://fm.example", sharezip.New(t.TempDir()))
+	h.AttachThumbs(pipe)
+
+	r := chi.NewRouter()
+	r.Post("/api/files/share", h.HandleCreate)
+	body, _ := json.Marshal(map[string]any{"node_id": dir.ID})
+	req := httptest.NewRequest("POST", "/api/files/share", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Eventually(t, func() bool {
+		th, err := store.GetThumbnail(context.Background(), pic.ID)
+		return err == nil && th != nil && th.State == "ready"
+	}, 10*time.Second, 50*time.Millisecond,
+		"sharing a folder must render its gallery tiles, not leave them for the first visitor")
+}

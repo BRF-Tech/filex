@@ -272,6 +272,7 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// being spent before anyone was waiting. Costs nothing new: it is the same
 	// build the warmer was going to do anyway, moved earlier.
 	h.warmFolderZip(node)
+	h.warmFolderThumbs(node)
 
 	// Dual envelope: nested `share` for the SFC + flat fields at the
 	// top level for legacy embed.js. Cheap to ship both.
@@ -372,6 +373,74 @@ func (h *Share) warmFolderZip(node *model.Node) {
 		ctx, cancel := context.WithTimeout(context.Background(), zipWarmTimeout)
 		defer cancel()
 		_, _ = h.Zip.Warm(ctx, drv, path, id)
+	}()
+}
+
+// prewarmThumbMax bounds how many tiles one share creation renders up front. A
+// folder of receipts is tens of files; a photo archive can be tens of
+// thousands, and rendering all of them because somebody minted a link is not a
+// trade anybody asked for. Past the cap the rest render on first view — still
+// far cheaper than shipping the originals.
+const prewarmThumbMax = 500
+
+// warmFolderThumbs renders the gallery tiles for a freshly shared folder.
+//
+// The thumbnail cache makes the SECOND visit fast; this makes the FIRST one
+// fast, and the first is the visit that matters: whoever creates a link
+// normally opens it straight away to check it, which is exactly when the page
+// used to crawl.
+//
+// Same shape as warmFolderZip — detached, asynchronous, bounded, silent. A
+// failure here costs a slower first paint, never a failed share.
+func (h *Share) warmFolderThumbs(node *model.Node) {
+	if h.Thumbs == nil || h.Store == nil || node == nil || node.Type != model.NodeTypeDirectory {
+		return
+	}
+	drv, err := h.StorageResolver(node.StorageID)
+	if err != nil || drv == nil {
+		return
+	}
+	root, storageID := node.Path, node.StorageID
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), zipWarmTimeout)
+		defer cancel()
+		rendered := 0
+		var walk func(dir string)
+		walk = func(dir string) {
+			if rendered >= prewarmThumbMax || ctx.Err() != nil {
+				return
+			}
+			objs, err := drv.List(ctx, dir)
+			if err != nil {
+				return
+			}
+			for _, o := range objs {
+				if rendered >= prewarmThumbMax || ctx.Err() != nil {
+					return
+				}
+				if browseSkipNames[o.Name] {
+					continue
+				}
+				child := joinShareRel(dir, o.Name)
+				if o.Kind == storage.KindDirectory {
+					walk(child)
+					continue
+				}
+				// Only what the public gallery actually inlines, and only what
+				// serveSharedThumb would have rendered on demand anyway.
+				if share.ClassifyEntry(o.Name, false) != share.EntryImage || o.Size > sharedThumbMaxSource {
+					continue
+				}
+				n, err := h.Store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, child))
+				if err != nil || n == nil || n.Type != model.NodeTypeFile || h.thumbReady(ctx, n.ID) {
+					continue
+				}
+				if err := h.Thumbs.GenerateThumb(ctx, n); err == nil {
+					rendered++
+				}
+			}
+		}
+		walk(root)
 	}()
 }
 

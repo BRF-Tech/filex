@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-08-12
+
+### Changed
+
+- **A shared folder's gallery tiles are rendered when the link is created**, not
+  when the first visitor arrives. 0.16.0 stopped the page shipping originals;
+  this makes the *first* visit fast too, which is the visit that matters —
+  whoever creates a link normally opens it straight away to check it, and that
+  is exactly when the page used to crawl. Bounded at 500 tiles per share (a
+  photo archive must not be re-rendered wholesale because somebody minted a
+  link); anything past the cap still renders on first view.
+
 ## [0.16.0] - 2026-08-12
 
 ### Changed
