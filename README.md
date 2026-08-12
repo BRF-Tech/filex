@@ -11,8 +11,9 @@
 [![Live demo](https://img.shields.io/badge/live_demo-demo.filex.sh-f59e0b)](https://demo.filex.sh)
 
 A single Go binary with a full-featured web UI, pluggable storage/auth/DB drivers,
-**real-time collaboration**, **an embeddable web component**, and a **built-in MCP server**
-so AI agents can drive it natively.
+**real-time collaboration**, **an embeddable web component**, a **desktop app with
+background folder sync**, and a **built-in MCP server** so AI agents can drive it
+natively.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/explorer-grid-dark.png">
@@ -33,6 +34,11 @@ docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:latest
 Open http://localhost:5212/admin — the first run prints admin credentials and embed
 instructions to the console.
 
+Prefer a window over a browser tab? The **desktop app** (Windows / Linux) signs in to
+any filex server and syncs folders in the background:
+[latest release](https://github.com/BRF-Tech/filex/releases/latest) ·
+[docs/DESKTOP.md](docs/DESKTOP.md).
+
 ## Why filex
 
 Most self-hosted file managers are either **too small** (a directory listing with uploads)
@@ -46,6 +52,10 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   list, read, write, share and zip — nothing else.
 - **Real-time** — presence avatars and live file updates over WebSocket, in the native UI
   *and* in embedded contexts (short-lived ticket auth, API-polling fallback).
+- **On your desktop too** — the same explorer ships as a Windows/Linux app that keeps
+  local folders in step with the server from the tray, updates itself, and holds several
+  accounts (or tenants) side by side. Headless machines get the same engine as
+  `filex sync` / `filex client`.
 - **Multi-tenant by design** — storage-per-tenant with native tenancy mode, RBAC roles +
   per-item grants, confined API tokens, per-token identities for audit trails.
 - **Boringly deployable** — one binary or one container; SQLite by default, Postgres/MySQL
@@ -65,6 +75,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 │  AI / MCP:       │  /api/ai REST + native MCP server        │
 │  Sync Worker:    │  ETag diff + tombstone guard             │
 │  Replica Layer:  │  primary→replica + rules + reconcile     │
+│  Protection:     │  trash + versions + ClamAV scanning      │
+│  E2E folders:    │  client-side WebCrypto (server blind)    │
 │  Notifications:  │  webhook + in-app bell + read/unread     │
 │  Search:         │  Bleve (full-text, embedded)             │
 │  Thumbnails:     │  image · video · pdf · office            │
@@ -82,6 +94,9 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
    Vue 3 apps       Any framework      React apps
                     (vanilla, Angular,
                     Svelte, Solid, …)
+
+   Same API, no server plugins:  desktop app (Electron, Windows/Linux)
+                                 CLI client (filex client · filex sync)
 ```
 
 ## Screenshots
@@ -170,6 +185,33 @@ Multi-tenant hosts typically proxy the API server-side, inject a **confined toke
 (`root: tenant-folder`) per request, and strip client headers — the sandbox is enforced by
 the backend, not the widget. See [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
+## Desktop app & CLI
+
+The explorer also ships as a **Windows / Linux desktop app** — the same component the web
+UI and the embeds render, not a separate half-copy:
+
+- **Several accounts at once** — a rail of servers/tenants, each showing its own branding.
+- **Folder sync** — pair a local folder with a server folder and they stay in step both
+  ways while the app sits in the tray ([docs/SYNC.md](docs/SYNC.md)).
+- **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
+- **Updates itself** — downloads quietly, installs on quit; `FILEX_NO_UPDATE=1` opts out.
+
+Installer, AppImage and `.deb` are attached to the
+[latest release](https://github.com/BRF-Tech/filex/releases/latest) — not code-signed yet,
+so expect a SmartScreen prompt on Windows. Details: [docs/DESKTOP.md](docs/DESKTOP.md).
+
+The same binary is also a client for servers, scripts and headless machines:
+
+```bash
+filex client login --url https://files.example.com
+filex client upload build/report.pdf docs://ci-artifacts/
+
+filex sync add ~/Documents/work docs://work   # the engine the desktop app uses
+filex sync run --watch 30s
+```
+
+See [docs/CLI.md](docs/CLI.md) and [docs/SYNC.md](docs/SYNC.md).
+
 ## AI agents / MCP
 
 filex ships a token-authenticated automation surface at `/api/ai` (list, read, write,
@@ -191,6 +233,10 @@ Details: [docs/MCP.md](docs/MCP.md).
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings.
 - **Sharing** — public links with PIN, expiry and max-downloads; folder links stream as ZIP (cached + pre-warmed); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint.
+- **Desktop app + folder sync** — Windows/Linux app: tray-resident two-way sync, several accounts at once, self-updating ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
+- **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
+- **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
 - **Native multi-tenancy** — provider/tenant mode with per-tenant isolation on one instance ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)).
 - **Driver-pluggable everything** — storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
 - **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).
@@ -202,8 +248,10 @@ Details: [docs/MCP.md](docs/MCP.md).
 - **Notifications** — generic JSON webhook (Slack/Discord-agnostic) + in-app bell with read/unread + per-user mute matrix.
 - **Search** — Bleve embedded, full-text + metadata, permission-aware.
 - **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware.
-- **Deep links** — the address bar tracks the open folder; paste a link, land in that folder.
+- **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there.
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.
+- **CLI client** — the same binary reaches a remote server (`filex client`, `filex sync`) with no server-side plugin ([docs/CLI.md](docs/CLI.md)).
+- **Self-updating** — patch releases install themselves, minor ones are announced for one-click upgrade ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Single binary** — goreleaser matrix: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** — English + Turkish out of the box.
 
@@ -213,19 +261,30 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
-- [Installation](docs/INSTALLATION.md)
-- [Configuration](docs/CONFIGURATION.md)
-- [Desktop app](docs/DESKTOP.md) — install, sign-in, background sync
-- [Folder sync rules](docs/SYNC.md)
-- [Integration / embedding](docs/INTEGRATION.md)
-- [AI & MCP](docs/MCP.md)
-- [RBAC & permissions](docs/RBAC.md)
-- [Multi-tenancy](docs/MULTI-TENANCY.md)
-- [Replication](docs/REPLICATION.md)
-- [Backend API spec](docs/BACKEND.md)
-- [Component API](docs/API.md)
-- [Docker](docs/DOCKER.md)
-- [Full documentation index](docs/README.md)
+**Getting started** — [Installation](docs/INSTALLATION.md) ·
+[Configuration](docs/CONFIGURATION.md) · [Releases](docs/RELEASES.md) ·
+[Updates](docs/UPDATES.md)
+
+**Clients** — [Desktop app](docs/DESKTOP.md) · [Folder sync](docs/SYNC.md) ·
+[CLI](docs/CLI.md) · [Integration / embedding](docs/INTEGRATION.md) ·
+[AI & MCP](docs/MCP.md)
+
+**Storage & access** — [Storage](docs/STORAGE.md) · [SSO (OIDC)](docs/SSO.md) ·
+[LDAP & proxy auth](docs/LDAP.md) · [RBAC & permissions](docs/RBAC.md) ·
+[Multi-tenancy](docs/MULTI-TENANCY.md)
+
+**Data & features** — [Sharing & file requests](docs/SHARING.md) ·
+[Trash & versioning](docs/TRASH-VERSIONING.md) · [Protection](docs/PROTECTION.md) ·
+[E2E encryption](docs/E2E-ENCRYPTION.md) · [Search](docs/SEARCH.md) ·
+[Notifications](docs/NOTIFICATIONS.md) · [Thumbnails](docs/thumbnails.md) ·
+[Replication](docs/REPLICATION.md)
+
+**Operate & extend** — [Deployment](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) ·
+[Architecture](docs/ARCHITECTURE.md) · [Backend API spec](docs/BACKEND.md) ·
+[Component API](docs/API.md) · [OnlyOffice](docs/ONLYOFFICE.md) ·
+[Converter](docs/CONVERT-INTEGRATION.md)
+
+[Full documentation index](docs/README.md)
 
 ## Development
 
@@ -243,10 +302,13 @@ Subdirectories:
 - `packages/webcomponent` — `@brftech/filex` (Web Component wrapper)
 - `packages/react` — `@brftech/filex-react` (React adapter via @lit/react)
 - `web/` — Vue 3 admin UI (embedded into Go binary via `go:embed`)
+- `desktop/` — Electron app (bundled main process, tray sync, auto-update)
 - `demo/` — Standalone HTML demos for each framework
+- `e2e/` — Playwright suites (web, embeds, packaged desktop app)
 - `docker/` — Dockerfiles + compose
 - `deploy/` — ready-made Compose stacks + Helm chart (see [`deploy/`](deploy/))
 - `docs/` — Markdown documentation
+- `docs-site/` — VitePress site published at [docs.filex.sh](https://docs.filex.sh)
 
 Contributions welcome — see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 

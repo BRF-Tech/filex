@@ -206,14 +206,26 @@ Doc updates live alongside code changes in the same PR. The pattern:
 
 Maintainer-only. Reproducible, automated by CI.
 
-1. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
-2. Bump `package.json` versions across all packages:
+1. **Re-read `README.md` against what actually shipped since the last tag.**
+   Run `git log --oneline vPREVIOUS..HEAD`, then ask of every new surface — a
+   client, a feature, a docs page — whether it appears in the intro, *Why
+   filex*, *Features* and *Documentation*. The README is the page most readers
+   see and the one nobody remembers to touch: a feature documented only under
+   `docs/` does not exist as far as a new reader is concerned. Update
+   `docs/README.md` (the index) in the same pass.
+
+   > Why this is step 1: by 2026-08-13 the desktop app, folder sync, the CLI,
+   > trash & versioning, E2E folders and self-update had all shipped — six
+   > minor releases' worth — and not one of them had reached the README.
+
+2. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
+3. Bump `package.json` versions across all packages:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
    ```
-3. Commit: `chore(release): vX.Y.Z`.
-4. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
-5. Push: `git push origin main --tags`.
+4. Commit: `chore(release): vX.Y.Z`.
+5. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
+6. Push: `git push origin main --tags`.
 
 CI does the rest:
 - `release:goreleaser` — multi-arch binaries → GitLab Release.
