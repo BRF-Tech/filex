@@ -104,11 +104,18 @@ attached to any other origin.
 
 ## Language
 
-The window follows your operating system's language (Turkish or English today).
-Before this, the app's own shell — the rail, Settings, the sign-in screen — was
-English while the file listing inside it was translated, which reads as a bug
-rather than a choice. The waiting state you see before the first listing arrives
-is now a full screen of its own instead of a bare line of text.
+*Settings → Language* — **System**, **English** or **Türkçe**. System follows
+your operating system, which is what the app did when there was nothing to
+choose, so nothing changes until you pick.
+
+The choice moves the whole app at once: this window, the tray menu (built by a
+different process), and the file list inside it (a separate component with its
+own catalogue). A Turkish shell around an English file list is one app
+pretending to be two — which is what it used to look like before any of this
+was translated.
+
+Switching takes effect immediately and **keeps the folder you are looking at**;
+nothing reloads.
 
 ---
 

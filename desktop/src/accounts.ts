@@ -28,7 +28,17 @@ export interface DesktopState {
   /** Keep running in the tray when the window is closed. */
   runInBackground: boolean;
   launchAtLogin: boolean;
+  /** Interface language. 'system' follows the OS — what the app did when there
+   *  was nothing to choose, so an existing install keeps the language it
+   *  already had. The window, the tray menu and the file explorer inside it all
+   *  read this one value: a Turkish shell around an English file list is one
+   *  app pretending to be two. */
+  locale: DesktopLocale;
 }
+
+/** 'system' resolves against the OS at read time, so moving a laptop between
+ *  language settings keeps working without a stored value going stale. */
+export type DesktopLocale = 'system' | 'en' | 'tr';
 
 export interface SyncFolder {
   id: string;
@@ -46,6 +56,7 @@ const EMPTY: DesktopState = {
   syncFolders: [],
   runInBackground: true,
   launchAtLogin: false,
+  locale: 'system',
 };
 
 function file(): string {

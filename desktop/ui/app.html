@@ -355,7 +355,32 @@
       // pretending to be two — which is most of why this window looked wrong.
       // The OS locale decides, and everything we do not ship falls back to
       // English rather than to an empty string.
-      const LANG = (navigator.language || 'en').toLowerCase().startsWith('tr') ? 'tr' : 'en';
+      // ⚠ A `let`, and read through lang(): the language is a SETTING now
+      // (Settings → Language: System / English / Türkçe). The main process
+      // resolves 'system' against the OS and hands the answer down as
+      // `effectiveLocale`, so the tray menu and this window can never disagree
+      // about what "system" means. Until the first state arrives — the boot
+      // screens draw before any IPC — the browser locale is the best guess.
+      let LANG = (navigator.language || 'en').toLowerCase().startsWith('tr') ? 'tr' : 'en';
+      function applyLang(next) {
+        const lang = next === 'tr' || next === 'en' ? next : LANG;
+        if (lang === LANG) return false;
+        LANG = lang;
+        document.documentElement.lang = lang;
+        // The explorer is a web component that WATCHES its config, so the file
+        // list switches language in place — no reload, and the folder you were
+        // looking at stays open.
+        //
+        // ⚠⚠ Through `config`, NOT the `locale` attribute: the component merges
+        // `{...attributes, ...config}` and the config property wins. Setting
+        // `el.locale = 'tr'` therefore changed the property and nothing else —
+        // the shell went Turkish while the file list stayed English, and the
+        // element reported `locale === 'tr'` the whole time. A new object is
+        // what the watcher notices.
+        const el = document.querySelector('filex-explorer');
+        if (el && el.config) el.config = { ...el.config, locale: lang };
+        return true;
+      }
       const STRINGS = {
         'boot.no_account':      ['No account is signed in', 'Giriş yapılmış hesap yok'],
         'boot.no_account_sub':  ['Add a server to start browsing your files.', 'Dosyalarını görmek için bir sunucu ekle.'],
@@ -395,6 +420,10 @@
         'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
         'set.autostart_dev':    ['Only the installed app can start at sign-in.',
                                  'Oturum açılışında yalnızca kurulu uygulama başlatılabilir.'],
+        'set.language':         ['Language', 'Dil'],
+        'set.language_sub':     ['Applies to this window, the tray menu and the file list.',
+                                 'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
+        'set.language_system':  ['System', 'Sistem'],
         'upd.title':            ['Updates', 'Güncellemeler'],
         'upd.idea':             ['filex updates itself in the background — while you are away, or when you quit. No installer, nothing to click.',
                                  'filex kendini arka planda günceller — bilgisayar başında değilken ya da çıkışta. Kurulum ekranı yok, tıklayacağın bir şey yok.'],
@@ -760,6 +789,18 @@
 
           <h2>${esc(T('set.this_app'))}</h2>
           <div class="card"><div class="between">
+            <div><strong>${esc(T('set.language'))}</strong>
+              <div class="muted">${esc(T('set.language_sub'))}</div></div>
+            <div class="row">${
+              // The names stay in their own language — a Turkish speaker looking
+              // for Turkish scans for "Türkçe", not for "Turkish".
+              [['system', T('set.language_system')], ['en', 'English'], ['tr', 'Türkçe']]
+                .map(([code, label]) => `<button data-locale="${code}"${
+                  (state.locale || 'system') === code ? ' class="primary"' : ''
+                }>${esc(label)}</button>`).join('')
+            }</div>
+          </div></div>
+          <div class="card"><div class="between">
             <div><strong>${esc(T('set.background'))}</strong>
               <div class="muted">${esc(T('set.background_sub'))}</div></div>
             <button id="bg">${esc(T(state.runInBackground ? 'set.on' : 'set.off'))}</button>
@@ -843,6 +884,15 @@
           state = await window.filexApp.setSettings({ runInBackground: !state.runInBackground });
           renderSettings();
         });
+        el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ locale: b.dataset.locale });
+          // The main process resolves 'system'; taking its answer keeps this
+          // window and the tray menu in the same language.
+          applyLang(state.effectiveLocale);
+          relabelStatic();
+          render();
+          renderSettings();
+        }));
         const updCheck = $('#upd-check', el);
         if (updCheck) updCheck.addEventListener('click', async () => {
           state = await window.filexApp.checkUpdate();
@@ -908,15 +958,22 @@
 
       async function refresh() {
         state = await window.filexApp.getState();
+        // The language the main process resolved (the choice, or the OS behind
+        // 'system'). Everything already on screen is relabelled when it moves.
+        if (applyLang(state.effectiveLocale)) relabelStatic();
         render();
         if ($('#settings').classList.contains('open')) renderSettings();
       }
 
-      // The picker's chrome is static markup, so it is labelled once at boot
-      // rather than on every open.
-      $('#pk-title').textContent = T('pick.title');
-      $('#pk-up').textContent = T('pick.up');
-      $('#pk-use').textContent = T('pick.use');
+      // The picker's chrome is static markup — labelled here rather than on
+      // every open, and again whenever the language changes (a switch that
+      // leaves half the window in the old language is worse than no switch).
+      function relabelStatic() {
+        $('#pk-title').textContent = T('pick.title');
+        $('#pk-up').textContent = T('pick.up');
+        $('#pk-use').textContent = T('pick.use');
+      }
+      relabelStatic();
 
       window.filexApp.onChanged(() => refresh());
       window.filexApp.onOpenSettings(() => toggleSettings(true));

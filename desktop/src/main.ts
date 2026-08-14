@@ -68,7 +68,7 @@ const HIDDEN_FLAG = '--hidden';
 // of whatever they were doing. See applyUpdateQuietly().
 const UPDATED_FLAG = '--updated';
 
-let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false };
+let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false, locale: 'system' };
 let mainWindow: BrowserWindow | null = null;
 let shellWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -315,25 +315,51 @@ function accountsChanged(): void {
   wireAuthHeaderInjection();
 }
 
+/** The chosen language, or what the OS says when the choice is 'system'.
+ *  One resolver for the tray, the window and the explorer — three places
+ *  deciding this for themselves is how a Turkish menu ends up on an English
+ *  window. */
+function effectiveLocale(): 'en' | 'tr' {
+  if (state.locale === 'en' || state.locale === 'tr') return state.locale;
+  return app.getLocale().toLowerCase().startsWith('tr') ? 'tr' : 'en';
+}
+
+/** The tray's own strings. Tiny on purpose: the window has the real catalogue,
+ *  and duplicating it into the main process would be two tables to keep in
+ *  step. Anything not listed here has no business being in a tray menu. */
+const TRAY_STRINGS: Record<string, [en: string, tr: string]> = {
+  signedOut: ['Not signed in', 'Giriş yapılmadı'],
+  open: ['Open filex', "filex'i aç"],
+  updateReady: ['Update {v} ready — installs itself (or now)', '{v} güncellemesi hazır — kendiliğinden kurulur (ya da şimdi)'],
+  settings: ['Settings…', 'Ayarlar…'],
+  quit: ['Quit filex', "filex'ten çık"],
+};
+
+function trayText(key: string, vars: Record<string, string> = {}): string {
+  const pair = TRAY_STRINGS[key];
+  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
+  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+}
+
 function refreshTray(): void {
   if (!tray) return;
   const acc = activeAccount(state);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : 'Not signed in', enabled: false },
+      { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : trayText('signedOut'), enabled: false },
       { type: 'separator' },
-      { label: 'Open filex', click: () => route() },
+      { label: trayText('open'), click: () => route() },
       // The update installs itself — while you are away, or when you quit. This
       // line is for the person who would rather have it now than later, so it
       // says what will happen either way; it is not a prompt to act on.
       ...(updateState.status === 'ready'
         ? [{
-            label: `Update ${updateState.version ?? ''} ready — installs itself (or now)`,
+            label: trayText('updateReady', { v: updateState.version ?? '' }),
             click: () => applyUpdateQuietly(),
           }]
         : []),
       {
-        label: 'Settings…',
+        label: trayText('settings'),
         click: () => {
           route();
           mainWindow?.webContents.send('app:open-settings');
@@ -341,7 +367,7 @@ function refreshTray(): void {
       },
       { type: 'separator' },
       {
-        label: 'Quit filex',
+        label: trayText('quit'),
         click: () => {
           quitting = true;
           app.quit();
@@ -613,6 +639,10 @@ function publicState() {
     syncEngine: cliPath() ? 'bundled' : 'missing',
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
+    locale: state.locale,
+    // What 'system' currently resolves to, so the window does not have to
+    // re-derive it from navigator.language and disagree with the tray.
+    effectiveLocale: effectiveLocale(),
     // What the OS actually did with the request, not what we asked for. Login
     // items are refused often enough (policy, sandboxing, a user unticking it
     // elsewhere) that reporting our own intent back would be a lie.
@@ -887,6 +917,13 @@ function wireIpc(): void {
     if (typeof patch.launchAtLogin === 'boolean') {
       state.launchAtLogin = patch.launchAtLogin;
       setLoginItem(patch.launchAtLogin);
+    }
+    if (patch.locale === 'system' || patch.locale === 'en' || patch.locale === 'tr') {
+      state.locale = patch.locale;
+      // The tray is drawn by the main process and would otherwise keep the
+      // language it was built with until the next restart — a menu in the old
+      // language next to a window in the new one.
+      refreshTray();
     }
     saveState(state);
     return publicState();
