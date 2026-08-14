@@ -237,9 +237,9 @@ Maintainer-only. Reproducible, automated by CI.
    Retake them with:
 
    ```bash
-   pnpm run build:all                    # the shots come from this binary
-   pnpm --dir e2e install:browsers       # once
-   node e2e/shots/capture.mjs            # → docs/screenshots/*.png
+   pnpm run build:all                     # the shots come from this binary
+   pnpm --dir e2e run install:browsers    # once
+   node e2e/shots/capture.mjs             # → docs/screenshots/*.png
    ```
 
    It boots a local instance, seeds a demo tree, pins the UI language to
