@@ -55,7 +55,9 @@ builds:
 
 archives:
   - id: filex
-    builds:
+    # `ids:` (was `builds:` — renamed upstream; the old key still works but
+    # `goreleaser check` now exits non-zero on it).
+    ids:
       - filex
     name_template: >-
       {{ .ProjectName }}_
@@ -74,6 +76,22 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
+
+  # ⚠ A second, UNVERSIONED set of bare binaries. docs/CLI.md tells people to
+  # install with one line —
+  #   curl -fL -o filex .../releases/latest/download/filex-linux-amd64
+  # — and a `latest/download/<name>` link only resolves if an asset with that
+  # exact, version-free name exists. None did: the documented install command
+  # answered 404 (measured 2026-08-14, against v0.17.1). Publishing the binary
+  # under a stable name keeps the promise the docs already made, and keeps it
+  # true release after release rather than depending on somebody remembering to
+  # upload it by hand.
+  - id: filex-bare
+    ids:
+      - filex
+    name_template: "filex-{{ .Os }}-{{ .Arch }}"
+    formats:
+      - binary
 
 checksum:
   name_template: "checksums.txt"
