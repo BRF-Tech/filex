@@ -218,14 +218,48 @@ Maintainer-only. Reproducible, automated by CI.
    > trash & versioning, E2E folders and self-update had all shipped — six
    > minor releases' worth — and not one of them had reached the README.
 
-2. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
-3. Bump `package.json` versions across all packages:
+2. **Open every screenshot the README shows and check it against the shipped
+   UI — in English.** Same failure as step 1, in pictures: a screenshot is
+   read as a promise about what the product looks like *now*, and a stale one
+   is wrong information rather than missing information. Two things to
+   confirm, image by image:
+
+   - **Language.** These are the repo's shop window and its readers are not
+     Turkish. Every visible string — buttons, menus, dialog footers — must be
+     English. Capture with the UI language set to English and re-read the
+     result; a half-translated dialog ("Düzenle" next to "Download") is worse
+     than no screenshot, because it looks like a product that cannot pick a
+     language.
+   - **Currency.** If a release touched a screen a screenshot shows, retake
+     it. A control added this cycle must be visible in the picture that claims
+     to show that screen.
+
+   Retake them with:
+
+   ```bash
+   pnpm run build:all                    # the shots come from this binary
+   pnpm --dir e2e install:browsers       # once
+   node e2e/shots/capture.mjs            # → docs/screenshots/*.png
+   ```
+
+   It boots a local instance, seeds a demo tree, pins the UI language to
+   English three ways over (browser locale, stored preference, server default)
+   and writes the set. Then **look at the PNGs** before committing them — see
+   `e2e/README.md` for the knobs (running server, VM/WSL paths, thumbnails, the
+   demo-mode landing page).
+
+   > Why this is a numbered step: by 2026-08-14 `share-modal.png` showed a
+   > share dialog with no download limit — a control that had shipped two
+   > releases earlier — and `viewer-markdown.png` had Turkish buttons in it.
+
+3. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
+4. Bump `package.json` versions across all packages:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
    ```
-4. Commit: `chore(release): vX.Y.Z`.
-5. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
-6. Push: `git push origin main --tags`.
+5. Commit: `chore(release): vX.Y.Z`.
+6. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
+7. Push: `git push origin main --tags`.
 
 CI does the rest:
 - `release:goreleaser` — multi-arch binaries → GitLab Release.

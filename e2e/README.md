@@ -46,6 +46,31 @@ visually. `pnpm test:debug` opens the inspector.
 `helpers/seed.ts`  → `seedLocalStorage`, `dropStorageByName`
 `fixtures/`         → small files used by upload tests
 
+## Screenshots (`shots/`)
+
+`shots/capture.mjs` retakes every screenshot the project README shows — in
+English, against the build in this working tree. Reviewing them is a numbered
+step in the release process (`docs/CONTRIBUTING.md`): a stale screenshot is
+wrong information, not missing information.
+
+```bash
+pnpm run build:all              # the shots come from this binary
+node e2e/shots/capture.mjs      # → docs/screenshots/*.png
+```
+
+It boots its own instance, generates the demo tree (`shots/fixtures.mjs` — PNGs
+encoded with Node's zlib, no image dependency), signs in and captures. Useful
+environment variables:
+
+| Variable | Why |
+|---|---|
+| `FILEX_BIN` | binary to run (default `bin/filex`) |
+| `SHOTS_URL` | shoot an instance that is ALREADY running instead of booting one |
+| `SHOTS_STORAGE` / `SHOTS_MOUNT` | the fixture directory as *this machine* and as the *server* see it — they differ when the server runs in a VM / WSL / container |
+| `SHOTS_SEED_ONLY`, `SHOTS_SKIP_SEED` | two passes: seed, run `filex thumb backfill` out of band, then capture. Thumbnails are rendered on UPLOAD, so fixtures written straight to disk have none and the hero shot comes out as a grid of generic icons |
+| `SHOTS_DEMO` | capture `demo-landing.png` — needs an instance booted with `FILEX_DEMO_MODE=true`, because that page replaces the login screen |
+| `SHOTS_KEEP` | leave the instance running afterwards |
+
 ## Notes
 
 - Tests are **serialized** (`workers: 1`) because the backend is

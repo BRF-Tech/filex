@@ -50,7 +50,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 - **AI-agent-native** — a token-scoped REST surface (`/api/ai`) plus a native
   **MCP server** (`/api/ai/mcp`). Hand an agent a token confined to one folder and it can
   list, read, write, share and zip — nothing else.
-- **Real-time** — presence avatars and live file updates over WebSocket, in the native UI
+- **Real-time** — presence avatars (a profile picture set once on the account, shown for
+  every client signed in as you) and live file updates over WebSocket, in the native UI
   *and* in embedded contexts (short-lived ticket auth, API-polling fallback).
 - **On your desktop too** — the same explorer ships as a Windows/Linux app that keeps
   local folders in step with the server from the tray, updates itself, and holds several
@@ -101,7 +102,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 ## Screenshots
 
-| Sharing (PIN + expiry links) | Markdown editor + preview |
+| Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
 | ![Share modal](docs/screenshots/share-modal.png) | ![Markdown viewer](docs/screenshots/viewer-markdown.png) |
 
@@ -304,7 +305,8 @@ Subdirectories:
 - `web/` — Vue 3 admin UI (embedded into Go binary via `go:embed`)
 - `desktop/` — Electron app (bundled main process, tray sync, auto-update)
 - `demo/` — Standalone HTML demos for each framework
-- `e2e/` — Playwright suites (web, embeds, packaged desktop app)
+- `e2e/` — Playwright suites (web, embeds, packaged desktop app) + `shots/`, the
+  script that retakes the screenshots above
 - `docker/` — Dockerfiles + compose
 - `deploy/` — ready-made Compose stacks + Helm chart (see [`deploy/`](deploy/))
 - `docs/` — Markdown documentation
