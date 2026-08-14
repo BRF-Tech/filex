@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-08-14
+
+### Fixed
+
+- **A share link capped at N downloads handed out more than N.** The cap was
+  checked against a counter bumped only *after* the bytes had left, so every
+  request that started while an earlier one was still streaming read the same
+  pre-download count and was let through. Measured against the shipped build: a
+  link capped at **one** download served **three complete files** to three
+  overlapping clients; "3 downloads" became four whenever the next click landed
+  before the previous transfer finished — which, for anything larger than a text
+  file, is most of the time.
+
+  A download is now claimed against the cap in a single statement *before*
+  anything is served — on the file itself, on a folder's "download all" ZIP and
+  on a single file fetched from a shared folder's browse page alike. A serve
+  that fails before a single byte leaves gives its slot back; a transfer the
+  visitor abandons half-way has still spent one. The claim is written on a
+  context detached from the request, so a client that hangs up cannot make the
+  record of its own download disappear.
+
+- **The share dialog's "Create link" button was pushed out of place** by the
+  download-limit control added in 0.16.2. The options were one wrapping flex row
+  with the button shoved to its right end by `margin-left: auto`; that survives
+  two controls and breaks with three. The options are a two-column grid now and
+  the action sits underneath at full width, which holds its shape whatever gets
+  added next.
+
+### Added
+
+- **The one-line `curl` is back in the share dialog.** It belonged to the old
+  standalone share dialog and was left behind when link creation moved into the
+  "Share / Permissions" panel — exactly how the download limit had been lost. A
+  share link is regularly minted *for a server* ("pull this onto the box"), and
+  that reader has no browser. Both surfaces build the command from one helper
+  now, so they cannot drift: folder links get `?zip=wait` and a `.zip` output
+  name, PIN-protected links carry their PIN.
+
+- **Profile pictures.** Set one in the admin panel → *My profile*, and the
+  explorer's collaboration strip draws it instead of your initials — for every
+  client of the account, including the desktop app and any API key minted under
+  it, which is what makes it worth setting once. Stored on the user row as a
+  small data URI (migration 00023), downscaled to 160px in the browser. A shared
+  proxy token keeps initials rather than wearing its owner's face, and a host
+  proxy that re-identifies an end user may supply that person's own picture with
+  `X-Filex-Presence-Avatar`.
+
+### Changed
+
+- **The README screenshots are retaken, in English, against the current UI.**
+  `share-modal.png` was showing a share dialog with no download limit — a
+  control two releases old — and `viewer-markdown.png` had Turkish buttons in
+  it. They are reproducible now: `node e2e/shots/capture.mjs` boots an instance,
+  seeds a demo tree and captures the set, and reviewing them is a numbered step
+  in the release process (`docs/CONTRIBUTING.md`).
+
 ## [0.17.1] - 2026-08-12
 
 ### Fixed
