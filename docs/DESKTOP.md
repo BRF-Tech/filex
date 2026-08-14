@@ -17,7 +17,7 @@ panel, and the app links out to it in your browser.
 
 | Platform | File | What it does |
 |---|---|---|
-| Windows 10/11 (64-bit) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Lets you pick the location, adds a Start-menu entry. |
+| Windows 10/11 (64-bit) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Installs for **your user only** (`%LOCALAPPDATA%\Programs\filex`) — no administrator rights, and the app can replace its own files, which is what lets it update itself quietly. Adds a Start-menu entry. |
 | Linux (any, 64-bit) | [`filex-desktop-x86_64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.AppImage) | **Portable** — no installation. `chmod +x` and run. |
 | Debian / Ubuntu | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install, appears in your applications menu. |
 
@@ -161,6 +161,27 @@ sandboxes refuse it often enough that showing our own intent back would be a
 lie.
 
 Quit properly from the tray menu.
+
+---
+
+## Updates
+
+The app updates itself and you are not asked about it. It checks a few times a
+day, downloads in the background, and applies the update at a moment that costs
+you nothing: when you quit, or — since this app is normally left in the tray for
+days — once the machine has been idle for ten minutes with no window open. It
+comes back where it was, in the tray. No installer window, no restart prompt.
+
+The sync watchers are stopped before the swap and start again on their own
+afterwards, so an update never lands in the middle of a transfer.
+
+*Settings → Updates* shows what it is doing and offers **Install it now** for
+anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
+
+> On Windows this only works because the app installs **per-user**. An install
+> under `C:\Program Files` needs administrator rights to replace its own files,
+> so every update would stop at a UAC prompt — which is no longer possible: the
+> installer does not offer a machine-wide install.
 
 ---
 
