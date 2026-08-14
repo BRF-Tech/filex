@@ -23,6 +23,7 @@ import {
   nativeImage,
   nativeTheme,
   net,
+  powerMonitor,
   protocol,
   session,
   shell,
@@ -61,6 +62,11 @@ const ICON_PATH = app.isPackaged
 // stays in the tray instead of throwing a window at a desktop that is still
 // loading. See setLoginItem().
 const HIDDEN_FLAG = '--hidden';
+// electron-updater's NSIS installer relaunches us with this after a silent
+// update (NsisUpdater passes `--updated`). Treated exactly like HIDDEN_FLAG: an
+// update the user never asked for must not end with a window appearing in front
+// of whatever they were doing. See applyUpdateQuietly().
+const UPDATED_FLAG = '--updated';
 
 let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false };
 let mainWindow: BrowserWindow | null = null;
@@ -317,16 +323,13 @@ function refreshTray(): void {
       { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : 'Not signed in', enabled: false },
       { type: 'separator' },
       { label: 'Open filex', click: () => route() },
-      // A downloaded update is worth one line in the menu the app lives in;
-      // without it the only way to learn about it is to open Settings.
+      // The update installs itself — while you are away, or when you quit. This
+      // line is for the person who would rather have it now than later, so it
+      // says what will happen either way; it is not a prompt to act on.
       ...(updateState.status === 'ready'
         ? [{
-            label: `Restart to update (${updateState.version ?? ''})`,
-            click: () => {
-              quitting = true;
-              supervisor?.stopAll();
-              autoUpdater.quitAndInstall();
-            },
+            label: `Update ${updateState.version ?? ''} ready — installs itself (or now)`,
+            click: () => applyUpdateQuietly(),
           }]
         : []),
       {
@@ -399,9 +402,21 @@ async function handleDeepLink(raw: string): Promise<void> {
 // token shipped inside the app to read its releases. The CLI's update manifest
 // already lives on the same static site.
 //
-// Policy: download quietly, install on quit. An update that interrupts a file
-// transfer to restart itself is worse than an update that waits — and the app
-// is normally left running in the tray, so "on quit" is a real moment.
+// Policy: the update happens BY ITSELF and the user never sees it — download
+// quietly, install silently, come back in the tray. Nobody is asked to restart,
+// and nobody is ever handed an installer window.
+//
+// ⚠⚠ The installer is only silent if we SAY so. `quitAndInstall()` defaults to
+// `isSilent = false`, which runs the NSIS installer with its full wizard — that
+// is what turned "your app updated itself" into "your app threw a setup screen
+// at you", and it is why every call here passes (true, true): silent, then
+// relaunch. The relaunch carries `--updated`, which starts us in the tray.
+//
+// When it happens: on quit (electron-updater does that for us), or — because
+// this app lives in the tray for days at a time — once the machine has been
+// idle for a while and no window is open. That is the Discord shape: it swaps
+// itself out while you are away from the keyboard, not while you are typing.
+//
 // `FILEX_NO_UPDATE=1` turns the whole thing off (used by the E2E rig, which
 // must not race a download).
 
@@ -433,6 +448,7 @@ function wireAutoUpdate(): void {
   autoUpdater.on('update-downloaded', (i) => {
     pushUpdateState({ status: 'ready', version: i?.version });
     refreshTray();
+    watchForAQuietMoment();
   });
   // ⚠ Silent by design. No network, a feed that 404s, a machine behind a proxy
   // — none of that is the user's problem while the app itself works. The state
@@ -448,6 +464,58 @@ function wireAutoUpdate(): void {
   // sync engine, and a machine that just woke up may not have a route yet.
   setTimeout(check, 30_000);
   setInterval(check, 6 * 60 * 60 * 1000);
+}
+
+/** How long the machine must be untouched before we swap the app underneath it.
+ *  Ten minutes is "gone to a meeting", not "paused to read something". */
+const IDLE_SECONDS_BEFORE_APPLY = 10 * 60;
+
+let quietMomentTimer: ReturnType<typeof setInterval> | null = null;
+let applying = false;
+
+/**
+ * Waits for a moment when applying the update costs the user nothing, then does
+ * it — no prompt, no restart button, no installer window.
+ *
+ * Two conditions, and both matter:
+ *   - the human is away (`powerMonitor.getSystemIdleTime()`), because the app
+ *     disappears and comes back during the swap;
+ *   - no window is open, because a window vanishing mid-look is the disruption
+ *     this whole design exists to avoid.
+ *
+ * If neither ever happens, nothing is lost: electron-updater still installs
+ * silently on quit. This only shortens the wait for an app that is never quit.
+ */
+function watchForAQuietMoment(): void {
+  if (quietMomentTimer) return;
+  quietMomentTimer = setInterval(() => {
+    if (applying || updateState.status !== 'ready') return;
+    const windowOpen = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
+    if (windowOpen) return;
+    if (powerMonitor.getSystemIdleTime() < IDLE_SECONDS_BEFORE_APPLY) return;
+    applyUpdateQuietly();
+  }, 60_000);
+}
+
+/**
+ * Installs the downloaded update and comes back in the tray.
+ *
+ * ⚠ The sync watchers are stopped first. They are child processes moving files;
+ * replacing the binary under one mid-copy is how a half-written file becomes
+ * somebody's only copy. They start again by themselves on the next launch.
+ */
+function applyUpdateQuietly(): void {
+  if (applying) return;
+  applying = true;
+  if (quietMomentTimer) {
+    clearInterval(quietMomentTimer);
+    quietMomentTimer = null;
+  }
+  supervisor?.stopAll();
+  quitting = true;
+  // (silent, relaunch) — see the ⚠⚠ note above: the defaults are (false, false),
+  // which shows the installer and then leaves the app closed.
+  autoUpdater.quitAndInstall(true, true);
 }
 
 // ─────────────────────────── start at login ───────────────────────────
@@ -806,13 +874,11 @@ function wireIpc(): void {
     return publicState();
   });
 
-  // Restart into the downloaded update. quitting=true so the window's
-  // close handler does not park the app in the tray instead of quitting.
+  // "Install it now" from Settings — the same silent swap the idle watcher does
+  // on its own, just earlier. Never the wizard.
   ipcMain.handle('update:install', () => {
     if (updateState.status !== 'ready') return publicState();
-    quitting = true;
-    supervisor?.stopAll();
-    autoUpdater.quitAndInstall();
+    applyUpdateQuietly();
     return publicState();
   });
 
@@ -926,7 +992,7 @@ if (!app.requestSingleInstanceLock()) {
     // A launch the user did not initiate stays in the tray. Opening a window at
     // sign-in — on top of whatever else the desktop is still restoring — is the
     // behaviour that makes people turn the setting off again.
-    if (!process.argv.includes(HIDDEN_FLAG)) route();
+    if (!process.argv.includes(HIDDEN_FLAG) && !process.argv.includes(UPDATED_FLAG)) route();
     void refreshPairs();
 
     // Windows/Linux deliver the launch deep link as an argv entry.

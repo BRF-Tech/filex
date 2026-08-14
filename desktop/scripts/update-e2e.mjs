@@ -15,6 +15,28 @@ import http from 'node:http';
 import path from 'node:path';
 import { check, finish, launchApp, signIn, sleep } from './lib/harness.mjs';
 
+// ── how the update is APPLIED (source guards — no app needed) ────────
+//
+// ⚠⚠ `quitAndInstall()` defaults to `isSilent = false`, which runs the NSIS
+// installer with its full wizard. The app then looks like it threw a setup
+// screen at somebody who never asked to install anything — which is exactly
+// what happened. Silence has to be opted into at every call site, and you
+// cannot see it from outside without actually installing, so it is asserted
+// against the source.
+{
+  const src = fs.readFileSync(path.resolve('src/main.ts'), 'utf8');
+  // Matched with the receiver on purpose: the prose above the code says
+  // "quitAndInstall()" while explaining the trap, and a guard that fails on its
+  // own explanation is a guard somebody deletes.
+  const calls = [...src.matchAll(/autoUpdater\.quitAndInstall\(([^)]*)\)/g)].map((m) => m[1].trim());
+  check('the update installs silently, never through the wizard',
+    calls.length > 0 && calls.every((a) => /^true\s*,\s*true\s*$/.test(a)),
+    calls.length ? calls.map((a) => `quitAndInstall(${a})`).join(' | ') : 'no quitAndInstall call found');
+  check('…and comes back in the tray afterwards',
+    /const UPDATED_FLAG = '--updated'/.test(src) && /includes\(UPDATED_FLAG\)/.test(src),
+    'the installer relaunches us with --updated; a window appearing then is the disruption this design avoids');
+}
+
 const BIN = process.env.FILEX_APP_BINARY;
 if (!BIN) {
   console.log('FILEX_APP_BINARY yok — bu süit kurulu uygulamayı sürer.');
