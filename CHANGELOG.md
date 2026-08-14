@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-08-14
+
+### Fixed
+
+- **The desktop app's update handed you an installer window.** Downloading was
+  already quiet, and quitting the app already installed silently — but the tray
+  entry and the Settings button called `quitAndInstall()`, whose default is
+  `isSilent = false`: it runs the NSIS installer with its full wizard. So the
+  one visible path through the feature was the one that made a background
+  updater feel like being sent back through setup.
+
+  The update now applies itself and the app comes back where it was — in the
+  tray. Every install is silent and relaunches (`quitAndInstall(true, true)`),
+  and the relaunch is treated like a hidden launch (`--updated`, the flag the
+  installer passes us) so no window appears in front of whatever you were doing.
+
+  Because this app lives in the tray for days, it no longer waits for a quit
+  that may never come: once an update is downloaded it watches for a quiet
+  moment — the machine idle for ten minutes with no window open — and swaps
+  itself then, stopping the sync watchers first so no transfer is interrupted.
+  Nothing prompts, nothing nags; the tray line now says the update installs
+  itself, and clicking it only means "sooner".
+
+  `scripts/update-e2e.mjs` grew two guards against exactly this regression: no
+  `quitAndInstall` may omit the silent flags, and the post-update relaunch must
+  stay in the tray.
+
 ## [0.18.0] - 2026-08-14
 
 ### Fixed
