@@ -258,7 +258,14 @@
       "scanHint": "Bu QR kodu authenticator uygulamanla tara, sonra 6 haneli kodu gir."
     },
     "timezone": "Zaman dilimi",
-    "locale": "Dil"
+    "locale": "Dil",
+    "avatar": {
+      "label": "Profil fotoğrafı",
+      "upload": "Fotoğraf yükle",
+      "help": "Adınızın yanında ve dosya yöneticisinin işbirliği çubuğunda görünür — hesabınızla açılan her istemcide. Otomatik olarak 160 piksele küçültülür.",
+      "notImage": "Lütfen bir görsel dosyası seçin.",
+      "failed": "Bu görsel işlenemedi — başka bir tane deneyin."
+    }
   },
   "settings": {
     "title": "Ayarlar",

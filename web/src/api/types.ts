@@ -14,6 +14,10 @@ export interface User {
   role: UserRole;
   locale?: string;
   timezone?: string;
+  /** Profile picture — a small data:image/… URI or a URL. Also the face the
+   *  explorer's collaboration strip draws for this account, on every client of
+   *  it (browser session, desktop app, any API key minted under it). */
+  avatar_url?: string;
   oidc_subject?: string | null;
   totp_enabled?: boolean;
   created_at: string;

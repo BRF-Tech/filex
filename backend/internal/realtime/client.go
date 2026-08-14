@@ -35,6 +35,7 @@ type Client struct {
 	ID     int64  // process-unique connection id
 	UserID int64  // authenticated user id (0 = anonymous, unused today)
 	Name   string // display name shown in presence
+	Avatar string // profile picture shown in presence ("" = draw initials)
 	Send   chan []byte
 
 	// PresenceKey (from the ticket) distinguishes end users behind a shared

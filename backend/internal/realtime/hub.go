@@ -30,6 +30,9 @@ type PresenceUser struct {
 	UID  string `json:"uid"` // stable identity key (Client.Identity) for client-side keying/colours
 	Name string `json:"name"`
 	File string `json:"file,omitempty"`
+	// Avatar is the profile picture to draw instead of initials — omitted when
+	// the person has none, which is the fallback the strip has always used.
+	Avatar string `json:"avatar,omitempty"`
 }
 
 // wireChange / wirePresence are the JSON envelopes pushed to clients.
@@ -234,13 +237,20 @@ func (h *Hub) snapshotLocked(key string) []PresenceUser {
 		ident := c.Identity()
 		existing, ok := byIdent[ident]
 		if !ok {
-			byIdent[ident] = PresenceUser{ID: c.UserID, UID: ident, Name: c.Name, File: c.file}
+			byIdent[ident] = PresenceUser{ID: c.UserID, UID: ident, Name: c.Name, File: c.file, Avatar: c.Avatar}
 			continue
 		}
 		// Prefer an entry that has a focused file so a person reading a
 		// document in one tab still shows that file.
 		if existing.File == "" && c.file != "" {
 			existing.File = c.file
+			byIdent[ident] = existing
+		}
+		// …and a picture from whichever of their connections carries one: an
+		// older client that never sends an avatar must not blank out the face
+		// their other tab is already showing.
+		if existing.Avatar == "" && c.Avatar != "" {
+			existing.Avatar = c.Avatar
 			byIdent[ident] = existing
 		}
 	}

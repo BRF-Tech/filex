@@ -223,22 +223,9 @@ func validateBrandingSetting(key, value string) error {
 			return errors.New("branding.accent must be a #rgb or #rrggbb hex color")
 		}
 	case "logo_url":
-		v := strings.TrimSpace(value)
-		switch {
-		case strings.HasPrefix(v, "data:"):
-			if !strings.HasPrefix(v, "data:image/") {
-				return errors.New("branding.logo_url data URI must be an image")
-			}
-			if len(v) > brandingLogoMaxBytes {
-				return fmt.Errorf("branding.logo_url data URI exceeds %d KB", brandingLogoMaxBytes/1024)
-			}
-		case strings.HasPrefix(v, "http://"), strings.HasPrefix(v, "https://"), strings.HasPrefix(v, "/"):
-			if len(v) > 2048 {
-				return errors.New("branding.logo_url is too long")
-			}
-		default:
-			return errors.New("branding.logo_url must be an http(s) URL, a site-relative path or a data:image/… URI")
-		}
+		// Same three accepted shapes as a user's avatar — one rule, one place
+		// (image_ref.go).
+		return validateImageRef("branding.logo_url", value, brandingLogoMaxBytes)
 	case "name", "footer_text":
 		if len(value) > 400 {
 			return errors.New("branding text fields are capped at 400 bytes")

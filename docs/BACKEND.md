@@ -72,10 +72,38 @@ the user, sets the session cookie, redirects to `next`.
 {
   "user": {
     "id": 1, "email": "admin@local", "username": "admin",
-    "role": "admin", "groups": ["filex-admin"]
+    "role": "admin", "groups": ["filex-admin"],
+    "avatar_url": "data:image/jpeg;base64,…"
   }
 }
 ```
+
+### `PATCH /api/auth/profile` ![user](https://img.shields.io/badge/-user-blue)
+Patches the caller's own `email`, `display_name`, `locale`, `timezone` and
+`avatar_url`. Absent fields are left alone.
+
+`avatar_url` is the **profile picture**: a `data:image/…` URI (≤ 48 KB) or an
+`http(s)` / site-relative URL; an explicit `""` removes it. Anything else is a
+`400` rather than a silent drop — the person is looking at an upload they
+believe worked. The admin SPA's profile page downscales what you pick to 160px
+before encoding, so the cap is not something a user meets.
+
+The picture belongs to the **account**, which is what makes it appear
+everywhere: the explorer's collaboration strip draws it instead of initials for
+that user on every client of the account — browser session, desktop app, and any
+API key minted under it. Two deliberate exceptions, because the alternative is
+drawing the wrong face on somebody's row:
+
+- A token with a **username allow-list** is a shared proxy, not a person (its
+  presence entry reads "work"), so no picture is attached.
+- When a trusted host proxy re-identifies a connection as a different end user
+  via `X-Filex-Presence-Name`, only *that* person's picture may be drawn —
+  supplied by the proxy as `X-Filex-Presence-Avatar` (same accepted shapes, same
+  cap). Without it the row falls back to initials.
+
+The cap is small on purpose: the avatar rides inside every presence frame the
+collaboration socket broadcasts, so it is paid for again on each join, leave and
+focus change — unlike the branding logo, which is fetched once per page.
 
 ---
 

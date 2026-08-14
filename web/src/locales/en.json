@@ -258,7 +258,14 @@
       "scanHint": "Scan this QR code with your authenticator app, then enter the 6-digit code."
     },
     "timezone": "Timezone",
-    "locale": "Language"
+    "locale": "Language",
+    "avatar": {
+      "label": "Profile picture",
+      "upload": "Upload photo",
+      "help": "Shown next to your name, and in the file explorer's collaboration bar — on every client signed in as you. Resized to 160px automatically.",
+      "notImage": "Please choose an image file.",
+      "failed": "That image could not be processed — try another one."
+    }
   },
   "settings": {
     "title": "Settings",

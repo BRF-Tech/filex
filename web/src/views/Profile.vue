@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { setStoredLocale, type Locale } from '@/i18n';
+import { downscaleImageToDataURL } from '@/lib/image';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -25,6 +26,44 @@ const displayName = ref('');
 const userLocale = ref<Locale>('en');
 const timezone = ref('Europe/Istanbul');
 const savingProfile = ref(false);
+
+// ── profile picture ──
+// Stored on the account, which is what makes it show up everywhere: the file
+// explorer's collaboration strip draws it for this user on every client of the
+// account — this browser session, the desktop app, and any API key minted under
+// it — instead of the initials it fell back to before.
+const avatarUrl = ref('');
+const avatarError = ref('');
+const avatarInput = ref<HTMLInputElement | null>(null);
+const AVATAR_MAX_PX = 160;
+// Mirrors the server's cap (handlers.avatarMaxBytes) so a picture is resized to
+// fit here rather than 400-ing after the fact.
+const AVATAR_MAX_BYTES = 48 * 1024;
+
+const avatarInitial = computed(() =>
+  (displayName.value || email.value || '?').trim().charAt(0).toUpperCase(),
+);
+
+async function onAvatarFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  avatarError.value = '';
+  if (!file.type.startsWith('image/')) {
+    avatarError.value = t('profile.avatar.notImage');
+    return;
+  }
+  try {
+    avatarUrl.value = await downscaleImageToDataURL(file, {
+      maxPx: AVATAR_MAX_PX,
+      maxBytes: AVATAR_MAX_BYTES,
+    });
+  } catch {
+    avatarError.value = t('profile.avatar.failed');
+  } finally {
+    // Let the same file be picked again after a failure.
+    if (avatarInput.value) avatarInput.value.value = '';
+  }
+}
 
 const currentPassword = ref('');
 const newPassword = ref('');
@@ -50,6 +89,7 @@ watchEffect(() => {
     displayName.value = auth.user.display_name;
     userLocale.value = (auth.user.locale as Locale) || 'en';
     timezone.value = auth.user.timezone ?? 'Europe/Istanbul';
+    avatarUrl.value = auth.user.avatar_url ?? '';
   }
 });
 
@@ -61,6 +101,7 @@ async function saveProfile() {
       display_name: displayName.value.trim(),
       locale: userLocale.value,
       timezone: timezone.value,
+      avatar_url: avatarUrl.value,
     });
     auth.user = u;
     setStoredLocale(userLocale.value);
@@ -151,6 +192,43 @@ async function disableTotp() {
       <h2 class="text-sm font-semibold uppercase tracking-wide text-zinc-500">
         {{ t('profile.section.account') }}
       </h2>
+
+      <!-- Profile picture: also the face shown in the file explorer's
+           collaboration strip, for every client of this account. -->
+      <div>
+        <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+          {{ t('profile.avatar.label') }}
+        </label>
+        <div class="flex items-center gap-3">
+          <img
+            v-if="avatarUrl"
+            :src="avatarUrl"
+            :alt="t('profile.avatar.label')"
+            class="h-14 w-14 rounded-full object-cover border border-zinc-200 dark:border-zinc-700"
+          />
+          <span
+            v-else
+            class="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-200 dark:bg-zinc-700 text-lg font-semibold text-zinc-600 dark:text-zinc-200"
+            aria-hidden="true"
+          >{{ avatarInitial }}</span>
+          <Button type="button" variant="outline" size="sm" @click.prevent="avatarInput?.click()">
+            {{ t('profile.avatar.upload') }}
+          </Button>
+          <Button
+            v-if="avatarUrl"
+            type="button"
+            variant="ghost"
+            size="sm"
+            @click.prevent="avatarUrl = ''"
+          >
+            {{ t('common.remove') }}
+          </Button>
+          <input ref="avatarInput" type="file" accept="image/*" class="hidden" @change="onAvatarFile" />
+        </div>
+        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{{ t('profile.avatar.help') }}</p>
+        <p v-if="avatarError" class="mt-1 text-xs text-rose-600 dark:text-rose-400">{{ avatarError }}</p>
+      </div>
+
       <Input v-model="email" type="email" :label="t('common.email')" required />
       <Input v-model="displayName" :label="t('users.fields.displayName')" required />
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">

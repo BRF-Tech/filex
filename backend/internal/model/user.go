@@ -42,6 +42,11 @@ type User struct {
 	TOTPRecoveryCodes []string   `json:"-"`
 	Locale            string     `json:"locale"`
 	Timezone          string     `json:"timezone"`
+	// AvatarURL is the profile picture: a small data: URI or an http(s) /
+	// site-relative URL (migration 00023). It is the face the collaboration
+	// presence strip draws instead of initials, for every client of this
+	// account — browser session, desktop app, and any API key minted under it.
+	AvatarURL string `json:"avatar_url,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	LastLoginAt       *time.Time `json:"last_login_at,omitempty"`

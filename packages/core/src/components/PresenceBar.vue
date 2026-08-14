@@ -10,6 +10,7 @@ import { computed, ref } from 'vue';
 import type { PresenceUser } from '../lib/realtime';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import PresenceAvatar from './PresenceAvatar.vue';
 
 const props = defineProps<{
   users: PresenceUser[];
@@ -49,20 +50,8 @@ function keyOf(u: PresenceUser): string {
   return u.uid ?? String(u.id);
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-// Deterministic hue per identity so the same person keeps the same colour.
-function hue(u: PresenceUser): number {
-  const s = keyOf(u);
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
+// The circle itself (photo or initials, colour, focus dot) lives in
+// PresenceAvatar so the compact strip and the expanded chips cannot drift.
 
 function label(u: PresenceUser): string {
   return u.file ? `${u.name} · ${u.file}` : u.name;
@@ -80,13 +69,7 @@ function label(u: PresenceUser): string {
         class="fx-presence-chip"
         :title="label(u)"
       >
-        <span
-          class="fx-presence-avatar"
-          :style="{ backgroundColor: `hsl(${hue(u)} 60% 45%)` }"
-        >
-          {{ initials(u.name) }}
-          <span v-if="u.file" class="fx-presence-dot" aria-hidden="true"></span>
-        </span>
+        <PresenceAvatar :user="u" />
         <span class="fx-presence-chip-name">{{ u.name }}</span>
         <span v-if="u.file" class="fx-presence-chip-file">· {{ u.file }}</span>
       </span>
@@ -95,16 +78,12 @@ function label(u: PresenceUser): string {
     <!-- Compact: the classic overlapping avatar strip. -->
     <template v-else>
       <div class="fx-presence-avatars" :title="others.map(label).join(', ')">
-        <span
+        <PresenceAvatar
           v-for="u in others.slice(0, 5)"
           :key="keyOf(u)"
-          class="fx-presence-avatar"
-          :style="{ backgroundColor: `hsl(${hue(u)} 60% 45%)` }"
+          :user="u"
           :title="label(u)"
-        >
-          {{ initials(u.name) }}
-          <span v-if="u.file" class="fx-presence-dot" aria-hidden="true"></span>
-        </span>
+        />
         <span v-if="others.length > 5" class="fx-presence-more">+{{ others.length - 5 }}</span>
       </div>
       <span class="fx-presence-text" :title="others.map(label).join(', ')">
@@ -162,6 +141,18 @@ function label(u: PresenceUser): string {
 }
 .fx-presence-avatar:first-child {
   margin-left: 0;
+}
+/* A photo fills the circle; the identity colour stays as the ring backdrop so
+   a picture with transparency still reads as that person. */
+.fx-presence-avatar--photo {
+  overflow: visible;
+}
+.fx-presence-photo {
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  object-fit: cover;
+  display: block;
 }
 .fx-presence-dot {
   position: absolute;

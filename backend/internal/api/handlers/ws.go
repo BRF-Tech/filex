@@ -79,6 +79,11 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 	// "Burak (work)". (Honored only on token auth; proxies strip these from
 	// client requests, so end users can't spoof them.)
 	name := wsDisplayName(user)
+	// ⭐ The picture follows the ACCOUNT, not the client: a session, the
+	// desktop app and every API key minted under the same user all resolve to
+	// the same avatar, so setting it once in the profile puts the same face on
+	// every filex surface that account opens.
+	avatar := user.AvatarURL
 	presenceKey := ""
 	if tok := auth.TokenFrom(r.Context()); tok != nil {
 		uname := auth.TokenUserFrom(r.Context())
@@ -102,7 +107,10 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 				name += " (" + qualifier + ")"
 			}
 		} else if uname != "" {
+			// A shared proxy token is not a person: the entry says "work", so
+			// the account owner's face would be a lie on somebody else's row.
 			name = uname
+			avatar = ""
 		}
 		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); v != "" {
 			if qualifier != "" {
@@ -110,6 +118,11 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 			} else {
 				name = v
 			}
+			// ⚠ A trusted proxy just told us this connection is a DIFFERENT
+			// human from the account holder. Their own picture is the only one
+			// that may be drawn here — the header below, when the host sends
+			// one — never the token owner's.
+			avatar = sanitizePresenceAvatar(r.Header.Get("X-Filex-Presence-Avatar"))
 		}
 		presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
 		if presenceKey == "" {
@@ -125,7 +138,7 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	t := realtime.Ticket{UserID: user.ID, Name: name, PresenceKey: presenceKey}
+	t := realtime.Ticket{UserID: user.ID, Name: name, Avatar: avatar, PresenceKey: presenceKey}
 	if hasRoot {
 		t.ConfineAdapter = root.Adapter
 		t.ConfineRel = root.Rel
@@ -175,6 +188,7 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	var (
 		userID   int64
 		name     string
+		avatar   string
 		ticketed bool
 		ticket   realtime.Ticket
 	)
@@ -185,14 +199,14 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ticketed, ticket = true, t
-		userID, name = t.UserID, t.Name
+		userID, name, avatar = t.UserID, t.Name, t.Avatar
 	} else {
 		user := auth.UserFrom(r.Context())
 		if user == nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		userID, name = user.ID, wsDisplayName(user)
+		userID, name, avatar = user.ID, wsDisplayName(user), user.AvatarURL
 	}
 
 	// Ticketed connections are cross-origin by design (embedded webcomponent →
@@ -225,6 +239,7 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := realtime.NewClient(userID, name, 32)
+	client.Avatar = avatar
 	if ticketed {
 		client.PresenceKey = ticket.PresenceKey
 		if ticket.ConfineAdapter != "" {
@@ -411,6 +426,18 @@ func sanitizePresenceName(v string) string {
 		v = string(runes[:48])
 	}
 	return strings.TrimSpace(v)
+}
+
+// sanitizePresenceAvatar cleans a proxy-supplied presence picture for an end
+// user the host re-identified. Same three shapes the profile accepts, same
+// cap — a header is the least trustworthy input we have, and the value is
+// broadcast to everyone in the room.
+func sanitizePresenceAvatar(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || validateImageRef("presence avatar", v, avatarMaxBytes) != nil {
+		return ""
+	}
+	return v
 }
 
 // sanitizePresenceKey restricts a proxy-supplied presence key to a safe

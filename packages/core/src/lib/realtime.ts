@@ -21,6 +21,11 @@ export interface PresenceUser {
   uid?: string;
   name: string;
   file?: string;
+  /** Profile picture (a small data: URI, or a URL) for this person, when their
+   *  filex account has one. Absent → the strip draws initials, as it always
+   *  did. Set from the ACCOUNT, so a session, the desktop app and any API key
+   *  minted under the same user all show the same face. */
+  avatar?: string;
 }
 
 export interface ChangeMessage {

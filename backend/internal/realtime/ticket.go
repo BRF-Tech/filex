@@ -17,6 +17,14 @@ import (
 type Ticket struct {
 	UserID int64
 	Name   string
+	// Avatar is the presence picture for this connection (a small data: URI or
+	// a URL). Resolved at mint time from the account the connection
+	// authenticates as, so every client of that account — browser session,
+	// desktop app, any API key minted under it — shows the same face. Empty
+	// when the account has no picture, or when a proxy re-identified the
+	// connection as a different end user without supplying one (drawing the
+	// account owner's face for somebody else would be worse than initials).
+	Avatar string
 	// PresenceKey distinguishes different END users sharing one filex account.
 	// Embedded hosts (work/fishapp) authenticate every end user with a single
 	// proxy token — the same filex UserID — so presence would collapse them all

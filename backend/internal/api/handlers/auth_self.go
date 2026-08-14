@@ -56,7 +56,18 @@ type profileReq struct {
 	DisplayName *string `json:"display_name,omitempty"`
 	Locale      *string `json:"locale,omitempty"`
 	Timezone    *string `json:"timezone,omitempty"`
+	// AvatarURL is the profile picture — a small data:image/… URI (what the
+	// profile page's file picker produces) or an http(s)/site-relative URL.
+	// An explicit "" removes it. Absent = leave the current one alone.
+	AvatarURL *string `json:"avatar_url,omitempty"`
 }
+
+// avatarMaxBytes caps an inline profile picture. Far below the branding logo's
+// 256 KB on purpose: the avatar rides inside every presence frame the live
+// collaboration socket broadcasts, so a heavy one is paid for again on every
+// join, leave and focus change — not once per page like a logo. The profile
+// page downscales to 160px before encoding, which lands comfortably under this.
+const avatarMaxBytes = 48 * 1024
 
 // UpdateProfile patches the current user's profile fields.
 func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +86,19 @@ func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DisplayName != nil {
 		_ = h.Store.UpdateUserDisplayName(r.Context(), u.ID, strings.TrimSpace(*req.DisplayName))
+	}
+	if req.AvatarURL != nil {
+		avatar := strings.TrimSpace(*req.AvatarURL)
+		// Reject loudly rather than silently dropping the picture: the user is
+		// looking at an upload they believe worked.
+		if err := validateImageRef("avatar_url", avatar, avatarMaxBytes); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := h.Store.UpdateUserAvatar(r.Context(), u.ID, avatar); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	if req.Locale != nil || req.Timezone != nil {
 		l := u.Locale
