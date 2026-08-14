@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-08-14
+
+### Changed
+
+- **The Windows app installs per-user, always.** The silent update in 0.18.1 was
+  only half a promise on a machine where the app had been installed for all
+  users: `C:\Program Files` needs administrator rights to write, so every
+  background update ended in a UAC prompt — the app could not update itself
+  while nobody was at the keyboard, which is the whole point. Discord, Slack and
+  VS Code's user installer all land in `%LOCALAPPDATA%` for the same reason.
+
+  The installer no longer offers the choice (`perMachine: false`,
+  `allowElevation: false`): one click on "for all users" was enough to put the
+  app somewhere its own updater could not reach. Settings and accounts live in
+  `%APPDATA%\@brftech\filex-desktop`, outside the install directory, so moving
+  an existing install is uninstall-then-install and nothing is lost.
+
 ## [0.18.1] - 2026-08-14
 
 ### Fixed

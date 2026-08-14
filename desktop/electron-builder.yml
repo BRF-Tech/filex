@@ -74,6 +74,22 @@ mac:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # ⚠⚠ PER-USER, always. Not a preference — it is what makes a silent update
+  # possible at all. An install under C:\Program Files needs administrator
+  # rights to replace its own files, so every background update ends in a UAC
+  # prompt: the app cannot update itself while nobody is at the machine, and
+  # "it updates itself quietly" becomes a promise it can only half keep.
+  # Discord, Slack and VS Code's user installer all land in %LOCALAPPDATA% for
+  # exactly this reason.
+  #
+  # `perMachine: false` is already the default, but it is written out because
+  # the default ALSO shows an install-mode page and offers elevation — and one
+  # click on "for all users" puts the app somewhere its own updater cannot
+  # reach. `allowElevation: false` removes that page and that choice.
+  # (Measured 2026-08-14: the installed copy was C:\Program Files\filex with
+  # `/allusers`, which is why its updates asked for elevation.)
+  perMachine: false
+  allowElevation: false
 
 # ── auto-update feed ─────────────────────────────────────────────────
 # Generic (a plain static directory), NOT the GitHub provider: this repo's
