@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-08-14
+
+### Added
+
+- **The desktop app has a language setting.** *Settings → Language*: System,
+  English or Türkçe. It followed the OS and offered nothing to choose, so
+  somebody on an English Windows could not have a Turkish filex — and the
+  server's own panel has had a language switcher all along.
+
+  The choice moves the whole app at once, which is the part worth saying: this
+  window, the tray menu (built in the main process, which had its labels
+  hard-coded in English), and the file explorer inside it — a separate component
+  with its own catalogue. Switching is immediate and keeps the folder you are
+  looking at; `system` still resolves against the OS at read time, so a laptop
+  that changes its language keeps working.
+
+  ⚠ The explorer is updated through its `config` property, not the `locale`
+  attribute: the component merges `{...attributes, ...config}` and config wins,
+  so setting the attribute changed what the element *reported* while the list on
+  screen stayed English. The first version of the test asked the element for its
+  locale and passed — a screenshot is what caught it. `scripts/lang-e2e.mjs`
+  now reads the rendered text instead, and checks the shell, the stored setting,
+  the main process's own resolution, and a restart.
+
 ## [0.18.2] - 2026-08-14
 
 ### Changed
