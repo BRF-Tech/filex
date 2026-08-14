@@ -1,63 +1,129 @@
-# filex desktop (Electron shell) — Dilim 2
+# filex desktop (Electron)
 
-Wraps the **existing** filex web app in a desktop window. The Vue app is not
-rewritten or re-skinned — Electron embeds the built bundle and adds three things
-it can't do from a browser tab:
+The filex explorer as a desktop app: a window, a tray icon, and a sync engine
+that keeps local folders in step with the server in the background.
 
-1. **Runs from a real origin, offline.** A custom `app://` protocol serves the
-   embedded bundle so `createWebHistory('/admin/')` routing keeps working
-   (file:// would break it — see `src/main.ts`).
-2. **Native login → durable token.** A small login window collects the server
-   address + credentials, mints a **self-service API token** (`POST /api/tokens`)
-   and stores it **encrypted** via the OS keychain (`safeStorage`). No cookies
-   (Electron is a different origin); no plaintext token on disk.
-3. **Injects the runtime seam.** The stored `{serverUrl, token}` is fed to the
-   Dilim-1 seam (`window.__FILEX_RUNTIME__`) from the preload before the bundle
-   boots, so every request hits the remote server authenticated.
+What it is **not** is the admin panel in a frame. The window embeds
+`<filex-explorer>` — the same web component every other surface embeds — and the
+app adds the four things a browser tab cannot do:
+
+1. **Several accounts at once.** A rail down the left switches between servers
+   (and tenants); each keeps its own token, branding and sync pairs.
+2. **A durable session, kept out of plaintext.** Sign-in happens in your real
+   browser (PKCE, `src/browser-auth.ts`), and the resulting token is stored
+   through the OS keychain (`safeStorage`). If the keychain is unavailable the
+   app **refuses to store the token** rather than writing it to disk.
+3. **Folder sync in the background.** `filex sync run --watch` runs per account,
+   supervised by the app and shipped inside it (`build/bin/filex`), so the app
+   and a terminal act on one implementation and one pairing file.
+4. **It keeps itself up to date, quietly.** See *Updates* below.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `src/main.ts` | Electron main: `app://` protocol, windows, IPC, lifecycle |
-| `src/preload-app.ts` | Injects `window.__FILEX_RUNTIME__` + `filexDesktop.logout()` |
-| `src/preload-login.ts` | Exposes `filexDesktop.login(server,email,pw)` |
-| `src/auth.ts` | login → mint self-service token |
-| `src/config-store.ts` | `safeStorage`-encrypted session at `<userData>/session.bin` |
-| `login/` | Native login page (static HTML/JS, not Vue) |
-| `scripts/sync-web.mjs` | Copies `web/dist` → `app/` for embedding |
-| `electron-builder.yml` | Linux / Windows / macOS packaging |
+| `src/main.ts` | Electron main: windows, tray, `app://` protocol, IPC, updates, login item |
+| `src/accounts.ts` | Accounts + settings, `safeStorage`-encrypted at `<userData>/desktop-state.bin` |
+| `src/browser-auth.ts` | Browser sign-in (PKCE) + deep-link/manual code exchange |
+| `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
+| `src/preload-app.cts` | The window's only bridge: `window.filexApp` (state, settings, sync, updates) |
+| `src/preload-shell.cts` | The narrower bridge for the chrome (rail/settings) |
+| `ui/app.html` | The app's own chrome — rail, settings, boot screens, string table |
+| `scripts/sync-web.mjs` | Copies the built explorer bundle → `app/` for embedding |
+| `scripts/fetch-cli.mjs` | Puts the `filex` CLI into `build/bin` (fails the build if missing) |
+| `scripts/build-main.mjs` | Bundles the main process with esbuild (see *Packaging traps*) |
+| `electron-builder.yml` | Windows / Linux / macOS packaging + the update feed |
 
 ## Build & run
 
 ```bash
-# 1. Build the web bundle first (needs packages/core built).
-pnpm run build:packages && pnpm --filter @brftech/filex-admin build
-# 2. Build + run the shell.
-pnpm --filter @brftech/filex-desktop dev
-# 3. Package installers (unsigned):
-pnpm --filter @brftech/filex-desktop dist        # current OS
-pnpm --filter @brftech/filex-desktop dist:win    # etc.
+# from the repo root — the explorer bundle has to exist first
+pnpm run build:packages
+cd desktop
+pnpm run build      # sync the web bundle + bundle the main process
+pnpm run dev        # build, then run it
+
+# installers (unsigned)
+pnpm run dist:win
+pnpm run dist:linux     # .deb + AppImage
 ```
 
-## Security posture (do not loosen — trap #2)
+`FILEX_CLI_BIN=<path>` points `fetch-cli.mjs` at an already-built CLI instead of
+compiling one; give it a binary of the **same version** you are packaging, built
+without the embedded server UI (85 MB of admin SPA the app already ships in
+`app/`).
 
-`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. The main
-window only ever loads `app://`; external links open in the OS browser; the
-preloads expose the narrowest possible surface (login OR logout+runtime).
+## Updates
+
+The app updates itself and nobody is asked about it: it checks a few times a
+day, downloads in the background, and installs at a moment that costs nothing —
+when you quit, or once the machine has been idle for ten minutes with no window
+open — then comes back in the tray. The sync watchers are stopped before the
+swap, so an update never lands mid-transfer.
+
+Two things make that possible, and both are easy to undo by accident:
+
+- **Every install call must be silent.** `autoUpdater.quitAndInstall()` defaults
+  to `isSilent = false`, which runs the NSIS installer with its full wizard.
+  Guarded by `scripts/update-e2e.mjs`.
+- **The Windows app installs per-user.** An install under `C:\Program Files`
+  needs administrator rights to replace its own files, so every background
+  update would stop at a UAC prompt. `electron-builder.yml` therefore pins
+  `perMachine: false` + `allowElevation: false`.
+
+The feed is a plain static directory on filex.sh, not the GitHub provider: this
+repo's mirror is private, and that provider would need a token shipped inside
+the app. `FILEX_NO_UPDATE=1` turns the whole thing off.
+
+## Language
+
+*Settings → Language* — System / English / Türkçe, stored in the app state. One
+resolver in the main process decides what "system" means, because three surfaces
+read it: this window, the tray menu (main process) and the explorer inside it (a
+separate component with its own catalogue). Covered by `scripts/lang-e2e.mjs`.
+
+## Security posture (do not loosen)
+
+`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`. The window
+only ever loads `app://`; external links open in the OS browser; the preloads
+expose the narrowest surface that works. Tokens live in the OS keychain.
 
 ## Signing
 
-The first release is **unsigned** by design (trap #4). Windows SmartScreen /
-macOS Gatekeeper will warn. Code-signing certificates are a separate, paid
-decision — not a defect.
+Releases are **unsigned** by design for now — Windows SmartScreen and macOS
+Gatekeeper will warn. A code-signing certificate is a separate, paid decision,
+not a defect.
 
-## Verification status ⚠️
+## Packaging traps (each of these shipped once)
 
-Written and type-checked; the `app://` + preload-injection + `safeStorage`
-plumbing is exercised by `scripts/plumbing-smoke.mjs`. **NOT yet verified on
-this workspace:** the full embedded-web run and the 3-platform packaging +
-end-to-end login/list/session-persist bar — `packages/core` (monaco/
-model-viewer) OOM-kills on this memory-constrained shared host, so the web
-bundle can't be built/embedded here, and there is no local backend to log in
-against. Those must be run on a capable host / CI (see the epic task #34).
+- **`files:` must list `node_modules/**/*`.** An explicit list replaces the
+  default, and the default is what pulls dependencies in. Without it
+  `electron-updater` was simply absent from the asar: the installer built, the
+  app launched, and no window ever appeared. The main process is bundled with
+  esbuild now so the package carries its own code either way.
+- **`fetch-cli.mjs` fails the build when the CLI is missing** rather than
+  producing a package that looks armed and syncs nothing.
+- **Artifact names carry no version** (`filex-desktop-x64.exe`): the download
+  links point at `releases/latest/download/<name>`, which only resolves for a
+  fixed filename.
+
+## End-to-end suites
+
+Each drives the real app with Playwright (`scripts/lib/harness.mjs`); most need
+a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
+`FILEX_APP_BINARY` points them at a packaged build instead of the source tree.
+
+| Script | What it proves |
+|---|---|
+| `ui-login-e2e.mjs` | Browser sign-in end to end, including the manual-code fallback |
+| `chrome-e2e.mjs` | The app's own chrome: rail, tabs, theme, scrollbars |
+| `files-e2e.mjs` · `share-e2e.mjs` | Listing, upload, preview; share links |
+| `share-limit-e2e.mjs` | A capped link hands out exactly that many downloads |
+| `sync-e2e.mjs` | A paired folder actually syncs, both directions |
+| `update-e2e.mjs` | The updater downloads and stages a newer version — and installs silently |
+| `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
+| `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
+| `plumbing-smoke.mjs` | `app://`, preload injection and `safeStorage`, without a server |
+
+`look*.mjs` and `diag-*.mjs` are not suites — they open the app and take a
+screenshot of one surface, for looking at a change rather than asserting it.
