@@ -757,6 +757,16 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ⭐ Claim the download BEFORE serving it. The cap used to be checked
+	// against a counter that was only bumped once the bytes had left, so every
+	// request that started while an earlier one was still streaming read the
+	// same pre-download count and was let through — a link capped at one
+	// download handed three full files to three overlapping clients on
+	// fm.brf.sh. Claiming first makes "3 downloads" mean three.
+	if !h.claimDownload(w, r, resolved.ID) {
+		return
+	}
+
 	// Use a presigned URL when the driver supports it AND the operator
 	// hasn't opted out via `disable_presign: true` in storage config.
 	// Honor `Capabilities().Presign` so drivers can advertise no-presign
@@ -766,7 +776,6 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// below.
 	if pres, ok := drv.(storage.Presigner); ok && drv.Capabilities().Presign {
 		if u, err := pres.PresignDownload(r.Context(), node.Path, 5*time.Minute); err == nil && u != "" {
-			_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
 			http.Redirect(w, r, u, http.StatusFound)
 			return
 		}
@@ -774,6 +783,9 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 
 	rc, err := drv.Read(r.Context(), node.Path)
 	if err != nil {
+		// Nothing was served — give the slot back rather than charge the
+		// visitor for our storage error.
+		_ = h.Service.ReleaseDownload(r.Context(), resolved.ID)
 		http.Error(w, "read error", http.StatusInternalServerError)
 		return
 	}
@@ -793,11 +805,32 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(node.Size, 10))
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if _, err := io.Copy(w, rc); err != nil {
-		// Headers already sent.
-		return
+	// The slot is already claimed; a transfer that dies half-way still counts
+	// (the visitor got bytes, and a refund here would reopen the very gap this
+	// claim closes).
+	_, _ = io.Copy(w, rc)
+}
+
+// claimDownload takes one download off the share's cap before anything is
+// served, and renders the expired page when there is none left. Reporting
+// false means the caller must write NOTHING further to w.
+//
+// A failing counter is treated as "no slot": the alternative is serving an
+// unbounded number of downloads whenever the database hiccups, which is the
+// exact failure the cap exists to prevent.
+func (h *Share) claimDownload(w http.ResponseWriter, r *http.Request, shareID int64) bool {
+	if h.claimDownloadSlot(r, shareID) {
+		return true
 	}
-	_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
+	h.renderErrorPage(w, r, http.StatusNotFound, "expired")
+	return false
+}
+
+// claimDownloadSlot is claimDownload without the HTML page, for the endpoints
+// that answer in plain text (the browse page's /f/ media route).
+func (h *Share) claimDownloadSlot(r *http.Request, shareID int64) bool {
+	ok, err := h.Service.ReserveDownload(r.Context(), shareID)
+	return err == nil && ok
 }
 
 // streamFolderZip walks `root` on the driver and writes every file under it
@@ -862,14 +895,24 @@ func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv 
 // The download counter is only bumped on a real byte serve. Any cache problem
 // falls back to streaming a fresh zip so a broken cache never blocks a download.
 func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, root, name string, nodeID, shareID int64, pin string) {
+	// Both serving paths claim their download BEFORE writing (see
+	// claimDownload): a folder ZIP takes long enough that two clicks used to
+	// overlap comfortably inside the old check-then-count gap.
 	stream := func() {
-		if err := h.streamFolderZip(ctx, w, drv, root, name); err == nil {
-			_ = h.Service.IncrementDownload(ctx, shareID)
+		if !h.claimDownload(w, r, shareID) {
+			return
 		}
+		// streamFolderZip writes its headers up front, so a failure part-way
+		// through has already handed bytes over — the claim stands.
+		_ = h.streamFolderZip(ctx, w, drv, root, name)
 	}
 	serve := func(cachePath string) {
-		if err := serveZipFile(w, cachePath, name); err == nil {
-			_ = h.Service.IncrementDownload(ctx, shareID)
+		if !h.claimDownload(w, r, shareID) {
+			return
+		}
+		if err := serveZipFile(w, cachePath, name); err != nil && errors.Is(err, errZipUnopened) {
+			// The cache file could not even be opened — nothing was served.
+			_ = h.Service.ReleaseDownload(ctx, shareID)
 		}
 	}
 
@@ -927,17 +970,22 @@ func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *ht
 	}
 }
 
+// errZipUnopened marks a cached-ZIP failure that happened BEFORE any byte (or
+// header) was written, which is the only case where a claimed download slot is
+// safe to hand back.
+var errZipUnopened = errors.New("share: cached zip could not be opened")
+
 // serveZipFile streams a finished cached zip with an explicit Content-Length so
 // the browser shows real download progress.
 func serveZipFile(w http.ResponseWriter, cachePath, name string) error {
 	f, err := os.Open(cachePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errZipUnopened, err)
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errZipUnopened, err)
 	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(name)))

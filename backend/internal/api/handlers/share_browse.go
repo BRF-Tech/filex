@@ -261,8 +261,21 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A real file download off the browse page counts against the link's cap,
+	// so it claims its slot BEFORE streaming — same reason as the single-file
+	// and ZIP paths: a check that reads a counter bumped only after the bytes
+	// leave lets every overlapping request through. Thumbnails are page
+	// furniture and never counted.
+	if !thumb && !h.claimDownloadSlot(r, resolved.ID) {
+		http.Error(w, "download limit reached", http.StatusGone)
+		return
+	}
+
 	rc, err := drv.Read(r.Context(), full)
 	if err != nil {
+		if !thumb {
+			_ = h.Service.ReleaseDownload(r.Context(), resolved.ID)
+		}
 		http.Error(w, "read error", http.StatusInternalServerError)
 		return
 	}
@@ -281,10 +294,6 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 	if thumb {
 		w.Header().Set("Cache-Control", "private, max-age=3600")
 	}
-	if _, err := io.Copy(w, rc); err != nil {
-		return // headers already sent
-	}
-	if !thumb {
-		_ = h.Service.IncrementDownload(r.Context(), resolved.ID)
-	}
+	// Slot already claimed above; a half-finished transfer still counts.
+	_, _ = io.Copy(w, rc)
 }

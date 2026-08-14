@@ -781,7 +781,8 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, ` +
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
 	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
-	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE)`
+	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE), ` +
+	`COALESCE(avatar_url,'')`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	// New users default to the always-present "default" provider (the
@@ -1144,6 +1145,29 @@ func (s *Store) IncrementShareDownload(ctx context.Context, id int64) error {
 	return err
 }
 
+// ReserveShareDownload claims one download against the cap in a single
+// statement, so overlapping requests cannot all pass a check that each of them
+// read before any of them wrote. False = the cap is already spent.
+func (s *Store) ReserveShareDownload(ctx context.Context, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1
+		WHERE id=$1 AND (max_downloads IS NULL OR download_count < max_downloads)`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ReleaseShareDownload hands a reserved slot back, never below zero.
+func (s *Store) ReleaseShareDownload(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count - 1
+		WHERE id=$1 AND download_count > 0`, id)
+	return err
+}
+
 func (s *Store) IncrementShareUpload(ctx context.Context, id int64, n int) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE shares SET upload_count = upload_count + $1 WHERE id=$2`, n, id)
 	return err
@@ -1477,7 +1501,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL); err != nil {
 		return nil, err
 	}
 	if recoveryJSON != "" {
@@ -1775,6 +1799,14 @@ func (s *Store) UpdateUserEmail(ctx context.Context, id int64, email string) err
 // UpdateUserDisplayName sets the user's human-friendly display name.
 func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE users SET display_name=$1, updated_at=NOW() WHERE id=$2`, displayName, id)
+	return err
+}
+
+// UpdateUserAvatar stores (or, with an empty string, clears) the profile
+// picture. Validation of the URI belongs to the API layer, which is the only
+// place that knows what a browser will accept.
+func (s *Store) UpdateUserAvatar(ctx context.Context, id int64, avatarURL string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET avatar_url=$1, updated_at=NOW() WHERE id=$2`, avatarURL, id)
 	return err
 }
 

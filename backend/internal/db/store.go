@@ -104,6 +104,10 @@ type Store interface {
 	UpdateUserPassword(ctx context.Context, id int64, hash string) error
 	UpdateUserEmail(ctx context.Context, id int64, email string) error
 	UpdateUserDisplayName(ctx context.Context, id int64, displayName string) error
+	// UpdateUserAvatar sets (or clears, with "") the profile picture — a small
+	// data: URI or an http(s)/site-relative URL. Validation lives at the API
+	// boundary; the store only persists what it is handed.
+	UpdateUserAvatar(ctx context.Context, id int64, avatarURL string) error
 	UpdateUserLocale(ctx context.Context, id int64, locale, tz string) error
 	UpdateUserRole(ctx context.Context, id int64, role string) error
 	TouchLastLogin(ctx context.Context, id int64) error
@@ -150,6 +154,17 @@ type Store interface {
 	ListAllShares(ctx context.Context, creatorID *int64, activeOnly bool, limit, offset int) ([]*ShareWithMeta, int64, error)
 	RevokeShare(ctx context.Context, id int64) error
 	IncrementShareDownload(ctx context.Context, id int64) error
+	// ReserveShareDownload claims ONE download against the link's cap and
+	// reports whether it got one. This is the cap's only real enforcement
+	// point: a check that reads the counter and a serve that bumps it
+	// afterwards are two separate steps, and every request that starts inside
+	// that gap passes the check (measured on fm.brf.sh: a 1-download link
+	// handed three full files to three overlapping clients). Claim, then serve.
+	ReserveShareDownload(ctx context.Context, id int64) (bool, error)
+	// ReleaseShareDownload hands a reserved slot back. Used only when the serve
+	// fails before a single byte reaches the client, so a storage error does
+	// not silently eat one of the downloads the owner granted.
+	ReleaseShareDownload(ctx context.Context, id int64) error
 	IncrementShareUpload(ctx context.Context, id int64, n int) error
 	DeleteShare(ctx context.Context, id int64) error
 	DeleteExpiredShares(ctx context.Context) error

@@ -931,6 +931,14 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, id int64, displayName
 	return err
 }
 
+// UpdateUserAvatar stores (or, with an empty string, clears) the profile
+// picture. Validation of the URI belongs to the API layer, which is the only
+// place that knows what a browser will accept.
+func (s *Store) UpdateUserAvatar(ctx context.Context, id int64, avatarURL string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET avatar_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, avatarURL, id)
+	return err
+}
+
 // SetTotpPendingSecret stores a freshly-enrolled TOTP secret + recovery
 // codes prior to the user verifying with a one-time code.
 func (s *Store) SetTotpPendingSecret(ctx context.Context, id int64, secret string, recoveryCodes []string) error {
@@ -1340,6 +1348,29 @@ func (s *Store) ListSharesByNode(ctx context.Context, nodeID int64) ([]*model.Sh
 
 func (s *Store) IncrementShareDownload(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1 WHERE id=?`, id)
+	return err
+}
+
+// ReserveShareDownload claims one download against the cap in a single
+// statement, so overlapping requests cannot all pass a check that each of them
+// read before any of them wrote. False = the cap is already spent.
+func (s *Store) ReserveShareDownload(ctx context.Context, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count + 1
+		WHERE id=? AND (max_downloads IS NULL OR download_count < max_downloads)`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ReleaseShareDownload hands a reserved slot back, never below zero.
+func (s *Store) ReleaseShareDownload(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE shares SET download_count = download_count - 1
+		WHERE id=? AND download_count > 0`, id)
 	return err
 }
 
@@ -1783,7 +1814,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1)`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,'')`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
@@ -1792,7 +1823,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 	var recoveryJSON string
 	var providerID sql.NullInt64
 	var enabled int
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1

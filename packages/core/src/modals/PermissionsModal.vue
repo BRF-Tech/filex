@@ -7,6 +7,7 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
+import { shareCliCommand } from '../lib/shareCli';
 
 const props = defineProps<{
   api: FileApi;
@@ -95,6 +96,24 @@ const maxDlOptions = [
   { v: 10, l: L('10 indirme', '10 downloads') },
   { v: 25, l: L('25 indirme', '25 downloads') },
 ];
+
+// ⚠ The one-line curl went missing the same way the download cap did: it was
+// part of the old standalone share dialog, and link creation moved here
+// without it. A share link is regularly made FOR a server ("pull this onto the
+// box"), and that reader has no browser — so the command comes back, built by
+// the shared helper both surfaces use.
+const shareCli = computed(() =>
+  shareCliCommand(
+    shareResult.value
+      ? {
+          url: shareResult.value.url,
+          pin: shareResult.value.pin,
+          filename: pathParts.value.name,
+          isDir: !!props.isDir,
+        }
+      : null,
+  ),
+);
 
 // ── file-drop (public upload link) state ──
 const dropPwd = ref(false);
@@ -630,22 +649,22 @@ async function nativeShare(body: { title: string; text: string }) {
                 <input type="checkbox" v-model="sharePwd" />
                 {{ L('PIN ile koru', 'Protect with a PIN') }}
               </label>
-              <label class="fx-perm-expiry">
+              <label class="fx-perm-field">
                 <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
                 <select v-model.number="shareExpiry" class="fx-perm-sel fx-perm-sel--sm">
                   <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                 </select>
               </label>
-              <label class="fx-perm-expiry">
+              <label class="fx-perm-field">
                 <span class="fx-perm-muted">{{ L('İndirme limiti', 'Download limit') }}</span>
                 <select v-model.number="shareMaxDl" class="fx-perm-sel fx-perm-sel--sm">
                   <option v-for="o in maxDlOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                 </select>
               </label>
-              <button class="fx-perm-btn fx-perm-btn--primary" :disabled="shareBusy" @click="createLink">
-                {{ L('Bağlantı oluştur', 'Create link') }}
-              </button>
             </div>
+            <button class="fx-perm-btn fx-perm-btn--primary fx-perm-create" :disabled="shareBusy" @click="createLink">
+              {{ L('Bağlantı oluştur', 'Create link') }}
+            </button>
 
             <div v-if="shareErr" class="fx-perm-warn">{{ shareErr }}</div>
 
@@ -661,6 +680,17 @@ async function nativeShare(body: { title: string; text: string }) {
                 <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareResult.pin, 'sharepin')">
                   {{ copied === 'sharepin' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
                 </button>
+              </div>
+
+              <!-- one-line download command, for pulling the file onto a server -->
+              <div class="fx-perm-cli">
+                <span class="fx-perm-clilabel">{{ L('Komut satırı', 'Command line') }}</span>
+                <div class="fx-perm-clirow">
+                  <code class="fx-perm-clicmd" :title="shareCli">{{ shareCli }}</code>
+                  <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareCli, 'sharecli')">
+                    {{ copied === 'sharecli' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+                  </button>
+                </div>
               </div>
 
               <!-- send by email (one or more, comma/space separated) -->
@@ -708,16 +738,16 @@ async function nativeShare(body: { title: string; text: string }) {
                 <input type="checkbox" v-model="dropPwd" />
                 {{ L('PIN ile koru', 'Protect with a PIN') }}
               </label>
-              <label class="fx-perm-expiry">
+              <label class="fx-perm-field">
                 <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
                 <select v-model.number="dropExpiry" class="fx-perm-sel fx-perm-sel--sm">
                   <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                 </select>
               </label>
-              <button class="fx-perm-btn fx-perm-btn--primary" :disabled="dropBusy" @click="createDropLink">
-                {{ L('Bağlantı oluştur', 'Create link') }}
-              </button>
             </div>
+            <button class="fx-perm-btn fx-perm-btn--primary fx-perm-create" :disabled="dropBusy" @click="createDropLink">
+              {{ L('Bağlantı oluştur', 'Create link') }}
+            </button>
 
             <button type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-advtoggle" @click="dropShowAdv = !dropShowAdv">
               {{ dropShowAdv ? L('Gelişmiş ▲', 'Advanced ▲') : L('Gelişmiş ▼', 'Advanced ▼') }}
@@ -904,16 +934,35 @@ async function nativeShare(body: { title: string; text: string }) {
 .fx-perm-invite-row { display: flex; gap: 8px; align-items: stretch; }
 .fx-perm-invite-row .fx-perm-btn--primary { flex: 1; }
 
-/* share result */
-.fx-perm-share-opts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.fx-perm-expiry { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
-.fx-perm-share-opts .fx-perm-btn--primary { margin-left: auto; }
+/* share options + result
+   ⚠ These options used to be one wrapping flex row with the primary button
+   pushed to its right end by `margin-left: auto`. That works with two controls
+   and breaks with three: at the modal's 520px the row wraps and the button
+   drops onto a line of its own, right-aligned and looking dislodged — which is
+   exactly what adding the download limit did. A two-column grid of fields with
+   the action underneath holds its shape whatever we add next. */
+.fx-perm-share-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: end; }
+.fx-perm-share-opts > .fx-perm-check { grid-column: 1 / -1; }
+.fx-perm-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
+.fx-perm-field .fx-perm-sel { width: 100%; }
+.fx-perm-create { width: 100%; margin-top: 10px; }
+@media (max-width: 380px) { .fx-perm-share-opts { grid-template-columns: 1fr; } }
 .fx-perm-result { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--fe-border); }
 .fx-perm-linkrow { display: flex; gap: 8px; align-items: center; }
 .fx-perm-link { color: var(--fe-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-decoration: none; }
 .fx-perm-link:hover { text-decoration: underline; }
 .fx-perm-pin { margin: 8px 0 0; font-size: 13px; color: var(--fe-text); display: flex; align-items: center; gap: 8px; }
 .fx-perm-pin code, .fx-perm-reveal code { font-family: var(--fe-font-mono, monospace); background: var(--fe-bg-hover); padding: 1px 6px; border-radius: 5px; }
+/* one-line curl for the fresh link */
+.fx-perm-cli { margin-top: 10px; }
+.fx-perm-clilabel { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fe-text-muted); margin-bottom: 4px; }
+.fx-perm-clirow { display: flex; gap: 8px; align-items: center; }
+.fx-perm-clicmd {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--fe-font-mono, monospace); font-size: 12px;
+  background: var(--fe-bg-hover); color: var(--fe-text);
+  padding: 6px 8px; border-radius: var(--fe-radius-sm, 7px);
+}
 .fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
 .fx-perm-mailrow .fx-perm-input { flex: 1; }
 .fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }

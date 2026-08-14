@@ -105,8 +105,32 @@ func (s *Service) Resolve(ctx context.Context, token, pin string) (*model.Share,
 
 // IncrementDownload bumps the counter — caller decides whether to call
 // before or after streaming the file.
+//
+// ⚠ Not the cap's enforcement point. Serving first and counting afterwards
+// leaves a window in which every concurrent request reads the same
+// pre-download count and is waved through: measured on fm.brf.sh, a link
+// capped at ONE download handed three complete files to three overlapping
+// clients. Anything that is about to hand bytes to a visitor must call
+// ReserveDownload instead.
 func (s *Service) IncrementDownload(ctx context.Context, id int64) error {
 	return s.store.IncrementShareDownload(ctx, id)
+}
+
+// ReserveDownload claims one download against the link's cap BEFORE the bytes
+// are served, and reports whether it got one. False means the cap is spent and
+// the caller must serve nothing.
+//
+// The context is detached from the request on purpose: the claim is the record
+// that a file was handed out, and a client that hangs up mid-request must not
+// be able to make that record disappear.
+func (s *Service) ReserveDownload(ctx context.Context, id int64) (bool, error) {
+	return s.store.ReserveShareDownload(context.WithoutCancel(ctx), id)
+}
+
+// ReleaseDownload returns a reserved slot. Call it ONLY when the serve failed
+// before any byte reached the client — a partial download is still a download.
+func (s *Service) ReleaseDownload(ctx context.Context, id int64) error {
+	return s.store.ReleaseShareDownload(context.WithoutCancel(ctx), id)
 }
 
 // IncrementUpload bumps a drop link's received-file counter by n. Feeds the

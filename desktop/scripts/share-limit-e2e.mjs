@@ -116,6 +116,23 @@ check('the server stored the link', !!stored, `${rows.length} kayıt`);
 check('…with max_downloads = 3', Number(stored?.max_downloads) === 3,
   `max_downloads=${stored?.max_downloads ?? 'null'} — a control that does not reach the API is decoration`);
 
+// ── and now the part this suite used to skip ─────────────────────────
+// ⚠ "the server stored 3" is not "the link hands out 3". It was stored
+// correctly the whole time while the link served four: the cap was checked
+// against a counter bumped only after the bytes had left. Ask the link itself.
+if (stored?.url) {
+  let served = 0;
+  const codes = [];
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch(stored.url, { redirect: 'follow' });
+    const body = await res.text();
+    codes.push(res.status);
+    if (res.ok && body.includes('limit fixture')) served++;
+  }
+  check('the link serves exactly three files, not four', served === 3,
+    `${served} indirme · HTTP ${codes.join(',')}`);
+}
+
 // ── cleanup ──────────────────────────────────────────────────────────
 if (stored?.uuid) await api(`/api/files/share/${stored.uuid}`, { method: 'DELETE' }, adminToken);
 await api('/api/files/manager?q=delete', {

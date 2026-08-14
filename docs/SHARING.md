@@ -48,6 +48,31 @@ if requested, the one‑time PIN.
 | `expires_at` | Absolute expiry (RFC3339). |
 | `max_downloads` | Auto‑expire after N downloads. |
 
+**The download cap is exact.** A download is claimed against the cap *before*
+the bytes are served, so "3 downloads" hands out three files even when several
+people click at once, or when a large transfer is still running as the next one
+starts. (It used to be counted afterwards, so every request that began inside
+that window read the same pre-download count and was waved through: measured on
+a live instance, a link capped at ONE download served three complete files to
+three overlapping clients.) A serve that fails before a single byte leaves
+gives its slot back; a transfer the visitor abandons half-way has spent one.
+
+Each real byte-serve counts once: the file itself, a folder's "download all"
+ZIP, and a single file fetched from a shared folder's browse page. The gallery
+thumbnails on that page, the ZIP progress poll and the "preparing…" page do not.
+
+**Command line.** The dialog also shows a one-line `curl` for the finished link
+— a share is often made *for a server*, and that reader has no browser:
+
+```bash
+curl -fSL -o 'q3.pdf' 'https://files.example.com/s/<token>?pin=12345678'
+```
+
+`-L` matters: an S3-backed instance answers with a redirect to a presigned URL,
+and without it curl saves the redirect instead of the file. For a folder link
+the command targets `?zip=wait`, which blocks until the archive is built and
+then streams it.
+
 **Metadata** (no PIN needed): `GET /api/files/share/{token}` →
 `requires_pin, expires_at, download_count, max_downloads, downloads_remaining,
 filename, size, mime, is_directory`.
