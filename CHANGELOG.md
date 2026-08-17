@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-08-17
+
+Packaging only — the server is identical to 0.20.1. It exists because the
+desktop CI job that 0.20.1 introduced had two faults, and both are the kind
+that produce a package nobody ever receives:
+
+- **The upload ran before the release existed.** The job built a 125 MB
+  AppImage and an 87 MB `.deb` and attached neither, because `gh release
+  upload` needs the GitHub Release that goreleaser creates in a different job.
+- **The version came from `desktop/package.json`, not the tag.** That file is
+  edited by hand and still said 0.20.0, so `latest.yml` — the auto-update feed
+  — would have advertised 0.20.0. An app already on 0.20.0 would have fetched
+  it, compared equal, and reported itself up to date for good.
+
 ## [0.20.1] - 2026-08-17
 
 ### Fixed
