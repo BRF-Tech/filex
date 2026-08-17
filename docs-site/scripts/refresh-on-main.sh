@@ -20,9 +20,22 @@
 # only ever changes the Releases page. That is deliberate: a cron that pulled a
 # branch could silently republish older documentation.
 #
+# Cron hands this script NO PATH at all (root's crontab sets none, and this
+# cron does not supply a default). bash then falls back to its compiled-in
+# search path, so `node` and `npx` are found — but the `sh -c` that npx spawns
+# for the binary is dash, which inherits the empty PATH and answers
+# "vitepress: not found". That is why the site had never rebuilt from cron
+# (137 identical failures between 2026-08-11 and 2026-08-17, every publish in
+# that window was a human running this by hand). PATH is therefore set here,
+# explicitly, and vitepress is invoked through its own bin — no npx.
+#
 # Exit codes: 0 nothing to do / published · 1 build or deploy failed.
+# A failure also posts to notify.example.com (group `infra`) when the token file
+# exists, because a cron that only writes to a log fails silently for a week.
 
 set -euo pipefail
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
 SRC_DIR=/root/filex-docs-src
 SITE_DIR="$SRC_DIR/docs-site"
@@ -32,12 +45,26 @@ SLUG=filex-docs
 ZIP=/root/filex-docs-dist.zip
 STAMP=/root/.filex-docs-releases.sha256
 MIN_FILES=30
+NOTIFY_URL="${NOTIFY_URL:-https://notify.example.com/api/notify/v1/send}"
+NOTIFY_TOKEN_FILE="${NOTIFY_TOKEN_FILE:-/root/.notify-token}"
 
 log() { echo "[$(date -Is)] $*"; }
-fail() { log "FAILED: $*"; exit 1; }
+notify_fail() {
+  [ -r "$NOTIFY_TOKEN_FILE" ] || return 0
+  local msg
+  msg=$(printf '%s' "$1" | tr '"\\' "''" | tr -d '\n\r' | cut -c1-600)
+  curl -sS --max-time 20 -X POST "$NOTIFY_URL" \
+    -H "Authorization: Bearer $(cat "$NOTIFY_TOKEN_FILE")" \
+    -H 'Content-Type: application/json' \
+    -H 'User-Agent: filex-docs-refresh/1.0' \
+    -d "{\"group\":\"infra\",\"severity\":\"danger\",\"title\":\"[main] docs.filex.sh yenilenemedi\",\"message\":\"filex-docs-refresh.sh: ${msg}. Site eski sürümü göstermeye devam ediyor; /var/log/filex-docs-refresh.log\",\"source\":\"filex-docs-refresh\"}" \
+    >/dev/null 2>&1 || log "notify POST failed"
+}
+fail() { log "FAILED: $*"; notify_fail "$*"; exit 1; }
 
 [ -d "$SITE_DIR" ] || fail "source snapshot missing: $SITE_DIR"
-[ -d "$SITE_DIR/node_modules/vitepress" ] || fail "vitepress not installed in $SITE_DIR (run npm install there)"
+VITEPRESS="$SITE_DIR/node_modules/.bin/vitepress"
+[ -x "$VITEPRESS" ] || fail "vitepress not installed in $SITE_DIR (run npm install there)"
 
 log "refresh start (script sha256: $(sha256sum "$0" | cut -c1-12))"
 
@@ -52,6 +79,12 @@ fi
 
 after="$(sha256sum "$PAGE" | awk '{print $1}')"
 
+# The generator refuses to write an empty page when GitHub is unreachable, but a
+# reachable GitHub that answers an empty array still yields a page with no
+# releases on it (seen 2026-08-17 17:25 and 18:25). Never publish that.
+listed=$(grep -c '^## v[0-9]' "$PAGE" || true)
+[ "$listed" -ge 1 ] || fail "RELEASES.md lists $listed releases — refusing to publish an empty Releases page"
+
 if [ "$after" = "$before" ]; then
   if [ "${1:-}" != "--force" ]; then
     log "no new release — RELEASES.md unchanged, nothing published"
@@ -62,7 +95,7 @@ else
   log "RELEASES.md changed (${before:-none} -> $after) — rebuilding the site"
 fi
 
-if ! npx vitepress build > /tmp/filex-docs-build.log 2>&1; then
+if ! "$VITEPRESS" build > /tmp/filex-docs-build.log 2>&1; then
   tail -30 /tmp/filex-docs-build.log
   fail "vitepress build"
 fi
@@ -71,7 +104,7 @@ fi
 [ -f "$DIST_DIR/RELEASES.html" ] || fail "build produced no RELEASES.html"
 count=$(find "$DIST_DIR" -type f | wc -l)
 [ "$count" -ge "$MIN_FILES" ] || fail "build produced only $count files (expected >= $MIN_FILES)"
-log "build ok — $count files"
+log "build ok — $count files, $listed releases listed"
 
 rm -f "$ZIP"
 ( cd "$DIST_DIR" && zip -qr "$ZIP" . )

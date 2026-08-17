@@ -21,6 +21,12 @@
  *   API unreachable AND no cache at all               → exit 1. Publishing an
  *     empty "Releases" page is worse than failing the build, so this is the one
  *     case that stops it. Cannot happen once data/releases.json is committed.
+ *   API answers 200 with an EMPTY list while the cache has releases → treated
+ *     exactly like "unreachable": keep the cache, loud banner, exit 0. GitHub
+ *     did this twice on 2026-08-17 (17:25 and 18:25) and the generator wrote a
+ *     Releases page with nothing on it — only a broken build kept it off the
+ *     site. A published repository does not lose all of its releases at once;
+ *     an empty answer is an outage, not news.
  *
  * Nothing here is invented. Bullet text comes from the commit subjects GitHub
  * puts in the release body; the optional one-paragraph summaries come from
@@ -491,10 +497,18 @@ async function main() {
   } else {
     try {
       const raw = await fetchReleases()
-      releases = raw
+      const fetched = raw
         .filter((r) => !r.draft && r.tag_name)
         .map(normalise)
         .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+      const cachedCount = cached && Array.isArray(cached.releases) ? cached.releases.length : 0
+      if (fetched.length === 0 && cachedCount > 0) {
+        throw new Error(
+          `GitHub answered 200 with an empty release list while the cache holds ${cachedCount}` +
+            ' — an outage, not a repository that lost every release'
+        )
+      }
+      releases = fetched
       console.log(`[releases] fetched ${releases.length} releases from ${REPO}`)
     } catch (err) {
       stale = true
