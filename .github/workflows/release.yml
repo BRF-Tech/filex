@@ -189,6 +189,20 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: pnpm -r --filter='./packages/*' build
+      # ⚠⚠ The tag is the version, not desktop/package.json. That file is
+      # maintained by hand and was still on 0.20.0 while this workflow built
+      # v0.20.1 — which would have stamped `latest.yml` with 0.20.0, so an app
+      # already on 0.20.0 would read the feed, compare equal, and report itself
+      # up to date forever. The package would have been built, published, and
+      # invisible.
+      - name: Stamp the version from the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          cd desktop
+          npm version "$VER" --no-git-tag-version --allow-same-version
+          node -e "console.log('desktop version =', require('./package.json').version)"
       - name: Build installer
         run: pnpm --filter ./desktop run ${{ matrix.script }}
       # Listed before uploading so a build that produced nothing is visible in
