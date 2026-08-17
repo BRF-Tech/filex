@@ -14,6 +14,7 @@ import {
   buildGuide,
   buildWebdavGuide,
   guideProtocols,
+  GUIDE_NAMES,
   hostOf,
   isPlainHttp,
   type GuideContext,
@@ -99,12 +100,23 @@ describe('buildWebdavGuide', () => {
 });
 
 describe('the registry', () => {
-  it('resolves a protocol to its builder, and is honest about the rest', () => {
-    expect(guideProtocols()).toContain('webdav');
-    expect(buildGuide('webdav', ctx, t)?.id).toBe('webdav');
-    // S3 and SFTP arrive as a builder each — until then, null, not a
-    // half-rendered page.
-    expect(buildGuide('s3', ctx, t)).toBeNull();
+  // ⚠ The invariant is that the PICKER and the BUILDERS agree. GUIDE_NAMES is
+  // what a user can choose; a name with no builder behind it renders a chosen
+  // protocol as an empty panel, which reads as "filex cannot do this" rather
+  // than as a missing page. Asserting the two sets match catches that at the
+  // moment a protocol is added to one and not the other — which is how this
+  // test came to assert that S3 returns null two releases after S3 shipped.
+  it('has a builder behind every protocol the picker offers', () => {
+    const offered = Object.keys(GUIDE_NAMES).sort();
+    expect(guideProtocols().sort()).toEqual(offered);
+    for (const id of offered) {
+      expect(buildGuide(id, ctx, t)?.id, `${id} has no builder`).toBe(id);
+    }
+  });
+
+  it('is honest about a protocol it does not know', () => {
+    // null, not a half-rendered page.
+    expect(buildGuide('gopher', ctx, t)).toBeNull();
   });
 });
 
