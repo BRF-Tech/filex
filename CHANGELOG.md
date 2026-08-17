@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-08-17
+
+### Fixed
+
+- **A host name in `FILEX_FTPS_PUBLIC_HOST` stopped the FTPS listener.** The
+  setting is documented as "the address to advertise for passive connections",
+  so a host name is the obvious value — and it made FTPS refuse to start with
+  `invalid passive IP`, while `/healthz` answered 200 and every other endpoint
+  came up. One protocol was simply absent, and the only trace was a single
+  line in the startup log. A name is now resolved once at startup; a literal
+  address still passes through, and empty still means "answer with the control
+  connection's own address". The two remaining refusals name the setting and
+  the fix, because the old message named neither.
+
+### Changed
+
+- **Desktop packages are built on every tag.** They were produced by hand,
+  which is why they drifted: 0.20.0 shipped a server whose headline feature
+  was the protocol endpoints while the installed desktop app was still 0.18.2,
+  so the Connections and Tokens screens did not exist for anyone who had it.
+  Windows and Linux build in CI and attach to the release. macOS is
+  deliberately absent until there is a Developer ID certificate — an unsigned
+  build is refused by Gatekeeper with a message that reads like a corrupt
+  download.
+
 ## [0.20.0] - 2026-08-17
 
 ### Added

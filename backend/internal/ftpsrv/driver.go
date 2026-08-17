@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
+	"strings"
 	"sync"
 
 	ftpserver "github.com/fclairamb/ftpserverlib"
@@ -27,9 +30,13 @@ type driver struct {
 // GetSettings describes the endpoint to the library.
 func (d *driver) GetSettings() (*ftpserver.Settings, error) {
 	c := d.srv.cfg
+	host, err := passiveAddress(c.PublicHost)
+	if err != nil {
+		return nil, err
+	}
 	return &ftpserver.Settings{
 		ListenAddr: c.Addr,
-		PublicHost: c.PublicHost,
+		PublicHost: host,
 		Banner:     bannerOr(c.Banner),
 		PassiveTransferPortRange: &ftpserver.PortRange{
 			Start: c.PassivePortMin,
@@ -150,4 +157,44 @@ func principalOf(cd ftpserver.ClientDriver) *protocolauth.Principal {
 		return f.principal
 	}
 	return nil
+}
+
+// passiveAddress turns whatever the operator put in FILEX_FTPS_PUBLIC_HOST
+// into the literal IPv4 address passive replies have to carry.
+//
+// ⚠⚠ The PASV reply is a dotted quad on the wire — the protocol has no room
+// for a name — and the library rejects anything else with "invalid passive
+// IP", which stops the listener with a message that names neither the setting
+// nor the fix. The setting is called PUBLIC_HOST and is documented as "the
+// address the client would use", so a HOST NAME is the obvious thing to put
+// there, and putting it there used to mean FTPS silently never started while
+// the rest of the server came up healthy.
+//
+// Resolving it here means the natural value works. An address that is already
+// a literal is passed through untouched, and an empty value keeps the
+// library's own default (answer with the control connection's local address).
+func passiveAddress(publicHost string) (string, error) {
+	h := strings.TrimSpace(publicHost)
+	if h == "" {
+		return "", nil
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		// ⚠ An IPv6 literal cannot be advertised in a PASV reply at all; the
+		// modern reply (EPSV) carries only a port and needs no address, so the
+		// setting is meaningless there rather than merely wrong.
+		if ip.To4() == nil {
+			return "", fmt.Errorf("ftpsrv: public host %q is IPv6; PASV can only advertise an IPv4 address", h)
+		}
+		return h, nil
+	}
+	ips, err := net.LookupIP(h)
+	if err != nil {
+		return "", fmt.Errorf("ftpsrv: cannot resolve public host %q: %w (an IPv4 address is also accepted)", h, err)
+	}
+	for _, ip := range ips {
+		if v4 := ip.To4(); v4 != nil {
+			return v4.String(), nil
+		}
+	}
+	return "", fmt.Errorf("ftpsrv: public host %q has no IPv4 address; PASV cannot advertise an IPv6 one", h)
 }
