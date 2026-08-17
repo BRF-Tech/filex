@@ -77,6 +77,12 @@ var publicText = map[string]map[string]string{
 		"zip_hint_b":  "buraya tıklayın",
 		"zip_hint_c":  ".",
 
+		// Prepared local copy for a big file on slow storage (filecache)
+		"cache_title":   "İndirme hazırlanıyor…",
+		"cache_heading": "İndirme hazırlanıyor…",
+		"cache_sub":     "%s — bu dosya yavaş bir depoda; yerel bir kopyası hazırlanıyor.",
+		"cache_hint":    "Kopya hazır olduğunda indirme kendiliğinden başlar. Bu sayfayı açık bırakabilirsiniz.",
+
 		// Shared folder listing
 		"folder_title_suffix": "paylaşılan klasör",
 		"folder_counts":       "%d klasör · %d dosya",
@@ -115,6 +121,12 @@ var publicText = map[string]map[string]string{
 		"zip_hint_a":  "The download starts on its own when it is ready. If it does not, ",
 		"zip_hint_b":  "click here",
 		"zip_hint_c":  ".",
+
+		// Prepared local copy for a big file on slow storage (filecache)
+		"cache_title":   "Preparing your download…",
+		"cache_heading": "Preparing your download…",
+		"cache_sub":     "%s — this file lives on slow storage, so a local copy is being prepared.",
+		"cache_hint":    "The download starts on its own once the copy is ready. You can leave this page open.",
 
 		"folder_title_suffix": "shared folder",
 		"folder_counts":       "%d folders · %d files",

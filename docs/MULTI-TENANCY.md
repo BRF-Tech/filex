@@ -16,8 +16,8 @@ primitives:
 
 - `confine.Root` — server-side path jail, cannot be bypassed by the client.
 - per-storage RBAC + item grants.
-- scoped API tokens — work.brf.sh already runs a hand-rolled version of this
-  (each project confined to `s3-test://projeler/<proje>`).
+- scoped API tokens — a downstream application already runs a hand-rolled
+  version of this, confining each of its projects to its own prefix.
 
 Native multi-tenancy makes that a first-class, host-resolved layer.
 
@@ -223,7 +223,7 @@ are unchanged.
 ## 11. Tenant lifecycle
 
 - **Create (provisioning):** super-admin API → provider row + first admin +
-  optional default storage (mirror work.brf.sh `TenantCreated`/provisioner).
+  optional default storage (mirroring a `TenantCreated` provisioner hook).
 - **Suspend:** disable login, keep data (billing/hold).
 - **Delete:** cascade — users, storages (nodes/shares/grants/sync_runs/thumbs
   inherit via storage), tokens, audit. Get the cascade order right or you orphan

@@ -7,6 +7,13 @@ file manager. Thin wrapper around `<filex-explorer>` (the
 `@brftech/filex` Web Component) — gives you proper React props and
 camelCased event handlers via `@lit/react`'s `createComponent`.
 
+> ⚠ This package wraps the **explorer** only. filex's other surface — the
+> connections panel, where storages are added and the credentials for reaching
+> the server over S3/SFTP/FTPS/NFS/WebDAV are minted — ships as
+> `<filex-connections>` in [`@brftech/filex`](https://www.npmjs.com/package/@brftech/filex)
+> and is a plain custom element: render it directly in JSX and set `config` on
+> the ref, exactly as you would any non-React element.
+
 ## Install
 
 ```bash

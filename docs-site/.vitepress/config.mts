@@ -29,7 +29,22 @@ export default defineConfig({
   base: '/',
   srcDir: '../docs',
   // BRF-internal operational docs — kept in the repo, not published on the site.
-  srcExclude: ['DEPLOY_BRF.md', 'MIGRATION_FISHAPP.md'],
+  // ⚠ Excluded, not merely unlinked. A page VitePress builds is a page the
+  // world can reach by URL and a search engine can index — leaving one out of
+  // the sidebar hides it from readers who use the sidebar and from nobody else.
+  //
+  //   DEPLOY_BRF / MIGRATION_FISHAPP — one deployment's runbooks, with real
+  //     hostnames and paths in them.
+  //   CLOUD — its own first line says "preparation skeleton only, NOT a live
+  //     service" and "do not launch a hosted cloud offering yet". Publishing it
+  //     on the product's docs site announces a service that does not exist.
+  //   handovers/** — ⚠⚠ working notes between maintainers, written on the
+  //     assumption nobody outside reads them: private hostnames, internal
+  //     board card numbers, named people and undecided questions. A GLOB, not
+  //     a list, because the next handover must be excluded by default rather
+  //     than by somebody remembering to add it. Measured: the v0.20.0 build
+  //     was serving one at /handovers/2026-08-14-write-path-and-slow-storage.
+  srcExclude: ['DEPLOY_BRF.md', 'MIGRATION_FISHAPP.md', 'CLOUD.md', 'handovers/**'],
   // Example URLs in the docs (dev-server addresses). Real links stay checked.
   ignoreDeadLinks: [/^https?:\/\/localhost/],
 
@@ -64,6 +79,19 @@ export default defineConfig({
         ]
       },
       {
+        // ⚠ Its own group rather than an item under Features: filex being
+        // reachable AS S3/SFTP/FTPS/NFS is a second way to USE the product, not
+        // a feature of the web UI, and somebody looking for "how do I point
+        // rclone at this" does not read a Features list to find it.
+        text: 'Without a browser',
+        collapsed: false,
+        items: [
+          { text: 'Protocols — S3 · SFTP · FTPS · NFS', link: '/PROTOCOLS' },
+          { text: 'WebDAV', link: '/WEBDAV' },
+          { text: 'filex mount', link: '/PROTOCOLS#filex-mount' }
+        ]
+      },
+      {
         text: 'Apps',
         collapsed: false,
         items: [
@@ -77,9 +105,10 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: 'Storage', link: '/STORAGE' },
+          { text: 'Uploads & resume', link: '/UPLOADS' },
+          { text: 'Quotas', link: '/QUOTAS' },
           { text: 'Search', link: '/SEARCH' },
           { text: 'Sharing & file requests', link: '/SHARING' },
-          { text: 'WebDAV', link: '/WEBDAV' },
           { text: 'Thumbnails', link: '/thumbnails' },
           { text: 'Protection & Antivirus', link: '/PROTECTION' },
           { text: 'Trash & Versioning', link: '/TRASH-VERSIONING' },
@@ -108,6 +137,7 @@ export default defineConfig({
         collapsed: true,
         items: [
           { text: 'HTTP & component API', link: '/API' },
+          { text: 'Metrics (Prometheus)', link: '/METRICS' },
           { text: 'Architecture', link: '/ARCHITECTURE' },
           { text: 'Backend internals', link: '/BACKEND' },
           { text: 'Migration', link: '/MIGRATION' },

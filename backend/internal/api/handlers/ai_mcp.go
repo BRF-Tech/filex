@@ -14,6 +14,7 @@ import (
 	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -47,6 +48,8 @@ type AIMCP struct {
 	convertURL string
 	acl        *acl.Resolver
 	thumbs     *thumb.Pipeline
+	staged     *StagedUpload
+	body       *filebody.Resolver
 	handler    http.Handler
 }
 
@@ -57,6 +60,15 @@ func (h *AIMCP) AttachACL(r *acl.Resolver) { h.acl = r }
 // AttachThumbs wires the thumbnail pipeline so MCP tool writes dispatch
 // generation like manager uploads (nil = thumbnails skipped).
 func (h *AIMCP) AttachThumbs(p *thumb.Pipeline) { h.thumbs = p }
+
+// AttachStaged routes MCP tool writes above the chunk threshold through the
+// staging area, so an agent gets the same acknowledge-then-transfer behaviour
+// as the browser and the CLI (nil = synchronous writes).
+func (h *AIMCP) AttachStaged(s *StagedUpload) { h.staged = s }
+
+// AttachBody wires the byte-source resolver so MCP reads serve a file that is
+// still being transferred out of staging.
+func (h *AIMCP) AttachBody(b *filebody.Resolver) { h.body = b }
 
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
@@ -85,6 +97,8 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
 	ops.acl = h.acl
 	ops.thumbs = h.thumbs
+	ops.staged = h.staged
+	ops.body = h.body
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",

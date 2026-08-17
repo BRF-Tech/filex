@@ -55,6 +55,42 @@ import '@brftech/filex';
 The element is just a normal DOM custom element — Angular, Svelte,
 plain JS, no problem.
 
+### `<filex-connections>` — reaching the server without a browser
+
+The package registers a **second** element. filex can be spoken to as **S3**,
+**SFTP**, **FTPS**, **NFSv3** and **WebDAV**, and mounted with `filex mount`;
+this is where a user manages storages, mints the credential each protocol
+takes, and reads instructions built from *that* deployment rather than a
+template with angle brackets in it. It is the same component the filex admin
+panel and the filex desktop app render — there is no second form and no second
+set of instructions anywhere.
+
+```html
+<filex-connections></filex-connections>
+
+<script type="module">
+  import '@brftech/filex';
+  const el = document.querySelector('filex-connections');
+  el.initialTab = 'connect';           // 'storages' | 'connect'
+  el.setAttribute('closable', '');     // show a close button, emits `close`
+  el.config = {
+    apiBase: 'https://files.example.com',
+    auth: { kind: 'bearer', token: '<jwt>' },
+    locale: 'tr',
+  };
+  el.addEventListener('changed', () => refreshMyFileList());
+</script>
+```
+
+> ⚠⚠ Configure it through the `config` **property**, not attributes —
+> `el.config = { ...el.config, locale: 'tr' }`. `buildConfig` merges
+> `{...attributes, ...config}` and the config object wins, so an attribute is
+> only ever a fallback for a key the config does not carry. That exact mistake
+> shipped in v0.19.0: the shell went Turkish while the file list stayed
+> English, and the element reported `locale === 'tr'` the whole time.
+
+See [docs/PROTOCOLS.md](https://github.com/BRF-Tech/filex/blob/main/docs/PROTOCOLS.md).
+
 ## Attributes
 
 Simple attributes are auto-parsed into the underlying `config` prop:

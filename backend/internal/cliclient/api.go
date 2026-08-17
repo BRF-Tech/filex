@@ -136,7 +136,8 @@ func (c *Client) remoteIsDir(ctx context.Context, p RemotePath) bool {
 // folder (`docs://reports/` — trailing slash or an existing dir) or a
 // full target path (`docs://reports/renamed.pdf`); an existing remote
 // folder wins, otherwise the last segment becomes the uploaded filename.
-// The multipart body is piped, so large files never load into memory.
+// Nothing is ever buffered in memory, and a large file is resumable — see
+// uploadFile.
 func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePath, []byte, error) {
 	rp, err := ParseRemotePath(remote)
 	if err != nil {
@@ -160,10 +161,44 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 	return destDir.Join(name), raw, nil
 }
 
-// uploadFile streams one local file into destDir under name. The shared
-// core behind Upload and UploadTree — no destination probing here, the
+// uploadFile sends one local file into destDir under name. The shared core
+// behind Upload, UploadTree and `filex sync` — no destination probing here, the
 // caller already resolved destDir.
+//
+// Anything at or above StagedThreshold goes over the resumable staged protocol
+// (staged.go): the bytes land in filex's own staging area, the offset survives
+// a dropped connection, and a bookmark on disk lets the NEXT process continue
+// the same session. Small files keep the one-shot multipart POST, which is fine
+// for a 20 KB text file and is what every existing integration speaks.
+//
+// The decision lives here, in the one function all three commands call, rather
+// than in each command: `filex sync` is the case that matters most and it never
+// touches Upload at all.
 func (c *Client) uploadFile(ctx context.Context, destDir RemotePath, name, localPath string) ([]byte, error) {
+	fi, err := os.Stat(localPath)
+	if err != nil {
+		return nil, err
+	}
+	if th := c.stagedThreshold(); th > 0 && fi.Size() >= th {
+		raw, serr := c.uploadStaged(ctx, destDir, name, localPath, fi.Size(), fi.ModTime())
+		if serr == nil {
+			return raw, nil
+		}
+		if !errors.Is(serr, errStagedUnsupported) {
+			return nil, serr
+		}
+		// An older server, or one with no staging configured. Fall through —
+		// nothing has been sent yet, so the multipart POST still has the whole
+		// file to work with.
+	}
+	return c.uploadMultipart(ctx, destDir, name, localPath)
+}
+
+// uploadMultipart streams one file as a single multipart POST. The body is
+// piped, so large files never load into memory — but there is no resume: a
+// dropped connection costs the whole file. That is why anything large goes
+// through uploadStaged instead.
+func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, localPath string) ([]byte, error) {
 	f, err := os.Open(localPath)
 	if err != nil {
 		return nil, err

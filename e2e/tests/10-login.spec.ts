@@ -4,7 +4,7 @@ import { ADMIN_EMAIL, ADMIN_PASSWORD, loginAs, logout } from '../helpers/auth';
 test.describe('Login flow', () => {
   test('rejects invalid credentials', async ({ page }) => {
     await page.goto('/admin/login');
-    await page.getByLabel(/email/i).fill('admin@local');
+    await page.getByLabel(/e-?mail|kullanıcı adı/i).fill('admin@local');
     await page.getByLabel(/password|şifre/i).fill('definitely-wrong-password');
     // Exact name disambiguates the local form submit from the OIDC
     // 'Sign in with SSO (Keycloak)' button.

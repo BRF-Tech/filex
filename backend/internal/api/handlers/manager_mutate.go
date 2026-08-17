@@ -19,8 +19,12 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/throughput"
+	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -359,8 +363,6 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
 		return
 	}
-	mover, _ := drv.(storage.Mover)
-
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
 		if srcAdapter != "" && srcAdapter != current.Name {
@@ -377,7 +379,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Soft-delete inside `.filex-trash/` already? Hard delete this
-		// time (mirrors the origin app's "delete from trash = permanent").
+		// time (mirrors brf-mono's "delete from trash = permanent").
 		if strings.HasPrefix(srcRel, trashPrefix) {
 			if del, ok := drv.(storage.Deleter); ok {
 				if err := del.Delete(r.Context(), srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
@@ -403,10 +405,31 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item base: " + it.Path})
 			return
 		}
-		trashRel := fmt.Sprintf("%s/%d-%s__%s", trashPrefix, time.Now().Unix(), randHex6(), base)
+		// trash.Put is the shared implementation every delete surface uses
+		// (WebDAV, AI/REST, the async ops worker, and this one), so the same
+		// item deleted from any of them lands in the trash the same way.
+		out, terr := trash.Put(r.Context(), drv, srcRel)
+		trashed := terr == nil && out.Trashed
+		switch {
+		case trashed:
+			/* bag:b3 event */
+			writehook.OnFileTrashed(r.Context(), current.ID, normalizeDBPath(srcRel), base,
+				normalizeDBPath(out.Key), writehook.OriginManager)
 
-		if mover == nil {
-			// Driver can't move — fall back to hard delete (legacy).
+		case terr == nil && out.Missing:
+			// Source object already gone (stale index / out-of-band delete):
+			// drop the cache row and continue so one missing item doesn't
+			// fail the whole delete batch.
+			origClean := normalizeDBPath(srcRel)
+			origHash := pathkey.Hash(current.ID, origClean)
+			if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
+				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
+				h.removeFromIndex(r.Context(), existing.ID)
+			}
+			continue
+
+		case errors.Is(terr, trash.ErrUnsupported):
+			// Driver can neither move nor copy — fall back to hard delete.
 			if del, ok := drv.(storage.Deleter); ok {
 				if err := del.Delete(r.Context(), srcRel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 					writeJSON(w, mapDriverErr(err), map[string]string{"error": "delete: " + err.Error()})
@@ -415,26 +438,10 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			}
 			/* bag:b3 event */
 			writehook.OnFileDeleted(r.Context(), current.ID, normalizeDBPath(srcRel), base, writehook.OriginManager)
-		} else {
-			if err := mover.Move(r.Context(), srcRel, trashRel); err != nil {
-				if !errors.Is(err, storage.ErrNotFound) {
-					writeJSON(w, mapDriverErr(err), map[string]string{"error": "trash: " + err.Error()})
-					return
-				}
-				// Source object already gone (stale index / out-of-band delete):
-				// drop the cache row and continue so one missing item doesn't
-				// fail the whole delete batch.
-				origClean := normalizeDBPath(srcRel)
-				origHash := pathkey.Hash(current.ID, origClean)
-				if existing, err := h.Store.GetNodeByPath(r.Context(), current.ID, origHash); err == nil && existing != nil {
-					_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
-					h.removeFromIndex(r.Context(), existing.ID)
-				}
-				continue
-			}
-			/* bag:b3 event */
-			writehook.OnFileTrashed(r.Context(), current.ID, normalizeDBPath(srcRel), base,
-				normalizeDBPath(trashRel), writehook.OriginManager)
+
+		default:
+			writeJSON(w, mapDriverErr(terr), map[string]string{"error": "trash: " + terr.Error()})
+			return
 		}
 
 		// Update DB: store the original path in storage_key so Restore
@@ -451,12 +458,14 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			if existing.Type == model.NodeTypeDirectory {
 				subtreeIDs = h.collectSubtreeIDs(r.Context(), current.ID, existing.ID)
 			}
-			if mover != nil {
-				newClean := normalizeDBPath(trashRel)
+			if trashed {
+				newClean := normalizeDBPath(out.Key)
 				newHash := pathkey.Hash(current.ID, newClean)
 				_ = h.Store.SoftDeleteAndRetag(r.Context(), existing.ID, newClean, newHash, origClean)
 			} else {
-				_ = h.Store.SoftDeleteNode(r.Context(), existing.ID)
+				// Bytes are gone for good: drop the row instead of parking a
+				// trash entry whose Restore could never find anything.
+				_ = h.Store.HardDeleteNode(r.Context(), existing.ID)
 			}
 			h.removeFromIndex(r.Context(), existing.ID)
 			for _, cid := range subtreeIDs {
@@ -472,7 +481,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 
 // trashPrefix is the in-storage directory where soft-deleted files are
 // renamed to. Listings filter it out; trash.Service.Restore renames out.
-const trashPrefix = ".filex-trash"
+const trashPrefix = trash.Prefix
 
 // collectSubtreeIDs walks the live cached descendants of a directory node
 // (DFS via ListNodesByParent) and returns their ids — used to purge the
@@ -513,9 +522,12 @@ func randHex6() string {
 // vfUpload accepts multipart/form-data with one or more file[] parts
 // and writes each into the destination dir on the backing driver.
 //
-// Limits: 32 MiB in-memory body (per ParseMultipartForm); larger
-// uploads should use the chunked /api/files/upload/init flow which
-// hands out S3 presigned URLs directly to the browser.
+// Limits: 32 MiB in-memory body (per ParseMultipartForm), the rest spilled to
+// a temp file. This is the SMALL-FILE fast path and stays that way — every
+// client now sends anything above the chunk size over the staged protocol
+// (/api/files/upload/*, docs/UPLOADS.md), which is resumable and works on
+// every driver. The old presigned `/upload/init` flow is S3-only and no client
+// speaks it any more.
 func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	// Spilled multipart temp files outlive the response unless dropped here —
 	// see the note in AI.Upload. This is the browser upload path, so it is the
@@ -549,6 +561,30 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The ceiling applies here too. Large uploads reach the staged path, which
+	// checks at `begin`; this is the small-file path, and without a check a
+	// user could sail past their quota a few megabytes at a time. Checked once
+	// for the whole batch — refusing halfway through would leave some files
+	// written and some not.
+	var batch int64
+	for _, fh := range files {
+		batch += fh.Size
+	}
+	if err := h.checkQuota(r.Context(), batch); err != nil {
+		if errors.Is(err, quota.ErrQuotaExceeded) {
+			slog.Info("upload refused: quota",
+				slog.Int64("user", quotastore.OwnerFrom(r.Context())),
+				slog.Int64("size", batch))
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "quota exceeded",
+				"code":  "QUOTA_EXCEEDED",
+			})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
 	drv, err := h.StorageResolver(current.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver: " + err.Error()})
@@ -560,11 +596,14 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parentID, parentLookupErr := h.lookupDirID(r.Context(), current.ID, destRel)
+	// ⚠ ENSURE rather than look up: a destination whose directories have no
+	// node rows yet is the normal case for a first upload into a new folder,
+	// and giving up here used to mean the file never entered the catalogue.
+	parentID, parentLookupErr := h.ensureDirChain(r.Context(), current.ID, destRel)
 
 	for _, fh := range files {
-		name := path.Base(fh.Filename)
-		if name == "" || name == "." || name == "/" || strings.ContainsAny(name, "\\") {
+		name, nameOK := sanitizeUploadName(fh.Filename)
+		if !nameOK {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad upload filename"})
 			return
 		}
@@ -604,11 +643,16 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		started := time.Now()
 		if err := wr.Write(r.Context(), fullRel, src, fh.Size); err != nil {
 			_ = src.Close()
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
 			return
 		}
+		// The driver call, timed. Without this the write side of
+		// filex_transfer_bytes_total would count only staged uploads and
+		// silently under-report every small one.
+		throughput.Observe(current.ID, throughput.Write, fh.Size, time.Since(started))
 		_ = src.Close()
 
 		if parentLookupErr != nil {
@@ -739,6 +783,67 @@ func (h *Manager) lookupDirID(ctx context.Context, storageID int64, rel string) 
 	return &id, nil
 }
 
+// ensureDirChain makes sure every directory on the way to rel has a node row,
+// creating the ones that are missing, and returns the id of the deepest.
+//
+// ⚠⚠ This exists because looking a parent up and GIVING UP when it is missing
+// loses the file from the catalogue entirely. Measured 2026-08-16: uploading to
+// `main://newdir/a.txt` when `newdir` had no node row wrote the bytes to the
+// driver and created NO rows at all — the file was on disk, the subfolder
+// listing found it through the driver fallback, and the level above was empty.
+// In the explorer that is a folder somebody just uploaded into that does not
+// exist until the next sync run.
+//
+// The directories are real on the driver by the time this runs (the write went
+// through them), so creating the rows is recording what is there rather than
+// inventing anything. Idempotent: an existing row is reused, never duplicated.
+func (h *Manager) ensureDirChain(ctx context.Context, storageID int64, rel string) (*int64, error) {
+	rel = strings.Trim(normalizeDBPath(rel), "/")
+	if rel == "" {
+		return nil, nil
+	}
+	var parent *int64
+	built := ""
+	for _, segment := range strings.Split(rel, "/") {
+		if segment == "" {
+			continue
+		}
+		built = path.Join(built, segment)
+		clean := normalizeDBPath(built)
+		hash := pathkey.Hash(storageID, clean)
+		if existing, _ := h.Store.GetNodeByPath(ctx, storageID, hash); existing != nil {
+			id := existing.ID
+			parent = &id
+			continue
+		}
+		created, err := h.Store.CreateNode(ctx, &model.Node{
+			StorageID:  storageID,
+			ParentID:   parent,
+			Name:       segment,
+			Path:       clean,
+			PathHash:   hash,
+			StorageKey: clean,
+			Type:       model.NodeTypeDirectory,
+			SyncState:  model.SyncStateSynced,
+		})
+		if err != nil {
+			// A concurrent writer may have created it between the read and the
+			// write; re-reading is cheaper than a transaction and is the same
+			// answer.
+			if again, _ := h.Store.GetNodeByPath(ctx, storageID, hash); again != nil {
+				id := again.ID
+				parent = &id
+				continue
+			}
+			return nil, err
+		}
+		id := created.ID
+		parent = &id
+		h.indexNode(ctx, created)
+	}
+	return parent, nil
+}
+
 // walkDirID is the slow fallback path that uses ListNodesByParent step
 // by step (used when GetNodeByPath misses, e.g. directory created
 // outside the cache).
@@ -843,6 +948,27 @@ func mapDriverErr(err error) int {
 
 // normalizeDBPath canonicalises a relative path to the form sync.poll
 // stores in the nodes table: leading slash, no trailing slash, no `.`.
+// sanitizeUploadName is the ONE filename guard every upload surface uses:
+// vfUpload (browser multipart), IngestFile (public file-drop) and the staged
+// upload path. Keeping it in one place is the point — three copies of a path
+// guard is three chances to fix a hole in two of them.
+//
+// It reduces the client's filename to a basename and refuses the values that
+// would escape the destination directory once path.Join'ed. ".." is refused
+// explicitly: path.Base("..") is ".." and joining it walks OUT of the target
+// folder — the earlier inline copies of this check did not cover it.
+func sanitizeUploadName(raw string) (string, bool) {
+	name := path.Base(raw)
+	switch name {
+	case "", ".", "..", "/":
+		return "", false
+	}
+	if strings.ContainsAny(name, "\\") {
+		return "", false
+	}
+	return name, true
+}
+
 func normalizeDBPath(rel string) string {
 	rel = strings.Trim(rel, "/")
 	clean := path.Clean("/" + rel)
@@ -857,8 +983,8 @@ func normalizeDBPath(rel string) string {
 // EnsureDir first when writing into a freshly-created folder so the new file's
 // node links to the right parent.
 func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, filename string, src io.Reader, size int64) (*model.Node, error) {
-	name := path.Base(filename)
-	if name == "" || name == "." || name == "/" || strings.ContainsAny(name, "\\") {
+	name, ok := sanitizeUploadName(filename)
+	if !ok {
 		return nil, fmt.Errorf("bad filename: %q", filename)
 	}
 	drv, err := h.StorageResolver(st.ID)
@@ -870,10 +996,35 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 		return nil, storage.ErrUnsupported
 	}
 	fullRel := path.Join(destRel, name)
+	// The ceiling, before a byte is written. For the public drop link the
+	// account measured is the LINK CREATOR (quotastore.OwnerFrom), because
+	// theirs is the disk being filled — the uploader has no account at all.
+	if err := h.checkQuota(ctx, size); err != nil {
+		return nil, err
+	}
 	// A file named exactly like an existing subfolder would leave `X` and `X/…`
 	// side by side on an object store (storage.ErrKindConflict).
 	if err := storage.EnsureFileTarget(ctx, drv, fullRel); err != nil {
 		return nil, err
+	}
+
+	// Large body → filex's own staging, then a background transfer. The caller
+	// gets a listed node as soon as the bytes are safe here instead of waiting
+	// out a slow or distant driver. ErrStagingUnavailable (no staging dir, no
+	// ops queue) falls through to the synchronous write below, so an instance
+	// without staging behaves exactly as it did before.
+	if h.Staged.ShouldStage(size) {
+		node, serr := h.Staged.IngestStream(ctx, st.ID, fullRel, src, size, currentUserID(ctx), "")
+		if serr == nil {
+			return node, nil
+		}
+		if !errors.Is(serr, ErrStagingUnavailable) {
+			return nil, serr
+		}
+		// ⚠ Staging consumed nothing on the unavailable path (it refuses
+		// before touching src), so falling through here is safe. Any other
+		// error has already eaten part of the body and must NOT be retried
+		// synchronously — that would write a truncated file.
 	}
 
 	// Sniff the first 512 bytes for mime, then REWIND — see vfUpload for the
@@ -899,9 +1050,11 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 			body = src
 		}
 	}
+	started := time.Now()
 	if err := wr.Write(ctx, fullRel, body, size); err != nil {
 		return nil, err
 	}
+	throughput.Observe(st.ID, throughput.Write, size, time.Since(started))
 
 	clean := normalizeDBPath(fullRel)
 	hash := pathkey.Hash(st.ID, clean)
@@ -914,7 +1067,7 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 		}
 		return existing, nil
 	}
-	parentID, _ := h.lookupDirID(ctx, st.ID, path.Dir(clean))
+	parentID, _ := h.ensureDirChain(ctx, st.ID, path.Dir(clean))
 	node := &model.Node{
 		StorageID:  st.ID,
 		ParentID:   parentID,
@@ -960,7 +1113,7 @@ func (h *Manager) EnsureDir(ctx context.Context, st *model.Storage, rel string) 
 		id := existing.ID
 		return &id, nil
 	}
-	parentID, _ := h.lookupDirID(ctx, st.ID, path.Dir(clean))
+	parentID, _ := h.ensureDirChain(ctx, st.ID, path.Dir(clean))
 	node := &model.Node{
 		StorageID:  st.ID,
 		ParentID:   parentID,

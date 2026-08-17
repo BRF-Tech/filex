@@ -5,6 +5,293 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.20.0] - 2026-08-17
+
+### Added
+
+- **filex is now reachable as S3, SFTP, FTPS and NFSv3 — not only as HTTP.**
+
+  The rule this follows: *whatever filex can connect to, it must be connectable
+  as*. It could already use S3, SFTP, FTP and WebDAV as storages; now those
+  clients can point at filex itself. `rclone`, `restic`, `aws s3`, `mc`, `s3fs`,
+  OpenSSH, `sshfs`, WinSCP, FileZilla, `lftp`, `curl --ssl-reqd`, a scanner that
+  only ever learned FTP and a media player that only ever learned NFS all land
+  in the same tree — with the same RBAC grants, the same trash, the same quota,
+  the same search index and the same audit trail as the web UI, because every
+  protocol writes through one funnel.
+
+  Each has a credential you can revoke on its own (S3 access keys, SSH public
+  keys, API tokens, NFS export paths), and every one of them resolves its caller
+  through a single door, `internal/protocolauth`. ⚠ That door exists because of
+  a real incident: a protocol that authenticates outside the HTTP middleware
+  chain starts with **no tenant scope**, and "no scope" means "see everything" —
+  which is how a tenant admin who mapped `/dav` once got all ten tenants
+  read-write. It is now impossible to attach an identity and forget the scope,
+  because they arrive together or not at all.
+
+  ⚠ An account with **2FA enabled cannot use its password** on any of these.
+  None of these protocols has a channel for a second factor, so accepting the
+  password would make each of them a documented 2FA bypass; such an account
+  mints a token, a key or an access key instead.
+
+  See [docs/PROTOCOLS.md](docs/PROTOCOLS.md). The connection instructions are in
+  the app — *Connections → Connect* builds every command from the live
+  deployment, so what is on screen is what works.
+
+  - **S3** (`FILEX_S3`, on by default) — SigV4 verified by hand and checked
+    against the SDK's own signer; a bucket **is** a storage; ListObjectsV2 *and*
+    V1, delimiters, real ranges, composite ETags, `x-amz-meta-mtime`, multipart
+    on filex's staging area, the modern `x-amz-checksum-*` contract in header
+    *and* trailer form, aws-chunked bodies, and directory markers so `mkdir`
+    works over `s3fs`. Path-style and virtual-hosted addressing both work.
+  - **SFTP** (`FILEX_SFTP`, off by default, `:2022`) — password (a token) or a
+    registered public key, posix-rename, `statvfs` reporting your quota so `df`
+    is right, permission bits synthesised from your ACL level. ⚠ Only the `sftp`
+    subsystem is served; `exec` and `shell` are refused, because answering an
+    exec request is how a file server grows a command-execution surface.
+  - **FTPS** (`FILEX_FTPS`, off by default, `:2121`) — explicit TLS **mandatory**
+    on control *and* data, passive-only, ASCII conversion **off** (it rewrites
+    line endings, which on a file a client guessed wrong about is silent
+    corruption), `REST`/`APPE` resume.
+  - **NFSv3** (`FILEX_NFS`, off by default, `:2049`) — ⚠⚠ unencrypted, so LAN or
+    VPN only. NFSv3 cannot authenticate a request in a way filex can use, so the
+    identity is bound to the **export path**, which carries 32 bytes of entropy:
+    the path *is* the credential, the mount is pinned to one account, and the
+    uid/gid on each request is discarded rather than trusted.
+
+- **`filex mount`** — a remote filex server attached to a folder on this
+  machine, over the same HTTPS the browser uses. The only one of these that
+  works from anywhere: NFS needs a LAN, an SFTP mount needs sshfs or WinFsp
+  configured, this needs a URL and a token, and it reaches the server through
+  whatever proxy sits in between because underneath it is the REST API.
+
+  ⚠ **It is not a sync.** Nothing is copied but a bounded read cache, so it
+  opens one file out of a hundred thousand without downloading the rest;
+  `filex sync` is still the answer for having the files offline.
+
+  ⚠ Linux at first; Windows landed in the same release — see the next entry.
+
+- **`filex mount` on Windows** — a real drive letter (`filex mount Z:`), over the
+  same HTTPS as everywhere else, with the same permissions, trash and quota.
+  This is what replaces the SMB server: the thing people wanted from SMB was a
+  drive on Windows without installing anything unusual.
+
+  ⚠ It is still ONE binary. The objection that made this look impossible was
+  CGO — filex ships `CGO_ENABLED=0` everywhere — and cgofuse has a CGO-free path
+  on Windows that loads WinFsp's DLL at run time instead of linking it. WinFsp
+  (free, [winfsp.dev](https://winfsp.dev)) is installed once by the user; filex
+  neither ships nor fetches it.
+
+  ⛔ **macOS is not supported and the command refuses there**, rather than
+  appearing to work and doing nothing: macFUSE's Go binding needs a C toolchain
+  filex deliberately does not use, and its licence forbids a commercial program
+  from installing it. Use folder sync or the desktop app.
+
+- **API tokens can be minted from the connections surface** — in the admin
+  panel, the web explorer and the desktop app, from the same component.
+
+  ⚠ Three of the protocols take an API token as their password (FTPS, WebDAV,
+  `filex mount`) and their guides say so. Until now the only screen that could
+  make one was the admin panel's, so a normal user read the instruction and had
+  nowhere to follow it. The route itself was never restricted — only the UI was
+  missing, and being an admin hid that completely.
+
+- **SMB / CIFS storage driver** — a NAS, a Windows file server or a Samba box as
+  a filex storage. ⚠ The library choice was a licence decision: the maintained
+  fork pulls an **LGPL-3.0** dependency into filex's statically linked binary,
+  which would stop being satisfiable the day filex ships closed-source, so the
+  **BSD-2** upstream was used instead.
+
+- **Every account has a username**, and every surface accepts the e-mail **or**
+  the username. An `@` in an SSH or FTP login has to be quoted in most clients'
+  config files, which is what this is for.
+
+
+- **Prometheus metrics at `GET /metrics`**, behind the same admin gate as every
+  other operator endpoint (filex is routinely on the public internet, and the
+  exposition names storages, counts accounts and shows traffic shape). Staged
+  uploads in flight, bytes staged, commits, failures, chunk retries and aborts;
+  the staging sweeper's passes and removals; every guard refusal, labelled;
+  per-storage transfer duration and bytes; quota usage; and the Go runtime
+  metrics. Scrape config and the alerts worth having are in
+  **[docs/METRICS.md](docs/METRICS.md)**.
+
+- **`internal/throughput` — one rolling bytes/sec per storage.** Published as
+  `filex_storage_throughput_bytes_per_second` and read by
+  `internal/filecache` to decide whether a storage is slow enough to be worth
+  caching. Deliberately one signal with two consumers: a cache that measured
+  slowness its own way would disagree with the dashboard the operator is looking
+  at. `Rate` distinguishes "unknown" from "zero", because treating silence as
+  slowness would make every fresh boot behave like a NAS on a phone line.
+
+  It measures the time spent inside the driver's `Read` calls, not wall clock
+  across the transfer: a download is paced by whoever is downloading, so wall
+  clock would let one person on a bad connection mark a fast bucket slow for
+  everybody — and publish that as *storage* throughput on the dashboard.
+  `internal/filecache` keeps the policy (a measured-fast storage overrules an
+  operator's `slow: true` flag; nothing is decided on fewer than three reads
+  big enough to mean anything) and asks `throughput.StatAbove` for the rate and
+  the evidence behind it, rather than keeping samples of its own.
+
+- **The staging sweeper logs every pass**, including the ones that remove
+  nothing — a sweeper that only speaks when it deletes something is
+  indistinguishable from a sweeper that has stopped running, and this project
+  has already lost 29 GB to temp files nobody was watching. The in-flight and
+  staged-bytes gauges are re-measured against the directory on each pass, so a
+  restart cannot leave the dashboard lying.
+
+### Fixed
+
+- **On Windows, deleting a file you had just uploaded could fail with a 500.**
+  About three times in two hundred, measured. Deleting moves the file into
+  `.filex-trash/` with a rename, and on Windows a rename fails outright while
+  any handle is open on the file.
+
+  ⚠⚠ And the handle was often filex's own. Go opens files without
+  `FILE_SHARE_DELETE`, so the thumbnailer, the content indexer or a download in
+  flight blocked the rename of the very file they were reading — filex standing
+  on its own foot. A real-time virus scanner does the same on a freshly written
+  file and is outside anybody's control, so the holder cannot be removed, only
+  waited out; every one of them lets go in milliseconds. The local driver now
+  retries a rename or an unlink for up to a second while the filesystem says
+  the file is held, and only for that class of error — "no such file" is an
+  answer and still comes back immediately. Unix is unaffected: a rename there
+  succeeds while the file is open.
+
+- **Revoking a credential now reaches the session it already opened.** "Delete
+  the token" did what the operator asked and not what they meant: the token
+  could no longer be used to log in, and the SFTP session it had opened kept
+  reading and writing files. Same for disabling an account, suspending a tenant,
+  revoking an SSH key or taking away a grant — every one of them was true for
+  the next login and false for the connection in flight.
+
+  Every credential check happens once, at authentication. Over HTTP that is the
+  same as "on every request"; for a protocol where one authentication is
+  followed by hours of file operations — or, for an NFS mount, days — it is not.
+  Live sessions are now registered and re-checked every 30 seconds, and the ones
+  whose credential no longer resolves are cut: the connection is closed for SFTP
+  and FTPS, and marked for NFS, which has no connection to close. Deleting or
+  disabling a credential also kicks its sessions immediately. ⚠ The sweep is the
+  guarantee, not the kick — it is what covers the paths nobody wired: an admin
+  disabling an account, an expiry passing, a row edited in the database.
+
+  ⚠⚠ The quieter half of the same bug: the **grant set** was cached for the life
+  of the caller, so a permission removed at 09:00 kept serving files until the
+  user logged out. It now expires on the same TTL as the password cache — one
+  number, one answer to "when does it stop working".
+
+- **A folder grant was unreachable over SFTP, FTPS and NFS.** A grant is
+  per-folder, so a caller can hold viewer on `main/projects/acme` and nothing on
+  `main`. All three asked for viewer on the folder being *listed*, which refuses
+  the two levels above the grant — so `ls /main` answered "no such file" to a
+  user who had been granted a subfolder of it, and the folder they were actually
+  given could not be reached. Listing and stat now use the traversal rule the web
+  UI, `/dav` and the S3 listing always used; reading a file's bytes still
+  requires viewer on the file itself, so traversal never becomes access.
+
+- **`/dav` enforced no quota at all.** Every other write surface did — manager,
+  AI, ShareX, S3, SFTP, FTPS, NFS. A user at their ceiling could keep writing
+  indefinitely by mapping a drive, and because the bytes are counted *after* the
+  write, the number in the admin panel simply climbed past the limit. It is now
+  refused with **507 Insufficient Storage** before the upload starts.
+
+- **WebDAV locks survive a restart.** They lived in a map, so a deploy silently
+  forgot every one of them: a client that took a lock before the restart
+  presented a token that named nothing, its save failed with 412, and the server
+  would meanwhile have let somebody else lock the same file. The lock said
+  "exclusive" and stopped being true without telling anybody.
+
+- **An upload to a folder with no database row wrote the file and created no
+  rows at all.** Uploading to `main://newdir/a.txt` left the bytes on disk, the
+  subfolder listing found them through the driver fallback, and the level above
+  was **empty** — a folder you just uploaded into that did not exist until the
+  next sync run. It hit the web explorer, the CLI and the AI upload path equally.
+
+
+- **A folder share's ZIP no longer outlives the share.** The cache of
+  "download all" archives had exactly one cleanup — dropping *older signatures
+  of a folder that is still shared* — so when a share expired, was revoked or
+  ran out of downloads, its archive simply stayed. Measured on a live instance:
+  a 16.7 GB folder was shared for **eleven minutes**, the warmer read the whole
+  folder from S3 for **three hours** after the link had already died, wrote a
+  **15 GB** archive that was never downloaded once, and that file then went into
+  the backup and was mirrored to the disaster-recovery host three times over. A
+  disk cleaned from 96 % to 90 % was back at 99 % two days later.
+
+  Three changes, in order of what they save:
+
+  - **Every warmer pass sweeps.** Any `<node>-<sig>.zip` whose node has no
+    active folder share is deleted, along with the temp files of builds that
+    died with a restart (unclaimed, older than an hour). It reads the same
+    share listing the warmer builds from, so there is one definition of
+    "active"; it deletes nothing at all until that listing has succeeded once,
+    keeps the archives of nodes that are still shared, keeps files a build is
+    writing, and does not touch any name that is not one of its own.
+  - **A build stops when its share does.** The build still runs detached from
+    the request that started it — a downloader who hangs up must not kill an
+    archive other people are waiting for — but it now asks, during the walk and
+    during a single long file, whether the share still exists, and abandons the
+    build and its partial file when it does not. It refuses nothing: a live
+    share is built however large it is, and the on-demand path is untouched.
+  - **The cache moved out of the data directory** to `<data_dir>/cache/sharezips`
+    (existing archives are moved on first start). It is regenerable, and it was
+    sitting where every backup, rsync and restore would pick it up. Backup
+    guidance in [DEPLOYMENT.md](docs/DEPLOYMENT.md) and
+    [SHARING.md](docs/SHARING.md).
+
+- **Quota accounting was dead code, and nobody could have noticed.**
+  `quota.AddUsage` and `Store.SetNodeOwner` had **no callers anywhere in the
+  tree**: `users.usage_bytes` was never incremented, `GetNodeOwner` always
+  returned `nil`, and so the release at trash-purge — the one place it was
+  called — could never run either. Nothing was counted, so nothing was ever
+  refused. Measured on a real instance: with a **2 MiB** quota, an **8 MiB**
+  upload returned `200`, the bytes landed on disk, and `GET
+  /api/files/quota/me` still read `used_bytes: 0`.
+
+  The fix is one place, not nine: `internal/quotastore`, a `db.Store`
+  decorator over `CreateNode`, `UpdateNodeMeta` and `HardDeleteNode`. Every
+  write surface — browser upload, staged upload, staged ingest, WebDAV `PUT`,
+  the public file drop, ShareX, the AI/REST API, save-text, archive extract,
+  copy — reaches it through the store, so none of them carries quota code and a
+  path added later is counted the day it is written. The rules for overwrite,
+  move, trash, restore, copy and purge are written down in
+  **[docs/QUOTAS.md](docs/QUOTAS.md)**.
+
+  Two attribution holes turned up while wiring it, each a bug of its own:
+
+  - **WebDAV never put the authenticated account on the request context.** It
+    authenticates itself (HTTP Basic) and so never ran `auth.Middleware`,
+    leaving `auth.UserFrom` nil for every `/dav` write — nodes owned by nobody,
+    and file events with **no actor**.
+  - **`save-text` created no node row for a new file.** The bytes went to the
+    driver and the catalogue only learned about them on the next storage scan,
+    so the file was invisible until then and the row it eventually got belonged
+    to nobody.
+
+  `RecomputeUserUsage` also filtered `deleted_at IS NULL`, which put the
+  reconciler at odds with the rule it was reconciling: a recompute forgave every
+  trashed byte, and the purge then released them a second time (clamped at zero,
+  so the drift never surfaced as an error).
+
+- **The per-user ceiling now holds on the synchronous upload path too.** Only
+  the staged path checked it, so anything under the staging threshold had no
+  ceiling at all — a user could pass their limit a few megabytes at a time.
+
+- **`FILEX_SYNC_INTERVAL` does something.** It was parsed into config and read
+  by nothing, while the real fallback was a hardcoded `15m` in the poll loop
+  that happened to equal the documented default — which is exactly why the dead
+  knob was invisible.
+
+### Removed
+
+- **`FILEX_SYNC_WORKERS`.** It was documented as "concurrent storage sync
+  workers" and parsed into a field nothing read. There is no pool to size: the
+  sync worker runs one goroutine per enabled storage and always has. Setting it
+  now has no effect and produces no error. Documenting a knob that does nothing
+  is worse than either wiring it up or deleting it.
+
 ## [0.19.0] - 2026-08-14
 
 ### Added
@@ -349,7 +636,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filex account and the account name would be misleading — but a token with no
   username allow-list is not a shared proxy. It is one person's own client, and
   that person is the account owner. Such tokens now read
-  `Burak (filex desktop)`: the person leads, the client qualifies. Shared proxy
+  `Ada (filex desktop)`: the person leads, the client qualifies. Shared proxy
   tokens are untouched.
 
 - **The desktop app's "start when I sign in" registered a bare `electron.exe`.**
@@ -405,7 +692,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Markdown previewed as a blank pane.** `markdown-it` was an external in the
   web-component build, and every consumer of that bundle loads it as a plain
   `<script type="module">` where a bare specifier cannot resolve — so the
-  dynamic import always failed, in the desktop app, work.brf.sh and fishapp
+  dynamic import always failed, in the desktop app, work.example.com and fishapp
   alike. It is bundled now (~100 KB, lazily chunked, loaded only when a `.md`
   is opened), and if a renderer is ever missing again the pane says so instead
   of rendering nothing.
@@ -1718,7 +2005,7 @@ fixes; no schema changes, no breaking API.
   mesh data, so model-viewer's poster canvas stayed at 0×0 and emitted
   WebGL framebuffer warnings. Replaced the fixture with the Khronos
   Box.glb sample (~1.6 KB, real cube mesh) — re-verify on
-  `https://fm.brf.sh/admin/files/edit?path=s3-test%3A%2F%2Fexample%2Fcube.glb&type=glb`
+  `https://fm.example.com/admin/files/edit?path=s3-test%3A%2F%2Fexample%2Fcube.glb&type=glb`
   now shows zero console warnings and a properly rendered cube. The
   v0.1.1 inline-style code change is what made the fixture-fix possible
   — both layers were needed.
@@ -1726,7 +2013,7 @@ fixes; no schema changes, no breaking API.
 ## [0.1.1] - 2026-05-09
 
 Patch release closing six bugs surfaced by the post-v0.1.0 production
-sweep against `https://fm.brf.sh` (see `sweep-2026-05-09/sweep-report.md`
+sweep against `https://fm.example.com` (see `sweep-2026-05-09/sweep-report.md`
 for the full matrix). No breaking changes; existing storages continue to
 work, three previously dead-end UI features are now usable.
 
@@ -1777,7 +2064,7 @@ work, three previously dead-end UI features are now usable.
 
 ### Notes
 
-- The live `s3-test` storage on `fm.brf.sh` was retrofitted with
+- The live `s3-test` storage on `fm.example.com` was retrofitted with
   `path_style: true` + `disable_presign: true` in addition to this
   release. Operators on Hetzner Object Storage should set both flags
   on existing storages (no migration provided since storage configs
@@ -1904,7 +2191,7 @@ manager with replication, persistent queue and notifications.
 
 ### Demo URL
 
-- `files.brf.sh` → `demo-fm.brf.sh` rename across `deploy/`,
+- `files.example.com` → `demo-fm.example.com` rename across `deploy/`,
   `docs/DEPLOY_BRF.md`, `docs/MIGRATION_FISHAPP.md`,
   `deploy/keycloak-client-filex.json`, `deploy/.env.example`,
   `deploy/README.md`. Deploy host moved from main to brkip Caddy

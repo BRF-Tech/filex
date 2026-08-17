@@ -21,7 +21,7 @@ func (p *Pipeline) generatePDF(ctx context.Context, node *model.Node, drv storag
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	rc, err := drv.Read(ctx, node.Path)
+	rc, err := p.openSource(ctx, drv, node)
 	if err != nil {
 		tmp.Close()
 		return err

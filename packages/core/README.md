@@ -2,10 +2,10 @@
 
 # @brftech/filex-core
 
-Vue 3 source of truth for the **filex** file manager. Ships a single
-`<FileExplorer>` SFC, the composables that drive it, and the type
-definitions consumers (Vue apps, the `@brftech/filex` Web Component
-wrapper, the `@brftech/filex-react` adapter) build against.
+Vue 3 source of truth for the **filex** file manager. Ships the
+`<FileExplorer>` SFC, the `<ConnectionsPanel>` surface, the composables that
+drive them, and the type definitions consumers (Vue apps, the `@brftech/filex`
+Web Component wrapper, the `@brftech/filex-react` adapter) build against.
 
 > Looking for a drop-in `<filex-explorer>` HTML tag? Use
 > [`@brftech/filex`](https://www.npmjs.com/package/@brftech/filex).
@@ -90,6 +90,36 @@ import {
 
 The composables are stable — feel free to compose your own UI without
 touching the SFC.
+
+### Connections
+
+A second surface, for reaching the same server *without* a browser. filex can
+be spoken to as **S3**, **SFTP**, **FTPS**, **NFSv3** and **WebDAV**, and
+mounted with `filex mount`; `<ConnectionsPanel>` is where a user manages
+storages, mints the credential each protocol takes, and reads instructions
+built from *this* deployment — its host, its port, their login — rather than a
+template with angle brackets in it.
+
+```ts
+import {
+  ConnectionsPanel,          // the whole surface: storages + guides
+  S3KeysPanel,               // or mount the pieces yourself
+  SSHKeysPanel,
+  NFSExportsPanel,
+  TokensPanel,               // FTPS / WebDAV / filex mount sign in with a token
+  ConnectionGuideView,
+  buildGuide, guideProtocols, guideName,
+  useS3Keys, useSSHKeys, useNFSExports, useTokens,
+  type ProtocolGuide, type ApiToken,
+} from '@brftech/filex-core';
+```
+
+⚠ Mount the panel, not a copy of it. The admin panel, the web explorer and the
+filex desktop app all render **this** component — a surface that mints
+credentials one of them cannot see or revoke is the failure mode the shared
+package exists to prevent.
+
+See [docs/PROTOCOLS.md](https://github.com/BRF-Tech/filex/blob/main/docs/PROTOCOLS.md).
 
 ## Build
 

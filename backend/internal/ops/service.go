@@ -10,9 +10,7 @@ package ops
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +20,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
 // Op kinds.
@@ -29,6 +28,12 @@ const (
 	OpCopy   = "copy"
 	OpMove   = "move"
 	OpDelete = "delete"
+	// OpUploadCommit streams a staged upload from filex's staging area into the
+	// storage driver. Its single "source" is the staged upload id, not a path —
+	// the work is done by the injected UploadCommitter, because the DB mirror,
+	// the search index, thumbnails and the writehook all live in the handler
+	// layer (same reason DBSync is injected rather than reimplemented here).
+	OpUploadCommit = "upload-commit"
 )
 
 // Status values.
@@ -62,6 +67,7 @@ type Service struct {
 	db              *sql.DB
 	storageResolver func(int64) (storage.Driver, error)
 	dbsync          DBSync
+	uploadCommitter UploadCommitter
 
 	wakeup chan struct{}
 	stopMu sync.Mutex
@@ -94,28 +100,26 @@ type DBSync interface {
 // SetSync wires the DB-sync hook. Call once at boot, before Run.
 func (s *Service) SetSync(d DBSync) { s.dbsync = d }
 
-// TrashPrefix is the in-storage dir soft-deleted files are moved into. It must
-// match the manager handler's const so listings hide it and trash.Service can
-// enumerate/restore. (A single shared const would be ideal, but the handler
-// package imports ops — not the other way round — so we mirror the literal.)
-const TrashPrefix = ".filex-trash"
-
-func randHex6() string {
-	var b [3]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+// UploadCommitter transfers one staged upload's bytes to the storage driver
+// and runs the post-write side effects (node update, search index, thumbnail,
+// writehook). Implemented by the staged-upload HTTP handler and injected via
+// SetUploadCommitter once both are constructed.
+//
+// Without it an OpUploadCommit op fails loudly rather than silently doing
+// nothing: a staged upload whose bytes never move is data the user believes
+// is saved.
+type UploadCommitter interface {
+	CommitUpload(ctx context.Context, uploadID string) error
 }
 
-// trashRelFor builds `.filex-trash/<unix>-<rand>__<basename>` for `src`,
-// matching the sync manager handler's trash-key format exactly.
-func trashRelFor(src string) string {
-	s := strings.TrimRight(src, "/")
-	base := s
-	if i := strings.LastIndex(s, "/"); i >= 0 {
-		base = s[i+1:]
-	}
-	return fmt.Sprintf("%s/%d-%s__%s", TrashPrefix, time.Now().Unix(), randHex6(), base)
-}
+// SetUploadCommitter wires the staged-upload transfer hook. Call once at boot,
+// before Run.
+func (s *Service) SetUploadCommitter(c UploadCommitter) { s.uploadCommitter = c }
+
+// TrashPrefix is the in-storage dir soft-deleted files are moved into.
+// Re-exported from the trash package so there is exactly one definition of
+// where the trash lives — the key minting itself is trash.Put's job now.
+const TrashPrefix = trash.Prefix
 
 // New returns a Service that talks to the given *sql.DB.
 //
@@ -165,7 +169,7 @@ func (s *Service) Migrate(ctx context.Context) error {
 // Submit enqueues a new op and pokes the worker.
 func (s *Service) Submit(ctx context.Context, kind string, storageID int64, sources []string, dest string) (*Op, error) {
 	switch kind {
-	case OpCopy, OpMove, OpDelete:
+	case OpCopy, OpMove, OpDelete, OpUploadCommit:
 	default:
 		return nil, fmt.Errorf("ops: unknown kind %q", kind)
 	}
@@ -385,42 +389,59 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 
 func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src string) error {
 	switch op.Kind {
+	case OpUploadCommit:
+		// `src` is the staged upload id. The committer owns the driver write
+		// and every post-write hook; this worker only owns the retry/progress
+		// bookkeeping.
+		if s.uploadCommitter == nil {
+			return errors.New("ops: no upload committer wired")
+		}
+		return s.uploadCommitter.CommitUpload(ctx, src)
 	case OpDelete:
 		// Soft-delete: rename the file into `.filex-trash/` and flag the DB
 		// row so it's restorable AND leaves the listing. The async worker
 		// used to hard-delete and never touch the DB, which left the file
 		// both un-trashable and still visible (the listing reads the DB).
-		if mover, ok := drv.(storage.Mover); ok {
-			trashRel := trashRelFor(src)
-			if err := mover.Move(ctx, src, trashRel); err != nil {
-				if !errors.Is(err, storage.ErrNotFound) {
-					return err
-				}
-				// Source object already gone (stale index / out-of-band delete):
-				// drop the cache row outright instead of trashing a phantom, so a
-				// batch delete never fails on already-missing items.
-				if s.dbsync != nil {
-					s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
-				}
-				return nil
-			}
+		//
+		// trash.Put is the one shared implementation of "put these bytes in the
+		// trash" — the same call the web UI, WebDAV and the AI surface make — so
+		// an async batch delete cannot drift from what a synchronous delete of
+		// the same item does.
+		out, terr := trash.Put(ctx, drv, src)
+		switch {
+		case terr == nil && out.Trashed:
 			if s.dbsync != nil {
-				s.dbsync.SyncSoftDelete(ctx, op.StorageID, src, trashRel)
+				s.dbsync.SyncSoftDelete(ctx, op.StorageID, src, out.Key)
 			}
 			return nil
+
+		case terr == nil && out.Missing:
+			// Source object already gone (stale index / out-of-band delete):
+			// drop the cache row outright instead of trashing a phantom, so a
+			// batch delete never fails on already-missing items.
+			if s.dbsync != nil {
+				s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
+			}
+			return nil
+
+		case errors.Is(terr, trash.ErrUnsupported):
+			// Driver can neither move nor copy — nothing can be preserved, so
+			// this is a real delete.
+			d, ok := drv.(storage.Deleter)
+			if !ok {
+				return errors.New("driver not deletable")
+			}
+			if err := d.Delete(ctx, src); err != nil {
+				return err
+			}
+			if s.dbsync != nil {
+				s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
+			}
+			return nil
+
+		default:
+			return terr
 		}
-		// Driver can't move — hard delete and just flag the DB row deleted.
-		d, ok := drv.(storage.Deleter)
-		if !ok {
-			return errors.New("driver not deletable")
-		}
-		if err := d.Delete(ctx, src); err != nil {
-			return err
-		}
-		if s.dbsync != nil {
-			s.dbsync.SyncHardDelete(ctx, op.StorageID, src)
-		}
-		return nil
 	case OpMove:
 		m, ok := drv.(storage.Mover)
 		if !ok {

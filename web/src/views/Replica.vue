@@ -6,7 +6,7 @@ import { GitBranch, RefreshCcw, Wrench, Plus, Save, Trash2, FileText, Settings a
 import { useReplicaStore } from '@/stores/replica';
 import { useStoragesStore } from '@/stores/storages';
 import { useToastStore } from '@/stores/toast';
-import { useCapabilitiesStore } from '@/stores/capabilities';
+import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { StoragesApi } from '@/api/storages';
 import { ReplicationTargetsApi } from '@/api/replicationTargets';
 import type { StorageRef, ReplicationTarget, StorageDriver } from '@/api/types';
@@ -24,7 +24,7 @@ import Badge from '@/components/ui/Badge.vue';
 
 type Tab = 'rules' | 'failures' | 'report' | 'settings';
 
-const { t, locale } = useI18n();
+const { t, te, locale } = useI18n();
 const replica = useReplicaStore();
 const toast = useToastStore();
 
@@ -32,11 +32,11 @@ const activeTab = ref<Tab>('rules');
 const refreshing = ref(false);
 
 // Replica targets — separate entity in the new `replication_targets`
-// table. NOT a regular storage (Burak: "replika bir depo değil"):
+// table. NOT a regular storage (Ada: "replika bir depo değil"):
 // no Depolar page entry, no file-explorer presence, no write API.
 // Primaries link to one via `storages.replica_target_id`.
 const storages = useStoragesStore();
-const caps = useCapabilitiesStore();
+const drivers = useStorageDriversStore();
 const replicaTargets = ref<ReplicationTarget[]>([]);
 
 const primaryStorages = computed(() => storages.items);
@@ -81,35 +81,32 @@ async function removeReplica(target: ReplicationTarget) {
 const showTargetForm = ref(false);
 const targetDraftName = ref('');
 const targetDraftDriver = ref<StorageDriver>('s3');
-const targetDraftConfig = ref<Record<string, unknown>>({
-  bucket: '', region: '', endpoint: '', access_key: '', secret_key: '',
-});
+const targetDraftConfig = ref<Record<string, unknown>>({});
 const targetDraftMode = ref<'async' | 'sync'>('async');
 const targetSaving = ref(false);
 
+// Same source as the storage form: the drivers' own descriptors. This
+// dialog used to carry a second, independently drifted field list — it
+// asked for `username` where every driver reads `user`, so a replication
+// target created here connected as nobody.
 const targetDriverOptions = computed(() =>
-  (['s3', 'local', 'sftp', 'webdav'] as StorageDriver[])
-    .filter((d) => caps.data.storage_drivers.length === 0 || caps.data.storage_drivers.includes(d))
-    .map((d) => ({ value: d, label: t(`storages.driver.${d}`) })),
+  drivers.items.map((d) => ({
+    value: d.driver,
+    label: d.i18n_key && te(d.i18n_key) ? t(d.i18n_key) : d.label,
+  })),
 );
 
 function openNewTargetForm() {
   targetDraftName.value = '';
-  targetDraftDriver.value = 's3';
-  targetDraftConfig.value = { bucket: '', region: '', endpoint: '', access_key: '', secret_key: '' };
+  targetDraftDriver.value = drivers.descriptor('s3') ? 's3' : (drivers.items[0]?.driver ?? 's3');
+  targetDraftConfig.value = drivers.defaults(targetDraftDriver.value);
   targetDraftMode.value = 'async';
   showTargetForm.value = true;
 }
 
 function onDraftDriverChange(d: StorageDriver) {
   targetDraftDriver.value = d;
-  switch (d) {
-    case 'local': targetDraftConfig.value = { path: '' }; break;
-    case 's3':    targetDraftConfig.value = { bucket: '', region: '', endpoint: '', access_key: '', secret_key: '' }; break;
-    case 'sftp':  targetDraftConfig.value = { host: '', port: 22, username: '', password: '', root: '/' }; break;
-    case 'webdav':targetDraftConfig.value = { url: '', username: '', password: '' }; break;
-    default:      targetDraftConfig.value = {};
-  }
+  targetDraftConfig.value = drivers.defaults(d);
 }
 
 async function submitNewTarget() {
@@ -162,7 +159,7 @@ async function loadAll() {
       replica.fetchRules(), replica.fetchFailures(), replica.fetchReport(), replica.fetchSettings(),
       storages.fetch(),
       loadReplicaTargets(),
-      caps.fetch(),
+      drivers.fetch(),
     ]);
     settingsDraft.value = { ...replica.settings };
     const matchPreset = cronPresets.value.find((p) => p.value === settingsDraft.value.report_cron);

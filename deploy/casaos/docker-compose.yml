@@ -66,10 +66,14 @@ x-casaos:
   description:
     en_US: >-
       filex is a fast, self-hosted file manager: browse, upload, preview,
-      share and edit files across local folders, S3/MinIO, SFTP, WebDAV and
-      FTP. Public share links with PIN and expiry, file-drop upload links,
-      full-text search, thumbnails, trash and versioning, RBAC, TOTP 2FA,
-      optional SSO (OIDC/LDAP) and an AI/MCP API for agents. On first start it
+      share and edit files across local folders, S3/MinIO, SFTP, WebDAV, FTP
+      and SMB/NAS shares. It also works the other way round — the same tree is
+      reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic, WinSCP or
+      a media player can point straight at it, and `filex mount` attaches it as
+      a drive. Public share links with PIN and expiry, file-drop upload links,
+      resumable uploads, full-text search, thumbnails, trash and versioning,
+      RBAC, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app with folder sync
+      and an AI/MCP API for agents. On first start it
       creates an admin account and prints the password once in the container
       logs (also saved to /data/.first-run.txt), unless FILEX_ADMIN_EMAIL /
       FILEX_ADMIN_PASSWORD are set.

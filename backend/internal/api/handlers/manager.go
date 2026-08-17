@@ -17,7 +17,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -36,7 +40,49 @@ type Manager struct {
 	// ACL enforces per-user/per-item access control. nil disables
 	// enforcement (tests / list-only environments) → legacy all-access.
 	ACL *acl.Resolver
+	// Staged, when wired, takes large whole-body uploads into filex's own
+	// staging area and lets the ops worker move them to the driver. nil (or a
+	// deployment with no staging directory configured) keeps the synchronous
+	// write — the feature degrades, it never blocks an upload.
+	Staged *StagedUpload
+	// Body resolves where a file's bytes actually are — the storage driver,
+	// or filex's staging area while a staged upload is still transferring.
+	// nil is fine and degrades to driver-only reads (filebody.Resolver).
+	Body *filebody.Resolver
+	// Quota enforces the per-user ceiling on the SYNCHRONOUS write paths.
+	// Large writes reach the staged path, which checks at `begin`; without
+	// this the small-file path had no ceiling at all, and a user could sail
+	// past their limit a few megabytes at a time. nil disables enforcement.
+	Quota *quota.Service
 }
+
+// checkQuota refuses a write that would put the acting account over its
+// ceiling. The identity comes from quotastore.OwnerFrom, not from the session,
+// so the public drop link is measured against the LINK CREATOR's quota — they
+// are the account whose disk is being filled.
+func (h *Manager) checkQuota(ctx context.Context, size int64) error {
+	if h.Quota == nil || size <= 0 {
+		return nil
+	}
+	if err := h.Quota.CheckCanWrite(ctx, quotastore.OwnerFrom(ctx), size); err != nil {
+		if errors.Is(err, quota.ErrQuotaExceeded) {
+			metrics.GuardRefusals.WithLabelValues(metrics.GuardQuota).Inc()
+		}
+		return err
+	}
+	return nil
+}
+
+// AttachStaged wires the staged ingest path so every surface that writes
+// through IngestFile — today the public drop link — answers as soon as the
+// bytes are safe inside filex rather than after the driver write. One switch,
+// every surface: see the note at the top of upload_staged_ingest.go.
+func (h *Manager) AttachStaged(s *StagedUpload) { h.Staged = s }
+
+// AttachBody wires the byte-source resolver, so every read surface on this
+// handler serves a file that is still being transferred out of staging
+// instead of asking a driver that does not have it yet.
+func (h *Manager) AttachBody(b *filebody.Resolver) { h.Body = b }
 
 // ThumbPipeline is the narrow surface manager_mutate needs to fire a
 // thumbnail job after upload. Kept as an interface so the package
@@ -316,9 +362,26 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 
 // vfStream serves a file body for action=preview (inline) and
 // action=download (attachment). Path is the SFC's relative form
-// (no `<adapter>://` prefix, just `dir/file.ext`). Resolves the
-// file via the storage Driver — does NOT consult the DB cache so
-// freshly-uploaded files appear before the next sync run.
+// (no `<adapter>://` prefix, just `dir/file.ext`).
+//
+// The byte source comes from filebody: the storage driver normally, and
+// filex's staging area while a staged upload's background transfer is
+// still running — a file must be openable while its bytes are still on
+// their way to the backend. The catalogue is consulted only to answer
+// that question; a path with no node still resolves to the driver, so
+// freshly-written, not-yet-synced files keep appearing here as before.
+//
+// Drivers that implement storage.RangeReader are served through
+// http.ServeContent, so this endpoint speaks Range: seeking in
+// video/audio, resume after a dropped connection, and a retry that costs
+// the remaining bytes instead of the whole object. Drivers that cannot
+// range keep the previous whole-object io.Copy.
+//
+// ⚠ This is the app's own authenticated download; it has no download
+// counter. Public share links (/s/, /s/{token}/f/, /d/) do NOT come
+// through here — they serve their own bodies and reserve a slot off the
+// link's cap before any byte leaves, which is why they stay on the
+// unranged path (see share.go claimDownload).
 func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, asAttachment bool) {
 	if h.StorageResolver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "storage offline"})
@@ -339,7 +402,12 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	stat, err := drv.Stat(r.Context(), rel)
+	src, err := h.Body.Resolve(r.Context(), drv, s.ID, rel, nil)
+	if err != nil {
+		writeStagingGone(w, err)
+		return
+	}
+	stat, err := src.Stat(r.Context())
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -352,18 +420,41 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "is a directory"})
 		return
 	}
-	rc, err := drv.Read(r.Context(), rel)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+
+	// Slow-and-big: prepare a local copy, and say so while it happens
+	// (internal/filecache). Once it is ready every read below comes off local
+	// disk — including the ranged ones — because filebody serves the prepared
+	// copy transparently, with no code here to notice it.
+	//
+	// Two deliberate narrowings, both of them "never make it worse":
+	//
+	//   - Only a DOWNLOAD starts a preparation. A preview is somebody scrubbing
+	//     a video or opening a PDF page; making them wait for a whole 4 GB
+	//     prefetch before the first frame is worse than the ranged read they
+	//     would otherwise have got. A preview still USES a copy that exists.
+	//   - Only a request with NO Range header can be answered "not yet". A
+	//     Range is a resume or a seek from a client already committed to a
+	//     body, and 202 is not an answer it can use.
+	if r.URL.Query().Get("cache") == "status" {
+		writeCacheStatus(w, src.Status(r.Context(), stat))
 		return
 	}
-	defer rc.Close()
+	if asAttachment && r.Header.Get("Range") == "" {
+		if prep := src.Prepare(r.Context(), stat); prep != nil && !prep.Ready {
+			writeCachePreparing(w, r, path.Base(rel), prep)
+			return
+		}
+	}
 
 	// MIME — extension lookup wins so svg/md/csv/html render the right
 	// way in the browser (DB cached + driver-reported mime is often
 	// `text/plain; charset=utf-8` after sync because Go's http.Detect
 	// doesn't know markdown/csv/svg, breaking inline preview). Driver
 	// value is the fallback for extensions we don't recognize.
+	//
+	// Setting it here also stops http.ServeContent from sniffing (it only
+	// sniffs when Content-Type is unset), which would cost a read of the
+	// first 512 bytes plus a rewind.
 	mime := mimeByExt(rel)
 	if mime == "" {
 		mime = stat.Mime
@@ -372,9 +463,6 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 		mime = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", mime)
-	if stat.Size > 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
-	}
 	if asAttachment {
 		base := path.Base(rel)
 		w.Header().Set("Content-Disposition", `attachment; filename="`+base+`"`)
@@ -382,6 +470,48 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}
 	w.Header().Set("Cache-Control", "private, max-age=60")
+
+	// Ranged path — the driver can start a transfer at an offset, so
+	// http.ServeContent gets a real seeker and answers 206 /
+	// Content-Range / If-Range / 416 on its own. That is what makes video
+	// and audio seekable and a dropped download resumable instead of
+	// restarting from byte 0.
+	//
+	// ⚠ Requires a known size: http.ServeContent trusts the seeker's end
+	// position, so a driver whose Stat reports 0 for a non-empty object
+	// would serve an empty body. Size 0 keeps the whole-object path, which
+	// is byte-identical for a genuinely empty file.
+	if src.CanRange() && stat.Size > 0 {
+		seek := newRangeSeeker(r.Context(), src, stat.Size)
+		defer seek.Close()
+		// Without a Range header the request is a plain download: open
+		// the one stream up front, exactly where the old code did, so a
+		// backend error is still a clean 500 rather than a truncated 200.
+		if r.Header.Get("Range") == "" {
+			rc, err := src.Open(r.Context())
+			if err != nil {
+				writeStagingGone(w, err)
+				return
+			}
+			seek.adopt(rc)
+		}
+		http.ServeContent(w, r, path.Base(rel), stat.Mtime, seek)
+		return
+	}
+
+	// Fallback — the source cannot range: the whole-object stream this
+	// endpoint has always served. Say so rather than let a client assume
+	// resume works.
+	rc, err := src.Open(r.Context())
+	if err != nil {
+		writeStagingGone(w, err)
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Accept-Ranges", "none")
+	if stat.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
+	}
 	_, _ = io.Copy(w, rc)
 }
 
@@ -890,6 +1020,7 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		nodeName  string
 		nodeMime  string
 		nodeSize  int64
+		known     *model.Node // the row when the caller addressed by id
 	)
 	if idStr := q.Get("id"); idStr != "" {
 		id, err := strconv.ParseInt(idStr, 10, 64)
@@ -902,6 +1033,7 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
+		known = node
 		storageID = node.StorageID
 		filePath = node.Path
 		aclRel = node.Path
@@ -940,9 +1072,17 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fall back to driver Stat for mime/size when caller passed storage+path.
+	src, err := h.Body.Resolve(r.Context(), drv, storageID, filePath, known)
+	if err != nil {
+		writeStagingGone(w, err)
+		return
+	}
+
+	// Fall back to Stat for mime/size when caller passed storage+path. While
+	// the file is staged that answer comes from the committed values, not from
+	// a driver that has nothing to describe yet.
 	if nodeMime == "" || nodeSize == 0 {
-		if obj, err := drv.Stat(r.Context(), filePath); err == nil {
+		if obj, err := src.Stat(r.Context()); err == nil {
 			if nodeMime == "" {
 				nodeMime = obj.Mime
 			}
@@ -952,13 +1092,13 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rc, err := drv.Read(r.Context(), filePath)
+	rc, err := src.Open(r.Context())
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read: " + err.Error()})
+		writeStagingGone(w, err)
 		return
 	}
 	defer rc.Close()

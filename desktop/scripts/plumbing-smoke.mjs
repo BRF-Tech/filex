@@ -21,7 +21,7 @@ import { normalizeServerUrl, parseAuthDeepLink } from '../dist/browser-auth.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = path.join(__dirname, '..', 'test', 'fixture-app');
 const APP_SCHEME = 'app';
-const FAKE = { serverUrl: 'https://fm.brf.sh', token: 'smoke-token-abc123' };
+const FAKE = { serverUrl: 'https://fm.example.com', token: 'smoke-token-abc123' };
 
 // Headless stability (same flags that let Playwright run where Cypress crashed).
 app.commandLine.appendSwitch('no-sandbox');
@@ -80,7 +80,7 @@ async function storageStep() {
   }
 
   // Pure helpers — no keychain needed, and they gate the whole browser flow.
-  check('bare host is normalised to https', normalizeServerUrl('fm.brf.sh') === 'https://fm.brf.sh');
+  check('bare host is normalised to https', normalizeServerUrl('fm.example.com') === 'https://fm.example.com');
   let rejected = false;
   try { normalizeServerUrl('http://example.com'); } catch { rejected = true; }
   check('plaintext http server is refused', rejected);

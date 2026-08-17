@@ -247,6 +247,26 @@
         color: var(--danger); font-size: 13px; overflow-wrap: anywhere; text-align: left;
       }
       .boot__actions { margin-top: 16px; display: flex; gap: 8px; }
+
+      /* ── storage connections ─────────────────────────────────────
+         A full surface, not a card inside Settings: the shared panel
+         carries its own tabs, a driver-driven form and a page of client
+         instructions, and folding that into a scrolling settings column
+         makes both unreadable.
+
+         ⚠ Above #settings (200) — it is opened FROM settings, and the
+         folder picker below already made exactly this mistake once: the
+         dialog was there, just underneath the surface that launched it. */
+      #conn {
+        position: absolute; inset: 0; background: var(--bg);
+        overflow: auto; padding: 26px 30px 40px; display: none;
+        z-index: 210;
+      }
+      #conn.open { display: block; }
+      /* The component draws its own chrome; it only needs the reading
+         width the rest of this window uses. */
+      #conn-host { max-width: 940px; }
+
       #settings {
         position: absolute; inset: 0; background: var(--bg);
         overflow: auto; padding: 26px 30px 40px; display: none;
@@ -310,6 +330,9 @@
       <div id="explorer-host" style="flex:1;min-height:0;display:flex"></div>
       <div id="boot"></div>
       <section id="settings"></section>
+      <section id="conn">
+        <div id="conn-host"></div>
+      </section>
     </div>
 
     <div id="picker"><div class="panel">
@@ -377,8 +400,14 @@
         // the shell went Turkish while the file list stayed English, and the
         // element reported `locale === 'tr'` the whole time. A new object is
         // what the watcher notices.
-        const el = document.querySelector('filex-explorer');
-        if (el && el.config) el.config = { ...el.config, locale: lang };
+        //
+        // ⚠ EVERY web component in this window, not just the file list. The
+        // connections panel is a second one with its own catalogue, and a
+        // switch that leaves half the window in the old language is not a
+        // switch. Same rule, same trap: reassign `config`.
+        for (const el of document.querySelectorAll('filex-explorer, filex-connections')) {
+          if (el.config) el.config = { ...el.config, locale: lang };
+        }
         return true;
       }
       const STRINGS = {
@@ -395,8 +424,13 @@
         'rail.settings':        ['Settings', 'Ayarlar'],
 
         'set.title':            ['Settings', 'Ayarlar'],
-        'set.sub':              ["These are this app's settings. Your server's own settings live in its admin panel.",
-                                 'Bunlar bu uygulamanın ayarları. Sunucunun kendi ayarları onun yönetim panelinde.'],
+        'set.sub':              ["This app's settings, plus the storage connections of the server you are signed in to.",
+                                 'Bu uygulamanın ayarları ve bağlı olduğunuz sunucunun depo bağlantıları.'],
+        'set.connections':      ['Storage connections', 'Depo bağlantıları'],
+        'set.connections_sub':  ['Connect this server to a bucket, a share or another server — and see how to mount it from this computer.',
+                                 'Bu sunucuyu bir bucket, bir paylaşım ya da başka bir sunucuya bağlayın — ve bu bilgisayardan nasıl bağlanacağınızı görün.'],
+        'set.connections_open': ['Manage storages', 'Depoları yönet'],
+        'set.connections_guide':['How to connect', 'Nasıl bağlanılır'],
         'set.accounts':         ['Accounts', 'Hesaplar'],
         'set.admin':            ['Admin panel ↗', 'Yönetim paneli ↗'],
         'set.signout':          ['Sign out', 'Çıkış yap'],
@@ -778,6 +812,16 @@
           ${accounts}
           <div class="row"><button id="add-account">${esc(T('boot.add'))}</button></div>
 
+          <h2>${esc(T('set.connections'))}</h2>
+          <div class="card"><div class="between">
+            <div><strong>${esc(T('set.connections'))}</strong>
+              <div class="muted">${esc(T('set.connections_sub'))}</div></div>
+            <div class="row">
+              <button id="conn-open" ${active ? '' : 'disabled'}>${esc(T('set.connections_open'))}</button>
+              <button id="conn-guide" ${active ? '' : 'disabled'}>${esc(T('set.connections_guide'))}</button>
+            </div>
+          </div></div>
+
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
           ${pairs}
@@ -850,8 +894,7 @@
         // Hide the explorer, don't just cover it. The body class additionally
         // hides overlays the explorer parents to <body> — hiding the host alone
         // left the tour card sitting in the middle of Settings.
-        $('#explorer-host').style.display = open ? 'none' : 'flex';
-        document.body.classList.toggle('settings-open', open);
+        syncOverlays();
         if (open) renderSettings();
       }
 
@@ -872,6 +915,10 @@
           render(); renderSettings();
         }));
         $('#add-account', el).addEventListener('click', () => window.filexApp.addAccount());
+        const connOpen = $('#conn-open', el);
+        if (connOpen) connOpen.addEventListener('click', () => openConnections('storages'));
+        const connGuide = $('#conn-guide', el);
+        if (connGuide) connGuide.addEventListener('click', () => openConnections('connect'));
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
         $('#sync-trash', el).addEventListener('click', async () => {
@@ -904,6 +951,74 @@
           state = await window.filexApp.setSettings({ launchAtLogin: !state.launchAtLogin });
           renderSettings();
         });
+      }
+
+      // ── storage connections ───────────────────────────────────
+      // ⚠⚠ NOT a form written here. `<filex-connections>` is the same
+      // component the web admin panel mounts, from the same npm package as
+      // the explorer above — the driver fields come from the server's own
+      // descriptors and the instructions from the live deployment. A
+      // hand-written copy in this file would be the exact split the shared
+      // package exists to prevent (v0.16.0 shipped one; Ada was right to
+      // be angry about it).
+      //
+      // The only genuinely desktop-specific parts stay here: which server
+      // is active, and where the bearer token comes from.
+      let connFor = null;
+      let connTab = null;
+
+      function openConnections(tab) {
+        const active = state.accounts.find((a) => a.id === state.activeId);
+        if (!active) return;
+        const slot = $('#conn-host');
+        // Recreated when the account OR the requested half changes: the
+        // panel picks its opening tab once, at setup.
+        if (connFor !== active.id || connTab !== tab) {
+          slot.innerHTML = '';
+          const el = document.createElement('filex-connections');
+          el.setAttribute('closable', '');
+          el.initialTab = tab;
+          el.config = {
+            apiBase: active.serverUrl,
+            // The same function-token the explorer gets: the credential is
+            // fetched from the main process per call rather than handed to
+            // this page up front.
+            auth: { kind: 'bearer', token: () => window.filexApp.token(active.id) },
+            locale: LANG,
+            theme: 'auto',
+          };
+          el.addEventListener('close', () => toggleConnections(false));
+          // A storage that was just added has to show up in the file list,
+          // otherwise the user adds it and nothing happens.
+          el.addEventListener('changed', () => {
+            mountedFor = null;
+            void mountExplorer(active);
+          });
+          el.addEventListener('error', (e) => console.error('[connections]', e.detail));
+          slot.appendChild(el);
+          connFor = active.id;
+          connTab = tab;
+        }
+        toggleConnections(true);
+      }
+
+      function toggleConnections(open) {
+        $('#conn').classList.toggle('open', open);
+        syncOverlays();
+      }
+
+      /** Explorer visibility is a function of BOTH overlays.
+       *
+       *  ⚠ Not of the one being toggled: closing connections while Settings
+       *  is still open would otherwise un-hide the explorer underneath it,
+       *  and the tour card it parents to <body> would land in the middle of
+       *  the settings page — the failure that is already commented twice
+       *  above. */
+      function syncOverlays() {
+        const any =
+          $('#conn').classList.contains('open') || $('#settings').classList.contains('open');
+        $('#explorer-host').style.display = any ? 'none' : 'flex';
+        document.body.classList.toggle('settings-open', any);
       }
 
       // ── remote folder picker ──────────────────────────────────
@@ -954,6 +1069,10 @@
         for (const a of state.accounts) void loadBrand(a);
         renderRail();
         void mountExplorer(active);
+        // The rail stays clickable while the connections surface is open, so
+        // a switch there must re-point it — otherwise it would keep showing
+        // the previous server's storages under the new server's name.
+        if ($('#conn').classList.contains('open')) openConnections(connTab || 'storages');
       }
 
       async function refresh() {

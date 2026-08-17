@@ -44,7 +44,11 @@ type PresignedUpload struct {
 
 // Capabilities advertises the Storage Driver's operation set.
 type Capabilities struct {
-	Read    bool `json:"read"`
+	Read bool `json:"read"`
+	// Range reports ranged reads (storage.RangeReader). Callers that serve
+	// HTTP bodies use it to decide between http.ServeContent (seekable,
+	// 206/Content-Range) and a whole-object io.Copy.
+	Range   bool `json:"range"`
 	Write   bool `json:"write"`
 	Move    bool `json:"move"`
 	Copy    bool `json:"copy"`

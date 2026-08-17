@@ -25,7 +25,7 @@
   </thumbs>
   <users>
     <user id="1" email="ada@example.com" role="admin"/>
-    <user id="2" email="gokcil@example.com" role="admin"/>
+    <user id="2" email="grace@example.com" role="admin"/>
     <user id="3" email="demo@demo.com" role="demo"/>
   </users>
 </filex-manifest>

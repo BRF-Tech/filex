@@ -76,7 +76,7 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 	// filex account, so the account name ("admin") would be misleading. A
 	// trusted host proxy can additionally stamp the REAL end user via
 	// X-Filex-Presence-Name/-Key; the display then combines both:
-	// "Burak (work)". (Honored only on token auth; proxies strip these from
+	// "Ada (work)". (Honored only on token auth; proxies strip these from
 	// client requests, so end users can't spoof them.)
 	name := wsDisplayName(user)
 	// ⭐ The picture follows the ACCOUNT, not the client: a session, the
@@ -100,7 +100,7 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 		// LABEL for such tokens, so replacing the name with it put
 		// "filex desktop — Win32" in the presence bar of the owner's OWN folder.
 		// Their name leads and the client goes in parentheses instead —
-		// "Burak (filex desktop)", the same shape the proxy branch produces.
+		// "Ada (filex desktop)", the same shape the proxy branch produces.
 		if len(tok.UsernameList()) == 0 {
 			qualifier = wsClientLabel(tok.Label)
 			if qualifier != "" {
@@ -210,7 +210,7 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ticketed connections are cross-origin by design (embedded webcomponent →
-	// fm.brf.sh) and already authenticated by the one-shot ticket, so skip the
+	// fm.example.com) and already authenticated by the one-shot ticket, so skip the
 	// same-origin (CSRF) check. Cookie connections keep it — behind a reverse
 	// proxy the Host header must be preserved for that to pass.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: ticketed})
@@ -408,7 +408,7 @@ func (h *WS) sendError(client *realtime.Client, path, reason string) {
 
 // sanitizePresenceName cleans a proxy-supplied presence display name: control
 // characters stripped, whitespace collapsed, capped at 48 runes. HTTP header
-// values are latin-1 territory, so proxies send non-ASCII names (Ayşe, Gökçil)
+// values are latin-1 territory, so proxies send non-ASCII names (Ayşe, Zoë)
 // RFC 2047-encoded (`=?utf-8?B?...?=`) — decode that first; plain values pass
 // through untouched.
 func sanitizePresenceName(v string) string {

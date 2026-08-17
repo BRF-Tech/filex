@@ -29,28 +29,69 @@
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Where the example fixture set lives. The whole regression suite
-// queries this path, so the constant doubles as documentation for
-// what the seed script populates.
-const FIXTURE_STORAGE = 's3-test';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES = path.join(HERE, '../fixtures/file-types');
+
+/**
+ * Where the example fixture set lives.
+ *
+ * ⚠ This used to be the bare constant `s3-test`, plus a guard that skipped
+ * the file when `E2E_BASE_URL` was unset or contained `localhost:5212`. The
+ * harness always sets E2E_BASE_URL — to `http://127.0.0.1:<free port>` — so
+ * the guard never fired, and nine tests ran against a hermetic server with no
+ * `s3-test` storage, no `example/` directory, no OnlyOffice and no
+ * rsvg-convert. Nine guaranteed reds that said nothing about the build.
+ *
+ * A precondition has to be MEASURED, not string-matched against a hostname
+ * that has since changed. So: point at a real deployment's fixture storage
+ * with E2E_FIXTURE_STORAGE, or let the suite seed an equivalent set locally
+ * and gate the externally-dependent cases on the capability probe.
+ */
+const LIVE_FIXTURE_STORAGE = process.env.E2E_FIXTURE_STORAGE;
+const FIXTURE_STORAGE = LIVE_FIXTURE_STORAGE ?? `rounds-fixtures-${Date.now()}`;
 const FIXTURE_DIR = `${FIXTURE_STORAGE}://example`;
+
+/**
+ * The example set, reproduced from the fixtures in this repo.
+ *
+ * `manager.jpg` / `manager.svg` only exist on the live deployment, and two
+ * assertions name them. They are spot-checks for "a real JPEG always
+ * thumbnails" and "the SVG rasteriser ran", so the local set supplies the
+ * same shapes under the same names rather than dropping the assertions.
+ */
+const EXAMPLE_FILES: Array<{ src: string; as: string }> = [
+  { src: 'square.jpg', as: 'square.jpg' },
+  { src: 'landscape.jpg', as: 'manager.jpg' },
+  { src: 'photo.webp', as: 'photo.webp' },
+  { src: 'scan.tiff', as: 'scan.tiff' },
+  { src: 'logo.svg', as: 'logo.svg' },
+  { src: 'logo.svg', as: 'manager.svg' },
+  { src: 'report.xlsx', as: 'report.xlsx' },
+  { src: 'slides.pptx', as: 'slides.pptx' },
+  { src: 'dummy.pdf', as: 'dummy.pdf' },
+  { src: 'sample.mp4', as: 'sample.mp4' },
+];
 
 let api: APIRequestContext;
 
-test.beforeAll(async ({ playwright, baseURL }) => {
-  // Hard requirement: a live filex deployment to point the regression
-  // suite at. CI sets these via Settings > CI/CD > Variables; locally
-  // export them in the shell. If they're missing we skip the whole
-  // describe block with a loud message rather than letting Playwright
-  // grind through 30-second timeouts to a non-existent localhost
-  // listener.
-  test.skip(
-    !process.env.E2E_BASE_URL || process.env.E2E_BASE_URL.includes('localhost:5212'),
-    'set E2E_BASE_URL to a live filex deployment (e.g. https://fm.example.com) ' +
-      'plus E2E_ADMIN_EMAIL + E2E_ADMIN_PASSWORD; suite skipped',
-  );
+interface Caps {
+  thumbs?: { svg?: boolean; office?: boolean };
+  libreoffice?: boolean;
+  external?: Record<string, { state?: string; enabled?: boolean }>;
+}
+let caps: Caps = {};
 
+/** True when OnlyOffice is actually reachable from this host. */
+function onlyofficeUsable(): boolean {
+  return caps.external?.onlyoffice?.enabled === true && caps.external?.onlyoffice?.state === 'ok';
+}
+
+test.beforeAll(async ({ playwright, baseURL, request }) => {
   // Bearer-token context — round-4 ops + onlyoffice + capabilities
   // endpoints all sit behind the admin auth middleware, so an authed
   // request is the minimum viable harness.
@@ -85,9 +126,57 @@ test.beforeAll(async ({ playwright, baseURL }) => {
     timeout: 30_000,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
+
+  caps = ((await (await api.get('/api/capabilities')).json()) ?? {}) as Caps;
+
+  if (!LIVE_FIXTURE_STORAGE) {
+    // Reproduce the example set locally so the search / thumb-hydration
+    // rounds are a real gate on this build instead of a skip.
+    await dropStorageByName(request, FIXTURE_STORAGE);
+    await seedLocalStorage(request, FIXTURE_STORAGE, `/tmp/filex-${FIXTURE_STORAGE}`);
+    const mk = await api.post('/api/files/manager?action=newfolder', {
+      data: { path: `${FIXTURE_STORAGE}://`, name: 'example' },
+    });
+    if (!mk.ok()) throw new Error(`newfolder example: ${mk.status()} ${await mk.text()}`);
+
+    for (const f of EXAMPLE_FILES) {
+      const src = path.join(FIXTURES, f.src);
+      if (!fs.existsSync(src)) throw new Error(`fixture missing on disk: ${src}`);
+      const up = await api.post('/api/files/manager?action=upload', {
+        multipart: {
+          path: FIXTURE_DIR,
+          'file[]': {
+            name: f.as,
+            mimeType: 'application/octet-stream',
+            buffer: fs.readFileSync(src),
+          },
+        },
+      });
+      if (!up.ok()) throw new Error(`upload ${f.as}: ${up.status()} ${await up.text()}`);
+    }
+
+    // Thumbnails are rendered asynchronously on upload. Wait for the images
+    // to land rather than asserting into a race.
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const res = await api.get(
+        `/api/files/manager?action=index&path=${encodeURIComponent(FIXTURE_DIR)}`,
+      );
+      if (res.ok()) {
+        const body = (await res.json()) as { files?: Array<{ basename: string; thumb_url?: string }> };
+        const files = body.files ?? [];
+        const jpg = files.find((f) => f.basename === 'manager.jpg');
+        const webp = files.find((f) => f.basename === 'photo.webp');
+        const tiff = files.find((f) => f.basename === 'scan.tiff');
+        if (jpg?.thumb_url && webp?.thumb_url && tiff?.thumb_url) break;
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
 });
 
-test.afterAll(async () => {
+test.afterAll(async ({ request }) => {
+  if (!LIVE_FIXTURE_STORAGE) await dropStorageByName(request, FIXTURE_STORAGE);
   await api.dispose();
 });
 
@@ -114,6 +203,15 @@ test.describe('Round 4 — SPA-vs-backend mismatches', () => {
   });
 
   test('BUG#7 — POST /api/files/onlyoffice/config accepts {path,mode} body', async () => {
+    // ⚠ Needs a reachable OnlyOffice. Without one the handler answers 503 and
+    // this test can only ever be red on a host that has no document server —
+    // which teaches people that red is normal. Skip explicitly, with the
+    // reason, and let a host that HAS one gate the behaviour.
+    test.skip(
+      !onlyofficeUsable(),
+      `OnlyOffice is not reachable from this host (state=${caps.external?.onlyoffice?.state ?? 'absent'}); ` +
+        'set FILEX_ONLYOFFICE_URL to a running document server to gate this',
+    );
     // PreviewModal's POST shape — backend was GET-only before round 4
     // and didn't know how to resolve a path back to a node id.
     const res = await api.post('/api/files/onlyoffice/config', {
@@ -132,6 +230,15 @@ test.describe('Round 4 — SPA-vs-backend mismatches', () => {
   });
 
   test('BUG#7b — POST /api/files/onlyoffice/config requires the FULL adapter path', async () => {
+    // ⚠ Needs a reachable OnlyOffice. Without one the handler answers 503 and
+    // this test can only ever be red on a host that has no document server —
+    // which teaches people that red is normal. Skip explicitly, with the
+    // reason, and let a host that HAS one gate the behaviour.
+    test.skip(
+      !onlyofficeUsable(),
+      `OnlyOffice is not reachable from this host (state=${caps.external?.onlyoffice?.state ?? 'absent'}); ` +
+        'set FILEX_ONLYOFFICE_URL to a running document server to gate this',
+    );
     // Round 5 caught a frontend regression where stripAdapter() left
     // the body with just "example/report.xlsx", causing the resolver
     // to fall through to storages[0]. Verify the bare relative form
@@ -255,6 +362,14 @@ test.describe('Round 5 — Bleve search', () => {
 
 test.describe('Round 6 — SVG thumbnails', () => {
   test('BUG#17 — SVG fixtures have populated thumb_url (rsvg-convert path)', async () => {
+    // ⚠ Environment dependency, stated rather than suffered: SVG thumbs shell
+    // out to rsvg-convert. Where it is absent the dispatcher marks the row
+    // "skipped" and thumb_url stays empty BY DESIGN, so a red here would be
+    // reporting the machine, not the build.
+    test.skip(
+      caps.thumbs?.svg !== true,
+      'rsvg-convert is not on PATH here (capabilities.thumbs.svg=false) — install librsvg to gate the SVG rasteriser',
+    );
     // Round 6 added thumb/svg.go which shells out to rsvg-convert; if
     // the binary isn't on PATH the dispatcher marks state="skipped"
     // (not "failed") and thumb_url stays empty. This test asserts the
@@ -270,18 +385,36 @@ test.describe('Round 6 — SVG thumbnails', () => {
   });
 
   test('Capability probe reports SVG support when rsvg-convert is on PATH', async () => {
+    // The probe must AGREE with the machine. Asserting `true` unconditionally
+    // just asserts that the machine has librsvg; what regresses is the two
+    // drifting apart (e.g. a Dockerfile that drops the package while the flag
+    // stays on), so compare the flag with the binary the container ships.
+    test.skip(
+      caps.thumbs?.svg !== true,
+      'rsvg-convert is not on PATH here — this pins the "Dockerfile dropped rsvg-convert" regression on hosts that have it',
+    );
     // Wire-test for the model.ThumbCapabilities.SVG field added in
     // round 6. Lets us catch a "Dockerfile dropped rsvg-convert"
     // regression without needing a thumbnail to render.
-    const caps = await api.get('/api/capabilities');
-    expect(caps.status()).toBe(200);
-    const body = (await caps.json()) as { thumbs?: { svg?: boolean } };
+    // Local name must not shadow the module-level `caps` — the skip above
+    // reads it, and a `const caps` in this scope puts it in the temporal dead
+    // zone, so the guard threw instead of skipping.
+    const res = await api.get('/api/capabilities');
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { thumbs?: { svg?: boolean } };
     expect(body.thumbs?.svg).toBe(true);
   });
 });
 
 test.describe('Round 8 — pptx fixture', () => {
   test('BUG#18 — slides.pptx generated by python-pptx round-trips through soffice', async () => {
+    // ⚠ The observable effect being asserted (thumb_url on slides.pptx) only
+    // exists where LibreOffice can re-export the deck. Without soffice the
+    // office thumbnailer is not wired at all.
+    test.skip(
+      caps.libreoffice !== true && caps.thumbs?.office !== true,
+      'LibreOffice is not available here (capabilities.libreoffice=false) — install it to gate the pptx round-trip',
+    );
     // The hand-rolled minimal pptx in earlier rounds tripped LibreOffice
     // Impress's "verify input parameters" guard (no slideLayout /
     // slideMaster / theme parts → input flagged malformed). Round 8
@@ -327,7 +460,7 @@ test.describe('Round 4-6 — Browser UI regression', () => {
     // All three are exercised by simply navigating to the editor URL
     // and watching for the upstream config POST to come back 200.
     await page.goto('/admin/login');
-    await page.getByLabel(/email/i).fill(ADMIN_EMAIL);
+    await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(ADMIN_EMAIL);
     await page.getByLabel(/password|şifre/i).fill(ADMIN_PASSWORD);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.waitForURL(/\/admin\/dashboard/, { timeout: 10_000 });
@@ -361,7 +494,7 @@ test.describe('Round 4-6 — Browser UI regression', () => {
     // because it mirrors double-click semantics. Browser-only — the
     // action set is a v-bound array assembled at runtime.
     await page.goto('/admin/login');
-    await page.getByLabel(/email/i).fill(ADMIN_EMAIL);
+    await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(ADMIN_EMAIL);
     await page.getByLabel(/password|şifre/i).fill(ADMIN_PASSWORD);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.waitForURL(/\/admin\/dashboard/);

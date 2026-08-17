@@ -31,43 +31,43 @@ import (
 const testAvatarURI = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
 func TestWSTicketAvatar(t *testing.T) {
-	burak := &model.User{ID: 3, DisplayName: "Burak", Email: "burak@brf.sh", AvatarURL: testAvatarURI}
+	ada := &model.User{ID: 3, DisplayName: "Ada", Email: "ada@example.com", AvatarURL: testAvatarURI}
 
 	// The account's own session.
-	require.Equal(t, testAvatarURI, mintVia(t, burak, nil, "", nil).Avatar)
+	require.Equal(t, testAvatarURI, mintVia(t, ada, nil, "", nil).Avatar)
 
 	// ⭐ The point of the feature: a key minted under the account carries the
 	// account's face, so the desktop app / CLI / any personal token shows it.
 	desktop := &model.APIToken{ID: 12, UserID: 3, Label: "filex desktop — Win32"}
-	got := mintVia(t, burak, desktop, "", nil)
-	require.Equal(t, "Burak (filex desktop)", got.Name)
+	got := mintVia(t, ada, desktop, "", nil)
+	require.Equal(t, "Ada (filex desktop)", got.Name)
 	require.Equal(t, testAvatarURI, got.Avatar, "an API key minted under the account is that person")
 
 	// ⚠ A shared proxy token is not a person. The entry reads "work", and the
-	// owner's photo on it would claim every work user is Burak.
+	// owner's photo on it would claim every work user is Ada.
 	shared := &model.APIToken{ID: 6, UserID: 3, Label: "shared", Usernames: "work,fishapp"}
-	viaShared := mintVia(t, burak, shared, "work", nil)
+	viaShared := mintVia(t, ada, shared, "work", nil)
 	require.Equal(t, "work", viaShared.Name)
 	require.Empty(t, viaShared.Avatar, "a shared proxy token must not wear its owner's face")
 
 	// A host that re-identifies the connection as a real end user may supply
 	// THAT person's picture; without one the row falls back to initials rather
 	// than borrowing the token owner's.
-	stamped := mintVia(t, burak, shared, "work", map[string]string{
-		"X-Filex-Presence-Name": "Gökçil",
+	stamped := mintVia(t, ada, shared, "work", map[string]string{
+		"X-Filex-Presence-Name": "Grace",
 	})
-	require.Equal(t, "Gökçil (work)", stamped.Name)
+	require.Equal(t, "Grace (work)", stamped.Name)
 	require.Empty(t, stamped.Avatar, "a different human with no picture of their own gets initials")
 
-	withPhoto := mintVia(t, burak, shared, "work", map[string]string{
-		"X-Filex-Presence-Name":   "Gökçil",
+	withPhoto := mintVia(t, ada, shared, "work", map[string]string{
+		"X-Filex-Presence-Name":   "Grace",
 		"X-Filex-Presence-Avatar": testAvatarURI,
 	})
 	require.Equal(t, testAvatarURI, withPhoto.Avatar)
 
 	// Junk in the header is dropped, not forwarded into everyone's DOM.
-	junk := mintVia(t, burak, shared, "work", map[string]string{
-		"X-Filex-Presence-Name":   "Gökçil",
+	junk := mintVia(t, ada, shared, "work", map[string]string{
+		"X-Filex-Presence-Name":   "Grace",
 		"X-Filex-Presence-Avatar": "javascript:alert(1)",
 	})
 	require.Empty(t, junk.Avatar, "only image sources are accepted")
@@ -80,8 +80,8 @@ func TestWSTicketAvatar(t *testing.T) {
 // TestWSPresenceCarriesAvatar walks the last hop: what a second viewer in the
 // same folder actually receives.
 func TestWSPresenceCarriesAvatar(t *testing.T) {
-	burak := &model.User{ID: 3, DisplayName: "Burak", Email: "burak@brf.sh", AvatarURL: testAvatarURI}
-	gokcil := &model.User{ID: 4, DisplayName: "Gökçil", Email: "gokcil@brf.sh"}
+	ada := &model.User{ID: 3, DisplayName: "Ada", Email: "ada@example.com", AvatarURL: testAvatarURI}
+	grace := &model.User{ID: 4, DisplayName: "Grace", Email: "grace@example.com"}
 
 	_, store := testutil.NewTestDB(t)
 	_, err := store.CreateStorage(context.Background(), &model.Storage{
@@ -106,27 +106,27 @@ func TestWSPresenceCarriesAvatar(t *testing.T) {
 		return conn
 	}
 
-	burakConn := dial(burak)
-	wsSend(t, burakConn, map[string]any{"type": "subscribe", "path": "main://projeler"})
-	wsReadType(t, burakConn, "presence")
+	adaConn := dial(ada)
+	wsSend(t, adaConn, map[string]any{"type": "subscribe", "path": "main://projeler"})
+	wsReadType(t, adaConn, "presence")
 
-	gokcilConn := dial(gokcil)
-	wsSend(t, gokcilConn, map[string]any{"type": "subscribe", "path": "main://projeler"})
+	graceConn := dial(grace)
+	wsSend(t, graceConn, map[string]any{"type": "subscribe", "path": "main://projeler"})
 
-	frame := wsReadType(t, gokcilConn, "presence")
+	frame := wsReadType(t, graceConn, "presence")
 	users, _ := frame["users"].([]any)
-	require.Len(t, users, 1, "Gökçil should see exactly Burak")
+	require.Len(t, users, 1, "Grace should see exactly Ada")
 	entry, _ := users[0].(map[string]any)
-	require.Equal(t, "Burak", entry["name"])
+	require.Equal(t, "Ada", entry["name"])
 	require.Equal(t, testAvatarURI, entry["avatar"], "the roster must carry the picture, not just the name")
 
 	// And the other way round: no picture → no key at all, so the client keeps
 	// its initials fallback instead of rendering an empty <img>.
-	back := wsReadType(t, burakConn, "presence")
+	back := wsReadType(t, adaConn, "presence")
 	others, _ := back["users"].([]any)
 	require.Len(t, others, 1)
 	gEntry, _ := others[0].(map[string]any)
-	require.Equal(t, "Gökçil", gEntry["name"])
+	require.Equal(t, "Grace", gEntry["name"])
 	_, hasAvatar := gEntry["avatar"]
 	require.False(t, hasAvatar, "an account with no picture must not send an empty avatar")
 }

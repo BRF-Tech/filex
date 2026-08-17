@@ -133,15 +133,16 @@ func (s *Service) Restore(ctx context.Context, nodeID int64) error {
 	// driver step fails (admin can recover via SQL + storage CLI).
 	if s.Resolver != nil {
 		if drv, err := s.Resolver(n.StorageID); err == nil {
-			if mv, ok := drv.(storage.Mover); ok {
-				if err := mv.Move(ctx, n.Path, origPath); err != nil &&
-					!errors.Is(err, storage.ErrNotFound) {
-					slog.Warn("trash restore move failed",
-						slog.Int64("node_id", n.ID),
-						slog.String("from", n.Path),
-						slog.String("to", origPath),
-						slog.String("err", err.Error()))
-				}
+			// TakeBack mirrors Put: native rename when the driver has one,
+			// Copy+Delete when it does not, and a per-object walk for a folder
+			// an object store never had a real object for.
+			if err := TakeBack(ctx, drv, n.Path, origPath); err != nil &&
+				!errors.Is(err, storage.ErrNotFound) {
+				slog.Warn("trash restore move failed",
+					slog.Int64("node_id", n.ID),
+					slog.String("from", n.Path),
+					slog.String("to", origPath),
+					slog.String("err", err.Error()))
 			}
 		}
 	}
@@ -344,19 +345,16 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 			}
 		}
 	}
-	owner, _ := s.Store.GetNodeOwner(ctx, n.ID)
 	/* calisma:d3 comments */
 	// Purge the node's comment rows explicitly (belt and suspenders next
 	// to the node_comments FK CASCADE — engines run with FK enforcement
 	// on, but an explicit delete keeps the purge self-contained).
 	_ = s.Store.DeleteNodeCommentsByNode(ctx, n.ID)
-	if err := s.Store.HardDeleteNode(ctx, n.ID); err != nil {
-		return err
-	}
-	if owner != nil && s.Quota != nil && n.Type == model.NodeTypeFile {
-		_ = s.Quota.SubUsage(ctx, *owner, n.Size)
-	}
-	return nil
+	// ⚠ The quota release happens INSIDE HardDeleteNode, in the accounting
+	// store (internal/quotastore) — the one place that also counts the bytes
+	// when they land. Subtracting here as well would release every purged
+	// file twice.
+	return s.Store.HardDeleteNode(ctx, n.ID)
 }
 
 // purgeDirDescendants hard-purges every trashed row still parked under a
@@ -405,12 +403,10 @@ func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
 				}
 			}
 		}
-		owner, _ := s.Store.GetNodeOwner(ctx, c.ID)
+		// Quota release is inside HardDeleteNode (internal/quotastore) — see
+		// purgeOne.
 		if err := s.Store.HardDeleteNode(ctx, c.ID); err != nil {
 			continue
-		}
-		if owner != nil && s.Quota != nil && c.Type == model.NodeTypeFile {
-			_ = s.Quota.SubUsage(ctx, *owner, c.Size)
 		}
 	}
 }

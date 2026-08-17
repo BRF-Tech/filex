@@ -49,7 +49,7 @@ func NewRulesEngine(reloadFn func() ([]RuleSpec, ReplicaMode)) RuleEngine {
 
 // Match returns the mode for a path. Priority asc, first enabled
 // match wins. Empty rule set falls back to defaultMode (mirror by
-// default — Burak E2 / SPEC §4.4).
+// default — owner decision E2 / SPEC §4.4).
 func (e *rulesEngine) Match(path string) ReplicaMode {
 	rules, _ := e.cache.Load().([]RuleSpec)
 	if len(rules) == 0 {

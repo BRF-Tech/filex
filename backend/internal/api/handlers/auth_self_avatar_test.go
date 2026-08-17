@@ -31,7 +31,7 @@ func patchProfile(t *testing.T, h *handlers.AuthSelf, store db.Store, u *model.U
 func TestProfileAvatar(t *testing.T) {
 	ctx := context.Background()
 	_, store := testutil.NewTestDB(t)
-	u, err := store.CreateUser(ctx, "burak@brf.sh", "x", model.RoleAdmin, "tr", "Europe/Istanbul")
+	u, err := store.CreateUser(ctx, "ada@example.com", "x", model.RoleAdmin, "tr", "Europe/Istanbul")
 	require.NoError(t, err)
 	h := handlers.NewAuthSelf(store)
 
@@ -48,12 +48,12 @@ func TestProfileAvatar(t *testing.T) {
 
 	// A patch that does not mention the picture must not wipe it — the profile
 	// form sends whatever it currently shows, and other callers send neither.
-	rec = patchProfile(t, h, store, saved, `{"display_name":"Burak"}`)
+	rec = patchProfile(t, h, store, saved, `{"display_name":"Ada"}`)
 	require.Equal(t, http.StatusOK, rec.Code)
 	saved, err = store.GetUser(ctx, u.ID)
 	require.NoError(t, err)
 	require.Equal(t, testAvatarURI, saved.AvatarURL)
-	require.Equal(t, "Burak", saved.DisplayName)
+	require.Equal(t, "Ada", saved.DisplayName)
 
 	// Anything that is not an image reference is refused OUT LOUD: the user is
 	// looking at an upload they believe worked.

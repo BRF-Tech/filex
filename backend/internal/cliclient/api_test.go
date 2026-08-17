@@ -70,11 +70,11 @@ func (fs *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	case "/api/auth/login":
 		var req struct{ Email, Password, Totp string }
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if req.Email == "burak@brf.sh" && req.Password == "s3cret" {
+		if req.Email == "ada@example.com" && req.Password == "s3cret" {
 			fs.writeJSON(w, 200, map[string]any{"token": "sess-abc", "user": map[string]any{"email": req.Email}})
 			return
 		}
-		if req.Email == "totp@brf.sh" && req.Password == "s3cret" && req.Totp == "" {
+		if req.Email == "totp@example.com" && req.Password == "s3cret" && req.Totp == "" {
 			fs.writeJSON(w, 401, map[string]any{"error": "two-factor code required", "totp_required": true})
 			return
 		}
@@ -210,7 +210,7 @@ func TestLogin_SavesConfig0600(t *testing.T) {
 	_, srv := newFakeServer(t)
 	api := New(Conn{URL: srv.URL})
 
-	lr, err := api.Login(context.Background(), "burak@brf.sh", "s3cret", "")
+	lr, err := api.Login(context.Background(), "ada@example.com", "s3cret", "")
 	require.NoError(t, err)
 	assert.Equal(t, "sess-abc", lr.Token)
 
@@ -234,7 +234,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 	_, srv := newFakeServer(t)
 	api := New(Conn{URL: srv.URL})
 
-	_, err := api.Login(context.Background(), "burak@brf.sh", "wrong", "")
+	_, err := api.Login(context.Background(), "ada@example.com", "wrong", "")
 	require.Error(t, err)
 	assert.True(t, IsUnauthorized(err))
 	assert.Contains(t, err.Error(), "invalid credentials")
@@ -245,7 +245,7 @@ func TestLogin_TotpRequiredHint(t *testing.T) {
 	_, srv := newFakeServer(t)
 	api := New(Conn{URL: srv.URL})
 
-	_, err := api.Login(context.Background(), "totp@brf.sh", "s3cret", "")
+	_, err := api.Login(context.Background(), "totp@example.com", "s3cret", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--totp")
 }

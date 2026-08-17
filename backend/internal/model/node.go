@@ -39,10 +39,15 @@ type Node struct {
 	BackendMtime *time.Time `json:"backend_mtime,omitempty"`
 	DBMtime      time.Time  `json:"db_mtime"`
 	SyncState    SyncState  `json:"sync_state"`
-	SeenAt       time.Time  `json:"seen_at"`
-	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// TransferState is "stored" (the bytes are on the driver) or "staged" (the
+	// row exists and is listed, but the bytes are still in filex's staging area
+	// while a background upload-commit op transfers them). Everything written
+	// before staged uploads existed reads back "stored".
+	TransferState string     `json:"transfer_state,omitempty"`
+	SeenAt        time.Time  `json:"seen_at"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 
 	// Optional joined data — populated by API layer, never persisted.
 	Thumb *Thumbnail        `json:"thumb,omitempty"`

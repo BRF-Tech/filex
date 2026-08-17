@@ -1,6 +1,6 @@
 {
   "name": "@brftech/filex-react",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "filex React adapter — wraps <filex-explorer> for React idiom (props + camelCase event handlers)",
   "type": "module",
   "main": "./dist/filex-react.cjs",
@@ -57,7 +57,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://gitlab.com/brftech/filemanager.git",
+    "url": "git+https://github.com/brf-tech/filex.git",
     "directory": "packages/react"
   }
 }

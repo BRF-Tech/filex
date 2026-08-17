@@ -30,7 +30,17 @@ export const AuthApi = {
     await api.post('/auth/password', { current_password: current, new_password: next });
   },
 
-  async enrollTotp(): Promise<{ secret: string; otpauth_url: string; qr_svg: string }> {
+  // ⚠ `recovery_codes` is part of the response and must stay part of the type.
+  // The backend generates ten codes, STORES them against the pending secret
+  // (auth_self.go:189) and hands them back exactly once. Dropping them from
+  // the type is how they stopped being rendered: a user who lost their
+  // authenticator had ten valid codes that nobody had ever shown them.
+  async enrollTotp(): Promise<{
+    secret: string;
+    otpauth_url: string;
+    qr_svg: string;
+    recovery_codes: string[];
+  }> {
     const { data } = await api.post('/auth/totp/enroll');
     return data;
   },

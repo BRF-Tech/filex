@@ -228,3 +228,50 @@ func TestShare_DownloadFolder_WaitPageAndStatus(t *testing.T) {
 	}
 	require.True(t, ready, "status must eventually report ready")
 }
+
+// A file request (drop link) must NOT pre-build the folder's ZIP. A drop link
+// is upload-only, so that archive can never be downloaded through it: building
+// it read the whole folder from object storage for a file the warmer never
+// looks at again and — before the sweeper existed — nothing ever deleted.
+func TestShare_DropLink_DoesNotPrewarmFolderZip(t *testing.T) {
+	_, store, drv, st, root := newMutateFixture(t)
+	resolver := func(id int64) (storage.Driver, error) { return drv, nil }
+
+	mkdirNode(t, store, st, root, "inbox")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "inbox", "a.txt"), []byte("alpha"), 0o644))
+
+	cacheDir := t.TempDir()
+	h := handlers.NewShare(share.NewService(store), store, resolver, "", sharezip.New(cacheDir))
+	r := chi.NewRouter()
+	r.Post("/api/files/share", h.HandleCreate)
+
+	create := func(kind string) {
+		t.Helper()
+		payload := map[string]any{"path": "main://inbox"}
+		if kind != "" {
+			payload["kind"] = kind
+		}
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest("POST", "/api/files/share", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		require.Equal(t, 200, rec.Code, rec.Body.String())
+	}
+	zips := func() []string {
+		m, err := filepath.Glob(filepath.Join(cacheDir, "*.zip"))
+		require.NoError(t, err)
+		return m
+	}
+
+	create("drop")
+	time.Sleep(300 * time.Millisecond)
+	require.Empty(t, zips(), "a drop link pre-built a folder ZIP nobody can download")
+
+	// Positive control on the SAME folder and the same handler: a download
+	// link does pre-build one, which is what makes the assertion above mean
+	// something.
+	create("")
+	require.Eventually(t, func() bool { return len(zips()) == 1 }, 5*time.Second, 20*time.Millisecond,
+		"a download link must still pre-build the folder ZIP")
+}

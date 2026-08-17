@@ -36,7 +36,13 @@ var ErrRootPathForbidden = errors.New("ROOT_PATH_FORBIDDEN: storage prefix/path 
 // path/prefix/root is empty or evaluates to the filesystem/bucket root after
 // trimming whitespace and slashes.
 //
-// The function is keyed by driver name to look at the right config field:
+// The field to look at comes from the driver's Descriptor — the one field
+// flagged Root, plus its legacy aliases. That is deliberate: this function
+// used to carry its own per-driver key list, which is exactly how it drifted
+// away from the admin form (the form collected "base_path", the validator
+// read "root", every submit 400'd). One declaration, both sides.
+//
+// Drivers without a descriptor keep the historical behaviour:
 //
 //	s3              → "prefix"
 //	local           → "path" (preferred), then "root"
@@ -46,6 +52,24 @@ var ErrRootPathForbidden = errors.New("ROOT_PATH_FORBIDDEN: storage prefix/path 
 // are protected by default. Callers should invoke this from API handlers
 // (Storage create / update) BEFORE persisting the row.
 func ValidateNonRootPath(driver string, cfg map[string]any) error {
+	if d, ok := DescriptorFor(driver); ok {
+		f, hasRoot := d.RootField()
+		if !hasRoot {
+			// The driver declares no root-scoping field — nothing to
+			// forbid (it does not mount a shared namespace).
+			return nil
+		}
+		if strings.Trim(ConfigString(cfg, f.Key, f.Aliases...), "/ \t\r\n") == "" {
+			return ErrRootPathForbidden
+		}
+		return nil
+	}
+	return validateNonRootPathLegacy(driver, cfg)
+}
+
+// validateNonRootPathLegacy is the pre-descriptor key list, kept for driver
+// names with no registered descriptor.
+func validateNonRootPathLegacy(driver string, cfg map[string]any) error {
 	var p string
 	switch driver {
 	case "s3":

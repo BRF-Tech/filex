@@ -88,7 +88,7 @@ func (f *davFS) aclSet(ctx context.Context, st *model.Storage) (*acl.Set, error)
 	if set, ok := f.sets[st.ID]; ok {
 		return set, nil
 	}
-	set, err := f.h.cfg.ACL.LoadSet(ctx, f.p.user, st)
+	set, err := f.h.cfg.ACL.LoadSet(ctx, f.p.User, st)
 	if err != nil {
 		return nil, err
 	}
@@ -226,14 +226,22 @@ func (f *davFS) OpenFile(ctx context.Context, name string, flag int, _ os.FileMo
 	if !set.CanSee(rel) {
 		return nil, os.ErrNotExist
 	}
-	obj, err := drv.Stat(ctx, rel)
+	// Where the bytes are: the driver, or filex's staging area while a staged
+	// upload is still transferring. A GET must work during that window, and the
+	// PROPFIND/GET size and ETag must be the committed ones — the driver has
+	// nothing to describe yet.
+	src, err := f.h.cfg.Body.Resolve(ctx, drv, st.ID, rel, nil)
+	if err != nil {
+		return nil, err
+	}
+	obj, err := src.Stat(ctx)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 	if obj.Kind == storage.KindDirectory {
 		return f.storageDir(ctx, st, set, drv, rel)
 	}
-	return newReadFile(ctx, drv, rel, newFileInfo(obj)), nil
+	return newReadFile(ctx, src, newFileInfo(obj)), nil
 }
 
 func (f *davFS) RemoveAll(ctx context.Context, name string) error {
@@ -260,72 +268,60 @@ func (f *davFS) RemoveAll(ctx context.Context, name string) error {
 		return mapErr(err)
 	}
 
-	// DAV DELETE is a SOFT delete, mirroring the manager UI: rename the
-	// object into `.filex-trash/<key>` so it stays restorable via the trash
-	// service. Drivers without Move keep the legacy permanent delete.
-	if mv, ok := drv.(storage.Mover); ok {
-		trashRel := trash.NewKey(path.Base(strings.TrimRight(rel, "/")))
-		if merr := mv.Move(ctx, rel, trashRel); merr != nil {
-			switch {
-			case errors.Is(merr, storage.ErrNotFound):
-				// Source already gone (stale index / out-of-band delete):
-				// just drop the cache rows.
-				f.h.syncDelete(ctx, st, rel)
-				return nil
-			case obj.Kind == storage.KindDirectory:
-				// Directory Move failed (driver-dependent on object stores)
-				// — move each file under the prefix instead (Rename's
-				// fallback pattern), then clean leftover markers.
-				files, werr := walkFiles(ctx, drv, rel)
-				if werr != nil {
-					return mapErr(merr)
-				}
-				prefix := strings.TrimRight(rel, "/") + "/"
-				for _, fp := range files {
-					if ferr := mv.Move(ctx, fp, trashRel+"/"+strings.TrimPrefix(fp, prefix)); ferr != nil &&
-						!errors.Is(ferr, storage.ErrNotFound) {
-						return mapErr(ferr)
-					}
-				}
-				if del, ok := drv.(storage.Deleter); ok {
-					_ = del.Delete(ctx, rel)
-					_ = del.Delete(ctx, prefix)
-				}
-			default:
-				return mapErr(merr)
-			}
-		}
-		f.h.syncTrash(ctx, st, rel, trashRel)
+	// DAV DELETE is a SOFT delete, mirroring the manager UI: the bytes are
+	// renamed into `.filex-trash/<key>` so they stay restorable via the trash
+	// service. trash.Put is the shared implementation every surface uses — it
+	// covers the single-rename case, the per-object walk an object store needs
+	// for a folder, and the Copy+Delete fallback for drivers without Move.
+	//
+	// The DB bookkeeping below runs on a WithoutCancel context: once the bytes
+	// have moved, a client that hangs up mid-DELETE must not leave the node row
+	// pointing at a path the file no longer occupies.
+	out, terr := trash.Put(ctx, drv, rel)
+	switch {
+	case terr == nil && out.Trashed:
+		f.h.syncTrash(context.WithoutCancel(ctx), st, rel, out.Key)
 		return nil
-	}
 
-	// Legacy hard delete for drivers without Move capability.
-	del, ok := drv.(storage.Deleter)
-	if !ok {
-		return storage.ErrUnsupported
-	}
-	if obj.Kind == storage.KindDirectory {
-		// Per-file walk: object stores have no real "directory" object, a
-		// single Delete of the prefix is driver-dependent. Files first, then
-		// best-effort marker cleanup.
-		files, werr := walkFiles(ctx, drv, rel)
-		if werr != nil {
-			return mapErr(werr)
+	case terr == nil && out.Missing:
+		// Source already gone (stale index / out-of-band delete): drop the
+		// cache rows outright rather than trashing a phantom.
+		f.h.syncDelete(context.WithoutCancel(ctx), st, rel)
+		return nil
+
+	case errors.Is(terr, trash.ErrUnsupported):
+		// The driver can neither Move nor Copy, so there is no way to keep the
+		// bytes. Delete them for real — and drop the rows instead of soft
+		// deleting, so nothing shows up in the trash offering a Restore that
+		// could never work.
+		del, ok := drv.(storage.Deleter)
+		if !ok {
+			return storage.ErrUnsupported
 		}
-		for _, fp := range files {
-			if err := del.Delete(ctx, fp); err != nil && !errors.Is(err, storage.ErrNotFound) {
-				return mapErr(err)
+		if obj.Kind == storage.KindDirectory {
+			// Object stores have no real object at a prefix, so a single
+			// Delete of it is driver-dependent: files first, then a
+			// best-effort sweep of the marker variants.
+			files, werr := walkFiles(ctx, drv, rel)
+			if werr != nil {
+				return mapErr(werr)
 			}
-		}
-		_ = del.Delete(ctx, rel)
-		_ = del.Delete(ctx, strings.TrimRight(rel, "/")+"/")
-	} else {
-		if err := del.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+			for _, fp := range files {
+				if err := del.Delete(ctx, fp); err != nil && !errors.Is(err, storage.ErrNotFound) {
+					return mapErr(err)
+				}
+			}
+			_ = del.Delete(ctx, rel)
+			_ = del.Delete(ctx, strings.TrimRight(rel, "/")+"/")
+		} else if err := del.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return mapErr(err)
 		}
+		f.h.syncDelete(context.WithoutCancel(ctx), st, rel)
+		return nil
+
+	default:
+		return mapErr(terr)
 	}
-	f.h.syncDelete(ctx, st, rel)
-	return nil
 }
 
 func (f *davFS) Rename(ctx context.Context, oldName, newName string) error {
@@ -413,7 +409,13 @@ func (f *davFS) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	obj, err := drv.Stat(ctx, rel)
+	// Same source resolution as OpenFile: a staged file must report the size
+	// and ETag it was committed with, not the backend's absence.
+	src, err := f.h.cfg.Body.Resolve(ctx, drv, st.ID, rel, nil)
+	if err != nil {
+		return nil, err
+	}
+	obj, err := src.Stat(ctx)
 	if err != nil {
 		return nil, mapErr(err)
 	}

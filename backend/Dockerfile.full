@@ -1,5 +1,5 @@
 # filex full image (~250 MB) — slim base + ffmpeg, ghostscript, libreoffice for full thumbnail support
-FROM ghcr.io/brf-tech/filex:slim
+FROM brftech/filex:slim
 USER root
 RUN apk --no-cache add \
     ffmpeg \

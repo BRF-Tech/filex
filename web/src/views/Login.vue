@@ -229,7 +229,7 @@ function startOidc() {
           <p class="text-xs text-zinc-500 dark:text-zinc-400">{{ t('demo.adminHint') }}</p>
         </div>
         <form v-if="localEnabled" class="space-y-3" @submit.prevent="submit">
-          <Input v-model="email" type="email" autocomplete="username" required :label="t('common.email')" name="email" />
+          <Input v-model="email" type="text" autocomplete="username" required :label="t('login.identifier')" name="email" />
           <Input v-model="password" type="password" autocomplete="current-password" required :label="t('common.password')" name="password" />
           <Checkbox v-model="remember" :label="t('login.remember')" />
           <p v-if="localError" class="text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-md px-3 py-2">
@@ -303,7 +303,7 @@ function startOidc() {
           </div>
 
           <form v-if="showLocalForm" class="space-y-3" @submit.prevent="submit">
-            <Input v-model="email" type="email" autocomplete="username" required :label="t('common.email')" placeholder="admin@local" name="email" />
+            <Input v-model="email" type="text" autocomplete="username" required :label="t('login.identifier')" placeholder="admin@local" name="email" />
             <Input v-model="password" type="password" autocomplete="current-password" required :label="t('common.password')" name="password" />
 
             <div class="text-right">

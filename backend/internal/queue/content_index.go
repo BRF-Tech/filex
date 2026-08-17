@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/search/extract"
@@ -43,6 +44,9 @@ type NodeGetter interface {
 type ContentIndexer struct {
 	store    NodeGetter
 	resolver func(int64) (storage.Driver, error)
+	// body resolves where a node's bytes are: the driver, or filex's staging
+	// area while a staged upload is still transferring. Nil-safe.
+	body     *filebody.Resolver
 	index    *search.Index
 	maxBytes int64
 }
@@ -55,6 +59,10 @@ func NewContentIndexer(store NodeGetter, resolver func(int64) (storage.Driver, e
 	}
 	return &ContentIndexer{store: store, resolver: resolver, index: idx, maxBytes: maxBytes}
 }
+
+// AttachBody wires the byte-source resolver so a re-queued extraction of a file
+// that is still being transferred reads the staged bytes.
+func (c *ContentIndexer) AttachBody(b *filebody.Resolver) { c.body = b }
 
 // Eligible reports whether n qualifies for content extraction: a live file
 // within the size cap whose mime/extension has a registered extractor.
@@ -127,7 +135,11 @@ func (c *ContentIndexer) Handle(ctx context.Context, op Op) error {
 	if err != nil {
 		return fmt.Errorf("content-index: resolve storage %d: %w", n.StorageID, err)
 	}
-	rc, err := drv.Read(ctx, n.Path)
+	src, err := c.body.Resolve(ctx, drv, n.StorageID, n.Path, n)
+	if err != nil {
+		return fmt.Errorf("content-index: resolve %q: %w", n.Path, err)
+	}
+	rc, err := src.Open(ctx)
 	if err != nil {
 		return fmt.Errorf("content-index: read %q: %w", n.Path, err)
 	}

@@ -109,3 +109,8 @@ NUL
 # folder (see CLAUDE.md), never in the repo.
 /shots/
 /desktop-*.png
+
+# E2E scratch: a local storage whose root fell back to ./fileman (lesson: a
+# seeded storage takes config.path, not root — a wrong key silently lands every
+# storage in the server working directory).
+/fileman/

@@ -32,7 +32,9 @@ function mapStatus(s: UploadJob['status']): OperationStatus {
   if (s === 'done') return 'done';
   if (s === 'error') return 'error';
   if (s === 'aborted') return 'aborted';
-  return 'running'; // pending | initializing | uploading | finalizing
+  // pending | initializing | uploading | committing | transferring — all of
+  // them are still in flight as far as the tray is concerned.
+  return 'running';
 }
 
 watch(
@@ -50,6 +52,8 @@ watch(
           error: j.error ?? null,
           uploadedBytes: j.uploadedBytes,
           totalBytes: j.totalBytes,
+          // Cancellable only while chunks are still moving: once the commit is
+          // accepted the bytes are filex's and the ops worker owns the rest.
           cancellable: j.status === 'uploading' || j.status === 'initializing',
           retryable: j.status === 'error',
         },

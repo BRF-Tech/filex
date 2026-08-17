@@ -93,7 +93,9 @@ This folder is the demo fixture the project's screenshots are taken from — the
 
 ## Good to know
 
-Storage is a driver, not a directory: local disk, S3, FTP, SFTP and WebDAV all look the same from here. Nothing in the UI knows which one it is talking to.
+Storage is a driver, not a directory: local disk, S3, FTP, SFTP, WebDAV and SMB/NAS all look the same from here. Nothing in the UI knows which one it is talking to.
+
+And it works the other way too — this same tree is reachable as **S3**, **SFTP**, **FTPS**, **NFS** and **WebDAV**, so rclone, restic, WinSCP or a scanner that only ever learned FTP can point straight at it.
 `;
 
 const NOTES = `# Release notes — draft

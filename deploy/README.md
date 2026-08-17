@@ -27,9 +27,9 @@ required settings. Common to all of them:
   (default `/srv/files`, seeded as the first storage when
   `FILEX_DEFAULT_STORAGE_DRIVER=local`).
 
-## Legacy files (brf.sh demo deploy)
+## Legacy files (example.com demo deploy)
 
-`demo-fm.brf.sh.compose.yml`, `Caddyfile.demo-fm.brf.sh`,
-`nginx.demo-fm.brf.sh.conf`, `keycloak-client-filex.json` and `.env.example`
-are the original demo-fm.brf.sh single-instance deploy artifacts — kept for
+`demo-fm.example.com.compose.yml`, `Caddyfile.demo-fm.example.com`,
+`nginx.demo-fm.example.com.conf`, `keycloak-client-filex.json` and `.env.example`
+are the original demo-fm.example.com single-instance deploy artifacts — kept for
 that environment, not templates for new installs.

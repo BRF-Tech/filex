@@ -54,10 +54,51 @@ const test = base.extend<{ authedRequest: APIRequestContext }>({
 // Track share ids/tokens we mint so afterAll can revoke + sweep.
 const created: Array<{ id?: number; token?: string }> = [];
 
+/**
+ * Mint a share and remember it for the afterAll sweep.
+ *
+ * ⚠ Every test mints its own instead of reaching for one an earlier test left
+ * in `created`. Playwright tears the worker down after a failed test and
+ * starts a fresh one, which RE-EVALUATES this module: `Date.now()` produces a
+ * new STORAGE name, beforeAll seeds a new (empty) storage, and every
+ * module-level array is back to []. So one genuine failure used to knock over
+ * every later test in the file — measured here as `files: []` and a null node
+ * id in "legacy {node_id, pin}", a test that has nothing to do with the one
+ * that actually broke. Cross-test state is a liability, not a shortcut.
+ */
+async function mintShare(
+  request: APIRequestContext,
+  body: Record<string, unknown>,
+): Promise<{
+  share: { id: number; token: string; url: string; has_pin: boolean; password_pin?: string };
+  url: string;
+  token: string;
+  id: number;
+}> {
+  const res = await request.post('/api/files/share', { data: body });
+  expect(res.ok(), `share status ${res.status()}`).toBeTruthy();
+  const json = await res.json();
+  created.push({ id: json.share.id, token: json.share.token });
+  return json;
+}
+
 test.describe('Share — create + public access (path + node_id shapes)', () => {
-  test.beforeAll(async ({ request }) => {
+  test.beforeAll(async ({ request, playwright, baseURL }) => {
     await dropStorageByName(request, STORAGE);
     await seedLocalStorage(request, STORAGE, MOUNT);
+    // The fixture lives in the hook, not in a test — see mintShare's note on
+    // worker restarts. A hook re-runs for the fresh worker; a test does not.
+    const authed = await newAuthedRequest(playwright, baseURL ?? '');
+    const upRes = await authed.post('/api/files/manager?action=upload', {
+      multipart: {
+        path: `${STORAGE}://`,
+        'file[]': { name: FILE_NAME, mimeType: 'text/plain', buffer: Buffer.from(FILE_BODY) },
+      },
+    });
+    if (!upRes.ok()) {
+      throw new Error(`seed upload failed: ${upRes.status()} ${await upRes.text()}`);
+    }
+    await authed.dispose();
   });
 
   test.afterAll(async ({ request }) => {
@@ -70,19 +111,7 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     await dropStorageByName(request, STORAGE);
   });
 
-  test('upload a fixture file before creating shares', async ({ authedRequest: request }) => {
-    const upRes = await request.post('/api/files/manager?action=upload', {
-      multipart: {
-        path: `${STORAGE}://`,
-        'file[]': {
-          name: FILE_NAME,
-          mimeType: 'text/plain',
-          buffer: Buffer.from(FILE_BODY),
-        },
-      },
-    });
-    expect(upRes.ok(), `upload status ${upRes.status()}`).toBeTruthy();
-
+  test('the uploaded fixture is listed with a node id', async ({ authedRequest: request }) => {
     // Confirm the listing emits an `id` per file — the SFC reads
     // `f.id` to drive the legacy share-by-node-id flow. This also
     // guards the projectFileNodes change in 87cf497.
@@ -94,28 +123,12 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
   test('path-shape, password=false → has_pin=false + flat url alias', async ({
     authedRequest: request,
   }) => {
-    const res = await request.post('/api/files/share', {
-      data: {
-        path: `${STORAGE}://${FILE_NAME}`,
-        password: false,
-        expires_at: null,
-        max_downloads: null,
-      },
+    const body = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: false,
+      expires_at: null,
+      max_downloads: null,
     });
-    expect(res.ok(), `share status ${res.status()}`).toBeTruthy();
-
-    const body: {
-      share: {
-        id: number;
-        url: string;
-        token: string;
-        has_pin: boolean;
-        password_pin?: string;
-      };
-      url: string;
-      token: string;
-      id: number;
-    } = await res.json();
 
     // Nested envelope — SFC consumes this.
     expect(body.share).toBeTruthy();
@@ -128,49 +141,30 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     expect(body.url).toBe(body.share.url);
     expect(body.token).toBe(body.share.token);
     expect(body.id).toBe(body.share.id);
-
-    created.push({ id: body.share.id, token: body.share.token });
   });
 
   test('path-shape, password=true → server returns 8-digit numeric PIN', async ({
     authedRequest: request,
   }) => {
-    const res = await request.post('/api/files/share', {
-      data: {
-        path: `${STORAGE}://${FILE_NAME}`,
-        password: true,
-        expires_at: null,
-        max_downloads: null,
-      },
+    const body = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: true,
+      expires_at: null,
+      max_downloads: null,
     });
-    expect(res.ok(), `share status ${res.status()}`).toBeTruthy();
-
-    const body: {
-      share: {
-        id: number;
-        token: string;
-        url: string;
-        has_pin: boolean;
-        password_pin: string;
-      };
-    } = await res.json();
     expect(body.share.has_pin).toBe(true);
     expect(body.share.password_pin).toMatch(/^\d{8}$/);
-
-    created.push({ id: body.share.id, token: body.share.token });
-    // Stash the PIN on the test info so the next case can reuse it.
-    test.info().annotations.push({ type: 'share-token-with-pin', description: body.share.token });
-    test.info().annotations.push({ type: 'share-pin', description: body.share.password_pin });
   });
 
   test('GET /api/files/share/{token} returns metadata for the no-pin share', async ({
     authedRequest: request,
   }) => {
-    // The first non-PIN share token we minted.
-    const noPin = created[0];
-    expect(noPin?.token, 'token from earlier no-pin share').toBeTruthy();
+    const noPin = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: false,
+    });
 
-    const res = await request.get(`/api/files/share/${noPin!.token}`);
+    const res = await request.get(`/api/files/share/${noPin.share.token}`);
     expect(res.ok(), `metadata status ${res.status()}`).toBeTruthy();
     const body: {
       requires_pin: boolean;
@@ -188,13 +182,18 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     expect('mime' in body || 'size' in body).toBeTruthy();
   });
 
-  test('GET /s/{token} on a no-pin share streams the file body', async ({ baseURL }) => {
+  test('GET /s/{token} on a no-pin share streams the file body', async ({
+    authedRequest: request,
+    baseURL,
+  }) => {
+    const noPin = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: false,
+    });
+
     // The /s/ endpoint is public (no auth header). Use a fresh anon ctx.
     const anon = await pwRequest.newContext({ baseURL });
-    const noPin = created[0];
-    expect(noPin?.token).toBeTruthy();
-
-    const res = await anon.get(`/s/${noPin!.token}`, { maxRedirects: 0 });
+    const res = await anon.get(`/s/${noPin.share.token}`, { maxRedirects: 0 });
     expect(res.status(), `public download status ${res.status()}`).toBe(200);
     const body = await res.text();
     expect(body).toBe(FILE_BODY);
@@ -202,16 +201,16 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
   });
 
   test('GET /s/{token} on a PIN-protected share without PIN renders the HTML form', async ({
+    authedRequest: request,
     baseURL,
   }) => {
-    const ann = test
-      .info()
-      .annotations.find((a) => a.type === 'share-token-with-pin');
-    const token = ann?.description;
-    expect(token, 'token from PIN share step').toBeTruthy();
+    const pinned = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: true,
+    });
 
     const anon = await pwRequest.newContext({ baseURL });
-    const res = await anon.get(`/s/${token}`);
+    const res = await anon.get(`/s/${pinned.share.token}`);
     expect(res.status(), `pin-form status ${res.status()}`).toBe(200);
     const ct = res.headers()['content-type'] ?? '';
     expect(ct).toMatch(/text\/html/);
@@ -221,24 +220,47 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     await anon.dispose();
   });
 
-  test('POST /s/{token} with the right PIN streams the file', async ({ baseURL }) => {
-    const tokenAnn = test
-      .info()
-      .annotations.find((a) => a.type === 'share-token-with-pin');
-    const pinAnn = test.info().annotations.find((a) => a.type === 'share-pin');
-    const token = tokenAnn?.description;
-    const pin = pinAnn?.description;
-    expect(token, 'token from PIN share step').toBeTruthy();
-    expect(pin, 'pin from PIN share step').toMatch(/^\d{8}$/);
+  test('POST /s/{token} with the right PIN streams the file', async ({
+    authedRequest: request,
+    baseURL,
+  }) => {
+    const pinned = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: true,
+    });
+    const token = pinned.share.token;
+    const pin = pinned.share.password_pin;
+    expect(pin, 'the server must hand back the PIN it generated').toMatch(/^\d{8}$/);
 
     const anon = await pwRequest.newContext({ baseURL });
-    const res = await anon.post(`/s/${token}`, {
+
+    // Step 1 — the PIN is accepted and the user is TOLD so. The handler
+    // deliberately shows this interstitial instead of streaming straight
+    // away, because an `attachment` Content-Disposition hijacks the page and
+    // the user would never learn whether the PIN matched (share.go:727).
+    const unlocked = await anon.post(`/s/${token}`, { form: { pin: pin! }, maxRedirects: 0 });
+    expect(unlocked.status(), `unlock status ${unlocked.status()}`).toBe(200);
+    expect(unlocked.headers()['content-type'] ?? '').toMatch(/text\/html/);
+    const page = await unlocked.text();
+    // The page auto-submits itself back with ?confirmed=1 — that form IS the
+    // contract, so assert it rather than just "some HTML came back".
+    expect(page).toContain(`?confirmed=1`);
+
+    // Step 2 — the confirmed request streams the actual bytes.
+    const res = await anon.post(`/s/${token}?confirmed=1`, {
       form: { pin: pin! },
       maxRedirects: 0,
     });
-    expect(res.status(), `unlock status ${res.status()}`).toBe(200);
+    expect(res.status(), `confirmed download status ${res.status()}`).toBe(200);
     const body = await res.text();
     expect(body).toBe(FILE_BODY);
+
+    // A wrong PIN must still not get through either step.
+    const wrong = await anon.post(`/s/${token}?confirmed=1`, {
+      form: { pin: '00000000' },
+      maxRedirects: 0,
+    });
+    expect(await wrong.text(), 'a wrong PIN must never stream the file').not.toBe(FILE_BODY);
     await anon.dispose();
   });
 

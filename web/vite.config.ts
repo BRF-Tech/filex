@@ -9,7 +9,7 @@ import path from 'node:path';
 //
 // ⚠ PWA scope boundary (Dilim 1, trap #2): the manifest + service worker live
 // ONLY in this standalone SPA build. `@brftech/filex-core` (the embeddable
-// <filex-explorer> hosted inside work.brf.sh "Dosyalar" and fishapp) has no PWA
+// <filex-explorer> hosted inside work.example.com "Dosyalar" and fishapp) has no PWA
 // plumbing, so those hosts never show a filex install prompt or register a
 // competing service worker. The SW `scope` below is pinned to '/admin/' as a
 // second guard so it can't claim clients outside this app.

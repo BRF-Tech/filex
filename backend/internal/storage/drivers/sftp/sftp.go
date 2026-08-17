@@ -57,22 +57,27 @@ type Driver struct {
 // Name implements storage.Driver.
 func (d *Driver) Name() string { return "sftp" }
 
-// Init configures the driver. Required: host, user; one of password or
-// private_key must be set. Optional: port (default 22), root.
+// Init configures the driver. Required: host, user, root; one of password,
+// private_key or key_path must be set. Optional: port (default 22).
+//
+// The config keys are declared in descriptor.go — keep the two in step,
+// there is a test that fails when they drift. Legacy spellings are read
+// through the descriptor's aliases ("username" for user, "base_path" /
+// "remote_path" for root) so rows written by older surfaces keep working.
 func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
-	d.host, _ = cfg["host"].(string)
+	d.host = storage.ConfigString(cfg, "host")
 	if v, ok := storage.ConfigInt(cfg["port"]); ok {
 		d.port = v
 	}
 	if d.port == 0 {
 		d.port = 22
 	}
-	d.user, _ = cfg["user"].(string)
-	d.password, _ = cfg["password"].(string)
-	d.keyPEM, _ = cfg["private_key"].(string)
-	d.root, _ = cfg["root"].(string)
-	d.knownHostsPath, _ = cfg["known_hosts"].(string)
-	d.hostKeyPin, _ = cfg["host_key"].(string)
+	d.user = storage.ConfigString(cfg, "user", "username")
+	d.password = storage.ConfigString(cfg, "password")
+	d.keyPEM = storage.ConfigString(cfg, "private_key")
+	d.root = storage.ConfigString(cfg, "root", "base_path", "remote_path")
+	d.knownHostsPath = storage.ConfigString(cfg, "known_hosts")
+	d.hostKeyPin = storage.ConfigString(cfg, "host_key")
 	d.insecureHostKey, _ = cfg["insecure_skip_host_key"].(bool)
 	if d.root == "" {
 		d.root = "/"
@@ -80,8 +85,18 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	if d.host == "" || d.user == "" {
 		return errors.New("sftp: host and user required")
 	}
+	// key_path points at a key file on the server; private_key carries the
+	// PEM itself. The file is read once here so a bad path fails loudly at
+	// configure time instead of on the first listing.
+	if keyPath := storage.ConfigString(cfg, "key_path"); d.keyPEM == "" && keyPath != "" {
+		pem, err := os.ReadFile(keyPath)
+		if err != nil {
+			return fmt.Errorf("sftp: read key_path: %w", err)
+		}
+		d.keyPEM = string(pem)
+	}
 	if d.password == "" && d.keyPEM == "" {
-		return errors.New("sftp: either password or private_key required")
+		return errors.New("sftp: either password, private_key or key_path required")
 	}
 	return nil
 }
@@ -90,6 +105,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 func (d *Driver) Capabilities() storage.Capabilities {
 	return storage.Capabilities{
 		Read:   true,
+		Range:  true,
 		Write:  true,
 		Move:   true,
 		Copy:   true,
@@ -310,6 +326,38 @@ func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
 	return f, nil
 }
 
+// ReadRange implements storage.RangeReader. sftp.File is seekable (the
+// protocol reads at an explicit offset), so nothing before off is
+// transferred. A seek past EOF is accepted and the first Read reports
+// io.EOF, per the contract.
+func (d *Driver) ReadRange(_ context.Context, p string, off, length int64) (io.ReadCloser, error) {
+	if off < 0 {
+		return nil, fmt.Errorf("sftp: negative range offset %d", off)
+	}
+	cl, err := d.connect()
+	if err != nil {
+		return nil, err
+	}
+	f, err := cl.Open(d.join(p))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, storage.ErrNotFound
+		}
+		return nil, err
+	}
+	if length == 0 {
+		_ = f.Close()
+		return storage.EmptyReadCloser(), nil
+	}
+	if off > 0 {
+		if _, err := f.Seek(off, io.SeekStart); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+	}
+	return storage.LimitReadCloser(f, length), nil
+}
+
 // Write implements storage.Writer.
 func (d *Driver) Write(_ context.Context, p string, r io.Reader, _ int64) error {
 	cl, err := d.connect()
@@ -328,6 +376,21 @@ func (d *Driver) Write(_ context.Context, p string, r io.Reader, _ int64) error 
 }
 
 // Move implements storage.Mover.
+// SetMtime implements storage.Toucher.
+func (d *Driver) SetMtime(_ context.Context, p string, mtime time.Time) error {
+	cl, err := d.connect()
+	if err != nil {
+		return err
+	}
+	if err := cl.Chtimes(d.join(p), mtime, mtime); err != nil {
+		if os.IsNotExist(err) {
+			return storage.ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 func (d *Driver) Move(_ context.Context, src, dst string) error {
 	cl, err := d.connect()
 	if err != nil {

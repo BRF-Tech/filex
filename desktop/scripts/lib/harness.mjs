@@ -19,7 +19,7 @@ export const DESKTOP = path.resolve(__dirname, '..', '..');
 export const REPO = path.resolve(DESKTOP, '..');
 export const SHOTS = path.join(REPO, 'shots');
 
-export const SERVER = process.env.FILEX_SERVER ?? 'https://fm.brf.sh';
+export const SERVER = process.env.FILEX_SERVER ?? 'https://fm.example.com';
 export const EMAIL = process.env.FILEX_EMAIL ?? '';
 export const PASSWORD = process.env.FILEX_PASSWORD ?? '';
 export const STORAGE = process.env.FILEX_STORAGE ?? 'docs';

@@ -8,7 +8,7 @@
 //
 // ⚠ This lives in web/ (the standalone SPA) ONLY, never in packages/core — the
 // embeddable explorer must not surface an install prompt inside its host apps
-// (work.brf.sh "Dosyalar", fishapp). See vite.config.ts for the matching SW
+// (work.example.com "Dosyalar", fishapp). See vite.config.ts for the matching SW
 // scope guard.
 import { computed, onBeforeUnmount, onMounted, readonly, ref } from 'vue';
 import { useRegisterSW } from 'virtual:pwa-register/vue';

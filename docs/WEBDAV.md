@@ -70,6 +70,19 @@ Notes:
 
 ## Connecting
 
+> 💡 **filex generates this page filled in.** Everything below is also
+> available inside the app with your real host, your storage name and your
+> own username already substituted, plus a copy button per command:
+>
+> - web: **Connections → How to connect** (admins), or the plug icon in the
+>   file explorer's header (every signed-in user);
+> - desktop app: **Settings → Storage connections → How to connect**.
+>
+> Both surfaces render the same component from `@brftech/filex-core`, so they
+> cannot drift apart from each other — but they *can* drift from this file.
+> A correction here belongs in `packages/core/src/lib/connectionGuides.ts`
+> too, and the other way round.
+
 ### Windows (map network drive)
 
 1. Open **File Explorer** → right-click **This PC** → **Map network drive…**
@@ -85,11 +98,47 @@ Command-line equivalent:
 net use Z: "https://fm.example.com/dav/" /user:you@example.com <password-or-token> /persistent:yes
 ```
 
-Tips:
+Tips — and Windows has three built-in limits that will look like filex bugs if
+you do not know about them. All three live under
+`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters`, and the
+**WebClient service must be restarted** after any change
+(`net stop webclient && net start webclient`).
 
-- Windows' WebDAV redirector caps file transfers at ~4 GB by default
-  (`HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters\FileSizeLimitInBytes`).
-- If mounting fails, make sure the **WebClient** service is running.
+- **Transfers stop at ~47.7 MB.** `FileSizeLimitInBytes` defaults to
+  **50,000,000 bytes**, not 4 GB — 4 GB (`0xFFFFFFFF`) is the largest value you
+  may set, not the default. Raise it with:
+
+  ```bat
+  reg add "HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters" /v FileSizeLimitInBytes /t REG_DWORD /d 4294967295 /f
+  ```
+
+- **Folders with roughly a thousand files fail to open**, often reported as
+  *"Disk is not formatted"* or error 31. `FileAttributesLimitInBytes` defaults
+  to 1,000,000 bytes, which is the total size of the properties returned for one
+  collection — about 1,000 entries. See
+  [Microsoft KB 912152](https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/cannot-access-webdav-web-folder).
+
+  ```bat
+  reg add "HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters" /v FileAttributesLimitInBytes /t REG_DWORD /d 20000000 /f
+  ```
+
+- **HTTPS is mandatory.** `BasicAuthLevel` defaults to `1`, meaning "Basic
+  authentication over SSL only" — over plain `http://` Windows silently refuses
+  to send your credentials and the mount fails with no useful message. Do not
+  set it to `2`; use TLS.
+
+- **The mapped drive will not survive a sign-out.** Since Windows 7, Basic
+  authentication credentials cannot be persisted by Credential Manager — this is
+  by design ([KB 2673544](https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/cannot-automatically-reconnect-dav-share)),
+  and `/persistent:yes` does not change it. Re-run `net use` from a logon script
+  if you need the drive back automatically.
+
+- If mounting fails at all, make sure the **WebClient** service is running
+  (`sc config WebClient start= auto && net start WebClient`). On Windows Server
+  it ships only with the *WebDAV Redirector* feature installed.
+
+- A slow first connection is usually proxy auto-detection: untick **Automatically
+  detect settings** in Internet Options → Connections → LAN settings.
 
 ### macOS (Finder)
 
@@ -141,9 +190,27 @@ WebDAV enforces exactly the same authorization model as the web UI:
 
 ## Limits & behavior notes
 
-- **DELETE is permanent.** Unlike the web UI (which soft-deletes into the
-  filex trash), a WebDAV delete removes the object from the backing storage
-  directly. Empty the client-side confirmation with care.
+- **DELETE goes to the trash**, exactly like the web UI. A `DELETE` — of a file
+  or of a whole collection — renames the object into the hidden
+  `.filex-trash/` bucket and flags the node row; the item then appears in the
+  trash listing and can be restored, and it is only destroyed for good when the
+  retention window expires or an admin empties the trash. See
+  [TRASH-VERSIONING.md](TRASH-VERSIONING.md).
+  - A **collection** goes in as **one restorable unit**: restoring the folder
+    brings its whole subtree back with it.
+  - Trashed bytes **still count against the owner's quota** until they are
+    purged — the same rule the web UI follows. Deleting over WebDAV does not
+    free space; emptying the trash does.
+  - The only way a WebDAV delete destroys data outright is a storage backend
+    that supports neither move nor copy, since there is then no way to preserve
+    the bytes. None of the shipped drivers (local, S3, SFTP, FTP, WebDAV) are in
+    that category. When it does happen the item is *not* placed in the trash, so
+    nothing offers a restore that could not work, and the emitted event is
+    `file.deleted` rather than `file.trashed`.
+- **This changed in the release that added `trash.Put`.** Earlier
+  documentation described WebDAV `DELETE` as permanent. Treat a sync client's
+  delete as recoverable, but note the flip side: a large
+  `rclone sync --delete` run fills the trash rather than freeing space.
 - **Cross-storage MOVE is not supported** (drivers can't rename across
   backends) — the server answers `502`; do COPY + DELETE instead. COPY
   across storages works (it streams through the server).

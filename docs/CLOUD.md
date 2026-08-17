@@ -1,7 +1,7 @@
 # Cloud preparation (`FILEX_CLOUD`)
 
 > Status: **preparation skeleton only — NOT a live service.** Built in the
-> v0.7 "Kimlik" wave (E3). The explicit product decision (Burak, md.18) is:
+> v0.7 "Kimlik" wave (E3). The explicit product decision (the project owner, md.18) is:
 > *prepare the scaffolding, do NOT launch a hosted cloud offering yet.* The
 > master flag is therefore **off by default**, and while it is off the
 > feature is guaranteed to be invisible (see §5).

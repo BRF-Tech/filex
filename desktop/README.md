@@ -18,6 +18,15 @@ app adds the four things a browser tab cannot do:
    and a terminal act on one implementation and one pairing file.
 4. **It keeps itself up to date, quietly.** See *Updates* below.
 
+Settings also opens a full-screen **Connections** surface, and that too is the
+shared component (`<filex-connections>`) rather than an app-specific screen: it
+manages the account's storages and mints the credentials for reaching the same
+server *without* a browser — S3 access keys, SSH keys for SFTP, NFS exports and
+the API tokens FTPS, WebDAV and `filex mount` sign in with. ⚠ On Windows the
+bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
+[WinFsp](https://winfsp.dev)); see
+[docs/PROTOCOLS.md](../docs/PROTOCOLS.md).
+
 ## Layout
 
 | Path | Role |

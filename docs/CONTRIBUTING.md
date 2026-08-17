@@ -117,7 +117,7 @@ Breaking changes:
 ```
 feat(api)!: rename @file-explorer-share to @share-created
 
-BREAKING CHANGE: the Vue event name changed; update listeners to @share-created.
+BREAKING CHANGE: the Vue event name changed. See docs/MIGRATION.md.
 ```
 
 ---
@@ -252,14 +252,95 @@ Maintainer-only. Reproducible, automated by CI.
    > share dialog with no download limit — a control that had shipped two
    > releases earlier — and `viewer-markdown.png` had Turkish buttons in it.
 
-3. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
-4. Bump `package.json` versions across all packages:
+3. **Audit the documentation on every surface. Never skip this.** The README
+   pass above is one leg of it; a feature can be finished, tested and shipped and
+   still not exist for anybody who did not write it.
+
+   ⚠⚠ **Do not work from a fixed list** — a list looks complete, and the surface
+   that is not on it gets skipped. The rule is *every text that describes the
+   product or explains how to use it*. Find them first:
+
+   ```bash
+   ls **/README.md docs/*.md docs/index.md
+   grep -rn '"description"\|description:' package.json packages/*/package.json \
+     deploy/helm/*/Chart.yaml deploy/*/*app*.yml deploy/*/docker-compose*.yml
+   ```
+
+   In this repo that is at least twelve places:
+
+   | Surface | Why it counts |
+   |---|---|
+   | `README.md` | step 1 above |
+   | `docs/*.md` | the new feature has a page — **and the old pages are still true** |
+   | `docs/README.md` | every `docs/*.md` is in the index |
+   | **`docs/index.md`** | the docs site's **home page** — its hero line and feature cards are the first thing a visitor reads |
+   | `docs-site/.vitepress/config.mts` | the new page is in the **sidebar** |
+   | `packages/*/README.md` | these are the **npm pages** — an export nobody documents does not exist for anybody installing the package |
+   | `desktop/README.md` | what the app actually does |
+   | `deploy/*/README.md` | install instructions per target |
+   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`) | **app-store listings** — public product copy |
+   | `deploy/helm/*/Chart.yaml` | shown by `helm search` |
+   | `package.json` descriptions | shown on npm |
+   | `deploy/compose/*.yml` | new env vars and **published ports** with the traps beside them |
+
+   > ⚠ The dangerous case is not a missing page, it is a **page that lies**.
+   > On 2026-08-17 `STORAGE.md` still said *"There is no `nfs` or `smb` driver,
+   > and there doesn't need to be"* — the `smb` driver had shipped in that very
+   > release.
+
+   > ⚠⚠ A page missing from the sidebar is **not** unpublished. VitePress builds
+   > every file under `srcDir`, so it is reachable by URL and indexable whether
+   > or not anything links to it. To actually keep a page off the site, add it to
+   > **`srcExclude`**. On 2026-08-17 five pages were live but unreachable from the
+   > nav, and `CLOUD.md` — whose own first line says *"NOT a live service"* — was
+   > being published.
+
+   Three commands finish the step, all required:
+
+   ```bash
+   # every relative markdown link resolves to a real file
+   python3 - <<'PY'
+   import os, re
+   roots = ['README.md', 'CHANGELOG.md', 'docs', 'packages/core/README.md',
+            'packages/webcomponent/README.md', 'packages/react/README.md',
+            'desktop/README.md', 'e2e/README.md']
+   files = []
+   for r in roots:
+       files += ([os.path.join(r, f) for f in os.listdir(r) if f.endswith('.md')]
+                 if os.path.isdir(r) else [r] if os.path.exists(r) else [])
+   bad = 0
+   for f in files:
+       base = os.path.dirname(f) or '.'
+       for m in re.finditer(r'\]\(([^)\s]+?)(#[^)]*)?\)', open(f, encoding='utf-8').read()):
+           t = m.group(1)
+           if t.startswith(('http', 'mailto:', '#', '/')):
+               continue
+           if not os.path.exists(os.path.normpath(os.path.join(base, t))):
+               print('MISSING', f, '->', t); bad += 1
+   print('broken links =', bad)
+   PY
+
+   # the site must BUILD — VitePress fails the build on a dead link
+   cd docs-site && npm run build
+
+   # every YAML you touched still parses — breaking a store listing is silent
+   python3 -c "import yaml,glob; [yaml.safe_load(open(f,encoding='utf-8')) \
+     for f in glob.glob('deploy/**/*.yml', recursive=True)]; print('yaml ok')"
+   ```
+
+   ⚠ A relative link to a page that is in `srcExclude` is a dead link *on the
+   site* even though it resolves in the repo — link those by full GitHub URL.
+   That is how the "not published" list in `docs/README.md` broke the build the
+   first time it was written.
+
+4. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
+5. Bump `package.json` versions across all packages:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
    ```
-5. Commit: `chore(release): vX.Y.Z`.
-6. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
-7. Push: `git push origin main --tags`.
+6. Commit: `chore(release): vX.Y.Z`.
+7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
+8. Push: `git push origin main --tags`.
 
 CI does the rest:
 - `release:goreleaser` — multi-arch binaries → GitLab Release.

@@ -86,7 +86,8 @@ extraction.
 **Pipeline.** Every time a file's metadata is (re)indexed — upload, save,
 rename, sync upsert — filex compares the file's content fingerprint (`etag`,
 falling back to size+mtime) against what the index already holds. On drift, a
-`content_index` job is enqueued on the [persistent queue](QUEUE.md). The worker
+`content_index` job is enqueued on the persistent queue
+([`FILEX_QUEUE_DRIVER`](CONFIGURATION.md)). The worker
 reads the file from its storage driver, runs the matching extractor, and
 updates the node's document with the text — metadata fields are preserved.
 Unchanged files never re-extract; errors are logged and skipped.

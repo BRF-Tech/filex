@@ -6,7 +6,7 @@ import (
 )
 
 // ReplicaMode controls how replica writes/deletes are handled per
-// path pattern. Default-on rule is ModeMirror (Burak E2 / SPEC §4.4).
+// path pattern. Default-on rule is ModeMirror (owner decision E2 / SPEC §4.4).
 const (
 	ReplicaModeMirror     = "mirror"
 	ReplicaModeAppendOnly = "append_only"

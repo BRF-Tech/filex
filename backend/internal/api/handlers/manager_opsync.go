@@ -7,6 +7,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -86,6 +87,15 @@ func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string
 	parentID, err := h.lookupDirID(ctx, storageID, path.Dir(strings.TrimPrefix(dstClean, "/")))
 	if err != nil {
 		return
+	}
+	// A copy is a second set of bytes on the disk and has to be counted, but
+	// this runs on the ops worker's server-lifetime context — the requesting
+	// user is long gone and the legacy `pending_ops` row does not carry them.
+	// Bill the copy to whoever owns the ORIGINAL: the bytes are a duplicate of
+	// theirs, and it needs no schema change to be true. Unowned source (a file
+	// the scanner found) stays unowned, exactly as the original is.
+	if owner, oerr := h.Store.GetNodeOwner(ctx, srcNode.ID); oerr == nil && owner != nil && *owner > 0 {
+		ctx = quotastore.WithOwner(ctx, *owner)
 	}
 	n := &model.Node{
 		StorageID: storageID,

@@ -8,11 +8,11 @@ import (
 )
 
 // Ticket is a short-lived, single-use grant that authenticates one WebSocket
-// upgrade. Embedded consumers (the vendored webcomponent inside work.brf.sh /
+// upgrade. Embedded consumers (the vendored webcomponent inside work.example.com /
 // fishapp) can't set an Authorization header on a native WebSocket and connect
-// cross-origin to fm.brf.sh, so instead they fetch a ticket through the host's
+// cross-origin to fm.example.com, so instead they fetch a ticket through the host's
 // existing HTTP proxy (which injects the real token server-side) and open
-// `wss://fm.brf.sh/api/ws?ticket=<t>`. The durable token never reaches the
+// `wss://fm.example.com/api/ws?ticket=<t>`. The durable token never reaches the
 // browser; only this 60-second, one-shot ticket does.
 type Ticket struct {
 	UserID int64

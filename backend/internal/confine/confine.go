@@ -77,6 +77,12 @@ func parseRoot(raw string) (Root, bool) {
 	return Root{Adapter: a, Rel: rel}, true
 }
 
+// ParseRoot exposes parseRoot to the protocol servers, which read a
+// confinement out of an API token's `root:` scope themselves — they
+// authenticate outside the HTTP chain, so the middleware in this package never
+// runs for them. Returns ok=false for an empty or storage-less spec.
+func ParseRoot(raw string) (Root, bool) { return parseRoot(raw) }
+
 // contains reports whether `r` confines (is an ancestor of or equal to) `c`.
 func (r Root) contains(c Root) bool {
 	if r.Adapter != c.Adapter {

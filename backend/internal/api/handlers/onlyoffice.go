@@ -14,6 +14,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -26,7 +27,14 @@ type OnlyOffice struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
 	ACL             *acl.Resolver
+	// Body resolves where the document's bytes are: the driver, or filex's
+	// staging area while a staged upload is still transferring. Nil-safe.
+	Body *filebody.Resolver
 }
+
+// AttachBody wires the byte-source resolver so a document that is still being
+// transferred opens in the editor.
+func (h *OnlyOffice) AttachBody(b *filebody.Resolver) { h.Body = b }
 
 // AttachACL wires the RBAC resolver: opening a document needs ≥viewer; an
 // editable config additionally needs ≥editor (else it's downgraded to view).
@@ -139,7 +147,12 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	   through — the fetch path will surface them as before. */
 	if node != nil && h.StorageResolver != nil {
 		if drv, derr := h.StorageResolver(node.StorageID); derr == nil {
-			if rc, rerr := drv.Read(r.Context(), node.Path); rerr == nil {
+			src, serr := h.Body.Resolve(r.Context(), drv, node.StorageID, node.Path, node)
+			if serr != nil {
+				writeStagingGone(w, serr)
+				return
+			}
+			if rc, rerr := src.Open(r.Context()); rerr == nil {
 				head := make([]byte, len(e2e.MagicPrefix))
 				n, _ := io.ReadFull(rc, head)
 				_ = rc.Close()
@@ -228,13 +241,18 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver"})
 		return
 	}
-	rc, err := drv.Read(r.Context(), node.Path)
+	src, err := h.Body.Resolve(r.Context(), drv, node.StorageID, node.Path, node)
+	if err != nil {
+		writeStagingGone(w, err)
+		return
+	}
+	rc, err := src.Open(r.Context())
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeStagingGone(w, err)
 		return
 	}
 	defer rc.Close()

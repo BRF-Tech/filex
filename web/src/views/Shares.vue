@@ -210,7 +210,11 @@ onMounted(load);
 
       <template #cell-token="{ row }">
         <div class="flex items-center gap-2">
-          <code class="text-xs font-mono text-zinc-700 dark:text-zinc-300">
+          <code
+            class="text-xs font-mono text-zinc-700 dark:text-zinc-300"
+            data-testid="share-token"
+            :data-token="shareOf(row).token"
+          >
             {{ shareOf(row).token.slice(0, 10) }}…
           </code>
           <CopyButton

@@ -104,6 +104,18 @@ async function boot() {
       FILEX_ADMIN_PASSWORD: PASSWORD,
       FILEX_DEFAULT_LOCALE: 'en',
       FILEX_PUBLIC_URL: PUBLIC_URL,
+      // ⚠ The protocol listeners are on for the shots instance, and on a
+      // throwaway port each. The connection guide renders a red "this endpoint
+      // is switched off" banner otherwise — true for a default install, and a
+      // picture of the release's headline feature captioned "switched off" is
+      // not what the README should show.
+      FILEX_SFTP: '1',
+      FILEX_SFTP_ADDR: '127.0.0.1:0',
+      FILEX_FTPS: '1',
+      FILEX_FTPS_ADDR: '127.0.0.1:0',
+      FILEX_NFS: '1',
+      FILEX_NFS_ADDR: '127.0.0.1:0',
+      FILEX_SECRET_KEY: 'screenshots-only-key-not-a-real-secret',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -378,6 +390,22 @@ async function run() {
     await page.waitForSelector('.card', { timeout: 15_000 });
     await sleep(1200);
     await shot(page, 'admin-dashboard.png');
+
+    // 3b — the connection guide. filex being reachable AS S3, SFTP, FTPS and
+    // NFS is the largest thing in this release and the README had no picture of
+    // it; the guide is also the honest one to show, because it is built from
+    // the live deployment rather than being a template with angle brackets.
+    //
+    // ⚠ SFTP on purpose: it is the protocol most readers already have a client
+    // for, and its page shows both halves — the credential panel above and the
+    // real commands below.
+    await page.goto(`${URL}/admin/connections`);
+    await page.waitForSelector('[data-testid="tab-connect"]', { timeout: 15_000 });
+    await page.locator('[data-testid="tab-connect"]').click();
+    await page.locator('[data-testid="guide-protocol"]').selectOption('sftp');
+    await page.waitForSelector('[data-testid="guide-facts"]', { timeout: 15_000 });
+    await sleep(800);
+    await shot(page, 'connections-guide.png');
 
     // 4 — the share dialog, showing what it can actually do today: a PIN, an
     // expiry, a DOWNLOAD LIMIT and the one-line curl for the finished link.

@@ -64,9 +64,11 @@ Then point ShareX at these uploaders — **Destinations** menu:
 Now the usual capture hotkeys (e.g. **Ctrl+PrtSc** for a region grab) upload to
 filex and copy the link to your clipboard.
 
-> **Self‑hosted host name.** The bundled configs post to
-> `https://fm.brf.sh/api/sharex/upload`. If your filex lives elsewhere, edit the
-> **Request URL** to `https://<your-filex-host>/api/sharex/upload`.
+> **⚠ Set your host name first.** The bundled configs ship with a placeholder,
+> `https://YOUR-FILEX-HOST/api/sharex/upload`. Edit the **Request URL** — in the
+> `.sxcu` file before importing, or in ShareX afterwards — to point at your own
+> instance. A real host name here would send every screenshot you take to
+> somebody else's server.
 
 ---
 
@@ -75,7 +77,7 @@ filex and copy the link to your clipboard.
 The endpoint replies with:
 
 ```json
-{ "url": "https://fm.brf.sh/s/AbC123?inline=1" }
+{ "url": "https://files.example.com/s/AbC123?inline=1" }
 ```
 
 ShareX parses `url` from the response (`URL` field = `{json:url}`) and gives you
@@ -123,7 +125,7 @@ A quick `curl` sanity check:
 
 ```bash
 curl -H "X-Filex-Token: $TOKEN" -F "file=@shot.png" \
-  https://fm.brf.sh/api/sharex/upload
+  https://files.example.com/api/sharex/upload
 ```
 
 ---

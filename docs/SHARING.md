@@ -73,6 +73,36 @@ and without it curl saves the redirect instead of the file. For a folder link
 the command targets `?zip=wait`, which blocks until the archive is built and
 then streams it.
 
+**Folder ZIPs are cached, and the cache is disposable.** A shared folder's
+archive is built once and kept at `<cache_dir>/sharezips/<node>-<signature>.zip`,
+so the second visitor does not pay for the walk again. A background warmer
+pre-builds it when the link is created and re-checks every active folder share
+every 5 minutes; the signature covers the file set, sizes and mtimes, so editing
+the folder invalidates the archive and the next pass rebuilds it. While a build
+is running, `/s/{token}` shows a "preparing… %" page (`?zip=status` polls,
+`?zip=wait` blocks); nothing about that is counted as a download.
+
+Two rules keep that cache from becoming a disk problem:
+
+- **Nothing outlives its share.** Each warmer pass deletes every archive whose
+  node no longer has an active folder share — expired, revoked, or out of
+  downloads — plus the leftovers of builds that died with a restart. There is no
+  retention to configure: an archive is regenerable, so a link that cannot be
+  used has no archive.
+- **A build stops when its share does.** A build that is still running when its
+  share expires abandons itself within about a minute and deletes its partial
+  file. (A 16.7 GB folder shared for eleven minutes once kept reading from S3
+  for three hours after the link had died, then left a 15 GB archive nobody ever
+  downloaded.) Nothing is ever refused for being large: a live share is built
+  however big it is, and a visitor who clicks always gets a build.
+
+⚠ **Operators: exclude the cache directory from backups.** `<data_dir>/cache`
+(prepared copies *and* folder-share ZIPs) is regenerable by definition; backing
+it up puts throwaway gigabytes into your snapshots, your off-site copy and every
+restore. Older installs kept the ZIPs in `<data_dir>/sharezips` — filex moves
+that directory into the cache directory on first start, so exclude
+`<data_dir>/cache` and, for a while, `**/sharezips/**` too.
+
 **Metadata** (no PIN needed): `GET /api/files/share/{token}` →
 `requires_pin, expires_at, download_count, max_downloads, downloads_remaining,
 filename, size, mime, is_directory`.

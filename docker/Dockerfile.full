@@ -5,14 +5,14 @@
 # - + fonts so libreoffice/Ghostscript don't render tofu
 #
 # Build (from repo root):
-#   docker build -t ghcr.io/brf-tech/filex:full -f docker/Dockerfile.full .
+#   docker build -t brftech/filex:full -f docker/Dockerfile.full .
 #
 # Run:
-#   docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:full
+#   docker run -p 5212:5212 -v $(pwd)/data:/data brftech/filex:full
 
 # Reuse the same multi-stage frontend + Go build logic from the slim Dockerfile,
 # duplicated inline so this image can be built independently (no chained
-# `FROM ghcr.io/brf-tech/filex:slim` dependency in CI).
+# `FROM brftech/filex:slim` dependency in CI).
 
 # ---------------------------------------------------------------------------
 # Stage 1: Build npm packages + admin UI

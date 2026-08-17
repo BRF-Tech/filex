@@ -25,7 +25,7 @@ const { _electron } = await import(
   pathToFileURL(path.join(PNPM, pwDir, 'node_modules/playwright-core/index.mjs')).href
 );
 
-const SERVER = process.env.FILEX_SERVER ?? 'https://fm.brf.sh';
+const SERVER = process.env.FILEX_SERVER ?? 'https://fm.example.com';
 const EMAIL = process.env.FILEX_EMAIL ?? '';
 const PASSWORD = process.env.FILEX_PASSWORD ?? '';
 

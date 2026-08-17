@@ -17,6 +17,7 @@ import (
 	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
 
 // AITokens is the admin handler for issuing / listing / revoking API tokens
@@ -29,11 +30,14 @@ import (
 //	DELETE /api/admin/ai-tokens/{id}     → {ok:true}
 type AITokens struct {
 	store db.Store
+	// auth is the shared credential resolver, held only so revoking a token
+	// reaches the SFTP/FTPS sessions that token already opened.
+	auth *protocolauth.Resolver
 }
 
 // NewAITokens constructs the admin token handler.
-func NewAITokens(store db.Store) *AITokens {
-	return &AITokens{store: store}
+func NewAITokens(store db.Store, pauth *protocolauth.Resolver) *AITokens {
+	return &AITokens{store: store, auth: pauth}
 }
 
 // List returns every token row WITHOUT the secret (only the hash is stored
@@ -176,6 +180,8 @@ func (h *AITokens) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// See the note on the self-service delete: the row is only half of it.
+	protocolauth.KickCredential(h.auth, protocolauth.KickToken, id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

@@ -3,7 +3,7 @@
  *
  * Why this exists: 80-file-types covers the **API** side of the preview
  * pipeline (Content-Type, bytes-back). Nothing was driving the **UI**
- * per extension until operator Ada reported a pptx regression on
+ * per extension until an operator reported a pptx regression on
  * 2026-05-14. This spec walks every advertised fixture, opens the
  * standalone editor route, and asserts the right viewer DOM landed
  * with no console errors and no failed lazy-chunk fetches.

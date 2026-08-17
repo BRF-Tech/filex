@@ -39,11 +39,58 @@ exists, filex falls back to a **root restore** rather than leaving the row
 orphaned in trash.
 
 > **Two edge behaviours worth knowing:**
-> - If the storage driver can't rename (no move support), delete falls back to a
->   legacy **hard delete** — there's nothing to restore.
+> - If the storage driver can rename, the trash step is a rename. If it can only
+>   **copy**, filex copies into the trash key and deletes the source afterwards,
+>   so the bytes still survive. Only a driver that can do **neither** falls back
+>   to a real hard delete — and then the item is deliberately **not** listed in
+>   the trash, because a Restore there could never work. None of the shipped
+>   drivers (local, S3, SFTP, FTP, WebDAV) fall into that case.
 > - Deleting an item that is **already in trash** (its path is under
 >   `.filex-trash/`) **hard‑deletes it permanently** — this is how "empty a
 >   single item from trash" works.
+
+### Every delete surface uses the same trash
+
+Deletion is not a web‑UI‑only concept. The web explorer, **WebDAV**, the
+**AI/REST** endpoints, the **MCP** tools, the **CLI/sync client** and the
+asynchronous batch‑ops worker all go through one shared helper (`trash.Put`),
+so an item deleted from any of them lands in the trash the same way and is
+restored the same way. A protocol added later inherits the behaviour by calling
+that helper instead of driving the storage driver itself.
+
+The helper never destroys data: when a backend cannot preserve the bytes it
+reports that instead of deleting them, and the caller decides what to do. That
+is also what keeps the emitted events honest — `file.trashed` fires **only**
+when the bytes are genuinely restorable, `file.deleted` when they are really
+gone.
+
+A **folder** goes to trash as one restorable unit: the folder row is retagged
+into the trash and its cached descendants are dragged along with it, so a single
+Restore brings the whole subtree back. Note that the descendants are still
+individual rows, and the trash listing is flat — a deleted folder therefore
+shows its children as separate entries even though restoring the folder is one
+action.
+
+> ⚠ **Sync clients delete in bulk.** A single `rclone sync --delete` run can
+> remove hundreds of files, and every one of them now lands in the trash. That
+> is the point — the run is recoverable — but it also means a bulk delete
+> **does not free space** until the retention window passes, and each file adds
+> a row to the flat trash listing. Watch storage headroom after a large sync,
+> and use the admin "empty trash" action when you need the space back
+> immediately.
+
+### Quota and the trash
+
+**Trashed items keep counting against the owner's quota.** Usage is decremented
+when an item is *purged*, not when it is trashed (see `trash.purgeOne`), and
+that is deliberate: bytes parked in `.filex-trash/` still occupy the backend.
+Deleting does not free space — emptying the trash does. Every surface follows
+the same rule; none of them adjust quota at delete time.
+
+> ⚠ Until v0.20 this was **theory**: nothing incremented `usage_bytes` at
+> all, so nothing was counted and nothing was ever released either. The
+> accounting is real now — see [Quotas](QUOTAS.md) for the full set of
+> rules (overwrite, move, restore, copy, purge) and where they live.
 
 ### Retention & purge
 

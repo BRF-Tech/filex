@@ -60,16 +60,16 @@ func presenceNames(m map[string]any) []string {
 func TestHubChangeBroadcast(t *testing.T) {
 	h := NewHub()
 	ayse := NewClient(1, "Ayşe", 16)
-	burak := NewClient(2, "Burak", 16)
+	ada := NewClient(2, "Ada", 16)
 	other := NewClient(3, "Other", 16)
 
 	h.Subscribe(ayse, 7, "reports", "s3://reports")
-	h.Subscribe(burak, 7, "/reports/", "s3://reports") // different spelling, same room
+	h.Subscribe(ada, 7, "/reports/", "s3://reports") // different spelling, same room
 	h.Subscribe(other, 7, "photos", "s3://photos")
 
 	// Clear the presence frames emitted by the subscribes.
 	drainAll(ayse)
-	drainAll(burak)
+	drainAll(ada)
 	drainAll(other)
 
 	h.EmitChange(7, "reports", ChangeEvent{Action: "create", Name: "q3.pdf"})
@@ -81,9 +81,9 @@ func TestHubChangeBroadcast(t *testing.T) {
 	if a["path"] != "s3://reports" {
 		t.Fatalf("expected room path echoed, got %v", a["path"])
 	}
-	b := drain(t, burak)
+	b := drain(t, ada)
 	if b["type"] != "change" || b["name"] != "q3.pdf" {
-		t.Fatalf("burak got wrong change frame: %#v", b)
+		t.Fatalf("ada got wrong change frame: %#v", b)
 	}
 	// The photos viewer must NOT have received anything.
 	if got := drainAll(other); len(got) != 0 {
@@ -127,7 +127,7 @@ func TestHubPerClientPath(t *testing.T) {
 func TestHubPresenceJoinLeaveFocus(t *testing.T) {
 	h := NewHub()
 	ayse := NewClient(1, "Ayşe", 16)
-	burak := NewClient(2, "Burak", 16)
+	ada := NewClient(2, "Ada", 16)
 
 	// Ayşe joins alone — presence answers "who ELSE is here", so her roster is
 	// empty (self is excluded).
@@ -136,37 +136,37 @@ func TestHubPresenceJoinLeaveFocus(t *testing.T) {
 		t.Fatalf("expected empty roster for lone subscriber, got %v", got)
 	}
 
-	// Burak joins → each sees the OTHER (and not themselves).
-	h.Subscribe(burak, 5, "x", "s3://x")
-	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 1 || got[0] != "Burak" {
-		t.Fatalf("ayşe expected [Burak] after burak joined, got %v", got)
+	// Ada joins → each sees the OTHER (and not themselves).
+	h.Subscribe(ada, 5, "x", "s3://x")
+	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 1 || got[0] != "Ada" {
+		t.Fatalf("ayşe expected [Ada] after ada joined, got %v", got)
 	}
-	if got := presenceNames(drainAll(burak)["presence"]); len(got) != 1 || got[0] != "Ayşe" {
-		t.Fatalf("burak expected [Ayşe], got %v", got)
+	if got := presenceNames(drainAll(ada)["presence"]); len(got) != 1 || got[0] != "Ayşe" {
+		t.Fatalf("ada expected [Ayşe], got %v", got)
 	}
 
-	// Burak focuses a file → presence carries the file for his entry.
-	h.SetFocus(burak, "rapor.pdf")
+	// Ada focuses a file → presence carries the file for his entry.
+	h.SetFocus(ada, "rapor.pdf")
 	pres := drainAll(ayse)["presence"]
 	if pres == nil {
-		t.Fatal("ayşe expected a presence update after burak focus")
+		t.Fatal("ayşe expected a presence update after ada focus")
 	}
 	users, _ := pres["users"].([]any)
 	foundFocus := false
 	for _, u := range users {
 		um := u.(map[string]any)
-		if um["name"] == "Burak" && um["file"] == "rapor.pdf" {
+		if um["name"] == "Ada" && um["file"] == "rapor.pdf" {
 			foundFocus = true
 		}
 	}
 	if !foundFocus {
-		t.Fatalf("expected Burak focused on rapor.pdf, got %#v", users)
+		t.Fatalf("expected Ada focused on rapor.pdf, got %#v", users)
 	}
 
-	// Burak leaves → Ayşe's roster is empty again.
-	h.Unsubscribe(burak)
+	// Ada leaves → Ayşe's roster is empty again.
+	h.Unsubscribe(ada)
 	if got := presenceNames(drainAll(ayse)["presence"]); len(got) != 0 {
-		t.Fatalf("expected empty roster after burak left, got %v", got)
+		t.Fatalf("expected empty roster after ada left, got %v", got)
 	}
 
 	// The Presence() accessor is the FULL room roster (diagnostics) — it still
@@ -226,31 +226,31 @@ func TestHubDedupePerUser(t *testing.T) {
 // (not themselves), and a native observer sees both.
 func TestHubPresenceKeySharedToken(t *testing.T) {
 	h := NewHub()
-	burak := NewClient(1, "Burak", 16)
-	burak.PresenceKey = "work-7"
-	gokcil := NewClient(1, "Gökçil", 16)
-	gokcil.PresenceKey = "work-8"
+	ada := NewClient(1, "Ada", 16)
+	ada.PresenceKey = "work-7"
+	grace := NewClient(1, "Grace", 16)
+	grace.PresenceKey = "work-8"
 	native := NewClient(2, "Native", 16)
 
-	h.Subscribe(burak, 3, "p", "s3://")
-	h.Subscribe(gokcil, 3, "p", "s3://")
+	h.Subscribe(ada, 3, "p", "s3://")
+	h.Subscribe(grace, 3, "p", "s3://")
 	h.Subscribe(native, 3, "p", "s3://p")
 
 	if got := presenceNames(drainAll(native)["presence"]); len(got) != 2 {
 		t.Fatalf("native expected both shared-token users, got %v", got)
 	}
-	got := presenceNames(drainAll(burak)["presence"])
+	got := presenceNames(drainAll(ada)["presence"])
 	if len(got) != 2 {
-		t.Fatalf("burak expected [Gökçil Native], got %v", got)
+		t.Fatalf("ada expected [Grace Native], got %v", got)
 	}
 	for _, n := range got {
-		if n == "Burak" {
-			t.Fatalf("burak must not see himself, got %v", got)
+		if n == "Ada" {
+			t.Fatalf("ada must not see himself, got %v", got)
 		}
 	}
 
 	// Wire entries carry a stable uid per identity (for client-side keying).
-	pres := drainAll(gokcil)["presence"]
+	pres := drainAll(grace)["presence"]
 	users, _ := pres["users"].([]any)
 	seen := map[string]bool{}
 	for _, u := range users {
@@ -269,22 +269,22 @@ func TestHubPresenceKeySharedToken(t *testing.T) {
 func TestHubRenameFocusFollow(t *testing.T) {
 	h := NewHub()
 	ayse := NewClient(1, "Ayşe", 16)
-	burak := NewClient(2, "Burak", 16)
+	ada := NewClient(2, "Ada", 16)
 	h.Subscribe(ayse, 4, "docs", "s3://docs")
-	h.Subscribe(burak, 4, "docs", "s3://docs")
+	h.Subscribe(ada, 4, "docs", "s3://docs")
 	h.SetFocus(ayse, "eski.pdf")
 	drainAll(ayse)
-	drainAll(burak)
+	drainAll(ada)
 
 	h.EmitChange(4, "docs", ChangeEvent{Action: "rename", Name: "eski.pdf", NewName: "yeni.pdf"})
 
-	pres := drainAll(burak)["presence"]
+	pres := drainAll(ada)["presence"]
 	if pres == nil {
 		t.Fatal("expected a presence re-broadcast after rename")
 	}
 	users, _ := pres["users"].([]any)
 	if len(users) != 1 {
-		t.Fatalf("burak expected [Ayşe], got %#v", users)
+		t.Fatalf("ada expected [Ayşe], got %#v", users)
 	}
 	if um := users[0].(map[string]any); um["file"] != "yeni.pdf" {
 		t.Fatalf("expected focus to follow rename to yeni.pdf, got %#v", um)

@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -38,7 +39,15 @@ type StorageResolver func(int64) (storage.Driver, error)
 type Service struct {
 	Store    db.Store
 	Resolver StorageResolver
+	// Body resolves where the LIVE file's bytes are before a snapshot: the
+	// driver, or filex's staging area while a staged upload is still
+	// transferring. Nil-safe. Without it, snapshotting a file whose overwrite
+	// is still in flight would capture the version it is replacing.
+	Body *filebody.Resolver
 }
+
+// AttachBody wires the byte-source resolver (staging-aware snapshots).
+func (s *Service) AttachBody(b *filebody.Resolver) { s.Body = b }
 
 // New constructs a Service.
 func New(store db.Store, resolver StorageResolver) *Service {
@@ -89,7 +98,7 @@ func (s *Service) Snapshot(ctx context.Context, nodeID int64) (*model.NodeVersio
 	}
 	snapshotKey := versionKey(nodeID, versionN)
 
-	if err := copyOrStream(ctx, drv, livePath, snapshotKey); err != nil {
+	if err := s.copyOrStream(ctx, drv, node.StorageID, livePath, snapshotKey); err != nil {
 		return nil, fmt.Errorf("versioning: snapshot copy: %w", err)
 	}
 
@@ -169,7 +178,7 @@ func (s *Service) Restore(ctx context.Context, nodeID, versionID int64, snapshot
 		}
 	}
 
-	if err := copyOrStream(ctx, drv, v.StorageKey, livePath); err != nil {
+	if err := s.copyOrStream(ctx, drv, node.StorageID, v.StorageKey, livePath); err != nil {
 		return fmt.Errorf("versioning: restore copy: %w", err)
 	}
 
@@ -236,14 +245,22 @@ func versionKey(nodeID int64, versionN int) string {
 }
 
 // copyOrStream uses Copier when available, otherwise streams Read→Write.
-func copyOrStream(ctx context.Context, drv storage.Driver, src, dst string) error {
+func (s *Service) copyOrStream(ctx context.Context, drv storage.Driver, storageID int64, src, dst string) error {
 	// A path that has since become a folder must not take a restored file on
 	// top of it (storage.ErrKindConflict). Checked before the Copier fast path
 	// too — a server-side copy lands the same colliding key.
 	if err := storage.EnsureFileTarget(ctx, drv, dst); err != nil {
 		return err
 	}
-	if cp, ok := drv.(storage.Copier); ok {
+	source, err := s.Body.Resolve(ctx, drv, storageID, src, nil)
+	if err != nil {
+		return err
+	}
+	// ⚠ Server-side copy ONLY when the backend actually holds the source. A
+	// file whose staged bytes have not landed yet either does not exist there
+	// (a new file) or exists as the version it is replacing (an overwrite) —
+	// so a Copy would snapshot the wrong thing without erroring.
+	if cp, ok := drv.(storage.Copier); ok && !source.Staged {
 		if err := cp.Copy(ctx, src, dst); err == nil {
 			return nil
 		} else if !errors.Is(err, storage.ErrUnsupported) {
@@ -254,14 +271,14 @@ func copyOrStream(ctx context.Context, drv storage.Driver, src, dst string) erro
 	if !ok {
 		return fmt.Errorf("%w: driver lacks Writer", storage.ErrUnsupported)
 	}
-	rc, err := drv.Read(ctx, src)
+	rc, err := source.Open(ctx)
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
 	// Stat the source so Writer gets the real size; fall back to -1 (unknown).
 	var size int64 = -1
-	if obj, err := drv.Stat(ctx, src); err == nil {
+	if obj, err := source.Stat(ctx); err == nil {
 		size = obj.Size
 	}
 	return wr.Write(ctx, dst, rc, size)

@@ -274,10 +274,13 @@ Everything filex owns lives under `FILEX_DATA_DIR` (`/data` in Docker):
 - `thumbs/` — the thumbnail cache (regenerable),
 - `.first-run.txt` — the initial admin secret.
 
-Back up the **database** (the SQLite file, or your Postgres) and your **storage
-backends**. The search index and thumbnail cache can be rebuilt
-(`POST /api/admin/search/rebuild`, `filex thumb backfill`), so backing them up
-is optional.
+Back up the **database** (the SQLite file, or your Postgres), your **storage
+backends**, and ⚠⚠ **`FILEX_SECRET_KEY`** if you set one — it seals the S3
+access keys, so a restored database without the matching key has access keys
+that no longer verify. See
+[Backup & restore](DEPLOYMENT.md#backup--restore). The search index and
+thumbnail cache can be rebuilt (`POST /api/admin/search/rebuild`,
+`filex thumb backfill`), so backing them up is optional.
 
 ---
 

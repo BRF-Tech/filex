@@ -118,7 +118,7 @@ func (d slowDriver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 // bites: nothing about it needs a "clever" client, just a file big enough that
 // the next click lands before the last one finished.
 //
-// Measured against the shipped fm.brf.sh build before the fix: a link capped at
+// Measured against the shipped fm.example.com build before the fix: a link capped at
 // ONE download handed three complete 400 KB files to three overlapping curls.
 func TestShareLimit_ConcurrentDownloadsCannotExceedCap(t *testing.T) {
 	ctx := context.Background()

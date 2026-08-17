@@ -31,7 +31,7 @@ async function ensureNoTour() {
 await ensureNoTour();
 
 // ── the server's brand mark ──────────────────────────────────────────
-// GET /api/branding is public and fm.brf.sh serves a data: URI. The plate is
+// GET /api/branding is public and fm.example.com serves a data: URI. The plate is
 // painted only once that request lands, so give it a moment.
 await win.waitForSelector('#rail .slot.active .avatar--brand img', { timeout: 15_000 }).catch(() => {});
 const brand = await win.evaluate(() => {
@@ -87,7 +87,7 @@ await ensureNoTour();
 // Open tabs until the strip ACTUALLY overflows rather than a fixed count:
 // tabs shrink to a 72px floor first, so how many it takes depends on the
 // window — 25 was not enough at 1944px and would have been plenty at 1280.
-// Burak's report was "ekranı taştı, akıyor gidiyor"; this reaches that state
+// The report was "it overflowed the screen and keeps sliding"; this reaches that state
 // on whatever screen the suite happens to run on.
 let overflowed = false;
 for (let i = 0; i < 60 && !overflowed; i++) {

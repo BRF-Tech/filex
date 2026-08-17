@@ -23,7 +23,7 @@ function b64url(buf: Buffer): string {
   return buf.toString('base64url');
 }
 
-/** Normalizes what a human types: "fm.brf.sh", "https://fm.brf.sh/", "…/admin". */
+/** Normalizes what a human types: "fm.example.com", "https://fm.example.com/", "…/admin". */
 export function normalizeServerUrl(input: string): string {
   let s = (input || '').trim();
   if (!s) throw new Error('server address required');

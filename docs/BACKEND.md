@@ -411,6 +411,27 @@ Best-effort cancel. Returns `200` regardless; check `status` afterwards.
 
 ## Admin: storages
 
+### `GET /api/admin/storage-drivers` ![admin](https://img.shields.io/badge/-admin-red)
+The config contract every registered storage driver declares: its fields, their
+type, which one is the storage root, which hold credentials, defaults and an
+i18n key per label. Admin UIs render their storage forms from this instead of
+hardcoding a field list, and the root‑path guard reads the same declaration.
+**Response 200**
+```json
+[
+  { "driver": "s3", "label": "S3 / Hetzner / MinIO", "i18n_key": "storages.driver.s3",
+    "capabilities": { "read": true, "write": true, "presign": true },
+    "fields": [
+      { "key": "bucket", "type": "string", "required": true, "secret": false,
+        "label": "Bucket", "i18n_key": "storages.fields.bucket" },
+      { "key": "prefix", "type": "string", "required": true, "root": true,
+        "label": "Prefix", "i18n_key": "storages.fields.prefix" }
+    ] }
+]
+```
+See [STORAGE.md → Driver descriptors](STORAGE.md#driver-descriptors-get-apiadminstorage-drivers).
+`GET /api/capabilities` keeps its plain `storage_drivers: []string` name list.
+
 ### `GET /api/admin/storages` ![admin](https://img.shields.io/badge/-admin-red)
 **Response 200**
 ```json

@@ -16,7 +16,7 @@ services:
   # filex (slim) — default
   # ---------------------------------------------------------------------
   filex:
-    image: ${FILEX_IMAGE:-ghcr.io/brf-tech/filex:latest}
+    image: ${FILEX_IMAGE:-brftech/filex:latest}
     container_name: filex
     restart: unless-stopped
     ports:
@@ -65,7 +65,7 @@ services:
   # ---------------------------------------------------------------------
   filex-full:
     profiles: ["full"]
-    image: ${FILEX_FULL_IMAGE:-ghcr.io/brf-tech/filex:full}
+    image: ${FILEX_FULL_IMAGE:-brftech/filex:full}
     container_name: filex-full
     restart: unless-stopped
     ports:

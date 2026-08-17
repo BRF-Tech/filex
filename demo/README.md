@@ -42,7 +42,7 @@ toolbar (default `http://localhost:5212`). Start one in a separate shell:
 ```bash
 docker run --rm -p 5212:5212 \
   -e FILEX_TRUST_PROXY_HEADERS=false \
-  ghcr.io/brf-tech/filex:latest
+  brftech/filex:latest
 ```
 
 Or if you're developing locally:
@@ -59,7 +59,7 @@ filex to allow CORS from the demo origin:
 ```bash
 docker run -p 5212:5212 \
   -e FILEX_CORS_ALLOWED_ORIGINS="http://localhost:8000" \
-  ghcr.io/brf-tech/filex:latest
+  brftech/filex:latest
 ```
 
 In production you'd serve filex behind the same origin as your app, so

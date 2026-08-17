@@ -2,7 +2,7 @@
 -- +goose StatementBegin
 
 -- Path-based rules. priority asc → first match wins. Empty rule set
--- defaults to "mirror" (Burak E2 / SPEC §4.4).
+-- defaults to "mirror" (owner decision E2 / SPEC §4.4).
 CREATE TABLE IF NOT EXISTS replica_rules (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     path_pattern    TEXT NOT NULL,

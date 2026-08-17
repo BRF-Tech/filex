@@ -5,9 +5,9 @@
 // authenticated caller may see. The heavy lifting is done by
 // golang.org/x/net/webdav; this package contributes:
 //
-//   - HTTP Basic authentication (username = account e-mail; the password is
-//     tried first against the account password, then as an API token), see
-//     authenticate().
+//   - HTTP Basic authentication (username = account e-mail OR the account's
+//     username, whichever the client typed; the password is tried first
+//     against the account password, then as an API token), see authenticate().
 //   - A composite webdav.FileSystem bridging storage.Driver + its optional
 //     capability sub-interfaces (fs.go / file.go).
 //   - Authorization: storage read_only flag, ACL/RBAC via internal/acl, and
@@ -26,26 +26,28 @@ package dav
 
 import (
 	"context"
-	"crypto/sha256"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/net/webdav"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
+	"github.com/brf-tech/filex/backend/internal/davlock"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // scopeOf returns the request's tenant scope. A nil scope means "unscoped"
@@ -62,12 +64,6 @@ func scopeOf(ctx context.Context) *tenant.Scope {
 // Prefix is the URL prefix the handler is mounted at.
 const Prefix = "/dav"
 
-// credTTL is how long a successful password verification is cached so the
-// per-request Basic auth of WebDAV clients doesn't run bcrypt (~100ms) on
-// every PROPFIND. Only POSITIVE password results are cached; API-token
-// lookups are a single indexed sha256 query and always run fresh.
-const credTTL = 5 * time.Minute
-
 // Config wires the handler to the server's shared services.
 type Config struct {
 	// Enabled — FILEX_DAV kill switch. When false ServeHTTP answers 404.
@@ -82,8 +78,26 @@ type Config struct {
 	Index *search.Index
 	// Thumbs — optional thumbnail pipeline; written files get async thumbs.
 	Thumbs *thumb.Pipeline
+	// Body resolves where a file's bytes are: the storage driver, or filex's
+	// staging area while a staged upload is still transferring. Nil-safe —
+	// unwired means driver-only, which is what /dav did before staging.
+	Body *filebody.Resolver
+	// Quota enforces the account's storage ceiling. Nil disables the check,
+	// which is right for a test and wrong for the server — see preGate.
+	Quota *quota.Service
 	// MultiTenant mirrors config.MultiTenant for the login policy check.
 	MultiTenant bool
+	// Auth is the shared protocol credential resolver. Nil builds a private
+	// one, which is correct for a test but wrong for the server: a resolver
+	// per protocol is a credential cache per protocol, and therefore a
+	// different answer per protocol to how long a revoked password keeps
+	// working.
+	Auth *protocolauth.Resolver
+	// LockDir is where the WebDAV lock table is persisted. Empty keeps the
+	// locks in memory only, which is what /dav did before 2026-08-16 and is
+	// still right for a test — see internal/davlock for why it is wrong for a
+	// server.
+	LockDir string
 	// Realm for WWW-Authenticate (default "filex").
 	Realm string
 }
@@ -92,14 +106,11 @@ type Config struct {
 type Handler struct {
 	cfg   Config
 	locks webdav.LockSystem
-
-	credMu sync.Mutex
-	creds  map[[32]byte]credEntry
-}
-
-type credEntry struct {
-	userID int64
-	exp    time.Time
+	auth  *protocolauth.Resolver
+	// sync is the shared post-write bookkeeping (node cache, search index,
+	// thumbnails, write hooks). Shared with every other protocol server so a
+	// fix lands once — see internal/protocolsync.
+	sync *protocolsync.Syncer
 }
 
 // NewHandler builds the /dav handler. The lock system is shared across all
@@ -108,27 +119,44 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.Realm == "" {
 		cfg.Realm = "filex"
 	}
+	// protocolauth's zero ConfinePolicy is ConfineRefuse, which is the right
+	// one here: /dav has no confine middleware, so accepting a `root:`-scoped
+	// token would silently promote a subtree-limited credential to whole-tree
+	// access.
+	pa := cfg.Auth
+	if pa == nil {
+		pa = protocolauth.New(cfg.Store, cfg.ACL, cfg.MultiTenant)
+	}
+	// ⚠⚠ The lock system is durable now. webdav.NewMemLS() holds every lock in
+	// a map, so a restart silently forgot them all: a client that took a lock
+	// before the deploy presented a token that named nothing afterwards, its
+	// PUT got 412, and the server would meanwhile have let somebody else lock
+	// the same file. The lock said "exclusive" and stopped being true without
+	// telling anybody. See internal/davlock.
+	locks := webdav.LockSystem(davlock.NewMemory())
+	if cfg.LockDir != "" {
+		if ls, err := davlock.New(cfg.LockDir); err == nil {
+			locks = ls
+		} else {
+			// Not fatal: locks that only live in memory are what /dav always
+			// had. Refusing to serve WebDAV because a cache file is unwritable
+			// would trade a small problem for an outage.
+			slog.Warn("dav: locks are memory-only", slog.String("err", err.Error()))
+		}
+	}
 	return &Handler{
 		cfg:   cfg,
-		locks: webdav.NewMemLS(),
-		creds: map[[32]byte]credEntry{},
+		locks: locks,
+		auth:  pa,
+		sync:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginDAV),
 	}
 }
 
-// principal is the resolved caller for one request.
-type principal struct {
-	user  *model.User
-	token *model.APIToken // nil when password-authenticated
-}
-
-// hasScope reports whether the caller may use the given verb scope. Password
-// sessions carry every scope; tokens consult their allow-list.
-func (p *principal) hasScope(scope string) bool {
-	if p.token == nil {
-		return true
-	}
-	return p.token.HasScope(scope)
-}
+// principal is the resolved caller for one request. It is protocolauth's
+// Principal under a local name, so the rest of this package reads unchanged
+// while identity, tenant scope, confinement and the ACL all arrive from the
+// one door every protocol shares.
+type principal struct{ *protocolauth.Principal }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.cfg.Enabled {
@@ -143,18 +171,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /dav authenticates itself (Basic), so it sits outside the chain where
-	// auth.TenantResolver runs: no tenant scope ever reached the scoped store,
-	// ListEnabledStorages saw an unscoped context, and the root listed every
-	// tenant's storages. Attach the scope the middleware would have.
-	//
-	// Until this, a tenant admin who mounted /dav got all ten olivov tenants
-	// read-write — and DELETE over WebDAV is permanent, it does not go to
-	// trash (H4, 2026-08-05).
-	if h.cfg.MultiTenant {
-		r = r.WithContext(tenant.WithScope(r.Context(),
-			auth.ScopeForUser(r.Context(), h.cfg.Store, p.user)))
-	}
+	// Stamp the account AND the tenant scope in one call. /dav authenticates
+	// itself, so it never ran auth.Middleware: without the user a PUT produced
+	// a node owned by nobody (bytes uncounted, file event actorless), and
+	// without the scope the root collection listed every tenant's storages — a
+	// tenant admin who mapped /dav got all ten olivov tenants read-write (H4,
+	// 2026-08-05). Both halves come from protocolauth now, so a protocol
+	// cannot attach one and forget the other.
+	r = r.WithContext(p.WithContext(r.Context()))
 
 	if status, msg := h.preGate(r, p); status != 0 {
 		http.Error(w, msg, status)
@@ -178,7 +202,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // ───────────────────────────── authentication ─────────────────────────────
 
 // authenticate resolves HTTP Basic credentials to a principal. The username
-// must be the account e-mail. The password is tried in order:
+// field carries the account e-mail OR the account's username — identity.Resolve
+// decides which, so this surface accepts exactly what the login form does. The
+// password is tried in order:
 //
 //  1. account password (bcrypt against users.password_hash); accounts with
 //     TOTP enabled are refused here — Basic auth cannot carry a second
@@ -188,81 +214,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //     refused: /dav has no confine middleware, accepting them would turn a
 //     subtree-limited credential into whole-tree access.
 func (h *Handler) authenticate(r *http.Request) (*principal, bool) {
-	email, secret, ok := r.BasicAuth()
-	if !ok || secret == "" {
+	ident, secret, ok := r.BasicAuth()
+	if !ok || secret == "" || strings.TrimSpace(ident) == "" {
 		return nil, false
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" {
+	p, err := h.auth.Any(r.Context(), ident, secret)
+	if err != nil {
 		return nil, false
 	}
-	ctx := r.Context()
-
-	// 1) account password (with positive-result cache).
-	if u := h.authPassword(ctx, email, secret); u != nil {
-		if !auth.LoginAllowed(ctx, h.cfg.Store, h.cfg.MultiTenant, u) {
-			return nil, false
-		}
-		return &principal{user: u}, true
-	}
-
-	// 2) API token.
-	tok, err := h.cfg.Store.GetAPITokenByHash(ctx, apitoken.HashToken(secret))
-	if err != nil || tok == nil {
-		return nil, false
-	}
-	if tok.ExpiresAt != nil && tok.ExpiresAt.Before(time.Now()) {
-		return nil, false
-	}
-	for _, s := range strings.Split(tok.Scopes, ",") {
-		if strings.HasPrefix(strings.TrimSpace(s), apitoken.ScopeRootPrefix) {
-			return nil, false // confined token — see doc comment
-		}
-	}
-	u, err := h.cfg.Store.GetUser(ctx, tok.UserID)
-	if err != nil || u == nil || !strings.EqualFold(u.Email, email) {
-		return nil, false
-	}
-	if !auth.LoginAllowed(ctx, h.cfg.Store, h.cfg.MultiTenant, u) {
-		return nil, false
-	}
-	_ = h.cfg.Store.TouchAPIToken(ctx, tok.ID)
-	return &principal{user: u, token: tok}, true
-}
-
-// authPassword verifies email+password against the users table, consulting
-// the positive-result cache first so steady-state WebDAV traffic costs one
-// cheap user fetch instead of a bcrypt compare per request.
-func (h *Handler) authPassword(ctx context.Context, email, password string) *model.User {
-	key := sha256.Sum256([]byte(email + "\x00" + password))
-	now := time.Now()
-
-	h.credMu.Lock()
-	ent, hit := h.creds[key]
-	h.credMu.Unlock()
-	if hit && ent.exp.After(now) {
-		u, err := h.cfg.Store.GetUser(ctx, ent.userID)
-		if err == nil && u != nil && strings.EqualFold(u.Email, email) &&
-			u.PasswordHash != "" && !u.TOTPEnabled {
-			return u
-		}
-	}
-
-	u, err := h.cfg.Store.GetUserByEmail(ctx, email)
-	if err != nil || u == nil || u.PasswordHash == "" || u.TOTPEnabled {
-		return nil
-	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
-		return nil
-	}
-
-	h.credMu.Lock()
-	if len(h.creds) > 4096 { // crude bound; entries also expire via TTL
-		h.creds = map[[32]byte]credEntry{}
-	}
-	h.creds[key] = credEntry{userID: u.ID, exp: now.Add(credTTL)}
-	h.credMu.Unlock()
-	return u
+	return &principal{Principal: p}, true
 }
 
 // ───────────────────────────── authorization ──────────────────────────────
@@ -311,7 +271,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	if !known {
 		return http.StatusMethodNotAllowed, "method not allowed"
 	}
-	if !p.hasScope(scope) {
+	if !p.HasScope(scope) {
 		return http.StatusForbidden, "token scope does not allow " + r.Method
 	}
 	name, rel, ok := splitDavPath(r.URL.Path)
@@ -338,6 +298,25 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	}
 	if status, msg := h.gateWrite(ctx, p, st, rel, r.Method); status != 0 {
 		return status, msg
+	}
+
+	// ⚠⚠ The quota, which /dav did not enforce at all until 2026-08-16 while
+	// every other write surface did (manager, AI, ShareX, S3, SFTP, FTPS, NFS).
+	// A user at their limit could keep writing indefinitely by mapping a drive
+	// — and because syncWrite counts the bytes afterwards, the number in the
+	// admin panel just kept climbing past the ceiling.
+	//
+	// Checked HERE, from Content-Length, rather than at Close: this is before
+	// the client has uploaded anything, and it is the only place that can
+	// answer 507 Insufficient Storage (RFC 4331 §5) — x/net/webdav turns a
+	// Close error into 405, which tells a client to stop trying the METHOD.
+	// A PUT with no Content-Length still gets caught at Close; see writeFile.
+	if r.Method == http.MethodPut && r.ContentLength > 0 && h.cfg.Quota != nil {
+		if u := auth.UserFrom(ctx); u != nil {
+			if err := h.cfg.Quota.CheckCanWrite(ctx, u.ID, r.ContentLength); err != nil {
+				return http.StatusInsufficientStorage, "quota exceeded"
+			}
+		}
 	}
 
 	// MOVE/COPY also mutate the Destination.
@@ -403,7 +382,7 @@ func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage
 			return http.StatusForbidden, "storage does not support writes"
 		}
 	}
-	set, err := h.cfg.ACL.LoadSet(ctx, p.user, st)
+	set, err := h.cfg.ACL.LoadSet(ctx, p.User, st)
 	if err != nil {
 		return http.StatusInternalServerError, "acl load failed"
 	}

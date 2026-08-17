@@ -57,6 +57,14 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   local folders in step with the server from the tray, updates itself, and holds several
   accounts (or tenants) side by side. Headless machines get the same engine as
   `filex sync` / `filex client`.
+- **Speaks the protocols both ways** — filex can *connect to* local disks, S3, FTP, SFTP,
+  WebDAV and SMB/NAS shares, and it can *be reached as* **S3**, **SFTP**, **FTPS**,
+  **NFSv3** and **WebDAV**. Point `rclone`, `restic`, `aws s3`, WinSCP, FileZilla, a
+  scanner that only learned FTP or a media player that only learned NFS at filex, and
+  they land in the same tree, with the same permissions, the same trash and the same
+  quota as the web UI. Off-LAN there is also **`filex mount`**, which attaches a remote
+  server over ordinary HTTPS — a folder on Linux, a drive letter on Windows
+  ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
 - **Multi-tenant by design** — storage-per-tenant with native tenancy mode, RBAC roles +
   per-item grants, confined API tokens, per-token identities for audit trails.
 - **Boringly deployable** — one binary or one container; SQLite by default, Postgres/MySQL
@@ -68,7 +76,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
-│  Storage Drivers:│  local · s3 · ftp · sftp · webdav        │
+│  Storage Drivers:│  local · s3 · ftp · sftp · webdav · smb  │
+│  Served as:      │  s3 · sftp · ftps · nfs · webdav         │
 │  DB Drivers:     │  sqlite (default) · mysql · postgres     │
 │  Queue Drivers:  │  sqlite (default) · redis · postgres     │
 │  Realtime:       │  WebSocket presence + live updates       │
@@ -109,6 +118,10 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 | Admin panel | Demo landing |
 |---|---|
 | ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Demo landing](docs/screenshots/demo-landing.png) |
+
+| Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
+|---|
+| ![Connection guide](docs/screenshots/connections-guide.png) |
 
 ## Quick start — binary
 
@@ -230,7 +243,9 @@ Details: [docs/MCP.md](docs/MCP.md).
 
 ## Features
 
-- **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV); each appears as a top-level folder.
+- **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder.
+- **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
+- **`filex mount`** — attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings.
 - **Sharing** — public links with PIN, expiry and max-downloads; folder links stream as ZIP (cached + pre-warmed); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint.
@@ -270,19 +285,25 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 [CLI](docs/CLI.md) · [Integration / embedding](docs/INTEGRATION.md) ·
 [AI & MCP](docs/MCP.md)
 
-**Storage & access** — [Storage](docs/STORAGE.md) · [SSO (OIDC)](docs/SSO.md) ·
+**Without a browser** — [Protocols (S3 · SFTP · FTPS · NFS · WebDAV ·
+`filex mount`)](docs/PROTOCOLS.md) · [WebDAV](docs/WEBDAV.md)
+
+**Storage & access** — [Storage](docs/STORAGE.md) · [Uploads & resume](docs/UPLOADS.md) ·
+[Quotas](docs/QUOTAS.md) · [SSO (OIDC)](docs/SSO.md) ·
 [LDAP & proxy auth](docs/LDAP.md) · [RBAC & permissions](docs/RBAC.md) ·
 [Multi-tenancy](docs/MULTI-TENANCY.md)
 
 **Data & features** — [Sharing & file requests](docs/SHARING.md) ·
+[ShareX](docs/SHAREX.md) ·
 [Trash & versioning](docs/TRASH-VERSIONING.md) · [Protection](docs/PROTECTION.md) ·
 [E2E encryption](docs/E2E-ENCRYPTION.md) · [Search](docs/SEARCH.md) ·
 [Notifications](docs/NOTIFICATIONS.md) · [Thumbnails](docs/thumbnails.md) ·
 [Replication](docs/REPLICATION.md)
 
 **Operate & extend** — [Deployment](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) ·
-[Architecture](docs/ARCHITECTURE.md) · [Backend API spec](docs/BACKEND.md) ·
-[Component API](docs/API.md) · [OnlyOffice](docs/ONLYOFFICE.md) ·
+[Metrics](docs/METRICS.md) · [Architecture](docs/ARCHITECTURE.md) ·
+[Backend API spec](docs/BACKEND.md) · [Component API](docs/API.md) ·
+[Migration](docs/MIGRATION.md) · [OnlyOffice](docs/ONLYOFFICE.md) ·
 [Converter](docs/CONVERT-INTEGRATION.md)
 
 [Full documentation index](docs/README.md)

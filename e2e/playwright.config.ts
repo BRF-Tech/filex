@@ -3,20 +3,29 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright config for the filex e2e suite.
  *
- * Default base URL is http://localhost:5212 — the slim Docker image's
- * exposed port. Tests assume the server is already running. Spin it up
- * with:
+ * Don't run this by hand — use the harness, which starts a server on a free
+ * port against a throwaway data dir and tears it down again:
  *
- *   docker run --rm -d --name filex-e2e -p 5212:5212 \
- *     -e FILEX_PUBLIC_URL=http://localhost:5212 \
- *     -e FILEX_E2E_BOOTSTRAP=1 \
- *     filex:test serve
+ *   node e2e/run.mjs local
+ *   node e2e/run.mjs local --s3          # + MinIO and an s3 storage
  *
- * The `FILEX_E2E_BOOTSTRAP=1` env var tells the binary to seed a
- * deterministic admin user (admin@local / admin) so the tests don't
- * depend on the random first-run password.
+ * If you do drive Playwright directly, point it at a server you started
+ * yourself and give it a deterministic admin:
+ *
+ *   FILEX_ADMIN_EMAIL=admin@local FILEX_ADMIN_PASSWORD=admin \
+ *   FILEX_LISTEN=127.0.0.1:5212 FILEX_DATA_DIR=$(mktemp -d) filex serve
+ *   E2E_BASE_URL=http://127.0.0.1:5212 pnpm test
+ *
+ * ⚠ 127.0.0.1, not "localhost": on Windows localhost resolves to ::1 first
+ * and a server bound to 127.0.0.1 answers that with ECONNREFUSED, which reads
+ * exactly like a server that failed to start.
+ *
+ * ⚠ There is no `FILEX_E2E_BOOTSTRAP` env var. This file and the README both
+ * documented one for a long time; the binary has never read it (grep the Go
+ * tree). Anyone following those instructions got a server with a random
+ * first-run password and a login failure in every test.
  */
-const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5212';
+const BASE_URL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5212';
 
 export default defineConfig({
   testDir: './tests',
@@ -58,7 +67,8 @@ export default defineConfig({
         webServer: {
           command:
             'docker run --rm --name filex-e2e -p 5212:5212 ' +
-            '-e FILEX_E2E_BOOTSTRAP=1 -e FILEX_LISTEN=0.0.0.0:5212 ' +
+            '-e FILEX_ADMIN_EMAIL=admin@local -e FILEX_ADMIN_PASSWORD=admin ' +
+            '-e FILEX_LISTEN=0.0.0.0:5212 ' +
             'filex:test serve',
           url: `${BASE_URL}/healthz`,
           reuseExistingServer: !process.env.CI,

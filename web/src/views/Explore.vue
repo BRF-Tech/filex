@@ -11,9 +11,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ChevronLeft, RefreshCcw, LayoutDashboard, KeyRound, LogOut } from 'lucide-vue-next';
+import { ChevronLeft, RefreshCcw, LayoutDashboard, KeyRound, LogOut, Cable } from 'lucide-vue-next';
 
-import { FileExplorer, type ExplorerConfig } from '@brftech/filex-core';
+import { FileExplorer, ConnectionsPanel, type ExplorerConfig } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 
 import { useAuthStore } from '@/stores/auth';
@@ -24,6 +24,7 @@ import LocaleSwitcher from '@/components/LocaleSwitcher.vue';
 import DarkModeToggle from '@/components/DarkModeToggle.vue';
 import SelfTokensModal from '@/components/SelfTokensModal.vue';
 import { effectiveTheme } from '@/lib/theme';
+import { explorerAuth, readBearerToken, readCsrfCookie } from '@/lib/explorerConfig';
 // Live collaboration (WebSocket + presence) now lives INSIDE @brftech/filex-core's
 // FileExplorer, so every consumer (this panel + the embedded webcomponent) gets
 // it automatically — no per-page realtime wiring here anymore.
@@ -35,6 +36,10 @@ const auth = useAuthStore();
 const storages = useStoragesStore();
 
 const showTokens = ref(false);
+// "How to connect" — the outward half of the connections surface. This is
+// where a NON-admin lands (the admin panel redirects them here), so it is
+// the only place they can be told how to mount a drive.
+const showConnect = ref(false);
 async function doLogout() {
   await auth.logout();
   router.push({ name: 'login' });
@@ -66,19 +71,6 @@ onBeforeUnmount(() => {
   htmlObserver?.disconnect();
   window.removeEventListener('storage', onStorage);
 });
-
-function readCsrfCookie(): string | null {
-  const prefix = 'filex_csrf=';
-  for (const part of document.cookie.split(';')) {
-    const trimmed = part.trim();
-    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
-  }
-  return null;
-}
-
-function readBearerToken(): string | null {
-  return sessionStorage.getItem('filex.bearer');
-}
 
 // Visible storages for the explorer root. Admins get the rich admin-store
 // list; non-admins (user/viewer) can't hit /api/admin/storages, so we discover
@@ -132,13 +124,7 @@ const initialPathFromQuery = computed(() => {
 
 const explorerConfig = computed<ExplorerConfig | null>(() => {
   if (!roots.value.length) return null;
-  const bearer = readBearerToken();
-  const csrf = readCsrfCookie();
-  const authConf: ExplorerConfig['auth'] = bearer
-    ? { kind: 'bearer', token: bearer }
-    : csrf
-      ? { kind: 'csrf', csrf }
-      : { kind: 'none' };
+  const authConf: ExplorerConfig['auth'] = explorerAuth();
   return {
     apiBase: '',
     endpoint: '/api/files/manager',
@@ -165,6 +151,18 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     onlyOfficeConfig: '/api/files/onlyoffice/config',
   };
 });
+
+// The connections panel must render even when the caller has no visible
+// storage at all: "you cannot see anything yet, here is how you would
+// connect" is a real state, and `explorerConfig` is deliberately null in
+// exactly that case (the explorer has nothing to draw).
+const connectConfig = computed<ExplorerConfig>(() => ({
+  apiBase: '',
+  endpoint: '/api/files/manager',
+  auth: explorerAuth(),
+  theme: currentTheme.value,
+  locale: locale.value === 'en' ? 'en' : 'tr',
+}));
 
 async function refresh() {
   loading.value = true;
@@ -229,6 +227,16 @@ onMounted(async () => {
           <LayoutDashboard class="h-4 w-4" />
           {{ t('explore.gotoAdmin') }}
         </Button>
+        <Button
+          v-if="auth.isAuthenticated"
+          size="xs"
+          variant="ghost"
+          :title="t('nav.connections')"
+          data-testid="explore-connect"
+          @click="showConnect = true"
+        >
+          <Cable class="h-4 w-4" />
+        </Button>
         <Button v-if="auth.isAuthenticated && !auth.isAdmin" size="xs" variant="ghost" @click="showTokens = true" :title="t('explore.apiKeys')">
           <KeyRound class="h-4 w-4" />
         </Button>
@@ -240,6 +248,36 @@ onMounted(async () => {
       </div>
     </header>
     <SelfTokensModal v-if="showTokens" @close="showTokens = false" />
+
+    <!-- The connections surface, on the page a non-admin actually lands on.
+         Same component as the admin route and as the desktop app — and it
+         is the component, not this page, that decides what a caller without
+         admin rights is shown.
+
+         ⚠ z-[120], not z-50. The explorer's onboarding tour is appended to
+         <body> at z-index 96 and its menus are fixed too, so anything in the
+         normal stacking order gets painted over by them — measured: the tour
+         card landed on top of this panel and swallowed its clicks. The
+         desktop shell hit the same thing and fixed it the same way. -->
+    <div
+      v-if="showConnect"
+      class="fixed inset-0 z-[120] overflow-auto bg-black/40 p-4 sm:p-8"
+      data-testid="explore-connect-overlay"
+      @click.self="showConnect = false"
+    >
+      <div
+        class="mx-auto max-w-4xl rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl"
+        @click.stop
+      >
+        <ConnectionsPanel
+          :config="connectConfig"
+          initial-tab="connect"
+          closable
+          @close="showConnect = false"
+          @changed="refresh()"
+        />
+      </div>
+    </div>
 
     <main class="flex-1 flex flex-col min-h-0">
       <div

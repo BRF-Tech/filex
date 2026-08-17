@@ -102,7 +102,7 @@ describe('api/client', () => {
   it('request interceptor honours a runtime API base override (Electron path)', async () => {
     vi.resetModules();
     const runtime = await import('@/api/runtimeConfig');
-    runtime.setApiBaseUrl('https://fm.brf.sh/api');
+    runtime.setApiBaseUrl('https://fm.example.com/api');
     // client.ts must import the SAME runtimeConfig module instance so the
     // override is visible; freshClient()'s resetModules would give it a
     // different one, so import client without resetting here.
@@ -115,7 +115,7 @@ describe('api/client', () => {
       method: 'get',
       headers: {} as Record<string, string>,
     })) as { baseURL?: string };
-    expect(out.baseURL).toBe('https://fm.brf.sh/api');
+    expect(out.baseURL).toBe('https://fm.example.com/api');
     runtime.setApiBaseUrl(''); // reset so later tests see the default
   });
 

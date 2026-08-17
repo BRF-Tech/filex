@@ -17,7 +17,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 const props = defineProps<{
-  /** Converter base, e.g. https://fm.brf.sh/convert */
+  /** Converter base, e.g. https://fm.example.com/convert */
   convertUrl: string;
   /** Source file name with extension, e.g. "clip.avi" */
   fileName: string;

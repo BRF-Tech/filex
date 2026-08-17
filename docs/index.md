@@ -6,7 +6,7 @@ titleTemplate: false
 hero:
   name: filex
   text: Self-hosted file manager
-  tagline: One Go binary. Your storage, your rules — local, S3, SFTP, WebDAV and more.
+  tagline: One Go binary. Connect it to local disks, S3, SFTP, WebDAV, FTP or a NAS — and reach it back as S3, SFTP, FTPS, NFS or a mounted drive.
   image:
     src: /logo.png
     alt: filex
@@ -40,6 +40,16 @@ features:
     details: Find files by name or by what is inside them — an embedded full-text index across every mounted storage.
     link: /SEARCH
     linkText: Search docs
+  - icon: 🔌
+    title: Speaks your tools' protocols
+    details: Point rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only learned FTP or a media player that only learned NFS straight at filex — S3, SFTP, FTPS, NFS and WebDAV, all on the same tree with the same permissions and trash as the web UI.
+    link: /PROTOCOLS
+    linkText: Protocol docs
+  - icon: 💾
+    title: Mount it as a drive
+    details: filex mount attaches a remote server over ordinary HTTPS — a folder on Linux, a drive letter on Windows. Not a sync it opens one file out of a hundred thousand without downloading the rest.
+    link: /PROTOCOLS#filex-mount
+    linkText: How to mount
   - icon: 🌐
     title: WebDAV
     details: Mount your drives in Finder, Explorer or davfs2 — every storage served over one WebDAV endpoint.

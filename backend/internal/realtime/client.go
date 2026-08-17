@@ -44,7 +44,7 @@ type Client struct {
 	PresenceKey string
 
 	// Confinement carried by a ticket-authenticated connection (embedded
-	// contexts like work.brf.sh proxy a root-confined token). When Confined is
+	// contexts like work.example.com proxy a root-confined token). When Confined is
 	// true the client may only subscribe to rooms within (ConfineAdapter,
 	// ConfineRel). Cookie-authenticated connections leave Confined=false and
 	// rely on RBAC alone. Set once before any hub interaction.

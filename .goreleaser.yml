@@ -126,9 +126,9 @@ changelog:
 
 release:
   # GitLab native release. Set GITLAB_TOKEN in CI env.
-  github:
-    owner: brf-tech
-    name: filex
+  gitlab:
+    owner: brftech
+    name: filemanager
   draft: false
   replace_existing_draft: true
   prerelease: auto
@@ -141,8 +141,8 @@ release:
     Download a binary below, or pull a Docker image:
 
     ```bash
-    docker pull ghcr.io/brf-tech/filex:slim-{{ .Tag }}
-    docker pull ghcr.io/brf-tech/filex:full-{{ .Tag }}
+    docker pull registry.github.com/brf-tech/filex:slim-{{ .Tag }}
+    docker pull registry.github.com/brf-tech/filex:full-{{ .Tag }}
     ```
   footer: |
     ---
@@ -185,7 +185,7 @@ release:
 #
 # dockers:
 #   - image_templates:
-#       - "ghcr.io/brf-tech/filex:slim-{{ .Tag }}-amd64"
+#       - "registry.github.com/brf-tech/filex:slim-{{ .Tag }}-amd64"
 #     dockerfile: docker/Dockerfile
 #     use: buildx
 #     build_flag_templates:

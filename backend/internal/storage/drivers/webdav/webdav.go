@@ -28,6 +28,9 @@ func init() {
 // Driver is the WebDAV storage driver.
 type Driver struct {
 	endpoint *url.URL
+	// basePath is endpoint.Path joined with the configured root — the
+	// prefix every request is built from and stripped against.
+	basePath string
 	user     string
 	pass     string
 	client   *http.Client
@@ -36,11 +39,22 @@ type Driver struct {
 // Name implements storage.Driver.
 func (d *Driver) Name() string { return "webdav" }
 
-// Init configures the driver. Required: url, user, password.
+// Init configures the driver. Required: url, user, root; password optional
+// (some servers authenticate the URL itself).
+//
+// The config keys are declared in descriptor.go — keep the two in step,
+// there is a test that fails when they drift. Legacy spellings are read
+// through the descriptor's aliases ("username" for user, "base_path" /
+// "remote_path" for root).
+//
+// root scopes the mount below the base URL. A row saved before the driver
+// read it has no root, which joins to nothing: the mount stays exactly
+// where it was.
 func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
-	rawURL, _ := cfg["url"].(string)
-	user, _ := cfg["user"].(string)
-	pass, _ := cfg["password"].(string)
+	rawURL := storage.ConfigString(cfg, "url")
+	user := storage.ConfigString(cfg, "user", "username")
+	pass := storage.ConfigString(cfg, "password")
+	root := storage.ConfigString(cfg, "root", "base_path", "remote_path")
 	if rawURL == "" || user == "" {
 		return errors.New("webdav: url and user required")
 	}
@@ -49,6 +63,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 		return fmt.Errorf("webdav: bad url: %w", err)
 	}
 	d.endpoint = u
+	d.basePath = path.Join(u.Path, root)
 	d.user = user
 	d.pass = pass
 	d.client = &http.Client{Timeout: 60 * time.Second}
@@ -59,6 +74,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 func (d *Driver) Capabilities() storage.Capabilities {
 	return storage.Capabilities{
 		Read:   true,
+		Range:  true,
 		Write:  true,
 		Move:   true,
 		Copy:   true,
@@ -70,7 +86,7 @@ func (d *Driver) Capabilities() storage.Capabilities {
 func (d *Driver) urlFor(p string) string {
 	clean := strings.TrimLeft(path.Clean("/"+p), "/")
 	u := *d.endpoint
-	u.Path = path.Join(u.Path, clean)
+	u.Path = path.Join(d.basePath, clean)
 	return u.String()
 }
 
@@ -137,7 +153,9 @@ func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
 	parentClean := strings.TrimLeft(path.Clean("/"+p), "/")
 	for _, r := range ms.Responses {
 		href, _ := url.QueryUnescape(r.Href)
-		hrefPath := strings.Trim(strings.TrimPrefix(href, d.endpoint.Path), "/")
+		// Strip the mount prefix (base URL path + root) so the reported
+		// path is relative to the storage, not to the server.
+		hrefPath := strings.Trim(strings.TrimPrefix(href, d.basePath), "/")
 		if hrefPath == parentClean {
 			continue
 		}
@@ -225,6 +243,54 @@ func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("webdav: read http %d", resp.StatusCode)
 	}
 	return resp.Body, nil
+}
+
+// ReadRange implements storage.RangeReader with a `Range:` request header
+// on GET.
+//
+// ⚠ A WebDAV server is free to ignore Range and answer 200 with the whole
+// body. Returning that body as if it started at off would hand the caller
+// the wrong bytes — silent corruption — so a 200 is an error whenever off
+// > 0. At off == 0 the body is correct by construction (it starts where we
+// asked), so the response is accepted and simply capped at length.
+func (d *Driver) ReadRange(ctx context.Context, p string, off, length int64) (io.ReadCloser, error) {
+	if off < 0 {
+		return nil, fmt.Errorf("webdav: negative range offset %d", off)
+	}
+	if length == 0 {
+		return storage.EmptyReadCloser(), nil
+	}
+	rng := fmt.Sprintf("bytes=%d-", off)
+	if length > 0 {
+		rng = fmt.Sprintf("bytes=%d-%d", off, off+length-1)
+	}
+	req, _ := http.NewRequestWithContext(ctx, "GET", d.urlFor(p), nil)
+	req.Header.Set("Range", rng)
+	resp, err := d.do(req)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		resp.Body.Close()
+		return nil, storage.ErrNotFound
+	case resp.StatusCode == http.StatusRequestedRangeNotSatisfiable:
+		// Offset at or past EOF — a short read, not a failure.
+		resp.Body.Close()
+		return storage.EmptyReadCloser(), nil
+	case resp.StatusCode == http.StatusPartialContent:
+		// The server honoured it; it may have returned a shorter window
+		// than asked for, which LimitReadCloser tolerates.
+		return storage.LimitReadCloser(resp.Body, length), nil
+	case resp.StatusCode == http.StatusOK && off == 0:
+		return storage.LimitReadCloser(resp.Body, length), nil
+	case resp.StatusCode == http.StatusOK:
+		resp.Body.Close()
+		return nil, fmt.Errorf("webdav: server ignored Range %s (answered 200); refusing to serve wrong bytes", rng)
+	default:
+		resp.Body.Close()
+		return nil, fmt.Errorf("webdav: read range http %d", resp.StatusCode)
+	}
 }
 
 // Write implements storage.Writer.

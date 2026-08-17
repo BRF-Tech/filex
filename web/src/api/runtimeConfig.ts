@@ -19,7 +19,7 @@
 // behaviour.
 
 export interface FilexRuntimeConfig {
-  /** Absolute API base, e.g. "https://fm.brf.sh/api". Overrides the '/api' default. */
+  /** Absolute API base, e.g. "https://fm.example.com/api". Overrides the '/api' default. */
   apiBaseUrl?: string;
   /** Self-service API token used as `Authorization: Bearer <token>`. */
   bearerToken?: string;
@@ -30,7 +30,7 @@ export interface FilexRuntimeConfig {
    * Electron sets this to FALSE, and that is not a preference: the desktop
    * renderer runs on an `app://` origin, so every call to the server is
    * cross-origin. filex answers `Access-Control-Allow-Origin: *` (the default,
-   * and what fm.brf.sh serves today), and the Fetch spec forbids a wildcard
+   * and what fm.example.com serves today), and the Fetch spec forbids a wildcard
    * origin on a credentialed request — the browser rejects the response, so
    * EVERY API call fails. The desktop app authenticates with a bearer token and
    * has no cookie jar, so dropping credentials costs it nothing and makes the

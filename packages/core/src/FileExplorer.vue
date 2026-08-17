@@ -25,7 +25,11 @@ import type {
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
 import { useFileApi, type GlobalSearchHit } from './composables/useFileApi';
-import { useUploadChunked, type UploadJob } from './composables/useUploadChunked';
+import {
+  useUploadChunked,
+  isStagedUnsupported,
+  type UploadJob,
+} from './composables/useUploadChunked';
 import { useSelection } from './composables/useSelection';
 import { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 import { useLocale } from './composables/useLocale';
@@ -1493,7 +1497,7 @@ const contextActions = computed<ContextAction[]>(() => {
   // for the virtual root sets currentPath to EMPTY string, not '/'.
   // So the guard never fired and every mutation action leaked into
   // the menu at the depo listing — including new-folder + paste,
-  // which Burak called out in the most direct possible terms. Use
+  // which Ada called out in the most direct possible terms. Use
   // the same empty-after-trim test as `atVirtualRoot` above.
   const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   const inStorageRoot = multiStorageRoot.value && trimmedPath === '';
@@ -1531,7 +1535,7 @@ const contextActions = computed<ContextAction[]>(() => {
 
 // selectionActionList — the SINGLE source of truth for the actions offered on a
 // selection. BOTH the right-click context menu AND the top toolbar render this
-// exact list so they can never drift apart (Burak: "sağ klik menüyle üst menü
+// exact list so they can never drift apart (Ada: "sağ klik menüyle üst menü
 // tutmuyor"). The toolbar filters out dividers/hidden; the context menu shows
 // them. Action handling is unified in dispatchItemAction().
 function selectionActionList(sel: FileNode[]): ContextAction[] {
@@ -1940,13 +1944,25 @@ async function uploadFiles(list: File[]) {
     if (list.length === 0) return;
   }
   /* /wiring:e2 */
-  const canChunk = !!(api.endpoints.uploadInit && api.endpoints.uploadFinalize);
   for (const f of list) {
-    // Chunked (S3 multipart) only when the endpoints exist AND the file is
-    // large. If chunked isn't viable (storage has no multipart support —
-    // e.g. the local driver — or init errors out) fall back to the legacy
-    // single-POST upload, which works for any storage / file size.
-    if (canChunk && f.size >= 10 * 1024 * 1024) {
+    // Anything above the chunk size goes on the STAGED path: chunked into
+    // filex's own staging area, resumable across a dropped connection and — via
+    // the bookmark in lib/uploadResume — across a reloaded tab. It works on
+    // every driver, unlike the S3-presigned path it replaced. Small files keep
+    // the single-POST fast path, and a server that has no staged path at all
+    // falls back to it too.
+    if (chunked.shouldChunk(f)) {
+      const pending = chunked.resumableFor(qualify(currentPath.value), f);
+      if (pending) {
+        // Say so. An upload that silently starts over looks identical to one
+        // that never happened, which is precisely the complaint.
+        flashToast(
+          t('upload.resuming', {
+            name: f.name,
+            percent: f.size > 0 ? Math.round((pending.offset / f.size) * 100) : 0,
+          }),
+        );
+      }
       if (await chunkedUpload(f)) continue;
     }
     await legacyUpload(f);
@@ -1954,13 +1970,13 @@ async function uploadFiles(list: File[]) {
   await load();
 }
 
-async function legacyUpload(file: File) {
+async function legacyUpload(file: File, dest?: string) {
   // Register a progress row so the corner badge tracks the upload — large files
   // fall back here from the chunked path, and previously showed no progress at
   // all (the chunked placeholder was removed on init failure and the legacy
   // POST tracked nothing, so the badge vanished mid-upload).
   const id = crypto.randomUUID();
-  const target = qualify(currentPath.value);
+  const target = dest ?? qualify(currentPath.value);
   uploadJobs.value = [
     ...uploadJobs.value,
     { id, file, path: target, totalBytes: file.size, uploadedBytes: 0, percent: 0, status: 'uploading', cancel() {} },
@@ -1996,36 +2012,45 @@ async function legacyUpload(file: File) {
 }
 
 /**
- * Attempt an S3 multipart (chunked) upload. Returns `true` on success,
- * `false` when the storage can't do multipart (local driver, init 4xx/5xx)
- * so the caller can transparently fall back to the legacy single-POST
- * upload. On failure the progress placeholder is removed — no stuck error
- * row, no error toast, because the fallback path will report any real error.
+ * Attempt a staged (chunked, resumable) upload. Returns `true` when it was
+ * handled — including when it failed — and `false` ONLY when this server has no
+ * staged path at all, so the caller may fall back to the single-POST upload.
+ *
+ * ⚠ The old version fell back on ANY error, which was harmless while the
+ * chunked path was S3-only and failed at init. It is not harmless now: a staged
+ * upload that dies at 90 % has bytes on the server and a bookmark to resume
+ * from, and quietly re-POSTing the whole file would throw both away — the
+ * "starts from zero" behaviour this change exists to remove. A real failure is
+ * shown to the user instead, and picking the same file again continues it.
  */
-async function chunkedUpload(file: File): Promise<boolean> {
-  // Register the progress row LAZILY — only once init succeeded and bytes are
-  // actually moving. A doomed init (local driver / 4xx) then shows no badge at
-  // all, so the legacy fallback's own badge is the only one the user sees (no
+async function chunkedUpload(file: File, dest?: string): Promise<boolean> {
+  // Register the progress row LAZILY — only once `begin` succeeded and bytes are
+  // actually moving. A server with no staged path then shows no badge at all,
+  // so the fallback's own badge is the only one the user sees (no
   // appear-then-vanish flicker).
   const id = crypto.randomUUID();
   let registered = false;
+  const patch = (job: UploadJob) => {
+    if (!registered) {
+      uploadJobs.value = [...uploadJobs.value, { ...job, id } as UploadJob];
+      registered = true;
+      return;
+    }
+    const idx = uploadJobs.value.findIndex((j) => j.id === id);
+    if (idx !== -1) {
+      const next = [...uploadJobs.value];
+      next[idx] = { ...job, id } as UploadJob;
+      uploadJobs.value = next;
+    }
+  };
+  const target = dest ?? qualify(currentPath.value);
   try {
     await chunked.uploadFile({
-      path: qualify(currentPath.value),
+      path: target,
       file,
       onProgress: (job) => {
-        if (!registered) {
-          if (job.status !== 'uploading' && job.uploadedBytes <= 0) return;
-          uploadJobs.value = [...uploadJobs.value, { ...job, id } as UploadJob];
-          registered = true;
-        } else {
-          const idx = uploadJobs.value.findIndex((j) => j.id === id);
-          if (idx !== -1) {
-            const next = [...uploadJobs.value];
-            next[idx] = { ...job, id } as UploadJob;
-            uploadJobs.value = next;
-          }
-        }
+        if (!registered && job.status !== 'uploading' && job.uploadedBytes <= 0) return;
+        patch(job);
         emit('upload-progress', {
           uploadId: job.uploadId ?? id,
           percent: job.percent,
@@ -2034,9 +2059,32 @@ async function chunkedUpload(file: File): Promise<boolean> {
       },
     });
     return true;
-  } catch {
-    if (registered) uploadJobs.value = uploadJobs.value.filter((j) => j.id !== id);
-    return false;
+  } catch (err) {
+    if (isStagedUnsupported(err)) {
+      if (registered) uploadJobs.value = uploadJobs.value.filter((j) => j.id !== id);
+      return false;
+    }
+    const message = (err as Error).message;
+    if (!registered) {
+      uploadJobs.value = [
+        ...uploadJobs.value,
+        {
+          id,
+          file,
+          path: target,
+          totalBytes: file.size,
+          uploadedBytes: 0,
+          percent: 0,
+          status: 'error',
+          error: message,
+          cancel() {},
+        } as UploadJob,
+      ];
+      registered = true;
+    }
+    flashToast(t('upload.failed', { name: file.name }));
+    emit('error', { message, context: { op: 'upload', file: file.name } });
+    return true;
   }
 }
 
@@ -2471,42 +2519,29 @@ watch(
 const opsCenter = useOperations();
 
 /**
- * Retry a failed upload from the operations center. The failed row is
- * already retired by the store; re-run the upload against the job's ORIGINAL
- * target folder (the user may have navigated away since) via the legacy
- * single-POST path — works for any storage / size, no chunked precondition.
+ * Retry a failed upload from the operations center. The failed row is already
+ * retired by the store; re-run the upload against the job's ORIGINAL target
+ * folder (the user may have navigated away since).
+ *
+ * ⚠ It goes back through the SAME decision a fresh upload makes, rather than
+ * straight to the single-POST path as it used to. A retry is the moment resume
+ * matters most: the staged session and its bookmark are still there, so this
+ * continues from filex's offset instead of pushing the whole file again.
  */
 function retryUploadJob(job: UploadJob) {
   uploadJobs.value = uploadJobs.value.filter((j) => j.id !== job.id);
   const file = job.file;
   const target = job.path || qualify(currentPath.value);
-  const id = crypto.randomUUID();
-  uploadJobs.value = [
-    ...uploadJobs.value,
-    { id, file, path: target, totalBytes: file.size, uploadedBytes: 0, percent: 0, status: 'uploading', cancel() {} },
-  ];
-  const patchRetry = (p: Partial<UploadJob>) => {
-    const idx = uploadJobs.value.findIndex((j) => j.id === id);
-    if (idx === -1) return;
-    const next = [...uploadJobs.value];
-    next[idx] = { ...next[idx], ...p };
-    uploadJobs.value = next;
-  };
-  api
-    .uploadMultipart(target, [file], (percent) => {
-      patchRetry({ percent, uploadedBytes: Math.round((percent / 100) * file.size) });
-      emit('upload-progress', { uploadId: id, percent, done: percent >= 100 });
-    })
-    .then(() => {
-      patchRetry({ percent: 100, uploadedBytes: file.size, status: 'done' });
-      emit('upload-progress', { uploadId: id, percent: 100, done: true });
-      void load();
-    })
-    .catch((err: Error) => {
-      patchRetry({ status: 'error', error: err.message });
-      flashToast(t('upload.failed', { name: file.name }));
-      emit('error', { message: err.message, context: { op: 'upload-retry', file: file.name } });
-    });
+  void (async () => {
+    if (chunked.shouldChunk(file)) {
+      if (await chunkedUpload(file, target)) {
+        await load();
+        return;
+      }
+    }
+    await legacyUpload(file, target);
+    await load();
+  })();
 }
 /* /wiring:c3 */
 /* === wiring:c4 — onboarding coach-mark tour ===
@@ -2716,7 +2751,7 @@ function onPaneOpenTrash() {
 }
 /* ui-fix — pane'in KENDİ görünüm modu: split açılırken ana panelinkini
  * devralır, sonrasında bağımsız. Toolbar'ın görünüm değiştiricisi ve palet
- * toggle'ı AKTİF panele yazar (Burak: "B tıklıyken ikon değiştir dersem
+ * toggle'ı AKTİF panele yazar (Ada: "B tıklıyken ikon değiştir dersem
  * B'nin değişmesi lazım"). */
 const paneViewMode = computed<ViewMode>(() => activeSplit.value?.viewMode ?? viewMode.value);
 function setPaneViewMode(v: ViewMode) {

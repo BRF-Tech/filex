@@ -1,5 +1,5 @@
 // Guards the bug that made the share dialog render as raw unstyled HTML in
-// EVERY embedded surface — the desktop app, work.brf.sh, fishapp, olivov.
+// EVERY embedded surface — the desktop app, work.example.com, fishapp, olivov.
 //
 // Vue's `<style scoped>` compiles to `.cls[data-v-HASH]`, and the hash is
 // stamped onto the DOM by the component's own compilation. The web-component

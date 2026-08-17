@@ -35,7 +35,7 @@ const (
 // sub-square downsampling we use a simple nearest-neighbour-ish step that's
 // fine for 320px previews. Use libvips for production-quality scaling.
 func (p *Pipeline) generateImage(ctx context.Context, node *model.Node, drv storage.Driver) error {
-	rc, err := drv.Read(ctx, node.Path)
+	rc, err := p.openSource(ctx, drv, node)
 	if err != nil {
 		return err
 	}

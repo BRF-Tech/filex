@@ -68,7 +68,7 @@ type saveTextReq struct {
 
 // Save writes `content` as the new body of the addressed file.
 //
-// Body shape mirrors the origin app's `FilesController::saveText`. We do
+// Body shape mirrors brf-mono's `FilesController::saveText`. We do
 // NOT version on save — the SFC's preview re-renders against the new
 // bytes immediately, and a future versions endpoint can snapshot the
 // previous payload before the write if requested.
@@ -173,6 +173,34 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	// Refresh cache metadata so the next listing carries the new size.
 	if existing != nil {
 		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, int64(len(body)), existing.Mime, existing.Etag, time.Now())
+	} else {
+		// A brand-new file had NO node row: the bytes went to the driver and
+		// the catalogue only learned about them on the next storage scan —
+		// which meant the file was invisible until then, and the row it
+		// eventually got belonged to nobody, so those bytes were never
+		// counted against anyone's quota. Create the row here, the way every
+		// other write path does.
+		var parentID *int64
+		if dir := path.Dir(clean); dir != "" && dir != "." && dir != "/" {
+			if p, perr := h.Store.GetNodeByPath(r.Context(), storageID, pathkey.Hash(storageID, dir)); perr == nil && p != nil {
+				parentID = &p.ID
+			}
+		}
+		if _, cerr := h.Store.CreateNode(r.Context(), &model.Node{
+			StorageID:  storageID,
+			ParentID:   parentID,
+			Name:       path.Base(clean),
+			Path:       clean,
+			PathHash:   hash,
+			StorageKey: clean,
+			Type:       model.NodeTypeFile,
+			Size:       int64(len(body)),
+			Mime:       "text/plain; charset=utf-8",
+			SyncState:  model.SyncStateSynced,
+		}); cerr != nil {
+			slog.Warn("save-text: node create",
+				slog.String("path", clean), slog.String("err", cerr.Error()))
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

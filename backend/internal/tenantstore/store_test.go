@@ -59,7 +59,7 @@ func TestScopedStorageListing(t *testing.T) {
 	assert.Empty(t, names(deny))
 }
 
-// TestScopedUserDirectory is the guarantee Burak cares most about: users of
+// TestScopedUserDirectory is the guarantee the owner cares most about: users of
 // different tenants do not see each other on the permission/grant picker (which
 // lists through ListUsers).
 func TestScopedUserDirectory(t *testing.T) {

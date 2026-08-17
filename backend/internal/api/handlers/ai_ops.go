@@ -18,11 +18,13 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -42,7 +44,18 @@ type aiOps struct {
 	acl        *acl.Resolver   // RBAC — nil disables per-user grant enforcement
 	thumbs     *thumb.Pipeline // optional — nil skips thumbnail dispatch (manager-upload parity)
 	origin     string          // writehook origin stamp — "ai" by default, "sharex" for the ShareX wrapper
+	// staged, when wired, takes writes above the chunk threshold into filex's
+	// staging area and lets the ops worker move them to the driver. nil keeps
+	// the synchronous write, so an instance without staging is unaffected.
+	staged *StagedUpload
+	// body resolves where a file's bytes are: the driver, or filex's staging
+	// area while a staged upload is still transferring. Nil-safe.
+	body *filebody.Resolver
 }
+
+// attachBody wires the byte-source resolver so the AI/REST read and zip
+// surfaces serve a file that is still being transferred.
+func (a *aiOps) attachBody(b *filebody.Resolver) { a.body = b }
 
 // allow reports whether the bound user has at least `need` on rel within s.
 // The AI surface bypasses confine.Middleware and manager gating, so every op
@@ -300,7 +313,11 @@ func (a *aiOps) Read(ctx context.Context, p string) (io.ReadCloser, string, int6
 	if err != nil {
 		return nil, "", 0, err
 	}
-	st, err := drv.Stat(ctx, rel)
+	src, err := a.body.Resolve(ctx, drv, s.ID, rel, nil)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	st, err := src.Stat(ctx)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -314,7 +331,7 @@ func (a *aiOps) Read(ctx context.Context, p string) (io.ReadCloser, string, int6
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
-	rc, err := drv.Read(ctx, rel)
+	rc, err := src.Open(ctx)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -347,7 +364,26 @@ func (a *aiOps) ReadBytes(ctx context.Context, p string) ([]byte, string, error)
 
 // Write creates or overwrites a file with the given bytes and mirrors the
 // result into the DB cache so it lists immediately. Returns the new entry.
+//
+// It is WriteStream over a byte slice — kept because most agent writes really
+// are small in-memory payloads (a JSON blob, a note), and a caller with bytes
+// in hand should not have to build a reader.
 func (a *aiOps) Write(ctx context.Context, p string, data []byte) (*aiEntry, error) {
+	return a.WriteStream(ctx, p, bytes.NewReader(data), int64(len(data)))
+}
+
+// WriteStream creates or overwrites a file from a stream of exactly size bytes.
+//
+// Above the staging threshold the bytes go into filex's own staging area and
+// the driver write is handed to the ops worker, so the caller's request returns
+// as soon as filex holds the data instead of waiting out a slow backend. Below
+// it — and on any instance without staging configured — this is the same
+// synchronous write it always was.
+//
+// ⚠ src is read at most once. On the staged path the body is consumed into
+// staging, so a failure there must NOT fall back to the synchronous write:
+// the reader is already drained and the file would land truncated.
+func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size int64) (*aiEntry, error) {
 	s, rel, err := a.resolveStorage(ctx, p)
 	if err != nil {
 		return nil, err
@@ -380,26 +416,53 @@ func (a *aiOps) Write(ctx context.Context, p string, data []byte) (*aiEntry, err
 		return nil, err
 	}
 
-	mime := ""
-	if len(data) > 0 {
-		head := data
-		if len(head) > 512 {
-			head = head[:512]
+	if a.staged.ShouldStage(size) {
+		node, serr := a.staged.IngestStream(ctx, s.ID, rel, src, size, currentUserID(ctx), "")
+		switch {
+		case serr == nil:
+			return &aiEntry{
+				Path:         joinAdapterPath(s.Name, rel),
+				Name:         name,
+				Type:         "file",
+				Size:         size,
+				Mime:         node.Mime,
+				LastModified: time.Now().UnixMilli(),
+			}, nil
+		case !errors.Is(serr, ErrStagingUnavailable):
+			return nil, serr
 		}
-		mime = storage.RefineOfficeMime(http.DetectContentType(head), name)
+		// ErrStagingUnavailable is refused before a byte of src is read, so the
+		// synchronous path below still sees the whole body.
 	}
 
-	if err := wr.Write(ctx, rel, bytes.NewReader(data), int64(len(data))); err != nil {
+	// Sniff the head, then hand the driver the ORIGINAL reader when it can
+	// rewind. Wrapping a seekable body in io.MultiReader destroys the Seeker,
+	// which is what once put every upload on the chunked path with no
+	// Content-Length (olivov H1, 2026-08-05).
+	var sniff [512]byte
+	n, _ := io.ReadFull(src, sniff[:])
+	mime := ""
+	if n > 0 {
+		mime = storage.RefineOfficeMime(http.DetectContentType(sniff[:n]), name)
+	}
+	body := io.Reader(io.MultiReader(bytes.NewReader(sniff[:n]), src))
+	if sk, ok := src.(io.Seeker); ok && n > 0 {
+		if _, serr := sk.Seek(0, io.SeekStart); serr == nil {
+			body = src
+		}
+	}
+
+	if err := wr.Write(ctx, rel, body, size); err != nil {
 		return nil, err
 	}
 
-	a.cacheUpsertFile(ctx, s, rel, int64(len(data)), mime)
+	a.cacheUpsertFile(ctx, s, rel, size, mime)
 
 	return &aiEntry{
 		Path:         joinAdapterPath(s.Name, rel),
 		Name:         name,
 		Type:         "file",
-		Size:         int64(len(data)),
+		Size:         size,
 		Mime:         mime,
 		LastModified: time.Now().UnixMilli(),
 	}, nil
@@ -431,80 +494,58 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 		return err
 	}
 	base := path.Base(rel)
-	trashRel := fmt.Sprintf("%s/%d-%s__%s", trashPrefix, time.Now().Unix(), randHex6(), base)
-	mover, hasMover := drv.(storage.Mover)
-	deleter, hasDeleter := drv.(storage.Deleter)
 
-	// Folder path → trash every file under the prefix (Move per-object works on
-	// S3; a single Move of the prefix does not).
-	if children, _ := a.listAllFiles(ctx, drv, rel); len(children) > 0 {
-		prefix := strings.TrimRight(rel, "/") + "/"
-		for _, child := range children {
-			dst := trashRel + "/" + strings.TrimPrefix(child, prefix)
-			switch {
-			case hasMover:
-				if err := mover.Move(ctx, child, dst); err != nil {
-					return fmt.Errorf("trash %q: %w", child, err)
-				}
-			case hasDeleter:
-				if err := deleter.Delete(ctx, child); err != nil && !errors.Is(err, storage.ErrNotFound) {
-					return err
-				}
-			default:
-				return storage.ErrUnsupported
-			}
-		}
-		// Best-effort: drop any leftover folder-marker objects (filex Mkdir
-		// writes a "<prefix>/" marker on S3).
-		if hasDeleter {
-			_ = deleter.Delete(ctx, rel)
-			_ = deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/")
-		}
-		a.trashRetagCache(ctx, s.ID, rel, trashRel)
+	// trash.Put is the shared implementation behind every delete surface: it
+	// renames the object into `.filex-trash/`, walks the prefix per-object when
+	// an object store has nothing at the folder path, and falls back to
+	// Copy+Delete on drivers without Move. It never destroys data — when it
+	// cannot preserve the bytes it says so, and only then do we hard delete.
+	//
+	// The hook now follows what actually happened. It used to be decided ahead
+	// of time, so a driver with Delete but no Move permanently erased a
+	// folder's contents while still reporting OnFileTrashed and retagging the
+	// row into the trash — the UI offered a Restore for bytes long gone.
+	out, terr := trash.Put(ctx, drv, rel)
+	switch {
+	case terr == nil && out.Trashed:
+		a.trashRetagCache(ctx, s.ID, rel, out.Key)
 		/* bag:b3 event */
-		writehook.OnFileTrashed(ctx, s.ID, normalizeDBPath(rel), base, normalizeDBPath(trashRel), a.origin)
+		writehook.OnFileTrashed(ctx, s.ID, normalizeDBPath(rel), base, normalizeDBPath(out.Key), a.origin)
 		return nil
-	}
 
-	// Single file (or an empty folder marker).
-	if hasMover {
-		if err := mover.Move(ctx, rel, trashRel); err != nil {
-			// No object at `rel` (e.g. an empty folder marker) → the Move/Copy
-			// 404s. Best-effort delete the marker variants; only surface the
-			// error if nothing could be removed.
-			cleaned := false
-			if hasDeleter {
-				if e := deleter.Delete(ctx, rel); e == nil {
-					cleaned = true
-				}
-				if e := deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/"); e == nil {
-					cleaned = true
-				}
-			}
-			if !cleaned {
-				return err
-			}
-		}
-		a.trashRetagCache(ctx, s.ID, rel, trashRel)
+	case terr == nil && out.Missing:
+		// Nothing was there to keep (an empty folder marker, or a stale cache
+		// row). Drop the row rather than parking an unrestorable trash entry.
+		a.dropCacheRow(ctx, s.ID, rel)
 		/* bag:b3 event */
-		writehook.OnFileTrashed(ctx, s.ID, normalizeDBPath(rel), base, normalizeDBPath(trashRel), a.origin)
+		writehook.OnFileDeleted(ctx, s.ID, normalizeDBPath(rel), base, a.origin)
 		return nil
-	}
 
-	// No move support — hard delete (legacy drivers).
-	if !hasDeleter {
-		return storage.ErrUnsupported
+	case errors.Is(terr, trash.ErrUnsupported):
+		deleter, ok := drv.(storage.Deleter)
+		if !ok {
+			return storage.ErrUnsupported
+		}
+		if err := deleter.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
+			return err
+		}
+		a.dropCacheRow(ctx, s.ID, rel)
+		/* bag:b3 event */
+		writehook.OnFileDeleted(ctx, s.ID, normalizeDBPath(rel), base, a.origin)
+		return nil
+
+	default:
+		return terr
 	}
-	if err := deleter.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return err
+}
+
+// dropCacheRow removes the node row for rel outright. Used when the bytes are
+// gone for good, so the trash listing never offers a Restore that cannot work.
+func (a *aiOps) dropCacheRow(ctx context.Context, storageID int64, rel string) {
+	origHash := pathkey.Hash(storageID, normalizeDBPath(rel))
+	if existing, gerr := a.store.GetNodeByPath(ctx, storageID, origHash); gerr == nil && existing != nil {
+		_ = a.store.HardDeleteNode(ctx, existing.ID)
 	}
-	origHash := pathkey.Hash(s.ID, normalizeDBPath(rel))
-	if existing, gerr := a.store.GetNodeByPath(ctx, s.ID, origHash); gerr == nil && existing != nil {
-		_ = a.store.SoftDeleteNode(ctx, existing.ID)
-	}
-	/* bag:b3 event */
-	writehook.OnFileDeleted(ctx, s.ID, normalizeDBPath(rel), base, a.origin)
-	return nil
 }
 
 // listAllFiles recursively returns every FILE object path under root (skipping
@@ -830,7 +871,7 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 			_ = zw.Close()
 			return nil, derr
 		}
-		if aerr := a.zipAdd(ctx, zw, drvSrc, relSrc, path.Base(relSrc), seen); aerr != nil {
+		if aerr := a.zipAdd(ctx, zw, drvSrc, sSrc.ID, relSrc, path.Base(relSrc), seen); aerr != nil {
 			_ = zw.Close()
 			return nil, aerr
 		}
@@ -872,7 +913,7 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 // already-cleaned basenames, so it is zip-slip-safe by construction; the file
 // branch still routes through sanitizeZipPath as defense in depth. `seen`
 // dedups member names (first writer wins) so colliding sources don't error.
-func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, rel, base string, seen map[string]bool) error {
+func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, storageID int64, rel, base string, seen map[string]bool) error {
 	st, err := drv.Stat(ctx, rel)
 	if err != nil {
 		return err
@@ -898,7 +939,7 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 			if childRel == "" {
 				childRel = path.Join(rel, o.Name)
 			}
-			if aerr := a.zipAdd(ctx, zw, drv, childRel, path.Join(base, o.Name), seen); aerr != nil {
+			if aerr := a.zipAdd(ctx, zw, drv, storageID, childRel, path.Join(base, o.Name), seen); aerr != nil {
 				return aerr
 			}
 		}
@@ -911,7 +952,11 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 	if seen[safe] {
 		return nil
 	}
-	rc, err := drv.Read(ctx, rel)
+	src, err := a.body.Resolve(ctx, drv, storageID, rel, nil)
+	if err != nil {
+		return err
+	}
+	rc, err := src.Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -962,7 +1007,11 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 	}
 
 	// archive/zip needs a ReaderAt+Seeker — materialize to a tmp file first.
-	rc, err := drv.Read(ctx, relSrc)
+	srcBody, err := a.body.Resolve(ctx, drv, sSrc.ID, relSrc, nil)
+	if err != nil {
+		return 0, err
+	}
+	rc, err := srcBody.Open(ctx)
 	if err != nil {
 		return 0, err
 	}

@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/net/webdav"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -123,15 +125,19 @@ func (d *dirFile) Readdir(count int) ([]os.FileInfo, error) {
 
 // ─────────────────────────────── readFile ─────────────────────────────────
 
-// readFile is a lazy, seekable read handle over Driver.Read. The Driver
-// interface exposes a plain ReadCloser, so Seek is emulated: forward gaps
-// are discarded, a backward seek closes and re-opens the stream. That makes
-// http.ServeContent's probe seeks (0,end then 0,start) free and range
-// requests O(offset) — fine for the drives WebDAV clients mount.
+// readFile is a lazy, seekable read handle over a filebody source — the
+// storage driver, or filex's staging area while a staged upload is still
+// transferring, decided once when the handle is opened.
+//
+// Seek is emulated: forward gaps are discarded, a backward seek closes and
+// re-opens the stream. That makes http.ServeContent's probe seeks (0,end then
+// 0,start) free and range requests O(offset) — fine for the drives WebDAV
+// clients mount. When the source CAN range (staging always can, and so can the
+// local/S3 drivers) the re-open starts at the offset instead, so nothing is
+// re-read to reach it.
 type readFile struct {
 	ctx  context.Context
-	drv  storage.Driver
-	rel  string
+	src  *filebody.Source
 	fi   os.FileInfo
 	size int64
 
@@ -140,8 +146,8 @@ type readFile struct {
 	rpos int64 // underlying stream position
 }
 
-func newReadFile(ctx context.Context, drv storage.Driver, rel string, fi os.FileInfo) *readFile {
-	return &readFile{ctx: ctx, drv: drv, rel: rel, fi: fi, size: fi.Size()}
+func newReadFile(ctx context.Context, src *filebody.Source, fi os.FileInfo) *readFile {
+	return &readFile{ctx: ctx, src: src, fi: fi, size: fi.Size()}
 }
 
 func (r *readFile) Stat() (os.FileInfo, error)         { return r.fi, nil }
@@ -203,7 +209,16 @@ func (r *readFile) reopen() error {
 		_ = r.rc.Close()
 		r.rc = nil
 	}
-	rc, err := r.drv.Read(r.ctx, r.rel)
+	if r.pos > 0 && r.src.CanRange() {
+		rc, err := r.src.ReadRange(r.ctx, r.pos, -1)
+		if err != nil {
+			return mapErr(err)
+		}
+		r.rc = rc
+		r.rpos = r.pos
+		return nil
+	}
+	rc, err := r.src.Open(r.ctx)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -272,6 +287,18 @@ func (w *writeFile) Close() error {
 	// WithoutCancel: a client that drops the connection right after the last
 	// body byte must not abort the backend flush halfway through.
 	ctx := context.WithoutCancel(w.ctx)
+
+	// ⚠ The quota backstop. preGate already refused anything that declared a
+	// Content-Length over the ceiling, with a proper 507 and before a byte was
+	// sent; this catches the PUT that declared no length at all (chunked
+	// transfer encoding). The status the client gets here is a poor one —
+	// x/net/webdav turns a Close error into 405 — but a wrong status is not the
+	// same kind of mistake as writing past the limit and counting it afterwards.
+	if u := auth.UserFrom(ctx); u != nil && w.h.cfg.Quota != nil {
+		if err := w.h.cfg.Quota.CheckCanWrite(ctx, u.ID, w.size); err != nil {
+			return err
+		}
+	}
 	// A PUT onto an existing collection would leave `X` and `X/…` side by side
 	// on an object store (storage.ErrKindConflict). macOS writing sidecars over
 	// /dav is exactly the traffic that produces these names.

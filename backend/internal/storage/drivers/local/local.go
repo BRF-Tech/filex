@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -59,6 +60,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 func (d *Driver) Capabilities() storage.Capabilities {
 	return storage.Capabilities{
 		Read:   true,
+		Range:  true,
 		Write:  true,
 		Move:   true,
 		Copy:   true,
@@ -162,6 +164,37 @@ func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
 	return f, nil
 }
 
+// ReadRange implements storage.RangeReader — a plain seek on the open
+// file. Seeking past EOF is legal on a POSIX file and the first Read then
+// reports io.EOF, which is exactly the documented contract.
+func (d *Driver) ReadRange(_ context.Context, p string, off, length int64) (io.ReadCloser, error) {
+	if off < 0 {
+		return nil, fmt.Errorf("local: negative range offset %d", off)
+	}
+	abs, err := d.resolve(p)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, storage.ErrNotFound
+		}
+		return nil, err
+	}
+	if length == 0 {
+		_ = f.Close()
+		return storage.EmptyReadCloser(), nil
+	}
+	if off > 0 {
+		if _, err := f.Seek(off, io.SeekStart); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+	}
+	return storage.LimitReadCloser(f, length), nil
+}
+
 // Write implements storage.Writer.
 func (d *Driver) Write(_ context.Context, p string, r io.Reader, _ int64) error {
 	abs, err := d.resolve(p)
@@ -180,6 +213,21 @@ func (d *Driver) Write(_ context.Context, p string, r io.Reader, _ int64) error 
 	return err
 }
 
+// SetMtime implements storage.Toucher.
+func (d *Driver) SetMtime(_ context.Context, p string, mtime time.Time) error {
+	abs, err := d.resolve(p)
+	if err != nil {
+		return err
+	}
+	if err := os.Chtimes(abs, mtime, mtime); err != nil {
+		if os.IsNotExist(err) {
+			return storage.ErrNotFound // same contract as Move and Copy, below
+		}
+		return err
+	}
+	return nil
+}
+
 // Move implements storage.Mover.
 func (d *Driver) Move(_ context.Context, src, dst string) error {
 	a, err := d.resolve(src)
@@ -193,7 +241,31 @@ func (d *Driver) Move(_ context.Context, src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(b), 0o755); err != nil {
 		return err
 	}
-	return os.Rename(a, b)
+	// ⚠⚠ Retried, because on Windows a rename fails outright while ANY handle
+	// is open on the file — including filex's own thumbnailer or content
+	// indexer, since Go opens files without FILE_SHARE_DELETE. Uploading a file
+	// and deleting it straight away returned 500 about three times in two
+	// hundred (measured 2026-08-17). Every such holder releases in
+	// milliseconds; see retry.go for why the budget is one second and why only
+	// this class of error is retried. On Unix the retry never engages.
+	if err := retryWhileLocked(func() error { return os.Rename(a, b) }); err != nil {
+		// The Driver contract says a missing path is storage.ErrNotFound, and
+		// Read/Stat/List all honour it — Move and Copy did not, and returned
+		// the raw *fs.PathError instead.
+		//
+		// That is not cosmetic. internal/trash.Put asks `errors.Is(err,
+		// storage.ErrNotFound)` to tell "the object is already gone" (report
+		// Missing, succeed) from "the rename genuinely failed" (fail the op).
+		// With the raw error it could not, so deleting a path that was no
+		// longer there ended the async op as `failed` — measured 2026-08-15 as
+		// `rename …: The system cannot find the path specified` on a delete
+		// whose source had already moved.
+		if os.IsNotExist(err) {
+			return storage.ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 // Copy implements storage.Copier.
@@ -208,6 +280,9 @@ func (d *Driver) Copy(ctx context.Context, src, dst string) error {
 	}
 	info, err := os.Stat(a)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return storage.ErrNotFound // same contract as Move, above
+		}
 		return err
 	}
 	if info.IsDir() {
@@ -222,7 +297,11 @@ func (d *Driver) Delete(_ context.Context, p string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(abs); err != nil && !os.IsNotExist(err) {
+	// Same Windows hazard as Move: an open handle blocks the unlink too, and a
+	// permanent delete failing with an internal error is the version of this
+	// bug the user cannot work around by waiting, because the row is already
+	// gone from their trash.
+	if err := retryWhileLocked(func() error { return os.RemoveAll(abs) }); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

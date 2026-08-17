@@ -37,6 +37,10 @@ const (
 	OriginShareX  = "sharex"  // ShareX capture upload
 	OriginDAV     = "dav"     // WebDAV surface
 	OriginOps     = "ops"     // async ops worker (copy/move/delete)
+	OriginS3      = "s3"      // S3-compatible endpoint (internal/s3api)
+	OriginSFTP    = "sftp"    // SFTP endpoint (internal/sftpsrv)
+	OriginFTP     = "ftp"     // FTPS endpoint (internal/ftpsrv)
+	OriginNFS     = "nfs"     // NFSv3 endpoint (internal/nfssrv)
 )
 
 // Package-wide sinks. Stay nil until Configure wires them at startup.

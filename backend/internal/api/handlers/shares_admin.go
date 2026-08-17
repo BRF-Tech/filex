@@ -77,6 +77,14 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 		rows = kept
 		total = int64(len(rows))
 	}
+	// An empty result must serialise as `[]`, never `null`. A nil Go slice
+	// marshals to JSON null, and both envelopes below promise arrays — every
+	// consumer does `.length` / `.map` / `v-for` on them, so a fresh instance
+	// with no shares yet handed the admin SPA a null and broke the page that
+	// exists precisely to say "you have no shares".
+	if rows == nil {
+		rows = []*db.ShareWithMeta{}
+	}
 	// Dual envelope: `items/total/page/page_size` is what the admin
 	// SPA expects (PaginatedResponse); `entries/limit/offset` keeps
 	// any older consumers happy.

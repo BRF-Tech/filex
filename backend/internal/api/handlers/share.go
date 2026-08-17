@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -52,7 +53,14 @@ type Share struct {
 	// DefaultLocale is the public pages' fallback language (the server's own
 	// `default_locale`). The visitor's request wins over it — see publicLocale.
 	DefaultLocale string
+	// Body resolves where a shared file's bytes are: the driver, or filex's
+	// staging area while a staged upload is still transferring. Nil-safe.
+	Body *filebody.Resolver
 }
+
+// AttachBody wires the byte-source resolver so a share link serves a file that
+// is still being transferred to the backend.
+func (h *Share) AttachBody(b *filebody.Resolver) { h.Body = b }
 
 // AttachBranding wires the shared branding source (wiring:e1).
 func (h *Share) AttachBranding(b *BrandingSource) { h.Branding = b }
@@ -292,7 +300,13 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// so the five minutes were being spent watching a progress bar instead of
 	// being spent before anyone was waiting. Costs nothing new: it is the same
 	// build the warmer was going to do anyway, moved earlier.
-	h.warmFolderZip(node)
+	// ⚠ Not for a file request: a drop link is upload-only, so its archive
+	// could never be downloaded by anyone. It used to be built anyway — the
+	// full folder read from object storage, for a file that the warmer never
+	// looks at again and (before the sweeper) nothing ever deleted.
+	if sh.Kind != model.ShareKindDrop {
+		h.warmFolderZip(node)
+	}
 	h.warmFolderThumbs(node)
 
 	// Dual envelope: nested `share` for the SFC + flat fields at the
@@ -753,7 +767,17 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 			h.renderFolderBrowse(r.Context(), w, r, drv, node, resolved, pin)
 			return
 		}
-		h.serveFolderZip(r.Context(), w, r, drv, node.Path, node.Name, node.ID, resolved.ID, pin)
+		h.serveFolderZip(r.Context(), w, r, drv, node.StorageID, node.Path, node.Name, node.ID, resolved.ID, pin)
+		return
+	}
+
+	// Where are this file's bytes? Resolved BEFORE the claim below, so a link
+	// whose staging has vanished answers an error without spending one of its
+	// downloads — the claim itself stays exactly where it was relative to the
+	// bytes, which is what the cap depends on.
+	src, err := h.Body.Resolve(r.Context(), drv, node.StorageID, node.Path, node)
+	if err != nil {
+		stagingGoneText(w, err)
 		return
 	}
 
@@ -762,7 +786,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// request that started while an earlier one was still streaming read the
 	// same pre-download count and was let through — a link capped at one
 	// download handed three full files to three overlapping clients on
-	// fm.brf.sh. Claiming first makes "3 downloads" mean three.
+	// fm.example.com. Claiming first makes "3 downloads" mean three.
 	if !h.claimDownload(w, r, resolved.ID) {
 		return
 	}
@@ -774,19 +798,24 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// SignatureDoesNotMatch on AWS SDK v2 SigV4 — sweep-2026-05-09 bug 23).
 	// When presign is disabled, fall through to the backend-stream path
 	// below.
-	if pres, ok := drv.(storage.Presigner); ok && drv.Capabilities().Presign {
+	//
+	// ⚠ Never while staged: a presigned URL points at the backend, and the
+	// backend is precisely what does not have this object yet. Redirecting
+	// there would hand the visitor a 404 (or, on an overwrite, the previous
+	// version) with the download already charged against the link.
+	if pres, ok := drv.(storage.Presigner); ok && !src.Staged && drv.Capabilities().Presign {
 		if u, err := pres.PresignDownload(r.Context(), node.Path, 5*time.Minute); err == nil && u != "" {
 			http.Redirect(w, r, u, http.StatusFound)
 			return
 		}
 	}
 
-	rc, err := drv.Read(r.Context(), node.Path)
+	rc, err := src.Open(r.Context())
 	if err != nil {
 		// Nothing was served — give the slot back rather than charge the
 		// visitor for our storage error.
 		_ = h.Service.ReleaseDownload(r.Context(), resolved.ID)
-		http.Error(w, "read error", http.StatusInternalServerError)
+		stagingGoneText(w, err)
 		return
 	}
 	defer rc.Close()
@@ -838,7 +867,14 @@ func (h *Share) claimDownloadSlot(r *http.Request, shareID int64) bool {
 // unpacks into a clean tree. Internal dirs (trash, thumbnails) are skipped, and
 // individually unreadable files are skipped rather than aborting the whole
 // download. The write is streaming — no full buffer — so large folders are fine.
-func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, root, name string) error {
+//
+// Every member is opened through filebody, so a file the driver still holds an
+// OLDER copy of — an overwrite whose staged bytes have not landed yet — is
+// archived with the version the user committed rather than the one it replaced.
+// ⚠ The walk itself is still the driver's listing, so a brand-new staged file
+// (no object on the backend at all) is not in the archive; see the note on
+// serveFolderZip.
+func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, storageID int64, root, name string) error {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(name)))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -863,7 +899,11 @@ func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv 
 					return err
 				}
 			case storage.KindFile:
-				rc, err := drv.Read(ctx, o.Path)
+				src, err := h.Body.Resolve(ctx, drv, storageID, o.Path, nil)
+				if err != nil {
+					continue
+				}
+				rc, err := src.Open(ctx)
 				if err != nil {
 					continue
 				}
@@ -894,7 +934,16 @@ func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv 
 //
 // The download counter is only bumped on a real byte serve. Any cache problem
 // falls back to streaming a fresh zip so a broken cache never blocks a download.
-func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, root, name string, nodeID, shareID int64, pin string) {
+//
+// ⚠ Known gap, deliberate: the CACHED path (internal/sharezip) is not
+// staging-aware. Its file list and its cache key (the content signature over
+// path+size+mtime) both come from drv.List, so a staged file is invisible to it
+// and an overwritten one signs with the pre-overwrite metadata. Making only its
+// reads staging-aware would produce a cached archive keyed by stale metadata —
+// a worse failure than the current one, because it would then be served to
+// everyone until the signature changed. Closing it properly means merging the
+// node catalogue into the walk, which is a listing change, not a read change.
+func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *http.Request, drv storage.Driver, storageID int64, root, name string, nodeID, shareID int64, pin string) {
 	// Both serving paths claim their download BEFORE writing (see
 	// claimDownload): a folder ZIP takes long enough that two clicks used to
 	// overlap comfortably inside the old check-then-count gap.
@@ -904,7 +953,7 @@ func (h *Share) serveFolderZip(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 		// streamFolderZip writes its headers up front, so a failure part-way
 		// through has already handed bytes over — the claim stands.
-		_ = h.streamFolderZip(ctx, w, drv, root, name)
+		_ = h.streamFolderZip(ctx, w, drv, storageID, root, name)
 	}
 	serve := func(cachePath string) {
 		if !h.claimDownload(w, r, shareID) {

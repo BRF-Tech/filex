@@ -47,6 +47,15 @@ export type LocaleCode = 'tr' | 'en';
  */
 export interface EndpointMap {
   manager: string;
+  /**
+   * Staged upload — the chunked, resumable, driver-agnostic path every client
+   * speaks (docs/UPLOADS.md). The per-upload routes (`PUT/GET/DELETE {id}`,
+   * `POST {id}/commit`) are derived from it by stripping `/begin`, so one
+   * override moves the whole protocol.
+   */
+  uploadBegin: string | null;
+  /** Legacy S3-presigned chunked upload. Still served by the backend for
+   *  older embedders; nothing in this package calls it. */
   uploadInit: string | null;
   uploadFinalize: string | null;
   uploadAbort: string | null;
@@ -83,6 +92,8 @@ export interface ExplorerConfig {
   endpoint?: string;
 
   // ——— Per-route overrides (optional; auto-derived from apiBase if absent) ———
+  /** Staged upload entry point; the `{id}` routes hang off it. */
+  uploadBegin?: string;
   uploadInit?: string;
   uploadFinalize?: string;
   uploadAbort?: string;
@@ -198,10 +209,20 @@ export interface ExplorerConfig {
    */
   viewerBaseUrl?: string;
 
-  /** Upload chunk size (bytes). Default 5 MB. */
+  /**
+   * Upload chunk size (bytes). Default 8 MB — the server's default too, so
+   * "large enough to chunk" means the same thing on both ends. The value the
+   * server returns from `begin` is binding; this is what the client asks for
+   * and the threshold above which a file goes on the staged path at all.
+   */
   chunkSize?: number;
 
-  /** Parallel chunks. Default 4. */
+  /**
+   * @deprecated Ignored since the move to the staged protocol. Chunks are sent
+   * sequentially because `offset` — the resume point — is the contiguous run
+   * from part 1; parallel parts would leave holes that a resumed upload has to
+   * re-send anyway.
+   */
   parallelChunks?: number;
 
   /** Theme. */

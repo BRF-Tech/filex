@@ -10,6 +10,10 @@ export type UserRole = 'admin' | 'user' | 'viewer';
 export interface User {
   id: number;
   email: string;
+  /** Short login name. Sign-in accepts this OR the e-mail, on every surface —
+   *  the browser, the desktop app, WebDAV, and the connection protocols, whose
+   *  clients cannot carry an `@` in a login without escaping it. */
+  username?: string;
   display_name: string;
   role: UserRole;
   locale?: string;
@@ -42,7 +46,70 @@ export interface LoginResponse {
   token?: string; // optional bearer if cookie auth disabled
 }
 
-export type StorageDriver = 'local' | 's3' | 'sftp' | 'webdav';
+/** Driver names the backend registers. Not a closed set in practice —
+ *  every surface picks drivers up from GET /admin/storage-drivers, so a
+ *  driver added on the backend appears without a frontend release. The
+ *  union lists the built-ins for autocomplete; `(string & {})` keeps a
+ *  new one assignable. */
+export type StorageDriver = 'local' | 's3' | 'sftp' | 'ftp' | 'webdav' | (string & {});
+
+/** Widget a storage config field renders as. Unknown values fall back to
+ *  a plain text input rather than hiding the field. */
+export type StorageFieldType = 'string' | 'int' | 'bool' | 'password' | 'select';
+
+export interface StorageFieldOption {
+  value: string;
+  /** English fallback; `i18n_key` wins when the catalogue has it. */
+  label: string;
+  i18n_key?: string;
+}
+
+/** One config key of a storage driver, as declared by the driver itself
+ *  (backend/internal/storage/descriptor.go). */
+export interface StorageField {
+  key: string;
+  type: StorageFieldType;
+  /** English fallback label — used only when `i18n_key` is missing from
+   *  the locale catalogue. */
+  label: string;
+  help?: string;
+  i18n_key: string;
+  help_i18n_key?: string;
+  required: boolean;
+  /** Credential material: render masked, never log. */
+  secret: boolean;
+  default?: unknown;
+  placeholder?: string;
+  options?: StorageFieldOption[];
+  min?: number;
+  max?: number;
+  monospace?: boolean;
+  multiline?: boolean;
+  advanced?: boolean;
+  /** THE field that scopes the storage inside the backend (s3 prefix,
+   *  local path, sftp/ftp/webdav root). The backend rejects an empty or
+   *  "/" value with ROOT_PATH_FORBIDDEN. */
+  root?: boolean;
+  /** Legacy spellings the driver still reads for this field. */
+  aliases?: string[];
+}
+
+export interface StorageDriverDescriptor {
+  driver: StorageDriver;
+  label: string;
+  i18n_key: string;
+  fields: StorageField[];
+  capabilities: {
+    read?: boolean;
+    write?: boolean;
+    move?: boolean;
+    copy?: boolean;
+    delete?: boolean;
+    mkdir?: boolean;
+    presign?: boolean;
+    watch?: boolean;
+  };
+}
 
 export interface StorageRef {
   id: number;

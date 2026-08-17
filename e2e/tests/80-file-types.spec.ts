@@ -29,6 +29,7 @@
  */
 import { test as base, expect, type APIRequestContext } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -86,7 +87,14 @@ const SAMPLES: Sample[] = [
   { name: 'main.go', expectMime: /^(text\/x-go|text\/plain)/, contentRegex: /package/ },
 ];
 
-const STORAGE = process.env.E2E_FILES_STORAGE ?? 'main';
+// ⚠ This used to default to a storage called `main`, which exists on the
+// production box and on nothing else. Against a hermetic server every upload
+// came back `404 {"error":"unknown adapter: main"}`, the beforeAll threw, and
+// because the file is a serial matrix ONE red hid the other 33 assertions.
+// Seed our own storage like every other spec; the env var stays as an escape
+// hatch for pointing the matrix at a real deployment.
+const STORAGE = process.env.E2E_FILES_STORAGE ?? `e2e-types-${Date.now()}`;
+const OWN_STORAGE = !process.env.E2E_FILES_STORAGE;
 const FOLDER = `e2e-types-${process.env.E2E_RUN_ID ?? Date.now()}`;
 const FIXTURES = path.join(__dirname, '../fixtures/file-types');
 
@@ -177,6 +185,10 @@ async function uploadFixture(request: APIRequestContext, name: string, folder: s
 test.describe('File-type preview/download MIME contract', () => {
   test.beforeAll(async ({ authedRequest: request }) => {
     await ensureFixtures();
+    if (OWN_STORAGE) {
+      await dropStorageByName(request, STORAGE);
+      await seedLocalStorage(request, STORAGE, `/tmp/filex-${STORAGE}`);
+    }
     // Create the test folder.
     await request.post('/api/files/manager?action=newfolder', {
       data: { path: `${STORAGE}://`, name: FOLDER },
@@ -203,6 +215,7 @@ test.describe('File-type preview/download MIME contract', () => {
         items: [{ path: `${STORAGE}://${FOLDER}` }],
       },
     });
+    if (OWN_STORAGE) await dropStorageByName(request, STORAGE);
   });
 
   for (const s of SAMPLES) {
@@ -220,9 +233,17 @@ test.describe('File-type preview/download MIME contract', () => {
         expect(body.length, `byte size for ${s.name}`).toBeGreaterThanOrEqual(s.minSize);
       }
       if (s.contentRegex) {
-        expect(body.toString('utf8').slice(0, 200), `head bytes for ${s.name}`).toMatch(
-          s.contentRegex,
-        );
+        // Anchored patterns (`^# `, `^{`, `^<?xml`) genuinely mean "at the
+        // very start", so they get the head. Unanchored ones mean "this file
+        // really is what it claims" and must see the whole body: main.go
+        // grew a doc-comment header and `package` slid past byte 200, which
+        // failed a matrix entry whose actual subject (Content-Type) was fine.
+        const text = body.toString('utf8');
+        const anchored = s.contentRegex.source.startsWith('^');
+        expect(
+          anchored ? text.slice(0, 200) : text,
+          `${anchored ? 'head bytes' : 'body'} for ${s.name}`,
+        ).toMatch(s.contentRegex);
       }
     });
 

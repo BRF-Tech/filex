@@ -18,17 +18,37 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+
+	// StagedThreshold is the file size at or above which uploads use the
+	// resumable staged protocol instead of one multipart POST. 0 means the
+	// default (DefaultStagedThreshold); a negative value disables the staged
+	// path, which is how a caller pins the old behaviour.
+	StagedThreshold int64
+	// ChunkSize is the part size asked for at `begin`. 0 lets the server
+	// choose — and the server's answer is binding either way.
+	ChunkSize int64
+	// ResumeDir holds the bookmarks that let an interrupted upload continue
+	// across process restarts. Empty disables persistence: uploads still
+	// resume within a run, but a restart begins the file again.
+	ResumeDir string
 }
 
 // New builds a Client from a resolved Conn. No global timeout is set —
 // uploads/downloads stream arbitrarily large bodies; cancellation is the
 // caller's context (Ctrl-C in the CLI).
 func New(conn Conn) *Client {
-	return &Client{
+	c := &Client{
 		BaseURL: strings.TrimRight(conn.URL, "/"),
 		Token:   conn.Token,
 		HTTP:    &http.Client{},
 	}
+	// A missing home directory is not a reason to refuse to upload; it only
+	// costs cross-restart resume, and the error would be reported at a point
+	// that has nothing to do with what the user asked for.
+	if dir, err := DefaultResumeDir(); err == nil {
+		c.ResumeDir = dir
+	}
+	return c
 }
 
 // APIError is a non-2xx response mapped to an error. Body keeps the raw

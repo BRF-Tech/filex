@@ -12,11 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
 // TypeAntivirusScan is the op type for async ClamAV scanning ("Koru",
@@ -45,7 +47,7 @@ type AVNodeStore interface {
 // duplication precedent as internal/dav/dbsync.go): quarantined files
 // must land where the trash listing/restore/purge machinery already
 // looks.
-const avTrashPrefix = ".filex-trash"
+const avTrashPrefix = trash.Prefix
 
 // AntivirusScanner owns the antivirus_scan job. Enqueue fires from the
 // upload surfaces (upload finalize, manager vfUpload, public drop);
@@ -53,6 +55,9 @@ const avTrashPrefix = ".filex-trash"
 type AntivirusScanner struct {
 	store    AVNodeStore
 	resolver func(int64) (storage.Driver, error)
+	// body resolves where a node's bytes are: the driver, or filex's staging
+	// area while a staged upload is still transferring. Nil-safe.
+	body     *filebody.Resolver
 	scanner  AVScanner
 	notify   notify.Service
 	index    *search.Index
@@ -64,6 +69,10 @@ type AntivirusScanner struct {
 func NewAntivirusScanner(store AVNodeStore, resolver func(int64) (storage.Driver, error), sc AVScanner, n notify.Service, idx *search.Index, maxBytes int64) *AntivirusScanner {
 	return &AntivirusScanner{store: store, resolver: resolver, scanner: sc, notify: n, index: idx, maxBytes: maxBytes}
 }
+
+// AttachBody wires the byte-source resolver so a re-queued scan of a file that
+// is still being transferred reads the staged bytes.
+func (a *AntivirusScanner) AttachBody(b *filebody.Resolver) { a.body = b }
 
 // Eligible reports whether n qualifies for a scan: a live file within the
 // size cap that is not itself a trash/version artifact.
@@ -122,7 +131,11 @@ func (a *AntivirusScanner) Handle(ctx context.Context, op Op) error {
 	if n.StorageKey != "" {
 		livePath = n.StorageKey
 	}
-	rc, err := drv.Read(ctx, livePath)
+	src, err := a.body.Resolve(ctx, drv, n.StorageID, livePath, n)
+	if err != nil {
+		return fmt.Errorf("antivirus: resolve %q: %w", livePath, err)
+	}
+	rc, err := src.Open(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return nil // vanished between enqueue and scan

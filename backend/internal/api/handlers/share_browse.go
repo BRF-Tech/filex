@@ -236,7 +236,16 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := joinShareRel(node.Path, rel)
-	obj, err := drv.Stat(r.Context(), full)
+	// Where the child's bytes are: the driver, or filex's staging area while a
+	// staged upload into this folder is still transferring. Resolved before the
+	// download claim below, so a vanished staging answers an error rather than
+	// spending one of the link's downloads.
+	src, err := h.Body.Resolve(r.Context(), drv, node.StorageID, full, nil)
+	if err != nil {
+		stagingGoneText(w, err)
+		return
+	}
+	obj, err := src.Stat(r.Context())
 	if err != nil || obj.Kind != storage.KindFile {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -271,12 +280,12 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc, err := drv.Read(r.Context(), full)
+	rc, err := src.Open(r.Context())
 	if err != nil {
 		if !thumb {
 			_ = h.Service.ReleaseDownload(r.Context(), resolved.ID)
 		}
-		http.Error(w, "read error", http.StatusInternalServerError)
+		stagingGoneText(w, err)
 		return
 	}
 	defer rc.Close()

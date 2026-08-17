@@ -62,8 +62,25 @@ export type { GlobalSearchHit, GlobalSearchScope } from './composables/useFileAp
 export { snippetSegments, matchedInContent } from './lib/snippet';
 export type { SnippetSegment, SearchMatched } from './lib/snippet';
 
-export { useUploadChunked } from './composables/useUploadChunked';
-export type { UploadJob, UploadOptions } from './composables/useUploadChunked';
+export { useUploadChunked, isStagedUnsupported } from './composables/useUploadChunked';
+export type {
+  UploadJob,
+  UploadOptions,
+  UploadResult,
+} from './composables/useUploadChunked';
+
+/* Resumable-upload bookmarks — a host can list or discard unfinished uploads
+   (e.g. an "unfinished uploads" panel) without reimplementing the store. */
+export {
+  uploadFingerprint,
+  listResume,
+  loadResume,
+  clearResume,
+  pruneResume,
+  defaultResumeStorage,
+  RESUME_TTL_MS,
+} from './lib/uploadResume';
+export type { ResumeRecord, ResumeStorage } from './lib/uploadResume';
 
 export { useSelection } from './composables/useSelection';
 export { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
@@ -154,3 +171,61 @@ export {
 export type { E2eMarker, E2eKeyRing } from './lib/e2ecrypto';
 export { default as EncryptedFolderModal } from './components/EncryptedFolderModal.vue';
 /* /wiring:e2 */
+
+/* ── connections ────────────────────────────────────────────────────
+   Storage connections and "how to connect", as ONE implementation for
+   every surface. The desktop app mounts <filex-connections> (the web
+   component wrapper around this), the admin SPA mounts the SFC, embeds
+   can do either — and none of them owns a copy of the form. */
+export { default as ConnectionsPanel } from './components/ConnectionsPanel.vue';
+export { default as StorageFields } from './components/StorageFields.vue';
+export { default as ConnectionGuideView } from './components/ConnectionGuideView.vue';
+export { default as S3KeysPanel } from './components/S3KeysPanel.vue';
+export { default as SSHKeysPanel } from './components/SSHKeysPanel.vue';
+export { default as NFSExportsPanel } from './components/NFSExportsPanel.vue';
+export { default as TokensPanel } from './components/TokensPanel.vue';
+export { useS3Keys } from './composables/useS3Keys';
+export { useSSHKeys } from './composables/useSSHKeys';
+export { useNFSExports } from './composables/useNFSExports';
+export { useTokens } from './composables/useTokens';
+export type { S3AccessKey, S3Connection, S3KeyCreated, S3KeyRequest } from './types/S3Keys';
+export type { SSHPublicKey, SSHConnection } from './types/SSHKeys';
+export type { NFSExport, NFSConnection, NFSExportCreated } from './types/NFSExports';
+export type { ApiToken, ApiTokenCreated, ApiTokenRequest } from './types/Tokens';
+export { useConnections, connectionsBase, connectionsOrigin } from './composables/useConnections';
+export type { ConnectionsApi } from './composables/useConnections';
+export {
+  GUIDE_BUILDERS,
+  buildGuide,
+  buildWebdavGuide,
+  buildS3Guide,
+  buildSftpGuide,
+  buildFtpsGuide,
+  buildNfsGuide,
+  guideProtocols,
+  hostOf,
+  isPlainHttp,
+} from './lib/connectionGuides';
+export type {
+  GuideBlock,
+  GuideBlockKind,
+  GuideBuilder,
+  GuideClient,
+  GuideContext,
+  GuideFact,
+  ProtocolGuide,
+  Translate,
+} from './lib/connectionGuides';
+export type {
+  ConnectionsUser,
+  ManageDenial,
+  StorageDriverCapabilities,
+  StorageDriverDescriptor,
+  StorageField,
+  StorageFieldOption,
+  StorageFieldType,
+  StorageRow,
+  StorageTestResult,
+  StorageWrite,
+} from './types/Connections';
+/* /connections */

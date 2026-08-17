@@ -119,7 +119,11 @@ sides. Unpairing is not deleting.
 - **Moves are a delete plus an add.** A renamed 2 GB file is re-uploaded, not
   moved server-side.
 - **A failed transfer is retried on the next run,** and is deliberately *not*
-  recorded as settled — one broken file cannot wedge the folder.
+  recorded as settled — one broken file cannot wedge the folder. Since the move
+  to staged uploads that retry is **cheap for large files**: anything from 8 MiB
+  up is sent in chunks the server keeps, and the next run continues from the
+  offset it reports rather than from byte 0 — across a restarted watcher, a
+  closed laptop or a reboot. See *Resuming in the CLI* in `docs/UPLOADS.md`.
 
 ---
 

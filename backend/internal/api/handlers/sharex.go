@@ -2,13 +2,13 @@ package handlers
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"path"
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -39,8 +39,9 @@ type ShareX struct {
 	defaultDir string
 }
 
-// shareXMaxUpload caps a single ShareX upload's in-memory read. Matches the AI
-// upload ceiling; larger captures are rejected rather than exhausting memory.
+// shareXMaxUpload caps a single ShareX capture. The bytes are streamed rather
+// than buffered now, so this is no longer a memory ceiling — it bounds what one
+// request may push into the staging filesystem. Matches the AI upload ceiling.
 const shareXMaxUpload = 512 << 20 // 512 MiB
 
 // shareXDefaultDir is where captures land when the request omits `folder`. For a
@@ -67,9 +68,17 @@ func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), sha
 // user's grants (≥editor on the target), mirroring the AI surface.
 func (h *ShareX) AttachACL(r *acl.Resolver) { h.ops.acl = r }
 
+// AttachBody wires the byte-source resolver (staging-aware reads).
+func (h *ShareX) AttachBody(b *filebody.Resolver) { h.ops.attachBody(b) }
+
 // AttachThumbs wires the thumbnail pipeline so captures get grid thumbnails
 // like manager uploads (nil = thumbnails skipped).
 func (h *ShareX) AttachThumbs(p *thumb.Pipeline) { h.ops.thumbs = p }
+
+// AttachStaged routes captures above the chunk threshold through filex's
+// staging area — a long screen recording is answered as soon as filex holds it
+// instead of after the driver write (nil = synchronous writes).
+func (h *ShareX) AttachStaged(s *StagedUpload) { h.ops.staged = s }
 
 // Upload accepts a ShareX multipart capture (`file`), stores + indexes it, mints
 // a public inline-viewable share, and returns {"url": …}.
@@ -91,9 +100,8 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, shareXMaxUpload))
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if fh.Size > shareXMaxUpload {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "capture too large"})
 		return
 	}
 
@@ -118,7 +126,10 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if _, err := h.ops.Write(r.Context(), dest, data); err != nil {
+	// Streamed, not buffered: a screen recording is a capture too, and above the
+	// chunk threshold WriteStream stages it so this reply does not wait on the
+	// backend write.
+	if _, err := h.ops.WriteStream(r.Context(), dest, f, fh.Size); err != nil {
 		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
 		return
 	}

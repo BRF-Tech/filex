@@ -47,20 +47,24 @@ type Driver struct {
 // Name implements storage.Driver.
 func (d *Driver) Name() string { return "ftp" }
 
-// Init configures the driver. Required: host, user, password.
-// Optional: port (default 21), root (default "/"), tls (default false),
-// passive (default true).
+// Init configures the driver. Required: host, user, password, root.
+// Optional: port (default 21), tls (default false), passive (default true).
+//
+// The config keys are declared in descriptor.go — keep the two in step,
+// there is a test that fails when they drift. Legacy spellings are read
+// through the descriptor's aliases ("username" for user, "base_path" /
+// "remote_path" for root) so rows written by older surfaces keep working.
 func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
-	d.host, _ = cfg["host"].(string)
+	d.host = storage.ConfigString(cfg, "host")
 	if v, ok := storage.ConfigInt(cfg["port"]); ok {
 		d.port = v
 	}
 	if d.port == 0 {
 		d.port = 21
 	}
-	d.user, _ = cfg["user"].(string)
-	d.password, _ = cfg["password"].(string)
-	d.root, _ = cfg["root"].(string)
+	d.user = storage.ConfigString(cfg, "user", "username")
+	d.password = storage.ConfigString(cfg, "password")
+	d.root = storage.ConfigString(cfg, "root", "base_path", "remote_path")
 	if d.root == "" {
 		d.root = "/"
 	}
@@ -83,6 +87,7 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 func (d *Driver) Capabilities() storage.Capabilities {
 	return storage.Capabilities{
 		Read:   true,
+		Range:  true,
 		Write:  true,
 		Move:   true,
 		Copy:   true,
@@ -307,6 +312,13 @@ func (rc *ftpReadCloser) Close() error {
 	}
 	rc.closed = true
 	err := rc.r.Close()
+	if err != nil {
+		// Closing before the server finished sending (a bounded range read,
+		// or a client that hung up) leaves the transfer-complete reply
+		// unread on the control channel — the next command would read it
+		// as its own answer. Drop the session so the next op redials.
+		rc.d.dropConnLocked()
+	}
 	rc.d.mu.Unlock()
 	return err
 }
@@ -330,6 +342,39 @@ func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
 		return nil, translateErr(err)
 	}
 	return &ftpReadCloser{r: resp, d: d}, nil
+}
+
+// ReadRange implements storage.RangeReader via the REST command
+// (`RetrFrom`), so the server skips the first off bytes instead of
+// filex reading and discarding them. RetrFrom requires the server to
+// answer 350 to REST — a server without REST support errors here rather
+// than quietly restarting at byte 0.
+//
+// ⚠ Unlike local/S3, an offset past EOF is server-dependent (many answer
+// 550 → ErrNotFound instead of an empty transfer). Callers that know the
+// size should not ask for it; the download seeker never does.
+func (d *Driver) ReadRange(_ context.Context, p string, off, length int64) (io.ReadCloser, error) {
+	if off < 0 {
+		return nil, fmt.Errorf("ftp: negative range offset %d", off)
+	}
+	if length == 0 {
+		return storage.EmptyReadCloser(), nil
+	}
+	d.mu.Lock()
+	c, err := d.connectLocked()
+	if err != nil {
+		d.mu.Unlock()
+		return nil, err
+	}
+	resp, err := c.RetrFrom(d.join(p), uint64(off))
+	if err != nil {
+		if isTransport(err) {
+			d.dropConnLocked()
+		}
+		d.mu.Unlock()
+		return nil, translateErr(err)
+	}
+	return storage.LimitReadCloser(&ftpReadCloser{r: resp, d: d}, length), nil
 }
 
 // mkdirAll creates each missing path component. FTP MKD does not have

@@ -73,7 +73,10 @@ type Capabilities struct {
 // by the frontend to decide whether to show the chunked upload UI, the
 // browser-direct upload button, or the live event indicator.
 type StorageCapabilities struct {
-	Read      bool `json:"read"`
+	Read bool `json:"read"`
+	// Range reports ranged reads — the download endpoint answers 206 /
+	// Content-Range for this storage instead of whole-object only.
+	Range     bool `json:"range"`
 	Write     bool `json:"write"`
 	Move      bool `json:"move"`
 	Copy      bool `json:"copy"`

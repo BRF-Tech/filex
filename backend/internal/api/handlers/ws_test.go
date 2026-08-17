@@ -84,7 +84,7 @@ func wsReadType(t *testing.T, conn *websocket.Conn, want string) map[string]any 
 // WebSocket client subscribes to a folder, receives a presence frame listing
 // itself, then receives a change frame when a mutation emits into that folder.
 func TestWSSubscribePresenceAndChange(t *testing.T) {
-	url, hub, store := newWSFixture(t, &model.User{ID: 1, DisplayName: "Ayşe", Email: "ayse@brf.sh"})
+	url, hub, store := newWSFixture(t, &model.User{ID: 1, DisplayName: "Ayşe", Email: "ayse@example.com"})
 
 	ctx := context.Background()
 	conn, _, err := websocket.Dial(ctx, url, nil)
@@ -126,7 +126,7 @@ func TestWSSubscribePresenceAndChange(t *testing.T) {
 // TestWSFocusPresence: a live socket sees another room member's focus reflected
 // in a presence broadcast.
 func TestWSFocusPresence(t *testing.T) {
-	url, hub, store := newWSFixture(t, &model.User{ID: 2, DisplayName: "Burak"})
+	url, hub, store := newWSFixture(t, &model.User{ID: 2, DisplayName: "Ada"})
 	ctx := context.Background()
 	st, err := store.ListEnabledStorages(ctx)
 	require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestWSFocusPresence(t *testing.T) {
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 	wsSend(t, conn, map[string]any{"type": "subscribe", "path": "main://x"})
-	_ = wsReadType(t, conn, "presence") // initial roster (Burak alone)
+	_ = wsReadType(t, conn, "presence") // initial roster (Ada alone)
 
 	// A different user joins the same room via the hub and focuses a file.
 	other := realtime.NewClient(9, "Cem", 16)
@@ -179,7 +179,7 @@ func TestWSSubscribeUnknownAdapter(t *testing.T) {
 // newWSTicketFixture builds a ws server with a TicketStore but NO cookie user —
 // identity comes purely from a ticket, exactly like an embedded consumer that
 // fetched its ticket through the host proxy. Returns the mint store so a test can
-// forge a confined ticket (the work.brf.sh / fishapp X-Filex-Root scenario).
+// forge a confined ticket (the work.example.com / fishapp X-Filex-Root scenario).
 func newWSTicketFixture(t *testing.T) (string, *realtime.Hub, db.Store, *realtime.TicketStore) {
 	t.Helper()
 	_, store := testutil.NewTestDB(t)
@@ -194,14 +194,14 @@ func newWSTicketFixture(t *testing.T) (string, *realtime.Hub, db.Store, *realtim
 
 	tickets := realtime.NewTicketStore()
 	hub := realtime.NewHub()
-	wsh := handlers.NewWS(store, nil, hub, tickets, "https://fm.brf.sh")
+	wsh := handlers.NewWS(store, nil, hub, tickets, "https://fm.example.com")
 	srv := httptest.NewServer(http.HandlerFunc(wsh.Handle)) // no user injected
 	t.Cleanup(srv.Close)
 
 	return "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/ws", hub, store, tickets
 }
 
-// TestWSConfinedTicketSubscribe reproduces the embedded (work.brf.sh) flow: the
+// TestWSConfinedTicketSubscribe reproduces the embedded (work.example.com) flow: the
 // explorer is confine-unaware and subscribes with a confine-RELATIVE path
 // ("main://" for its root), while the ticket confines it to "projeler/5". The
 // handler must (a) NOT forbid it, (b) join the ABSOLUTE room so a mutation into
@@ -305,7 +305,7 @@ func mintVia(t *testing.T, user *model.User, token *model.APIToken, tokenUser st
 	t.Helper()
 	_, store := testutil.NewTestDB(t)
 	tickets := realtime.NewTicketStore()
-	wsh := handlers.NewWS(store, nil, realtime.NewHub(), tickets, "https://fm.brf.sh")
+	wsh := handlers.NewWS(store, nil, realtime.NewHub(), tickets, "https://fm.example.com")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/files/ws-ticket", nil)
 	ctx := auth.WithUser(req.Context(), user)
@@ -327,7 +327,7 @@ func mintVia(t *testing.T, user *model.User, token *model.APIToken, tokenUser st
 		WsURL  string `json:"ws_url"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, "wss://fm.brf.sh/api/ws", resp.WsURL)
+	require.Equal(t, "wss://fm.example.com/api/ws", resp.WsURL)
 	tk, ok := tickets.Consume(resp.Ticket)
 	require.True(t, ok)
 	return tk
@@ -366,10 +366,10 @@ func TestWSTicketIdentity(t *testing.T) {
 
 	// Proxy-stamped real person combines with the token username.
 	stamped := mintVia(t, admin, named, "work", map[string]string{
-		"X-Filex-Presence-Name": "  Burak  Fun ",
+		"X-Filex-Presence-Name": "  Ada  Fun ",
 		"X-Filex-Presence-Key":  "work-7",
 	})
-	require.Equal(t, "Burak Fun (work)", stamped.Name)
+	require.Equal(t, "Ada Fun (work)", stamped.Name)
 	require.Equal(t, "work-7", stamped.PresenceKey)
 
 	badKey := mintVia(t, admin, tok, "", map[string]string{
@@ -381,10 +381,10 @@ func TestWSTicketIdentity(t *testing.T) {
 	// HTTP headers are latin-1 territory — proxies RFC 2047-encode non-ASCII
 	// names (Turkish characters) and the mint must decode them.
 	encoded := mintVia(t, admin, tok, "", map[string]string{
-		"X-Filex-Presence-Name": mime.BEncoding.Encode("utf-8", "Gökçil Ayşe"),
+		"X-Filex-Presence-Name": mime.BEncoding.Encode("utf-8", "Ayşe Zoë"),
 		"X-Filex-Presence-Key":  "work-8",
 	})
-	require.Equal(t, "Gökçil Ayşe (work-panel)", encoded.Name)
+	require.Equal(t, "Ayşe Zoë (work-panel)", encoded.Name)
 }
 
 // TestWSDesktopClientPresence locks the case that sent us here: the desktop app
@@ -392,29 +392,29 @@ func TestWSTicketIdentity(t *testing.T) {
 // folder, as the raw token label — "filex desktop — Win32" — instead of as the
 // person sitting in front of it.
 func TestWSDesktopClientPresence(t *testing.T) {
-	burak := &model.User{ID: 3, DisplayName: "Burak", Email: "burak@brf.sh"}
+	ada := &model.User{ID: 3, DisplayName: "Ada", Email: "ada@example.com"}
 	desktop := &model.APIToken{ID: 12, UserID: 3, Label: "filex desktop — Win32"}
 
-	got := mintVia(t, burak, desktop, "", nil)
-	require.Equal(t, "Burak (filex desktop)", got.Name,
+	got := mintVia(t, ada, desktop, "", nil)
+	require.Equal(t, "Ada (filex desktop)", got.Name,
 		"the person leads; the platform detail belongs in the token list, not in the presence bar")
 
 	// A user with no display name still gets a person-shaped entry.
-	nameless := &model.User{ID: 4, Email: "gokcil@brf.sh"}
-	require.Equal(t, "gokcil (filex desktop)", mintVia(t, nameless, desktop, "", nil).Name)
+	nameless := &model.User{ID: 4, Email: "grace@example.com"}
+	require.Equal(t, "grace (filex desktop)", mintVia(t, nameless, desktop, "", nil).Name)
 
 	// A label with nothing to trim survives whole.
 	cli := &model.APIToken{ID: 13, UserID: 3, Label: "filex cli"}
-	require.Equal(t, "Burak (filex cli)", mintVia(t, burak, cli, "", nil).Name)
+	require.Equal(t, "Ada (filex cli)", mintVia(t, ada, cli, "", nil).Name)
 
-	// An empty label leaves the name alone rather than producing "Burak ()".
+	// An empty label leaves the name alone rather than producing "Ada ()".
 	blank := &model.APIToken{ID: 14, UserID: 3, Label: "   "}
-	require.Equal(t, "Burak", mintVia(t, burak, blank, "", nil).Name)
+	require.Equal(t, "Ada", mintVia(t, ada, blank, "", nil).Name)
 
 	// A token that DOES carry an allow-list is a shared proxy and keeps the old
 	// contract: the end users behind it are not the account owner.
 	shared := &model.APIToken{ID: 15, UserID: 3, Label: "shared", Usernames: "work,fishapp"}
-	require.Equal(t, "work", mintVia(t, burak, shared, "", nil).Name,
+	require.Equal(t, "work", mintVia(t, ada, shared, "", nil).Name,
 		"a shared proxy token must NOT advertise the account owner's name")
 }
 

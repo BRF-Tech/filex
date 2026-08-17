@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
 )
@@ -228,6 +229,16 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	if !sh.IsDrop() {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_a_drop_link"})
 		return
+	}
+
+	// Bill the bytes to the person whose link this is. The uploader is
+	// anonymous by design, but the files land in the link creator's storage,
+	// so they are the link creator's bytes. Without this, the public drop
+	// would be the one write surface with no owner and therefore no quota —
+	// a way to fill somebody's disk for free. Set on the request context so
+	// EnsureDir and every IngestFile below inherit it.
+	if sh.CreatedBy != nil && *sh.CreatedBy > 0 {
+		r = r.WithContext(quotastore.WithOwner(r.Context(), *sh.CreatedBy))
 	}
 
 	// Resolve the target folder + storage server-side. The uploader supplies

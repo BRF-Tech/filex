@@ -94,6 +94,11 @@ type Store interface {
 	CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error)
 	GetUser(ctx context.Context, id int64) (*model.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*model.User, error)
+	// Dual-side login (migration 00025): an account answers to its e-mail or
+	// its username. Reach these through identity.Resolve, not directly — the
+	// rule for deciding which one an identifier is belongs in one place.
+	GetUserByUsername(ctx context.Context, username string) (*model.User, error)
+	SetUserUsername(ctx context.Context, id int64, username string) error
 	// Multi-tenancy (docs/MULTI-TENANCY.md): look a user up within one provider
 	// (tenant); re-home a user to a provider + record its OIDC subject (JIT).
 	GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error)
@@ -129,6 +134,7 @@ type Store interface {
 	// API tokens — long-lived bearer credentials for AI / MCP / FilexClient.
 	CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error)
+	GetAPITokenByID(ctx context.Context, id int64) (*model.APIToken, error)
 	ListAPITokens(ctx context.Context) ([]*model.APIToken, error)
 	ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	TouchAPIToken(ctx context.Context, id int64) error
@@ -136,6 +142,45 @@ type Store interface {
 	// allow-list); nil leaves a field unchanged. The credential is immutable.
 	UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames *string) error
 	DeleteAPIToken(ctx context.Context, id int64) error
+
+	// S3 access keys (migration 00026) — the credential an S3 client signs
+	// with. Unlike an API token these hold a RECOVERABLE secret, because SigV4
+	// verifies by recomputing an HMAC chain rather than by comparing a hash;
+	// internal/secretbox is what keeps that out of a database dump. A key
+	// minted from a token INHERITS that token's permissions and never widens
+	// them (see model.S3AccessKey).
+	CreateS3AccessKey(ctx context.Context, k *model.S3AccessKey) (*model.S3AccessKey, error)
+	GetS3AccessKey(ctx context.Context, accessKeyID string) (*model.S3AccessKey, error)
+	GetS3AccessKeyByID(ctx context.Context, id int64) (*model.S3AccessKey, error)
+	ListS3AccessKeys(ctx context.Context, userID int64) ([]*model.S3AccessKey, error)
+	TouchS3AccessKey(ctx context.Context, id int64) error
+	SetS3AccessKeyDisabled(ctx context.Context, id int64, disabled bool) error
+	DeleteS3AccessKey(ctx context.Context, id, userID int64) error
+
+	// SSH public keys (migration 00027) — how an account reaches the SFTP
+	// endpoint without sending a password. The signature is verified by
+	// x/crypto/ssh before any of these are called; what the lookup decides is
+	// which ACCOUNT the key belongs to, which is why GetSSHPublicKey takes a
+	// fingerprint and returns exactly one row.
+	CreateSSHPublicKey(ctx context.Context, k *model.SSHPublicKey) (*model.SSHPublicKey, error)
+	GetSSHPublicKey(ctx context.Context, fingerprint string) (*model.SSHPublicKey, error)
+	GetSSHPublicKeyByID(ctx context.Context, id int64) (*model.SSHPublicKey, error)
+	ListSSHPublicKeys(ctx context.Context, userID int64) ([]*model.SSHPublicKey, error)
+	TouchSSHPublicKey(ctx context.Context, id int64) error
+	SetSSHPublicKeyDisabled(ctx context.Context, id int64, disabled bool) error
+	DeleteSSHPublicKey(ctx context.Context, id, userID int64) error
+
+	// NFS exports (migration 00028) — an NFSv3 mount bound to one account by a
+	// high-entropy export PATH, because NFSv3 has no authentication filex can
+	// use. GetNFSExport takes the sha256 of that path: the server only ever
+	// compares, so the plaintext is never stored.
+	CreateNFSExport(ctx context.Context, e *model.NFSExport) (*model.NFSExport, error)
+	GetNFSExport(ctx context.Context, tokenHash string) (*model.NFSExport, error)
+	GetNFSExportByID(ctx context.Context, id int64) (*model.NFSExport, error)
+	ListNFSExports(ctx context.Context, userID int64) ([]*model.NFSExport, error)
+	TouchNFSExport(ctx context.Context, id int64) error
+	SetNFSExportDisabled(ctx context.Context, id int64, disabled bool) error
+	DeleteNFSExport(ctx context.Context, id, userID int64) error
 
 	// File grants — per-user/per-folder ACL (RBAC feature, migration 00012).
 	ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
@@ -158,7 +203,7 @@ type Store interface {
 	// reports whether it got one. This is the cap's only real enforcement
 	// point: a check that reads the counter and a serve that bumps it
 	// afterwards are two separate steps, and every request that starts inside
-	// that gap passes the check (measured on fm.brf.sh: a 1-download link
+	// that gap passes the check (measured on fm.example.com: a 1-download link
 	// handed three full files to three overlapping clients). Claim, then serve.
 	ReserveShareDownload(ctx context.Context, id int64) (bool, error)
 	// ReleaseShareDownload hands a reserved slot back. Used only when the serve
@@ -175,6 +220,31 @@ type Store interface {
 	UpdateChunkedUploadParts(ctx context.Context, id string, parts []model.UploadPart) error
 	DeleteChunkedUpload(ctx context.Context, id string) error
 	DeleteExpiredChunkedUploads(ctx context.Context) error
+
+	// Staged uploads — the driver-agnostic resumable path (docs/UPLOADS.md).
+	// A separate table from chunked_uploads on purpose: see the comment in
+	// db/migrations/sqlite/00024_staged_uploads.sql.
+	CreateStagedUpload(ctx context.Context, u *model.StagedUpload) error
+	GetStagedUpload(ctx context.Context, id string) (*model.StagedUpload, error)
+	// GetStagedUploadByNode is the reverse index chunk 5 (read-during-transfer)
+	// uses to find the staging directory holding a node's bytes.
+	GetStagedUploadByNode(ctx context.Context, nodeID int64) (*model.StagedUpload, error)
+	UpdateStagedUploadProgress(ctx context.Context, id string, receivedBytes int64) error
+	UpdateStagedUploadState(ctx context.Context, id, state, errMsg string) error
+	AttachStagedUploadTarget(ctx context.Context, id string, nodeID, opID int64) error
+	DeleteStagedUpload(ctx context.Context, id string) error
+	ListStagedUploads(ctx context.Context, state string, limit int) ([]*model.StagedUpload, error)
+	// ListIdleStagedUploads returns rows whose last activity is older than
+	// `before` — the staging sweeper's input.
+	ListIdleStagedUploads(ctx context.Context, before time.Time, limit int) ([]*model.StagedUpload, error)
+	// SumOpenStagedUploadBytes is the quota RESERVATION: the declared size of
+	// every not-yet-committed upload the user owns. Derived rather than stored,
+	// so it can never drift from the rows it describes and a row leaving the
+	// open set releases its reservation by construction.
+	SumOpenStagedUploadBytes(ctx context.Context, userID int64) (int64, error)
+
+	// SetNodeTransferState flips nodes.transfer_state ("staged" → "stored").
+	SetNodeTransferState(ctx context.Context, nodeID int64, state string) error
 
 	// Sync runs / conflicts
 	CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error)

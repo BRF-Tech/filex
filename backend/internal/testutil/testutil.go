@@ -11,8 +11,10 @@ package testutil
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,12 +26,14 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
@@ -144,7 +148,16 @@ func NewTestServerCfg(t *testing.T, mutate func(*config.Config)) (*httptest.Serv
 func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate func(*api.Deps)) (*httptest.Server, *http.Client, db.Store) {
 	t.Helper()
 
-	_, store := NewTestDB(t)
+	_, raw := NewTestDB(t)
+	// Mirror internal/server.New: handlers see the QUOTA-ACCOUNTING store, so
+	// a handler test exercises the same node-write behaviour the running
+	// product has (owner stamped, usage_bytes moved). A harness that quietly
+	// differs from production is how a suite goes green over a broken feature.
+	accounting := quotastore.New(raw)
+	// …and the IDENTITY wrapper too, for the same reason: a fixture that
+	// creates accounts nobody named would let a dual-side-login test pass
+	// against a store production does not have (migration 00025).
+	var store db.Store = identitystore.New(accounting)
 
 	// Local auth driver wired to the same store.
 	localDrv := authlocal.New(store)
@@ -180,7 +193,7 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 		// to "unlimited, no error", so the whole /api/admin/quota surface
 		// answered 200 in tests no matter what the DB said and the H5
 		// no-rows-is-a-500 bug was invisible here.
-		Quota:           quota.New(store),
+		Quota:           accounting.Quota(),
 		Worker:          worker,
 		Caps:            caps,
 		Share:           share.NewService(store),
@@ -247,3 +260,27 @@ func ReadJSON(t *testing.T, resp *http.Response, out any) {
 // files — handy for code that requires an embed.FS but doesn't care about
 // its contents.
 func MustEmbedFS() embed.FS { return embed.FS{} }
+
+// NewAPIToken mints an API token for a user and returns the plaintext secret.
+//
+// It lives here because three protocol suites need the same thing: a token to
+// authenticate with, with a chosen scope string. Each of them writing its own
+// would mean three places that could drift from how the product actually
+// hashes a token.
+func NewAPIToken(t *testing.T, store db.Store, userID int64, scopes string) string {
+	t.Helper()
+	var raw [24]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		t.Fatalf("testutil: random: %v", err)
+	}
+	secret := "filex_" + hex.EncodeToString(raw[:])
+	if _, err := store.CreateAPIToken(context.Background(), &model.APIToken{
+		UserID:    userID,
+		Label:     "testutil",
+		TokenHash: apitoken.HashToken(secret),
+		Scopes:    scopes,
+	}); err != nil {
+		t.Fatalf("testutil: create token: %v", err)
+	}
+	return secret
+}

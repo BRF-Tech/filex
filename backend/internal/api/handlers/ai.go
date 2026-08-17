@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -50,6 +52,14 @@ func (h *AI) AttachACL(r *acl.Resolver) { h.ops.acl = r }
 // AttachThumbs wires the thumbnail pipeline so AI-surface writes dispatch
 // generation like manager uploads (nil = thumbnails skipped).
 func (h *AI) AttachThumbs(p *thumb.Pipeline) { h.ops.thumbs = p }
+
+// AttachStaged routes writes above the chunk threshold through filex's staging
+// area, exactly as the browser and the CLI do (nil = synchronous writes).
+func (h *AI) AttachStaged(s *StagedUpload) { h.ops.staged = s }
+
+// AttachBody wires the byte-source resolver so /api/ai reads serve a file that
+// is still being transferred out of staging.
+func (h *AI) AttachBody(b *filebody.Resolver) { h.ops.attachBody(b) }
 
 // List → GET /api/ai/files?path=<adapter://dir>
 func (h *AI) List(w http.ResponseWriter, r *http.Request) {
@@ -97,19 +107,19 @@ type aiUploadBody struct {
 }
 
 // Upload → POST /api/ai/upload. Accepts JSON (base64/text) or multipart.
+//
+// A multipart body is STREAMED: the part is handed to WriteStream as a reader,
+// so a large capture never has to exist in memory, and above the chunk
+// threshold it goes through filex's staging area like every other client.
 func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
-	var (
-		dest string
-		data []byte
-	)
 
 	if hasPrefix(ct, "multipart/form-data") {
 		// Parts above the in-memory limit are spilled to $TMPDIR as
 		// multipart-*. net/http clears those only for the request struct it
 		// holds itself, which is not the one the router hands us, so without
 		// this the files survive a 200 response and the disk fills silently
-		// (fm.brf.sh: 74 files / 29 GB in two hours, 2026-08-09). Deferred
+		// (fm.example.com: 74 files / 29 GB in two hours, 2026-08-09). Deferred
 		// before the parse so a rejected body is cleaned up too.
 		defer func() {
 			if r.MultipartForm != nil {
@@ -120,46 +130,61 @@ func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
 			return
 		}
-		dest = r.FormValue("path")
-		f, _, err := r.FormFile("file")
+		dest := r.FormValue("path")
+		f, fh, err := r.FormFile("file")
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
 			return
 		}
 		defer f.Close()
-		b, err := io.ReadAll(io.LimitReader(f, 512<<20))
+		if fh.Size > aiMaxUploadBytes {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": fmt.Sprintf("file too large for this endpoint (> %d bytes); use /api/files/upload/begin", aiMaxUploadBytes),
+			})
+			return
+		}
+		// multipart.File is an io.Seeker; passed straight through it stays one,
+		// which is what keeps the S3 SDK able to measure and replay the body.
+		e, err := h.ops.WriteStream(r.Context(), dest, f, fh.Size)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"entry": e})
+		return
+	}
+
+	var body aiUploadBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	var data []byte
+	switch {
+	case body.ContentBase64 != "":
+		b, err := base64.StdEncoding.DecodeString(body.ContentBase64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad base64: " + err.Error()})
 			return
 		}
 		data = b
-	} else {
-		var body aiUploadBody
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
-			return
-		}
-		dest = body.Path
-		switch {
-		case body.ContentBase64 != "":
-			b, err := base64.StdEncoding.DecodeString(body.ContentBase64)
-			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad base64: " + err.Error()})
-				return
-			}
-			data = b
-		default:
-			data = []byte(body.Content)
-		}
+	default:
+		data = []byte(body.Content)
 	}
 
-	e, err := h.ops.Write(r.Context(), dest, data)
+	e, err := h.ops.Write(r.Context(), body.Path, data)
 	if err != nil {
 		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
 }
+
+// aiMaxUploadBytes caps a single /api/ai/upload multipart body. The bytes no
+// longer sit in memory, but an unbounded ceiling here would let one request
+// fill the staging filesystem; a client with more than this uses the chunked
+// protocol, which has a disk guard and a resume point.
+const aiMaxUploadBytes = 512 << 20
 
 // aiPathBody is the shared {"path":"…"} body.
 type aiPathBody struct {

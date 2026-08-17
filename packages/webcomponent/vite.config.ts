@@ -55,7 +55,7 @@ export default defineConfig({
       //
       // ⚠ `markdown-it` is deliberately NOT in this list any more. Every
       // consumer of this bundle is a raw <script type="module"> — the desktop
-      // app, work.brf.sh, fishapp — where an external BARE specifier cannot
+      // app, work.example.com, fishapp — where an external BARE specifier cannot
       // resolve at all, so `import('markdown-it')` always failed and the
       // markdown preview pane rendered blank in every one of them (measured in
       // the desktop app, 2026-08-10). It is ~100 KB and lazily chunked, so it

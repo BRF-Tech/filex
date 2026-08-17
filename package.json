@@ -2,14 +2,14 @@
   "name": "filemanager-monorepo",
   "private": true,
   "version": "0.1.0",
-  "description": "filex — self-hosted file manager: Go backend + multi-framework frontend (Vue/React/WC), single binary + Docker",
+  "description": "filex — self-hosted file manager: Go backend + multi-framework frontend (Vue/React/WC), reachable over HTTP, S3, SFTP, FTPS, NFS and WebDAV, single binary + Docker",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/brf-tech/filex.git"
   },
   "homepage": "https://github.com/brf-tech/filex",
-  "author": "BRF Tech <hello@example.com>",
+  "author": "BRF Tech <hello@brf.sh>",
   "scripts": {
     "build": "pnpm -r --filter='./packages/*' build && pnpm --filter='./web' build",
     "dev": "pnpm -r --parallel dev",

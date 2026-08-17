@@ -3,7 +3,7 @@
 // webcomponent embedded in host apps — gets live folder updates + presence.
 //
 // Auth: the browser's native WebSocket can't set an Authorization header and,
-// when embedded, connects cross-origin to fm.brf.sh. So instead of a header we
+// when embedded, connects cross-origin to fm.example.com. So instead of a header we
 // fetch a short-lived, single-use TICKET through the host's normal API (which
 // injects the real token server-side) and open `wss://…/api/ws?ticket=<t>`.
 // The durable token never reaches the browser.

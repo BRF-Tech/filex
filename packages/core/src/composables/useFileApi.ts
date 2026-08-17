@@ -201,6 +201,9 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
 
   return {
     manager,
+    // Staged (chunked + resumable) uploads — what useUploadChunked speaks on
+    // every driver. The {id} routes are derived from this one.
+    uploadBegin: derive(config.uploadBegin, '/api/files/upload/begin'),
     uploadInit: derive(config.uploadInit, '/api/files/upload/init'),
     uploadFinalize: derive(config.uploadFinalize, '/api/files/upload/finalize'),
     uploadAbort: derive(config.uploadAbort, '/api/files/upload/abort'),
@@ -322,7 +325,7 @@ export function useFileApi(config: ExplorerConfig) {
 
   // Map an HTTP status to a short, human-readable message in the explorer's
   // locale. The raw JSON body is attached as `.detail` for debugging but never
-  // shown in the toast (Burak: "404/403 falan verince ham json görüyorum").
+  // shown in the toast (Ada: "404/403 falan verince ham json görüyorum").
   function statusMessage(status: number): string {
     const tr = (config.locale ?? 'tr') !== 'en';
     const m: Record<number, [string, string]> = {
@@ -361,7 +364,17 @@ export function useFileApi(config: ExplorerConfig) {
       err.detail = text.slice(0, 300);
       throw err;
     }
-    return res.json() as Promise<T>;
+    // ⚠⚠ A 204 carries NO BODY, and several endpoints answer with one (every
+    // delete does). Parsing it throws "Unexpected end of JSON input" AFTER the
+    // server has already done the work, so the caller reports a failure for an
+    // operation that succeeded — measured 2026-08-16 in a browser: revoking an
+    // S3 access key deleted it on the server and left it on screen with an
+    // error under it, which invites the user to trust a credential that is
+    // gone. An empty success is a success.
+    if (res.status === 204 || res.status === 205) return undefined as T;
+    const body = await res.text();
+    if (!body) return undefined as T;
+    return JSON.parse(body) as T;
   }
 
   // --------------------------------------------------------------------

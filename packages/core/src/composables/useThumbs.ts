@@ -2,7 +2,7 @@
 //
 // The backend emits `thumb_url` as a ROOT-RELATIVE path ("/api/files/thumb/{id}").
 // A plain `<img src>` only works for the native same-origin SPA: an embedded
-// webcomponent resolves it against the HOST page's origin (work.brf.sh → 404)
+// webcomponent resolves it against the HOST page's origin (work.example.com → 404)
 // and, even with the URL fixed, `<img>` cannot carry the bearer header a
 // proxied host (fishapp PWA) requires. So thumbs are fetched through the same
 // auth machinery as every API call (headers + credentials), cached as object

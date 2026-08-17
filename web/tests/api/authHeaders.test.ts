@@ -11,7 +11,7 @@
 // Authorization header at all and the server answers 401. Nothing throws, and
 // the only symptom is a feature that quietly does not work.
 //
-// Measured on 2026-08-10 against fm.brf.sh, in this order:
+// Measured on 2026-08-10 against fm.example.com, in this order:
 //   POST /api/files/onlyoffice/config   401  → "Config fetch 401" on every doc
 //   GET  /api/files/manager/star/list   401  → starred files silently empty
 //   POST /api/files/manager/recent      401  → recently-opened silently empty

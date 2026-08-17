@@ -18,7 +18,7 @@ test.describe('Smoke — server up and serving', () => {
 
   test('admin login page renders core controls', async ({ page }) => {
     await page.goto('/admin/login');
-    await expect(page.getByLabel(/email/i)).toBeVisible();
+    await expect(page.getByLabel(/e-?mail|kullanıcı adı/i)).toBeVisible();
     await expect(page.getByLabel(/password|şifre/i)).toBeVisible();
     // OIDC-enabled builds also show "Sign in with SSO (Keycloak)" — match
     // the local-auth submit by exact name to dodge the strict-mode clash.

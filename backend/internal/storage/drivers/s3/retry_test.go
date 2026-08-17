@@ -11,7 +11,7 @@ import (
 
 // A transient 503 from the object store must not sink a whole sync run.
 //
-// Real failure (fm.brf.sh, 12 occurrences over a month):
+// Real failure (fm.example.com, 12 occurrences over a month):
 //
 //	sync: run failed  storage=s3-test
 //	err="s3: list: operation error S3: ListObjectsV2, exceeded maximum number

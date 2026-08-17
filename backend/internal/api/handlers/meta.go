@@ -7,7 +7,7 @@
 //	POST /api/files/manager/tags        body {node_id, tags: []string}
 //	GET  /api/files/manager/tags?node_id=…  OR ?storage_id=…
 //	POST /api/files/manager/star        body {node_id, starred: bool}
-//	GET  /api/files/manager/starred?storage_id=…&limit=
+//	GET  /api/files/manager/star/list?storage_id=…&limit=
 //	POST /api/files/manager/recent      body {node_id}
 //	GET  /api/files/manager/recent?limit=
 package handlers
@@ -36,6 +36,28 @@ type Meta struct {
 
 // NewMeta constructs the handler.
 func NewMeta(store db.Store) *Meta { return &Meta{Store: store} }
+
+// nonNilNodes guarantees a JSON array on the wire.
+//
+// A nil Go slice marshals to `null`, and every one of these endpoints is
+// consumed as a list (`.length`, `.map`, `v-for`). A user with nothing
+// starred, nothing opened recently, or no nodes under a tag is the NORMAL
+// first-run state — exactly when these lists get read — so the empty case is
+// the one that has to be right.
+func nonNilNodes(n []*model.Node) []*model.Node {
+	if n == nil {
+		return []*model.Node{}
+	}
+	return n
+}
+
+// nonNilStrings is nonNilNodes for the tag-name list.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
 
 // ─────────────────── Tags ───────────────────
 
@@ -116,7 +138,7 @@ func (h *Meta) ListAllTags(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
+	writeJSON(w, http.StatusOK, map[string]any{"tags": nonNilStrings(tags)})
 }
 
 // TaggedNodes lists non-deleted nodes carrying the given tag (?tag=…),
@@ -133,7 +155,7 @@ func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "tag": tag})
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "tag": tag})
 }
 
 // ─────────────────── Starred ───────────────────
@@ -194,7 +216,7 @@ func (h *Meta) ListStarred(w http.ResponseWriter, r *http.Request) {
 			nodes = filterByStorage(nodes, storageID)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "limit": limit})
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "limit": limit})
 }
 
 // ─────────────────── Recently opened ───────────────────
@@ -240,7 +262,7 @@ func (h *Meta) ListRecent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "limit": limit})
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "limit": limit})
 }
 
 // parseLimit defaults / clamps a string query param.

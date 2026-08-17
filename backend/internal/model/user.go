@@ -31,25 +31,32 @@ func ValidRole(name string) bool {
 
 // User represents an authenticated principal.
 type User struct {
-	ID                int64      `json:"id"`
-	Email             string     `json:"email"`
-	DisplayName       string     `json:"display_name"`
-	PasswordHash      string     `json:"-"`
-	Role              string     `json:"role"`
-	TOTPSecret        string     `json:"-"`
-	TOTPPendingSecret string     `json:"-"`
-	TOTPEnabled       bool       `json:"totp_enabled"`
-	TOTPRecoveryCodes []string   `json:"-"`
-	Locale            string     `json:"locale"`
-	Timezone          string     `json:"timezone"`
+	ID    int64  `json:"id"`
+	Email string `json:"email"`
+	// Username is the short login name (migration 00025), unique across the
+	// install. It exists because the connection protocols cannot carry an
+	// e-mail comfortably — `sftp://ada@example.com@host` needs escaping, and
+	// rclone/WinSCP config files split on `@`. Every login surface accepts
+	// EITHER this or the e-mail; internal/identity owns that rule and is the
+	// only place allowed to decide which one an identifier is.
+	Username          string   `json:"username"`
+	DisplayName       string   `json:"display_name"`
+	PasswordHash      string   `json:"-"`
+	Role              string   `json:"role"`
+	TOTPSecret        string   `json:"-"`
+	TOTPPendingSecret string   `json:"-"`
+	TOTPEnabled       bool     `json:"totp_enabled"`
+	TOTPRecoveryCodes []string `json:"-"`
+	Locale            string   `json:"locale"`
+	Timezone          string   `json:"timezone"`
 	// AvatarURL is the profile picture: a small data: URI or an http(s) /
 	// site-relative URL (migration 00023). It is the face the collaboration
 	// presence strip draws instead of initials, for every client of this
 	// account — browser session, desktop app, and any API key minted under it.
-	AvatarURL string `json:"avatar_url,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	LastLoginAt       *time.Time `json:"last_login_at,omitempty"`
+	AvatarURL   string     `json:"avatar_url,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 	// Multi-tenancy (docs/MULTI-TENANCY.md): the tenant (provider) this user
 	// belongs to. Nil only on rows predating the 00014 backfill; assigned
 	// immutably at JIT login. OIDCSubject pins the OIDC identity per provider.
@@ -108,7 +115,7 @@ type Session struct {
 }
 
 // APIToken is a long-lived bearer credential for non-interactive callers
-// (AI agents, the work.brf.sh FilexClient, the MCP server). It is bound to
+// (AI agents, the work.example.com FilexClient, the MCP server). It is bound to
 // a user so every authenticated call inherits that user's role. The
 // plaintext value is shown only once at creation; only TokenHash (sha256
 // hex) is persisted.

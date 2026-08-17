@@ -17,11 +17,11 @@ that lets you assemble the stack you actually need.
 
 | Tag                       | Size    | Includes                                                       |
 |---------------------------|---------|----------------------------------------------------------------|
-| `ghcr.io/brf-tech/filex:latest`    | ~40 MB  | Alias for `slim`. Pure Go binary. Image thumbs only.           |
-| `ghcr.io/brf-tech/filex:slim`      | ~40 MB  | Same as `latest`.                                              |
-| `ghcr.io/brf-tech/filex:full`      | ~250 MB | + ffmpeg, vips-tools, ghostscript, poppler-utils, libreoffice. |
-| `ghcr.io/brf-tech/filex:vX.Y.Z`    | varies  | Pinned-version slim.                                           |
-| `ghcr.io/brf-tech/filex:slim-vX.Y.Z` / `full-vX.Y.Z` | varies | Pinned-version explicit variants. |
+| `brftech/filex:latest`    | ~40 MB  | Alias for `slim`. Pure Go binary. Image thumbs only.           |
+| `brftech/filex:slim`      | ~40 MB  | Same as `latest`.                                              |
+| `brftech/filex:full`      | ~250 MB | + ffmpeg, vips-tools, ghostscript, poppler-utils, libreoffice. |
+| `brftech/filex:vX.Y.Z`    | varies  | Pinned-version slim.                                           |
+| `brftech/filex:slim-vX.Y.Z` / `full-vX.Y.Z` | varies | Pinned-version explicit variants. |
 
 The Go binary inside both is identical — `full` only adds runtime tools to
 unlock PDF / office / video thumbnails.
@@ -29,8 +29,8 @@ unlock PDF / office / video thumbnails.
 ### Build locally
 
 ```bash
-docker build -t ghcr.io/brf-tech/filex:slim -f docker/Dockerfile .
-docker build -t ghcr.io/brf-tech/filex:full -f docker/Dockerfile.full .
+docker build -t brftech/filex:slim -f docker/Dockerfile .
+docker build -t brftech/filex:full -f docker/Dockerfile.full .
 ```
 
 Both Dockerfiles are multi-stage:
@@ -45,7 +45,7 @@ docker build \
   --build-arg VERSION=v0.1.0 \
   --build-arg COMMIT=$(git rev-parse --short HEAD) \
   --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  -t ghcr.io/brf-tech/filex:slim -f docker/Dockerfile .
+  -t brftech/filex:slim -f docker/Dockerfile .
 ```
 
 ---
@@ -255,5 +255,5 @@ To pin a version:
 ```yaml
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:slim-v0.2.0
+    image: brftech/filex:slim-v0.2.0
 ```

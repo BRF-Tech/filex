@@ -16,6 +16,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -85,10 +86,16 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 	return user, nil
 }
 
-// Login validates email + password and returns a freshly created session token.
+// Login validates an identifier + password and returns a freshly created
+// session token.
+//
+// The identifier is an e-mail OR a username (migration 00025): identity.Resolve
+// owns that decision so this surface cannot drift from WebDAV, SFTP or FTPS.
+// The parameter keeps its old name because every caller passes what the user
+// typed into a field labelled "e-mail or username", and renaming it would touch
+// the whole auth.LoginDriver interface for no behaviour change.
 func (d *Driver) Login(ctx context.Context, email, password string) (*model.User, string, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
-	user, err := d.store.GetUserByEmail(ctx, email)
+	user, err := identity.Resolve(ctx, d.store, email)
 	if err != nil {
 		return nil, "", auth.ErrUnauthorized
 	}

@@ -16,9 +16,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/webdav"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
+	"github.com/brf-tech/filex/backend/internal/davlock"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -582,4 +584,57 @@ func TestChiMountPassesWebdavMethods(t *testing.T) {
 	require.NotEqual(t, http.StatusMethodNotAllowed, resp.StatusCode,
 		"chi swallowed PROPFIND with 405 — RegisterMethod init missing")
 	require.Equal(t, 207, resp.StatusCode)
+}
+
+// ⚠⚠ The lock has to survive a restart, end to end and through the real HTTP
+// surface — the client's token is what makes its next PUT legal.
+//
+// Before internal/davlock this test's second half failed: the restarted handler
+// had never heard of the token, so the PUT that presented it got 423 Locked
+// while the file was, as far as the server knew, not locked at all. The client's
+// save failed and a second client could have taken the file.
+func TestALockSurvivesARestart(t *testing.T) {
+	ha := newHarness(t)
+	ha.addStorage(t, "depo", false, false)
+	lockDir := t.TempDir()
+	ha.h.cfg.LockDir = lockDir
+	ha.h.locks = mustLocks(t, lockDir)
+
+	resp := ha.req(t, http.MethodPut, "/dav/depo/kilit.txt", ha.adminEmail, ha.adminPass, "v1", nil)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	lockBody := `<?xml version="1.0" encoding="utf-8"?>
+<D:lockinfo xmlns:D="DAV:">
+  <D:lockscope><D:exclusive/></D:lockscope>
+  <D:locktype><D:write/></D:locktype>
+  <D:owner>dav-test</D:owner>
+</D:lockinfo>`
+	resp = ha.req(t, "LOCK", "/dav/depo/kilit.txt", ha.adminEmail, ha.adminPass, lockBody,
+		map[string]string{"Timeout": "Second-600", "Depth": "0"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	lockToken := resp.Header.Get("Lock-Token")
+	require.NotEmpty(t, lockToken)
+
+	// filex restarts. Everything in memory is gone; only the data directory is
+	// left, which is exactly what a deploy looks like.
+	ha.h.locks = mustLocks(t, lockDir)
+
+	// The same client, the same token, its next save.
+	resp = ha.req(t, http.MethodPut, "/dav/depo/kilit.txt", ha.adminEmail, ha.adminPass, "v2",
+		map[string]string{"If": "(" + lockToken + ")"})
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("PUT with the pre-restart lock token = %d, want 201/204", resp.StatusCode)
+	}
+
+	// And the file is STILL exclusive: a second client must not get in.
+	resp = ha.req(t, http.MethodPut, "/dav/depo/kilit.txt", ha.adminEmail, ha.adminPass, "hijack", nil)
+	require.Equal(t, http.StatusLocked, resp.StatusCode,
+		"a restart made a locked file writable by anybody")
+}
+
+func mustLocks(t *testing.T, dir string) webdav.LockSystem {
+	t.Helper()
+	ls, err := davlock.New(dir)
+	require.NoError(t, err)
+	return ls
 }

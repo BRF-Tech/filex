@@ -16,6 +16,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -28,7 +29,14 @@ type Archive struct {
 	Store           db.Store
 	StorageResolver func(int64) (storage.Driver, error)
 	ACL             *acl.Resolver
+	// Body resolves where a member's bytes are: the driver, or filex's
+	// staging area while a staged upload is still transferring. Nil-safe.
+	Body *filebody.Resolver
 }
+
+// AttachBody wires the byte-source resolver so a file that is still being
+// transferred can be zipped/extracted like any other.
+func (a *Archive) AttachBody(b *filebody.Resolver) { a.Body = b }
 
 // NewArchive constructs an Archive handler.
 func NewArchive(store db.Store, resolver func(int64) (storage.Driver, error)) *Archive {
@@ -314,7 +322,12 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		rc, err := drv.Read(r.Context(), e.Source)
+		src, err := a.Body.Resolve(r.Context(), drv, req.StorageID, e.Source, nil)
+		if err != nil {
+			slog.Warn("archive: source resolve", slog.String("source", e.Source), slog.String("err", err.Error()))
+			continue
+		}
+		rc, err := src.Open(r.Context())
 		if err != nil {
 			slog.Warn("archive: source read", slog.String("source", e.Source), slog.String("err", err.Error()))
 			continue
@@ -409,7 +422,11 @@ func (a *Archive) fetchToTemp(r *http.Request, storageID int64, p string) (strin
 	if err != nil {
 		return "", err
 	}
-	rc, err := drv.Read(r.Context(), p)
+	src, err := a.Body.Resolve(r.Context(), drv, storageID, p, nil)
+	if err != nil {
+		return "", err
+	}
+	rc, err := src.Open(r.Context())
 	if err != nil {
 		return "", err
 	}

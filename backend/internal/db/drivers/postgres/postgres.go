@@ -255,11 +255,19 @@ func (s *Store) DeleteReplicationTarget(ctx context.Context, id int64) error {
 // ─────────────────── Nodes (key paths only) ───────────────────
 
 func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, error) {
+	// transfer_state is written explicitly rather than left to the column
+	// default: a staged upload inserts its node BEFORE the bytes reach the
+	// driver, and a node that claims "stored" for even a moment is a node a
+	// read path would try to fetch from a backend that has nothing.
+	transferState := n.TransferState
+	if transferState == "" {
+		transferState = model.TransferStateStored
+	}
 	row := s.db.QueryRowContext(ctx,
-		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state, transfer_state)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		 RETURNING `+nodeColumns(),
-		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState)
+		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState, transferState)
 	return scanNode(row)
 }
 
@@ -782,7 +790,7 @@ const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,'
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
 	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
 	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE), ` +
-	`COALESCE(avatar_url,'')`
+	`COALESCE(avatar_url,''), COALESCE(username,'')`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	// New users default to the always-present "default" provider (the
@@ -833,6 +841,22 @@ func (s *Store) GetUser(ctx context.Context, id int64) (*model.User, error) {
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
 	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE email=$1`, email))
+}
+
+// GetUserByUsername is the username half of dual-side login (migration 00025).
+// Callers should reach it through identity.Resolve rather than directly, so
+// the e-mail/username disambiguation lives in one place.
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (*model.User, error) {
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE username=$1`, username))
+}
+
+// SetUserUsername claims a login name. The unique index — not any check above
+// this call — is what actually guarantees uniqueness, so a caller racing
+// another creation gets an error here and is expected to try another name.
+func (s *Store) SetUserUsername(ctx context.Context, id int64, username string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET username=$1, updated_at=NOW() WHERE id=$2`, username, id)
+	return err
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]*model.User, error) {
@@ -930,10 +954,247 @@ func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.A
 	return t, nil
 }
 
+// ─────────────────── S3 access keys (migration 00026) ───────────────────
+
+const s3KeyCols = `id, access_key_id, secret_enc, user_id, api_token_id, label, bucket, prefix, created_at, last_used_at, expires_at, disabled_at`
+
+func scanS3AccessKey(r rowScanner) (*model.S3AccessKey, error) {
+	k := &model.S3AccessKey{}
+	var tokenID sql.NullInt64
+	if err := r.Scan(&k.ID, &k.AccessKeyID, &k.SecretEnc, &k.UserID, &tokenID, &k.Label,
+		&k.Bucket, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt, &k.DisabledAt); err != nil {
+		return nil, err
+	}
+	if tokenID.Valid {
+		v := tokenID.Int64
+		k.APITokenID = &v
+	}
+	return k, nil
+}
+
+func (s *Store) CreateS3AccessKey(ctx context.Context, k *model.S3AccessKey) (*model.S3AccessKey, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO s3_access_keys (access_key_id, secret_enc, user_id, api_token_id, label, bucket, prefix, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		k.AccessKeyID, k.SecretEnc, k.UserID, k.APITokenID, k.Label, k.Bucket, k.Prefix, k.ExpiresAt).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetS3AccessKeyByID(ctx, id)
+}
+
+func (s *Store) GetS3AccessKeyByID(ctx context.Context, id int64) (*model.S3AccessKey, error) {
+	return scanS3AccessKey(s.db.QueryRowContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE id=$1`, id))
+}
+
+// GetS3AccessKey is the hot path: every signed request looks its key up here,
+// so it is a single indexed read and nothing more.
+func (s *Store) GetS3AccessKey(ctx context.Context, accessKeyID string) (*model.S3AccessKey, error) {
+	return scanS3AccessKey(s.db.QueryRowContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE access_key_id=$1`, accessKeyID))
+}
+
+func (s *Store) ListS3AccessKeys(ctx context.Context, userID int64) ([]*model.S3AccessKey, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+s3KeyCols+` FROM s3_access_keys WHERE user_id=$1 ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// Never nil — see the sqlite driver for why an empty collection must
+	// serialize as [] and not null.
+	out := []*model.S3AccessKey{}
+	for rows.Next() {
+		k, err := scanS3AccessKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TouchS3AccessKey(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE s3_access_keys SET last_used_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) SetS3AccessKeyDisabled(ctx context.Context, id int64, disabled bool) error {
+	if disabled {
+		_, err := s.db.ExecContext(ctx, `UPDATE s3_access_keys SET disabled_at=NOW() WHERE id=$1`, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE s3_access_keys SET disabled_at=NULL WHERE id=$1`, id)
+	return err
+}
+
+// DeleteS3AccessKey takes the owner id too — see the sqlite driver.
+func (s *Store) DeleteS3AccessKey(ctx context.Context, id, userID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM s3_access_keys WHERE id=$1 AND user_id=$2`, id, userID)
+	return err
+}
+
+// ─────────────────── SSH public keys (migration 00027) ───────────────────
+
+const sshKeyCols = `id, user_id, name, fingerprint, public_key, created_at, last_used_at, disabled_at`
+
+func scanSSHPublicKey(r rowScanner) (*model.SSHPublicKey, error) {
+	k := &model.SSHPublicKey{}
+	if err := r.Scan(&k.ID, &k.UserID, &k.Name, &k.Fingerprint, &k.PublicKey,
+		&k.CreatedAt, &k.LastUsedAt, &k.DisabledAt); err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+func (s *Store) CreateSSHPublicKey(ctx context.Context, k *model.SSHPublicKey) (*model.SSHPublicKey, error) {
+	var id int64
+	if err := s.db.QueryRowContext(ctx,
+		`INSERT INTO ssh_public_keys (user_id, name, fingerprint, public_key) VALUES ($1,$2,$3,$4) RETURNING id`,
+		k.UserID, k.Name, k.Fingerprint, k.PublicKey).Scan(&id); err != nil {
+		return nil, err
+	}
+	return s.GetSSHPublicKeyByID(ctx, id)
+}
+
+// GetSSHPublicKey is the login path: one indexed read on the fingerprint.
+func (s *Store) GetSSHPublicKey(ctx context.Context, fingerprint string) (*model.SSHPublicKey, error) {
+	return scanSSHPublicKey(s.db.QueryRowContext(ctx,
+		`SELECT `+sshKeyCols+` FROM ssh_public_keys WHERE fingerprint=$1`, fingerprint))
+}
+
+func (s *Store) GetSSHPublicKeyByID(ctx context.Context, id int64) (*model.SSHPublicKey, error) {
+	return scanSSHPublicKey(s.db.QueryRowContext(ctx,
+		`SELECT `+sshKeyCols+` FROM ssh_public_keys WHERE id=$1`, id))
+}
+
+func (s *Store) ListSSHPublicKeys(ctx context.Context, userID int64) ([]*model.SSHPublicKey, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+sshKeyCols+` FROM ssh_public_keys WHERE user_id=$1 ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// Never nil — see the sqlite driver.
+	out := []*model.SSHPublicKey{}
+	for rows.Next() {
+		k, err := scanSSHPublicKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TouchSSHPublicKey(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE ssh_public_keys SET last_used_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) SetSSHPublicKeyDisabled(ctx context.Context, id int64, disabled bool) error {
+	if disabled {
+		_, err := s.db.ExecContext(ctx, `UPDATE ssh_public_keys SET disabled_at=NOW() WHERE id=$1`, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE ssh_public_keys SET disabled_at=NULL WHERE id=$1`, id)
+	return err
+}
+
+// DeleteSSHPublicKey takes the owner id too — see the sqlite driver.
+func (s *Store) DeleteSSHPublicKey(ctx context.Context, id, userID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM ssh_public_keys WHERE id=$1 AND user_id=$2`, id, userID)
+	return err
+}
+
+// ─────────────────── NFS exports (migration 00028) ───────────────────
+
+const nfsExportCols = `id, user_id, api_token_id, label, token_hash, storage_name, prefix, read_only, allow_cidrs, created_at, last_used_at, expires_at, disabled_at`
+
+func scanNFSExport(r rowScanner) (*model.NFSExport, error) {
+	e := &model.NFSExport{}
+	var tokenID sql.NullInt64
+	if err := r.Scan(&e.ID, &e.UserID, &tokenID, &e.Label, &e.TokenHash,
+		&e.StorageName, &e.Prefix, &e.ReadOnly, &e.AllowCIDRs,
+		&e.CreatedAt, &e.LastUsedAt, &e.ExpiresAt, &e.DisabledAt); err != nil {
+		return nil, err
+	}
+	if tokenID.Valid {
+		v := tokenID.Int64
+		e.APITokenID = &v
+	}
+	return e, nil
+}
+
+func (s *Store) CreateNFSExport(ctx context.Context, e *model.NFSExport) (*model.NFSExport, error) {
+	var id int64
+	if err := s.db.QueryRowContext(ctx,
+		`INSERT INTO nfs_exports (user_id, api_token_id, label, token_hash, storage_name, prefix, read_only, allow_cidrs, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+		e.UserID, e.APITokenID, e.Label, e.TokenHash, e.StorageName, e.Prefix, e.ReadOnly, e.AllowCIDRs, e.ExpiresAt).Scan(&id); err != nil {
+		return nil, err
+	}
+	return s.GetNFSExportByID(ctx, id)
+}
+
+// GetNFSExport is the mount path: one indexed read on the hashed secret.
+func (s *Store) GetNFSExport(ctx context.Context, tokenHash string) (*model.NFSExport, error) {
+	return scanNFSExport(s.db.QueryRowContext(ctx,
+		`SELECT `+nfsExportCols+` FROM nfs_exports WHERE token_hash=$1`, tokenHash))
+}
+
+func (s *Store) GetNFSExportByID(ctx context.Context, id int64) (*model.NFSExport, error) {
+	return scanNFSExport(s.db.QueryRowContext(ctx,
+		`SELECT `+nfsExportCols+` FROM nfs_exports WHERE id=$1`, id))
+}
+
+func (s *Store) ListNFSExports(ctx context.Context, userID int64) ([]*model.NFSExport, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+nfsExportCols+` FROM nfs_exports WHERE user_id=$1 ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.NFSExport{}
+	for rows.Next() {
+		e, err := scanNFSExport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TouchNFSExport(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nfs_exports SET last_used_at=NOW() WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) SetNFSExportDisabled(ctx context.Context, id int64, disabled bool) error {
+	if disabled {
+		_, err := s.db.ExecContext(ctx, `UPDATE nfs_exports SET disabled_at=NOW() WHERE id=$1`, id)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE nfs_exports SET disabled_at=NULL WHERE id=$1`, id)
+	return err
+}
+
+// DeleteNFSExport takes the owner id too — see the sqlite driver.
+func (s *Store) DeleteNFSExport(ctx context.Context, id, userID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM nfs_exports WHERE id=$1 AND user_id=$2`, id, userID)
+	return err
+}
+
 func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
 	return scanAPIToken(s.db.QueryRowContext(ctx,
 		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
 		tokenHash))
+}
+
+// GetAPITokenByID fetches a token by primary key — see the sqlite driver.
+func (s *Store) GetAPITokenByID(ctx context.Context, id int64) (*model.APIToken, error) {
+	return scanAPIToken(s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE id=$1`, id))
 }
 
 func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
@@ -1219,6 +1480,137 @@ func (s *Store) DeleteExpiredChunkedUploads(ctx context.Context) error {
 	return err
 }
 
+// ─────────────────── Staged uploads ───────────────────
+
+const stagedUploadColumns = `id, storage_id, storage_key, COALESCE(user_id,0), total_size, chunk_size,
+	COALESCE(mime,''), COALESCE(hash,''), received_bytes, state, COALESCE(error,''),
+	node_id, op_id, created_at, updated_at, expires_at`
+
+func scanStagedUpload(r rowScanner) (*model.StagedUpload, error) {
+	u := &model.StagedUpload{}
+	if err := r.Scan(&u.ID, &u.StorageID, &u.StorageKey, &u.UserID, &u.TotalSize, &u.ChunkSize,
+		&u.Mime, &u.Hash, &u.ReceivedBytes, &u.State, &u.Error,
+		&u.NodeID, &u.OpID, &u.CreatedAt, &u.UpdatedAt, &u.ExpiresAt); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func (s *Store) CreateStagedUpload(ctx context.Context, u *model.StagedUpload) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO staged_uploads (id, storage_id, storage_key, user_id, total_size, chunk_size, mime, hash, received_bytes, state, expires_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		u.ID, u.StorageID, u.StorageKey, u.UserID, u.TotalSize, u.ChunkSize, u.Mime, u.Hash, u.ReceivedBytes, u.State, u.ExpiresAt)
+	return err
+}
+
+func (s *Store) GetStagedUpload(ctx context.Context, id string) (*model.StagedUpload, error) {
+	return scanStagedUpload(s.db.QueryRowContext(ctx,
+		`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE id=$1`, id))
+}
+
+func (s *Store) GetStagedUploadByNode(ctx context.Context, nodeID int64) (*model.StagedUpload, error) {
+	return scanStagedUpload(s.db.QueryRowContext(ctx,
+		`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE node_id=$1 ORDER BY updated_at DESC LIMIT 1`, nodeID))
+}
+
+func (s *Store) UpdateStagedUploadProgress(ctx context.Context, id string, receivedBytes int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE staged_uploads SET received_bytes=$1, updated_at=NOW() WHERE id=$2`, receivedBytes, id)
+	return err
+}
+
+func (s *Store) UpdateStagedUploadState(ctx context.Context, id, state, errMsg string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE staged_uploads SET state=$1, error=$2, updated_at=NOW() WHERE id=$3`, state, errMsg, id)
+	return err
+}
+
+func (s *Store) AttachStagedUploadTarget(ctx context.Context, id string, nodeID, opID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE staged_uploads SET node_id=$1, op_id=$2, updated_at=NOW() WHERE id=$3`, nodeID, opID, id)
+	return err
+}
+
+func (s *Store) DeleteStagedUpload(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM staged_uploads WHERE id=$1`, id)
+	return err
+}
+
+func (s *Store) ListStagedUploads(ctx context.Context, state string, limit int) ([]*model.StagedUpload, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if state != "" {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE state=$1 ORDER BY updated_at DESC LIMIT $2`, state, limit)
+	} else {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT `+stagedUploadColumns+` FROM staged_uploads ORDER BY updated_at DESC LIMIT $1`, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.StagedUpload{}
+	for rows.Next() {
+		u, err := scanStagedUpload(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListIdleStagedUploads(ctx context.Context, before time.Time, limit int) ([]*model.StagedUpload, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+stagedUploadColumns+` FROM staged_uploads WHERE updated_at < $1 ORDER BY updated_at ASC LIMIT $2`,
+		before.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.StagedUpload{}
+	for rows.Next() {
+		u, err := scanStagedUpload(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SumOpenStagedUploadBytes(ctx context.Context, userID int64) (int64, error) {
+	if userID <= 0 {
+		return 0, nil
+	}
+	// ⚠ Postgres SUM(bigint) returns NUMERIC, which will not scan into an
+	// int64. Cast it back explicitly.
+	var total sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(total_size),0)::bigint FROM staged_uploads WHERE user_id=$1 AND state IN ('staging','committing')`,
+		userID).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	return total.Int64, nil
+}
+
+func (s *Store) SetNodeTransferState(ctx context.Context, nodeID int64, state string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE nodes SET transfer_state=$1, updated_at=NOW() WHERE id=$2`, state, nodeID)
+	return err
+}
+
 func (s *Store) CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx, `INSERT INTO sync_runs (storage_id, cursor_before, status) VALUES ($1,$2,'running') RETURNING id`, storageID, cursorBefore).Scan(&id)
@@ -1452,12 +1844,12 @@ type rowScanner interface {
 }
 
 func nodeColumns() string {
-	return `id, storage_id, parent_id, name, path, path_hash, COALESCE(storage_key,''), type, size, COALESCE(mime,''), COALESCE(etag,''), backend_mtime, db_mtime, sync_state, seen_at, deleted_at, created_at, updated_at`
+	return `id, storage_id, parent_id, name, path, path_hash, COALESCE(storage_key,''), type, size, COALESCE(mime,''), COALESCE(etag,''), backend_mtime, db_mtime, sync_state, COALESCE(transfer_state,'stored'), seen_at, deleted_at, created_at, updated_at`
 }
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1501,7 +1893,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username); err != nil {
 		return nil, err
 	}
 	if recoveryJSON != "" {
@@ -2081,11 +2473,15 @@ func (s *Store) SetUserQuota(ctx context.Context, userID int64, bytes int64) err
 	return err
 }
 
-// RecomputeUserUsage scans nodes owned by this user, sets usage_bytes.
+// RecomputeUserUsage scans the file nodes owned by this user, sets usage_bytes.
+//
+// ⚠ TRASHED ROWS ARE INCLUDED — no `deleted_at IS NULL`, deliberately. See the
+// SQLite driver's copy for the full reasoning; in short, trashed bytes still
+// count and the purge is the only release point (docs/QUOTAS.md).
 func (s *Store) RecomputeUserUsage(ctx context.Context, userID int64) (int64, error) {
 	var total sql.NullInt64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(size),0) FROM nodes WHERE owner_id=$1 AND deleted_at IS NULL AND type='file'`,
+		`SELECT COALESCE(SUM(size),0) FROM nodes WHERE owner_id=$1 AND type='file'`,
 		userID).Scan(&total)
 	if err != nil {
 		return 0, err
@@ -2325,7 +2721,7 @@ func (s *Store) ListNodesByUserMeta(ctx context.Context, userID int64, key strin
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
 		 FROM user_node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
 		 WHERE m.user_id=$1 AND m.key=$2 AND n.deleted_at IS NULL
@@ -2450,7 +2846,7 @@ func (s *Store) ListNodesByTag(ctx context.Context, tag string, limit int) ([]*m
 		limit = 500
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
 		 FROM node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
 		 WHERE m.key=$1 AND n.deleted_at IS NULL

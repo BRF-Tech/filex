@@ -59,23 +59,38 @@ test.describe('Meta routes + markdown editor', () => {
 
     const created = await (
       await authed.post('/api/admin/storages/', {
-        data: { name: STORAGE_NAME, driver: 'local', config: { root: tmpRoot } },
+        data: { name: STORAGE_NAME, driver: 'local', config: { path: tmpRoot }, enabled: true },
       })
     ).json();
     storageId = created.id;
-    await authed.patch(`/api/admin/storages/${storageId}`, { data: { enabled: true } });
 
-    // Force one indexing pass so demo.md gets a DB node id.
-    const idx = await (
-      await authed.get(
-        `/api/files/manager?action=index&path=${encodeURIComponent(STORAGE_NAME + '://')}`,
-      )
-    ).json();
-    const demoRow = (idx.files as Array<{ id: number; basename: string }>).find(
-      (r) => r.basename === 'demo.md',
-    );
-    if (!demoRow) throw new Error('demo.md not found after index');
-    demoNodeId = demoRow.id;
+    // ⚠ Listing is NOT indexing. `manager?action=index` projects whatever the
+    // driver can see right now; files that were written straight to disk
+    // (rather than uploaded through the API) have no DB row yet, so their
+    // `id` is absent — and star / tags / recent are per-NODE features that
+    // answer `400 bad node_id` without one. The storage defaults to
+    // sync_mode=poll with a 900s interval, so "eventually" is 15 minutes
+    // away. Ask for the pass explicitly, then wait for the row to exist.
+    const sync = await authed.post(`/api/admin/storages/${storageId}/sync`);
+    if (!sync.ok()) throw new Error(`sync trigger failed: ${sync.status()} ${await sync.text()}`);
+
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const idx = await (
+        await authed.get(
+          `/api/files/manager?action=index&path=${encodeURIComponent(STORAGE_NAME + '://')}`,
+        )
+      ).json();
+      const demoRow = (idx.files as Array<{ id?: number; basename: string }>).find(
+        (r) => r.basename === 'demo.md',
+      );
+      if (demoRow?.id) {
+        demoNodeId = demoRow.id;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!demoNodeId) throw new Error('demo.md never got a node id after an explicit sync pass');
 
     await ctx.dispose();
     await authed.dispose();
@@ -110,7 +125,7 @@ test.describe('Meta routes + markdown editor', () => {
     // It should appear in /starred. The endpoint shape is intentionally
     // a bit loose — older builds returned a bare array, newer ones wrap
     // it in {entries:[…]} — accept both.
-    const listRes = await api.get('/api/files/manager/starred?limit=50');
+    const listRes = await api.get('/api/files/manager/star/list?limit=50');
     expect(listRes.ok()).toBeTruthy();
     const listBody = await listRes.json();
     const rows: Array<{ id: number }> = Array.isArray(listBody)
@@ -126,7 +141,7 @@ test.describe('Meta routes + markdown editor', () => {
     await api.post('/api/files/manager/star', {
       data: { node_id: demoNodeId, starred: false },
     });
-    const list2 = await (await api.get('/api/files/manager/starred?limit=50')).json();
+    const list2 = await (await api.get('/api/files/manager/star/list?limit=50')).json();
     const rows2: Array<{ id: number }> = Array.isArray(list2)
       ? list2
       : Array.isArray(list2?.entries)
@@ -178,11 +193,19 @@ test.describe('Meta routes + markdown editor', () => {
     const listRes = await api.get('/api/files/manager/recent?limit=10');
     expect(listRes.ok()).toBeTruthy();
     const body = await listRes.json();
+    // The endpoint answers `{nodes: [...], limit}`. The older tolerant parse
+    // knew about a bare array and `{entries}` but not `{nodes}`, so it read
+    // every response as empty and this assertion could never pass.
     const rows: Array<{ id: number }> = Array.isArray(body)
       ? body
-      : Array.isArray(body?.entries)
-        ? body.entries
-        : [];
+      : Array.isArray(body?.nodes)
+        ? body.nodes
+        : Array.isArray(body?.entries)
+          ? body.entries
+          : [];
+    expect(Array.isArray(body?.nodes) || Array.isArray(body), 'recent must answer with an array').toBe(
+      true,
+    );
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0].id).toBe(demoNodeId);
 

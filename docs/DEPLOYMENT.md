@@ -252,7 +252,7 @@ shared by definition.
 
 ## Backup & restore
 
-Two things hold real state; back up **both**:
+Three things hold real state; back up **all three**:
 
 1. **The database** — the SQLite file (`<data_dir>/instance.sqlite`) or your
    PostgreSQL/MySQL. This is the source of truth for users, storages,
@@ -260,6 +260,18 @@ Two things hold real state; back up **both**:
 2. **The storage backends** — the actual file bytes. filex doesn't own these; a
    local disk, an S3 bucket, an SFTP server each have their own backup story.
    Back them up where they live.
+3. ⚠⚠ **`FILEX_SECRET_KEY`** — the key that seals the credentials filex has to
+   be able to *recover* rather than merely compare. S3 access keys are the case
+   today: SigV4 verifies a request by recomputing an HMAC chain from the secret,
+   so it cannot be hashed the way an API token is, and it is stored sealed with
+   AES-GCM under this key.
+
+   **A restored database without the matching key is a database whose S3 access
+   keys no longer verify** — every `aws s3`, `rclone` and `restic` job pointed
+   at this server stops with a signature error, and nothing in that error says
+   why. Keep it wherever you keep the database credentials, and do not rotate it
+   casually. Losing it is not recoverable; the fix is minting every access key
+   again.
 
 **Rebuildable, so backing them up is optional:**
 
@@ -267,6 +279,16 @@ Two things hold real state; back up **both**:
   by deleting it and restarting.
 - `thumbs/` — regenerate with `filex thumb backfill` (add `--retry-failed` to
   re‑run failed rows, `--storage <name|id>` to scope it).
+
+**Rebuildable, and you should actively EXCLUDE it:**
+
+- `cache/` — prepared copies of big files on slow storage, and folder-share ZIPs
+  (`cache/sharezips/`, moved there from `<data_dir>/sharezips` on first start of
+  v0.19.1+). These are the largest throwaway objects filex produces: one archive
+  of a shared folder is as big as the folder. Backing the directory up puts them
+  in every snapshot, every off-site copy and every restore, for bytes that are
+  regenerated on demand. Exclude `<data_dir>/cache` (and, for older backup
+  configs, `**/sharezips/**`).
 
 **Restore** = restore the database, restore/attach the storage backends, start
 filex. If you skipped the search index and thumbnail cache in your backup, filex

@@ -1,6 +1,6 @@
 package handlers_test
 
-// Guards against the multipart temp-file leak that filled fm.brf.sh's disk on
+// Guards against the multipart temp-file leak that filled fm.example.com's disk on
 // 2026-08-09: 74 leftover /tmp/multipart-* files, 29 GB, from uploads that had
 // all returned 200. Parts above the in-memory limit are spilled to $TMPDIR by
 // mime/multipart, and net/http only removes them when the request the server

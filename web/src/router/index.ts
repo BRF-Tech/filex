@@ -50,6 +50,16 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.dashboard' },
       },
       {
+        // The shared connections surface — the same component the desktop
+        // app mounts as <filex-connections>. Storages.vue below stays the
+        // operational console (sync runs, drift, RBAC); this is the
+        // connect-and-instructions half of the same subject.
+        path: 'connections',
+        name: 'connections',
+        component: () => import('@/views/Connections.vue'),
+        meta: { breadcrumb: 'nav.connections' },
+      },
+      {
         path: 'storages',
         name: 'storages',
         component: () => import('@/views/Storages.vue'),

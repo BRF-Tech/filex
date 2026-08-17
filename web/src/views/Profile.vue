@@ -22,6 +22,10 @@ const auth = useAuthStore();
 const toast = useToastStore();
 
 const email = ref('');
+// The short login name. It is what the connection protocols use (SFTP, FTPS,
+// and the S3/NFS credential pages), because an `@` in a login does not survive
+// an rclone or WinSCP config file. Sign-in accepts either this or the e-mail.
+const username = ref('');
 const displayName = ref('');
 const userLocale = ref<Locale>('en');
 const timezone = ref('Europe/Istanbul');
@@ -75,6 +79,8 @@ const showTotpEnroll = ref(false);
 const showTotpDisable = ref(false);
 const totpQr = ref<string | null>(null);
 const totpSecret = ref<string | null>(null);
+const totpRecoveryCodes = ref<string[]>([]);
+const totpRecoveryCodesText = computed(() => totpRecoveryCodes.value.join('\n'));
 const totpCode = ref('');
 const totpBusy = ref(false);
 
@@ -86,6 +92,7 @@ const localeOptions = [
 watchEffect(() => {
   if (auth.user) {
     email.value = auth.user.email;
+    username.value = auth.user.username ?? '';
     displayName.value = auth.user.display_name;
     userLocale.value = (auth.user.locale as Locale) || 'en';
     timezone.value = auth.user.timezone ?? 'Europe/Istanbul';
@@ -98,6 +105,7 @@ async function saveProfile() {
   try {
     const u = await AuthApi.updateProfile({
       email: email.value.trim(),
+      username: username.value.trim().toLowerCase(),
       display_name: displayName.value.trim(),
       locale: userLocale.value,
       timezone: timezone.value,
@@ -139,6 +147,7 @@ async function startTotp() {
     const res = await AuthApi.enrollTotp();
     totpSecret.value = res.secret;
     totpQr.value = res.qr_svg;
+    totpRecoveryCodes.value = res.recovery_codes ?? [];
     showTotpEnroll.value = true;
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -156,6 +165,7 @@ async function verifyTotp() {
     totpCode.value = '';
     totpQr.value = null;
     totpSecret.value = null;
+    totpRecoveryCodes.value = [];
     toast.success('2FA enabled');
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -230,6 +240,10 @@ async function disableTotp() {
       </div>
 
       <Input v-model="email" type="email" :label="t('common.email')" required />
+      <div>
+        <Input v-model="username" :label="t('profile.username.label')" autocomplete="username" />
+        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{{ t('profile.username.help') }}</p>
+      </div>
       <Input v-model="displayName" :label="t('users.fields.displayName')" required />
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Select
@@ -315,6 +329,7 @@ async function disableTotp() {
       </p>
       <div
         v-if="totpQr"
+        data-testid="totp-qr"
         class="flex flex-col items-center gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white p-4"
         v-html="totpQr"
       />
@@ -325,6 +340,28 @@ async function disableTotp() {
           {{ totpSecret }}
         </code>
         <CopyButton :value="totpSecret" />
+      </div>
+      <!-- Recovery codes. The server generates and stores these on enroll and
+           returns them ONCE; if we don't render them here the user has ten
+           valid codes they have never seen, and losing the authenticator app
+           means losing the account. -->
+      <div
+        v-if="totpRecoveryCodes.length"
+        data-testid="totp-recovery-codes"
+        class="mt-4 rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-3"
+      >
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-xs font-medium text-amber-900 dark:text-amber-200">
+            {{ t('profile.totp.recoveryTitle') }}
+          </p>
+          <CopyButton :value="totpRecoveryCodesText" size="xs" />
+        </div>
+        <p class="mt-1 text-xs text-amber-800 dark:text-amber-300">
+          {{ t('profile.totp.recoveryHint') }}
+        </p>
+        <ul class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
+          <li v-for="c in totpRecoveryCodes" :key="c" class="select-all">{{ c }}</li>
+        </ul>
       </div>
       <Input
         v-model="totpCode"

@@ -1,9 +1,47 @@
 import type { APIRequestContext } from '@playwright/test';
 import { apiLogin, ADMIN_EMAIL, ADMIN_PASSWORD } from './auth';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * Turn a spec's mount string into a real directory ON THIS MACHINE.
+ *
+ * Specs write POSIX-looking mounts (`/tmp/filex-e2e-share-…`). On Windows
+ * the server resolves that against the current drive (`C:\tmp\…`), which is
+ * outside anything the harness cleans up. Map the `/tmp/` prefix onto the
+ * OS temp dir so both platforms get a real, writable, per-storage directory
+ * that a run can throw away.
+ */
+export function storageRoot(mountPath: string): string {
+  if (!mountPath.startsWith('/tmp/')) return mountPath;
+  const leaf = mountPath.slice('/tmp/'.length).replace(/[\/]+/g, '-');
+  // The harness points this at a directory inside the run's throwaway data
+  // dir, so nothing survives into the next run. Several specs use FIXED mount
+  // names (`/tmp/filex-e2e-files`), and without a per-run root those kept
+  // yesterday's files: a delete would collide with a trash sidecar from an
+  // earlier run and fail, in a spec that had done nothing wrong.
+  const base = process.env.E2E_STORAGE_ROOT ?? os.tmpdir();
+  return path.join(base, leaf);
+}
 
 /**
  * Seed a local-driver storage so the file tests have somewhere to play.
  * Returns the storage row from the API.
+ *
+ * ⚠ The root of a local storage is `config.path` — NOT `mount_path`, and not
+ * `config.root` when `config.path` is also set. `local.Driver.Init` reads
+ * `config["path"]` first and only falls back to `config["root"]`; `mount_path`
+ * is a display column the driver never looks at (25-connections asserts the
+ * same contract from the admin form: `made.config.path === MOUNT`).
+ *
+ * This helper used to send `{ root: mountPath, path: 'fileman' }`, so `path`
+ * won and EVERY storage every spec seeded resolved to the same relative
+ * directory — `./fileman` under the server's working dir. The `mountPath`
+ * argument was dead. Measured consequence: one shared folder holding every
+ * spec's files, so a listing scoped to "my storage" returned other specs'
+ * uploads, node-id lookups found the wrong row or none, and the explorer
+ * never saw a single-storage deployment. It also leaked outside the throwaway
+ * data dir, so state survived between runs.
  */
 export async function seedLocalStorage(
   request: APIRequestContext,
@@ -11,14 +49,15 @@ export async function seedLocalStorage(
   mountPath = '/tmp/filex-e2e-storage',
 ) {
   await apiLogin(request);
+  const root = storageRoot(mountPath);
   const res = await request.post('/api/admin/storages', {
     data: {
       name,
       driver: 'local',
-      mount_path: mountPath,
+      mount_path: root,
       // model.Storage's JSON tag is `config` (not `config_json`) and the
       // field is json.RawMessage — pass an object, not a string.
-      config: { root: mountPath, path: 'fileman' },
+      config: { path: root },
       sync_mode: 'fsnotify',
       sync_interval_s: 0,
       enabled: true,
@@ -26,7 +65,15 @@ export async function seedLocalStorage(
     },
   });
   if (!res.ok()) throw new Error(`seedLocalStorage failed: ${res.status()} ${await res.text()}`);
-  return res.json();
+  const row = (await res.json()) as { id: number; config?: { path?: string } };
+  // Fail loudly rather than hand back a storage pointing somewhere else —
+  // that is precisely how the shared-`./fileman` bug stayed invisible.
+  if (row.config?.path !== root) {
+    throw new Error(
+      `seedLocalStorage(${name}): asked for root ${root}, server stored ${row.config?.path}`,
+    );
+  }
+  return row;
 }
 
 /**

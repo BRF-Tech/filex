@@ -397,3 +397,67 @@ func TestManagerMutate_BadAction(t *testing.T) {
 	rec := callMutate(t, mh, "wat", map[string]any{"path": "main://"})
 	assert.Equal(t, http.StatusNotImplemented, rec.Code)
 }
+
+// ⚠⚠ Uploading into a folder that has no node row yet must still put the file
+// in the catalogue — and put the FOLDER there too.
+//
+// This is the bug this test exists for (2026-08-16, found by mounting the
+// server with `filex mount` and seeing an empty root): the upload looked its
+// parent directory up, the lookup failed because nothing had created that row,
+// and the handler then wrote the bytes and created NO rows at all. On disk the
+// file was there; the subfolder listing found it through the driver fallback;
+// the level above was empty. To a user that is a folder they just uploaded into
+// that does not exist until the next sync run — and to `filex mount`, a storage
+// with nothing in it.
+func TestManagerMutate_UploadIntoUnknownFolder_MaterialisesTheChain(t *testing.T) {
+	mh, store, _, st, root := newMutateFixture(t)
+	ctx := context.Background()
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	// Two levels deep, neither of which has a node row.
+	require.NoError(t, mw.WriteField("path", "main://newdir/inner"))
+	part, err := mw.CreateFormFile("file[]", "a.txt")
+	require.NoError(t, err)
+	_, err = io.WriteString(part, "hello")
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+
+	req := httptest.NewRequest("POST", "/api/files/manager?action=upload", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	mh.Mutate(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	// The bytes landed…
+	onDisk, err := os.ReadFile(filepath.Join(root, "newdir", "inner", "a.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(onDisk))
+
+	// …and so did the rows, all the way down.
+	fileNode, err := store.GetNodeByPath(ctx, st.ID, mutTestPathHash(st.ID, "/newdir/inner/a.txt"))
+	require.NoError(t, err)
+	require.NotNil(t, fileNode, "the uploaded file has no node row — it is invisible in the explorer")
+
+	inner, err := store.GetNodeByPath(ctx, st.ID, mutTestPathHash(st.ID, "/newdir/inner"))
+	require.NoError(t, err)
+	require.NotNil(t, inner, "the folder the file went into has no node row")
+	require.NotNil(t, fileNode.ParentID)
+	assert.Equal(t, inner.ID, *fileNode.ParentID, "the file is not attached to its folder")
+
+	outer, err := store.GetNodeByPath(ctx, st.ID, mutTestPathHash(st.ID, "/newdir"))
+	require.NoError(t, err)
+	require.NotNil(t, outer, "the top of the chain has no node row")
+	require.NotNil(t, inner.ParentID)
+	assert.Equal(t, outer.ID, *inner.ParentID)
+
+	// ⚠ And the level ABOVE lists it: this is what the user actually sees, and
+	// asserting only the rows would pass with a chain that is attached wrongly.
+	top, err := store.ListNodesByParent(ctx, st.ID, nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(top))
+	for _, n := range top {
+		names = append(names, n.Name)
+	}
+	assert.Contains(t, names, "newdir", "the storage root does not list the new folder: %v", names)
+}

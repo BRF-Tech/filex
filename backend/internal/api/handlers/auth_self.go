@@ -4,7 +4,7 @@
 // authenticated session and act on the principal in the request context.
 //
 //	GET    /api/auth/me              — current user
-//	PATCH  /api/auth/profile         — update email/locale/timezone
+//	PATCH  /api/auth/profile         — update email/username/locale/timezone
 //	POST   /api/auth/password        — change password (requires old)
 //	POST   /api/auth/totp/enroll     — start TOTP enrollment
 //	POST   /api/auth/totp/verify     — confirm TOTP enrollment with code
@@ -27,6 +27,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/identity"
 )
 
 // AuthSelf wraps the self-service profile/password/TOTP routes.
@@ -52,7 +53,13 @@ func (h *AuthSelf) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 type profileReq struct {
-	Email       *string `json:"email,omitempty"`
+	Email *string `json:"email,omitempty"`
+	// Username is the short login name used by the connection protocols
+	// (migration 00025). Unlike the fields around it this one is REJECTED
+	// rather than silently ignored when invalid or taken: it is a name other
+	// people can see is unavailable, and a form that appears to save a name
+	// the account did not get is worse than an error.
+	Username    *string `json:"username,omitempty"`
 	DisplayName *string `json:"display_name,omitempty"`
 	Locale      *string `json:"locale,omitempty"`
 	Timezone    *string `json:"timezone,omitempty"`
@@ -83,6 +90,26 @@ func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Email != nil && *req.Email != "" {
 		_ = h.Store.UpdateUserEmail(r.Context(), u.ID, strings.ToLower(strings.TrimSpace(*req.Email)))
+	}
+	if req.Username != nil {
+		name := identity.Normalize(*req.Username)
+		if err := identity.Validate(name); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		// Check before writing so the common case gets a clear 409 instead of
+		// a driver-specific unique-constraint string. The index is still the
+		// real guard: a racing claim fails the UPDATE below and is reported.
+		if other, err := h.Store.GetUserByUsername(r.Context(), name); err == nil && other != nil && other.ID != u.ID {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "that username is taken"})
+			return
+		}
+		if name != u.Username {
+			if err := h.Store.SetUserUsername(r.Context(), u.ID, name); err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "that username is taken"})
+				return
+			}
+		}
 	}
 	if req.DisplayName != nil {
 		_ = h.Store.UpdateUserDisplayName(r.Context(), u.ID, strings.TrimSpace(*req.DisplayName))

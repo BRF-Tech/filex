@@ -14,12 +14,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -33,8 +35,28 @@ type Pipeline struct {
 	store    db.Store
 	storages map[int64]storage.Driver
 	cacheDir string
+	// body resolves where a node's bytes are: the storage driver, or filex's
+	// staging area while a staged upload is still transferring. Nil-safe.
+	body *filebody.Resolver
 
 	caps Capabilities
+}
+
+// AttachBody wires the byte-source resolver, so a file that is still being
+// transferred gets its thumbnail from the staged bytes instead of failing
+// against a driver that does not have the object yet.
+func (p *Pipeline) AttachBody(b *filebody.Resolver) { p.body = b }
+
+// openSource is the ONE door every generator reads its source bytes through.
+// Generators must not call drv.Read directly — that is what made them blind to
+// staged uploads, and a per-generator exception is how one file starts
+// behaving differently depending on which thumbnailer picked it up.
+func (p *Pipeline) openSource(ctx context.Context, drv storage.Driver, node *model.Node) (io.ReadCloser, error) {
+	src, err := p.body.Resolve(ctx, drv, node.StorageID, node.Path, node)
+	if err != nil {
+		return nil, err
+	}
+	return src.Open(ctx)
 }
 
 // Capabilities indicates which thumbnail backends are available at runtime.

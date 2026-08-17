@@ -112,11 +112,13 @@
     "themeDark": "Karanlık",
     "protection": "Koruma",
     "branding": "Kurumsal Kimlik",
-    "updates": "Güncellemeler"
+    "updates": "Güncellemeler",
+    "connections": "Bağlantılar"
   },
   "login": {
     "title": "Oturum aç",
     "subtitle": "filex yönetim hesabınla giriş yap",
+    "identifier": "E-posta ya da kullanıcı adı",
     "remember": "30 gün boyunca beni hatırla",
     "submit": "Giriş yap",
     "or": "veya",
@@ -124,7 +126,7 @@
     "local": "Parola ile giriş yap",
     "redirecting": "SSO girişine yönlendiriliyorsun…",
     "totpHint": "Authenticator uygulamandaki 6 haneli kodu gir",
-    "errInvalid": "E-posta veya şifre yanlış",
+    "errInvalid": "E-posta, kullanıcı adı ya da şifre yanlış",
     "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
     "errGeneric": "Bir şeyler ters gitti. Tekrar dene.",
     "errOidc": "SSO girişi başarısız oldu. Tekrar dene veya parola ile giriş yap."
@@ -168,8 +170,11 @@
       "local": "Yerel dosya sistemi",
       "s3": "S3 / Hetzner / MinIO",
       "sftp": "SFTP",
+      "ftp": "FTP / FTPS",
       "webdav": "WebDAV"
     },
+    "advancedFields": "Gelişmiş ayarlar",
+    "driverFieldsUnavailable": "\"{driver}\" sürücüsünün ayar alanları yüklenemedi.",
     "fields": {
       "name": "Görünen isim",
       "namePlaceholder": "Kişisel fotoğraflar",
@@ -180,15 +185,41 @@
       "endpoint": "Endpoint",
       "region": "Bölge",
       "bucket": "Bucket",
+      "prefix": "Önek (prefix)",
       "accessKey": "Access key",
       "secretKey": "Secret key",
       "pathStyle": "Path-style URL kullan (Hetzner, MinIO)",
+      "disablePresign": "İmzalı URL'leri kapat",
       "host": "Sunucu",
       "port": "Port",
       "user": "Kullanıcı",
-      "keyPath": "Özel anahtar yolu",
+      "password": "Parola",
+      "privateKey": "Özel anahtar (PEM)",
+      "keyPath": "Özel anahtar dosyası",
       "basePath": "Temel yol",
+      "root": "Temel yol",
+      "knownHosts": "known_hosts dosyası",
+      "hostKey": "Sabitlenmiş sunucu anahtarı",
+      "insecureSkipHostKey": "Sunucu anahtarı doğrulamasını atla (güvensiz)",
+      "tls": "FTPS (açık AUTH TLS)",
+      "passive": "Pasif mod (PASV)",
       "url": "Temel URL"
+    },
+    "fieldHelp": {
+      "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
+      "prefix": "Bucket içindeki alt klasör. Zorunlu: filex bucket kökünün sahipliğini asla almaz.",
+      "root": "Arka uçtaki alt klasör. Zorunlu: filex hesabın kökünü asla mount etmez.",
+      "region": "Boş bırakılırsa \"auto\" kullanılır.",
+      "endpoint": "AWS S3 için boş bırakın. S3 uyumlu diğer tüm depolar kendi endpoint'ini ister.",
+      "pathStyle": "AWS dışındaki tüm depolarda açık olmalı. Endpoint girildiyse ve bu alana hiç dokunulmadıysa kendiliğinden açılır.",
+      "disablePresign": "Depo, SDK'nın imzaladığı URL'leri reddediyorsa açın (Ceph RGW / bazı Hetzner kurulumları SignatureDoesNotMatch döner); yüklemeler o zaman arka uç üzerinden akar.",
+      "sftpAuth": "Parola ya da özel anahtardan biri zorunludur.",
+      "keyPath": "Sunucudaki anahtar dosyasının yolu; depo başlarken okunur. PEM alanı boşken kullanılır.",
+      "knownHosts": "Katı sunucu anahtarı denetimi için OpenSSH known_hosts yolu. Varsayılan, ~/.filex/known_hosts içinde ilk bağlantıda güven.",
+      "hostKey": "authorized_keys / known_hosts satır biçiminde tek bir açık anahtar.",
+      "insecureSkipHostKey": "Her sunucu anahtarını kabul eder. Yalnızca geçici sunucular için.",
+      "tls": "Düz FTP kimlik bilgilerini açık metin gönderir — sunucu destekliyorsa açın.",
+      "passive": "Kapatmak aktif moda geçirir; bu, sunucunun bu makineye geri bağlanmasını gerektirir."
     },
     "actions": {
       "test": "Bağlantıyı test et",
@@ -255,10 +286,16 @@
       "enable": "2FA'yı aç",
       "disable": "2FA'yı kapat",
       "code": "Doğrulama kodu",
-      "scanHint": "Bu QR kodu authenticator uygulamanla tara, sonra 6 haneli kodu gir."
+      "scanHint": "Bu QR kodu authenticator uygulamanla tara, sonra 6 haneli kodu gir.",
+      "recoveryTitle": "Kurtarma kodları",
+      "recoveryHint": "Bunları şimdi kaydedin — doğrulayıcınızı kaybederseniz her biri bir kez giriş yapmanızı sağlar. Yalnızca bu sefer gösterilir."
     },
     "timezone": "Zaman dilimi",
     "locale": "Dil",
+    "username": {
+      "label": "Kullanıcı adı",
+      "help": "Kısa giriş adınız. Girişte bunu da e-postanızı da kullanabilirsiniz — bağlantı istemcileri (SFTP, FTP) için ise bu ad gerekir, çünkü giriş adındaki {'@'} işareti onların ayar dosyalarında kaçış gerektirir."
+    },
     "avatar": {
       "label": "Profil fotoğrafı",
       "upload": "Fotoğraf yükle",
@@ -974,5 +1011,9 @@
     "codeHint": "Uygulama açılmadıysa bu kodu bekleme ekranına yapıştırın:",
     "copy": "Kopyala",
     "copied": "Kopyalandı"
+  },
+  "connections": {
+    "subtitle": "Bu sunucuyu bir depoya bağlayın ve kendi bilgisayarınızdan ona nasıl erişeceğinizi görün.",
+    "advanced": "Gelişmiş depo ayarları"
   }
 }

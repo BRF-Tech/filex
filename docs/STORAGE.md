@@ -6,13 +6,24 @@ top‑level folder you name. You can mix several at once (e.g. a local disk, an 
 bucket, and an SFTP server side by side).
 
 Supported adapters: **local** filesystem · **S3** / S3‑compatible · **SFTP** ·
-**WebDAV** · **FTP/FTPS**.
+**WebDAV** · **FTP/FTPS** · **SMB/CIFS**.
+
+A **NAS** (Synology, QNAP, TrueNAS, a Windows share…) is supported two ways:
+the **`smb` driver** talks to the share directly, and for NFS you mount it with
+the operating system and serve the mount point with the `local` adapter. Most
+boxes also speak SFTP/FTP/WebDAV natively. See
+[NAS](#nas-nfs-smb-and-friends).
+
+> Reaching filex *from* somewhere else — as an S3 endpoint, an SFTP server, an
+> FTPS server, an NFS export or a mounted drive — is the other direction, and
+> lives in [PROTOCOLS.md](PROTOCOLS.md).
 
 - [How storages work](#how-storages-work)
 - [Adding a storage](#adding-a-storage)
 - [The storage config](#the-storage-config)
-- [Adapters](#adapters) — [local](#local) · [S3](#s3--s3-compatible) · [SFTP](#sftp) · [WebDAV](#webdav) · [FTP](#ftp--ftps)
+- [Adapters](#adapters) — [local](#local) · [NAS / SMB / NFS](#nas-nfs-smb-and-friends) · [S3](#s3--s3-compatible) · [SFTP](#sftp) · [WebDAV](#webdav) · [FTP](#ftp--ftps)
 - [Sync — staying in step with the backend](#sync)
+- [Slow storage](#slow-storage)
 - [Read‑only mounts](#read-only-mounts)
 - [Path validation & errors](#path-validation--errors)
 
@@ -81,8 +92,11 @@ filex storage list
 filex storage remove --name team-bucket
 ```
 
-> ⚠ **`filex storage add` does not validate the root‑path guard** (the API/UI
-> do). Always give a non‑empty `prefix`/`root`/`path` — never `/`.
+`filex storage add` runs the same gates as the admin API before it writes:
+unknown `--driver` is refused (with the registered names), `--config` must
+parse as a JSON object, and the root‑path guard applies. Required fields the
+driver declares but the config omits are reported as a warning, not an error —
+an S3 storage on an instance role legitimately ships no keys.
 
 ### Connect a storage at install time (env / Compose / Helm)
 
@@ -172,10 +186,53 @@ storage:
 
 ---
 
+### Driver descriptors (`GET /api/admin/storage-drivers`)
+
+Every driver declares its own config contract — the keys it reads, their type,
+which one is the storage root, which hold credentials, defaults, placeholders
+and an i18n key per label. The admin UI's storage form, the storage editor and
+the replication‑target dialog all render from this endpoint, and the root‑path
+guard reads the same declaration, so a driver's fields cannot drift away from
+what the backend accepts.
+
+```bash
+curl -s https://files.example.com/api/admin/storage-drivers \
+  -H "Authorization: Bearer $TOKEN" | jq '.[] | {driver, fields: [.fields[].key]}'
+```
+
+```json
+{
+  "driver": "s3",
+  "label": "S3 / Hetzner / MinIO",
+  "i18n_key": "storages.driver.s3",
+  "capabilities": { "read": true, "write": true, "presign": true, "…": true },
+  "fields": [
+    { "key": "bucket", "type": "string", "required": true, "label": "Bucket",
+      "i18n_key": "storages.fields.bucket", "placeholder": "my-bucket" },
+    { "key": "prefix", "type": "string", "required": true, "root": true,
+      "label": "Prefix", "i18n_key": "storages.fields.prefix" },
+    { "key": "secret_key", "type": "password", "secret": true, "…": "…" }
+  ]
+}
+```
+
+`root: true` marks the field the [root‑path guard](#path-validation--errors)
+checks. `aliases` lists older spellings of a key that the driver still reads,
+so configs written before a rename keep working. Adding a driver on the backend
+puts it in every picker without a frontend release.
+
+`capabilities` on `/api/capabilities` still carries the plain
+`storage_drivers: ["ftp","local","s3","sftp","webdav"]` name list for older
+callers.
+
+---
+
 ## Adapters
 
 Each adapter's `config` object is passed verbatim to the driver. Only the keys
-below are read; unknown keys are ignored.
+below are read; unknown keys are ignored. The same key lists are served
+machine‑readably by
+[`GET /api/admin/storage-drivers`](#driver-descriptors-get-apiadminstorage-drivers).
 
 ### local
 
@@ -189,6 +246,87 @@ Serves a directory on the host running filex.
 \*One of `path` / `root`. Example: `{"path": "/data/files"}`.
 Capabilities: read, write, move, copy, delete, mkdir, **live change events**
 (fsnotify). Path traversal (`..`) is rejected.
+
+### NAS (NFS, SMB, and friends)
+
+There are two ways, and since v0.20.0 the first one is usually better.
+
+**1 — the `smb` driver (SMB / CIFS).** filex talks to the share itself: give it
+the host, the share NAME alone (`media`, not `\\nas\media`), an account and
+optionally a sub‑folder. No `/etc/fstab`, nothing to mount on the host, and the
+whole configuration stays inside filex.
+
+```jsonc
+{ "name": "NAS", "driver": "smb", "mount_path": "/",
+  "config": { "host": "nas.local", "share": "media",
+              "user": "filex", "password": "…", "root": "projects" } }
+```
+
+⚠ There is **no `nfs` driver** — NFSv3 needs a privileged source port and, for
+anything beyond trust-me-it's-uid-1000, Kerberos. Mount NFS with the OS and use
+option 2. (The other direction *does* exist: filex can be **served as** NFSv3 —
+see [PROTOCOLS.md](PROTOCOLS.md).)
+
+**2 — mount it with the operating system** and serve the mount point with the
+**[local](#local)** adapter. Still supported, and the only option for NFS. It
+has three traps, and all three are below.
+
+```bash
+# NFS
+sudo mount -t nfs nas.local:/volume1/files /mnt/nas
+
+# SMB / CIFS — only if you prefer the OS mount to the smb driver above
+sudo mount -t cifs //nas.local/files /mnt/nas \
+  -o credentials=/etc/nas.cred,uid=1000,gid=1000
+```
+
+```jsonc
+{ "name": "NAS", "driver": "local", "mount_path": "/",
+  "config": { "path": "/mnt/nas/filex" } }
+```
+
+**You may not need the mount at all.** Most NAS boxes speak protocols filex
+talks natively — **[SFTP](#sftp)**, **[FTP/FTPS](#ftp--ftps)**,
+**[WebDAV](#webdav)**, or an S3 endpoint (e.g. MinIO running on the box) for the
+**[S3](#s3--s3-compatible)** adapter. A native adapter keeps the whole
+configuration inside filex instead of half of it in `/etc/fstab`, so prefer one
+where the NAS offers it.
+
+**Docker:** mount the share on the **host** and bind‑mount it into the container
+(`-v /mnt/nas:/data/nas`), then point the storage at `/data/nas/…`. The official
+image sets no `USER`, so it runs as root unless you override it — meaning the
+permission that usually bites is on the **NAS side** (NFS `root_squash`, the SMB
+share's ACL), not inside the container. If you *do* run the container as a
+non‑root user, the `uid`/`gid` mount options have to match it: CIFS assigns
+ownership at mount time, not from the file itself.
+
+**Trap 1 — use `sync_mode: poll`, never `fsnotify`.** `fsnotify` is an OS‑local
+watch (inotify / kqueue / ReadDirectoryChangesW). It sees what *this* machine
+writes to the mount and **never sees what another machine writes to the NAS** —
+so a file dropped on the share from a laptop would stay invisible until
+something else triggered a sync. filex only falls back to polling when the
+driver isn't `local`, and a mounted share *is* the `local` driver: nothing falls
+back, nothing warns. Choose `poll` explicitly and set an interval that matches
+how fresh you need the listing (`sync_interval_s`; `900` = 15 min is the default
+when you don't set one, and 60 s is reasonable on a busy share).
+
+**Trap 2 — mount before filex starts.** filex **creates a storage's root
+directory if it is missing**, so a storage pointed at an *unmounted* path will
+cheerfully serve an empty directory, and the next sync run reads "empty backend"
+as "everything was deleted". The [tombstone guard](#sync) blocks the *first*
+such run — it skips the delete pass when a run sees less than ~70 % of what the
+previous run saw — but it only ever compares against the **previous run**. Once
+that empty run is on record with a seen count of 0, the guard has nothing to
+compare against and the next empty run soft‑deletes the tree from the cache. It
+buys you one cycle, not safety. Nothing is deleted on the NAS itself, and a sync
+against a properly mounted share restores the entries, but in between your users
+see an empty folder. Put the share in `/etc/fstab` with `_netdev` (or use a
+systemd `.mount` unit and order filex `After=` it).
+
+**Trap 3 — a share is fast to browse and slow to transfer.** Listings, search
+and thumbnails come from filex's own index and caches, so the explorer stays
+quick over a slow mount; uploads and downloads move real bytes and run at the
+speed of the network path. See [Slow storage](#slow-storage).
 
 ### S3 / S3‑compatible
 
@@ -244,13 +382,15 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
 | `user` | **yes** | — | SSH username. |
 | `password` | one‑of | — | Password auth. |
 | `private_key` | one‑of | — | PEM private key (string). Use instead of / with password. |
+| `key_path` | one‑of | — | Path to a key file on the server, read at Init when `private_key` is empty. |
 | `port` | no | `22` | Integer. |
-| `root` | no | `/` | Base directory (use a sub‑folder). |
+| `root` | **yes** | `/` | Base directory. Must be a sub‑folder — the root guard rejects `/`. Aliases: `base_path`, `remote_path`. |
 | `known_hosts` | no | `~/.filex/known_hosts` | Strict OpenSSH known_hosts path. |
 | `host_key` | no | — | Pin a single host key. |
 | `insecure_skip_host_key` | no | `false` | Disable host‑key checking (not recommended). |
 
-Provide **either** `password` **or** `private_key`. **Host‑key handling:**
+`user` also accepts the legacy spelling `username`.
+Provide **either** `password`, `private_key` **or** `key_path`. **Host‑key handling:**
 if you don't pin a key or supply a known_hosts file, filex uses
 **trust‑on‑first‑use** — it records the server key on first connect and refuses
 if it later changes (a MITM signal). Example:
@@ -262,12 +402,15 @@ Tested against **Nextcloud, ownCloud, Apache mod_dav, nginx‑dav, SabreDAV**.
 
 | key | required | default | notes |
 |---|---|---|---|
-| `url` | **yes** | — | Full WebDAV base URL (scope the path here — there is no separate `root`). |
-| `user` | **yes** | — | Basic‑auth user. |
+| `url` | **yes** | — | WebDAV base URL. |
+| `user` | **yes** | — | Basic‑auth user. Alias: `username`. |
 | `password` | no | — | Basic‑auth password. |
+| `root` | **yes** | `""` | Sub‑folder under the base URL — the mount point. Aliases: `base_path`, `remote_path`. |
 
+`root` is joined onto the base URL's path; a storage saved before the driver
+read it (empty `root`) still mounts exactly at the URL, unchanged.
 Only **Basic auth** is supported today (Bearer is planned). Example:
-`{"url":"https://cloud.example.com/remote.php/dav/files/alice/filex","user":"alice","password":"…"}`.
+`{"url":"https://cloud.example.com/remote.php/dav/files/alice/","user":"alice","password":"…","root":"filex"}`.
 `MKCOL`/`MOVE`/`COPY`/`DELETE`/`PROPFIND` back the file operations.
 
 ### FTP / FTPS
@@ -275,10 +418,10 @@ Only **Basic auth** is supported today (Bearer is planned). Example:
 | key | required | default | notes |
 |---|---|---|---|
 | `host` | **yes** | — | Server hostname/IP. |
-| `user` | **yes** | — | Username. |
+| `user` | **yes** | — | Username. Alias: `username`. |
 | `password` | **yes** | — | Password (required, unlike SFTP). |
 | `port` | no | `21` | Integer. |
-| `root` | no | `/` | Base directory (use a sub‑folder). |
+| `root` | **yes** | `/` | Base directory. Must be a sub‑folder — the root guard rejects `/`. Aliases: `base_path`, `remote_path`. |
 | `tls` | no | `false` | Explicit FTPS (AUTH TLS). |
 | `passive` | no | `true` | PASV mode; set `false` to disable. |
 
@@ -306,14 +449,117 @@ uploaded straight to the S3 console).
 are updated, and objects gone from the backend are soft‑deleted from the cache.
 A **tombstone guard** protects against transient backend glitches: if a run sees
 fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
-(so a flaky S3 endpoint doesn't wipe your tree from the cache).
+(so a flaky S3 endpoint doesn't wipe your tree from the cache). ⚠ The comparison
+is against the **previous run only**: a backend that stays empty records a run
+with a seen count of 0, and the run after that has nothing to compare against
+and deletes. The guard buys a cycle to notice the outage in — see
+[NAS trap 2](#nas-nfs-smb-and-friends).
 
-**Global tuning (env):** `FILEX_SYNC_INTERVAL` (default `15m`) is the fallback
-cadence, and `FILEX_SYNC_WORKERS` (default `4`) sizes the pool. Per‑storage
-`sync_interval_s` takes precedence.
+**Cadence is per storage.** The poll loop uses the storage row's
+`sync_interval_s` (`900` when you don't set one; anything under 5 s is treated
+as 15 minutes). Every enabled storage gets its own goroutine and walks its
+backend sequentially — there is no shared worker pool, so set the interval on
+the storage rather than looking for a global knob.
 
 You can watch runs at `GET /api/admin/storages/{id}/sync-runs` and detect drift
 with `GET /api/admin/storages/{id}/drift`.
+
+---
+
+## Slow storage
+
+A NAS over a VPN, an SFTP box on the other side of the country, a bucket in
+another region — filex is built so that the slow part stays the slow part.
+
+**Already fast, nothing to configure:**
+- **Listings** are served from the DB cache, not the backend. The driver is only
+  consulted for a storage that has never synced (so a brand‑new mount isn't
+  empty while the first walk runs).
+- **Search** runs against filex's own index/database and never touches the
+  backend at query time (see [SEARCH.md](SEARCH.md)).
+- **Thumbnails** are generated once and cached on local disk, so the second
+  visit to a photo folder costs nothing.
+
+**Worth tuning:**
+
+| Knob | Where | Why |
+|---|---|---|
+| `sync_interval_s` | storage row | Every poll is a **full recursive walk** of the backend. On a big, rarely changing share, raise it. |
+| `sync_mode: ondemand` | storage row | Never walks on its own — you trigger it with `POST /api/admin/storages/{id}/sync` (e.g. from the job that writes to the share). |
+| `filex thumb backfill` | CLI | Pays the first‑browse cost up front instead of making a user wait. Takes `--storage <id\|name>`, `--limit N`, `--concurrency N`, `--retry-failed`. |
+| `FILEX_THUMB_BACKFILL_ON_BOOT=once` | env | Same thing, once, in the background at startup. |
+| `disable_presign: true` | S3 `config` | The **opposite** of a speed‑up: it forces download bytes through filex instead of a redirect straight to the bucket. Use it only when presigned URLs don't work for your users (Hetzner/Ceph `SignatureDoesNotMatch`, or a bucket that isn't reachable from the browser). |
+
+**Downloads support ranges.** `GET …?action=download|preview` answers
+`Accept-Ranges: bytes` and serves `206` / `Content-Range` for a `Range`
+request, so video and audio seek, a dropped download resumes from where it
+stopped instead of restarting, and only the missing bytes are re-read from the
+backend. All five drivers (`local`, `s3`, `sftp`, `ftp`, `webdav`) can start a
+transfer at an offset; a driver that could not would answer
+`Accept-Ranges: none` and serve the whole object, never a wrong window.
+Public **share links** (`/s/…`) deliberately stay whole-object: one request
+there is one download against the link's cap.
+
+### Prepared copies for big downloads
+
+Ranges make a download resumable and seekable, but they do not make a slow
+backend fast. So when a **big** file lives on a **slow** storage, filex fetches
+it to local disk once and says so while it happens:
+
+1. the first `?action=download` is answered **`202`** — a progress page in a
+   browser, `{"state":"preparing","percent":N}` for an API client;
+2. the client polls `?action=download&…&cache=status` (the page does it for
+   you) until `{"ready":true}`;
+3. from then on the file is served from local disk — for **every** surface,
+   with full `Range` support, at local-disk speed, without touching the backend
+   again.
+
+The copy is keyed on the file's identity (its ETag, or size+mtime for backends
+that have none), so **a changed file invalidates itself**: the next request
+prepares the new content rather than serving the old.
+
+**When it happens.** Both conditions, together:
+
+| Condition | How |
+|---|---|
+| The file is big | `size ≥ FILEX_CACHE_MIN_SIZE` (default 64 MiB) |
+| The storage is slow | `"slow": true` in the storage's `config`, **or** measured below `FILEX_CACHE_SLOW_BPS` (default 10 MiB/s) |
+
+```jsonc
+{ "name": "nas", "driver": "local", "config": { "path": "/mnt/nas", "slow": true } }
+```
+
+**When it deliberately does not happen** — the rule being "never make it
+worse":
+
+* **Small files** are never prepared, whatever the flag says. One round trip
+  beats a preparing screen.
+* **A storage that measures fast** is not prepared even if you flagged it: a
+  measurement at twice the threshold overrules the flag, because on a fast
+  backend a prefetch replaces an instant stream with a wait. (Move a share onto
+  a faster link and filex notices; you do not have to remember the flag.)
+* **Previews** never wait. Scrubbing a video asks for a window, and it gets one.
+  A preview still *uses* a copy that already exists.
+* **`Range` requests** are never answered `202` — a resume or a seek is a client
+  already committed to a body.
+* **Public share links** are never answered `202` either: they spend one of the
+  link's capped downloads before bytes leave, and "not yet" is not something to
+  charge a visitor for. They do read from a copy that exists.
+* **Files still being uploaded** (`transfer_state: staged`) are not prepared —
+  their bytes are already on filex's local disk.
+
+**Disk.** The cache directory (`<data_dir>/cache`) has a **global** ceiling,
+`FILEX_CACHE_MAX_BYTES`, default 20 GiB, enforced with LRU eviction and counting
+copies that are still being fetched. It is never unlimited. An entry a request
+is currently reading is never evicted; when nothing can be freed, the new file
+is simply not prepared and streams from the backend as before.
+
+**What is not tuned away:** moving bytes still takes as long as the link takes.
+An upload lands in filex's staging area first, so it is resumable and the client
+stops waiting on the backend ([UPLOADS.md](UPLOADS.md)) — but the transfer to
+the backend still runs at the backend's speed, and the *first* download of a big
+file pays the full fetch before it is served. What the prepared copy buys is
+that nobody pays it twice, and that the person waiting is told why.
 
 ---
 

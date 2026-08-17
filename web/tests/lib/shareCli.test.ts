@@ -56,7 +56,7 @@ describe('shareCliCommand', () => {
 
   it('quotes for a POSIX shell, including embedded quotes', () => {
     expect(shQuote("it's")).toBe(`'it'\\''s'`);
-    const cmd = shareCliCommand({ url: 'https://files.example.com/s/abc', filename: "burak's file.pdf" });
-    expect(cmd).toContain(`'burak'\\''s file.pdf'`);
+    const cmd = shareCliCommand({ url: 'https://files.example.com/s/abc', filename: "ada's file.pdf" });
+    expect(cmd).toContain(`'ada'\\''s file.pdf'`);
   });
 });

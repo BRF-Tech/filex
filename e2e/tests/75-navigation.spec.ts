@@ -41,22 +41,62 @@ test.describe('Navigation — root crumb + go-up', () => {
     await dropStorageByName(request, STORAGE_NAME);
   });
 
-  test('root crumb label = adapter name (not "Kök/Root")', async ({ page }) => {
+  test('the storage crumb is named after the adapter (not "Kök/Root")', async ({ page }) => {
     await loginAs(page);
     await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE_NAME)}`);
-    const firstCrumb = page.locator('.fe-breadcrumb__crumb').first();
-    await expect(firstCrumb).toBeVisible({ timeout: 10_000 });
-    await expect(firstCrumb).toContainText(STORAGE_NAME);
+    const crumbs = page.locator('.fe-breadcrumb__crumb');
+    await expect(crumbs.first()).toBeVisible({ timeout: 10_000 });
+
+    // ⚠ The admin explorer sets `multiStorageRoot: true` unconditionally
+    // (Explore.vue:141), so Breadcrumb.vue prepends a global "/" crumb that
+    // pops back to the storage picker and the storage name takes slot #1.
+    // Asserting on `.first()` therefore read "/" and failed — the product
+    // changed on purpose and the assertion never caught up.
+    //
+    // What the original bug was about survives intact: the crumb that lands
+    // you at the storage ROOT must be labelled with the ADAPTER NAME, not a
+    // localised "Kök"/"Root", and it must sit directly above the path.
+    const labels = (await crumbs.allInnerTexts()).map((s) => s.replace(/[›»]/g, '').trim());
+    expect(labels, `crumbs were ${JSON.stringify(labels)}`).toContain(STORAGE_NAME);
+    expect(labels[0] === '/' ? labels[1] : labels[0]).toBe(STORAGE_NAME);
+    expect(labels, 'a generic root label is the exact bug this pins').not.toContain('Kök');
+    expect(labels, 'a generic root label is the exact bug this pins').not.toContain('Root');
   });
 
-  test('parent-dir button is hidden at storage root', async ({ page }) => {
+  test('at storage root there is nothing below the storage, and no bogus parent', async ({
+    page,
+  }) => {
     await loginAs(page);
     await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE_NAME)}`);
-    await expect(page.locator('.fe-breadcrumb__crumb').first()).toBeVisible({
-      timeout: 10_000,
-    });
+    const crumbs = page.locator('.fe-breadcrumb__crumb');
+    await expect(crumbs.first()).toBeVisible({ timeout: 10_000 });
+
+    const labels = async () =>
+      (await crumbs.allInnerTexts()).map((s) => s.replace(/[›»]/g, '').trim()).filter(Boolean);
+
+    // At the storage root the trail ends at the storage: no path segments
+    // below it. This is the half of the original bug that is true in every
+    // mode.
+    expect(await labels()).toEqual(expect.arrayContaining([STORAGE_NAME]));
+    expect((await labels()).filter((l) => l !== '/')).toEqual([STORAGE_NAME]);
+
+    // ⚠ The old assertion was `upBtn` count === 0. In the admin explorer
+    // `multiStorageRoot` is always on, so when the deployment has more than
+    // one storage there IS a real level above — the storage picker — and the
+    // button legitimately appears. That made this test pass or fail on how
+    // many storages the rest of the suite happened to be holding at that
+    // moment: green by default, red under `--s3`.
+    //
+    // Assert the behaviour instead: whatever "up" is offered here must leave
+    // the storage, never re-enter it. Going up from the root and landing back
+    // in the same folder IS the bug this file exists for.
     const upBtn = page.getByRole('button', { name: /üst klasör|up one level/i });
-    await expect(upBtn).toHaveCount(0);
+    if (await upBtn.count()) {
+      await upBtn.first().click();
+      await expect
+        .poll(async () => (await labels()).filter((l) => l !== '/'))
+        .toEqual([]);
+    }
   });
 
   test('drill in + click root-crumb pops back to storage root', async ({ page, request }) => {

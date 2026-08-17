@@ -17,6 +17,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/api"
+	"github.com/brf-tech/filex/backend/internal/api/handlers"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authapitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	authldap "github.com/brf-tech/filex/backend/internal/auth/drivers/ldap"
@@ -27,17 +28,27 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/filecache"
+	"github.com/brf-tech/filex/backend/internal/ftpsrv"
+	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/mailer"
+	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/nfssrv"
+	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/replica"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/sftpsrv"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
@@ -58,6 +69,7 @@ import (
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/s3"
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/sftp"
+	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/smb"
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/webdav"
 )
 
@@ -83,6 +95,22 @@ type Server struct {
 	resolver        func(int64) (storage.Driver, error)
 	mailer          *mailer.Service
 	zipWarmer       *sharezip.Warmer
+	// sftp is the SFTP endpoint, nil when FILEX_SFTP is off. It owns a TCP
+	// listener of its own rather than a route on the HTTP server.
+	sftp *sftpsrv.Server
+	// ftps is the FTPS endpoint, nil when FILEX_FTPS is off. Like the SFTP
+	// one it owns its own listener rather than a route.
+	ftps *ftpsrv.Server
+	// nfs is the NFSv3 endpoint, nil when FILEX_NFS is off.
+	nfs *nfssrv.Server
+	// protocolAuth is the shared credential resolver every non-HTTP protocol
+	// authenticates through. Held here for the revalidation sweep, which is what
+	// makes revoking a credential reach a session that is already open.
+	protocolAuth *protocolauth.Resolver
+	// stagedUploads owns the staging sweeper. Filled by api.BuildRouter, which
+	// constructs the handler the routes use — running the sweeper against a
+	// second instance would sweep a different view of the same directory.
+	stagedUploads *handlers.StagedUpload
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -105,7 +133,36 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	if err := db.Migrate(ctx, dbDrv, sqlDB); err != nil {
 		return nil, fmt.Errorf("server: migrate: %w", err)
 	}
-	store := dbDrv.NewStore(sqlDB)
+	// Every consumer below — handlers, background workers, the trash purge,
+	// the CLI — takes the QUOTA-ACCOUNTING store, not the raw one. That
+	// wrapper is where users.usage_bytes is kept true: it owns node creation,
+	// overwrite and hard delete, so a write surface added later is counted
+	// without a line of its own. See internal/quotastore for the rules (and
+	// for why the post-write hooks could not host this).
+	//
+	// ⚠ Wrap HERE, before anything captures `store`. A consumer handed the raw
+	// store writes bytes nobody counts — which is precisely the bug this
+	// fixes: quota.AddUsage and SetNodeOwner had no callers in the tree at
+	// all, so usage_bytes was never incremented, GetNodeOwner always returned
+	// nil, and the SubUsage at trash-purge could never fire either.
+	accounting := quotastore.New(dbDrv.NewStore(sqlDB))
+	accounting.AttachMetrics(quotaMetrics{})
+	// The identity wrapper goes OUTSIDE the accounting one so it sees every
+	// CreateUser, including those made by the JIT provisioning in the OIDC,
+	// LDAP and proxy-header drivers. It names accounts; see identitystore for
+	// why that cannot live in the eight call sites (migration 00025).
+	var store db.Store = identitystore.New(accounting)
+
+	// Name the accounts that predate migration 00025. Idempotent and cheap
+	// (one query plus one UPDATE per unnamed account), so it runs on every
+	// start rather than as a one-shot: an account restored from an older dump,
+	// or one whose naming lost a race at creation time, is repaired here
+	// instead of quietly lacking an SFTP/FTPS login forever.
+	if named, err := identitystore.Backfill(ctx, store); err != nil {
+		slog.Warn("identity: username backfill failed; accounts without a username can still sign in by e-mail", slog.Any("err", err))
+	} else if named > 0 {
+		slog.Info("identity: named existing accounts", slog.Int("count", named))
+	}
 
 	// Auth drivers — local always present.
 	var localDrv auth.LoginDriver
@@ -179,7 +236,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 
 	// API-token driver is always enabled (independent of cfg.Auth.Drivers)
-	// so AI agents / the work.brf.sh FilexClient / MCP clients can
+	// so AI agents / the work.example.com FilexClient / MCP clients can
 	// authenticate against /api/files and /api/ai with X-Filex-Token or a
 	// Bearer token. Tokens are minted from /api/admin/ai-tokens.
 	{
@@ -227,10 +284,54 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Sync worker. Bind the search index so every create/update/delete
 	// during a sync run also updates Bleve — without this, the in-toolbar
 	// search box only sees rows the admin's "Rebuild" button has touched.
-	worker := syncpkg.New(store)
+	// FILEX_SYNC_INTERVAL reaches the sync worker HERE. Until now it was
+	// parsed into config and read by nobody, while loopPoll used a hardcoded
+	// 15m that happened to match the default.
+	worker := syncpkg.NewWithInterval(store, cfg.Sync.DefaultInterval)
 	if idx != nil {
 		worker.AttachIndex(idx)
 	}
+
+	// Staging area for resumable uploads, plus the byte-source resolver every
+	// read surface consults. Both are constructed HERE, before the services
+	// that need them, because a staged upload publishes its node the moment the
+	// client commits and transfers the bytes afterwards: during that window the
+	// driver does not have the object, and a service that asks it directly
+	// fails or reads the version being replaced.
+	//
+	// This one uses the raw (unscoped) store, like every other background
+	// service in this function. The router builds its own over the tenant-
+	// scoped store — same helper, each bound to the store its layer already
+	// uses, so no tenant boundary moves.
+	stagingArea := staging.New(cfg.Upload.StagingDir)
+
+	// The local copy filex prepares for a big file on a slow backend. ONE
+	// cache for the whole instance, shared by this background resolver and the
+	// router's: two caches over the same directory would each enforce the
+	// global cap against half the truth, and the cap is the part that must not
+	// be wrong.
+	fileCacheCfg := filecache.Config{
+		Dir:             cfg.Cache.Dir,
+		MinSize:         cfg.Cache.MinSize,
+		MaxBytes:        cfg.Cache.MaxBytes,
+		SlowBytesPerSec: cfg.Cache.SlowBytesPerSec,
+	}
+	if cfg.Cache.Disabled {
+		fileCacheCfg.Dir = ""
+	}
+	fileCache := filecache.New(fileCacheCfg)
+	if fileCache.Enabled() {
+		slog.Info("filecache: enabled",
+			slog.String("dir", cfg.Cache.Dir),
+			slog.Int64("min_size", fileCache.MinSize()),
+			slog.Int64("max_bytes", fileCache.MaxBytes()),
+			slog.Int64("bytes", fileCache.Bytes()),
+			slog.Int("entries", fileCache.Len()))
+	} else {
+		slog.Info("filecache: disabled (FILEX_CACHE=0)")
+	}
+
+	bgBody := filebody.New(store, stagingArea).WithCache(fileCache)
 
 	// Thumbnail pipeline.
 	pipelineCaps := thumb.Capabilities{Image: true}
@@ -243,6 +344,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		pipelineCaps.SVG = cap.Thumbs.SVG
 	}
 	pipeline := thumb.New(store, cfg.Thumbs.CacheDir, pipelineCaps)
+	pipeline.AttachBody(bgBody)
 
 	// Share service.
 	shareSvc := share.NewService(store)
@@ -382,6 +484,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// blocks on (or fails because of) extraction.
 	if idx != nil && srvObj.qpool != nil && cfg.Search.Content {
 		contentIdx := queue.NewContentIndexer(store, resolver, idx, cfg.Search.ContentMaxBytes)
+		contentIdx.AttachBody(bgBody)
 		srvObj.qpool.Register(queue.TypeContentIndex, contentIdx.Handle)
 		qd := srvObj.queue
 		idx.SetContentHook(func(ctx context.Context, n *model.Node) {
@@ -410,6 +513,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	if srvObj.qpool != nil {
 		if avScanner := antivirus.New(); avScanner.Supports() {
 			avJob := queue.NewAntivirusScanner(store, resolver, avScanner, srvObj.notify, idx, antivirus.MaxScanBytes())
+			avJob.AttachBody(bgBody)
 			srvObj.qpool.Register(queue.TypeAntivirusScan, avJob.Handle)
 			qd := srvObj.queue
 			avEnqueue = func(ctx context.Context, n *model.Node) {
@@ -451,9 +555,23 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
-	// Quota service — per-user usage accounting + admin set.
-	quotaSvc := quota.New(store)
+	// Quota service — per-user usage accounting + admin set. Taken FROM the
+	// accounting wrapper rather than built again, so the ceiling that is
+	// enforced and the counter that is moved are the same object over the
+	// same tables.
+	quotaSvc := accounting.Quota()
 	srvObj.quota = quotaSvc
+	// Seed the process gauge from the DB so a restart does not report zero
+	// usage until the next upload. One pass over the users table at boot;
+	// after this the accounting wrapper moves the gauge by the same deltas it
+	// writes, so the two never diverge without the DB also being wrong.
+	if users, err := store.ListUsers(ctx); err == nil {
+		var total int64
+		for _, u := range users {
+			total += u.UsageBytes
+		}
+		metrics.QuotaUsageBytes.Set(float64(total))
+	}
 
 	// Trash retention service — handles soft-delete restore + scheduled
 	// purge of expired tombstones.
@@ -465,6 +583,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// /api/admin/versions. Its daily retention loop (versions.keep_n)
 	// starts in Start().
 	versionsSvc := versioning.New(store, versioning.StorageResolver(resolver))
+	versionsSvc.AttachBody(bgBody)
 	srvObj.versions = versionsSvc
 
 	// Mailer for invite/share notices — verified periodically in Start().
@@ -481,24 +600,57 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// each active folder share and pre-builds its zip if the folder changed, so
 	// downloads almost always hit a warm cache. Uses the raw (unscoped) store
 	// like the other background services.
-	zipCache := sharezip.New(filepath.Join(cfg.DataDir, "sharezips"))
+	//
+	// ⚠ It lives under the CACHE directory, not beside the data: every byte in
+	// here is regenerable from the folder it archives, and one 15 GB archive of
+	// an eleven-minute share once rode into the backups, the off-site restore
+	// and the DR mirror three times over before anyone noticed. Backups should
+	// exclude <data>/cache entirely; see docs/SHARING.md.
+	zipDir := filepath.Join(cfg.Cache.Dir, "sharezips")
+	migrateShareZipDir(filepath.Join(cfg.DataDir, "sharezips"), zipDir)
+	zipCache := sharezip.New(zipDir)
 	srvObj.zipWarmer = sharezip.NewWarmer(
 		zipCache,
 		func(ctx context.Context) ([]sharezip.DirShare, error) {
-			rows, _, err := store.ListAllShares(ctx, nil, true, 1000, 0)
-			if err != nil {
-				return nil, err
+			// ⚠ Paged to completion on purpose. This list is not only what
+			// gets pre-built, it is also what the sweeper keeps and what a
+			// running build checks itself against — a share truncated off
+			// the end of page one would have its archive deleted and its
+			// build abandoned while the link still worked.
+			const page, maxShares = 500, 100000
+			var out []sharezip.DirShare
+			complete := false
+			for offset := 0; offset < maxShares; offset += page {
+				rows, total, err := store.ListAllShares(ctx, nil, true, page, offset)
+				if err != nil {
+					return nil, err
+				}
+				for _, sm := range rows {
+					if sm.Share == nil || sm.Share.Kind == model.ShareKindDrop {
+						continue
+					}
+					node, nerr := store.GetNode(ctx, sm.Share.NodeID)
+					if nerr != nil && !errors.Is(nerr, sql.ErrNoRows) {
+						// A database hiccup must not read as "that share
+						// is gone": the sweeper would delete a live
+						// archive and a running build would abandon
+						// itself. Fail the pass; the previous view stands.
+						return nil, nerr
+					}
+					if node == nil || node.Type != model.NodeTypeDirectory {
+						continue
+					}
+					out = append(out, sharezip.DirShare{StorageID: node.StorageID, Path: node.Path, NodeID: node.ID})
+				}
+				if len(rows) < page || int64(offset+len(rows)) >= total {
+					complete = true
+					break
+				}
 			}
-			out := make([]sharezip.DirShare, 0, len(rows))
-			for _, sm := range rows {
-				if sm.Share == nil || sm.Share.Kind == model.ShareKindDrop {
-					continue
-				}
-				node, nerr := store.GetNode(ctx, sm.Share.NodeID)
-				if nerr != nil || node == nil || node.Type != model.NodeTypeDirectory {
-					continue
-				}
-				out = append(out, sharezip.DirShare{StorageID: node.StorageID, Path: node.Path, NodeID: node.ID})
+			if !complete {
+				// Better no answer than half an answer, for the same
+				// reason: half an answer deletes live archives.
+				return nil, fmt.Errorf("sharezip: more than %d active shares; refusing a partial list", maxShares)
 			}
 			return out, nil
 		},
@@ -584,6 +736,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		OIDCAuth:        oidcDrv,
 		Mailer:          srvObj.mailer,
 		ZipCache:        zipCache,
+		FileCache:       fileCache,
 		AVScan:          avEnqueue, /* koru:k2 av */
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
@@ -596,7 +749,144 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		slog.Info("webdav: disabled (FILEX_DAV=0)")
 	}
 
+	// The staging directory itself is created here (not lazily in the router)
+	// so a broken/unwritable staging path is a boot-time complaint rather than
+	// a surprise on the first big upload. The Area value was built at the top,
+	// because the background services already needed it.
+	if err := os.MkdirAll(cfg.Upload.StagingDir, 0o755); err != nil {
+		slog.Warn("uploads: staging dir unavailable",
+			slog.String("dir", cfg.Upload.StagingDir), slog.String("err", err.Error()))
+	} else {
+		slog.Info("uploads: staging enabled",
+			slog.String("dir", cfg.Upload.StagingDir),
+			slog.String("ttl", cfg.Upload.StagingTTL.String()),
+			slog.Int64("chunk", cfg.Upload.ChunkSize))
+	}
+	deps.Staging = stagingArea
+
+	// ⚠ Set BEFORE BuildRouter but READ later: the listener does not exist yet,
+	// and with `:0` the configured address names no port at all. The closure
+	// resolves at request time, when it does.
+	deps.FTPSAddr = func() string {
+		if srvObj.ftps == nil {
+			return ""
+		}
+		return srvObj.ftps.Addr()
+	}
+
 	router := api.BuildRouter(deps)
+	srvObj.stagedUploads = deps.StagedUploads
+	// Filled BY BuildRouter when nil — same reason the protocol listeners below
+	// are built after it.
+	srvObj.protocolAuth = deps.ProtocolAuth
+
+	// SFTP endpoint (its own TCP listener, not a route). OFF unless asked for:
+	// a port nobody requested is not something to open for them.
+	//
+	// ⚠ Built AFTER BuildRouter, and from `deps`: the credential resolver, the
+	// ACL resolver and the read door are singletons with their own caches, and
+	// a second set would mean "how long does a revoked password keep working"
+	// has two different answers depending on which protocol you ask.
+	if cfg.SFTP.Enabled {
+		hostKeyDir := cfg.SFTP.HostKeyDir
+		if hostKeyDir == "" {
+			hostKeyDir = filepath.Join(cfg.DataDir, "ssh")
+		}
+		sftpSrv, err := sftpsrv.New(sftpsrv.Config{
+			Enabled:     true,
+			Addr:        cfg.SFTP.Addr,
+			HostKeyDir:  hostKeyDir,
+			Banner:      cfg.SFTP.Banner,
+			MaxSpool:    cfg.SFTP.MaxSpool,
+			Store:       deps.Store,
+			Auth:        deps.ProtocolAuth,
+			ACL:         deps.ACL,
+			Resolver:    deps.StorageResolver,
+			Body:        deps.Body,
+			Quota:       deps.Quota,
+			Index:       deps.Index,
+			Thumbs:      deps.Thumbs,
+			SpoolDir:    cfg.Upload.StagingDir,
+			MultiTenant: cfg.MultiTenant,
+		})
+		if err != nil {
+			// A misconfigured host key directory must not take the whole
+			// service down: the web app is what most people are here for.
+			slog.Error("sftp: not started", slog.String("err", err.Error()))
+		} else {
+			srvObj.sftp = sftpSrv
+		}
+	} else {
+		slog.Info("sftp: disabled (FILEX_SFTP=0)")
+	}
+
+	// FTPS endpoint, same shape as SFTP: its own listener, off unless asked
+	// for, and built from `deps` so the credential resolver and the read door
+	// are the SAME singletons every other protocol uses.
+	//
+	// ⚠⚠ AFTER BuildRouter, like the SFTP block above. `deps.ProtocolAuth`,
+	// `deps.ACL` and `deps.Body` are filled in BY BuildRouter when they are
+	// nil, so a listener constructed before it gets nil for all three — which
+	// is exactly what happened here: "ftps: not started … Auth … required",
+	// logged at boot while the web app came up fine (2026-08-16, found by
+	// pointing curl at the port).
+	if cfg.FTPS.Enabled {
+		ftpsSrv, err := ftpsrv.New(ftpsrv.Config{
+			Enabled:        true,
+			Addr:           cfg.FTPS.Addr,
+			PublicHost:     cfg.FTPS.PublicHost,
+			PassivePortMin: cfg.FTPS.PassivePortMin,
+			PassivePortMax: cfg.FTPS.PassivePortMax,
+			CertFile:       cfg.FTPS.CertFile,
+			KeyFile:        cfg.FTPS.KeyFile,
+			CertDir:        filepath.Join(cfg.DataDir, "ftps"),
+			Banner:         cfg.FTPS.Banner,
+			IdleTimeout:    cfg.FTPS.IdleTimeout,
+			Store:          deps.Store,
+			Auth:           deps.ProtocolAuth,
+			ACL:            deps.ACL,
+			Resolver:       deps.StorageResolver,
+			Body:           deps.Body,
+			Quota:          deps.Quota,
+			Index:          deps.Index,
+			Thumbs:         deps.Thumbs,
+			SpoolDir:       cfg.Upload.StagingDir,
+			MultiTenant:    cfg.MultiTenant,
+		})
+		if err != nil {
+			slog.Error("ftps: not started", slog.String("err", err.Error()))
+		} else {
+			srvObj.ftps = ftpsSrv
+		}
+	} else {
+		slog.Info("ftps: disabled (FILEX_FTPS=0)")
+	}
+
+	// NFSv3 endpoint. Same placement rule as the two above: after BuildRouter,
+	// built from `deps`.
+	if cfg.NFS.Enabled {
+		nfsSrv, err := nfssrv.New(nfssrv.Config{
+			Enabled:     true,
+			Addr:        cfg.NFS.Addr,
+			Store:       deps.Store,
+			Auth:        deps.ProtocolAuth,
+			ACL:         deps.ACL,
+			Resolver:    deps.StorageResolver,
+			Body:        deps.Body,
+			Quota:       deps.Quota,
+			Index:       deps.Index,
+			Thumbs:      deps.Thumbs,
+			SpoolDir:    cfg.Upload.StagingDir,
+			MultiTenant: cfg.MultiTenant,
+		})
+		if err != nil {
+			slog.Error("nfs: not started", slog.String("err", err.Error()))
+		} else {
+			srvObj.nfs = nfsSrv
+		}
+	} else {
+		slog.Info("nfs: disabled (FILEX_NFS=0)")
+	}
 
 	srvObj.srv = &http.Server{
 		Addr:              cfg.Listen,
@@ -612,6 +902,40 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	seedFromEnv(ctx, store, cfg)
 
 	return srvObj, nil
+}
+
+// migrateShareZipDir moves a pre-existing folder-share ZIP cache out of the
+// data directory and into the cache directory, once, at boot.
+//
+// The archives are regenerable, so the fallback for anything that does not
+// move cleanly is to delete them rather than to leave a second cache nobody
+// sweeps: an orphaned <data>/sharezips would keep the exact bug this change
+// exists to end (files that outlive their share, in the backup set).
+func migrateShareZipDir(legacy, dst string) {
+	if legacy == "" || dst == "" || legacy == dst {
+		return
+	}
+	if fi, err := os.Stat(legacy); err != nil || !fi.IsDir() {
+		return
+	}
+	if _, err := os.Stat(dst); os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err == nil {
+			if err := os.Rename(legacy, dst); err == nil {
+				slog.Info("sharezip: moved cache out of the data directory",
+					slog.String("from", legacy), slog.String("to", dst))
+				return
+			}
+		}
+	}
+	// Destination already there, or the rename failed (a cross-device data
+	// dir, say). Drop the old copy; the warmer rebuilds what is still shared.
+	if err := os.RemoveAll(legacy); err != nil {
+		slog.Warn("sharezip: could not remove the legacy cache directory",
+			slog.String("dir", legacy), slog.String("err", err.Error()))
+		return
+	}
+	slog.Info("sharezip: removed the legacy cache directory (archives are regenerable)",
+		slog.String("dir", legacy))
 }
 
 // seedExternalDefaults inserts placeholder rows for the three known
@@ -675,9 +999,28 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.zipWarmer != nil {
 		s.zipWarmer.Start(ctx)
 	}
+	// Staging sweeper — an upload area with no GC is a disk incident waiting.
+	// Sweeps once at boot, then on the configured interval; every removal is
+	// logged with its id, path and staged size.
+	if s.stagedUploads != nil {
+		go s.stagedUploads.RunSweeper(ctx, s.cfg.Upload.SweepInterval)
+	}
 	if s.replicaCron != nil {
 		s.replicaCron.Start()
 		_ = s.replicaCron.Reload(ctx)
+	}
+
+	// ⚠⚠ Revocation for the protocols that authenticate ONCE and then stay open.
+	// SFTP, FTPS and NFS check a credential at login and never again, so
+	// deleting a token, disabling an account or suspending a tenant used to do
+	// nothing at all to the session that credential had already opened — the
+	// operator's action was true for the next login and false for the
+	// connection in flight. This sweep re-checks every registered session and
+	// cuts the ones that no longer resolve. Started unconditionally: the
+	// registry is empty when no protocol listener is enabled, so the tick costs
+	// a map read.
+	if s.protocolAuth != nil {
+		go s.protocolAuth.RunRevalidator(ctx, protocolauth.DefaultRevalidate)
 	}
 
 	// Retention crons ("Koru" v0.4). The trash purge loop existed as
@@ -730,6 +1073,15 @@ func (s *Server) Start(ctx context.Context) error {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = s.srv.Shutdown(shutCtx)
+		if s.sftp != nil {
+			_ = s.sftp.Close()
+		}
+		if s.ftps != nil {
+			_ = s.ftps.Close()
+		}
+		if s.nfs != nil {
+			_ = s.nfs.Close()
+		}
 		s.worker.Stop()
 		if s.ops != nil {
 			s.ops.Stop()
@@ -792,6 +1144,32 @@ func (s *Server) Start(ctx context.Context) error {
 		}()
 	}
 
+	if s.sftp != nil {
+		go func() {
+			if err := s.sftp.ListenAndServe(); err != nil {
+				// Same rule as above: the SFTP port failing to bind is a
+				// complaint, not a reason to stop serving the web app.
+				slog.Error("sftp: listener stopped", slog.String("err", err.Error()))
+			}
+		}()
+	}
+
+	if s.ftps != nil {
+		go func() {
+			if err := s.ftps.ListenAndServe(); err != nil {
+				slog.Error("ftps: listener stopped", slog.String("err", err.Error()))
+			}
+		}()
+	}
+
+	if s.nfs != nil {
+		go func() {
+			if err := s.nfs.ListenAndServe(); err != nil {
+				slog.Error("nfs: listener stopped", slog.String("err", err.Error()))
+			}
+		}()
+	}
+
 	slog.Info("filex listening", slog.String("addr", s.cfg.Listen))
 	if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
@@ -836,4 +1214,21 @@ func initWithBackoff(ctx context.Context, driver string, init func(context.Conte
 			slog.String("err", err.Error()))
 	}
 	return err
+}
+
+// quotaMetrics bridges the accounting store to the Prometheus exposition.
+// It lives here rather than in internal/quotastore so that package keeps its
+// dependencies at auth/db/model/quota and stays testable without a registry.
+type quotaMetrics struct{}
+
+// QuotaUsageDelta moves the process-wide usage gauge by the same delta the
+// accounting store just wrote, and records the absolute movement so a stalled
+// accounting path is visible even when adds and releases cancel out.
+func (quotaMetrics) QuotaUsageDelta(_ int64, delta int64) {
+	metrics.QuotaUsageBytes.Add(float64(delta))
+	if delta > 0 {
+		metrics.QuotaAccountedBytes.WithLabelValues("added").Add(float64(delta))
+	} else {
+		metrics.QuotaAccountedBytes.WithLabelValues("released").Add(float64(-delta))
+	}
 }

@@ -19,10 +19,18 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
+// DefaultPollInterval is the cadence a polled storage falls back to when its
+// own sync_interval_s is unset (or under the 5 s floor). FILEX_SYNC_INTERVAL
+// overrides it; see NewWithInterval.
+const DefaultPollInterval = 15 * time.Minute
+
 // Worker is the top-level sync supervisor — one instance per server.
 type Worker struct {
 	store db.Store
 	index *search.Index // optional — when set, sync upserts feed Bleve
+	// fallback is the global poll cadence for storages with no interval of
+	// their own (FILEX_SYNC_INTERVAL).
+	fallback time.Duration
 
 	mu      sync.Mutex
 	cancels map[int64]context.CancelFunc // storageID → cancel
@@ -31,12 +39,27 @@ type Worker struct {
 	stopped bool
 }
 
-// New constructs a new Worker. Call Start to spawn syncers.
-func New(store db.Store) *Worker {
+// New constructs a Worker with the built-in fallback cadence. Call Start to
+// spawn syncers.
+func New(store db.Store) *Worker { return NewWithInterval(store, DefaultPollInterval) }
+
+// NewWithInterval is New with an explicit global fallback cadence — what
+// FILEX_SYNC_INTERVAL sets.
+//
+// ⚠ Fallback ONLY: a storage row with its own sync_interval_s still wins. That
+// is exactly what docs/CONFIGURATION.md has always claimed the variable did.
+// It did not — the value was parsed into config and then read by nothing,
+// while the real fallback was a hardcoded 15m literal in loopPoll that
+// happened to be the same number, which is why the dead knob was invisible.
+func NewWithInterval(store db.Store, fallback time.Duration) *Worker {
+	if fallback <= 0 {
+		fallback = DefaultPollInterval
+	}
 	return &Worker{
-		store:   store,
-		cancels: map[int64]context.CancelFunc{},
-		syncers: map[int64]*storageSyncer{},
+		store:    store,
+		fallback: fallback,
+		cancels:  map[int64]context.CancelFunc{},
+		syncers:  map[int64]*storageSyncer{},
 	}
 }
 
@@ -139,11 +162,12 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	syncer := &storageSyncer{
-		store:   w.store,
-		index:   w.index,
-		storage: st,
-		driver:  driver,
-		ctx:     ctx,
+		store:    w.store,
+		index:    w.index,
+		storage:  st,
+		driver:   driver,
+		ctx:      ctx,
+		fallback: w.fallback,
 	}
 	w.mu.Lock()
 	w.cancels[st.ID] = cancel
@@ -164,6 +188,8 @@ type storageSyncer struct {
 	storage *model.Storage
 	driver  storage.Driver
 	ctx     context.Context
+	// fallback is the cadence used when this storage states none of its own.
+	fallback time.Duration
 }
 
 // Loop dispatches to the appropriate strategy.
@@ -180,9 +206,15 @@ func (s *storageSyncer) Loop() {
 }
 
 func (s *storageSyncer) loopPoll() {
+	// A storage that states its own cadence wins. Anything under the 5 s floor
+	// — including 0, i.e. "not set" — falls back to the configured global,
+	// which is what FILEX_SYNC_INTERVAL sets.
 	interval := time.Duration(s.storage.SyncIntervalS) * time.Second
 	if interval < 5*time.Second {
-		interval = 15 * time.Minute
+		interval = s.fallback
+		if interval <= 0 {
+			interval = DefaultPollInterval
+		}
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()

@@ -108,7 +108,7 @@ func (s *Service) Resolve(ctx context.Context, token, pin string) (*model.Share,
 //
 // ⚠ Not the cap's enforcement point. Serving first and counting afterwards
 // leaves a window in which every concurrent request reads the same
-// pre-download count and is waved through: measured on fm.brf.sh, a link
+// pre-download count and is waved through: measured on fm.example.com, a link
 // capped at ONE download handed three complete files to three overlapping
 // clients. Anything that is about to hand bytes to a visitor must call
 // ReserveDownload instead.

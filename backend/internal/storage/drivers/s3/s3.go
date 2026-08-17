@@ -23,6 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
@@ -137,6 +138,7 @@ func newRetryer() aws.Retryer {
 func (d *Driver) Capabilities() storage.Capabilities {
 	return storage.Capabilities{
 		Read:    true,
+		Range:   true,
 		Write:   true,
 		Move:    true,
 		Copy:    true,
@@ -301,6 +303,57 @@ func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("s3: get: %w", err)
 	}
 	return resp.Body, nil
+}
+
+// ReadRange implements storage.RangeReader with a `Range:` header on
+// GetObject. The server does the seeking, so no bytes before off ever
+// cross the wire.
+//
+// An offset at or past the end answers 416 InvalidRange on S3; per the
+// RangeReader contract that is a short read, not a failure, so it maps to
+// an empty (EOF) reader.
+func (d *Driver) ReadRange(ctx context.Context, p string, off, length int64) (io.ReadCloser, error) {
+	if off < 0 {
+		return nil, fmt.Errorf("s3: negative range offset %d", off)
+	}
+	if length == 0 {
+		return storage.EmptyReadCloser(), nil
+	}
+	rng := fmt.Sprintf("bytes=%d-", off)
+	if length > 0 {
+		rng = fmt.Sprintf("bytes=%d-%d", off, off+length-1)
+	}
+	resp, err := d.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+		Range:  aws.String(rng),
+	})
+	if err != nil {
+		if isS3NotFound(err) {
+			return nil, storage.ErrNotFound
+		}
+		if isS3RangeNotSatisfiable(err) {
+			return storage.EmptyReadCloser(), nil
+		}
+		return nil, fmt.Errorf("s3: get range %s: %w", rng, err)
+	}
+	return resp.Body, nil
+}
+
+// isS3RangeNotSatisfiable matches the 416 an offset past the end produces.
+// Providers word it differently (AWS `InvalidRange`, MinIO
+// `InvalidRange`, some gateways only set the status), so both the code and
+// the status are checked.
+func isS3RangeNotSatisfiable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var api smithy.APIError
+	if errors.As(err, &api) && api.ErrorCode() == "InvalidRange" {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "StatusCode: 416") || strings.Contains(msg, "InvalidRange")
 }
 
 // Write implements storage.Writer.
@@ -602,6 +655,27 @@ func (d *Driver) InitMultipart(ctx context.Context, p string, _ int64, partCount
 		urls[i-1] = req.URL
 	}
 	return uploadID, urls, nil
+}
+
+// UploadPart implements storage.PartUploader — the server-side half of
+// multipart, used by the staged upload path. (The browser-direct flow uses the
+// presigned URLs from InitMultipart and never comes through here.)
+//
+// size is always known at this point (it comes from the staging manifest), so
+// the body goes out with a Content-Length instead of chunked.
+func (d *Driver) UploadPart(ctx context.Context, p, uploadID string, partNumber int, r io.Reader, size int64) (string, error) {
+	out, err := d.client.UploadPart(ctx, &s3.UploadPartInput{
+		Bucket:        aws.String(d.bucket),
+		Key:           aws.String(d.key(p)),
+		UploadId:      aws.String(uploadID),
+		PartNumber:    aws.Int32(int32(partNumber)),
+		Body:          r,
+		ContentLength: aws.Int64(size),
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.Trim(aws.ToString(out.ETag), `"`), nil
 }
 
 // CompleteMultipart implements storage.MultipartUploader.

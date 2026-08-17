@@ -31,8 +31,8 @@ describe('api/runtimeConfig', () => {
 
   it('setApiBaseUrl overrides the base and trims whitespace', async () => {
     const cfg = await freshConfig();
-    cfg.setApiBaseUrl('  https://fm.brf.sh/api  ');
-    expect(cfg.getApiBaseUrl()).toBe('https://fm.brf.sh/api');
+    cfg.setApiBaseUrl('  https://fm.example.com/api  ');
+    expect(cfg.getApiBaseUrl()).toBe('https://fm.example.com/api');
   });
 
   it('setApiBaseUrl with empty/blank/null resets to the default (never bricks)', async () => {

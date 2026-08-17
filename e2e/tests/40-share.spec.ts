@@ -1,33 +1,90 @@
+/**
+ * Share — admin list surface + public viewer, end to end.
+ *
+ * 77-share pins the share API. This spec's distinct job is the ADMIN LIST
+ * (Shares.vue) and the public entry point a recipient actually hits.
+ *
+ * ⚠ What was here before could not fail. It navigated to /admin/shares,
+ * counted `tbody tr` immediately after `goto` and skipped when the count was
+ * 0 — i.e. it skipped whenever the table had not finished loading, and
+ * otherwise depended on whatever shares an earlier spec happened to leave
+ * behind. When rows did exist it read `getByTestId('share-token')`, which
+ * existed nowhere in web/src, so the only two outcomes were "skip" and
+ * "time out". Its final assertion accepted `[200, 401]`, which no broken
+ * build could violate.
+ *
+ * It now seeds its own file, mints its own PIN-protected share, and asserts
+ * the whole path: the row shows up in the admin table with the right token
+ * and a PIN badge, the metadata endpoint declares the PIN, and the public
+ * URL answers with the unlock form instead of leaking the bytes.
+ */
 import { test, expect } from '@playwright/test';
 import { loginAs } from '../helpers/auth';
+import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
+
+const STORAGE = `e2e-share40-${Date.now()}`;
+const MOUNT = `/tmp/filex-${STORAGE}`;
+const FILE_NAME = 'pinned.txt';
+const FILE_BODY = 'forty-share-bytes';
 
 test.describe('Share — create, public access with PIN', () => {
-  test('admin creates a share with PIN, public viewer accepts it', async ({ page, browser, request }) => {
-    await loginAs(page);
-    // For the share flow we need at least one file. We'll trust the seed
-    // from the previous test or create one inline.
-    await page.goto('/admin/shares');
+  test.beforeAll(async ({ request }) => {
+    await dropStorageByName(request, STORAGE);
+    await seedLocalStorage(request, STORAGE, MOUNT);
+  });
 
-    // If the list has any active share, use the first; otherwise skip
-    // — share creation is exercised in the admin UI flow tests proper.
-    const rows = page.locator('tbody tr');
-    const count = await rows.count();
-    if (count === 0) test.skip(true, 'no shares present — share-create UI tested separately');
+  test.afterAll(async ({ request }) => {
+    await dropStorageByName(request, STORAGE);
+  });
 
-    // Copy the public share URL from the first row.
-    const tokenCell = await rows.first().getByTestId('share-token').textContent();
-    const token = (tokenCell ?? '').trim();
+  test('admin creates a share with PIN, public viewer accepts it', async ({
+    page,
+    playwright,
+    baseURL,
+    browser,
+  }) => {
+    const api = await newAuthedRequest(playwright, baseURL ?? '');
+
+    const up = await api.post('/api/files/manager?action=upload', {
+      multipart: {
+        path: `${STORAGE}://`,
+        'file[]': { name: FILE_NAME, mimeType: 'text/plain', buffer: Buffer.from(FILE_BODY) },
+      },
+    });
+    expect(up.ok(), `upload status ${up.status()}`).toBeTruthy();
+
+    const made = await api.post('/api/files/share', {
+      data: { path: `${STORAGE}://${FILE_NAME}`, password: true },
+    });
+    expect(made.ok(), `share status ${made.status()}`).toBeTruthy();
+    const { share } = await made.json();
+    const token: string = share.token;
     expect(token).toBeTruthy();
 
-    // Open public viewer in a fresh browser context (no auth cookie).
-    const ctx = await browser.newContext();
-    const pub = await ctx.newPage();
-    await pub.goto(`/api/files/share/${token}`);
+    // ── the admin list renders the share ──────────────────────────────────
+    await loginAs(page);
+    await page.goto('/admin/shares');
+    const row = page.locator('tbody tr', { has: page.locator(`[data-token="${token}"]`) });
+    await expect(row).toHaveCount(1, { timeout: 10_000 });
+    // The cell shows a truncated token — enough to recognise the share,
+    // never the whole secret.
+    await expect(row.getByTestId('share-token')).toHaveText(new RegExp(`^${token.slice(0, 10)}`));
+    await expect(row.getByText('PIN', { exact: true })).toBeVisible();
 
-    // Either we see a JSON metadata response, or the public viewer.
-    // Just verify it isn't a 401 / 404 / 5xx.
-    const res = await ctx.request.get(`/api/files/share/${token}`);
-    expect([200, 401]).toContain(res.status()); // 401 = PIN required
+    // ── the public entry point is PIN-gated ───────────────────────────────
+    const ctx = await browser.newContext();
+    const meta = await ctx.request.get(`/api/files/share/${token}`);
+    expect(meta.status()).toBe(200);
+    expect((await meta.json()).requires_pin, 'metadata must declare the PIN').toBe(true);
+
+    const pub = await ctx.request.get(`/s/${token}`);
+    expect(pub.status()).toBe(200);
+    const html = await pub.text();
+    expect(html.toLowerCase(), 'an un-PINned visitor gets the form').toContain('<form');
+    expect(html, 'and must NOT get the file').not.toContain(FILE_BODY);
     await ctx.close();
+
+    await api.delete(`/api/files/share/${share.id}`).catch(() => undefined);
+    await api.dispose();
   });
 });

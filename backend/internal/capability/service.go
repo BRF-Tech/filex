@@ -272,6 +272,7 @@ func probeStorage(drv storage.Driver) model.StorageCapabilities {
 	c := storage.ComputeCapabilities(drv)
 	out := model.StorageCapabilities{
 		Read:    c.Read,
+		Range:   c.Range,
 		Write:   c.Write,
 		Move:    c.Move,
 		Copy:    c.Copy,

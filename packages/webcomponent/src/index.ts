@@ -30,6 +30,7 @@
 
 import { defineCustomElement, h, ref, watch, type PropType } from 'vue';
 import FileExplorer from '@brftech/filex-core/src/FileExplorer.vue';
+import ConnectionsPanel from '@brftech/filex-core/src/components/ConnectionsPanel.vue';
 import type { ExplorerConfig, LocaleCode, ThemeMode } from '@brftech/filex-core';
 import coreCss from '@brftech/filex-core/style.css?inline';
 
@@ -168,17 +169,90 @@ const FilexExplorerWrapper = defineCustomElement({
   },
 }, { shadowRoot: false });
 
-/** Public class — useful for tests / programmatic instantiation. */
+/**
+ * `<filex-connections>` — the storage-connection surface as a custom
+ * element, so a host with no bundler (the desktop shell, a plain page)
+ * mounts the SAME component the admin SPA imports as an SFC. There is no
+ * second form and no second set of instructions anywhere.
+ *
+ * ⚠⚠ Configure it through the `config` PROPERTY, exactly like the
+ * explorer:
+ *
+ *   el.config = { ...el.config, locale: 'tr' };
+ *
+ * Setting `el.locale = 'tr'` changes a property nothing renders from:
+ * `buildConfig` merges `{...attributes, ...config}` and the config object
+ * wins, so an attribute is only ever a fallback for a key the config does
+ * not carry. That exact mistake shipped in v0.19.0 — the shell went
+ * Turkish while the file list stayed English, and the element reported
+ * `locale === 'tr'` the whole time.
+ */
+const FilexConnectionsWrapper = defineCustomElement(
+  {
+    inheritAttrs: false,
+    props: {
+      config: {
+        type: Object as PropType<ExplorerConfig | null>,
+        default: null,
+      },
+      apiBase: { type: String, default: '' },
+      endpoint: { type: String, default: '' },
+      locale: { type: String, default: '' },
+      theme: { type: String, default: '' },
+      /** 'storages' | 'connect' — which half to open on. */
+      initialTab: { type: String, default: '' },
+      closable: { type: [Boolean, String], default: undefined },
+    },
+    emits: ['changed', 'close', 'error'],
+    setup(props, { emit }) {
+      injectStylesOnce();
+
+      const attrs = () => ({
+        apiBase: props.apiBase,
+        endpoint: props.endpoint,
+        locale: props.locale,
+        theme: props.theme,
+      });
+      const merged = ref<ExplorerConfig>(buildConfig(attrs(), props.config));
+
+      watch(
+        () => [props.config, props.apiBase, props.endpoint, props.locale, props.theme],
+        () => {
+          merged.value = buildConfig(attrs(), props.config);
+        },
+        { deep: true },
+      );
+
+      return () =>
+        h(ConnectionsPanel as never, {
+          config: merged.value,
+          initialTab: props.initialTab === 'connect' ? 'connect' : 'storages',
+          closable:
+            props.closable === true || props.closable === 'true' || props.closable === '',
+          onChanged: () => emit('changed'),
+          onClose: () => emit('close'),
+          onError: (e: unknown) => emit('error', e),
+        });
+    },
+  },
+  { shadowRoot: false },
+);
+
+/** Public classes — useful for tests / programmatic instantiation. */
 export const FilexElement = FilexExplorerWrapper;
+export const FilexConnectionsElement = FilexConnectionsWrapper;
 
 /**
  * Self-register on import so consumers can do
  *   `import '@brftech/filex'`
- * and have the element available immediately. Idempotent — re-import
+ * and have the elements available immediately. Idempotent — re-import
  * doesn't throw.
  */
 if (typeof customElements !== 'undefined' && !customElements.get('filex-explorer')) {
   customElements.define('filex-explorer', FilexExplorerWrapper);
+}
+if (typeof customElements !== 'undefined' && !customElements.get('filex-connections')) {
+  customElements.define('filex-connections', FilexConnectionsWrapper);
 }
 
 /**
@@ -192,6 +266,7 @@ if (typeof customElements !== 'undefined' && !customElements.get('filex-explorer
 declare global {
   interface HTMLElementTagNameMap {
     'filex-explorer': HTMLElement;
+    'filex-connections': HTMLElement;
   }
 }
 

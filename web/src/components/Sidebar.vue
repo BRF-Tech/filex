@@ -29,6 +29,7 @@ import {
   Copy as CopyIcon /* bul:s3 */,
   Palette /* wiring:e1 */,
   ArrowUpCircle,
+  Cable,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -68,6 +69,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'dashboard' }, label: t('nav.dashboard'), icon: LayoutDashboard, group: 'main' },
   { to: { name: 'explore' }, label: t('nav.files'), icon: FolderOpen, group: 'main' },
   { to: { name: 'admin-files' }, label: t('nav.adminFiles'), icon: History, group: 'main' },
+  { to: { name: 'connections' }, label: t('nav.connections'), icon: Cable, group: 'main' },
   { to: { name: 'storages' }, label: t('nav.storages'), icon: Database, group: 'main' },
   { to: { name: 'sync' }, label: t('nav.sync'), icon: RefreshCcw, group: 'main' },
   { to: { name: 'shares' }, label: t('nav.shares'), icon: Share2, group: 'main' },

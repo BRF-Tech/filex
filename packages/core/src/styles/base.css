@@ -1,12 +1,13 @@
 /* FileExplorer — unscoped stylesheet (lib consumers apply once). */
 
-/* ⚠⚠ Bu blok dosyanın BAŞINDA durur, sonunda değil. Aynı özgüllükteki
-   (`.fe *` = 0,1,0) bileşen kuralları bunun ALTINDA kalırsa kaskadda kazanır;
-   sonda dururken sekme şeridinin kendi "çubuğu gizle" kuralını ezip tabların
-   altına bir kaydırma çubuğu düşürdü (2026-08-12, Burak bildirdi). Genel
-   varsayılan önce gelir, bileşen kendi istisnasını sonra yazar. */
+/* ⚠⚠ This block belongs at the TOP of the file, not the bottom. Component
+   rules of the same specificity (`.fe *` = 0,1,0) win the cascade when they
+   sit BELOW it; while it sat at the bottom it overrode the tab strip's own
+   "hide the bar" rule and dropped a scrollbar under the tabs (2026-08-12,
+   reported). The general default comes first, the component writes its own
+   exception afterwards. */
 
-/* === ui-fix — kaydırma çubukları ======================================
+/* === ui-fix — scrollbars ==============================================
    The platform scrollbar ignores the theme completely: on Terminal Green or
    any dark variant it paints a wide light-grey slab down the edge of the
    panel. Chromium/WebKit honour the -webkit pseudo-elements and Firefox the
@@ -1183,8 +1184,8 @@ filex-explorer {
   height: 78vh;
   background: var(--fe-bg);
 }
-/* CodeMirror 6 editor surface — Burak (V1.5 follow-up #4): "monaco
-   editör çalışmıyor" → CodeMirror replacement. */
+/* CodeMirror 6 editor surface — V1.5 follow-up #4: the Monaco editor did
+   not work, so CodeMirror replaced it. */
 .fe-preview__code-wrap {
   display: flex;
   flex-direction: column;
@@ -2944,7 +2945,6 @@ filex-explorer {
   }
 }
 /* /wiring:c3 */
-=======
 /* === wiring:c4 — onboarding turu, erişilebilirlik ve etkileşim cilası === */
 
 /* ---------- Focus ring: grid cards (list rows already had one) ---------- */
@@ -3171,7 +3171,7 @@ filex-explorer {
    * wider than the window pushed the whole explorer sideways instead of
    * overflowing into `.fe-tabs__scroll`: measured 63 tabs → a 4903px strip in
    * a 1264px window, the layout running off the right edge with no scrollbar
-   * anywhere (2026-08-12, Burak: "ekranı taştı, akıyor gidiyor"). Allowing the
+   * anywhere (2026-08-12, reported as "it overflowed the screen and keeps sliding"). Allowing the
    * strip to shrink is what hands the overflow to the scroller inside it. */
   min-width: 0;
   padding: 4px 6px 0;
@@ -3189,7 +3189,7 @@ filex-explorer {
   /* ⚠ EXPLICIT `hidden`, not left to default. `overflow-x: auto` alone makes
    * the other axis compute to `auto` too, so the strip grew a VERTICAL
    * scrollbar with nothing to scroll — a bar down the side of a row of tabs
-   * (2026-08-12, Burak reported it). */
+   * (2026-08-12, reported). */
   overflow-y: hidden;
   /* Enough tabs and they run off the edge; a strip that scrolls without
    * saying so is a strip whose overflow is invisible. Thin, on its own axis,

@@ -14,6 +14,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,7 +39,16 @@ type Config struct {
 	// tenant, per-provider storage confinement, scoped user directory). OFF by
 	// default — a single-tenant install behaves exactly as before. See
 	// docs/MULTI-TENANCY.md.
-	MultiTenant      bool         `yaml:"multi_tenant"`
+	MultiTenant bool `yaml:"multi_tenant"`
+	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
+	// read back rather than merely compare — today the S3 access keys, because
+	// SigV4 derives an HMAC chain from the secret and so cannot work off a
+	// one-way hash. See internal/secretbox for what this does and does not buy.
+	//
+	// ⚠ Losing it makes every credential sealed under it unusable; they must be
+	// re-issued. It is not a password to rotate casually — treat it like the
+	// database, because losing one is as bad as losing the other.
+	SecretKey        string       `yaml:"secret_key"`
 	Log              LogConfig    `yaml:"log"`
 	DB               DBConfig     `yaml:"db"`
 	Auth             AuthConfig   `yaml:"auth"`
@@ -53,9 +63,55 @@ type Config struct {
 	Sentry           SentryConfig `yaml:"sentry"`
 	Seed             SeedConfig   `yaml:"seed"`
 	DAV              DAVConfig    `yaml:"dav"`
+	S3               S3Config     `yaml:"s3"`
+	SFTP             SFTPConfig   `yaml:"sftp"`
+	FTPS             FTPSConfig   `yaml:"ftps"`
+	NFS              NFSConfig    `yaml:"nfs"`
 	Update           UpdateConfig `yaml:"update"`
+	Upload           UploadConfig `yaml:"upload"`
+	Cache            CacheConfig  `yaml:"cache"`
 	/* kimlik:e3 cloud */
 	Cloud CloudConfig `yaml:"cloud"`
+}
+
+// CacheConfig — the local copy filex prepares for a big file that lives on a
+// slow backend (internal/filecache). See docs/CONFIGURATION.md.
+type CacheConfig struct {
+	// Dir is where prepared copies live. Defaults to <data_dir>/cache.
+	Dir string `yaml:"dir"`
+	// MinSize is the smallest file worth preparing (FILEX_CACHE_MIN_SIZE,
+	// default 64 MiB). Below it the preparation costs more than the transfer
+	// it saves.
+	MinSize int64 `yaml:"min_size"`
+	// MaxBytes is the GLOBAL ceiling on the cache directory
+	// (FILEX_CACHE_MAX_BYTES, default 20 GiB), enforced with LRU eviction. It
+	// is never unlimited: a per-file cache with no global cap is a disk
+	// incident, and this project has had one (29 GB of leaked multipart temp
+	// files, v0.13.4).
+	MaxBytes int64 `yaml:"max_bytes"`
+	// SlowBytesPerSec is the measured throughput below which a storage counts
+	// as slow (FILEX_CACHE_SLOW_BPS, default 10 MiB/s).
+	SlowBytesPerSec int64 `yaml:"slow_bytes_per_sec"`
+	// Disabled turns the whole thing off (FILEX_CACHE=0). With no slow
+	// storage configured it never does anything anyway.
+	Disabled bool `yaml:"disabled"`
+}
+
+// UploadConfig — staged (resumable, driver-agnostic) uploads. See
+// docs/UPLOADS.md.
+type UploadConfig struct {
+	// StagingDir is where in-flight upload parts live. Defaults to
+	// <data_dir>/uploads. Must be on a filesystem with room for the largest
+	// upload you expect — the whole object passes through it.
+	StagingDir string `yaml:"staging_dir"`
+	// ChunkSize is the part size handed to clients that do not ask for one.
+	// Clients may request a different size; the server's answer is binding.
+	ChunkSize int64 `yaml:"chunk_size"`
+	// StagingTTL is how long a staging directory may sit with no activity
+	// before the sweeper removes it. FILEX_UPLOAD_STAGING_TTL.
+	StagingTTL time.Duration `yaml:"staging_ttl"`
+	// SweepInterval is how often the sweeper runs.
+	SweepInterval time.Duration `yaml:"sweep_interval"`
 }
 
 // UpdateConfig — release awareness and (where the install owns its binary)
@@ -113,6 +169,94 @@ type DAVConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// S3Config controls the S3-compatible endpoint (internal/s3api).
+type S3Config struct {
+	// Enabled — FILEX_S3 kill switch. ON by default like /dav: the endpoint
+	// refuses every unsigned request anyway, and an access key has to be
+	// minted before anything can reach it.
+	Enabled bool `yaml:"enabled"`
+	// Domain enables virtual-hosted-style addressing (bucket.s3.example.com).
+	// Empty leaves path-style only, which is what restic and the older SDKs
+	// use — so an install without a wildcard DNS record still works, it just
+	// needs `path_style` in the client config.
+	//
+	// ⚠ Setting it requires a wildcard A record AND a wildcard certificate for
+	// *.<domain>; without both, current SDKs (which default to virtual-hosted)
+	// fail at TLS rather than with anything that names the cause.
+	Domain string `yaml:"domain"`
+}
+
+// SFTPConfig controls the SFTP endpoint (internal/sftpsrv).
+type SFTPConfig struct {
+	// Enabled — FILEX_SFTP. OFF by default, unlike /dav and S3: this surface
+	// opens a TCP port of its own, and a port nobody asked for is not something
+	// to switch on for them.
+	Enabled bool `yaml:"enabled"`
+	// Addr is the listen address. 2022 by convention — sftpgo and
+	// `rclone serve sftp` both use it, while 2222 means "SSH in a container".
+	Addr string `yaml:"addr"`
+	// HostKeyDir holds the server's host keys.
+	//
+	// ⚠ It must survive a rebuild. Regenerating host keys gives every user
+	// REMOTE HOST IDENTIFICATION HAS CHANGED — indistinguishable from an attack,
+	// and usually "fixed" by deleting the known_hosts line, which trains people
+	// to ignore the one warning that matters. Empty puts them in the data dir.
+	HostKeyDir string `yaml:"host_key_dir"`
+	// Banner is shown before authentication. Empty sends none.
+	Banner string `yaml:"banner"`
+	// MaxSpool caps one upload's spool file. 0 uses the package default.
+	MaxSpool int64 `yaml:"max_spool"`
+}
+
+// FTPSConfig controls the FTPS endpoint (internal/ftpsrv).
+//
+// ⚠⚠ There is no "plain FTP" switch and there will not be one. Plain FTP sends
+// the password in the clear and the file after it; a flag that turned TLS off
+// would be a flag that publishes a user's credentials to anything on the path.
+type FTPSConfig struct {
+	// Enabled — FILEX_FTPS. OFF by default: this one opens a control port AND
+	// a range of data ports.
+	Enabled bool `yaml:"enabled"`
+	// Addr is the control channel (2121 by convention; 21 needs root).
+	Addr string `yaml:"addr"`
+	// PublicHost is what passive-mode replies advertise.
+	//
+	// ⚠⚠ The setting FTP deployments get wrong, and it fails as a HANG rather
+	// than an error: the server answers PASV with an address the client cannot
+	// route to and the client waits until it times out. Behind NAT or in Docker
+	// it must be the address the CLIENT would use.
+	PublicHost string `yaml:"public_host"`
+	// PassivePortMin/Max bound the data ports. They must be open in the
+	// firewall and, under Docker, published one-for-one — a range open on the
+	// server and closed at the edge is the same hang.
+	PassivePortMin int `yaml:"passive_port_min"`
+	PassivePortMax int `yaml:"passive_port_max"`
+	// CertFile/KeyFile are the TLS material. Empty generates a self-signed pair
+	// into the data dir — encrypted but unverified, and the guide says so.
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+	// Banner is the greeting line.
+	Banner string `yaml:"banner"`
+	// IdleTimeout in seconds; 0 uses the package default.
+	IdleTimeout int `yaml:"idle_timeout"`
+}
+
+// NFSConfig controls the NFSv3 endpoint (internal/nfssrv).
+//
+// ⚠⚠ NFSv3 is unencrypted and unauthenticated on the wire. filex binds identity
+// to the EXPORT PATH (32 bytes of entropy, see model.NFSExport) rather than
+// trusting the uid a client asserts — but the traffic itself is still readable
+// by anything on the path. This is the NAS-on-the-LAN protocol; `filex mount`
+// (FUSE over HTTPS) is the answer for anything off-LAN.
+type NFSConfig struct {
+	// Enabled — FILEX_NFS. OFF by default, and more emphatically than the
+	// others: switching it on is a decision about the network it sits on.
+	Enabled bool `yaml:"enabled"`
+	// Addr is the listen address. 2049 is the registered port and what clients
+	// assume; anything else needs `-o port=` on every mount.
+	Addr string `yaml:"addr"`
+}
+
 // SeedConfig holds one-time bootstrap values applied to the DB on first boot,
 // only when the target record is ABSENT (operator UI edits are never
 // clobbered). It lets a fresh `helm install` / `docker compose up` come up
@@ -167,7 +311,7 @@ type SeedStorage struct {
 }
 
 // SentryConfig — optional Sentry-wire error reporting (self-hosted GlitchTip at
-// errors.brf.sh). An empty DSN disables it entirely (default build reports
+// errors.example.com). An empty DSN disables it entirely (default build reports
 // nothing). Environment tags events (e.g. production / demo) so one project can
 // serve multiple deployments.
 type SentryConfig struct {
@@ -300,10 +444,19 @@ type ConvertConfig struct {
 // Mermaid needs no external service — diagrams render client-side in the
 // browser via the bundled `mermaid` library, so there is no MermaidConfig.
 
-// SyncConfig — worker settings.
+// SyncConfig — storage sync settings.
+//
+// ⚠ There is deliberately no `Workers` here any more. FILEX_SYNC_WORKERS was
+// parsed into a field that nothing read, while CONFIGURATION.md advertised it
+// as "concurrent storage sync workers" — there is no pool to size: the sync
+// worker runs one goroutine per enabled storage (internal/sync.Worker.startOne)
+// and always has. Inventing a pool to justify the variable would be a
+// redesign; documenting a knob that does nothing is worse than either, so the
+// knob is gone and the doc says what actually happens.
 type SyncConfig struct {
+	// DefaultInterval is the poll cadence for storages with no
+	// sync_interval_s of their own. FILEX_SYNC_INTERVAL.
 	DefaultInterval time.Duration `yaml:"default_interval"`
-	Workers         int           `yaml:"workers"`
 }
 
 // ThumbsConfig — generation policy.
@@ -353,7 +506,6 @@ func Default() Config {
 		},
 		Sync: SyncConfig{
 			DefaultInterval: 15 * time.Minute,
-			Workers:         4,
 		},
 		Thumbs: ThumbsConfig{
 			Enabled: true,
@@ -375,11 +527,19 @@ func Default() Config {
 		DAV: DAVConfig{
 			Enabled: true,
 		},
+		S3: S3Config{
+			Enabled: true,
+		},
 		Update: UpdateConfig{
 			Enabled:  true,
 			Policy:   "manual",
 			Channel:  "stable",
 			Interval: 24 * time.Hour,
+		},
+		Upload: UploadConfig{
+			ChunkSize:     8 << 20,
+			StagingTTL:    24 * time.Hour,
+			SweepInterval: time.Hour,
 		},
 		Demo: DemoConfig{
 			Mode: false,
@@ -424,6 +584,21 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Thumbs.CacheDir == "" {
 		cfg.Thumbs.CacheDir = filepath.Join(cfg.DataDir, "thumbs")
+	}
+	if cfg.Upload.StagingDir == "" {
+		cfg.Upload.StagingDir = filepath.Join(cfg.DataDir, "uploads")
+	}
+	if cfg.Cache.Dir == "" {
+		cfg.Cache.Dir = filepath.Join(cfg.DataDir, "cache")
+	}
+	if cfg.Upload.ChunkSize <= 0 {
+		cfg.Upload.ChunkSize = 8 << 20
+	}
+	if cfg.Upload.StagingTTL <= 0 {
+		cfg.Upload.StagingTTL = 24 * time.Hour
+	}
+	if cfg.Upload.SweepInterval <= 0 {
+		cfg.Upload.SweepInterval = time.Hour
 	}
 	return cfg, nil
 }
@@ -472,6 +647,40 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_COOKIE_DOMAIN"); v != "" {
 		c.CookieDomain = v
 	}
+	if v := os.Getenv("FILEX_UPLOAD_STAGING_DIR"); v != "" {
+		c.Upload.StagingDir = v
+	}
+	if v := os.Getenv("FILEX_UPLOAD_CHUNK_SIZE"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			c.Upload.ChunkSize = n
+		}
+	}
+	if v := os.Getenv("FILEX_UPLOAD_STAGING_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Upload.StagingTTL = d
+		}
+	}
+	if v := os.Getenv("FILEX_CACHE"); v != "" {
+		c.Cache.Disabled = v == "0" || strings.EqualFold(v, "false")
+	}
+	if v := os.Getenv("FILEX_CACHE_DIR"); v != "" {
+		c.Cache.Dir = v
+	}
+	if v := os.Getenv("FILEX_CACHE_MIN_SIZE"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			c.Cache.MinSize = n
+		}
+	}
+	if v := os.Getenv("FILEX_CACHE_MAX_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			c.Cache.MaxBytes = n
+		}
+	}
+	if v := os.Getenv("FILEX_CACHE_SLOW_BPS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			c.Cache.SlowBytesPerSec = n
+		}
+	}
 	/* kimlik:e3 cloud */
 	if v := os.Getenv("FILEX_CLOUD"); v != "" {
 		c.Cloud.Enabled = v == "1" || strings.EqualFold(v, "true")
@@ -507,7 +716,7 @@ func applyEnv(c *Config) {
 	//   FILEX_OIDC_*       (deploy/.env.example + docs)
 	//   FILEX_AUTH_OIDC_*  (legacy from earlier draft of this file)
 	// The shorter form wins when both are set, matching the convention
-	// used in deploy/demo-fm.brf.sh.compose.yml + plan files.
+	// used in deploy/demo-fm.example.com.compose.yml + plan files.
 	if v := os.Getenv("FILEX_AUTH_DRIVERS"); v != "" {
 		parts := strings.Split(v, ",")
 		out := make([]string, 0, len(parts))
@@ -557,13 +766,14 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_SYNC_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.Sync.DefaultInterval = d
+		} else {
+			// Silently keeping the default is how a typo becomes "the setting
+			// does not work". Say so once, at boot.
+			slog.Warn("config: FILEX_SYNC_INTERVAL is not a Go duration; keeping default",
+				slog.String("value", v), slog.String("default", c.Sync.DefaultInterval.String()))
 		}
 	}
-	if v := os.Getenv("FILEX_SYNC_WORKERS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.Sync.Workers = n
-		}
-	}
+	// FILEX_SYNC_WORKERS is intentionally NOT parsed — see SyncConfig.
 	if v := os.Getenv("FILEX_THUMBS_ENABLED"); v != "" {
 		c.Thumbs.Enabled = v == "1" || strings.EqualFold(v, "true")
 	}
@@ -600,6 +810,61 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DAV"); v != "" {
 		c.DAV.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_SECRET_KEY"); v != "" {
+		c.SecretKey = v
+	}
+	if v := os.Getenv("FILEX_S3"); v != "" {
+		c.S3.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_S3_DOMAIN"); v != "" {
+		c.S3.Domain = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("FILEX_SFTP"); v != "" {
+		c.SFTP.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_SFTP_ADDR"); v != "" {
+		c.SFTP.Addr = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_SFTP_HOST_KEY_DIR"); v != "" {
+		c.SFTP.HostKeyDir = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_SFTP_BANNER"); v != "" {
+		c.SFTP.Banner = v
+	}
+	if v := os.Getenv("FILEX_FTPS"); v != "" {
+		c.FTPS.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_FTPS_ADDR"); v != "" {
+		c.FTPS.Addr = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_FTPS_PUBLIC_HOST"); v != "" {
+		c.FTPS.PublicHost = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_FTPS_PASV_MIN"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			c.FTPS.PassivePortMin = n
+		}
+	}
+	if v := os.Getenv("FILEX_FTPS_PASV_MAX"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			c.FTPS.PassivePortMax = n
+		}
+	}
+	if v := os.Getenv("FILEX_FTPS_CERT"); v != "" {
+		c.FTPS.CertFile = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_FTPS_KEY"); v != "" {
+		c.FTPS.KeyFile = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_FTPS_BANNER"); v != "" {
+		c.FTPS.Banner = v
+	}
+	if v := os.Getenv("FILEX_NFS"); v != "" {
+		c.NFS.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_NFS_ADDR"); v != "" {
+		c.NFS.Addr = strings.TrimSpace(v)
 	}
 	// ── updates ──
 	// AUTO_UPGRADE is the friendly shorthand people reach for; it selects the

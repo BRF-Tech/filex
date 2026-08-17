@@ -61,6 +61,7 @@ func main() {
 		thumbCmd(),
 		clientCmd(),
 		syncCmd(),
+		mountCmd(),
 		selfUpdateCmd(),
 	)
 
@@ -414,12 +415,55 @@ func storageList() error {
 	return nil
 }
 
+// validateStorageInput runs `filex storage add` through the same gates as
+// POST /api/admin/storages: known driver, parseable config, and a
+// non-root mount point (storage.ValidateNonRootPath, which reads the
+// field the driver's descriptor flags as its root).
+//
+// Missing required fields are reported as a warning rather than an error:
+// a descriptor marks what a form should ask for, and an operator scripting
+// this command may legitimately lean on ambient credentials (an S3
+// instance role fills access_key/secret_key with nothing in the config).
+func validateStorageInput(driver, configJSON string) error {
+	if driver == "" {
+		return fmt.Errorf("--driver is required (one of: %s)", strings.Join(storage.Names(), ", "))
+	}
+	if _, err := storage.Get(driver); err != nil {
+		return fmt.Errorf("unknown driver %q (registered: %s)", driver, strings.Join(storage.Names(), ", "))
+	}
+	cfgMap := map[string]any{}
+	if strings.TrimSpace(configJSON) != "" {
+		if err := json.Unmarshal([]byte(configJSON), &cfgMap); err != nil {
+			return fmt.Errorf("--config is not a JSON object: %w", err)
+		}
+	}
+	if err := storage.ValidateNonRootPath(driver, cfgMap); err != nil {
+		return err
+	}
+	if d, ok := storage.DescriptorFor(driver); ok {
+		if missing := d.MissingRequired(cfgMap); len(missing) > 0 {
+			fmt.Fprintf(os.Stderr, "warning: %s config is missing %s — the driver will fail to start unless it can pick them up elsewhere\n",
+				driver, strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
 func storageAddCmd() *cobra.Command {
 	var name, driver, mount, configJSON string
 	c := &cobra.Command{
 		Use:   "add",
 		Short: "Add a new storage row",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// This command writes the storages row straight into the DB,
+			// so it used to skip every check the admin API runs — a
+			// storage added here could sit at the bucket root, or name a
+			// driver that does not exist, and nothing said a word until
+			// the sync worker tripped over it. Same validation as the API
+			// now, from the same driver descriptors.
+			if err := validateStorageInput(driver, configJSON); err != nil {
+				return err
+			}
 			cfg, err := loadConfig()
 			if err != nil {
 				return err
@@ -452,7 +496,7 @@ func storageAddCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&name, "name", "", "logical name")
-	c.Flags().StringVar(&driver, "driver", "", "driver: local | s3 | sftp | ftp | webdav")
+	c.Flags().StringVar(&driver, "driver", "", "driver: "+strings.Join(storage.Names(), " | "))
 	c.Flags().StringVar(&mount, "mount", "/", "logical mount path")
 	c.Flags().StringVar(&configJSON, "config", "{}", "JSON object with driver-specific options")
 	return c

@@ -354,8 +354,8 @@ filemanager/
 │
 ├── docs/                           # this directory
 │
-├── .github/                        # issue/PR templates + CI workflows
-│   └── workflows/ci.yml            # build/test pipeline
+├── .gitlab/                        # CI helpers (placeholders)
+├── .gitlab-ci.yml                  # pipeline
 ├── .goreleaser.yml                 # release matrix
 ├── docker-compose.yml              # full stack with profiles
 ├── package.json                    # workspace root

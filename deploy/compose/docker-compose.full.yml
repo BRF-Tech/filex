@@ -34,6 +34,22 @@ services:
       FILEX_QUEUE_DRIVER: redis
       FILEX_QUEUE_DSN: redis://redis:6379/0
       FILEX_THUMBS_ENABLED: "true"
+      # ── Reaching filex without a browser (docs/PROTOCOLS.md) ───────────
+      # The S3 endpoint and /dav are already on and need no port of their own.
+      # ⚠ Set this before anybody mints an S3 access key: the secret must be
+      # recoverable (SigV4 recomputes an HMAC chain), so it is sealed with this
+      # key rather than hashed. Without it, minting FAILS instead of storing
+      # plaintext — and losing it stops every existing access key verifying, so
+      # back it up with the database.
+      FILEX_SECRET_KEY: ${FILEX_SECRET_KEY:-}
+      # SFTP / FTPS / NFS each open a LISTENER, so they stay off until asked
+      # for — and each needs its port published below and opened on the
+      # firewall. ⚠ FTPS also needs the whole passive range, or transfers hang
+      # with no error on either side.
+      FILEX_SFTP: ${FILEX_SFTP:-0}
+      FILEX_FTPS: ${FILEX_FTPS:-0}
+      FILEX_FTPS_PUBLIC_HOST: ${FILEX_DOMAIN}
+      FILEX_NFS: ${FILEX_NFS:-0}
       # External integrations — each is blank unless you enable it (see header).
       # filex hides an integration whose URL is blank or unreachable.
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
@@ -75,6 +91,18 @@ services:
       FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY: ${FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY:-}
       FILEX_DEFAULT_STORAGE_S3_SECRET_KEY: ${FILEX_DEFAULT_STORAGE_S3_SECRET_KEY:-}
       FILEX_DEFAULT_STORAGE_S3_PATH_STYLE: ${FILEX_DEFAULT_STORAGE_S3_PATH_STYLE:-true}
+    # ⚠ Uncomment the ones you switched on above. They are NOT behind Caddy:
+    # SFTP, FTPS and NFS are raw TCP and cannot go through an HTTP proxy, so
+    # each is published straight from the container and has to be opened on the
+    # firewall too. The web UI, the S3 endpoint and /dav all arrive over 443
+    # via Caddy and need nothing here.
+    # ports:
+    #   - "2022:2022"               # FILEX_SFTP
+    #   - "2121:2121"               # FILEX_FTPS control channel
+    #   - "30000-30100:30000-30100" # ⚠ FILEX_FTPS passive range — without the
+    #                               #   WHOLE range, transfers hang with no
+    #                               #   error on either side
+    #   - "2049:2049"               # ⚠ FILEX_NFS — unencrypted, LAN/VPN only
     volumes:
       - filex-data:/data          # DB (if you switch to sqlite), search index, thumbs, first-run secret
       - ./files:/srv/files        # default local storage folder (seeded on boot)

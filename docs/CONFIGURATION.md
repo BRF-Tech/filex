@@ -200,17 +200,116 @@ Each is optional — an empty URL disables it. Set via env or
 
 ---
 
-## Storage sync
+## Protocol endpoints (S3 · SFTP · FTPS · NFS · WebDAV)
 
-Global fallback cadence for the [sync worker](STORAGE.md#sync). Per‑storage
-`sync_interval_s` overrides this.
+filex can be reached as five protocols besides HTTP. Full picture, including
+which credential each one takes and the traps that cost real time:
+[PROTOCOLS.md](./PROTOCOLS.md).
+
+⚠ **S3 and `/dav` are ON by default; the other three are OFF.** The two that are
+on do not open a port of their own and refuse every unsigned or unauthenticated
+request, and a credential still has to be minted before anything can reach them.
+The three that open a **listener** stay off until asked for — a port nobody
+requested is not something to open for them.
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_SYNC_INTERVAL` | `15m` | Go duration (`30s`, `15m`, `1h`). |
-| `FILEX_SYNC_WORKERS` | `4` | Concurrent storage sync workers. |
+| `FILEX_SECRET_KEY` | — | ⚠⚠ **Required once anybody mints an S3 access key.** SigV4 verifies a request by recomputing an HMAC chain from the secret, so unlike a token it cannot be hashed — filex seals it with AES-GCM under this key. With no key configured, minting an access key **fails** rather than storing plaintext. **Changing or losing it stops every existing access key from verifying**, so treat it like the database, not like a password: back it up, do not rotate it casually. Any 32+ random bytes. |
+| `FILEX_S3` | `1` | The S3-compatible endpoint. Set `0` to switch it off. |
+| `FILEX_S3_DOMAIN` | — | Dedicated host for the endpoint, e.g. `s3.example.com`, which also enables virtual-hosted addressing (`bucket.s3.example.com`). Empty leaves the endpoint under `/s3`, path-style only. ⚠⚠ **Never point this at the host the app itself serves** — the whole site then answers as S3. ⚠ Setting it needs a wildcard A record **and** a wildcard certificate for `*.<domain>`; without both, current SDKs (which default to virtual-hosted) fail at TLS with nothing that names the cause. |
+| `FILEX_SFTP` | `0` | The SFTP endpoint. Its own TCP listener, not a route. |
+| `FILEX_SFTP_ADDR` | `:2022` | Listen address. 2022 by convention — sftpgo and `rclone serve sftp` use it, while 2222 reads as "SSH in a container". |
+| `FILEX_SFTP_HOST_KEY_DIR` | `<data>/ssh` | Where the server's host keys live. ⚠ **It must survive a rebuild**: regenerating host keys gives every user the "REMOTE HOST IDENTIFICATION HAS CHANGED" warning, which is indistinguishable from an attack. |
+| `FILEX_SFTP_BANNER` | — | Text shown before authentication. |
+| `FILEX_FTPS` | `0` | The FTPS endpoint. ⚠ Explicit TLS is **mandatory** on both channels and there is no switch to relax it: plain FTP sends the password in the clear and the file after it. |
+| `FILEX_FTPS_ADDR` | `:2121` | Control channel. Port 21 needs root. |
+| `FILEX_FTPS_PASV_MIN` / `_MAX` | `30000` / `30100` | The passive data-port range. ⚠⚠ **Open it on the firewall too** — a blocked range makes every transfer *hang* with no error on either side, which is the classic FTP failure and impossible to guess at from the client end. |
+| `FILEX_FTPS_PUBLIC_HOST` | — | The address to advertise for passive connections, when it differs from what the server sees (NAT, Docker). |
+| `FILEX_FTPS_CERT` / `_KEY` | — | TLS certificate. Absent, filex generates a self-signed one and the guide says so, so nobody has to discover it from a client warning. |
+| `FILEX_FTPS_BANNER` | — | Greeting line shown on connect. |
+| `FILEX_NFS` | `0` | The NFSv3 endpoint. ⚠⚠ **NFSv3 is unencrypted** — anyone who can read the traffic sees the files, and anyone who learns an export path can mount it. LAN or VPN only; for anything off-LAN the answer is `filex mount`. |
+| `FILEX_NFS_ADDR` | `:2049` | Listen address. ⚠ There is no portmapper on 111, so clients must be given `port=` and `mountport=` explicitly — and Windows' "Client for NFS" cannot say that at all, so it only works on the standard 2049. |
+| `FILEX_DAV` | `1` | The WebDAV endpoint at `/dav`. |
+
+---
+
+## Storage sync
+
+Fallback cadence for the [sync worker](STORAGE.md#sync), used by storages that
+do not set their own `sync_interval_s`. A storage that does set one wins.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_SYNC_INTERVAL` | `15m` | Go duration (`30s`, `15m`, `1h`). Values under 5 s are treated as "unset". |
 
 > ⚠ The variable is `FILEX_SYNC_INTERVAL`, **not** `FILEX_SYNC_DEFAULT_INTERVAL`.
+> An unparseable value logs a warning at boot and keeps the default rather than
+> failing silently.
+
+> ⚠ **`FILEX_SYNC_WORKERS` was removed in v0.20.** It was documented here as
+> "concurrent storage sync workers" and parsed into a config field that
+> **nothing ever read** — there is no pool to size. The sync worker runs one
+> goroutine per enabled storage and always has, so concurrency is the number of
+> enabled storages and there is no knob to turn. Setting the variable now has
+> no effect and produces no error; delete it from your environment.
+>
+> (`FILEX_SYNC_INTERVAL` was equally dead until v0.20 — parsed, then read by
+> nobody, while the real fallback was a hardcoded `15m` that happened to match
+> the documented default. It is wired up now.)
+
+---
+
+## Uploads (staged / resumable)
+
+Large uploads land in filex's own staging area first and are transferred to the
+storage backend by a background job, so they survive a dropped connection and
+work on every driver. See [UPLOADS.md](UPLOADS.md).
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_UPLOAD_STAGING_DIR` | `<data_dir>/uploads` | Where in‑flight upload parts live. |
+| `FILEX_UPLOAD_CHUNK_SIZE` | `8388608` (8 MiB) | Default part size when the client does not request one. |
+| `FILEX_UPLOAD_STAGING_TTL` | `24h` | Idle time before the sweeper removes an abandoned staging directory. |
+
+> ⚠ The whole object passes through the staging directory — put it on a
+> filesystem with room for the largest upload you expect. `begin` refuses when
+> less than `size × 1.2` is free.
+
+---
+
+## Downloads from slow storage (prepared copies)
+
+When a **big** file lives on a **slow** backend, filex fetches it to local disk
+once, tells the user it is preparing (with a percentage), and then serves it —
+and every later request — at local-disk speed, with full `Range` support. See
+*Slow storage* in [STORAGE.md](STORAGE.md).
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_CACHE` | `1` | Master switch. `0` disables prepared copies entirely. |
+| `FILEX_CACHE_DIR` | `<data_dir>/cache` | Where prepared copies live. |
+| `FILEX_CACHE_MIN_SIZE` | `67108864` (64 MiB) | Smallest file worth preparing. Below it, nothing is ever cached. |
+| `FILEX_CACHE_MAX_BYTES` | `21474836480` (20 GiB) | **Global** ceiling on the cache directory, enforced with LRU eviction. |
+| `FILEX_CACHE_SLOW_BPS` | `10485760` (10 MiB/s) | Measured throughput below which a storage counts as slow. |
+
+A file is prepared only when it is **at least `MIN_SIZE`** *and* its storage is
+slow — either flagged by you (`"slow": true` in the storage config) or measured
+below `SLOW_BPS`. Small files, and files on storages that measure fast, are
+served exactly as they were before: nothing is prepared and nobody waits.
+
+> ⚠ The cap is not optional and cannot be set to "unlimited". When the cache is
+> full of entries that are being read, a new file is simply **not** prepared and
+> streams from the backend as before — filex will not exceed the ceiling to make
+> room.
+
+**The cache directory also holds folder-share ZIPs** (`<cache_dir>/sharezips`,
+moved there from `<data_dir>/sharezips` on first start of v0.19.1+). They are
+not covered by `FILEX_CACHE_MAX_BYTES`; they are bounded by their shares
+instead — an archive is deleted as soon as no active share can serve it. See
+*Folder ZIPs are cached* in [SHARING.md](SHARING.md).
+
+⚠ **Exclude `<data_dir>/cache` from your backups.** Everything under it is
+regenerable, and a single folder-share archive can be tens of gigabytes.
 
 ---
 
@@ -392,6 +491,8 @@ Some settings (branding, default thumbnail policy) live in the database
 
 - `FILEX_SYNC_DEFAULT_INTERVAL` is **not** read — the correct var is
   `FILEX_SYNC_INTERVAL`.
+- `FILEX_SYNC_WORKERS` is **not** read either, and was removed in v0.20: there
+  is no worker pool to size. See [Storage sync](#storage-sync).
 - `FILEX_DEFAULT_STORAGE_*` only takes effect on a **fresh** install (it seeds a
   default storage when none exists yet); it never edits or replaces an existing
   storage. See [Zero‑touch seeding](#zero-touch-seeding).

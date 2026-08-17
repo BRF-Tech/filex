@@ -1,6 +1,6 @@
 package cloud
 
-// Stripe SKELETON — deliberately NO Stripe SDK dependency (Burak md.18: raw
+// Stripe SKELETON — deliberately NO Stripe SDK dependency (owner decision md.18: raw
 // stdlib http drafts + TODOs only; no live billing until the cloud offering
 // actually launches). Everything below compiles and shapes the integration,
 // but nothing is production-hardened: see the TODO markers + docs/CLOUD.md.

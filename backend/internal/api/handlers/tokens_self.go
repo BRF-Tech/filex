@@ -16,6 +16,7 @@ import (
 	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
 
 // SelfTokens is the self-service API-token surface at /api/tokens. Any
@@ -26,11 +27,14 @@ import (
 type SelfTokens struct {
 	store db.Store
 	acl   *acl.Resolver
+	// auth is the shared credential resolver, held only so revoking a token
+	// reaches the SFTP/FTPS sessions that token already opened.
+	auth *protocolauth.Resolver
 }
 
 // NewSelfTokens constructs the self-service token handler.
-func NewSelfTokens(store db.Store, resolver *acl.Resolver) *SelfTokens {
-	return &SelfTokens{store: store, acl: resolver}
+func NewSelfTokens(store db.Store, resolver *acl.Resolver, pauth *protocolauth.Resolver) *SelfTokens {
+	return &SelfTokens{store: store, acl: resolver, auth: pauth}
 }
 
 // List returns the caller's own tokens (never any secret).
@@ -195,6 +199,10 @@ func (h *SelfTokens) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// ⚠ Deleting the row stops the NEXT login. The protocols that authenticate
+	// once and stay open — SFTP, FTPS — keep serving files on the session this
+	// token already opened, so they are cut here too.
+	protocolauth.KickCredential(h.auth, protocolauth.KickToken, id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

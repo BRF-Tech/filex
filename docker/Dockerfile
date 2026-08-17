@@ -11,10 +11,10 @@
 # Dockerfile.full has been merged into this single canonical recipe.
 #
 # Build (from repo root):
-#   docker build -t ghcr.io/brf-tech/filex:latest -f docker/Dockerfile .
+#   docker build -t brftech/filex:latest -f docker/Dockerfile .
 #
 # Run:
-#   docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:latest
+#   docker run -p 5212:5212 -v $(pwd)/data:/data brftech/filex:latest
 
 # Multi-arch: build stages are pinned to $BUILDPLATFORM so the Node/Go work
 # always runs natively on the build host; the Go stage cross-compiles via

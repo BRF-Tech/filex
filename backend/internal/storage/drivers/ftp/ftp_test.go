@@ -100,7 +100,7 @@ func TestCapabilities(t *testing.T) {
 	d := &Driver{}
 	got := d.Capabilities()
 	want := storage.Capabilities{
-		Read: true, Write: true, Move: true,
+		Read: true, Range: true, Write: true, Move: true,
 		Copy: true, Delete: true, Mkdir: true,
 	}
 	if got != want {
@@ -115,7 +115,7 @@ func TestCapabilities(t *testing.T) {
 func TestComputeCapabilities(t *testing.T) {
 	d := &Driver{}
 	c := storage.ComputeCapabilities(d)
-	if !c.Read || !c.Write || !c.Move || !c.Copy || !c.Delete || !c.Mkdir {
+	if !c.Read || !c.Range || !c.Write || !c.Move || !c.Copy || !c.Delete || !c.Mkdir {
 		t.Fatalf("ComputeCapabilities missing one or more flags: %+v", c)
 	}
 	if c.Presign || c.Watch {

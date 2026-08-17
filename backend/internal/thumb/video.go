@@ -26,7 +26,7 @@ func (p *Pipeline) generateVideo(ctx context.Context, node *model.Node, drv stor
 	}
 	defer os.Remove(tmp.Name())
 
-	rc, err := drv.Read(ctx, node.Path)
+	rc, err := p.openSource(ctx, drv, node)
 	if err != nil {
 		tmp.Close()
 		return err

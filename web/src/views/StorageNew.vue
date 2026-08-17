@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { Save, ArrowLeft, Activity } from 'lucide-vue-next';
 
 import { useStoragesStore } from '@/stores/storages';
 import { useToastStore } from '@/stores/toast';
-import { useCapabilitiesStore } from '@/stores/capabilities';
+import { useStorageDriversStore } from '@/stores/storageDrivers';
 import { extractError } from '@/api/client';
 import { StoragesApi } from '@/api/storages';
 import type { StorageDriver } from '@/api/types';
@@ -18,59 +18,44 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const router = useRouter();
 const storages = useStoragesStore();
 const toast = useToastStore();
-const caps = useCapabilitiesStore();
+const drivers = useStorageDriversStore();
 
 const driver = ref<StorageDriver>('local');
 const name = ref('');
 const readOnly = ref(false);
-const config = ref<Record<string, unknown>>({ path: '' });
+const config = ref<Record<string, unknown>>({});
 const saving = ref(false);
 
 const testing = ref(false);
 const testResult = ref<{ ok: boolean; error?: string } | null>(null);
 
-const allDrivers: StorageDriver[] = ['local', 's3', 'sftp', 'webdav'];
+// The picker lists whatever the backend registers — no hardcoded driver
+// list. The literal that used to live here omitted `ftp`, which the
+// backend has supported all along, so the driver was invisible.
 const driverOptions = computed(() =>
-  allDrivers
-    .filter((d) => caps.data.storage_drivers.length === 0 || caps.data.storage_drivers.includes(d))
-    .map((d) => ({ value: d, label: t(`storages.driver.${d}`) })),
+  drivers.items.map((d) => ({
+    value: d.driver,
+    label: d.i18n_key && te(d.i18n_key) ? t(d.i18n_key) : d.label,
+  })),
 );
+
+onMounted(async () => {
+  await drivers.fetch();
+  if (!drivers.descriptor(driver.value) && drivers.items.length > 0) {
+    driver.value = drivers.items[0].driver;
+  }
+  config.value = drivers.defaults(driver.value);
+});
 
 function onDriverChange(d: StorageDriver) {
   driver.value = d;
-  // Sensible defaults per driver. We never silently keep stale fields.
-  switch (d) {
-    case 'local':
-      config.value = { path: '' };
-      break;
-    case 's3':
-      config.value = {
-        endpoint: '',
-        region: '',
-        bucket: '',
-        access_key: '',
-        secret_key: '',
-        path_style: true,
-      };
-      break;
-    case 'sftp':
-      config.value = {
-        host: '',
-        port: 22,
-        user: '',
-        password: '',
-        key_path: '',
-        base_path: '/',
-      };
-      break;
-    case 'webdav':
-      config.value = { url: '', user: '', password: '' };
-      break;
-  }
+  // Defaults come from the driver's descriptor. Switching drivers
+  // replaces the config wholesale — stale keys are never carried over.
+  config.value = drivers.defaults(d);
   testResult.value = null;
 }
 

@@ -43,7 +43,7 @@ func (p *Pipeline) generateOffice(ctx context.Context, node *model.Node, drv sto
 	if err != nil {
 		return err
 	}
-	rc, err := drv.Read(ctx, node.Path)
+	rc, err := p.openSource(ctx, drv, node)
 	if err != nil {
 		src.Close()
 		return err

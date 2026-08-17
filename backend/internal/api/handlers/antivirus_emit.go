@@ -29,5 +29,13 @@ func enqueueAntivirusScan(ctx context.Context, n *model.Node) {
 	if avEnqueue == nil || n == nil {
 		return
 	}
+	// A staged node is listed, but its bytes are still in filex's staging area
+	// and not on the driver the scanner reads through. Scanning now would find
+	// nothing and report a clean file; the writehook fires the scan again once
+	// the transfer lands. One guard in the shared sink rather than one per
+	// call site.
+	if n.TransferState == model.TransferStateStaged {
+		return
+	}
 	avEnqueue(context.WithoutCancel(ctx), n)
 }

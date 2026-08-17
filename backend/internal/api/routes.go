@@ -9,7 +9,11 @@ package api
 import (
 	"context"
 	"embed"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -24,18 +28,24 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/dav"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/mailer"
+	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/replica"
+	"github.com/brf-tech/filex/backend/internal/s3api"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -71,10 +81,29 @@ type Deps struct {
 	// ACL resolves per-user/per-item grants (RBAC feature). Constructed in
 	// BuildRouter from Store when nil.
 	ACL *acl.Resolver
+	// ProtocolAuth is the one door every non-HTTP protocol resolves its caller
+	// through (WebDAV today; S3, SFTP, FTPS, NFS and FUSE next). ONE instance is
+	// shared on purpose: a resolver per protocol would mean a credential cache
+	// per protocol, and therefore a different answer to "how long does a revoked
+	// password keep working" on each of them. Constructed in BuildRouter when
+	// nil.
+	ProtocolAuth *protocolauth.Resolver
+	// FTPSAddr reports the address the FTPS listener actually bound.
+	//
+	// ⚠⚠ A function, not a string, and read at REQUEST time. Config may say
+	// `:0` ("any free port") — and it does in the test harness — so the only
+	// place the real port exists is the running listener, which is created
+	// after this router. A guide that printed the configured value would tell
+	// somebody to connect to port 0. Nil falls back to the configured address.
+	FTPSAddr func() string
 	// Mailer sends invite/share notices (optional; nil → links shown on-screen).
 	Mailer *mailer.Service
 	// ZipCache caches folder-share ZIPs (shared with the background warmer).
 	ZipCache *sharezip.Cache
+	// FileCache holds the locally prepared copies of big files that live on
+	// slow storages (internal/filecache). Nil = no caching; every read then
+	// goes to the driver exactly as it did before the cache existed.
+	FileCache *filecache.Cache
 	/* koru:k2 av */
 	// AVScan enqueues an async ClamAV scan for a freshly written node
 	// (v0.4 "Koru"). Wired by the server bootstrap only when a ClamAV
@@ -85,6 +114,18 @@ type Deps struct {
 	// binary) applies them. Nil = the feature is off; the admin endpoints then
 	// report a "disabled" status instead of disappearing. See docs/UPDATES.md.
 	Updater *update.Service
+	// Staging is the on-disk staging area for resumable uploads. Constructed
+	// in BuildRouter from Cfg.Upload.StagingDir when nil.
+	Staging *staging.Area
+	// StagedUploads is filled in BY BuildRouter so the server bootstrap can
+	// run the staging sweeper against the same handler the routes use.
+	StagedUploads *handlers.StagedUpload
+	// Body resolves where a file's bytes are — the storage driver, or the
+	// staging area while a staged upload is still being transferred. Built in
+	// BuildRouter from Store+Staging when nil, and filled back in here so the
+	// bootstrap can hand the SAME resolver to the surfaces that live outside
+	// the router (WebDAV, thumbnails, versioning, the queue workers).
+	Body *filebody.Resolver
 }
 
 // BuildRouter constructs the chi router with all routes wired up.
@@ -96,6 +137,56 @@ func BuildRouter(d *Deps) http.Handler {
 	// the caller's grants + account-role ceiling.
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
+	}
+	if d.ProtocolAuth == nil {
+		d.ProtocolAuth = protocolauth.New(d.Store, d.ACL, d.Cfg.MultiTenant)
+		// The box is what lets an S3 access key be issued at all: SigV4 needs a
+		// recoverable secret, so with no FILEX_SECRET_KEY configured, issuing
+		// fails loudly instead of storing one in the clear.
+		if box, err := protocolauth.SecretsFrom(d.Cfg.SecretKey); err == nil {
+			d.ProtocolAuth.Secrets = box
+		} else {
+			slog.Error("protocolauth: secret box unavailable; S3 access keys cannot be issued", slog.Any("err", err))
+		}
+	}
+
+	// The S3 endpoint, built here because it has to be reachable at the ROOT
+	// of a dedicated host: every S3 client talks to `/` (ListBuckets) and
+	// `/bucket/key` (objects). Mounted only under /s3, `GET /` reaches the web
+	// app and the client parses an HTML redirect as XML.
+	//
+	// ⚠ chi requires middleware before any route is registered, which is why
+	// this sits at the top rather than next to the other mounts.
+	s3h := s3api.NewHandler(s3api.Config{
+		Enabled:     d.Cfg.S3.Enabled,
+		Store:       d.Store,
+		Auth:        d.ProtocolAuth,
+		ACL:         d.ACL,
+		Resolver:    d.StorageResolver,
+		Body:        d.Body,
+		Quota:       d.Quota,
+		Index:       d.Index,
+		Thumbs:      d.Thumbs,
+		Staging:     d.Staging,
+		PublicURL:   d.Cfg.PublicURL,
+		MultiTenant: d.Cfg.MultiTenant,
+		Domain:      d.Cfg.S3.Domain,
+	})
+	if d.Cfg.S3.Enabled && d.Cfg.S3.Domain != "" {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				// ⚠ /healthz stays with the app even on the S3 host. A load
+				// balancer or uptime probe pointed at the endpoint would
+				// otherwise get a signed-request refusal and call the service
+				// down. The cost is that a bucket named "healthz" is
+				// unreachable by name, which is a trade worth making once.
+				if req.URL.Path != "/healthz" && s3api.HostMatches(d.Cfg.S3.Domain, req.Host) {
+					s3h.ServeHTTP(w, req)
+					return
+				}
+				next.ServeHTTP(w, req)
+			})
+		})
 	}
 
 	r.Use(Logger)
@@ -112,6 +203,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
 	mh.AttachACL(d.ACL)
+	// The per-user ceiling on the synchronous write paths (vfUpload, and the
+	// IngestFile fallback that drop/ShareX/AI take for small files). The staged
+	// path checks at `begin`; before this, everything below the staging
+	// threshold had no ceiling at all.
+	mh.Quota = d.Quota
 	if d.Index != nil {
 		// Wire Bleve so vfSearch consults the index before falling
 		// back to SQL LIKE.
@@ -125,10 +221,70 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	uh.AttachACL(d.ACL)
+	// Staged uploads — the driver-agnostic resumable path (docs/UPLOADS.md).
+	// It is handed the manager so the committed bytes fire the same post-write
+	// hooks (search index, thumbnail, writehook, realtime) as vfUpload rather
+	// than a parallel set that can drift.
+	if d.Staging == nil {
+		stagingDir := d.Cfg.Upload.StagingDir
+		if stagingDir == "" && d.Cfg.DataDir != "" {
+			// config.Load fills this in; a Deps assembled by hand (tests,
+			// embedders) gets the same default rather than a silently
+			// disabled feature.
+			stagingDir = filepath.Join(d.Cfg.DataDir, "uploads")
+		}
+		d.Staging = staging.New(stagingDir)
+	}
+	// One byte-source resolver, shared by EVERY read surface. A staged upload
+	// publishes its node the moment the client commits and transfers the bytes
+	// afterwards, so "ask the driver" stopped being the whole answer; this is
+	// where the other half lives. Deliberately built once and handed to all of
+	// them rather than re-derived per handler — a read that is staging-aware on
+	// one surface and not another is the same file behaving as two products.
+	// The local copy prepared for a big file on a slow storage. Defaulted from
+	// Cfg the same way Staging is, so a Deps assembled by hand (tests,
+	// embedders) gets the feature rather than a silently disabled one — the
+	// server bootstrap passes its own so that both resolvers share ONE cache
+	// and therefore one view of the global cap.
+	if d.FileCache == nil {
+		cacheDir := d.Cfg.Cache.Dir
+		if cacheDir == "" && d.Cfg.DataDir != "" {
+			cacheDir = filepath.Join(d.Cfg.DataDir, "cache")
+		}
+		if d.Cfg.Cache.Disabled {
+			cacheDir = ""
+		}
+		d.FileCache = filecache.New(filecache.Config{
+			Dir:             cacheDir,
+			MinSize:         d.Cfg.Cache.MinSize,
+			MaxBytes:        d.Cfg.Cache.MaxBytes,
+			SlowBytesPerSec: d.Cfg.Cache.SlowBytesPerSec,
+		})
+	}
+	if d.Body == nil {
+		d.Body = filebody.New(d.Store, d.Staging).WithCache(d.FileCache)
+	}
+	mh.AttachBody(d.Body)
+	if d.Thumbs != nil {
+		// The bootstrap already wires its own pipeline, but a Deps assembled by
+		// hand (tests, embedders) must not end up with a thumbnailer that is
+		// the one read surface still blind to staging.
+		d.Thumbs.AttachBody(d.Body)
+	}
+	suh := handlers.NewStagedUpload(d.Store, mh, d.Staging, d.Ops, d.Quota, d.Cfg.Upload.ChunkSize, d.Cfg.Upload.StagingTTL)
+	suh.AttachACL(d.ACL)
+	d.StagedUploads = suh
+	// …and back into the manager, so the whole-body surfaces that write through
+	// IngestFile (the public drop link) stage a large file instead of holding
+	// the request open for the driver write. The chunked protocol above and
+	// this share one staging area, one transfer op and one set of hooks.
+	mh.AttachStaged(suh)
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	ah.AttachACL(d.ACL)
+	ah.AttachBody(d.Body)
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL, d.ZipCache)
 	sh.AttachACL(d.ACL)
+	sh.AttachBody(d.Body)
 	// The public folder page draws its gallery tiles from the same thumbnail
 	// cache the app uses. Unwired, those tiles fall back to the full-size
 	// originals — which is what made a shared photo folder crawl on open.
@@ -148,9 +304,14 @@ func BuildRouter(d *Deps) http.Handler {
 		// owns that DB logic, so inject it as the worker's DBSync hook —
 		// without this, async move/delete/copy don't reflect in the UI.
 		d.Ops.SetSync(mh)
+		// …and the staged-upload transfer, for the same reason: the bytes move
+		// in the worker, but the node/index/thumb/writehook side of a write
+		// lives in the handler layer.
+		d.Ops.SetUploadCommitter(suh)
 	}
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	ooh.AttachACL(d.ACL)
+	ooh.AttachBody(d.Body)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	stg := handlers.NewStorages(d.Store, d.Worker)
@@ -184,7 +345,7 @@ func BuildRouter(d *Deps) http.Handler {
 	saveTextH.AttachACL(d.ACL)
 	if d.Versions != nil {
 		// Snapshot the pre-edit bytes into version history before
-		// every save-text write (Burak: "değişiklik sonrası sürüm
+		// every save-text write (Ada: "değişiklik sonrası sürüm
 		// geçmişine bir bok gelmedi" — handler never tapped the
 		// versioning service).
 		saveTextH.AttachVersions(d.Versions)
@@ -192,7 +353,7 @@ func BuildRouter(d *Deps) http.Handler {
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
-	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL)
+	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL, d.ProtocolAuth)
 	desktopAuthH := handlers.NewDesktopAuth(d.Store)
 
 	// ────── public viewer ──────
@@ -323,6 +484,41 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/api/auth/totp/verify", authSelf.TotpVerify)
 		r.Post("/api/auth/totp/disable", authSelf.TotpDisable)
 
+		// S3 access keys — self-service, because a credential only an admin can
+		// mint is one most people never get. The permission ceiling is enforced
+		// by protocolauth.Issue (a key can only narrow its owner), not by who
+		// is asking.
+		s3keys := handlers.NewS3Keys(d.Store, d.ProtocolAuth, d.Cfg.S3, d.Cfg.PublicURL)
+		r.Get("/api/auth/s3-keys", s3keys.List)
+		r.Post("/api/auth/s3-keys", s3keys.Create)
+		r.Post("/api/auth/s3-keys/{id}/state", s3keys.SetState)
+		r.Delete("/api/auth/s3-keys/{id}", s3keys.Delete)
+
+		// Self-service SSH keys, for the SFTP endpoint.
+		//
+		// ⚠ Not a follow-up to shipping SFTP: `ssh-copy-id` appends to
+		// ~/.ssh/authorized_keys over a shell and filex has none, so without
+		// this screen public-key authentication is unreachable and everybody
+		// sends their account password to a file server instead.
+		sshkeys := handlers.NewSSHKeys(d.Store, d.ProtocolAuth, d.Cfg.SFTP.Enabled,
+			sftpHost(d.Cfg.PublicURL), sftpPort(d.Cfg.SFTP.Addr),
+			ftpsFacts(d.Cfg, d.FTPSAddr))
+		r.Get("/api/auth/ssh-keys", sshkeys.List)
+		r.Post("/api/auth/ssh-keys", sshkeys.Create)
+		r.Post("/api/auth/ssh-keys/{id}/state", sshkeys.SetState)
+		r.Delete("/api/auth/ssh-keys/{id}", sshkeys.Delete)
+
+		// Self-service NFS exports. ⚠ The path a POST returns IS the
+		// credential: NFSv3 cannot authenticate a request, so filex binds the
+		// identity to a high-entropy export path instead (see
+		// model.NFSExport). It is shown once and stored hashed.
+		nfsexports := handlers.NewNFSExports(d.Store, d.ProtocolAuth, d.Cfg.NFS.Enabled,
+			sftpHost(d.Cfg.PublicURL), portOf(d.Cfg.NFS.Addr, 2049))
+		r.Get("/api/auth/nfs-exports", nfsexports.List)
+		r.Post("/api/auth/nfs-exports", nfsexports.Create)
+		r.Post("/api/auth/nfs-exports/{id}/state", nfsexports.SetState)
+		r.Delete("/api/auth/nfs-exports/{id}", nfsexports.Delete)
+
 		// Self-service API tokens — any user (incl. non-admin user/viewer) may
 		// mint tokens bound to themselves, capped to their role ceiling + own
 		// grants (see handlers.SelfTokens). Admins also have /api/admin/ai-tokens.
@@ -380,9 +576,21 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/move", oh.SubmitMove)
 			r.Post("/delete", oh.SubmitDelete)
 
+			// Legacy S3-presigned chunked upload — untouched. It is what the
+			// current web client speaks, and it still works wherever the
+			// driver is S3.
 			r.Post("/upload/init", uh.Init)
 			r.Post("/upload/finalize", uh.Finalize)
 			r.Post("/upload/abort", uh.Abort)
+
+			// Staged uploads — driver-agnostic and resumable (docs/UPLOADS.md).
+			// `begin` is declared before the `{id}` routes so chi cannot route
+			// the literal segment into the parameter.
+			r.Post("/upload/begin", suh.Begin)
+			r.Put("/upload/{id}", suh.Put)
+			r.Get("/upload/{id}", suh.Status)
+			r.Post("/upload/{id}/commit", suh.Commit)
+			r.Delete("/upload/{id}", suh.Abort)
 
 			r.Post("/archive/list", ah.List)
 			r.Post("/archive/extract", ah.Extract)
@@ -469,10 +677,25 @@ func BuildRouter(d *Deps) http.Handler {
 		// Audit page empty even after real changes.
 		r.Use(auth.AuditMiddleware(d.Store))
 
+		// Prometheus exposition. Inside the admin group on purpose: filex is
+		// routinely on the public internet, and an open /metrics hands out
+		// storage names, user counts and traffic shape to anyone who asks.
+		// The scrape job authenticates as an admin — docs/METRICS.md has the
+		// job config. Not under /api/admin because scrapers and dashboards
+		// expect the conventional path.
+		r.Handle("/metrics", metrics.Handler())
+
 		r.Route("/api/admin", func(r chi.Router) {
 			r.Get("/dashboard", dashH.Get)
 			// Duplicate-file report — same (size, etag) grouping (v0.2 "Bul").
 			r.Get("/duplicates", handlers.NewDuplicates(d.Store).Report)
+
+			// Driver config contracts — what fields each storage driver
+			// needs, straight from the driver registry. Every admin
+			// surface that builds a driver config (new storage, edit,
+			// replication target) renders from this instead of carrying
+			// its own hardcoded field list. See handlers/storage_drivers.go.
+			r.Get("/storage-drivers", handlers.NewStorageDrivers().List)
 
 			r.Route("/storages", func(r chi.Router) {
 				r.Get("/", stg.List)
@@ -542,7 +765,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 			// AI / MCP / FilexClient bearer tokens. POST returns the
 			// plaintext token ONCE; only its sha256 hash is stored.
-			aiTokensH := handlers.NewAITokens(d.Store)
+			aiTokensH := handlers.NewAITokens(d.Store, d.ProtocolAuth)
 			r.Route("/ai-tokens", func(r chi.Router) {
 				r.Get("/", aiTokensH.List)
 				r.Post("/", aiTokensH.Create)
@@ -657,7 +880,7 @@ func BuildRouter(d *Deps) http.Handler {
 	})
 
 	// ────── AI / MCP (token-authenticated) ──────
-	// Token-only namespace consumed by AI agents, the work.brf.sh
+	// Token-only namespace consumed by AI agents, the work.example.com
 	// FilexClient, and MCP clients. auth.APITokenMiddleware validates
 	// X-Filex-Token / Bearer and attaches the bound principal + token;
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
@@ -665,6 +888,8 @@ func BuildRouter(d *Deps) http.Handler {
 	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
 	aiH.AttachACL(d.ACL)
 	aiH.AttachThumbs(d.Thumbs)
+	aiH.AttachStaged(suh)
+	aiH.AttachBody(d.Body)
 	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
 		Store:           d.Store,
 		Caps:            d.Caps,
@@ -680,6 +905,8 @@ func BuildRouter(d *Deps) http.Handler {
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
 	aiMCP.AttachACL(d.ACL)
 	aiMCP.AttachThumbs(d.Thumbs)
+	aiMCP.AttachStaged(suh)
+	aiMCP.AttachBody(d.Body)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		// Agents are tenant-scoped too — resolve the token user's provider
@@ -735,6 +962,8 @@ func BuildRouter(d *Deps) http.Handler {
 	sxUploadH := handlers.NewShareX(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
 	sxUploadH.AttachACL(d.ACL)
 	sxUploadH.AttachThumbs(d.Thumbs)
+	sxUploadH.AttachStaged(suh)
+	sxUploadH.AttachBody(d.Body)
 	r.Route("/api/sharex", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
@@ -743,7 +972,11 @@ func BuildRouter(d *Deps) http.Handler {
 	})
 
 	// ────── WebDAV (/dav/<storage>/<path>, Basic auth — see internal/dav) ──────
-	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, Index: d.Index, Thumbs: d.Thumbs, MultiTenant: d.Cfg.MultiTenant}))
+	// The path-prefixed mount, for installs without a dedicated S3 host. A
+	// client then needs /s3 in its endpoint URL and cannot use virtual-hosted
+	// addressing — which is why the host route above is the real answer.
+	r.Mount(s3api.Prefix, s3h)
+	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, Index: d.Index, Thumbs: d.Thumbs, Body: d.Body, Quota: d.Quota, MultiTenant: d.Cfg.MultiTenant, Auth: d.ProtocolAuth, LockDir: filepath.Join(d.Cfg.DataDir, "dav")}))
 
 	// ────── healthz ──────
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -1007,4 +1240,70 @@ func hasAssetExt(name string) bool {
 		}
 	}
 	return false
+}
+
+// sftpHost is the hostname a client should be pointed at: the deployment's own,
+// taken from the public URL rather than invented.
+func sftpHost(publicURL string) string {
+	u, err := url.Parse(strings.TrimSpace(publicURL))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// sftpPort is the TCP port the endpoint listens on.
+//
+// ⚠ It is NOT the web port. SFTP is raw TCP on a port of its own (2022 by
+// convention), and a guide that printed 443 would send every client to a
+// reverse proxy that speaks only HTTP.
+func sftpPort(addr string) int { return portOf(addr, 2022) }
+
+// portOf reads the port out of a listen address, falling back to a protocol's
+// conventional one. ⚠ Port 0 is not a port — it means "pick one" — so it falls
+// back rather than being printed in an instruction.
+func portOf(addr string, fallback int) int {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return fallback
+	}
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		if n, err := strconv.Atoi(addr[i+1:]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+// ftpsFacts describes the FTPS endpoint to the connection guide.
+//
+// ⚠ Computed here rather than in the page: the passive port range and whether
+// the certificate is self-signed are server facts, and a UI that guessed at
+// either would produce instructions that fail as a hang (blocked passive
+// ports) or as an unexplained client warning (an unverified certificate).
+func ftpsFacts(cfg config.Config, live func() string) handlers.FTPSFacts {
+	addr := strings.TrimSpace(cfg.FTPS.Addr)
+	// The listener's own address wins: with `:0` the configured value names no
+	// port at all, and even with a fixed one the running server is the only
+	// thing that knows what actually bound.
+	if live != nil {
+		if a := strings.TrimSpace(live()); a != "" {
+			addr = a
+		}
+	}
+	f := handlers.FTPSFacts{
+		Enabled:    cfg.FTPS.Enabled,
+		Host:       sftpHost(cfg.PublicURL),
+		Port:       portOf(addr, 2121),
+		PasvMin:    cfg.FTPS.PassivePortMin,
+		PasvMax:    cfg.FTPS.PassivePortMax,
+		SelfSigned: cfg.FTPS.CertFile == "" || cfg.FTPS.KeyFile == "",
+	}
+	if cfg.FTPS.PublicHost != "" {
+		f.Host = cfg.FTPS.PublicHost
+	}
+	if f.PasvMin == 0 || f.PasvMax == 0 {
+		f.PasvMin, f.PasvMax = 30000, 30100
+	}
+	return f
 }

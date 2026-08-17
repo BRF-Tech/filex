@@ -160,8 +160,13 @@ test.describe('Capability gating', () => {
       popupOpened = true;
     });
 
-    await page.goto('/admin/explore');
-    await page.getByRole('row', { name: new RegExp(`^${STORAGE_NAME}\\b`) }).dblclick();
+    // Open THIS storage directly. Landing on the bare /admin/explore and
+    // double-clicking a storage row only works when the picker happens to be
+    // showing it — which depends on how many storages the rest of the suite
+    // has left lying around at this moment. Deep-link instead, the way
+    // 75-navigation does, so the test measures the gating branch and not
+    // the suite's storage census.
+    await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE_NAME)}`);
     await page.getByRole('row', { name: /gating\.docx/ }).dblclick();
 
     // The in-page PreviewModal shows the operator-friendly Turkish

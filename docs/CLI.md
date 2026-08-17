@@ -8,6 +8,11 @@ installed server-side — the CLI only uses endpoints the web UI already uses.
 filex client login | ls | upload | download | mkdir | rm | mv | search | share
 ```
 
+The same binary also carries two commands that are not part of `client`:
+[`filex sync`](SYNC.md), which keeps a local folder in step with the server, and
+[`filex mount`](#filex-mount--the-server-as-a-folder), which attaches the server
+as a folder (or a drive letter on Windows) without copying anything.
+
 ## Installation
 
 Grab the release binary for your platform (the same binary that runs the
@@ -88,8 +93,32 @@ filex client upload ./rapor.pdf docs://reports/final.pdf # rename while uploadin
 ```
 
 An existing remote **folder** target keeps the local basename; otherwise the
-last path segment becomes the uploaded filename. The body is streamed
-(multipart), so large files don't load into memory.
+last path segment becomes the uploaded filename. Nothing is ever buffered in
+memory.
+
+**Large files are resumable.** Anything from 8 MiB up goes over the staged
+protocol (`docs/UPLOADS.md`): the file is sent in chunks, the server holds them,
+and a dropped connection costs the current chunk rather than the file. The
+resume point survives the process — a bookmark under `~/.filex/uploads` records
+the upload id, and the next run asks the server where to continue:
+
+```bash
+filex client upload ./4gb.tar docs://backups/    # link dies at 62%
+filex client upload ./4gb.tar docs://backups/    # continues at 62%
+```
+
+A `sha256` is declared before the first chunk and verified by the server over
+the whole assembled file at commit, so a resume cannot quietly splice two
+different files together. If the local file changed in between (different size
+or mtime) the bookmark is discarded and the upload starts fresh.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FILEX_UPLOAD_STATE` | `~/.filex/uploads` | where resume bookmarks live |
+
+Servers older than the staged path (or with no staging directory configured)
+answer `404`/`501` at `begin`; the client then falls back to the single
+multipart POST automatically.
 
 #### Recursive upload (`-r` / `--recursive`)
 
@@ -177,6 +206,59 @@ Expires: 2026-07-24 13:44
 Folders can be shared too — the public link serves them as a ZIP. The PIN is
 generated server-side and shown **once**; `--expires-days 0` (default) means
 no expiry.
+
+## `filex mount` — the server as a folder
+
+The same binary attaches a remote filex to this machine, over the same HTTPS the
+browser uses. It is a sibling of `filex client` / `filex sync` rather than part
+of them, so it takes the same `FILEX_URL` / `FILEX_TOKEN` and the same
+`~/.filex/cli.yaml`.
+
+```bash
+export FILEX_URL=https://filex.example.com
+export FILEX_TOKEN=<token>
+
+mkdir -p ~/filex && filex mount ~/filex        # every storage you can see
+filex mount --remote docs:// ~/docs            # one storage
+filex mount --remote 'docs://projects/acme' --read-only ~/acme
+```
+
+On **Windows** the mountpoint is usually a drive letter, and
+[WinFsp](https://winfsp.dev) (free) has to be installed once:
+
+```powershell
+filex mount Z:      # ⚠ Z: must be FREE — the letter is created, not reused
+```
+
+Stop it by unmounting (`fusermount -u ~/filex`) or with Ctrl-C on Windows.
+
+> ⚠⚠ **It is not a sync.** Nothing is copied to this machine except a bounded
+> read cache, so a mount opens one file out of a hundred thousand without
+> downloading the rest — and nothing is available when you are offline. For
+> that, use [`filex sync`](SYNC.md).
+
+> ⚠ **macOS is not supported.** It needs macFUSE, whose Go binding needs a C
+> toolchain filex deliberately does not use and whose licence forbids a
+> commercial program from installing it. The command refuses there rather than
+> appearing to work and doing nothing.
+
+| Flag | What it does |
+|---|---|
+| `--remote` | what to mount: empty for every storage, `docs://` for one, `docs://sub/dir` for a subtree |
+| `--read-only` | refuse every write through this mount |
+| `--block-size` | read granularity (default 4 MiB) — one HTTPS request per block |
+| `--cache-blocks` | how many blocks to keep in memory (default 64) |
+| `--attr-ttl` | how long a listing is trusted before it is re-fetched (default 5s) |
+| `--spool-dir` | where in-flight writes are spooled |
+| `--debug` | log every filesystem call |
+
+A file written through the mount is uploaded when the program closes it, not
+while it is being written — the REST API takes a whole object, and a partial
+upload committed under the real name would replace a good file with a torn one.
+Editing a very large file in place is therefore slower here than on a local
+disk; copying it in and out is not.
+
+Full protocol picture: [PROTOCOLS.md](PROTOCOLS.md).
 
 ## JSON output
 
