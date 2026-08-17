@@ -130,3 +130,80 @@ jobs:
           VER="${GITHUB_REF_NAME#v}"
           pnpm -r --filter='./packages/*' exec npm version "$VER" --no-git-tag-version --allow-same-version
           pnpm publish --filter='./packages/*' --access public --no-git-checks
+
+  # ── Desktop packages ────────────────────────────────────────────────────
+  #
+  # ⚠⚠ These used to be built BY HAND, which is why they drifted: at v0.20.0
+  # the desktop app was still shipping 0.18.2, so the connections and tokens
+  # screens the release was named after did not exist for anyone who had
+  # installed it. A package that is produced only when somebody remembers is a
+  # package that is two releases old.
+  #
+  # It runs alongside `release` rather than after it: the installer embeds the
+  # CLI, and desktop/scripts/fetch-cli.mjs builds that from source when
+  # FILEX_CLI_BIN is unset, so there is nothing to wait for goreleaser to
+  # publish.
+  #
+  # ⚠ Windows and Linux only. An unsigned macOS build is refused by Gatekeeper
+  # with a message that reads like corruption, so shipping one would be worse
+  # than shipping none; mac needs a Developer ID certificate first.
+  #
+  # ⚠ The artefacts are attached to the GitHub Release, which is NOT the
+  # auto-update feed: this repository is private, and pointing electron-updater
+  # at it would mean embedding a token in the app. The feed stays on
+  # filex.sh/desktop/ and is published by scripts/filex-publish-desktop.sh from
+  # these files.
+  desktop:
+    name: Desktop packages (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            script: "dist:win"
+          - os: ubuntu-latest
+            label: linux
+            script: "dist:linux"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - run: pnpm install --frozen-lockfile
+      # desktop/scripts/sync-web.mjs copies packages/webcomponent/dist into the
+      # app, so the packages have to exist before the installer is built.
+      - name: Build packages
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: pnpm -r --filter='./packages/*' build
+      - name: Build installer
+        run: pnpm --filter ./desktop run ${{ matrix.script }}
+      # Listed before uploading so a build that produced nothing is visible in
+      # the log as an empty directory rather than as a silently short release.
+      - name: What was produced
+        shell: bash
+        run: ls -la desktop/release
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(desktop/release/*.exe desktop/release/*.blockmap desktop/release/*.AppImage \
+                 desktop/release/*.deb desktop/release/latest*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no desktop artefacts to upload" >&2
+            exit 1
+          fi
+          printf 'uploading: %s\n' "${files[@]}"
+          gh release upload "${GITHUB_REF_NAME}" "${files[@]}" --clobber
