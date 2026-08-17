@@ -6,7 +6,7 @@
 # Build (from repo root):
 #   pnpm -r --filter='./packages/*' build
 #   pnpm --filter='./web' build
-#   docker build -f docker/Dockerfile.local -t registry.github.com/brf-tech/filex:vX.Y.Z .
+#   docker build -f docker/Dockerfile.local -t ghcr.io/brf-tech/filex:vX.Y.Z .
 
 # ---------------------------------------------------------------------------
 # Stage 1: Stage embed assets straight from the host build tree

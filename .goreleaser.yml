@@ -141,8 +141,8 @@ release:
     Download a binary below, or pull a Docker image:
 
     ```bash
-    docker pull registry.github.com/brf-tech/filex:slim-{{ .Tag }}
-    docker pull registry.github.com/brf-tech/filex:full-{{ .Tag }}
+    docker pull ghcr.io/brf-tech/filex:slim-{{ .Tag }}
+    docker pull ghcr.io/brf-tech/filex:full-{{ .Tag }}
     ```
   footer: |
     ---
@@ -185,7 +185,7 @@ release:
 #
 # dockers:
 #   - image_templates:
-#       - "registry.github.com/brf-tech/filex:slim-{{ .Tag }}-amd64"
+#       - "ghcr.io/brf-tech/filex:slim-{{ .Tag }}-amd64"
 #     dockerfile: docker/Dockerfile
 #     use: buildx
 #     build_flag_templates:
