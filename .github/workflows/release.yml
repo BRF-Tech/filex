@@ -139,10 +139,13 @@ jobs:
   # installed it. A package that is produced only when somebody remembers is a
   # package that is two releases old.
   #
-  # It runs alongside `release` rather than after it: the installer embeds the
-  # CLI, and desktop/scripts/fetch-cli.mjs builds that from source when
-  # FILEX_CLI_BIN is unset, so there is nothing to wait for goreleaser to
-  # publish.
+  # ⚠⚠ `needs: release`, and the reason is the UPLOAD rather than the build.
+  # The installer embeds the CLI, but desktop/scripts/fetch-cli.mjs builds that
+  # from source when FILEX_CLI_BIN is unset, so the build itself waits for
+  # nothing — which is why this job first ran in parallel. The GitHub Release
+  # is created by goreleaser inside `release`, and `gh release upload` against
+  # a tag with no release yet fails: v0.20.1 duly produced a 125 MB AppImage
+  # and an 87 MB .deb, then attached neither.
   #
   # ⚠ Windows and Linux only. An unsigned macOS build is refused by Gatekeeper
   # with a message that reads like corruption, so shipping one would be worse
@@ -155,6 +158,7 @@ jobs:
   # these files.
   desktop:
     name: Desktop packages (${{ matrix.label }})
+    needs: release
     strategy:
       fail-fast: false
       matrix:
