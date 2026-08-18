@@ -147,9 +147,16 @@ jobs:
   # a tag with no release yet fails: v0.20.1 duly produced a 125 MB AppImage
   # and an 87 MB .deb, then attached neither.
   #
-  # ⚠ Windows and Linux only. An unsigned macOS build is refused by Gatekeeper
-  # with a message that reads like corruption, so shipping one would be worse
-  # than shipping none; mac needs a Developer ID certificate first.
+  # ⚠ macOS ships UNSIGNED but ad-hoc SEALED (desktop/scripts/adhoc-sign.cjs).
+  # The distinction is what dialog the user gets: a linker-signed-only bundle
+  # (what electron-builder emits with no certificate) is treated as TAMPERED —
+  # macOS 26 says "malware blocked and moved to Trash", no override offered
+  # (measured 2026-08-18). A deep ad-hoc re-seal turns that into the honest
+  # "unverified developer" dialog with the System Settings → Open Anyway path.
+  # Still second-best: a Developer ID certificate + notarization removes the
+  # dialog entirely, and mac AUTO-update stays inert until then (Squirrel.Mac
+  # refuses to swap an unsigned app). arm64 only — macOS 26 deprecates Rosetta,
+  # and the fleet this ships to is Apple Silicon.
   #
   # ⚠ The artefacts are attached to the GitHub Release, which is NOT the
   # auto-update feed: this repository is private, and pointing electron-updater
@@ -169,6 +176,13 @@ jobs:
           - os: ubuntu-latest
             label: linux
             script: "dist:linux"
+          # Pinned rather than macos-latest: the runner's arch IS the
+          # artifact's arch (electron-builder defaults to the host, and
+          # fetch-cli.mjs compiles the embedded CLI for the host), so a silent
+          # image bump must not silently change what users download.
+          - os: macos-14
+            label: macos
+            script: "dist:mac"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -204,6 +218,12 @@ jobs:
           npm version "$VER" --no-git-tag-version --allow-same-version
           node -e "console.log('desktop version =', require('./package.json').version)"
       - name: Build installer
+        env:
+          # Never let the mac runner auction its keychain: a stray self-signed
+          # certificate would produce a "signed" build that fails Gatekeeper
+          # WORSE than the ad-hoc seal. Delete this line (and set CSC_LINK /
+          # CSC_KEY_PASSWORD secrets) when a real Developer ID lands.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm --filter ./desktop run ${{ matrix.script }}
       # Listed before uploading so a build that produced nothing is visible in
       # the log as an empty directory rather than as a silently short release.
@@ -218,7 +238,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           files=(desktop/release/*.exe desktop/release/*.blockmap desktop/release/*.AppImage \
-                 desktop/release/*.deb desktop/release/latest*.yml)
+                 desktop/release/*.deb desktop/release/*.dmg desktop/release/*.zip \
+                 desktop/release/latest*.yml)
           if [ ${#files[@]} -eq 0 ]; then
             echo "no desktop artefacts to upload" >&2
             exit 1

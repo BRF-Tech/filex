@@ -55,6 +55,7 @@ pnpm run dev        # build, then run it
 # installers (unsigned)
 pnpm run dist:win
 pnpm run dist:linux     # .deb + AppImage
+pnpm run dist:mac       # .dmg + .zip — host arch (arm64 on Apple Silicon), ad-hoc sealed
 ```
 
 `FILEX_CLI_BIN=<path>` points `fetch-cli.mjs` at an already-built CLI instead of
@@ -102,6 +103,22 @@ expose the narrowest surface that works. Tokens live in the OS keychain.
 Releases are **unsigned** by design for now — Windows SmartScreen and macOS
 Gatekeeper will warn. A code-signing certificate is a separate, paid decision,
 not a defect.
+
+macOS specifics, because the failure mode there is not a warning but a wall:
+
+- A no-certificate electron-builder output is only *linker-signed*, and macOS
+  26 treats that half-signature on a downloaded app as tampering: **"malware
+  blocked and moved to Trash"**, no override offered. `scripts/adhoc-sign.cjs`
+  (an `afterPack` hook) therefore re-seals the bundle with a deep **ad-hoc**
+  signature, which downgrades the verdict to the honest "unverified developer"
+  dialog.
+- First launch of a downloaded copy: macOS blocks once — open **System
+  Settings → Privacy & Security → Open Anyway** (or right-click → Open on
+  older versions). A locally built copy has no quarantine flag and just opens.
+- **Auto-update is inert on macOS until real signing lands**: Squirrel.Mac
+  refuses to swap an unsigned app. The `zip` target and `latest-mac.yml` ship
+  anyway so the feed is already correct the day a Developer ID certificate
+  (and notarization) arrives — which is the actual fix for all of the above.
 
 ## Packaging traps (each of these shipped once)
 

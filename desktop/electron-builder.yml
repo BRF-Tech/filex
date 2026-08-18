@@ -68,8 +68,20 @@ win:
     - nsis
 mac:
   target:
+    # dmg is the human download; zip is what electron-updater's mac feed
+    # (latest-mac.yml) points at — without it the feed file names an artifact
+    # that does not exist. Auto-update on mac stays INERT until the app is
+    # signed with a real identity (Squirrel.Mac refuses to swap an unsigned
+    # app); the zip ships anyway so the feed is already correct the day a
+    # Developer ID lands.
     - dmg
+    - zip
   category: public.app-category.productivity
+
+# Unsigned macOS builds get a deep ad-hoc re-seal (see the script for why a
+# half-signed bundle reads as MALWARE to macOS 26 while an ad-hoc-sealed one
+# gets the "Open Anyway" path). No-op off macOS and when a real cert is set.
+afterPack: scripts/adhoc-sign.cjs
 
 nsis:
   oneClick: false
