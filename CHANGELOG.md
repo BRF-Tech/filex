@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-08-19
+
+Three desktop fixes that came out of a real macOS 26 (Apple Silicon)
+deployment (Berk, PR #9), one Connections-page fix, and — as a consequence of
+the first — **macOS packages** on the release for the first time.
+
+- **Desktop pairing died in a browser that was already signed in.** The
+  router's "signed-in users skip /login" redirect destroyed the query string
+  before the login view could stash `desktop_state`/`desktop_challenge`, so
+  the browser showed a file manager with no code and no error while the app
+  waited forever. The stash now happens in the router guard, ahead of the
+  first `await`; a failed hand-off keeps the overlay and says so instead of
+  disappearing.
+- **The embedded sync engine was x86_64 inside an arm64 app.** `fetch-cli.mjs`
+  defaulted `GOARCH` to `amd64`; every launch on Apple Silicon raised macOS
+  26's Rosetta deprecation alert. It now follows the host arch (an explicit
+  `GOARCH` still wins; CI's x64 runners are unaffected).
+- **macOS packages: `filex-desktop-arm64.dmg` + `.zip`**, built on a pinned
+  `macos-14` runner. Unsigned, but *ad-hoc sealed* by an `afterPack` hook: a
+  no-certificate electron-builder output is only linker-signed, and macOS 26
+  treats that as tampering ("malware blocked and moved to Trash", no override);
+  the deep ad-hoc re-seal turns it into the ordinary "unverified developer /
+  Open Anyway" dialog. Auto-update on macOS stays inert until the app carries a
+  Developer ID (Squirrel.Mac refuses to swap an unsigned app); the zip and
+  `latest-mac.yml` ship anyway so the feed is right the day it does. The docs,
+  the README and the web app's download banner now list macOS honestly —
+  Apple Silicon only, unsigned, first-launch step included.
+- **Connections page in dark mode: the panel painted its own page ground, and
+  five theme tokens did not exist.** `.fe-conn` set `background: var(--fe-bg)`
+  and drew a blue-black rectangle over the admin's zinc page (and a white one
+  over the light page) that ended where the panel ended; the API-tokens box
+  referenced `--fe-surface`, `--fe-muted`, `--fe-accent`, `--fe-surface-2` and
+  `--fe-mono`, none declared, so it had no ground, un-muted muted text and a
+  hardcoded-blue button next to a token-blue one. Fixed in the shared package
+  (web admin and the desktop app render the same component), 17 phantom token
+  uses corrected across core, and a test now refuses any `var(--fe-*)` that
+  `variables.css` does not declare.
+- docs site: the hourly release rebuild had failed silently since 08-11 (no
+  `PATH` under cron); it now sets its own, reports failure, and refuses to
+  publish an empty release list.
+
 ## [0.20.2] - 2026-08-17
 
 Packaging only — the server is identical to 0.20.1. It exists because the

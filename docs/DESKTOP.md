@@ -1,7 +1,7 @@
 # filex desktop app
 
 The filex explorer in its own window, with folder sync that keeps running in the
-background. Windows and Linux today.
+background. Windows, Linux and macOS (Apple Silicon).
 
 It is the same explorer the web app and embedders use — not a separate,
 half-finished copy. What it adds on top: **several accounts at once**, **folders
@@ -20,6 +20,7 @@ panel, and the app links out to it in your browser.
 | Windows 10/11 (64-bit) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Installs for **your user only** (`%LOCALAPPDATA%\Programs\filex`) — no administrator rights, and the app can replace its own files, which is what lets it update itself quietly. Adds a Start-menu entry. |
 | Linux (any, 64-bit) | [`filex-desktop-x86_64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.AppImage) | **Portable** — no installation. `chmod +x` and run. |
 | Debian / Ubuntu | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install, appears in your applications menu. |
+| macOS 12+ (Apple Silicon) | [`filex-desktop-arm64.dmg`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.dmg) | Drag to *Applications*. **Unsigned** — see the first-launch note below. Intel Macs: no build; the web app works there. |
 
 ```bash
 # Debian / Ubuntu
@@ -36,8 +37,12 @@ chmod +x filex-desktop-x86_64.AppImage
 > Verify what you downloaded against `checksums.txt` on the release if you want
 > certainty.
 >
-> ⚠ **No macOS build.** Use the web app there; folder sync is Windows/Linux only
-> for now.
+> ⚠ **macOS, first launch.** The app is not signed with a Developer ID, only
+> *ad-hoc sealed*, so a downloaded copy is blocked once: open **System Settings →
+> Privacy & Security → Open Anyway** (older versions: right-click → *Open*).
+> Without that seal macOS 26 would not warn but *refuse* — "malware blocked and
+> moved to Trash", no override — which is why the seal is there. Signing +
+> notarization is the actual fix, and the same paid decision as on Windows.
 
 **Server requirement:** filex **v0.11.0 or newer**. The app signs in through two
 endpoints that older servers do not have, and will tell you so rather than
@@ -189,6 +194,11 @@ anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
 > under `C:\Program Files` needs administrator rights to replace its own files,
 > so every update would stop at a UAC prompt — which is no longer possible: the
 > installer does not offer a machine-wide install.
+>
+> ⚠ **On macOS the app does not update itself yet.** The updater refuses to
+> swap an unsigned app (Squirrel.Mac checks the signature of what it installs),
+> so until the build is signed a new version means downloading the new `.dmg`
+> yourself — the feed and the *Install it now* button cannot do it for you there.
 
 ---
 
@@ -196,7 +206,7 @@ anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
 
 | What | Where |
 |---|---|
-| Account tokens | Your OS keychain (Windows Credential Manager / libsecret). The app **refuses to store a token in plaintext** if the keychain is unavailable. |
+| Account tokens | Your OS keychain (Windows Credential Manager / macOS Keychain / libsecret). The app **refuses to store a token in plaintext** if the keychain is unavailable. |
 | Which folders are paired | `~/.filex/sync/pairs.json` — shared with the CLI |
 | Sync bookkeeping + local trash | `~/.filex/sync/` |
 | Window state, account list | The app's own config directory |

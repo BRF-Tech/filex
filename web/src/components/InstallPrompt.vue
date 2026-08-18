@@ -49,8 +49,17 @@ const desktopDownloads = computed<{ label: string; hint: string; href: string }[
       },
     ];
   }
-  // No macOS build is produced yet. Saying so beats a button that 404s.
-  return [];
+  // ⚠ Apple Silicon only, and unsigned: the CI runner's arch is the artifact's
+  // arch (macos-14 = arm64), and there is no Developer ID yet, so the first
+  // launch is a Gatekeeper "Open Anyway" — the hint says so up front instead
+  // of letting the user find out from a dialog that reads like a virus alert.
+  return [
+    {
+      label: 'macOS (.dmg, Apple Silicon)',
+      hint: 'Unsigned — first launch: System Settings → Privacy & Security → Open Anyway',
+      href: `${DL}/filex-desktop-arm64.dmg`,
+    },
+  ];
 });
 
 const desktopLabel = computed(() =>
@@ -174,9 +183,6 @@ async function onInstall() {
           </span>
           <span aria-hidden="true" class="text-indigo-600 dark:text-indigo-400">↓</span>
         </a>
-        <p v-if="!desktopDownloads.length" class="text-xs text-zinc-500 dark:text-zinc-400">
-          {{ $t('install.desktopNoBuild') }}
-        </p>
         <a
           :href="RELEASES"
           target="_blank"

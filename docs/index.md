@@ -27,7 +27,7 @@ hero:
 features:
   - icon: 🖥️
     title: Desktop app
-    details: The same explorer in its own window on Windows and Linux — several accounts at once, and sync that keeps running when the window is closed.
+    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, and sync that keeps running when the window is closed.
     link: /DESKTOP
     linkText: Desktop docs
   - icon: 🔁

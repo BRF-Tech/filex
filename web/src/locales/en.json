@@ -14,7 +14,6 @@
     "desktopTitle": "Get the filex desktop app",
     "desktopSubtitle": "Sync folders to this computer and keep them up to date in the background. Available for {platform}.",
     "desktopDownload": "Download for {platform}",
-    "desktopNoBuild": "No macOS build yet — the web app works, and folder sync is available on Windows and Linux.",
     "desktopAllDownloads": "All downloads and release notes"
   },
   "common": {

@@ -46,7 +46,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Features
 
-- [Desktop app](DESKTOP.md) — Windows/Linux app: multiple accounts, background sync
+- [Desktop app](DESKTOP.md) — Windows/Linux/macOS app: multiple accounts, background sync
 - [Folder sync](SYNC.md) — how a folder on your PC is kept in step with the server
 - [Uploads](UPLOADS.md) — the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection

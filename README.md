@@ -53,7 +53,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 - **Real-time** — presence avatars (a profile picture set once on the account, shown for
   every client signed in as you) and live file updates over WebSocket, in the native UI
   *and* in embedded contexts (short-lived ticket auth, API-polling fallback).
-- **On your desktop too** — the same explorer ships as a Windows/Linux app that keeps
+- **On your desktop too** — the same explorer ships as a Windows/Linux/macOS app that keeps
   local folders in step with the server from the tray, updates itself, and holds several
   accounts (or tenants) side by side. Headless machines get the same engine as
   `filex sync` / `filex client`.
@@ -105,7 +105,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
                     (vanilla, Angular,
                     Svelte, Solid, …)
 
-   Same API, no server plugins:  desktop app (Electron, Windows/Linux)
+   Same API, no server plugins:  desktop app (Electron, Windows/Linux/macOS)
                                  CLI client (filex client · filex sync)
 ```
 
@@ -249,7 +249,7 @@ Details: [docs/MCP.md](docs/MCP.md).
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings.
 - **Sharing** — public links with PIN, expiry and max-downloads; folder links stream as ZIP (cached + pre-warmed); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint.
-- **Desktop app + folder sync** — Windows/Linux app: tray-resident two-way sync, several accounts at once, self-updating ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, several accounts at once, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
 - **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
 - **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).

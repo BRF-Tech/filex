@@ -14,7 +14,6 @@
     "desktopTitle": "filex masaüstü uygulamasını edinin",
     "desktopSubtitle": "Klasörleri bu bilgisayara eşitleyin, arka planda güncel kalsınlar. {platform} için mevcut.",
     "desktopDownload": "{platform} için indir",
-    "desktopNoBuild": "macOS derlemesi henüz yok — web uygulaması çalışır, klasör senkronu Windows ve Linux'ta mevcut.",
     "desktopAllDownloads": "Tüm indirmeler ve sürüm notları"
   },
   "common": {
