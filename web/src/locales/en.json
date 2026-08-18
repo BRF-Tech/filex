@@ -1008,6 +1008,7 @@
   },
   "desktop": {
     "handoff": "You can return to the desktop app — authorization complete.",
+    "handoffError": "Authorizing the desktop app failed. Close this tab and try signing in from the app again.",
     "codeHint": "If the app did not open, copy this code into its waiting screen:",
     "copy": "Copy",
     "copied": "Copied"
