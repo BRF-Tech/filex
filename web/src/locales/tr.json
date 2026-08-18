@@ -1008,6 +1008,7 @@
   },
   "desktop": {
     "handoff": "Masaüstü uygulamasına dönebilirsiniz — yetkilendirme tamamlandı.",
+    "handoffError": "Masaüstü uygulaması yetkilendirilemedi. Bu sekmeyi kapatıp uygulamadan tekrar giriş deneyin.",
     "codeHint": "Uygulama açılmadıysa bu kodu bekleme ekranına yapıştırın:",
     "copy": "Kopyala",
     "copied": "Kopyalandı"

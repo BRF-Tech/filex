@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 
 import AdminLayout from '@/components/AdminLayout.vue';
 
@@ -255,6 +256,17 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
+
+  // ⚠ Desktop pairing params must be stashed HERE, not only in the login
+  // view. A browser that already has a session never mounts Login.vue — the
+  // dashboard redirect below fires first and destroys the query string, so
+  // the desktop app sat on its waiting screen forever and the browser showed
+  // a file manager with no code and no error. Measured 2026-08-18: pairing
+  // only ever worked from a browser with no session. Stashing before the
+  // first await also beats App.vue's post-fetchMe hasPendingHandoff() check.
+  if (to.name === 'login') {
+    stashDesktopHandoff(to.query.desktop_state, to.query.desktop_challenge);
+  }
 
   // Hydrate session on cold-load before guarding.
   if (!auth.ready) {

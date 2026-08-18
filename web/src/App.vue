@@ -12,6 +12,7 @@ const caps = useCapabilitiesStore();
 
 const handingOff = ref(false);
 const handoffCode = ref<string | null>(null);
+const handoffError = ref(false);
 const copied = ref(false);
 
 async function copyCode() {
@@ -39,10 +40,13 @@ onMounted(async () => {
     try {
       handoffCode.value = await completeDesktopHandoff();
     } catch {
-      // Leave the flag up: the panel behind is still usable, and the desktop
-      // app shows its own timeout. Silently continuing would look like nothing
-      // happened at all.
-      handingOff.value = false;
+      // Leave the flag up and SAY it failed. This branch used to drop the
+      // overlay (`handingOff.value = false`) — the exact "looks like nothing
+      // happened at all" its own comment warned about: the user came from the
+      // desktop app, the mint failed, and the browser showed a file manager
+      // with no code and no error. The desktop app still shows its own
+      // timeout; this screen owns telling the user the browser half failed.
+      handoffError.value = true;
     }
   }
 });
@@ -58,7 +62,10 @@ onMounted(async () => {
     data-testid="desktop-handoff"
   >
     <div class="w-full max-w-sm px-6 text-center">
-      <p class="text-sm text-zinc-600 dark:text-zinc-300">{{ $t('desktop.handoff') }}</p>
+      <p v-if="handoffError" class="text-sm text-red-600 dark:text-red-400" data-testid="handoff-error">
+        {{ $t('desktop.handoffError') }}
+      </p>
+      <p v-else class="text-sm text-zinc-600 dark:text-zinc-300">{{ $t('desktop.handoff') }}</p>
       <!-- The code is shown, not hidden behind a failure: a browser silently
            does nothing when no filex:// handler is registered, so there is no
            event to react to. Whoever needs it can copy it into the app. -->
