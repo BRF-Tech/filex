@@ -206,7 +206,7 @@ function fingerprintOf(k: SSHPublicKey): string {
 }
 .fe-sshkeys__paste {
   width: 100%;
-  font-family: var(--fe-mono, ui-monospace, monospace);
+  font-family: var(--fe-font-mono);
   font-size: 12px;
   resize: vertical;
   overflow-wrap: anywhere;

@@ -860,7 +860,7 @@ async function nativeShare(body: { title: string; text: string }) {
 .fx-perm-body { flex: 1 1 auto; overflow-y: auto; padding: 14px 18px 18px; }
 
 .fx-perm-addcard {
-  padding: 12px; border-radius: var(--fe-radius-md, 10px);
+  padding: 12px; border-radius: var(--fe-radius-md);
   background: var(--fe-bg-elev); border: 1px solid var(--fe-border);
 }
 .fx-perm-section { margin-top: 16px; }

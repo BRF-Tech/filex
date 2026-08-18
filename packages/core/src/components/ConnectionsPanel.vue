@@ -684,7 +684,16 @@ watch(
   font-family: var(--fe-font);
   font-size: 14px;
   color: var(--fe-text);
-  background: var(--fe-bg);
+  /* ⚠ No painted ground. This is a SECTION of whatever page mounts it, not a
+     full-bleed app like the explorer, and every host paints its own page:
+     the web admin's dark shell is zinc #09090b, the desktop's is #14181d,
+     the light shells are #fafafa / #ffffff. `background: var(--fe-bg)`
+     (#0f1419 / #ffffff) drew a slightly-different rectangle behind the
+     panel that ended where the panel ended — measured on demo.filex.sh
+     2026-08-18 in dark mode: a blue-black box on a zinc page, cards and
+     inputs inside it on their own tint. The tokens still colour the cards,
+     inputs and buttons; only the page ground belongs to the host. */
+  background: transparent;
   min-width: 0;
 }
 /* An explicit light palette, so a panel asked for light stays light even

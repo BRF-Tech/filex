@@ -259,6 +259,13 @@ function scopeOf(k: S3AccessKey): string {
 </template>
 
 <style>
+/* ⚠ Only tokens that packages/core/src/styles/variables.css declares. This
+   block shipped with `--fe-surface`, `--fe-muted`, `--fe-accent`,
+   `--fe-surface-2` and `--fe-mono` — none of them exist — so the box had no
+   ground, the muted text was full-strength, and the mint button wore a
+   hardcoded blue that ignored the dark palette while the button beside it
+   used --fe-primary. web/tests/api/themeTokens.test.ts now refuses a token
+   that variables.css does not declare. */
 .fe-s3keys {
   display: flex;
   flex-direction: column;
@@ -266,7 +273,7 @@ function scopeOf(k: S3AccessKey): string {
   padding: 14px;
   border: 1px solid var(--fe-border);
   border-radius: 10px;
-  background: var(--fe-surface);
+  background: var(--fe-bg-elev);
 }
 .fe-s3keys__title {
   margin: 0;
@@ -278,12 +285,12 @@ function scopeOf(k: S3AccessKey): string {
 .fe-s3keys__muted {
   margin: 0;
   font-size: 12px;
-  color: var(--fe-muted);
+  color: var(--fe-text-muted);
 }
 .fe-s3keys__warn {
   margin: 0;
   font-size: 12px;
-  color: var(--fe-danger, #c0392b);
+  color: var(--fe-danger);
 }
 .fe-s3keys__form {
   display: grid;
@@ -300,7 +307,7 @@ function scopeOf(k: S3AccessKey): string {
   padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid transparent;
-  background: var(--fe-accent, #2f6df6);
+  background: var(--fe-primary);
   color: #fff;
   font-size: 13px;
   cursor: pointer;
@@ -315,8 +322,8 @@ function scopeOf(k: S3AccessKey): string {
   gap: 6px;
   padding: 10px;
   border-radius: 8px;
-  border: 1px solid var(--fe-accent, #2f6df6);
-  background: var(--fe-surface-2, rgba(47, 109, 246, 0.06));
+  border: 1px solid var(--fe-primary);
+  background: var(--fe-bg-selected);
 }
 .fe-s3keys__once {
   margin: 0;
@@ -333,11 +340,11 @@ function scopeOf(k: S3AccessKey): string {
 .fe-s3keys__pair code {
   flex: 1;
   overflow-wrap: anywhere;
-  font-family: var(--fe-mono, ui-monospace, monospace);
+  font-family: var(--fe-font-mono);
 }
 .fe-s3keys__k {
   min-width: 96px;
-  color: var(--fe-muted);
+  color: var(--fe-text-muted);
 }
 .fe-s3keys__copy,
 .fe-s3keys__dismiss,
@@ -345,12 +352,12 @@ function scopeOf(k: S3AccessKey): string {
   background: none;
   border: none;
   padding: 0 4px;
-  color: var(--fe-accent, #2f6df6);
+  color: var(--fe-primary);
   font-size: 12px;
   cursor: pointer;
 }
 .fe-s3keys__link.is-danger {
-  color: var(--fe-danger, #c0392b);
+  color: var(--fe-danger);
 }
 .fe-s3keys__dismiss {
   align-self: flex-start;
@@ -363,7 +370,7 @@ function scopeOf(k: S3AccessKey): string {
 .fe-s3keys__table th {
   text-align: left;
   font-weight: 500;
-  color: var(--fe-muted);
+  color: var(--fe-text-muted);
   padding: 4px 6px;
 }
 .fe-s3keys__table td {

@@ -395,10 +395,10 @@ filex-explorer {
   flex: 1;
   background: var(--fe-bg);
   color: var(--fe-text);
-  border: 1px solid var(--fe-accent, #2563eb);
+  border: 1px solid var(--fe-primary);
   border-radius: 4px;
   padding: 4px 8px;
-  font-family: var(--fe-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--fe-font-mono);
   font-size: 13px;
   outline: none;
 }
@@ -3736,7 +3736,7 @@ filex-explorer {
 }
 .fe-inspector__comment-input:focus {
   outline: none;
-  border-color: var(--fe-accent);
+  border-color: var(--fe-primary);
 }
 .fe-inspector__comment-input:disabled {
   opacity: 0.6;

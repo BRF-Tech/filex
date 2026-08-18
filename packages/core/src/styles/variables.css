@@ -21,6 +21,7 @@
   --fe-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.08);
   --fe-radius: 8px;
   --fe-radius-sm: 4px;
+  --fe-radius-md: 10px;
   --fe-radius-lg: 12px;
   --fe-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --fe-font-mono: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
@@ -157,4 +158,8 @@
 :root.dark,
 .dark {
   --fe-warning: #f59e0b;
+  /* Green status accent (sync "ok" states, the connections test result). Same
+     value the inline fallbacks carried, identical in light + dark — declaring
+     it changes nothing visually, it only makes the token real. */
+  --fe-ok: #16a34a;
 }
