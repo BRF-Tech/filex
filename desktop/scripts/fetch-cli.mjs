@@ -76,11 +76,19 @@ for (const sub of ['admin', 'web']) {
 }
 
 const goos = platform === 'win32' ? 'windows' : platform;
+// ⚠ GOARCH must follow the HOST, not default to amd64. This used to be
+// `process.env.GOARCH || 'amd64'`, which put an x86_64 sync engine inside an
+// arm64 filex.app: the app itself launched native, then spawned the CLI under
+// Rosetta and macOS 26 greeted every launch with the "Intel-based apps will no
+// longer be supported" deprecation alert (measured 2026-08-18). CI is
+// unaffected — its x64 runners resolve to amd64 exactly as before, and an
+// explicit GOARCH still wins for cross-builds.
+const goarch = process.env.GOARCH || (process.arch === 'arm64' ? 'arm64' : 'amd64');
 try {
   execFileSync('go', ['build', '-trimpath', '-ldflags', '-s -w', '-o', dest, './cmd/filex'], {
     cwd: BACKEND,
     stdio: 'inherit',
-    env: { ...process.env, GOOS: goos, GOARCH: process.env.GOARCH || 'amd64', CGO_ENABLED: '0' },
+    env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: '0' },
   });
 } catch (err) {
   console.error(
