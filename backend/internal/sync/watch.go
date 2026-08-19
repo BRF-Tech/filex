@@ -34,10 +34,7 @@ import (
 func (s *storageSyncer) loopDriverWatch(w storage.Watcher) {
 	// The initial scan is what makes the index true; the stream only makes it
 	// current sooner.
-	if err := s.RunOnce(s.ctx); err != nil {
-		slog.Warn("sync: initial run failed",
-			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
-	}
+	s.noteRun(s.RunOnce(s.ctx))
 
 	events, err := w.Subscribe(s.ctx)
 	if err != nil {

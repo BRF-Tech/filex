@@ -55,9 +55,7 @@ func (s *storageSyncer) loopFSNotify() {
 	pending := false
 
 	// Initial full scan.
-	if err := s.RunOnce(s.ctx); err != nil {
-		slog.Warn("sync: initial run failed", slog.String("err", err.Error()))
-	}
+	s.noteRun(s.RunOnce(s.ctx))
 
 	for {
 		select {
@@ -83,7 +81,7 @@ func (s *storageSyncer) loopFSNotify() {
 		case <-debounce.C:
 			pending = false
 			if err := s.RunOnce(s.ctx); err != nil {
-				slog.Warn("sync: debounced run failed", slog.String("err", err.Error()))
+				s.noteRun(err)
 			}
 		}
 	}

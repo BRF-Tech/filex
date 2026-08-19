@@ -46,17 +46,30 @@ type Storages struct {
 	DemoMode bool
 }
 
-// denyOnDemo refuses the drivers that reach the SERVER's own filesystem when
-// this instance is a public demo.
+// denyOnDemo refuses new storage backends when this instance is a public demo.
 //
-// A demo publishes an admin login on purpose. Everything admin-only is
-// therefore public here, and `local` means "a path on the host": measured on
-// this project's demo, storages rooted at /data, /etc and /proc/1 were all
-// accepted, which is the database, the configuration and the process
-// environment of the machine. The `/` guard that already existed stops the
-// laziest version of that and nothing else.
+// A demo publishes an admin login on purpose, so everything admin-only is
+// public here — and adding a storage is the admin power that reaches OUTWARD
+// from the server.
 //
-// Remote drivers are left alone: an S3 bucket a visitor brings is their own.
+//   - `local` means "a path on the host". Measured on this project's demo:
+//     storages rooted at /data, /etc and /proc/1 were all accepted, which is
+//     the database, the configuration and the process environment of the
+//     machine. The `/` guard that existed before stopped the laziest version of
+//     that and nothing else.
+//   - the remote drivers mean "connect from this server to an address I give
+//     you", which is a request the visitor cannot otherwise make: loopback,
+//     private ranges, a cloud metadata endpoint. Legitimate on any other
+//     install — it is how you attach your own bucket — and not something a
+//     public playground needs to offer.
+//
+// A demo ships with the storage it is meant to demonstrate; browsing, sharing,
+// uploading and every other surface work unchanged.
+//
+// ⚠ Plugin drivers are not listed. On a demo the plugin subsystem is off by
+// default anyway (config.PluginsDisabled), so a plugin storage can only exist
+// where the operator deliberately turned it back on — and then it is their
+// own program, deliberately installed.
 func (h *Storages) denyOnDemo(driver string) error {
 	if !h.DemoMode {
 		return nil
@@ -64,6 +77,8 @@ func (h *Storages) denyOnDemo(driver string) error {
 	switch driver {
 	case "local":
 		return errors.New("this is a public demo: a storage on the server's own filesystem cannot be added here")
+	case "s3", "sftp", "webdav", "smb", "ftp", "ftps", "b2", "gcs", "azure":
+		return errors.New("this is a public demo: connecting the server to another storage backend is disabled here — run your own filex to attach a bucket or a share")
 	}
 	return nil
 }

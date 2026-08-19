@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.21.4, 19 August 2026
-The other half of the demo hardening in 0.21.3. A demo instance publishes an admin login, and the `local` storage driver means "a path on this host" — so on a demo it was possible to add a storage rooted at /data, /etc or /proc/1 and read the machine's database, configuration and process environment. Measured, then closed: demo mode refuses the local driver. Backends a visitor brings (S3, SFTP, WebDAV, SMB, plugins) still work, because a demo where nothing connects is not a demo.
+::: tip Latest — v0.21.5, 19 August 2026
+Plugins no longer outlive filex on Windows. If filex was stopped without a chance to clean up — a crash, a hard kill, a service restart — every plugin it had launched kept running; and since a running plugin holds its own .exe open, the next install or upgrade of that plugin failed with a sharing violation. Plugins now live in a job object, so the kernel reaps them with filex.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.21.4
-docker pull ghcr.io/brf-tech/filex:full-v0.21.4
+docker pull ghcr.io/brf-tech/filex:slim-v0.21.5
+docker pull ghcr.io/brf-tech/filex:full-v0.21.5
 ```
+
+## v0.21.5
+
+<span class="filex-release-date">19 August 2026</span>
+
+Plugins no longer outlive filex on Windows. If filex was stopped without a chance to clean up — a crash, a hard kill, a service restart — every plugin it had launched kept running; and since a running plugin holds its own .exe open, the next install or upgrade of that plugin failed with a sharing violation. Plugins now live in a job object, so the kernel reaps them with filex.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.5) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.5`
 
 ## v0.21.4
 
@@ -33,7 +41,7 @@ docker pull ghcr.io/brf-tech/filex:full-v0.21.4
 
 The other half of the demo hardening in 0.21.3. A demo instance publishes an admin login, and the `local` storage driver means "a path on this host" — so on a demo it was possible to add a storage rooted at /data, /etc or /proc/1 and read the machine's database, configuration and process environment. Measured, then closed: demo mode refuses the local driver. Backends a visitor brings (S3, SFTP, WebDAV, SMB, plugins) still work, because a demo where nothing connects is not a demo.
 
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.4) · `ghcr.io/brf-tech/filex:slim-v0.21.4`
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.4`
 
 ## v0.21.3
 
@@ -259,28 +267,13 @@ Two things a shared folder was doing the slow way. Its gallery tiles were the or
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) · `ghcr.io/brf-tech/filex:slim-v0.16.0`
 
-## v0.15.1
-
-<span class="filex-release-date">12 August 2026</span>
-
-The desktop app's account rail had its two identities the wrong way round. Each row of that rail is a server — a tenant — so it now carries that server's own Branding logo, which is a better label than initials taken from an e-mail address; the filex mark stays fixed above them, because the application's identity is the one thing on that rail that should never change with what you clicked. Branding is fetched for every signed-in account, so a rail of several tenants paints all of their logos at once.
-
-**Fixed**
-
-- **Desktop** — The rail's two identities were the wrong way round.
-
-**Other changes**
-
-- **Desktop** — The login-item checks now branch on packaging.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.15.1`
-
 ## Earlier releases
 
-The 55 releases before v0.15.1, in brief. Full notes are on GitHub.
+The 56 releases before v0.16.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.15.1](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) | 12 August 2026 | The desktop app's account rail had its two identities the wrong way round. Each row of that rail is a server — a tenant — so it now carries that server's own Branding logo, which is a better label than initials taken from an… |
 | [v0.15.0](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) | 12 August 2026 | Mostly the desktop app, and one thing that was writing to your operating system. "Start when I sign in" registered whichever executable happened to be running the app — which, for anyone who had ever run it from source, was a… |
 | [v0.14.0](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) | 10 August 2026 | The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first… |
 | [v0.13.4](https://github.com/BRF-Tech/filex/releases/tag/v0.13.4) | 10 August 2026 | A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffered to a temporary file, and those files were never removed — every request answered normally while the disk quietly drained (29 GB in two hours on a… |
@@ -339,4 +332,4 @@ The 55 releases before v0.15.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-19 from 75 published releases.</small>
+<small>Generated 2026-08-19 from 76 published releases.</small>

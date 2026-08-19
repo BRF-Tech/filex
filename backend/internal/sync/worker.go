@@ -190,6 +190,56 @@ type storageSyncer struct {
 	ctx     context.Context
 	// fallback is the cadence used when this storage states none of its own.
 	fallback time.Duration
+	// failures counts CONSECUTIVE failed runs. See noteRun.
+	failures int
+}
+
+// FailureReportThreshold is how many runs in a row must fail before a failure
+// is reported as a WARNING (and so reaches the error tracker) rather than
+// noted at INFO.
+//
+// # Why a single failed run is not an error
+//
+// A poll run reads the backend's listing. Object stores answer a transient
+// 503/504 under load, and when the retry budget is spent the run gives up —
+// but nothing is lost: the catalogue is simply not refreshed until the next
+// tick, minutes later, which normally succeeds.
+//
+// Measured on fm.example.com: "sync: run failed … ListObjectsV2 … 504" fired 15
+// times in six weeks against Hetzner Object Storage, every one of them
+// followed by a successful run. Reporting each hiccup buys nothing and costs
+// the thing that matters — an error tracker where a real outage stands out.
+// Three in a row is roughly 45 minutes of a storage genuinely not answering,
+// which IS worth waking up for.
+const FailureReportThreshold = 3
+
+// noteRun records the outcome of one run and says how it should be logged.
+//
+// It deliberately keeps reporting once the threshold is crossed rather than
+// warning once: the tracker groups by message, so a sustained outage shows up
+// as a rising count on one issue, which is the signal an operator wants.
+func (s *storageSyncer) noteRun(err error) {
+	if err == nil {
+		if s.failures >= FailureReportThreshold {
+			slog.Info("sync: recovered",
+				slog.String("storage", s.storage.Name),
+				slog.Int("after_failures", s.failures))
+		}
+		s.failures = 0
+		return
+	}
+	s.failures++
+	if s.failures >= FailureReportThreshold {
+		slog.Warn("sync: run failed",
+			slog.String("storage", s.storage.Name),
+			slog.Int("consecutive", s.failures),
+			slog.String("err", err.Error()))
+		return
+	}
+	slog.Info("sync: run failed, will retry on the next tick",
+		slog.String("storage", s.storage.Name),
+		slog.Int("consecutive", s.failures),
+		slog.String("err", err.Error()))
 }
 
 // Loop dispatches to the appropriate strategy.
@@ -218,17 +268,13 @@ func (s *storageSyncer) loopPoll() {
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
-	if err := s.RunOnce(s.ctx); err != nil {
-		slog.Warn("sync: initial run failed", slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
-	}
+	s.noteRun(s.RunOnce(s.ctx))
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
-			if err := s.RunOnce(s.ctx); err != nil {
-				slog.Warn("sync: run failed", slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
-			}
+			s.noteRun(s.RunOnce(s.ctx))
 		}
 	}
 }

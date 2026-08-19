@@ -267,6 +267,13 @@ than to search for:
 
 ## Storage sync
 
+> ⚠ **A single failed sync run is not an error.** A run that cannot list the
+> backend (a 503/504 from an object store under load, say) is logged at INFO and
+> the catalogue is refreshed on the next tick. Only **three consecutive**
+> failures are reported as a warning — that is a storage genuinely not
+> answering, not a hiccup. The message carries the streak, and recovery is
+> logged too.
+
 Fallback cadence for the [sync worker](STORAGE.md#sync), used by storages that
 do not set their own `sync_interval_s`. A storage that does set one wins.
 

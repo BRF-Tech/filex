@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.6] - 2026-08-19
+
+### Changed
+
+- **A demo instance no longer accepts any new storage backend.** 0.21.4 refused
+  the `local` driver, which reaches the server's own filesystem. The remote
+  drivers (`s3`, `sftp`, `webdav`, `smb`, …) are refused now too: "attach your
+  own bucket" reads as harmless, but what it asks the SERVER to do is open a
+  connection to an address a stranger chose — loopback, a private range, a cloud
+  metadata endpoint. A demo ships with the storage it demonstrates, and every
+  other surface works unchanged.
+
+  A plugin driver is still allowed, because on a demo the plugin subsystem is
+  off unless the operator deliberately turned it back on — at which point it is
+  their own program.
+
+- **A single failed sync run is no longer reported as an error.** A poll run
+  reads the backend's listing; when an object store answers 503/504 under load
+  and the retry budget is spent, the run gives up and the catalogue is refreshed
+  on the next tick instead. Nothing is lost. Measured on one instance: fifteen
+  such failures in six weeks, every one followed by a successful run — fifteen
+  reports that meant "the internet had a hiccup".
+
+  Failures are now noted at INFO and reported as a warning only once **three in
+  a row** have failed (roughly 45 minutes of a storage genuinely not answering),
+  with the streak in the message; recovery is logged too. What an error tracker
+  holds should be things worth waking up for.
+
+
 ## [0.21.5] - 2026-08-19
 
 ### Fixed
