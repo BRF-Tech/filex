@@ -23,8 +23,8 @@
 // the browser locale, the stored preference and the server default. Getting a
 // half-Turkish dialog into the repo took one of those being unset.
 
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -335,6 +335,68 @@ async function shot(target, name) {
   log(`wrote ${name}`);
 }
 
+/**
+ * installExamplePlugin builds backend/examples/plugin-memfs and installs it
+ * through the very API the admin page uses, so the plugins screenshot shows a
+ * REAL running plugin rather than an empty table.
+ *
+ * The binary is built for the machine this script runs on, because that is
+ * the machine running the instance being shot. With no Go toolchain it says
+ * so and returns false: the shot is then skipped rather than showing an empty
+ * table that claims to be the feature.
+ */
+async function installExamplePlugin(token) {
+  // SHOTS_PLUGIN_BIN: an already-built plugin, for the same reason
+  // FILEX_BIN exists. On this Windows workstation the Go toolchain lives
+  // in WSL, so `go build` here is ENOENT while a binary cross-built there
+  // is perfectly good.
+  let out = process.env.SHOTS_PLUGIN_BIN ?? null;
+  if (out && !existsSync(out)) {
+    log(`SHOTS_PLUGIN_BIN does not exist: ${out}`);
+    return false;
+  }
+  if (!out) {
+  out = join(tmpdir(), process.platform === 'win32' ? 'filex-shot-memfs.exe' : 'filex-shot-memfs');
+  try {
+    execFileSync('go', ['build', '-o', out, './examples/plugin-memfs'], {
+      cwd: join(REPO, 'backend'),
+      env: { ...process.env, CGO_ENABLED: '0' },
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    log(`no example plugin in the shot: ${String(err.message).split('\n')[0]}`);
+    return false;
+  }
+  }
+  const form = new FormData();
+  form.append('name', 'memfs');
+  form.append('file', new Blob([readFileSync(out)]), 'memfs');
+  const res = await fetch(`${URL}/api/admin/plugins`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) {
+    log(`plugin install failed (${res.status}) - skipping that shot`);
+    return false;
+  }
+  // Starting is asynchronous: the row says "starting" until the handshake
+  // and the describe are done, and a picture of that shows nothing.
+  for (let i = 0; i < 40; i++) {
+    const list = await api(token, '/api/admin/plugins');
+    const body = await list.json().catch(() => ({}));
+    const row = (body.plugins ?? [])[0];
+    if (row?.state === 'running') return true;
+    if (row?.state === 'refused') {
+      log(`plugin refused: ${row.state_error ?? ''}`);
+      return false;
+    }
+    await sleep(250);
+  }
+  log('plugin never reached running - skipping that shot');
+  return false;
+}
+
 async function run() {
   const proc = await boot();
   try {
@@ -390,6 +452,16 @@ async function run() {
     await page.waitForSelector('.card', { timeout: 15_000 });
     await sleep(1200);
     await shot(page, 'admin-dashboard.png');
+
+    // 3a - Plugins. A storage driver filex does not ship is the headline of
+    // this release, and a picture of the empty table would show none of it,
+    // so the example plugin is really installed and really running here.
+    if (await installExamplePlugin(token)) {
+      await page.goto(`${URL}/admin/plugins`);
+      await page.waitForSelector('[data-testid="plugin-memfs"]', { timeout: 15_000 });
+      await sleep(600);
+      await shot(page, 'admin-plugins.png');
+    }
 
     // 3b — the connection guide. filex being reachable AS S3, SFTP, FTPS and
     // NFS is the largest thing in this release and the README had no picture of

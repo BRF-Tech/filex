@@ -182,6 +182,16 @@ type Store interface {
 	SetNFSExportDisabled(ctx context.Context, id int64, disabled bool) error
 	DeleteNFSExport(ctx context.Context, id, userID int64) error
 
+	// Storage plugins (migration 00029) — the admin's registration of an
+	// out-of-process storage driver; see internal/plugin. Runtime state is
+	// NOT here (the manager re-derives it by starting the plugin).
+	CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugin, error)
+	GetPlugin(ctx context.Context, id int64) (*model.Plugin, error)
+	GetPluginByName(ctx context.Context, name string) (*model.Plugin, error)
+	ListPlugins(ctx context.Context) ([]*model.Plugin, error)
+	UpdatePlugin(ctx context.Context, p *model.Plugin) error
+	DeletePlugin(ctx context.Context, id int64) error
+
 	// File grants — per-user/per-folder ACL (RBAC feature, migration 00012).
 	ListFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
 	ListFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error)

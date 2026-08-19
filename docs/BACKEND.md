@@ -432,6 +432,64 @@ hardcoding a field list, and the root‑path guard reads the same declaration.
 See [STORAGE.md → Driver descriptors](STORAGE.md#driver-descriptors-get-apiadminstorage-drivers).
 `GET /api/capabilities` keeps its plain `storage_drivers: []string` name list.
 
+> A **plugin** driver (`plugin:<name>`) appears in this list too, with the
+> fields the plugin described — which is what lets an admin form render a
+> driver that did not exist when the frontend was built. See
+> [PLUGINS.md](PLUGINS.md).
+
+---
+
+## Admin: plugins
+
+Storage drivers that live outside the binary. Instance-wide, and in
+multi-tenant mode **supertenant-only** (a tenant admin gets `403
+supertenant_only`, not an empty list). With `FILEX_PLUGINS_DISABLED=1` every
+route answers `503 plugins_disabled`. Full picture: [PLUGINS.md](PLUGINS.md).
+
+### `GET /api/admin/plugins` ![admin](https://img.shields.io/badge/-admin-red)
+Every registered plugin plus its live state — the row is the admin's intent,
+the state is what the manager sees right now.
+**Response 200**
+```json
+{
+  "dir": "/data/plugins",
+  "plugins": [
+    { "id": 1, "name": "memfs", "kind": "binary", "binary": "memfs",
+      "sha256": "9f2c…", "enabled": true, "version": "1.0.0",
+      "driver": "memfs", "state": "running", "restarts": 0,
+      "label": "In-memory (example)", "field_count": 1, "in_use": 1,
+      "capabilities": { "write": true, "delete": true, "set_mtime": true } }
+  ]
+}
+```
+`state` is one of `running` · `starting` · `failed` · `refused` · `disabled`;
+`state_error` carries the reason for the last two. `in_use` counts storages on
+this plugin's driver.
+
+### `POST /api/admin/plugins` ![admin](https://img.shields.io/badge/-admin-red)
+Install, in one of three shapes — the Content-Type picks which:
+
+| Shape | Body |
+|---|---|
+| upload | `multipart/form-data` with `name` and `file` |
+| download | `{"name":"…","url":"https://…","sha256":"…"}` — the hash is **required** |
+| remote | `{"name":"…","kind":"remote","address":"http(s)://…","token":"…"}` |
+
+**201** with the same object as above. `409` when the name is taken, `400` for
+a bad name (`[a-z0-9][a-z0-9_-]{0,31}`), a missing hash, or a remote plugin
+with no `FILEX_SECRET_KEY` configured to seal its token.
+
+### `PATCH /api/admin/plugins/{id}` ![admin](https://img.shields.io/badge/-admin-red)
+`{"enabled": true|false}`. Disabling unregisters the driver, so storages on it
+stop opening — they are not deleted.
+
+### `POST /api/admin/plugins/{id}/restart` ![admin](https://img.shields.io/badge/-admin-red)
+Stop and start it. The way out of `refused` once the cause is fixed.
+
+### `DELETE /api/admin/plugins/{id}` ![admin](https://img.shields.io/badge/-admin-red)
+**204.** Removes the registration and, for a binary plugin, its directory.
+Storages created on it are left in place.
+
 ### `GET /api/admin/storages` ![admin](https://img.shields.io/badge/-admin-red)
 **Response 200**
 ```json

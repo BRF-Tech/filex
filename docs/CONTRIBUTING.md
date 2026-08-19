@@ -244,7 +244,10 @@ Maintainer-only. Reproducible, automated by CI.
 
    It boots a local instance, seeds a demo tree, pins the UI language to
    English three ways over (browser locale, stored preference, server default)
-   and writes the set. Then **look at the PNGs** before committing them — see
+   and writes the set. `admin-plugins.png` needs the example plugin built for
+   the shots machine — the script builds it when `go` is on PATH, otherwise
+   point `SHOTS_PLUGIN_BIN` at a binary you built (on a Windows workstation
+   with the toolchain in WSL, cross-build it: `GOOS=windows go build -o …`). Then **look at the PNGs** before committing them — see
    `e2e/README.md` for the knobs (running server, VM/WSL paths, thumbnails, the
    demo-mode landing page).
 

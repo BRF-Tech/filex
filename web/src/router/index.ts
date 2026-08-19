@@ -209,6 +209,15 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.notifications' },
       },
       {
+        // Storage plugins - drivers that live outside the binary. Sits
+        // next to the other instance-wide settings; storages ON a plugin
+        // are created from Connections like any other driver's.
+        path: 'plugins',
+        name: 'plugins',
+        component: () => import('@/views/Plugins.vue'),
+        meta: { breadcrumb: 'nav.plugins' },
+      },
+      {
         // bag:b3 — webhook v2 target CRUD (multi-destination, signed).
         path: 'webhooks',
         name: 'webhooks',

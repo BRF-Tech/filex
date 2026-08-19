@@ -210,6 +210,14 @@ func RegisterDescriptor(d Descriptor) {
 	descriptors[d.Driver] = d
 }
 
+// UnregisterDescriptor forgets a driver's config contract — the plugin
+// counterpart of Unregister. Unknown names are a no-op.
+func UnregisterDescriptor(name string) {
+	descMu.Lock()
+	defer descMu.Unlock()
+	delete(descriptors, name)
+}
+
 // DescriptorFor returns the descriptor for a driver name.
 func DescriptorFor(name string) (Descriptor, bool) {
 	descMu.RLock()

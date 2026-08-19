@@ -112,7 +112,8 @@
     "protection": "Koruma",
     "branding": "Kurumsal Kimlik",
     "updates": "Güncellemeler",
-    "connections": "Bağlantılar"
+    "connections": "Bağlantılar",
+    "plugins": "Eklentiler"
   },
   "login": {
     "title": "Oturum aç",
@@ -1015,5 +1016,60 @@
   "connections": {
     "subtitle": "Bu sunucuyu bir depoya bağlayın ve kendi bilgisayarınızdan ona nasıl erişeceğinizi görün.",
     "advanced": "Gelişmiş depo ayarları"
+  },
+  "plugins": {
+    "title": "Eklentiler",
+    "subtitle": "filex'in dışında yaşayan depolama sürücüleri. Eklenti, filex'in çalıştırdığı (ya da bağlandığı) bir programdır; çalışmaya başladığı anda sürücüsü, kendi tarif ettiği ayar formuyla birlikte sıradan depo seçicisinde görünür.",
+    "add": "Eklenti kur",
+    "install": "Kur",
+    "restart": "Yeniden başlat",
+    "empty": "Kurulu eklenti yok. İkili (binary) eklentiler burada durur:",
+    "whereNext": "Çalışan bir eklentinin sürücüsü Bağlantılar → Depo ekle altında plugin:<sürücü> adıyla listelenir.",
+    "installed": "{name} kuruldu",
+    "deleted": "{name} kaldırıldı",
+    "deleteConfirm": "“{name}” eklentisi kaldırılsın mı? Dosyaları sunucudan silinir.",
+    "deleteConfirmInUse": "“{name}” eklentisi kaldırılsın mı? {count} depo bu sürücüyü kullanıyor ve eklenti yeniden kurulana kadar açılamaz. Depoların kendisi silinmez.",
+    "errName": "Ad gerekli",
+    "errFile": "Yüklenecek eklenti dosyasını seçin",
+    "nameHint": "Küçük harf, rakam, - ve _ (en çok 32). Sunucudaki klasörünü adlandırır; sürücü adını eklentinin kendisi bildirir.",
+    "fileHint": "Eklenti programı — kendi bilgisayarınız için değil, SUNUCUNUN işletim sistemi ve mimarisi için derlenmiş olmalı.",
+    "shaHint": "Zorunlu: bir URL, gelecek baytın sözü değildir. filex indirdikten sonra doğrular, tutmazsa reddeder.",
+    "remoteHint": "filex yalnızca bağlanır, hiçbir şey başlatmaz. Token servisin beklediği değerdir; FILEX_SECRET_KEY ile mühürlenir ve bir daha gösterilmez.",
+    "trustWarning": "Bir eklenti filex'in kendi yetkileriyle çalışır ve üzerinde açılan her deponun kimlik bilgileri ona verilir. Yalnızca güvendiğiniz eklentileri kurun.",
+    "supertenantOnly": "Depolama eklentilerini platform işletmecisi yönetir.",
+    "disabled": "Bu kurulumda depolama eklentileri kapalı.",
+    "restarts": "{count}× yeniden başladı",
+    "source": {
+      "file": "Dosya yükle",
+      "url": "URL'den",
+      "remote": "Uzak servis"
+    },
+    "state": {
+      "running": "Çalışıyor",
+      "starting": "Başlıyor…",
+      "failed": "Başarısız",
+      "refused": "Reddedildi",
+      "disabled": "Kapalı"
+    },
+    "fields": {
+      "driver": "Sürücü",
+      "state": "Durum",
+      "capabilities": "Yapabildikleri",
+      "inUse": "Depo",
+      "enabled": "Açık",
+      "binary": "Eklenti dosyası",
+      "address": "Adres",
+      "token": "Token"
+    },
+    "caps": {
+      "read": "okuma",
+      "write": "yazma",
+      "readOnly": "salt okunur",
+      "range": "aralıklı okuma",
+      "move": "taşıma",
+      "copy": "kopyalama",
+      "mtime": "zaman damgası",
+      "watch": "değişim olayları"
+    }
   }
 }

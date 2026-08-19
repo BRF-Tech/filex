@@ -40,6 +40,13 @@ type Config struct {
 	// default — a single-tenant install behaves exactly as before. See
 	// docs/MULTI-TENANCY.md.
 	MultiTenant bool `yaml:"multi_tenant"`
+	// PluginsDisabled (FILEX_PLUGINS_DISABLED=1) turns the storage-plugin
+	// subsystem off: nothing under <data-dir>/plugins is launched, no remote
+	// plugin is contacted, and the admin API answers 503. ON by default,
+	// because a plugin is only ever installed by an admin — but an operator
+	// hardening a shared instance may not want the admin role to include
+	// "run a program on the server". See docs/PLUGINS.md.
+	PluginsDisabled bool `yaml:"plugins_disabled"`
 	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
 	// read back rather than merely compare — today the S3 access keys, because
 	// SigV4 derives an HMAC chain from the secret and so cannot work off a
@@ -643,6 +650,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_MULTI_TENANT"); v == "1" || v == "true" {
 		c.MultiTenant = true
+	}
+	if v := os.Getenv("FILEX_PLUGINS_DISABLED"); v == "1" || v == "true" {
+		c.PluginsDisabled = true
 	}
 	if v := os.Getenv("FILEX_COOKIE_DOMAIN"); v != "" {
 		c.CookieDomain = v

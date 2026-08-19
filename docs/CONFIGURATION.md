@@ -233,6 +233,21 @@ requested is not something to open for them.
 
 ---
 
+## Storage plugins
+
+Drivers that live outside the binary — see [PLUGINS.md](PLUGINS.md).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FILEX_PLUGINS_DISABLED` | `0` | Turns the whole subsystem off: nothing under `<data-dir>/plugins` is launched, no remote plugin is contacted, and the admin API answers 503 saying so. On by default, because a plugin is only ever installed by an admin — but an operator hardening a shared instance may not want the admin role to include “run a program on the server”. |
+| `FILEX_SECRET_KEY` | — | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). |
+
+Installed binaries live in `<data-dir>/plugins/<name>/`, and a plugin's socket
+in `<data-dir>/plugins/<name>/run/` (mode 0600). In multi-tenant mode the admin
+surface is supertenant-only.
+
+---
+
 ## Storage sync
 
 Fallback cadence for the [sync worker](STORAGE.md#sync), used by storages that

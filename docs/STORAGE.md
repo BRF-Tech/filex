@@ -8,6 +8,11 @@ bucket, and an SFTP server side by side).
 Supported adapters: **local** filesystem · **S3** / S3‑compatible · **SFTP** ·
 **WebDAV** · **FTP/FTPS** · **SMB/CIFS**.
 
+That list is not the limit: a backend filex does not ship can be added as a
+**[storage plugin](PLUGINS.md)** — a separate program that describes its own
+config form and appears here as `plugin:<driver>`, behaving like any adapter
+below.
+
 A **NAS** (Synology, QNAP, TrueNAS, a Windows share…) is supported two ways:
 the **`smb` driver** talks to the share directly, and for NFS you mount it with
 the operating system and serve the mount point with the `local` adapter. Most
@@ -233,6 +238,10 @@ Each adapter's `config` object is passed verbatim to the driver. Only the keys
 below are read; unknown keys are ignored. The same key lists are served
 machine‑readably by
 [`GET /api/admin/storage-drivers`](#driver-descriptors-get-apiadminstorage-drivers).
+
+> A **plugin** driver appears in that same endpoint with the fields the plugin
+> described, which is why the admin form renders it without a frontend release.
+> See [PLUGINS.md](PLUGINS.md).
 
 ### local
 

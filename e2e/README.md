@@ -113,6 +113,7 @@ environment variables:
 | `SHOTS_STORAGE` / `SHOTS_MOUNT` | the fixture directory as *this machine* and as the *server* see it — they differ when the server runs in a VM / WSL / container |
 | `SHOTS_SEED_ONLY`, `SHOTS_SKIP_SEED` | two passes: seed, run `filex thumb backfill` out of band, then capture. Thumbnails are rendered on UPLOAD, so fixtures written straight to disk have none and the hero shot comes out as a grid of generic icons |
 | `SHOTS_DEMO` | capture `demo-landing.png` — needs an instance booted with `FILEX_DEMO_MODE=true`, because that page replaces the login screen |
+| `SHOTS_PLUGIN_BIN` | an already-built `examples/plugin-memfs` binary for the shots machine, when `go` is not on its PATH (Windows workstation with the toolchain in WSL). Without it the plugins shot is skipped, with a log line — never a silently empty table |
 | `SHOTS_KEEP` | leave the instance running afterwards |
 
 ## Notes

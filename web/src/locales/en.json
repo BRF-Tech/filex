@@ -112,7 +112,8 @@
     "protection": "Protection",
     "branding": "Branding",
     "updates": "Updates",
-    "connections": "Connections"
+    "connections": "Connections",
+    "plugins": "Plugins"
   },
   "login": {
     "title": "Sign in",
@@ -1015,5 +1016,60 @@
   "connections": {
     "subtitle": "Connect this server to a storage backend, and see how to reach it from your own computer.",
     "advanced": "Advanced storage settings"
+  },
+  "plugins": {
+    "title": "Plugins",
+    "subtitle": "Storage drivers that live outside filex. A plugin is a program filex runs (or a service it connects to); once it is running, its driver appears in the ordinary storage picker with the config form the plugin itself describes.",
+    "add": "Install a plugin",
+    "install": "Install",
+    "restart": "Restart",
+    "empty": "No plugins installed. Binary plugins live under:",
+    "whereNext": "A running plugin's driver is on Connections → Add a storage, named plugin:<driver>.",
+    "installed": "{name} installed",
+    "deleted": "{name} removed",
+    "deleteConfirm": "Remove the plugin “{name}”? Its files are deleted from the server.",
+    "deleteConfirmInUse": "Remove the plugin “{name}”? {count} storage(s) use its driver and will stop opening until it is installed again. The storages themselves are not deleted.",
+    "errName": "A name is required",
+    "errFile": "Choose the plugin binary to upload",
+    "nameHint": "Lower-case letters, digits, - and _ (max 32). Names the plugin's folder on the server; the storage driver name comes from the plugin itself.",
+    "fileHint": "The plugin program, built for the server's operating system and architecture — not for your own machine.",
+    "shaHint": "Required: a URL is not a promise about bytes. filex checks it after downloading and refuses a mismatch.",
+    "remoteHint": "filex only connects here — nothing is launched. The token is the one the service expects; it is sealed with FILEX_SECRET_KEY and never shown again.",
+    "trustWarning": "A plugin runs with filex's own privileges and is handed the credentials of every storage created on it. Install only plugins you trust.",
+    "supertenantOnly": "Storage plugins are managed by the platform operator.",
+    "disabled": "Storage plugins are disabled on this instance.",
+    "restarts": "restarted {count}×",
+    "source": {
+      "file": "Upload a binary",
+      "url": "From a URL",
+      "remote": "Remote service"
+    },
+    "state": {
+      "running": "Running",
+      "starting": "Starting…",
+      "failed": "Failed",
+      "refused": "Refused",
+      "disabled": "Off"
+    },
+    "fields": {
+      "driver": "Driver",
+      "state": "State",
+      "capabilities": "Can do",
+      "inUse": "Storages",
+      "enabled": "Enabled",
+      "binary": "Plugin binary",
+      "address": "Address",
+      "token": "Token"
+    },
+    "caps": {
+      "read": "read",
+      "write": "write",
+      "readOnly": "read-only",
+      "range": "ranged reads",
+      "move": "move",
+      "copy": "copy",
+      "mtime": "timestamps",
+      "watch": "change events"
+    }
   }
 }

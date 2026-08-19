@@ -5,6 +5,7 @@ import { trashApi } from '@/api/trash';
 import TrashFull from './icons/TrashFull.vue';
 import {
   LayoutDashboard,
+  Blocks,
   Database,
   Users,
   Settings,
@@ -96,6 +97,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'queue' }, label: t('nav.queue'), icon: ListChecks, group: 'ops' },
   { to: { name: 'notifications' }, label: t('nav.notifications'), icon: Bell, group: 'ops' },
   { to: { name: 'webhooks' }, label: t('nav.webhooks'), icon: Webhook, group: 'ops' } /* bag:b3 */,
+  { to: { name: 'plugins' }, label: t('nav.plugins'), icon: Blocks, group: 'ops' },
   { to: { name: 'audit' }, label: t('nav.audit'), icon: ScrollText, group: 'ops' },
   { to: { name: 'updates' }, label: t('nav.updates'), icon: ArrowUpCircle, group: 'ops' },
 

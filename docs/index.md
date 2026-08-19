@@ -45,6 +45,11 @@ features:
     details: Point rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only learned FTP or a media player that only learned NFS straight at filex — S3, SFTP, FTPS, NFS and WebDAV, all on the same tree with the same permissions and trash as the web UI.
     link: /PROTOCOLS
     linkText: Protocol docs
+  - icon: 🧩
+    title: Teach it a new storage
+    details: A backend filex has never heard of is a separate program you install from the admin panel — it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods.
+    link: /PLUGINS
+    linkText: Plugin docs
   - icon: 💾
     title: Mount it as a drive
     details: filex mount attaches a remote server over ordinary HTTPS — a folder on Linux, a drive letter on Windows. Not a sync it opens one file out of a hundred thousand without downloading the rest.

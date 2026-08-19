@@ -105,6 +105,7 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: 'Storage', link: '/STORAGE' },
+          { text: 'Storage plugins', link: '/PLUGINS' },
           { text: 'Uploads & resume', link: '/UPLOADS' },
           { text: 'Quotas', link: '/QUOTAS' },
           { text: 'Search', link: '/SEARCH' },

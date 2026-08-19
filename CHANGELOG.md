@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-19
+
+**A storage driver can now live outside the binary.** Somebody who writes
+their own storage system could not teach filex to speak it without forking
+filex; now they write a program, install it from the admin panel, and their
+driver appears in the ordinary storage picker.
+
+- **Plugins** — a plugin is a separate process. filex launches it (or connects
+  to one you run), asks what it can do over a small HTTP/JSON protocol, and
+  registers it as `plugin:<driver>`. Any language can implement the protocol;
+  a plugin crash cannot take filex down; a plugin ships on its own schedule.
+  Its **config form comes from the plugin's own describe**, which is what lets
+  a driver that did not exist when the frontend was built render in the admin
+  UI with no frontend release.
+- **What a plugin does not implement is either emulated or honestly absent.**
+  Ranged reads, move and copy are emulated by the host; `set_mtime` is only
+  offered when the plugin really stores it, because filex can tell "not
+  supported" from "applied" but not "applied" from "pretended". A read-only
+  plugin is handed to filex as a value with **no** write methods at all, so
+  the UI does not offer an upload button that fails at the last moment.
+- **Go SDK** (`backend/pkg/pluginsdk`) — implement three methods, call
+  `Serve`. Capabilities are derived from the type, so a plugin cannot claim
+  one it did not write or hide one it did. A complete example lives in
+  `backend/examples/plugin-memfs`, and the test suite builds and runs it.
+- **Admin → Plugins** — install by upload, by URL with a required SHA256, or
+  as a remote service; enable, disable, restart, remove. The page says what
+  will stop working before you remove a plugin that storages are using.
+- Security posture, stated rather than implied: a plugin runs with filex's
+  privileges and receives the credentials of every storage on it, so the UI
+  says so before the install button; a remote plugin's token is sealed with
+  `FILEX_SECRET_KEY` (registering one without that key is refused rather than
+  stored in plaintext); a launched plugin must listen on loopback; and an
+  installed binary's SHA256 is re-checked on **every** start, so a file that
+  changed under filex is refused rather than run.
+- `FILEX_PLUGINS_DISABLED=1` turns the subsystem off entirely. In
+  multi-tenant mode the surface is supertenant-only.
+- **Fixed while proving it on Windows:** a plugin uploaded without an
+  extension was stored as `memfs` and never started — on Windows the
+  extension is what makes a file executable, and Go reports that as
+  `executable file not found in %PATH%`, which reads like the file is missing
+  when it is sitting right there. Binaries now get `.exe` unless they already
+  carry an executable extension.
+
+Migration **00029** (`plugins`). Docs: [PLUGINS.md](docs/PLUGINS.md).
+
 ## [0.20.3] - 2026-08-19
 
 Three desktop fixes that came out of a real macOS 26 (Apple Silicon)

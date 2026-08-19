@@ -36,6 +36,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -75,9 +76,12 @@ type Deps struct {
 	ReplicaCron     *replica.CronScheduler
 	ReplicaReloader *replica.RulesReloader
 	StorageResolver func(int64) (storage.Driver, error)
-	Embed           embed.FS // web/dist + admin
-	LocalAuth       auth.LoginDriver
-	OIDCAuth        auth.OIDCDriver
+	// Plugins manages out-of-process storage drivers (internal/plugin). Nil
+	// when FILEX_PLUGINS_DISABLED — the admin routes then answer 503.
+	Plugins   *plugin.Manager
+	Embed     embed.FS // web/dist + admin
+	LocalAuth auth.LoginDriver
+	OIDCAuth  auth.OIDCDriver
 	// ACL resolves per-user/per-item grants (RBAC feature). Constructed in
 	// BuildRouter from Store when nil.
 	ACL *acl.Resolver
@@ -696,6 +700,19 @@ func BuildRouter(d *Deps) http.Handler {
 			// replication target) renders from this instead of carrying
 			// its own hardcoded field list. See handlers/storage_drivers.go.
 			r.Get("/storage-drivers", handlers.NewStorageDrivers().List)
+
+			// Storage plugins — out-of-process drivers the admin installs.
+			// Their descriptors show up in /storage-drivers above the moment
+			// a plugin is running. See handlers/plugins.go, docs/PLUGINS.md.
+			pluginsH := handlers.NewPlugins(d.Plugins, d.Cfg.MultiTenant)
+			r.Route("/plugins", func(r chi.Router) {
+				r.Get("/", pluginsH.List)
+				r.Post("/", pluginsH.Install)
+				r.Get("/{id}", pluginsH.Get)
+				r.Patch("/{id}", pluginsH.Patch)
+				r.Post("/{id}/restart", pluginsH.Restart)
+				r.Delete("/{id}", pluginsH.Delete)
+			})
 
 			r.Route("/storages", func(r chi.Router) {
 				r.Get("/", stg.List)

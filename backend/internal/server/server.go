@@ -36,10 +36,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/nfssrv"
-	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/plugin"
+	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
@@ -103,6 +104,11 @@ type Server struct {
 	ftps *ftpsrv.Server
 	// nfs is the NFSv3 endpoint, nil when FILEX_NFS is off.
 	nfs *nfssrv.Server
+	// plugins supervises out-of-process storage drivers, nil when
+	// FILEX_PLUGINS_DISABLED. Held here so shutdown stops the processes it
+	// started — an orphaned plugin would keep a socket and the storage
+	// credentials it was handed.
+	plugins *plugin.Manager
 	// protocolAuth is the shared credential resolver every non-HTTP protocol
 	// authenticates through. Held here for the revalidation sweep, which is what
 	// makes revoking a credential reach a session that is already open.
@@ -349,8 +355,36 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Share service.
 	shareSvc := share.NewService(store)
 
+	// Storage plugins — drivers that live outside this binary. Started BEFORE
+	// the resolver pre-warms storages below: a storage on `plugin:foo` can
+	// only open once that plugin has described itself and registered, and a
+	// pre-warm that ran first would log "unknown driver" for every one of
+	// them. WaitReady bounds that wait; a plugin that is slower than it still
+	// registers, and its storages open on first use.
+	var pluginMgr *plugin.Manager
+	if !cfg.PluginsDisabled {
+		pluginMgr, err = plugin.New(plugin.Options{
+			Store:     store,
+			Dir:       filepath.Join(cfg.DataDir, "plugins"),
+			SecretKey: cfg.SecretKey,
+			Log:       slog.Default(),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("server: plugins: %w", err)
+		}
+		if err := pluginMgr.Load(ctx); err != nil {
+			// A broken plugin must not stop the server: the whole point of
+			// running them out of process is that they cannot take filex
+			// down. The failure is logged and visible in the admin list.
+			slog.Warn("plugins: load failed; continuing without them", slog.Any("err", err))
+		} else {
+			pluginMgr.WaitReady(10 * time.Second)
+		}
+	}
+
 	srvObj := &Server{
 		cfg:      cfg,
+		plugins:  pluginMgr,
 		store:    store,
 		sqlDB:    sqlDB,
 		worker:   worker,
@@ -731,6 +765,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		ReplicaCron:     srvObj.replicaCron,
 		ReplicaReloader: srvObj.replicaReloader,
 		StorageResolver: resolver,
+		Plugins:         pluginMgr,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
 		OIDCAuth:        oidcDrv,
@@ -1081,6 +1116,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.nfs != nil {
 			_ = s.nfs.Close()
+		}
+		if s.plugins != nil {
+			s.plugins.Shutdown()
 		}
 		s.worker.Stop()
 		if s.ops != nil {

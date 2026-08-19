@@ -3754,3 +3754,66 @@ func scanNodeComment(rs interface {
 	}
 	return c, nil
 }
+
+// ─────────────────── Storage plugins (migration 00029) ───────────────────
+
+const pluginCols = `id, name, kind, binary, sha256, address, token_sealed, enabled, version, driver, last_error, created_at, updated_at`
+
+func scanPlugin(r rowScanner) (*model.Plugin, error) {
+	p := &model.Plugin{}
+	if err := r.Scan(&p.ID, &p.Name, &p.Kind, &p.Binary, &p.SHA256, &p.Address, &p.TokenSealed,
+		&p.Enabled, &p.Version, &p.Driver, &p.LastError, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *Store) CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugin, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO plugins (name, kind, binary, sha256, address, token_sealed, enabled, version, driver, last_error)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return s.GetPlugin(ctx, id)
+}
+
+func (s *Store) GetPlugin(ctx context.Context, id int64) (*model.Plugin, error) {
+	return scanPlugin(s.db.QueryRowContext(ctx, `SELECT `+pluginCols+` FROM plugins WHERE id=?`, id))
+}
+
+func (s *Store) GetPluginByName(ctx context.Context, name string) (*model.Plugin, error) {
+	return scanPlugin(s.db.QueryRowContext(ctx, `SELECT `+pluginCols+` FROM plugins WHERE name=?`, name))
+}
+
+func (s *Store) ListPlugins(ctx context.Context) ([]*model.Plugin, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+pluginCols+` FROM plugins ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.Plugin{}
+	for rows.Next() {
+		p, err := scanPlugin(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE plugins SET kind=?, binary=?, sha256=?, address=?, token_sealed=?, enabled=?, version=?, driver=?, last_error=?, updated_at=CURRENT_TIMESTAMP
+		 WHERE id=?`,
+		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.ID)
+	return err
+}
+
+func (s *Store) DeletePlugin(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM plugins WHERE id=?`, id)
+	return err
+}
