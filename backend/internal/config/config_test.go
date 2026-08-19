@@ -169,3 +169,48 @@ func TestPluginEnvRejectsNonsense(t *testing.T) {
 		}
 	}
 }
+
+// TestDemoModeTurnsPluginsOff — the default that a live measurement forced.
+//
+// A demo instance publishes an ADMIN login (that is the point of a demo), and
+// the plugin API is admin-only, so on a demo "admin-only" means "anybody".
+// Installing a plugin makes filex execute an uploaded program on the host.
+// Measured on the public demo 2026-08-19: the published credentials logged in
+// as role=admin and GET /api/admin/plugins answered 200.
+//
+// So demo mode turns the subsystem off — and an operator who genuinely wants
+// plugins in a demo has to say so, rather than the safe state depending on
+// somebody noticing.
+func TestDemoModeTurnsPluginsOff(t *testing.T) {
+	t.Setenv("FILEX_DEMO_MODE", "true")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.PluginsDisabled {
+		t.Fatal("a demo instance must not offer the plugin API: it is admin-only, and its admin is public")
+	}
+}
+
+func TestDemoModePluginsCanBeForcedOn(t *testing.T) {
+	// Explicit beats implicit — but it has to be explicit.
+	t.Setenv("FILEX_DEMO_MODE", "true")
+	t.Setenv("FILEX_PLUGINS_DISABLED", "0")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PluginsDisabled {
+		t.Fatal("an operator setting FILEX_PLUGINS_DISABLED=0 in a demo means it")
+	}
+}
+
+func TestPluginsOnByDefaultWithoutDemo(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PluginsDisabled {
+		t.Fatal("plugins are on by default on an ordinary instance")
+	}
+}

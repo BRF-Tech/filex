@@ -235,6 +235,24 @@ FILEX_PLUGIN_TRUSTED_KEYS=3d40…e91b,7ac2… filex serve
 
 ---
 
+## ⚠⚠ A public demo must not offer this
+
+An instance running with `FILEX_DEMO_MODE` publishes an **admin** login. The
+plugin API is admin-only, so on that one instance "admin-only" means *anybody*
+— and installing a plugin makes filex execute an uploaded program on the host.
+
+So demo mode turns the subsystem **off** by default. `FILEX_PLUGINS_DISABLED=0`
+overrides it, deliberately, for somebody who knows what they are handing out.
+
+> This default came from a measurement rather than a worry. On 2026-08-19 the
+> project's own public demo was checked: the credentials printed on its landing
+> page logged in as `role=admin`, and `GET /api/admin/plugins` answered `200`.
+> Nothing had been installed — and nothing was stopping it. A safe state that
+> depends on the operator noticing is not a default.
+
+The same reasoning is why the surface is **supertenant-only** in multi-tenant
+mode: a tenant admin administers their tenant, not the machine.
+
 ## What a plugin may cost filex
 
 A plugin is somebody else's program in filex's request path. Without ceilings,

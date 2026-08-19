@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-08-19
+
+### Security
+
+- **A demo instance no longer offers the plugin API.** `FILEX_DEMO_MODE`
+  publishes an admin login — that is what a demo is for — and the plugin API is
+  admin-only, so on a demo "admin-only" means anybody; installing a plugin makes
+  filex execute an uploaded program on the host. Demo mode now turns the
+  subsystem off unless `FILEX_PLUGINS_DISABLED=0` says otherwise in so many
+  words.
+
+  Found by measuring rather than reasoning: the project's own public demo was
+  checked after the previous release, the published credentials logged in as
+  `role=admin`, and `GET /api/admin/plugins` answered `200`. Nothing had been
+  installed, and nothing was stopping it. If you run a filex demo with plugins
+  from v0.21.0–0.21.2, set `FILEX_PLUGINS_DISABLED=1` now — upgrading also does
+  it, but the switch works today.
+
+
 ## [0.21.2] - 2026-08-19
 
 ### Fixed

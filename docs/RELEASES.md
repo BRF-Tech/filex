@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.21.1, 19 August 2026
-Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". It works now, and it checks permissions on the way in, which the root case had been skipping. The plugin documentation also stopped promising something it does not do: a plugin can serve a change stream, but nothing in filex subscribes to one yet. Plus a second example plugin, written in Python without the Go SDK, and the acceptance run that drives it — including killing it mid-transfer to show that a storage survives its plugin crashing.
+::: tip Latest — v0.21.2, 19 August 2026
+A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails its own claims is refused rather than registered. That is the difference between a plugin that is broken and an app that looks broken: without it, a plugin declaring `write` with a broken write hands the user an upload button, a trash move and a version snapshot that each fail at the last moment. Plugins can also be upgraded in place now (a failed upgrade rolls back and costs you an error, not a plugin), their change streams are actually consumed instead of polled, and there is a ceiling on what one plugin may cost the server. Three things that were written but unreachable are wired up: signature enforcement (`FILEX_PLUGIN_TRUSTED_KEYS`) could not be switched on at all, the concurrency ceiling had no setting, and a rejected upload was reported as a server error.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.21.1
-docker pull ghcr.io/brf-tech/filex:full-v0.21.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.21.2
+docker pull ghcr.io/brf-tech/filex:full-v0.21.2
 ```
+
+## v0.21.2
+
+<span class="filex-release-date">19 August 2026</span>
+
+A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails its own claims is refused rather than registered. That is the difference between a plugin that is broken and an app that looks broken: without it, a plugin declaring `write` with a broken write hands the user an upload button, a trash move and a version snapshot that each fail at the last moment. Plugins can also be upgraded in place now (a failed upgrade rolls back and costs you an error, not a plugin), their change streams are actually consumed instead of polled, and there is a ceiling on what one plugin may cost the server. Three things that were written but unreachable are wired up: signature enforcement (`FILEX_PLUGIN_TRUSTED_KEYS`) could not be switched on at all, the concurrency ceiling had no setting, and a rejected upload was reported as a server error.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) · `ghcr.io/brf-tech/filex:slim-v0.21.2`
 
 ## v0.21.1
 
@@ -275,24 +283,13 @@ The desktop app can reach its own server again. Opening any office document show
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.14.0`
 
-## v0.13.4
-
-<span class="filex-release-date">10 August 2026</span>
-
-A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffered to a temporary file, and those files were never removed — every request answered normally while the disk quietly drained (29 GB in two hours on a live server). Every upload surface now cleans up after itself, including requests it rejects.
-
-**Fixed**
-
-- **Upload** — Multipart temp files outlived the response and filled the disk.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.13.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.13.4`
-
 ## Earlier releases
 
-The 52 releases before v0.13.4, in brief. Full notes are on GitHub.
+The 53 releases before v0.14.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.13.4](https://github.com/BRF-Tech/filex/releases/tag/v0.13.4) | 10 August 2026 | A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffered to a temporary file, and those files were never removed — every request answered normally while the disk quietly drained (29 GB in two hours on a… |
 | [v0.13.3](https://github.com/BRF-Tech/filex/releases/tag/v0.13.3) | 7 August 2026 | The share button now appears in the desktop app. The explorer has always had one, but it was gated on the Web Share API, which Electron does not ship — so rather than build a second share UI, the app puts a native handler behind… |
 | [v0.13.2](https://github.com/BRF-Tech/filex/releases/tag/v0.13.2) | 7 August 2026 | Sixteen components were rendering as raw, unstyled HTML in every embedded surface — the share dialog, the convert dialog, the presence bar and nine file viewers. |
 | [v0.13.1](https://github.com/BRF-Tech/filex/releases/tag/v0.13.1) | 7 August 2026 | The explorer's onboarding tour sat on top of the desktop app's Settings panel. The tour attaches to `<body>`, so hiding the explorer left it exactly where it was. |
@@ -348,4 +345,4 @@ The 52 releases before v0.13.4, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-19 from 72 published releases.</small>
+<small>Generated 2026-08-19 from 73 published releases.</small>

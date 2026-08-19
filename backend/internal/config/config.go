@@ -42,7 +42,14 @@ type Config struct {
 	MultiTenant bool `yaml:"multi_tenant"`
 	// PluginsDisabled (FILEX_PLUGINS_DISABLED=1) turns the storage-plugin
 	// subsystem off: nothing under <data-dir>/plugins is launched, no remote
-	// plugin is contacted, and the admin API answers 503. ON by default,
+	// plugin is contacted, and the admin API answers 503.
+	//
+	// ⚠ DEMO MODE FLIPS THE DEFAULT: with FILEX_DEMO_MODE on, plugins are off
+	// unless this variable explicitly says otherwise, because a demo hands an
+	// admin account to strangers and installing a plugin runs a program on the
+	// host. Set FILEX_PLUGINS_DISABLED=0 to override that deliberately.
+	//
+	// Otherwise ON by default,
 	// because a plugin is only ever installed by an admin — but an operator
 	// hardening a shared instance may not want the admin role to include
 	// "run a program on the server". See docs/PLUGINS.md.
@@ -674,8 +681,10 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_MULTI_TENANT"); v == "1" || v == "true" {
 		c.MultiTenant = true
 	}
-	if v := os.Getenv("FILEX_PLUGINS_DISABLED"); v == "1" || v == "true" {
-		c.PluginsDisabled = true
+	pluginsSpoken := false
+	if v, ok := os.LookupEnv("FILEX_PLUGINS_DISABLED"); ok && v != "" {
+		pluginsSpoken = true
+		c.PluginsDisabled = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_PLUGIN_CONFORMANCE"); v != "" {
 		c.PluginConformance = strings.ToLower(strings.TrimSpace(v))
@@ -955,6 +964,19 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_DEMO_MODE"); v != "" {
 		c.Demo.Mode = v == "1" || strings.EqualFold(v, "true")
+	}
+	// ⚠⚠ A demo instance hands an ADMIN account to strangers — that is what it
+	// is for. Installing a storage plugin makes filex run an uploaded program
+	// on the host, and the plugin API is admin-only, which on a demo means
+	// "anybody". So demo mode turns the subsystem OFF unless the operator says
+	// otherwise in so many words.
+	//
+	// Measured on the public demo 2026-08-19: the published credentials logged
+	// in as role=admin and GET /api/admin/plugins answered 200. Nothing was
+	// installed, but nothing was stopping it either. A default that depends on
+	// the operator noticing this is not a default.
+	if c.Demo.Mode && !pluginsSpoken {
+		c.PluginsDisabled = true
 	}
 	if v := os.Getenv("FILEX_DEMO_USER"); v != "" {
 		c.Demo.User = v

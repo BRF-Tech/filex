@@ -3,6 +3,21 @@
   "generatedAt": "2026-08-19",
   "releases": [
     {
+      "tag": "v0.21.2",
+      "date": "2026-08-19T12:22:52Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.2",
+      "prerelease": false,
+      "headline": "A plugin has to prove its claims.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.21.2",
+        "ghcr.io/brf-tech/filex:full-v0.21.2"
+      ],
+      "hasDesktop": false,
+      "assetCount": 13
+    },
+    {
       "tag": "v0.21.1",
       "date": "2026-08-19T08:51:06Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.1",
