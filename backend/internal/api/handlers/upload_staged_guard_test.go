@@ -164,6 +164,11 @@ type writerDriver struct {
 	object    []byte
 	written   bool
 	failWrite bool
+	// hold, when non-nil, blocks Write until the test closes it. Without a
+	// gate, "is the node still staged right after commit?" is a race against
+	// the worker that commits it — one this test lost on CI while passing
+	// locally, which is the worst way for a test to be wrong.
+	hold chan struct{}
 }
 
 func (d *writerDriver) Init(context.Context, map[string]any) error { return nil }
@@ -193,8 +198,11 @@ func (d *writerDriver) Capabilities() storage.Capabilities {
 
 func (d *writerDriver) Write(_ context.Context, _ string, r io.Reader, _ int64) error {
 	d.mu.Lock()
-	failing := d.failWrite
+	failing, hold := d.failWrite, d.hold
 	d.mu.Unlock()
+	if hold != nil {
+		<-hold
+	}
 	if failing {
 		return errors.New("disk on fire")
 	}
@@ -365,7 +373,16 @@ func TestStagedUpload_PlainWriterDriverTakesTheWritePath(t *testing.T) {
 // kept free of post-change symbols so it can be run against the pre-change
 // tree as red evidence.)
 func TestStagedUpload_SuccessfulCommitClearsRowAndMarksStored(t *testing.T) {
-	f := newStagedFixture(t)
+	// ⚠ The driver is held shut on purpose. `staged` is a state the node
+	// passes THROUGH, so sampling it after an async commit is a race: on a
+	// loaded runner the worker wins, the node reads `stored`, and the test
+	// fails while the code is right. Blocking the write makes the window
+	// last as long as the assertion needs.
+	gate := make(chan struct{})
+	held := &writerDriver{hold: gate}
+	f := newStagedFixtureWith(t, func(d *api.Deps) {
+		d.StorageResolver = func(int64) (storage.Driver, error) { return held, nil }
+	})
 	src := randomBytes(5000)
 	total := int64(len(src))
 
@@ -386,6 +403,7 @@ func TestStagedUpload_SuccessfulCommitClearsRowAndMarksStored(t *testing.T) {
 	assert.Equal(t, model.TransferStateStaged, staged.TransferState,
 		"the node is listed while its bytes are still in staging")
 
+	close(gate)
 	require.Equal(t, "ok", f.waitForOp(t, num(committed["op_id"])))
 
 	fresh, err := f.store.GetNode(context.Background(), nodeID)

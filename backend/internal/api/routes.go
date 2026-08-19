@@ -322,6 +322,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// The plugin conformance gate on storage save (handlers/plugin_gate.go).
 	stg.Plugins = d.Plugins
 	stg.StorageResolver = d.StorageResolver
+	stg.DemoMode = d.Cfg.Demo.Mode
 	ush := handlers.NewUsers(d.Store)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)

@@ -3,6 +3,21 @@
   "generatedAt": "2026-08-19",
   "releases": [
     {
+      "tag": "v0.21.3",
+      "date": "2026-08-19T12:44:04Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.3",
+      "prerelease": false,
+      "headline": "A demo instance must not offer the plugin API.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.21.3",
+        "ghcr.io/brf-tech/filex:full-v0.21.3"
+      ],
+      "hasDesktop": false,
+      "assetCount": 13
+    },
+    {
       "tag": "v0.21.2",
       "date": "2026-08-19T12:22:52Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.2",
@@ -14,8 +29,8 @@
         "ghcr.io/brf-tech/filex:slim-v0.21.2",
         "ghcr.io/brf-tech/filex:full-v0.21.2"
       ],
-      "hasDesktop": false,
-      "assetCount": 13
+      "hasDesktop": true,
+      "assetCount": 24
     },
     {
       "tag": "v0.21.1",

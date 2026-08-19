@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,6 +41,31 @@ type Storages struct {
 	// subsystem is off and nothing is probed.
 	Plugins         *plugin.Manager
 	StorageResolver func(int64) (storage.Driver, error)
+	// DemoMode marks a public playground, where "admin" is whoever read the
+	// credentials off the landing page. See denyOnDemo.
+	DemoMode bool
+}
+
+// denyOnDemo refuses the drivers that reach the SERVER's own filesystem when
+// this instance is a public demo.
+//
+// A demo publishes an admin login on purpose. Everything admin-only is
+// therefore public here, and `local` means "a path on the host": measured on
+// this project's demo, storages rooted at /data, /etc and /proc/1 were all
+// accepted, which is the database, the configuration and the process
+// environment of the machine. The `/` guard that already existed stops the
+// laziest version of that and nothing else.
+//
+// Remote drivers are left alone: an S3 bucket a visitor brings is their own.
+func (h *Storages) denyOnDemo(driver string) error {
+	if !h.DemoMode {
+		return nil
+	}
+	switch driver {
+	case "local":
+		return errors.New("this is a public demo: a storage on the server's own filesystem cannot be added here")
+	}
+	return nil
 }
 
 // NewStorages constructs a Storages handler.
@@ -134,6 +160,10 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := h.denyOnDemo(st.Driver); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	if st.SyncMode == "" {
 		st.SyncMode = model.SyncModePoll
 	}
@@ -182,6 +212,10 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur.ID = id
+	if err := h.denyOnDemo(cur.Driver); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	// A plugin storage is re-probed on every change: the operator may have
 	// just pointed it at a different bucket, and a configuration that half
 	// works fails the same way a half-working plugin does — in the user's

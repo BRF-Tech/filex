@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.21.2, 19 August 2026
-A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails its own claims is refused rather than registered. That is the difference between a plugin that is broken and an app that looks broken: without it, a plugin declaring `write` with a broken write hands the user an upload button, a trash move and a version snapshot that each fail at the last moment. Plugins can also be upgraded in place now (a failed upgrade rolls back and costs you an error, not a plugin), their change streams are actually consumed instead of polled, and there is a ceiling on what one plugin may cost the server. Three things that were written but unreachable are wired up: signature enforcement (`FILEX_PLUGIN_TRUSTED_KEYS`) could not be switched on at all, the concurrency ceiling had no setting, and a rejected upload was reported as a server error.
+::: tip Latest — v0.21.3, 19 August 2026
+A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and installing a plugin makes filex run an uploaded program on the host. Demo mode now turns the plugin subsystem off unless you explicitly say otherwise. If you run a filex demo on 0.21.0–0.21.2, set FILEX_PLUGINS_DISABLED=1 or upgrade.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.21.2
-docker pull ghcr.io/brf-tech/filex:full-v0.21.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.21.3
+docker pull ghcr.io/brf-tech/filex:full-v0.21.3
 ```
+
+## v0.21.3
+
+<span class="filex-release-date">19 August 2026</span>
+
+A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and installing a plugin makes filex run an uploaded program on the host. Demo mode now turns the plugin subsystem off unless you explicitly say otherwise. If you run a filex demo on 0.21.0–0.21.2, set FILEX_PLUGINS_DISABLED=1 or upgrade.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) · `ghcr.io/brf-tech/filex:slim-v0.21.3`
 
 ## v0.21.2
 
@@ -33,7 +41,7 @@ docker pull ghcr.io/brf-tech/filex:full-v0.21.2
 
 A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails its own claims is refused rather than registered. That is the difference between a plugin that is broken and an app that looks broken: without it, a plugin declaring `write` with a broken write hands the user an upload button, a trash move and a version snapshot that each fail at the last moment. Plugins can also be upgraded in place now (a failed upgrade rolls back and costs you an error, not a plugin), their change streams are actually consumed instead of polled, and there is a ceiling on what one plugin may cost the server. Three things that were written but unreachable are wired up: signature enforcement (`FILEX_PLUGIN_TRUSTED_KEYS`) could not be switched on at all, the concurrency ceiling had no setting, and a rejected upload was reported as a server error.
 
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) · `ghcr.io/brf-tech/filex:slim-v0.21.2`
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.2`
 
 ## v0.21.1
 
@@ -271,24 +279,13 @@ Mostly the desktop app, and one thing that was writing to your operating system.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.15.0`
 
-## v0.14.0
-
-<span class="filex-release-date">10 August 2026</span>
-
-The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first three (a bearer token supplied as a function has to be awaited, and the header builder handed to the viewers was the synchronous one, so requests went out with no Authorization header), and a scheme the OS cannot open under the last. Images, video, audio and downloads work too, since those elements carry no headers of their own. Markdown and syntax highlighting now render in every embedded surface, not only in the admin app. The window follows the OS language instead of wrapping a Turkish file list in an English shell, and it opens on a real connecting screen that names the server it is waiting for.
-
-**Fixed**
-
-- **Desktop** — The credential never reached three surfaces, so the app 401'd itself.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.14.0`
-
 ## Earlier releases
 
-The 53 releases before v0.14.0, in brief. Full notes are on GitHub.
+The 54 releases before v0.15.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.14.0](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) | 10 August 2026 | The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first… |
 | [v0.13.4](https://github.com/BRF-Tech/filex/releases/tag/v0.13.4) | 10 August 2026 | A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffered to a temporary file, and those files were never removed — every request answered normally while the disk quietly drained (29 GB in two hours on a… |
 | [v0.13.3](https://github.com/BRF-Tech/filex/releases/tag/v0.13.3) | 7 August 2026 | The share button now appears in the desktop app. The explorer has always had one, but it was gated on the Web Share API, which Electron does not ship — so rather than build a second share UI, the app puts a native handler behind… |
 | [v0.13.2](https://github.com/BRF-Tech/filex/releases/tag/v0.13.2) | 7 August 2026 | Sixteen components were rendering as raw, unstyled HTML in every embedded surface — the share dialog, the convert dialog, the presence bar and nine file viewers. |
@@ -345,4 +342,4 @@ The 53 releases before v0.14.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-19 from 73 published releases.</small>
+<small>Generated 2026-08-19 from 74 published releases.</small>

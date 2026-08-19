@@ -251,7 +251,10 @@ overrides it, deliberately, for somebody who knows what they are handing out.
 > depends on the operator noticing is not a default.
 
 The same reasoning is why the surface is **supertenant-only** in multi-tenant
-mode: a tenant admin administers their tenant, not the machine.
+mode: a tenant admin administers their tenant, not the machine — and why a demo
+also refuses the `local` storage driver, which is the other way to reach the
+host's filesystem from an admin session
+([STORAGE.md](STORAGE.md#local)).
 
 ## What a plugin may cost filex
 

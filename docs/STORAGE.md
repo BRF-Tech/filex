@@ -248,6 +248,13 @@ machine‑readably by
 
 ### local
 
+> ⚠⚠ **Refused on a public demo.** `FILEX_DEMO_MODE` publishes an admin login,
+> and this driver means "a path on this host" — measured on filex's own demo,
+> storages rooted at `/data`, `/etc` and `/proc/1` were all accepted before the
+> guard existed. Backends a visitor brings (S3, SFTP, WebDAV, SMB, a plugin)
+> are unaffected.
+
+
 Serves a directory on the host running filex.
 
 | key | required | default | notes |

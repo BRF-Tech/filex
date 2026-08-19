@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.4] - 2026-08-19
+
+### Security
+
+- **A public demo no longer accepts a storage on the server's own filesystem.**
+  The `local` driver means "a path on this host", and on a demo every
+  admin-only door is a public door. Measured on this project's demo before the
+  guard existed: storages rooted at `/data`, `/etc` and `/proc/1` were all
+  accepted — the database, the configuration and the process environment of the
+  machine. The check that was already there refused `/` and nothing else.
+
+  Drivers that reach a backend the visitor brings (`s3`, `sftp`, `webdav`,
+  `smb`, a plugin) are unaffected: a demo where nothing can be connected is not
+  a demo.
+
+### Fixed
+
+- **A flaky test on the release path.** `TestStagedUpload_SuccessfulCommit…`
+  sampled the node's state right after an asynchronous commit and expected to
+  catch it in `staged`. On a loaded runner the worker got there first, so CI
+  went red while the code was right — the worst way for a test to be wrong. The
+  fake driver now blocks until the assertion has been made, which makes the
+  window as long as the test needs instead of as long as the machine happens to
+  allow.
+
+
 ## [0.21.3] - 2026-08-19
 
 ### Security
