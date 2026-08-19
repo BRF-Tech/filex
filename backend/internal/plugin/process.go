@@ -175,6 +175,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", p.Binary, err)
 	}
+	// Bind the child's lifetime to filex's where the platform can (Windows job
+	// object). A failure is worth a line and nothing more: the plugin runs
+	// either way, and the cost is an orphan if filex is killed outright.
+	if err := adoptChild(cmd); err != nil {
+		p.Log.Warn("plugin: could not bind process to filex's lifetime",
+			"plugin", p.Name, "err", err)
+	}
 	p.mu.Lock()
 	p.cmd = cmd
 	stopping := p.stopping

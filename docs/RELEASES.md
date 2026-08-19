@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.21.3, 19 August 2026
-A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and installing a plugin makes filex run an uploaded program on the host. Demo mode now turns the plugin subsystem off unless you explicitly say otherwise. If you run a filex demo on 0.21.0–0.21.2, set FILEX_PLUGINS_DISABLED=1 or upgrade.
+::: tip Latest — v0.21.4, 19 August 2026
+The other half of the demo hardening in 0.21.3. A demo instance publishes an admin login, and the `local` storage driver means "a path on this host" — so on a demo it was possible to add a storage rooted at /data, /etc or /proc/1 and read the machine's database, configuration and process environment. Measured, then closed: demo mode refuses the local driver. Backends a visitor brings (S3, SFTP, WebDAV, SMB, plugins) still work, because a demo where nothing connects is not a demo.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.21.3
-docker pull ghcr.io/brf-tech/filex:full-v0.21.3
+docker pull ghcr.io/brf-tech/filex:slim-v0.21.4
+docker pull ghcr.io/brf-tech/filex:full-v0.21.4
 ```
+
+## v0.21.4
+
+<span class="filex-release-date">19 August 2026</span>
+
+The other half of the demo hardening in 0.21.3. A demo instance publishes an admin login, and the `local` storage driver means "a path on this host" — so on a demo it was possible to add a storage rooted at /data, /etc or /proc/1 and read the machine's database, configuration and process environment. Measured, then closed: demo mode refuses the local driver. Backends a visitor brings (S3, SFTP, WebDAV, SMB, plugins) still work, because a demo where nothing connects is not a demo.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.4) · `ghcr.io/brf-tech/filex:slim-v0.21.4`
 
 ## v0.21.3
 
@@ -33,7 +41,7 @@ docker pull ghcr.io/brf-tech/filex:full-v0.21.3
 
 A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and installing a plugin makes filex run an uploaded program on the host. Demo mode now turns the plugin subsystem off unless you explicitly say otherwise. If you run a filex demo on 0.21.0–0.21.2, set FILEX_PLUGINS_DISABLED=1 or upgrade.
 
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) · `ghcr.io/brf-tech/filex:slim-v0.21.3`
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.3`
 
 ## v0.21.2
 
@@ -267,24 +275,13 @@ The desktop app's account rail had its two identities the wrong way round. Each 
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.15.1`
 
-## v0.15.0
-
-<span class="filex-release-date">12 August 2026</span>
-
-Mostly the desktop app, and one thing that was writing to your operating system. "Start when I sign in" registered whichever executable happened to be running the app — which, for anyone who had ever run it from source, was a bare Electron binary with no project path, so every sign-in afterwards opened Electron's own welcome window, and the entry outlived the checkout it pointed at. It is an installed-app feature now, it names the installed app explicitly, and it starts minimised to the tray as the setting always claimed; Linux gets a real autostart entry instead of a switch that did nothing. Collaborators working from the desktop app appear under their own name rather than under their API token's label. A server's Branding logo reaches the desktop client, so an install with an identity looks like that install. In the explorer itself: the tab strip can stay on screen with a single tab open — it was hiding the + button that opens the second one — the theme gallery gained a Day / Night / Automatic switch, which is a separate question from which palette paints and the one people were already opening that button to answer, and scrollbars follow the theme instead of staying platform grey.
-
-**Fixed**
-
-- **Desktop** — The app that started itself as a bare electron, and three things that looked wrong.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.15.0`
-
 ## Earlier releases
 
-The 54 releases before v0.15.0, in brief. Full notes are on GitHub.
+The 55 releases before v0.15.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.15.0](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) | 12 August 2026 | Mostly the desktop app, and one thing that was writing to your operating system. "Start when I sign in" registered whichever executable happened to be running the app — which, for anyone who had ever run it from source, was a… |
 | [v0.14.0](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) | 10 August 2026 | The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first… |
 | [v0.13.4](https://github.com/BRF-Tech/filex/releases/tag/v0.13.4) | 10 August 2026 | A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffered to a temporary file, and those files were never removed — every request answered normally while the disk quietly drained (29 GB in two hours on a… |
 | [v0.13.3](https://github.com/BRF-Tech/filex/releases/tag/v0.13.3) | 7 August 2026 | The share button now appears in the desktop app. The explorer has always had one, but it was gated on the Web Share API, which Electron does not ship — so rather than build a second share UI, the app puts a native handler behind… |
@@ -342,4 +339,4 @@ The 54 releases before v0.15.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-19 from 74 published releases.</small>
+<small>Generated 2026-08-19 from 75 published releases.</small>

@@ -3,6 +3,21 @@
   "generatedAt": "2026-08-19",
   "releases": [
     {
+      "tag": "v0.21.4",
+      "date": "2026-08-19T13:03:18Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.4",
+      "prerelease": false,
+      "headline": "A demo must not mount the host's filesystem either.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.21.4",
+        "ghcr.io/brf-tech/filex:full-v0.21.4"
+      ],
+      "hasDesktop": false,
+      "assetCount": 13
+    },
+    {
       "tag": "v0.21.3",
       "date": "2026-08-19T12:44:04Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.3",
@@ -14,8 +29,8 @@
         "ghcr.io/brf-tech/filex:slim-v0.21.3",
         "ghcr.io/brf-tech/filex:full-v0.21.3"
       ],
-      "hasDesktop": false,
-      "assetCount": 13
+      "hasDesktop": true,
+      "assetCount": 24
     },
     {
       "tag": "v0.21.2",

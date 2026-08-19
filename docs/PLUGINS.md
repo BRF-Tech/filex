@@ -267,6 +267,7 @@ one slow plugin is one slow filex.
 | Waiting for a slot | 5 s, then refused | If every slot is busy the honest answer is "this storage is overloaded", not a request that hangs for a minute and fails anyway. |
 | Metadata operations | 60 s | `list`, `stat`, `delete`, `mkdir`, `move`, `copy`, `set_mtime`. Slowness there means trouble. |
 | Reads and writes | **no timeout** | A 20 GB upload is legitimately slow; a deadline would turn a working transfer into a failed one. |
+| Lifetime | bound to filex's | A plugin must not outlive its supervisor. Unix: a process group, so a helper the plugin forked goes with it. Windows: a **job object** with `KILL_ON_JOB_CLOSE`, which the kernel enforces even when filex is killed outright — measured, because otherwise the orphan holds its own `.exe` open and the next upgrade of that plugin fails. |
 | Plugin stdout/stderr | 50 lines/s, burst 200 | A chatty debug build or a tight retry loop is otherwise filex filling the disk. Dropped lines are reported, once per window, rather than silently lost. |
 
 A refusal is counted separately from a failure (`outcome="busy"`, see

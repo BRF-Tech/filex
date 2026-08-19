@@ -1,19 +1,16 @@
-//go:build !linux && !darwin
+//go:build !linux && !darwin && !windows
 
 package plugin
 
 import "os/exec"
 
-// Windows has no rlimits and no process groups in the POSIX sense, so the
-// ceilings the unix build applies simply do not exist here. Saying that in
-// code beats pretending: a plugin on Windows is bounded by filex's
-// concurrency limit and by nothing else.
-//
-// (Job objects could do it. They are a bigger piece of work than this
-// release, and a Windows deployment of filex is not where plugins are run
-// today.)
+// Whatever this platform is, it is neither Unix nor Windows, so filex applies
+// nothing and says so rather than pretending. (Windows does have an answer and
+// uses it — see limits_windows.go.)
 
 func applyLimits(cmd *exec.Cmd) {}
+
+func adoptChild(cmd *exec.Cmd) error { return nil }
 
 // killGroup falls back to killing the process itself; children it started
 // survive, which is a known gap on this platform.

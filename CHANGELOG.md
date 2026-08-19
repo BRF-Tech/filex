@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.5] - 2026-08-19
+
+### Fixed
+
+- **A plugin no longer outlives filex on Windows.** Stop filex without letting
+  it clean up — a crash, a hard kill, a service restart — and every plugin it
+  launched kept running. Measured: two `memfs.exe` processes still alive, one of
+  them an hour after the run that started it had gone.
+
+  That is not merely untidy on this platform: a running plugin holds its own
+  `.exe` open, so the next install or upgrade of it fails with a sharing
+  violation, and the socket it still owns makes the next start look mysteriously
+  broken. Plugins are now put in a **job object** with
+  `KILL_ON_JOB_CLOSE`, so the kernel reaps them when filex's handles close,
+  whether or not filex got to run a line of shutdown. Measured after: 1 plugin
+  running, 0 surviving the same hard kill.
+
+  Unix keeps its process group and deliberately does **not** use `Pdeathsig`:
+  in Go it fires when the OS thread that forked exits, and the runtime retires
+  idle threads, so a healthy plugin could be killed for no reason. An orphan is
+  a nuisance; a plugin that dies at random is a bug report nobody can reproduce.
+
+
 ## [0.21.4] - 2026-08-19
 
 ### Security

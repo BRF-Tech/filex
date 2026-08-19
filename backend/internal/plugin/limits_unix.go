@@ -38,6 +38,17 @@ func applyLimits(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
+// adoptChild has nothing to do here: the process group set above is what binds
+// a plugin's descendants to it.
+//
+// ⚠ The obvious next step — Pdeathsig, so a plugin dies when filex is KILLED
+// rather than stopped — is deliberately not taken. In Go it fires when the OS
+// THREAD that forked exits, and the runtime retires idle threads, so a healthy
+// plugin can be killed for no reason at all. An orphan is a nuisance; a plugin
+// that dies at random is a bug report nobody can reproduce. Windows gets the
+// guarantee because job objects give it without that catch.
+func adoptChild(cmd *exec.Cmd) error { return nil }
+
 // killGroup kills the plugin AND anything it started.
 func killGroup(pid int) {
 	// Negative pid = the whole process group (Setpgid above made one).
