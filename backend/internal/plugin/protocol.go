@@ -92,7 +92,11 @@ const DriverPrefix = "plugin:"
 //     directories; the local driver's semantics do not apply).
 //   - set_mtime: only offered to filex when true — a mtime that is accepted and
 //     silently dropped is worse than one that is refused (storage.Toucher).
-//   - watch: /watch is an SSE stream of Events.
+//   - watch: /watch is an SSE stream of Events. ⚠ Declared for forward
+//     compatibility: filex has no watch-driven sync mode today, so nothing
+//     subscribes (the fsnotify mode is local-driver only). The adapter
+//     implements storage.Watcher regardless, so the day one lands, plugins
+//     that already serve /watch work unchanged.
 type Capabilities struct {
 	Range    bool `json:"range"`
 	Write    bool `json:"write"`

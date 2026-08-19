@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -569,6 +570,16 @@ func errMessage(err error) string {
 //
 // Plain rename (single source, dest already a full path) is also supported
 // — if dest doesn't end with `/` we treat it literally.
+// joinIntoDir resolves an operation's destination for one source.
+//
+// A dest that ends in "/" is a DIRECTORY: the source keeps its own basename
+// inside it. Anything else is a literal target (a rename). An empty dest
+// leaves the source path alone.
+//
+// ⚠ The storage root arrives here as "/", and path.Join is what keeps that
+// case honest: "/" + "a/b.txt" must be "b.txt", not "/b.txt". A leading slash
+// is harmless on a local disk and a real object on S3 — a key whose first
+// path segment is empty, which no listing shows where the user expects it.
 func joinIntoDir(dest, src string) string {
 	if dest == "" {
 		return src
@@ -581,7 +592,7 @@ func joinIntoDir(dest, src string) string {
 	if idx >= 0 {
 		base = src[idx+1:]
 	}
-	return strings.TrimRight(dest, "/") + "/" + base
+	return path.Join(strings.TrimRight(dest, "/"), base)
 }
 
 func scanOp(row *sql.Row) (*Op, error) {

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-19
+
+- **Copy or move into a storage's root was refused — for every driver.**
+  Pasting at the top of a storage sends `<storage>://` as the destination; the
+  handler turned that into an empty destination (with a comment saying
+  "storage root"), and the operations queue refuses an empty destination with
+  `ops: dest required`. Two halves of the same feature disagreed about what
+  empty meant, so the paste failed on local disks, S3 and everything else.
+  Measured on a built-in local storage. The root is now `/`, which is also
+  what the queue keys off to drop a file *into* a directory rather than rename
+  it; the join uses `path.Join`, so the root case produces `f.txt` and not
+  `/f.txt` — harmless on a disk, a real object with an empty first path
+  segment on S3. Pasting into a root also skipped the permission check before
+  (an empty destination was not checked); it is checked now.
+- **The plugin docs promised a change stream nothing subscribes to.**
+  `Watcher` was listed as buying "change events without polling". Nothing in
+  filex consumes `storage.Watcher`, no built-in driver implements it, and the
+  only event-driven sync mode works on the local driver alone. The protocol
+  keeps the endpoint — it costs a plugin nothing and stays forward-compatible
+  — but the docs, the SDK and the protocol comments now say plainly that a
+  watch-driven sync mode does not exist yet.
+- **A second example plugin, in Python, with no SDK**
+  (`backend/examples/plugin-diskfs`): the same protocol implemented by hand,
+  backed by a real directory, with every optional capability. Its
+  `acceptance.sh` drives the whole subsystem through filex — including a 25 MB
+  transfer, native ranged reads, trash and restore, a plugin killed with `-9`
+  mid-life, the remote kind with a sealed token, and a read-only plugin whose
+  driver has no write methods at all.
+
 ## [0.21.0] - 2026-08-19
 
 **A storage driver can now live outside the binary.** Somebody who writes

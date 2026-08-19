@@ -216,6 +216,13 @@ type Toucher interface {
 
 // Watcher streams change events until ctx is cancelled. Close the channel
 // when the stream ends.
+//
+// ⚠⚠ Nothing in filex subscribes to this yet. The protocol carries the
+// stream and this SDK serves it, but the only event-driven sync mode today is
+// fsnotify, which works on the local driver alone; no built-in driver
+// implements storage.Watcher either. Implementing it is cheap and forward
+// compatible — just do not expect it to change how often filex notices your
+// changes until a watch-driven sync mode exists.
 type Watcher interface {
 	Watch(ctx context.Context) (<-chan Event, error)
 }

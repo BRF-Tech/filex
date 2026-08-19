@@ -108,10 +108,16 @@ func main() {
 }
 ```
 
-A complete, working example lives in
-[`backend/examples/plugin-memfs`](../backend/examples/plugin-memfs/main.go) —
-about a hundred lines, and filex's own test suite installs and drives it, so it
-cannot rot.
+Two complete, working examples live in the repository, and filex's own tests
+install and drive them, so neither can rot:
+
+- [`backend/examples/plugin-memfs`](../backend/examples/plugin-memfs/main.go) —
+  the Go SDK, about a hundred lines, in-memory.
+- [`backend/examples/plugin-diskfs/plugin.py`](../backend/examples/plugin-diskfs/plugin.py) —
+  **Python, standard library only, no SDK**: the same protocol implemented by
+  hand, backed by a real directory, with every optional capability (ranged
+  reads, move, copy, mkdir, mtimes, the change stream). It exists because
+  “any language” is a claim worth proving rather than repeating.
 
 ```bash
 go build -o myfs ./cmd/myfs      # for the SERVER's platform
@@ -129,7 +135,7 @@ Add a method, gain a capability. There is no list to keep in step:
 | `Mover` / `Copier` | server-side move / copy | emulated as copy+delete / read+write |
 | `Mkdirer` | real directories | treated like an object store: a no-op |
 | `Toucher` | a file's own mtime survives a sync | filex does not offer it (better than pretending) |
-| `Watcher` | change events without polling | filex polls on its sync interval |
+| `Watcher` | nothing yet — see the note below | filex polls on its sync interval |
 
 > ⚠ `Write` and `Delete` travel **together**. A driver that can create files it
 > cannot remove breaks trash and versioning, so filex refuses the pair split at
@@ -139,6 +145,15 @@ Add a method, gain a capability. There is no list to keep in step:
 > ⚠ Exactly one field should be marked **`Root: true`** — the field that scopes
 > a storage inside your backend (a path, a prefix, a bucket). filex refuses to
 > mount a backend's root, so a plugin without one has every storage rejected.
+
+> ⚠⚠ **`watch` is declared but not consumed yet.** The protocol carries a
+> change stream and the SDK serves it, but nothing in filex subscribes to it
+> today: the only event-driven sync mode is `fsnotify`, which works on the
+> **local** driver alone and falls back to polling for everything else. No
+> built-in driver implements `storage.Watcher` either. Implement it if you
+> like — it costs a plugin nothing and the endpoint is part of protocol 1 —
+> but until a watch-driven sync mode lands, a storage on your plugin is
+> refreshed by the poll interval like any other. Measured 2026-08-19.
 
 > ⚠ Return the SDK's errors — `pluginsdk.ErrNotFound`, `ErrReadOnly`,
 > `ErrUnsupported`. They become filex's own `storage.ErrNotFound` and friends, so
@@ -183,7 +198,7 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 | `POST` | `/v1/instances/{id}/move` · `/copy` | `{src, dst}` |
 | `POST` | `/v1/instances/{id}/delete` · `/mkdir` | `{path}` |
 | `POST` | `/v1/instances/{id}/set-mtime` | `{path, mtime}` (RFC 3339) |
-| `GET` | `/v1/instances/{id}/watch` | `text/event-stream` of `{op, path, from}` |
+| `GET` | `/v1/instances/{id}/watch` | `text/event-stream` of `{op, path, from}` — **not called by filex yet**, see above |
 
 Errors are `{"error": <code>, "message": <text>}`. Codes filex understands:
 `not_found`, `read_only`, `unsupported`, `invalid`, and **`no_instance`** —

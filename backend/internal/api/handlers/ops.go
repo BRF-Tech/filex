@@ -159,9 +159,20 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		}
 		raw = strings.TrimLeft(raw, "/") // drop leading slashes
 		if raw == "" {
-			// Storage root — drop sources at the root with their
-			// own basename.
-			dest = ""
+			// Storage root — drop sources at the root with their own
+			// basename.
+			//
+			// ⚠⚠ "/" and not "": the ops service refuses an EMPTY dest
+			// for copy/move ("ops: dest required"), so writing "" here
+			// meant that pasting into the top of a storage — exactly
+			// what FileExplorer.qualify() sends as `<storage>://` — was
+			// rejected for every driver, built-in ones included
+			// (measured 2026-08-19). The two halves of the same feature
+			// disagreed: this side said "empty means root", that side
+			// said "empty means missing". A trailing slash is also what
+			// joinIntoDir keys off to drop into a directory rather than
+			// rename onto a literal name.
+			dest = "/"
 		} else if strings.HasSuffix(raw, "/") {
 			dest = raw
 		} else {
