@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -23,11 +24,25 @@ type Handle interface {
 	DriverName() string
 }
 
+// limitedHandle is a Handle that also carries the plugin's concurrency
+// ceiling and its name for metrics. The manager's entry implements it; a
+// bare Handle (tests, the conformance run) does not, and then nothing is
+// bounded or counted — which is right: a probe must not be refused because
+// the plugin is busy serving users.
+type limitedHandle interface {
+	limits() *limiter
+	metricName() string
+}
+
 // conn is one storage row's view of a plugin: the config it was created
 // with and the instance id the plugin gave back for it.
 type conn struct {
 	h    Handle
 	caps Capabilities
+	lim  *limiter
+	// metric is the plugin's name for Prometheus labels; empty means the
+	// operations are not counted (a conformance run, a test).
+	metric string
 
 	mu       sync.Mutex
 	cfg      map[string]any
@@ -40,6 +55,60 @@ type conn struct {
 // restart looks like from here. Every adapter method goes through this, so a
 // restart costs one retried request rather than a broken storage.
 func (c *conn) call(ctx context.Context, op func(cl *Client, id string) error) error {
+	return c.callNamed(ctx, "op", op)
+}
+
+// callNamed is call with a label for the metrics. Every path through a plugin
+// goes through here, so a plugin cannot be slow, failing or saturated without
+// it being visible from outside.
+func (c *conn) callNamed(ctx context.Context, name string, op func(cl *Client, id string) error) error {
+	release, err := c.acquire(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	started := time.Now()
+	err = c.callLocked(ctx, op)
+	c.observe(name, started, err)
+	return err
+}
+
+func (c *conn) acquire(ctx context.Context, name string) (func(), error) {
+	if c.lim == nil {
+		return func() {}, nil
+	}
+	release, err := c.lim.acquire(ctx)
+	if err != nil {
+		if c.metric != "" {
+			metrics.PluginOps.WithLabelValues(c.metric, name, "busy").Inc()
+		}
+		return nil, err
+	}
+	if c.metric != "" {
+		metrics.PluginInFlight.WithLabelValues(c.metric).Inc()
+	}
+	return func() {
+		release()
+		if c.metric != "" {
+			metrics.PluginInFlight.WithLabelValues(c.metric).Dec()
+		}
+	}, nil
+}
+
+func (c *conn) observe(name string, started time.Time, err error) {
+	if c.metric == "" {
+		return
+	}
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+	}
+	metrics.PluginOps.WithLabelValues(c.metric, name, outcome).Inc()
+	metrics.PluginOpDuration.WithLabelValues(c.metric, name).Observe(time.Since(started).Seconds())
+}
+
+func (c *conn) callLocked(ctx context.Context, op func(cl *Client, id string) error) error {
 	cl, id, err := c.ensure(ctx, false)
 	if err != nil {
 		return err
@@ -56,6 +125,16 @@ func (c *conn) call(ctx context.Context, op func(cl *Client, id string) error) e
 		return err
 	}
 	return mapErr(op(cl, id))
+}
+
+// callFast is callNamed with a deadline. Used by the METADATA operations,
+// where slowness means trouble; reads and writes deliberately have none,
+// because a 20 GB upload is legitimately slow and a timeout there would turn
+// a working transfer into a failed one.
+func (c *conn) callFast(ctx context.Context, name string, op func(cl *Client, id string) error) error {
+	tctx, cancel := context.WithTimeout(ctx, DefaultOpTimeout)
+	defer cancel()
+	return c.callNamed(tctx, name, op)
 }
 
 // ensure returns the current client and instance id, (re)creating the
@@ -104,12 +183,13 @@ func (r *readOps) Capabilities() storage.Capabilities {
 		Read: true, Range: true, // range is always offered (emulated when the plugin lacks it)
 		Write: caps.Writable(), Delete: caps.Writable(), Move: caps.Writable(),
 		Copy: caps.Writable(), Mkdir: caps.Writable(), Watch: caps.Watch,
+		Presign: caps.Presign,
 	}
 }
 
 func (r *readOps) List(ctx context.Context, path string) ([]storage.Object, error) {
 	var out []storage.Object
-	err := r.c.call(ctx, func(cl *Client, id string) error {
+	err := r.c.callFast(ctx, "list", func(cl *Client, id string) error {
 		objs, err := cl.List(ctx, id, path)
 		if err != nil {
 			return err
@@ -125,7 +205,7 @@ func (r *readOps) List(ctx context.Context, path string) ([]storage.Object, erro
 
 func (r *readOps) Stat(ctx context.Context, path string) (storage.Object, error) {
 	var out storage.Object
-	err := r.c.call(ctx, func(cl *Client, id string) error {
+	err := r.c.callFast(ctx, "stat", func(cl *Client, id string) error {
 		o, err := cl.Stat(ctx, id, path)
 		if err != nil {
 			return err
@@ -138,7 +218,7 @@ func (r *readOps) Stat(ctx context.Context, path string) (storage.Object, error)
 
 func (r *readOps) Read(ctx context.Context, path string) (io.ReadCloser, error) {
 	var rc io.ReadCloser
-	err := r.c.call(ctx, func(cl *Client, id string) error {
+	err := r.c.callNamed(ctx, "read", func(cl *Client, id string) error {
 		var err error
 		rc, err = cl.Read(ctx, id, path, 0, -1)
 		return err
@@ -158,7 +238,7 @@ func (r *readOps) ReadRange(ctx context.Context, path string, off, length int64)
 	}
 	if r.c.caps.Range {
 		var rc io.ReadCloser
-		err := r.c.call(ctx, func(cl *Client, id string) error {
+		err := r.c.callNamed(ctx, "read_range", func(cl *Client, id string) error {
 			var err error
 			rc, err = cl.Read(ctx, id, path, off, length)
 			return err
@@ -201,17 +281,17 @@ func (w *writeOps) Write(ctx context.Context, path string, r io.Reader, size int
 		if int64(len(b)) != size {
 			return fmt.Errorf("plugin: write %s: got %d bytes, size says %d", path, len(b), size)
 		}
-		return w.c.call(ctx, func(cl *Client, id string) error {
+		return w.c.callNamed(ctx, "write", func(cl *Client, id string) error {
 			return cl.Write(ctx, id, path, bytes.NewReader(b), size)
 		})
 	}
-	return w.c.call(ctx, func(cl *Client, id string) error {
+	return w.c.callNamed(ctx, "write", func(cl *Client, id string) error {
 		return cl.Write(ctx, id, path, r, size)
 	})
 }
 
 func (w *writeOps) Delete(ctx context.Context, path string) error {
-	return w.c.call(ctx, func(cl *Client, id string) error { return cl.Delete(ctx, id, path) })
+	return w.c.callFast(ctx, "delete", func(cl *Client, id string) error { return cl.Delete(ctx, id, path) })
 }
 
 // Mkdir is a no-op for plugins without directories — the same choice the
@@ -220,13 +300,13 @@ func (w *writeOps) Mkdir(ctx context.Context, path string) error {
 	if !w.c.caps.Mkdir {
 		return nil
 	}
-	return w.c.call(ctx, func(cl *Client, id string) error { return cl.Mkdir(ctx, id, path) })
+	return w.c.callFast(ctx, "mkdir", func(cl *Client, id string) error { return cl.Mkdir(ctx, id, path) })
 }
 
 // Copy uses the plugin's own copy when it has one, else read→write.
 func (w *writeOps) Copy(ctx context.Context, src, dst string) error {
 	if w.c.caps.Copy {
-		return w.c.call(ctx, func(cl *Client, id string) error { return cl.Copy(ctx, id, src, dst) })
+		return w.c.callFast(ctx, "copy", func(cl *Client, id string) error { return cl.Copy(ctx, id, src, dst) })
 	}
 	return w.emulateCopy(ctx, src, dst)
 }
@@ -264,7 +344,7 @@ func (w *writeOps) emulateCopy(ctx context.Context, src, dst string) error {
 // Move uses the plugin's own move when it has one, else copy→delete.
 func (w *writeOps) Move(ctx context.Context, src, dst string) error {
 	if w.c.caps.Move {
-		return w.c.call(ctx, func(cl *Client, id string) error { return cl.Move(ctx, id, src, dst) })
+		return w.c.callFast(ctx, "move", func(cl *Client, id string) error { return cl.Move(ctx, id, src, dst) })
 	}
 	if err := w.Copy(ctx, src, dst); err != nil {
 		return err
@@ -310,7 +390,7 @@ func joinPath(dir, name string) string {
 type touchOps struct{ c *conn }
 
 func (t *touchOps) SetMtime(ctx context.Context, path string, mtime time.Time) error {
-	return t.c.call(ctx, func(cl *Client, id string) error { return cl.SetMtime(ctx, id, path, mtime) })
+	return t.c.callFast(ctx, "set_mtime", func(cl *Client, id string) error { return cl.SetMtime(ctx, id, path, mtime) })
 }
 
 type watchOps struct{ c *conn }
@@ -339,95 +419,148 @@ func (w *watchOps) Subscribe(ctx context.Context) (<-chan storage.Event, error) 
 	return out, nil
 }
 
+type presignOps struct{ c *conn }
+
+// PresignUpload/PresignDownload hand the CALLER a URL that skips filex.
+//
+// ⚠ The URL must be reachable from wherever the caller is — a browser, not
+// this server. filex cannot check that for the plugin (it may sit on a
+// network the browser cannot see), so conformance only asserts that a URL
+// comes back and parses; a plugin that returns a loopback URL will "work" in
+// a probe and fail in a browser. Declare presign only when the backend really
+// hands out public, signed URLs.
+func (p *presignOps) PresignUpload(ctx context.Context, path string, size int64) (storage.PresignedUpload, error) {
+	var out storage.PresignedUpload
+	err := p.c.call(ctx, func(cl *Client, id string) error {
+		r, err := cl.PresignUpload(ctx, id, path, size)
+		if err != nil {
+			return err
+		}
+		if r.URL == "" {
+			return fmt.Errorf("%s: presign-upload returned no url", p.c.h.DriverName())
+		}
+		method := r.Method
+		if method == "" {
+			method = "PUT"
+		}
+		out = storage.PresignedUpload{
+			URL: r.URL, Method: method, Headers: r.Headers, ExpiresAt: r.ExpiresAt,
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (p *presignOps) PresignDownload(ctx context.Context, path string, ttl time.Duration) (string, error) {
+	var out string
+	err := p.c.call(ctx, func(cl *Client, id string) error {
+		r, err := cl.PresignDownload(ctx, id, path, ttl)
+		if err != nil {
+			return err
+		}
+		if r.URL == "" {
+			return fmt.Errorf("%s: presign-download returned no url", p.c.h.DriverName())
+		}
+		out = r.URL
+		return nil
+	})
+	return out, err
+}
+
+type multipartOps struct{ c *conn }
+
+func (m *multipartOps) InitMultipart(ctx context.Context, path string, totalSize int64, partCount int) (string, []string, error) {
+	var id string
+	var urls []string
+	err := m.c.call(ctx, func(cl *Client, inst string) error {
+		r, err := cl.InitMultipart(ctx, inst, path, totalSize, partCount)
+		if err != nil {
+			return err
+		}
+		if r.UploadID == "" {
+			return fmt.Errorf("%s: multipart init returned no upload id", m.c.h.DriverName())
+		}
+		id, urls = r.UploadID, r.PartURLs
+		return nil
+	})
+	return id, urls, err
+}
+
+// UploadPart pushes one part from the server side. ⚠ NOT retried on
+// no_instance: a part body can only be read once, and a plugin that lost its
+// instance has also lost the multipart upload the part belongs to, so the
+// caller must start the upload again rather than have a part silently land
+// in a different upload.
+func (m *multipartOps) UploadPart(ctx context.Context, path, uploadID string, partNumber int, r io.Reader, size int64) (string, error) {
+	cl, inst, err := m.c.ensure(ctx, false)
+	if err != nil {
+		return "", err
+	}
+	etag, err := cl.UploadPart(ctx, inst, path, uploadID, partNumber, r, size)
+	return etag, mapErr(err)
+}
+
+func (m *multipartOps) CompleteMultipart(ctx context.Context, path, uploadID string, parts []storage.PartCompletion) error {
+	wire := make([]MultipartPart, 0, len(parts))
+	for _, p := range parts {
+		wire = append(wire, MultipartPart{PartNumber: p.PartNumber, Etag: p.Etag})
+	}
+	return m.c.call(ctx, func(cl *Client, inst string) error {
+		return cl.CompleteMultipart(ctx, inst, path, uploadID, wire)
+	})
+}
+
+func (m *multipartOps) AbortMultipart(ctx context.Context, path, uploadID string) error {
+	return m.c.call(ctx, func(cl *Client, inst string) error {
+		return cl.AbortMultipart(ctx, inst, path, uploadID)
+	})
+}
+
 // ── profiles ────────────────────────────────────────────────────────────────
 //
 // filex discovers what a driver can do by TYPE-ASSERTING optional interfaces
 // on it (storage.Writer, storage.Toucher, …) — at forty-odd call sites, not
 // only in ComputeCapabilities. So a plugin that cannot write must be handed
 // to filex as a value that does not HAVE a Write method, and one that cannot
-// set mtimes as a value without SetMtime. Eight concrete shapes cover the
-// {read-only, writable} × {mtime} × {watch} space; the factory picks one from
-// the plugin's declared capabilities.
+// set mtimes as a value without SetMtime.
+//
+// With five optional axes — write, mtime, watch, presign, multipart — that is
+// twenty concrete shapes, which is why they are GENERATED (driver_shapes.go,
+// from gen/main.go) rather than written out here. newShape picks the one
+// matching the plugin's declared capabilities.
 
-type (
-	drvR  struct{ *readOps }
-	drvRT struct {
-		*readOps
-		*touchOps
-	}
-	drvRW struct {
-		*readOps
-		*watchOps
-	}
-	drvRTW struct {
-		*readOps
-		*touchOps
-		*watchOps
-	}
-	drvX struct {
-		*readOps
-		*writeOps
-	}
-	drvXT struct {
-		*readOps
-		*writeOps
-		*touchOps
-	}
-	drvXW struct {
-		*readOps
-		*writeOps
-		*watchOps
-	}
-	drvXTW struct {
-		*readOps
-		*writeOps
-		*touchOps
-		*watchOps
-	}
-)
-
-// Compile-time proof that each shape implements what its name promises —
-// and, as importantly, that the read-only ones do NOT satisfy storage.Writer
-// (that assertion is in driver_test.go, since Go cannot state a negative
-// here).
-var (
-	_ storage.Driver      = drvR{}
-	_ storage.RangeReader = drvR{}
-	_ storage.Toucher     = drvRT{}
-	_ storage.Watcher     = drvRW{}
-	_ storage.Writer      = drvX{}
-	_ storage.Mover       = drvX{}
-	_ storage.Copier      = drvX{}
-	_ storage.Deleter     = drvX{}
-	_ storage.Mkdirer     = drvX{}
-	_ storage.Toucher     = drvXTW{}
-	_ storage.Watcher     = drvXTW{}
-)
+// newBoundDriver builds a driver already attached to an EXISTING instance,
+// bypassing Init.
+//
+// The conformance run needs this: the instance it probes is the throwaway one
+// the plugin opened for POST /v1/selftest, so there is no config to Init with
+// and nothing may be created a second time underneath a probe.
+func newBoundDriver(h Handle, caps Capabilities, cl *Client, instance string) storage.Driver {
+	// No limiter and no metrics on purpose: a conformance probe must not be
+	// refused because users are keeping the plugin busy, and its calls are
+	// not user traffic.
+	c := &conn{h: h, caps: caps, cfg: map[string]any{}, instance: instance, client: cl}
+	return newShape(
+		&readOps{c: c}, &writeOps{c: c}, &touchOps{c: c},
+		&watchOps{c: c}, &presignOps{c: c}, &multipartOps{c: c},
+		caps,
+	)
+}
 
 // NewDriver builds a fresh storage.Driver for one storage row on plugin h.
 // This is the storage.Factory the manager registers.
+//
+// The concrete type is chosen by newShape (driver_shapes.go, generated): a
+// plugin gets a value whose METHOD SET is exactly what it declared, because
+// filex reads capabilities by type assertion at forty-odd call sites.
 func NewDriver(h Handle, caps Capabilities) storage.Driver {
 	c := &conn{h: h, caps: caps}
-	r := &readOps{c: c}
-	t := &touchOps{c: c}
-	w := &watchOps{c: c}
-	x := &writeOps{c: c}
-	switch {
-	case caps.Writable() && caps.SetMtime && caps.Watch:
-		return drvXTW{r, x, t, w}
-	case caps.Writable() && caps.SetMtime:
-		return drvXT{r, x, t}
-	case caps.Writable() && caps.Watch:
-		return drvXW{r, x, w}
-	case caps.Writable():
-		return drvX{r, x}
-	case caps.SetMtime && caps.Watch:
-		return drvRTW{r, t, w}
-	case caps.SetMtime:
-		return drvRT{r, t}
-	case caps.Watch:
-		return drvRW{r, w}
-	default:
-		return drvR{r}
+	if lh, ok := h.(limitedHandle); ok {
+		c.lim, c.metric = lh.limits(), lh.metricName()
 	}
+	return newShape(
+		&readOps{c: c}, &writeOps{c: c}, &touchOps{c: c},
+		&watchOps{c: c}, &presignOps{c: c}, &multipartOps{c: c},
+		caps,
+	)
 }

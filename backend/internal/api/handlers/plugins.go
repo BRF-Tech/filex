@@ -69,7 +69,16 @@ func (h *Plugins) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"plugins": list, "dir": h.Manager.Dir()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plugins": list,
+		"dir":     h.Manager.Dir(),
+		// Surfaces show these so nobody discovers the rules from a rejection.
+		"requires_signature": h.Manager.RequiresSignature(),
+		// conformance_MODE, not "conformance": each plugin already carries a
+		// `conformance` report, and one name meaning two things is how a
+		// surface ends up reading the wrong one.
+		"conformance_mode": h.Manager.ConformanceMode(),
+	})
 }
 
 func (h *Plugins) Get(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +105,9 @@ type pluginInstallReq struct {
 	SHA256  string `json:"sha256"`
 	Address string `json:"address"`
 	Token   string `json:"token"`
+	// Signature is a detached ed25519 signature over the binary's sha256.
+	// Required only when the instance configures trusted keys.
+	Signature string `json:"signature"`
 }
 
 // Install accepts three shapes; the Content-Type decides which.
@@ -123,7 +135,7 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
-		st, err := h.Manager.InstallBinary(r.Context(), name, hdr.Filename, f)
+		st, err := h.Manager.InstallBinary(r.Context(), name, hdr.Filename, f, r.FormValue("signature"))
 		if err != nil {
 			writeJSON(w, installStatus(err), map[string]string{"error": err.Error()})
 			return
@@ -145,7 +157,7 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 	case req.Kind == "remote" || (req.Address != "" && req.URL == ""):
 		st, err = h.Manager.InstallRemote(r.Context(), req.Name, strings.TrimSpace(req.Address), req.Token)
 	case req.URL != "":
-		st, err = h.Manager.InstallFromURL(r.Context(), req.Name, strings.TrimSpace(req.URL), req.SHA256)
+		st, err = h.Manager.InstallFromURL(r.Context(), req.Name, strings.TrimSpace(req.URL), req.SHA256, req.Signature)
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {url, sha256}, or {kind:\"remote\", address, token}"})
 		return
@@ -161,6 +173,13 @@ func installStatus(err error) int {
 	if errors.Is(err, plugin.ErrBadName) {
 		return http.StatusBadRequest
 	}
+	// Typed first. The string matching below is a net for older errors, not
+	// a scheme: whether a caller's mistake is reported as 400 or 500 should
+	// not depend on which words the message happens to contain.
+	var rejected plugin.RejectedError
+	if errors.As(err, &rejected) {
+		return http.StatusBadRequest
+	}
 	s := err.Error()
 	if strings.Contains(s, "already exists") {
 		return http.StatusConflict
@@ -171,6 +190,42 @@ func installStatus(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
+}
+
+// Upgrade replaces a binary plugin's file, keeping its registration and every
+// storage built on it. A failed upgrade rolls back to the previous binary.
+func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) {
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+		return
+	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+	f, hdr, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file is required"})
+		return
+	}
+	defer f.Close()
+	st, err := h.Manager.Upgrade(r.Context(), id, hdr.Filename, f, r.FormValue("signature"))
+	if err != nil {
+		// A rollback still returns the status, so the page shows what is
+		// running now rather than leaving the operator guessing.
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "plugin": st})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (h *Plugins) Patch(w http.ResponseWriter, r *http.Request) {

@@ -11,7 +11,10 @@ Supported adapters: **local** filesystem · **S3** / S3‑compatible · **SFTP**
 That list is not the limit: a backend filex does not ship can be added as a
 **[storage plugin](PLUGINS.md)** — a separate program that describes its own
 config form and appears here as `plugin:<driver>`, behaving like any adapter
-below.
+below. A plugin only gets that far by **proving what it claims**: filex probes
+every capability it declares before registering it, and probes it again against
+the configuration you type when you save a storage on it, so a driver that half
+works is refused rather than offered.
 
 A **NAS** (Synology, QNAP, TrueNAS, a Windows share…) is supported two ways:
 the **`smb` driver** talks to the share directly, and for NFS you mount it with
@@ -183,7 +186,7 @@ storage:
 | `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp`. Required. |
 | `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
-| `sync_mode` | string | `poll` | `poll` · `fsnotify` (local only) · `ondemand`. |
+| `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. |
 | `sync_interval_s` | int (seconds) | `900` | Poll cadence. **Values < 5 s are clamped to 15 min.** |
 | `enabled` | bool | `true` | Disabled storages are hidden and not synced. |
 | `read_only` | bool | `false` | Block all writes to this mount. |
@@ -313,9 +316,9 @@ ownership at mount time, not from the file itself.
 watch (inotify / kqueue / ReadDirectoryChangesW). It sees what *this* machine
 writes to the mount and **never sees what another machine writes to the NAS** —
 so a file dropped on the share from a laptop would stay invisible until
-something else triggered a sync. filex only falls back to polling when the
-driver isn't `local`, and a mounted share *is* the `local` driver: nothing falls
-back, nothing warns. Choose `poll` explicitly and set an interval that matches
+something else triggered a sync. filex only leaves the OS watch when the driver
+isn't `local` — and a mounted share *is* the `local` driver: nothing falls back,
+nothing warns. Choose `poll` explicitly and set an interval that matches
 how fresh you need the listing (`sync_interval_s`; `900` = 15 min is the default
 when you don't set one, and 60 s is reasonable on a busy share).
 
@@ -449,8 +452,16 @@ uploaded straight to the S3 console).
 **Modes** (`sync_mode`):
 - **`poll`** (default) — a full recursive walk every `sync_interval_s` seconds.
   Intervals below 5 s are clamped to 15 minutes.
-- **`fsnotify`** — real‑time OS watch, **local driver only** (falls back to poll
-  otherwise). 2‑second debounce coalesces bursts like `tar -xf`.
+- **`fsnotify`** — event‑driven instead of timed. It resolves in this order:
+  the **OS watch** (inotify / kqueue / ReadDirectoryChangesW) when the driver is
+  `local`; otherwise the **driver's own change stream**, when it has one — today
+  that means a [storage plugin](PLUGINS.md) declaring `watch`, since no built‑in
+  remote driver implements it; otherwise it falls back to poll. Either way a
+  2‑second debounce coalesces bursts like `tar -xf`, and every batch triggers the
+  same full run a poll would, so an event stream affects *latency*, never
+  correctness. ⚠ A driver stream that **ends** (a plugin restarts, a connection
+  drops) drops the storage back to polling rather than leaving it frozen with a
+  stale index.
 - **`ondemand`** — only syncs when explicitly triggered
   (`POST /api/admin/storages/{id}/sync`).
 

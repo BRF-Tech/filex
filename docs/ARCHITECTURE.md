@@ -117,6 +117,11 @@ interval (default 5 min).
 Three driver families, each with a Go interface + a built-in registry. Add
 a new driver = implement the interface + register at init.
 
+> A **storage** driver no longer has to be compiled in: a
+> [plugin](PLUGINS.md) is a separate program filex speaks HTTP/JSON to, and it
+> is registered in the same registry as `plugin:<name>` — with the capabilities
+> it declares probed before anything is registered at all.
+
 ### Storage driver
 
 ```go

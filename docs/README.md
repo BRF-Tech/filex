@@ -23,7 +23,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Slow storage](STORAGE.md#slow-storage) — what is already cached, and what is
   actually worth tuning
 - [Storage plugins](PLUGINS.md) — teaching filex a backend it does not ship:
-  installing one, and writing one (the protocol, and the Go SDK)
+  installing one, upgrading it in place, and writing one (the protocol, the Go
+  SDK, presigned URLs and multipart) — plus **conformance**, the probes that
+  refuse a plugin which cannot do what it claims
 
 ## Reaching filex without a browser
 

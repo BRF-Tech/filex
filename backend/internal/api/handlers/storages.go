@@ -11,6 +11,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 )
@@ -33,6 +34,12 @@ func validateStorageRootPath(st *model.Storage) error {
 type Storages struct {
 	Store  db.Store
 	Worker *syncpkg.Worker
+	// Plugins and StorageResolver are set when the plugin subsystem is on.
+	// They exist for ONE reason: a storage saved on a plugin driver is probed
+	// against its own configuration first (see plugin_gate.go). Nil means the
+	// subsystem is off and nothing is probed.
+	Plugins         *plugin.Manager
+	StorageResolver func(int64) (storage.Driver, error)
 }
 
 // NewStorages constructs a Storages handler.
@@ -133,6 +140,16 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 	if st.SyncIntervalS == 0 {
 		st.SyncIntervalS = 900
 	}
+	// ⚠⚠ A storage on a PLUGIN is verified against this exact configuration
+	// before the row exists. The plugin passed its own selftest at install,
+	// which proves the code works; this proves it works with the credentials,
+	// the bucket and the path somebody just typed. Finding out here costs one
+	// error message — finding out later costs a user who uploads a file into
+	// a storage that cannot hold it and blames filex for losing it.
+	if msg, ok := verifyPluginStorage(r.Context(), h.Plugins, h.StorageResolver, &st); !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
 	created, err := h.Store.CreateStorage(r.Context(), &st)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -165,6 +182,14 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur.ID = id
+	// A plugin storage is re-probed on every change: the operator may have
+	// just pointed it at a different bucket, and a configuration that half
+	// works fails the same way a half-working plugin does — in the user's
+	// hands, looking like filex.
+	if msg, ok := verifyPluginStorage(r.Context(), h.Plugins, h.StorageResolver, cur); !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
 	if err := validateStorageRootPath(cur); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

@@ -123,3 +123,49 @@ func TestSeedAndAuthEnv(t *testing.T) {
 		t.Fatalf("header email: %q", cfg.Auth.Header.EmailHeader)
 	}
 }
+
+// TestPluginEnv — the two plugin settings that existed in code long before
+// anything set them.
+//
+// ⚠ This is the regression that matters more than the parsing: a repo-wide
+// search once found FILEX_PLUGIN_TRUSTED_KEYS only inside the error message
+// that told the operator to set it. Signature enforcement was written,
+// documented and unreachable, because server.go never passed the field. A
+// test that reads the env is the cheap half; the expensive half is that it
+// fails loudly if the wiring is removed again.
+func TestPluginEnv(t *testing.T) {
+	t.Setenv("FILEX_PLUGIN_TRUSTED_KEYS", " aaaa , bbbb ,, cccc ")
+	t.Setenv("FILEX_PLUGIN_MAX_INFLIGHT", "3")
+	t.Setenv("FILEX_PLUGIN_CONFORMANCE", "WARN")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(cfg.PluginTrustedKeys); got != 3 {
+		t.Fatalf("trusted keys: want 3, got %d (%v)", got, cfg.PluginTrustedKeys)
+	}
+	if cfg.PluginTrustedKeys[0] != "aaaa" || cfg.PluginTrustedKeys[2] != "cccc" {
+		t.Fatalf("keys not trimmed: %v", cfg.PluginTrustedKeys)
+	}
+	if cfg.PluginMaxInFlight != 3 {
+		t.Fatalf("max in flight: want 3, got %d", cfg.PluginMaxInFlight)
+	}
+	if cfg.PluginConformance != "warn" {
+		t.Fatalf("conformance: want warn, got %q", cfg.PluginConformance)
+	}
+}
+
+// TestPluginEnvRejectsNonsense — a ceiling of zero or garbage keeps the
+// default rather than silently allowing no concurrent operation at all.
+func TestPluginEnvRejectsNonsense(t *testing.T) {
+	for _, v := range []string{"0", "-4", "many"} {
+		t.Setenv("FILEX_PLUGIN_MAX_INFLIGHT", v)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.PluginMaxInFlight != 0 {
+			t.Fatalf("%q should not set a ceiling, got %d", v, cfg.PluginMaxInFlight)
+		}
+	}
+}

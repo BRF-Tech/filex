@@ -46,6 +46,25 @@
 //	POST   /v1/instances/{id}/mkdir  {path}
 //	POST   /v1/instances/{id}/set-mtime {path,mtime}   RFC 3339
 //	GET    /v1/instances/{id}/watch          → text/event-stream of Event, when capabilities.watch
+//	POST   /v1/instances/{id}/presign-upload   {path,size}      → PresignedUpload   (capabilities.presign)
+//	POST   /v1/instances/{id}/presign-download {path,ttl_s}     → {url,expires_at}  (capabilities.presign)
+//	POST   /v1/instances/{id}/multipart/init     {path,total_size,part_count} → {upload_id,part_urls}
+//	PUT    /v1/instances/{id}/multipart/part?upload_id=&part=N&path=  ← body → {etag}
+//	POST   /v1/instances/{id}/multipart/complete {path,upload_id,parts[]}
+//	POST   /v1/instances/{id}/multipart/abort    {path,upload_id}
+//	POST   /v1/selftest                      → {"instance": id}  a THROWAWAY instance for conformance
+//
+// # Conformance
+//
+// A plugin that declares a capability it cannot actually perform is worse
+// than one that declares nothing: the UI offers the operation, the operation
+// fails, and the user reads that as filex being broken. So filex PROBES what
+// a plugin claims — at install, and again whenever a storage on it is saved —
+// and refuses a plugin whose own claims do not hold up (internal/plugin/
+// conformance.go). /v1/selftest is how a plugin offers a scratch area for
+// that: it creates an instance backed by throwaway space and returns its id.
+// A plugin without it can still be installed, but it is marked UNVERIFIED and
+// the probes run against the first real storage instead.
 //
 // The driver a plugin implements is registered in filex as `plugin:<name>`,
 // so a plugin can never shadow a built-in driver, and its config form on the
@@ -92,20 +111,28 @@ const DriverPrefix = "plugin:"
 //     directories; the local driver's semantics do not apply).
 //   - set_mtime: only offered to filex when true — a mtime that is accepted and
 //     silently dropped is worse than one that is refused (storage.Toucher).
-//   - watch: /watch is an SSE stream of Events. ⚠ Declared for forward
-//     compatibility: filex has no watch-driven sync mode today, so nothing
-//     subscribes (the fsnotify mode is local-driver only). The adapter
-//     implements storage.Watcher regardless, so the day one lands, plugins
-//     that already serve /watch work unchanged.
+//   - watch: /watch is an SSE stream of Events. Consumed by the sync worker
+//     when a storage's sync mode is `fsnotify` and the driver is not local —
+//     see internal/sync/watch.go.
+//   - presign: the plugin can hand out URLs a BROWSER can use directly, so
+//     bytes skip filex entirely. Only claim it when the URL is reachable from
+//     the client's network — a loopback-only plugin cannot presign anything
+//     useful, and conformance will catch a URL filex itself cannot fetch.
+//   - multipart: resumable uploads in parts. Implies write; the host uses it
+//     for the staged-upload path (internal/staging), where it also pushes the
+//     parts itself, so the plugin must serve /multipart/part as well as the
+//     init/complete/abort trio.
 type Capabilities struct {
-	Range    bool `json:"range"`
-	Write    bool `json:"write"`
-	Delete   bool `json:"delete"`
-	Move     bool `json:"move"`
-	Copy     bool `json:"copy"`
-	Mkdir    bool `json:"mkdir"`
-	SetMtime bool `json:"set_mtime"`
-	Watch    bool `json:"watch"`
+	Range     bool `json:"range"`
+	Write     bool `json:"write"`
+	Delete    bool `json:"delete"`
+	Move      bool `json:"move"`
+	Copy      bool `json:"copy"`
+	Mkdir     bool `json:"mkdir"`
+	SetMtime  bool `json:"set_mtime"`
+	Watch     bool `json:"watch"`
+	Presign   bool `json:"presign"`
+	Multipart bool `json:"multipart"`
 }
 
 // Writable reports whether the host will offer write, delete (and emulated
@@ -190,6 +217,57 @@ type MoveRequest struct {
 type MtimeRequest struct {
 	Path  string    `json:"path"`
 	Mtime time.Time `json:"mtime"`
+}
+
+// PresignRequest is the body of presign-upload / presign-download.
+type PresignRequest struct {
+	Path string `json:"path"`
+	// Size is the object size for an upload (-1 when unknown).
+	Size int64 `json:"size,omitempty"`
+	// TTLSeconds is how long a download URL should stay valid.
+	TTLSeconds int64 `json:"ttl_s,omitempty"`
+}
+
+// PresignResponse is what a plugin answers to either presign call. Only URL
+// and ExpiresAt are required; the rest describe how the client must send an
+// upload.
+type PresignResponse struct {
+	URL       string            `json:"url"`
+	Method    string            `json:"method,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expires_at"`
+}
+
+// MultipartInitRequest starts a resumable upload.
+type MultipartInitRequest struct {
+	Path      string `json:"path"`
+	TotalSize int64  `json:"total_size"`
+	PartCount int    `json:"part_count"`
+}
+
+// MultipartInitResponse carries the upload id and, when the plugin can
+// presign them, one URL per part for the browser to PUT into.
+type MultipartInitResponse struct {
+	UploadID string   `json:"upload_id"`
+	PartURLs []string `json:"part_urls,omitempty"`
+}
+
+// MultipartPartResponse is the answer to a server-side part upload.
+type MultipartPartResponse struct {
+	Etag string `json:"etag"`
+}
+
+// MultipartPart is one finished part.
+type MultipartPart struct {
+	PartNumber int    `json:"part_number"`
+	Etag       string `json:"etag"`
+}
+
+// MultipartCompleteRequest finishes (or, without Parts, aborts) an upload.
+type MultipartCompleteRequest struct {
+	Path     string          `json:"path"`
+	UploadID string          `json:"upload_id"`
+	Parts    []MultipartPart `json:"parts,omitempty"`
 }
 
 // Event is one SSE `data:` payload of /watch.

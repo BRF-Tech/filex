@@ -20,6 +20,7 @@ concurrency, stream with a fixed buffer, and be far more careful about paths
 than the one check below.
 """
 
+import hashlib
 import http.server
 import json
 import mimetypes
@@ -28,6 +29,7 @@ import shutil
 import socket
 import socketserver
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -46,8 +48,14 @@ READ_ONLY = os.environ.get("DISKFS_READ_ONLY", "") in ("1", "true")
 
 # Every instance filex creates, by id -> its root directory.
 INSTANCES = {}
+# SCRATCH holds the instances opened for /v1/selftest, whose directories are
+# ours to delete when filex releases them.
+SCRATCH = set()
 NEXT_ID = [0]
 LOCK = threading.Lock()
+
+# Unfinished multipart uploads: id -> {"path": str, "dir": tempdir}.
+UPLOADS = {}
 
 # Change events, drained by /watch. A real plugin would use inotify; this one
 # records what it did itself, which is enough to prove the stream works.
@@ -75,6 +83,10 @@ def describe() -> dict:
         "mkdir": not READ_ONLY,
         "set_mtime": not READ_ONLY,
         "watch": True,
+        # Resumable uploads, assembled from parts on disk. filex uses them for
+        # the staged-upload path; it pushes each part itself, so there are no
+        # part URLs to hand out.
+        "multipart": not READ_ONLY,
     }
     return {
         "protocol": PROTOCOL,
@@ -174,9 +186,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             from urllib.parse import unquote_plus
 
             query[unquote_plus(k)] = unquote_plus(v)
-        parts = path.strip("/").split("/")  # v1, instances, id, op
+        parts = path.strip("/").split("/")  # v1, instances, id, op...
         inst = parts[2] if len(parts) > 2 else ""
-        op = parts[3] if len(parts) > 3 else ""
+        # The op is EVERYTHING after the instance id, not just the next
+        # segment: "multipart/part" is one operation. Taking parts[3] alone
+        # made every multipart route answer 404, which filex's conformance
+        # run caught before this plugin could be used for anything.
+        op = "/".join(parts[3:]) if len(parts) > 3 else ""
         return inst, op, query
 
     # ── routes ──────────────────────────────────────────────────────────────
@@ -275,6 +291,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.authorised():
             return
+        if self.path == "/v1/selftest":
+            # A throwaway directory for filex's conformance probes. Without
+            # this endpoint the plugin is registered UNVERIFIED and the checks
+            # land on somebody's first real storage instead.
+            root = tempfile.mkdtemp(prefix="diskfs-selftest-")
+            with LOCK:
+                NEXT_ID[0] += 1
+                inst = "i%d" % NEXT_ID[0]
+                INSTANCES[inst] = root
+                SCRATCH.add(inst)
+            return self.ok_json({"instance": inst})
         if self.path == "/v1/instances":
             body = self.read_json()
             root = (body.get("config") or {}).get("root") or ""
@@ -321,6 +348,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     shutil.copy2(src, dst)
                     emit("create", body.get("dst", ""))
                 return self.no_content()
+            if op.startswith("multipart/"):
+                return self.multipart(inst, op, body)
             if op == "set-mtime":
                 full = resolve(inst, body.get("path", ""))
                 when = body.get("mtime", "")
@@ -334,6 +363,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.fail(403, "read_only", str(e))
         return self.fail(404, "not_found", op)
 
+    def multipart(self, inst, op, body):
+        """Parts are files in a temp directory; complete concatenates them.
+
+        ⚠ Assembled into a temp file and then MOVED into place, so a caller
+        that fails half way leaves nothing at the destination — a half-written
+        object under the real name is worse than no object at all.
+        """
+        if op == "multipart/init":
+            up = "u%d" % (len(UPLOADS) + 1)
+            UPLOADS[up] = {"path": body.get("path", ""), "dir": tempfile.mkdtemp(prefix="diskfs-mp-")}
+            return self.ok_json({"upload_id": up, "part_urls": []})
+
+        up = UPLOADS.get(body.get("upload_id", ""))
+        if up is None:
+            return self.fail(404, "not_found", "unknown upload")
+
+        if op == "multipart/abort":
+            shutil.rmtree(up["dir"], ignore_errors=True)
+            UPLOADS.pop(body.get("upload_id", ""), None)
+            return self.no_content()
+
+        # complete
+        parts = sorted(body.get("parts", []), key=lambda p: p.get("part_number", 0))
+        full = resolve(inst, up["path"])
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        tmp = full + ".assembling"
+        with open(tmp, "wb") as out:
+            for p in parts:
+                part_file = os.path.join(up["dir"], "part-%d" % p.get("part_number", 0))
+                if not os.path.exists(part_file):
+                    os.unlink(tmp)
+                    return self.fail(400, "invalid", "missing part %s" % p.get("part_number"))
+                with open(part_file, "rb") as src:
+                    shutil.copyfileobj(src, out)
+        os.replace(tmp, full)
+        shutil.rmtree(up["dir"], ignore_errors=True)
+        UPLOADS.pop(body.get("upload_id", ""), None)
+        emit("create", up["path"])
+        return self.no_content()
+
     def do_PUT(self):
         if not self.authorised():
             return
@@ -342,6 +411,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.fail(409, "no_instance", "unknown instance " + inst)
         if READ_ONLY:
             return self.fail(403, "read_only", "this plugin is read-only")
+        if op == "multipart/part":
+            up = UPLOADS.get(q.get("upload_id", ""))
+            if up is None:
+                return self.fail(404, "not_found", "unknown upload")
+            n = int(q.get("part", "0"))
+            dest = os.path.join(up["dir"], "part-%d" % n)
+            with open(dest, "wb") as f:
+                remaining = int(self.headers.get("Content-Length") or 0)
+                while remaining > 0:
+                    chunk = self.rfile.read(min(1 << 20, remaining))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    remaining -= len(chunk)
+            # The etag is whatever the plugin wants, as long as it comes back
+            # in the complete call. A digest of the part is the obvious choice.
+            with open(dest, "rb") as f:
+                digest = hashlib.md5(f.read()).hexdigest()
+            return self.ok_json({"etag": digest})
         if op != "write":
             return self.fail(404, "not_found", op)
         rel = q.get("path", "")
@@ -384,7 +472,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         inst, op, _ = self.split()
         if not op:
-            INSTANCES.pop(inst, None)
+            root = INSTANCES.pop(inst, None)
+            # A self-test area is ours to discard; a real storage's directory
+            # obviously is not.
+            if inst in SCRATCH:
+                SCRATCH.discard(inst)
+                if root:
+                    shutil.rmtree(root, ignore_errors=True)
             return self.no_content()
         return self.fail(404, "not_found", op)
 

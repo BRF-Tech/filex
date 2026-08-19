@@ -219,7 +219,7 @@ func TestBinaryPluginRoundTrip(t *testing.T) {
 		t.Fatalf("open built plugin: %v", err)
 	}
 	defer f.Close()
-	st, err := m.InstallBinary(ctx, "memfs", filepath.Base(bin), f)
+	st, err := m.InstallBinary(ctx, "memfs", filepath.Base(bin), f, "")
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}

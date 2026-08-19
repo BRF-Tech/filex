@@ -7,6 +7,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-08-19
+
+### Fixed
+
+- **Signature enforcement could not be switched on.** `plugin.New` parsed and
+  validated the trusted ed25519 keys into a local variable and never assigned
+  them to the manager, so `requires_signature` stayed false and an unsigned
+  plugin installed on an instance that had configured keys. Measured through a
+  real server, not a unit test — every existing test set the field by hand,
+  which is exactly why none of them noticed.
+- **The trusted keys and the concurrency ceiling had no way in.** The rejection
+  message named `FILEX_PLUGIN_TRUSTED_KEYS`, and nothing read it; `MaxInFlight`
+  was likewise only reachable by an embedder. Both are configuration now
+  (`FILEX_PLUGIN_TRUSTED_KEYS`, `FILEX_PLUGIN_MAX_INFLIGHT`).
+- **A rejected plugin upload is a client error, not a server one.** Install
+  failures were classified by searching the message for words like `sha256`, so
+  a bad signature answered `500` while a missing one answered `400`. They are
+  typed now (`plugin.RejectedError`) and both answer `400`.
+- **The generated driver shapes had nothing checking them.** `gen/main.go`
+  claimed a test asserted the committed file matched the generator; no such
+  test existed. It does now — and it caught the generator emitting unformatted
+  source on its first run.
+
+
+**A plugin now has to prove what it claims, and it can be upgraded without
+taking its storages down.**
+
+- **Conformance — every declared capability is probed, and a plugin that fails
+  its own claims is refused.** A plugin declares capabilities and filex acts on
+  them: it registers a driver whose method set matches, and every surface then
+  offers those operations. If the plugin declared `write` and its write is
+  broken, the user meets an upload button that fails, a trash move that fails
+  and a version snapshot that fails, and reads all three as **filex** being
+  broken — the plugin is the faulty part, the product wears the fault. So the
+  claims are measured in two places: at install and at every start, against a
+  throwaway instance the plugin opens for the new `POST /v1/selftest`; and again
+  whenever a storage on it is saved, against that storage's **real**
+  configuration, in a scratch folder (`.filex-conformance-<random>`) that is
+  removed afterwards. The second gate exists because the first cannot cover it —
+  a self-test proves the code works, not that these credentials reach that
+  bucket. Probes: `list`, `not_found`, `write`, `read` (bytes compared), `stat`
+  (a size that lies breaks ranged serving, quota and sync three different ways),
+  `list_after_write`, `range`, `set_mtime` (set then re-stat: a timestamp
+  accepted and dropped makes every sync run copy everything again), `copy`,
+  `move`, `mkdir`, `delete`, `delete_idempotent`, `presign`, `multipart`,
+  `watch`. A failure names the probe, what was expected and what happened.
+  `FILEX_PLUGIN_CONFORMANCE=enforce|warn|off`, `enforce` by default. A plugin
+  with no self-test endpoint is still installed, but is marked **unverified**
+  and probed when the first storage is saved on it. ⚠ What the probes cannot
+  check is stated where it matters rather than hidden: `presign` is verified to
+  return a URL that parses, **not** one a browser on another network can reach
+  (filex may not share the client's network), and `watch` is verified to open a
+  stream, not to deliver an event for every change.
+- **`storage.Watcher` is finally consumed — and the previous release's
+  documentation line about it is now wrong and has been corrected.** v0.21.1
+  removed a promise that a change stream bought "change events without polling",
+  because nothing subscribed to one. Now a storage in `fsnotify` mode resolves
+  in order: inotify when the driver is local, **the driver's own stream** when
+  it implements `Watcher` (today: a plugin), polling otherwise. Events are
+  coalesced with the same 2-second debounce as the inotify loop and each batch
+  triggers the same full run a poll would, so a missed or duplicated event costs
+  a scan and never a wrong index — the stream is a hint about *when*, not a
+  ledger of *what*. ⚠ A stream that **ends** (the plugin restarts, the
+  connection drops) falls back to polling rather than leaving the storage frozen
+  with a stale index.
+- **Upgrade a plugin in place** — `POST /api/admin/plugins/{id}/upgrade`. The
+  row, the name, the driver and every storage built on it survive: stop, swap
+  the file, start, verify. Remove-then-install was the only route before, and it
+  takes the registration with it — a storage whose driver has gone cannot open.
+  **If the new binary does not come up, the previous one is restored and
+  started**, and the call answers 400 with the plugin's current status attached,
+  so a failed upgrade costs an error message rather than a plugin. ⚠ The plugin
+  is stopped first on purpose: a running executable cannot be replaced on Linux
+  (`ETXTBSY`).
+- **Presigned URLs and multipart uploads over the plugin protocol**, with two
+  new capabilities. `presign` lets a plugin hand out a URL the client uses
+  directly — share downloads then redirect instead of streaming through filex.
+  `multipart` is resumable upload in parts, used by the staged-upload commit
+  path, which holds the bytes itself and therefore pushes each part through
+  `PUT …/multipart/part` rather than handing out part URLs. New routes:
+  `presign-upload`, `presign-download`, `multipart/init|part|complete|abort`,
+  plus `POST /v1/selftest`. `multipart` without `write`+`delete` is refused at
+  describe time: a resumable upload is still an upload. The Go SDK gains
+  `Plugin[T].SelfTest` and the optional `Presigner` / `Multipart` interfaces.
+- **ed25519 signature verification for plugin binaries.** With trusted keys
+  configured (`plugin.Options.TrustedKeys`, hex or base64), install and upgrade
+  both refuse an unsigned or badly signed binary, and the admin API reports
+  `requires_signature` so a surface can ask for the signature before the
+  rejection rather than after it. What is signed is the binary's lower-case hex
+  **sha256**, so an operator can sign the digest they already publish. ⚠ The
+  checksum an install already required only proves the file has not changed
+  since it arrived — never who it came from; that is the gap this closes.
+  ⚠⚠ There is **no environment variable for the keys yet**: the rejection
+  message names `FILEX_PLUGIN_TRUSTED_KEYS`, but nothing reads it, so on a stock
+  server signature enforcement is off.
+- **A ceiling on what a plugin may cost filex.** A plugin is somebody else's
+  program in filex's request path, and a backend that accepts connections and
+  then says nothing is indistinguishable from one that is merely busy. Each
+  plugin now gets 10 concurrent operations (`DefaultMaxInFlight`); a caller that
+  cannot get a slot within 5 s is told the storage is saturated instead of
+  joining a queue nobody drains. Metadata operations get a 60-second deadline;
+  streaming reads and writes deliberately get none, because a 20 GB upload is
+  legitimately slow. A plugin's stdout/stderr is rate-limited to 50 lines/s
+  (burst 200) with the dropped count reported — a chatty debug build was
+  otherwise filex filling the disk, whose first symptom is "the server ran out
+  of space", not "the plugin is noisy". On Linux and macOS a plugin is started
+  in its own **process group** and killed as one, so a helper it spawned cannot
+  outlive it holding the socket. ⚠⚠ filex is **not** a sandbox and the code now
+  says so plainly: memory and file-descriptor limits are not set (Go cannot
+  apply an rlimit to a child between fork and exec, and capping the parent would
+  cap filex), and Windows has neither process groups nor rlimits here.
+- **Plugin metrics** — `filex_plugin_ops_total{plugin,op,outcome}`,
+  `filex_plugin_op_duration_seconds`, `filex_plugin_in_flight`,
+  `filex_plugin_restarts_total`, `filex_plugin_up`. `busy` is its own outcome
+  because saturation is a sizing problem, not a fault to chase, and
+  `restarts_total` is how a plugin that restarts in a loop becomes visible at
+  all — filex retries the instance once, so single requests keep working while
+  the process dies every few seconds. Conformance probes and the server-side
+  multipart part push are deliberately outside both the ceiling and the
+  counters.
+- **The driver shapes are generated** (`internal/plugin/gen`, 20 combinations).
+  filex reads capabilities by type-asserting optional interfaces at forty-odd
+  call sites, so a plugin that cannot write must be handed over as a value with
+  **no** `Write` method. With five optional axes that is twenty structs, and
+  twenty hand-written structs is where somebody eventually embeds the wrong
+  thing and a read-only plugin quietly becomes writable.
+- **The Python example gained a self-test area and multipart**, and its
+  `acceptance.sh` grew from 11 measured steps to 17 — conformance at install,
+  a plugin deliberately edited to **lie** about its writes (accepted by the
+  install call, then refused, driver never registered, storage impossible to
+  create), multipart, upgrade, upgrade rollback, and the live load figures.
+
 ## [0.21.1] - 2026-08-19
 
 - **Copy or move into a storage's root was refused — for every driver.**

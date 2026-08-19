@@ -9,6 +9,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 )
 
@@ -21,7 +22,16 @@ import (
 func (s *storageSyncer) loopFSNotify() {
 	localDrv, ok := s.driver.(*local.Driver)
 	if !ok {
-		slog.Warn("sync: fsnotify mode requested but driver is not local — falling back to poll", slog.String("storage", s.storage.Name))
+		// Not local: the driver may still have a change stream of its own
+		// (storage.Watcher — a plugin, typically). Falling straight through
+		// to polling is what made that interface dead code for years.
+		if w, hasWatch := s.driver.(storage.Watcher); hasWatch {
+			slog.Info("sync: driver is not local but streams its own changes — using them",
+				slog.String("storage", s.storage.Name))
+			s.loopDriverWatch(w)
+			return
+		}
+		slog.Warn("sync: fsnotify mode requested but the driver is not local and streams no changes — falling back to poll", slog.String("storage", s.storage.Name))
 		s.loopPoll()
 		return
 	}

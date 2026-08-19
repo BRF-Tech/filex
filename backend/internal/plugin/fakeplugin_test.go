@@ -53,6 +53,15 @@ type fakePlugin struct {
 	rangeCalls int
 	readCalls  int
 	events     chan plugin.Event
+	// selfTestOK makes the plugin offer POST /v1/selftest (a throwaway
+	// backend), which is what conformance probes.
+	selfTestOK bool
+	// The three ways a plugin can lie about what it does. Each one is a real
+	// mistake somebody writing a plugin makes, and each one is invisible
+	// without a probe:
+	swallowWrites bool // accepts the bytes, stores nothing
+	notFoundIs500 bool // answers a plain error for a missing path
+	ignoreMtime   bool // accepts set-mtime and leaves the timestamp alone
 }
 
 func newFakePlugin(name string, caps plugin.Capabilities) *fakePlugin {
@@ -119,6 +128,22 @@ func (f *fakePlugin) handle(w http.ResponseWriter, r *http.Request) {
 			},
 			Capabilities: f.caps,
 		})
+	case r.URL.Path == "/v1/selftest" && r.Method == http.MethodPost:
+		f.mu.Lock()
+		offer := f.selfTestOK
+		f.mu.Unlock()
+		if !offer {
+			f.writeErr(w, http.StatusNotFound, "unsupported", "no selftest area")
+			return
+		}
+		f.mu.Lock()
+		f.next++
+		f.creates++
+		id := "i" + strconv.Itoa(f.next)
+		f.instances[id] = map[string]any{"selftest": true}
+		f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(plugin.InstanceResponse{Instance: id})
 	case r.URL.Path == "/v1/instances" && r.Method == http.MethodPost:
 		var req plugin.InstanceRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -214,8 +239,16 @@ func (f *fakePlugin) instanceOp(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		lie := f.notFoundIs500
 		f.mu.Unlock()
 		if !ok {
+			if lie {
+				// The mistake this models: a plugin that reports every
+				// missing path as a server error, so filex answers 500 where
+				// it should answer 404.
+				f.writeErr(w, http.StatusInternalServerError, "error", "something went wrong")
+				return
+			}
 			f.writeErr(w, http.StatusNotFound, plugin.ErrCodeNotFound, p)
 			return
 		}
@@ -270,8 +303,14 @@ func (f *fakePlugin) instanceOp(w http.ResponseWriter, r *http.Request) {
 		p := strings.Trim(q.Get("path"), "/")
 		b, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
-		files[p] = &fakeFile{data: b, mtime: time.Now().UTC()}
+		swallow := f.swallowWrites
+		if !swallow {
+			files[p] = &fakeFile{data: b, mtime: time.Now().UTC()}
+		}
 		f.mu.Unlock()
+		// swallow models the plugin that answers 204 and keeps nothing —
+		// every surface believes the upload worked until somebody reads it
+		// back.
 		w.WriteHeader(http.StatusNoContent)
 	case "delete":
 		var req plugin.PathRequest
@@ -318,7 +357,7 @@ func (f *fakePlugin) instanceOp(w http.ResponseWriter, r *http.Request) {
 		var req plugin.MtimeRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.mu.Lock()
-		if fl, ok := files[strings.Trim(req.Path, "/")]; ok {
+		if fl, ok := files[strings.Trim(req.Path, "/")]; ok && !f.ignoreMtime {
 			fl.mtime = req.Mtime
 		}
 		f.mu.Unlock()

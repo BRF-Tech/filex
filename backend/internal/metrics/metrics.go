@@ -198,6 +198,46 @@ var (
 	}, []string{"direction"})
 )
 
+// Storage plugins. A plugin is somebody else's program in filex's request
+// path, so "is it slow, is it failing, is it saturated" has to be answerable
+// from outside — the alternative is an operator watching a spinner.
+var (
+	// PluginOps counts operations by plugin, operation and outcome
+	// (ok | error | busy). `busy` is its own outcome on purpose: it means the
+	// plugin hit its concurrency ceiling, which is a sizing problem, not a
+	// fault to chase.
+	PluginOps = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "filex_plugin_ops_total",
+		Help: "Storage-plugin operations, by plugin, operation and outcome.",
+	}, []string{"plugin", "op", "outcome"})
+
+	// PluginOpDuration is how long the plugin took to answer.
+	PluginOpDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "filex_plugin_op_duration_seconds",
+		Help:    "How long a storage plugin takes to answer, by plugin and operation.",
+		Buckets: []float64{0.005, 0.025, 0.1, 0.5, 1, 5, 30},
+	}, []string{"plugin", "op"})
+
+	// PluginInFlight is the live count of operations inside a plugin.
+	PluginInFlight = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "filex_plugin_in_flight",
+		Help: "Operations currently inside a storage plugin.",
+	}, []string{"plugin"})
+
+	// PluginRestarts counts supervisor restarts. A plugin that restarts in a
+	// loop still "works" for single requests, and this is how that shows up.
+	PluginRestarts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "filex_plugin_restarts_total",
+		Help: "Times filex has restarted a storage plugin after it exited.",
+	}, []string{"plugin"})
+
+	// PluginUp is 1 while a plugin is running and registered.
+	PluginUp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "filex_plugin_up",
+		Help: "1 when a storage plugin is running and its driver is registered.",
+	}, []string{"plugin"})
+)
+
 func init() {
 	Registry.MustRegister(
 		StagedInFlight, StagedBytes, StagedBegun, StagedBytesStaged,
@@ -207,6 +247,7 @@ func init() {
 		TransferDuration, TransferBytes,
 		CacheEvents, CacheBytes,
 		QuotaUsageBytes, QuotaAccountedBytes,
+		PluginOps, PluginOpDuration, PluginInFlight, PluginRestarts, PluginUp,
 		throughputCollector{},
 		// Go runtime + process metrics: goroutines, heap, GC pause, open FDs.
 		// Free, and the first thing anyone wants when "filex is slow".

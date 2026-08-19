@@ -13,11 +13,17 @@ staged path exists because on a slow backend the progress bar shows the
 
 There used to be a third path — `POST /api/files/upload/init` — which handed the
 browser presigned S3 URLs. It is still served for older embedders, but it
-requires the S3 driver: every other backend answers `501 storage does not
-support multipart upload`, and on that path filex never sees the bytes at all.
-**No filex client speaks it any more.** The staged path replaces it everywhere
-and works on **every** driver, including `local`, `sftp`, `ftp`, `webdav` and an
-OS-mounted NAS.
+requires a driver that implements multipart: `local`, `sftp`, `ftp` and `webdav`
+answer `501 storage does not support multipart upload`, and on that path filex
+never sees the bytes at all. **No filex client speaks it any more.** The staged
+path replaces it everywhere and works on **every** driver, including `local`,
+`sftp`, `ftp`, `webdav` and an OS-mounted NAS.
+
+⚠ A [storage plugin](PLUGINS.md) declaring `multipart` also implements that
+interface, so `init` does **not** 501 on it — but it hands back no part URLs
+(its multipart exists for the staged commit, where filex pushes the parts), so
+the browser is left with nothing to PUT to. That is another reason not to reach
+for this path.
 
 ---
 
@@ -204,12 +210,18 @@ with a gap in it.
 ### Staging boundaries vs backend boundaries
 
 **Staging part sizes belong to the client; backend part sizes belong to the
-driver.** On commit, a driver that implements `storage.PartUploader` (S3 today)
-gets a real multipart upload with the parts **re-chunked** to at least 5 MiB —
-S3 rejects any smaller non-final part, and it does so at
-`CompleteMultipartUpload`, i.e. after every byte has already been sent. A client
-that sent 1 MiB chunks must not be able to break the backend. Every other driver
-gets one `Writer.Write` over the assembled staging file.
+driver.** On commit, a driver that implements `storage.PartUploader` — S3, and
+any [storage plugin](PLUGINS.md) that declares `multipart` — gets a real
+multipart upload with the parts **re-chunked** to at least 5 MiB — S3 rejects
+any smaller non-final part, and it does so at `CompleteMultipartUpload`, i.e.
+after every byte has already been sent. A client that sent 1 MiB chunks must not
+be able to break the backend. Every other driver gets one `Writer.Write` over
+the assembled staging file.
+
+> ⚠ filex pushes those parts itself here (`PUT …/multipart/part` on a plugin):
+> the staged file is on filex's disk, so there is nothing to hand a browser. A
+> plugin that returns no `part_urls` from `multipart/init` is doing the normal
+> thing.
 
 ---
 

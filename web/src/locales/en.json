@@ -1055,6 +1055,8 @@
       "driver": "Driver",
       "state": "State",
       "capabilities": "Can do",
+      "conformance": "Verification",
+      "load": "Load",
       "inUse": "Storages",
       "enabled": "Enabled",
       "binary": "Plugin binary",
@@ -1069,7 +1071,55 @@
       "move": "move",
       "copy": "copy",
       "mtime": "timestamps",
-      "watch": "change events"
+      "watch": "change events",
+      "presign": "direct links",
+      "multipart": "resumable uploads"
+    },
+    "conformance": {
+      "verified": "Verified",
+      "unverified": "Unverified — probes owed",
+      "failed": "{count} probe(s) failed",
+      "unverifiedHint": "No report: the plugin offers no self-test endpoint, or verification is off on this instance. Nothing failed — nothing was checked.",
+      "reportTitle": "Conformance report — {name}",
+      "summary": "{pass} passed, {fail} failed, {skip} skipped",
+      "ranAt": "Probed {when}",
+      "scratchLabel": "against {where}",
+      "refusedNote": "A plugin that fails its own claims is refused: filex will not offer half a driver as a whole one. Fix the probe below and install the new build.",
+      "took": "{ms} ms",
+      "scratch": {
+        "selftest": "the plugin's own throwaway area",
+        "storage": "a real storage's configuration"
+      },
+      "result": {
+        "pass": "pass",
+        "fail": "fail",
+        "skip": "skip"
+      },
+      "mode": {
+        "warn": "Verification is in “warn” mode on this instance: a plugin that fails its own claims is installed anyway and only written to the log. The safety net is down.",
+        "off": "Verification is off on this instance: nothing checks that a plugin does what it claims before a storage is built on it. The safety net is down."
+      }
+    },
+    "load": {
+      "inFlight": "{current}/{max} in flight",
+      "waited": "{count} waited for a slot",
+      "waitedTitle": "Calls that had to queue for a free slot. A plugin that is merely slow shows up here before it shows up as an error.",
+      "rejected": "{count} refused",
+      "rejectedTitle": "Callers that gave up waiting for a free slot and were answered with an error. Find out why the plugin is slow, or raise its concurrency limit.",
+      "rejectingBanner": "Refusing operations: {names}. Every slot is busy, so callers are being turned away with an error rather than queued."
+    },
+    "upgrade": {
+      "action": "Upgrade",
+      "title": "Upgrade {name}",
+      "hint": "Replaces the binary in place. The plugin keeps its name, its driver and every storage built on it: it is stopped, the file is swapped, and it is started again.",
+      "errFile": "Choose the new plugin binary",
+      "done": "{name} upgraded",
+      "rollback": "The upgrade failed. The previous binary was put back, so nothing was lost.",
+      "restored": "Running now: {state}, from {binary}."
+    },
+    "signature": {
+      "label": "Signature",
+      "required": "This instance only accepts signed plugins: paste the detached signature over the binary's SHA-256, hex or base64, made with a key the operator trusts. Without it the install is refused."
     }
   }
 }

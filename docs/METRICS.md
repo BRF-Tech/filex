@@ -123,6 +123,41 @@ releases cancel out — a flat `accounted_bytes_total` while uploads are landing
 means the writes are not being counted, which is exactly the bug
 [Quotas](QUOTAS.md) documents.
 
+### Storage plugins
+
+A [plugin](PLUGINS.md) is somebody else's program in filex's request path, so
+"is it slow, is it failing, is it saturated" has to be answerable from outside.
+The alternative is an operator watching a spinner.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `filex_plugin_ops_total{plugin,op,outcome="ok"\|"error"\|"busy"}` | counter | every operation filex sends a plugin. `op` is the storage operation (`list`, `stat`, `read`, `read_range`, `write`, `delete`, `mkdir`, `move`, `copy`, `set_mtime`, and `op` for the paths that are not named individually) |
+| `filex_plugin_op_duration_seconds{plugin,op}` | histogram | how long the plugin took to answer (buckets 5 ms → 30 s) |
+| `filex_plugin_in_flight{plugin}` | gauge | operations inside the plugin right now, out of the ceiling of 10 |
+| `filex_plugin_restarts_total{plugin}` | counter | times the supervisor restarted it after it exited |
+| `filex_plugin_up{plugin}` | gauge | `1` while it is running **and its driver is registered** — `0` while it is disabled, failed or refused |
+
+⚠ **`busy` is not an error.** It means the plugin hit its concurrency ceiling
+and a caller was refused a slot after waiting 5 s. That is a sizing signal — a
+storage too popular or a backend too slow for ten parallel operations — not a
+fault to chase in the plugin's code. It is a separate outcome precisely so it
+cannot hide inside an error rate.
+
+⚠ A plugin that **restarts in a loop still answers single requests**: filex
+re-creates the instance and retries once, so a user may see nothing wrong while
+the process is dying every few seconds. `filex_plugin_restarts_total` is how
+that becomes visible.
+
+⚠ Conformance probes are **not** counted. They run without the limiter and
+without metrics, so a probe cannot be refused because users are keeping the
+plugin busy, and install-time traffic does not appear as user traffic.
+
+⚠ Neither is the **server-side multipart part push**. It bypasses the slot and
+the counter deliberately — a part body can only be read once, so it must not
+wait behind a queue or be retried — which means a large staged upload into a
+plugin storage moves bytes without moving `filex_plugin_ops_total`. Use the
+transfer metrics above for that.
+
 ## Alerts worth having
 
 ```yaml
@@ -151,4 +186,21 @@ groups:
         for: 15m
         annotations:
           summary: "storage {{ $labels.storage }} is under 1 MB/s ({{ $labels.direction }})"
+
+      - alert: FilexPluginDown
+        expr: filex_plugin_up == 0
+        for: 5m
+        annotations:
+          summary: "storage plugin {{ $labels.plugin }} is not registered — storages on it cannot open"
+
+      - alert: FilexPluginRestartLoop
+        expr: increase(filex_plugin_restarts_total[15m]) > 3
+        annotations:
+          summary: "storage plugin {{ $labels.plugin }} keeps exiting ({{ $value }} restarts in 15m)"
+
+      - alert: FilexPluginSaturated
+        expr: rate(filex_plugin_ops_total{outcome="busy"}[10m]) > 0
+        for: 10m
+        annotations:
+          summary: "storage plugin {{ $labels.plugin }} is refusing work at its concurrency ceiling"
 ```

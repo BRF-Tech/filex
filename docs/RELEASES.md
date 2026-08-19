@@ -18,14 +18,250 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.14.0, 10 August 2026
-The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first three (a bearer token supplied as a function has to be awaited, and the header builder handed to the viewers was the synchronous one, so requests went out with no Authorization header), and a scheme the OS cannot open under the last. Images, video, audio and downloads work too, since those elements carry no headers of their own. Markdown and syntax highlighting now render in every embedded surface, not only in the admin app. The window follows the OS language instead of wrapping a Turkish file list in an English shell, and it opens on a real connecting screen that names the server it is waiting for.
+::: tip Latest — v0.21.1, 19 August 2026
+Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". It works now, and it checks permissions on the way in, which the root case had been skipping. The plugin documentation also stopped promising something it does not do: a plugin can serve a change stream, but nothing in filex subscribes to one yet. Plus a second example plugin, written in Python without the Go SDK, and the acceptance run that drives it — including killing it mid-transfer to show that a storage survives its plugin crashing.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.14.0
-docker pull ghcr.io/brf-tech/filex:full-v0.14.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.21.1
+docker pull ghcr.io/brf-tech/filex:full-v0.21.1
 ```
+
+## v0.21.1
+
+<span class="filex-release-date">19 August 2026</span>
+
+Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". It works now, and it checks permissions on the way in, which the root case had been skipping. The plugin documentation also stopped promising something it does not do: a plugin can serve a change stream, but nothing in filex subscribes to one yet. Plus a second example plugin, written in Python without the Go SDK, and the acceptance run that drives it — including killing it mid-transfer to show that a storage survives its plugin crashing.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.1`
+
+## v0.21.0
+
+<span class="filex-release-date">19 August 2026</span>
+
+filex can now be taught a storage it has never heard of. A plugin is a separate program — in any language — that filex launches (or connects to) and speaks a small HTTP/JSON protocol to; once it is running, its driver appears in the ordinary storage picker with the config form the plugin itself describes, and behaves like any built-in one. Whatever a plugin does not implement is either emulated (ranged reads, move, copy) or honestly absent, so a read-only plugin never shows an upload button that fails at the last moment. Writing one in Go is three methods and a Serve call, and the example plugin in the repository is built and driven by filex's own tests. Install by upload, by URL with a required checksum, or point filex at a service you run yourself.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.0`
+
+## v0.20.3
+
+<span class="filex-release-date">18 August 2026</span>
+
+The desktop app now ships for macOS (Apple Silicon) — unsigned but ad-hoc sealed, so first launch is the ordinary Open Anyway step rather than a refusal; auto-update on the Mac waits for a signed build. Two desktop fixes from the same real-world install: pairing now works from a browser that is already signed in, and the sync engine inside the Mac app is arm64 (no more Rosetta alert on every launch). The Connections page stopped painting its own background over the admin page in dark mode, and the API-tokens box on it got real theme colours.
+
+**Fixed**
+
+- **Core** — The connections panel painted its own page ground; five theme tokens did not exist.
+- **Desktop** — Compile the embedded CLI for the host arch, not amd64.
+- **Release** — The pull command names ghcr.io, not a registry that does not exist.
+- **Web** — Desktop pairing survives an already-signed-in browser.
+- **Docs-site** — The release cron never rebuilt — no PATH under cron, and two guards.
+
+**Other changes**
+
+- **Desktop** — Ship macOS packages — dmg + zip, ad-hoc sealed.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.20.3`
+
+## v0.20.2
+
+<span class="filex-release-date">17 August 2026</span>
+
+**Other changes**
+
+- **Desktop** — The tag is the version, not desktop/package.json.
+- **Desktop** — Wait for the release before uploading to it.
+- Release: v0.20.2 — desktop packaging fixes take effect.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.20.2`
+
+## v0.20.1
+
+<span class="filex-release-date">17 August 2026</span>
+
+**Other changes**
+
+- Release: v0.20.1 — FTPS starts when you give it a host name.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.1) · `ghcr.io/brf-tech/filex:slim-v0.20.1`
+
+## v0.20.0
+
+<span class="filex-release-date">17 August 2026</span>
+
+filex is now reachable without a browser. It could already use S3, SFTP, FTP and WebDAV as storages; now those clients can point at filex itself — as an S3 endpoint, an SFTP server, an FTPS server and an NFSv3 export, alongside the WebDAV it already had. rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only ever learned FTP and a media player that only ever learned NFS all land in the same tree, with the same permissions, the same trash and the same quota as the web UI. Each has a credential you can revoke on its own, and revoking one now cuts the session it already opened rather than only the next login. Off-LAN there is `filex mount`, which attaches a remote server to a folder over ordinary HTTPS — not a sync: it opens one file out of a hundred thousand without downloading the rest. A NAS can also be a storage now, over SMB. And three quieter fixes with teeth: a folder grant was unreachable over the new protocols, /dav enforced no quota at all, and WebDAV locks vanished on every restart while still telling clients they were exclusive.
+
+**Other changes**
+
+- **Desktop** — The package README described an app that no longer exists.
+- Release: v0.20.0 — the protocol gateway.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.0) · `ghcr.io/brf-tech/filex:slim-v0.20.0`
+
+## v0.19.0
+
+<span class="filex-release-date">14 August 2026</span>
+
+The desktop app gets a language setting — System, English or Türkçe — where before it followed the operating system and offered nothing to choose. The choice moves the whole app at once: the window, the tray menu built by a different process, and the file explorer inside it, which is a separate component with its own catalogue. Switching is immediate and keeps the folder you are looking at.
+
+**New**
+
+- **Desktop** — Choose the app's language.
+
+**Other changes**
+
+- **Desktop** — Say how the update actually behaves, and why per-user matters.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.19.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.19.0`
+
+## v0.18.2
+
+<span class="filex-release-date">14 August 2026</span>
+
+The Windows app installs per-user now, and that is what makes the quiet update in 0.18.1 real: an app under C:Program Files needs administrator rights to replace its own files, so every background update ended in a UAC prompt — it could never update itself while nobody was at the machine. The installer no longer offers the all-users choice, because one click on it put the app somewhere its own updater could not reach. Settings and accounts live outside the install directory, so moving an existing install loses nothing.
+
+**Fixed**
+
+- **Desktop** — Install per-user, because a Program Files install cannot update itself.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.18.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.18.2`
+
+## v0.18.1
+
+<span class="filex-release-date">14 August 2026</span>
+
+The desktop app updates itself the way it always should have. Downloading was quiet and quitting installed silently, but the tray entry and the Settings button ran the installer with its wizard — so the one visible path through the feature was the one that made a background updater feel like being sent back through setup. Every install is silent now, and the app comes back in the tray rather than throwing a window at you. It also stops waiting for a quit that may never come: an app that lives in the tray applies the update at a quiet moment — ten minutes idle, no window open — after stopping its sync watchers so nothing is interrupted.
+
+**Fixed**
+
+- **Desktop** — The update stops handing you an installer window.
+
+**Other changes**
+
+- **Release** — Publish an unversioned linux binary, so the documented install works.
+- **Contributing** — The screenshot step's install command needs `run`
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.18.1) · `ghcr.io/brf-tech/filex:slim-v0.18.1`
+
+## v0.18.0
+
+<span class="filex-release-date">14 August 2026</span>
+
+Share links keep their word, and you get a face. A link capped at three downloads could hand out four: the cap was checked against a counter that was only bumped after the bytes had left, so any request that started while an earlier one was still streaming read the same old count and was let through — measured on a live instance, a one-download link served three complete files to three overlapping clients. A download is now claimed before anything is served. The share dialog also gets its one-line curl back (a link is often made for a server, and that reader has no browser) and its Create link button stops being pushed out of place by the download-limit control. New: profile pictures — set one on your profile and the collaboration bar shows it instead of your initials, for every client of the account, the desktop app and API keys included.
+
+**New**
+
+- **Profile** — A profile picture, shown wherever that account is present.
+
+**Fixed**
+
+- **Share** — A download cap that could be exceeded, and a dialog that lost its curl.
+
+**Other changes**
+
+- **Screenshots** — Retake them in English, and make checking them a release step.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.18.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.18.0`
+
+## v0.17.1
+
+<span class="filex-release-date">12 August 2026</span>
+
+A packaging fix, and the first release whose tag matches what ships. The desktop package could be built without the updater inside it: in a pnpm workspace the dependency is a symlink pointing outside the app directory and electron-builder does not follow those, so the app launched and simply never opened a window — no dialog, no log. The main process is bundled now, so the package carries its own code and nothing else. There is also a suite that points a packaged app at a feed advertising a newer version and watches it download and stage the update, because "the installer built" is not "the app works".
+
+**Fixed**
+
+- **Desktop** — The package shipped without its updater, and nothing said so.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.17.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.17.1`
+
+## v0.17.0
+
+<span class="filex-release-date">12 August 2026</span>
+
+The desktop app keeps itself up to date. It checks a static feed on filex.sh (not GitHub — that mirror is private and the provider would need a token inside the app), downloads quietly, and installs when you quit, because an update that interrupts a file transfer to restart itself is worse than one that waits. The tray offers "Restart to update" once one is staged and Settings gained an Updates row. Failures stay silent while the app works. Note that this is the first version that can update itself: reaching it still takes one manual install.
+
+**New**
+
+- **Desktop** — The app keeps itself up to date.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.17.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.17.0`
+
+## v0.16.3
+
+<span class="filex-release-date">12 August 2026</span>
+
+The tab strip, fixed properly. It was permanent in the desktop app and came and went on the web, because 0.16.0 gave the two surfaces different defaults — this package exists so they are one product, so the default is now the same everywhere. A scrollbar had appeared across the 30px row of tabs (a themed-scrollbar rule added at the end of the stylesheet outranked the strip's own), the strip had grown a vertical scrollbar it could never use, and — the real one — enough tabs did not overflow the strip but GREW it, pushing the whole layout off the right edge with no scrollbar anywhere: an embedded custom element is nearly always a flex item, and a flex item will not shrink below its content unless told to. Also: "new tab" no longer scrolls away with the tabs it creates.
+
+**Fixed**
+
+- **Tabs** — The strip differed between surfaces, wore a scrollbar it should not have, and grew instead of scrolling.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.3) · `ghcr.io/brf-tech/filex:slim-v0.16.3`
+
+## v0.16.2
+
+<span class="filex-release-date">12 August 2026</span>
+
+Two things a share link got wrong. It changed language when you entered its PIN — the gate was English, the page behind it Turkish, and the screen in between managed both at once. Those pages have no session and no user, so the language now comes from the request (an explicit ?lang=, then the browser's Accept-Language, then the server's own default) and is resolved once per request, so a page can no longer mix two. And the download limit is settable again: it lived in the old standalone share dialog and was left behind when link creation moved into the Share / Permissions panel, so the server kept honouring a cap that nothing could set.
+
+**Fixed**
+
+- **Share** — A share link changed language when you entered its PIN, and the download cap could not be set.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.16.2`
+
+## v0.16.1
+
+<span class="filex-release-date">12 August 2026</span>
+
+Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the link is created rather than when the first visitor arrives, so the first open is fast too — which is the open that matters, since whoever creates a link usually checks it immediately. Capped at 500 tiles per share; anything past that still renders on first view.
+
+**New**
+
+- **Share** — Render a shared folder's tiles when the link is created.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.16.1`
+
+## v0.16.0
+
+<span class="filex-release-date">12 August 2026</span>
+
+Two things a shared folder was doing the slow way. Its gallery tiles were the original photos — the page asked for a thumbnail and the server streamed the whole file — so a folder of a few dozen photos shipped tens of megabytes to paint one screen and crawled until it settled; tiles now come from the same cached thumbnails the app itself uses, with the originals kept as the fallback for anything that has none. And a folder share's ZIP is now built when you create the link rather than when somebody clicks download, so the wait lands before anyone is waiting instead of on whoever opened the link.
+
+**New**
+
+- **Share** — A shared folder was serving originals as its gallery tiles, and zipping on click.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) · `ghcr.io/brf-tech/filex:slim-v0.16.0`
+
+## v0.15.1
+
+<span class="filex-release-date">12 August 2026</span>
+
+The desktop app's account rail had its two identities the wrong way round. Each row of that rail is a server — a tenant — so it now carries that server's own Branding logo, which is a better label than initials taken from an e-mail address; the filex mark stays fixed above them, because the application's identity is the one thing on that rail that should never change with what you clicked. Branding is fetched for every signed-in account, so a rail of several tenants paints all of their logos at once.
+
+**Fixed**
+
+- **Desktop** — The rail's two identities were the wrong way round.
+
+**Other changes**
+
+- **Desktop** — The login-item checks now branch on packaging.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.15.1`
+
+## v0.15.0
+
+<span class="filex-release-date">12 August 2026</span>
+
+Mostly the desktop app, and one thing that was writing to your operating system. "Start when I sign in" registered whichever executable happened to be running the app — which, for anyone who had ever run it from source, was a bare Electron binary with no project path, so every sign-in afterwards opened Electron's own welcome window, and the entry outlived the checkout it pointed at. It is an installed-app feature now, it names the installed app explicitly, and it starts minimised to the tray as the setting always claimed; Linux gets a real autostart entry instead of a switch that did nothing. Collaborators working from the desktop app appear under their own name rather than under their API token's label. A server's Branding logo reaches the desktop client, so an install with an identity looks like that install. In the explorer itself: the tab strip can stay on screen with a single tab open — it was hiding the + button that opens the second one — the theme gallery gained a Day / Night / Automatic switch, which is a separate question from which palette paints and the one people were already opening that button to answer, and scrollbars follow the theme instead of staying platform grey.
+
+**Fixed**
+
+- **Desktop** — The app that started itself as a bare electron, and three things that looked wrong.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.15.0`
 
 ## v0.14.0
 
@@ -51,275 +287,30 @@ A fix for a disk that fills up on its own. Uploads larger than 32 MiB are buffer
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.13.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.13.4`
 
-## v0.13.3
-
-<span class="filex-release-date">7 August 2026</span>
-
-The share button now appears in the desktop app. The explorer has always had one, but it was gated on the Web Share API, which Electron does not ship — so rather than build a second share UI, the app puts a native handler behind the standard API and the existing button lights up. On Windows and Linux that is a native menu (copy link, copy message, email, open in browser); the OS share sheet needs WinRT, which Electron does not expose. Also fixes the sync engine being reported missing when the app runs from source.
-
-**New**
-
-- **Desktop** — The share button works here too, and three things found by using it.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.13.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.13.3`
-
-## v0.13.2
-
-<span class="filex-release-date">7 August 2026</span>
-
-Sixteen components were rendering as raw, unstyled HTML in every embedded surface — the share dialog, the convert dialog, the presence bar and nine file viewers. Vue's scoped styles compile to a build-specific hash, and the web-component build was pairing components from one build with CSS from another, so every scoped rule was dead. Nothing errored, which is why it survived. This affected **every** embedder, not only the desktop app.
-
-**Fixed**
-
-- **Core** — Scoped styles were dead in every embed — 16 components rendered raw.
-
-**Other changes**
-
-- **Desktop** — Say out loud which commit is being packaged.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.13.2) · `ghcr.io/brf-tech/filex:slim-v0.13.2`
-
-## v0.13.1
-
-<span class="filex-release-date">7 August 2026</span>
-
-The explorer's onboarding tour sat on top of the desktop app's Settings panel. The tour attaches to `<body>`, so hiding the explorer left it exactly where it was.
-
-**Fixed**
-
-- **Desktop** — The onboarding tour covered Settings, and the test said it did not.
-
-**Other changes**
-
-- **Desktop** — Drive the PACKAGED app, not just the source tree.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.13.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.13.1`
-
-## v0.13.0
-
-<span class="filex-release-date">7 August 2026</span>
-
-The desktop app is a file manager, not an admin console. Signing in used to land you on the server's dashboard because the shell embedded the whole admin SPA; it now shows the file explorer, an account rail down the left, and a gear for the app's own settings. Also fixes starred files, recently-opened, starring and tags in **any** cross-origin embed — four calls hardcoded credentialed requests, which a wildcard CORS response may not answer, so those lists came back empty with no error.
-
-**Fixed**
-
-- **Desktop** — The window is a file manager, not the admin console.
-
-**Other changes**
-
-- **Desktop** — The bundled engine no longer carries a second copy of the UI.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.13.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.13.0`
-
-## v0.12.0
-
-<span class="filex-release-date">7 August 2026</span>
-
-Selective folder sync. A folder on your computer and a folder on a filex server are kept in step in both directions, in the background. The engine ships as `filex sync` in the CLI and the desktop app runs that same binary, so the terminal and the app can never disagree about what is paired. The first sync of a pair deletes nothing, a delete never beats an edit, a file changed in both places keeps both copies, and anything sync removes locally is kept for 30 days.
-
-**New**
-
-- **Sync** — Keep a local folder and a server folder in step.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.12.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.12.0`
-
-## v0.11.0
-
-<span class="filex-release-date">7 August 2026</span>
-
-The desktop app, for Windows and Linux. It runs the same web UI this repo already ships, and sign-in happens in your browser — the app opens the server's own login page and waits, so installs behind an identity provider (OIDC, SSO, passkeys, MFA) work. Multiple accounts on multiple servers, a background tray, optional start-at-login, and tokens held in the OS keychain. Also fixes cross-origin embedding of the web app, which every split-origin deployment hit.
-
-**New**
-
-- Desktop app (Windows + Linux), browser sign-in, install prompts.
-
-**Other changes**
-
-- **Desktop** — Version the app with the product, not on its own.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.11.0) · `ghcr.io/brf-tech/filex:slim-v0.11.0`
-
-## v0.10.2
-
-<span class="filex-release-date">6 August 2026</span>
-
-Completes the guard added in 0.10.1: a sweep found four more places that could still write a file onto a folder — archive extraction and creation, the OnlyOffice save-back, and version restore — plus replication, where a collision does its real damage. Also fixes uploads through the public file-drop link on S3 providers that require a `Content-Length`.
-
-Refuses a file written onto a folder, on every write surface — and the reverse
-(a folder created onto a file).
-
-An object store accepts `X` and `X/…` side by side. A directory-backed mirror
-cannot represent that: the prefix stops listing and the objects under it
-silently lose their backup. Measured on a live DR mirror — 2760 syncs in 24h,
-1016 versions of one PNG, a 43 MiB folder occupying 45 GB. Overwriting a file
-with a file is unchanged; that was never the problem.
-
-Also fixes uploads through the public file-drop link on providers that require
-a Content-Length (411), and adds `filex storage scan-collisions` to report
-damage that predates the guard.
-
-Full notes: CHANGELOG.md (0.10.1 + 0.10.2).
-
-Built and published manually: GitHub Actions was in a major outage on release
-day, so no workflow run could be scheduled. Same steps as the release workflow
-(frontend → embed → goreleaser). Binaries verified to report `0.10.2 (c3b1c53)`
-and all six checksums verified before upload. Container images (amd64+arm64)
-were published the same way to ghcr.io/brf-tech/filex.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.10.2)
-
-## v0.10.0
-
-<span class="filex-release-date">6 August 2026</span>
-
-Two explorer changes reported by a deployment whose users mount WebDAV from macOS. Dot-prefixed files can now be shown or hidden and are hidden by default (a Mac leaves `.DS_Store` and `._name` litter in every folder it opens), and when exactly one storage is visible that storage opens directly instead of making you click through a one-row page. Shipped as a minor rather than a patch on purpose: a release that changes what the explorer does on screen has to be one the operator opts into.
-
-**New**
-
-- **UI** — Open the storage directly when only one is visible.
-- **UI** — Show/hide dot-files, off by default.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.10.0) · `ghcr.io/brf-tech/filex:slim-v0.10.0`
-
-## v0.9.0
-
-<span class="filex-release-date">6 August 2026</span>
-
-Closes the ten items a multi-tenant deployment filed against v0.8.0. The important one is a security fix: a tenant admin could reach every other tenant's storages over WebDAV, because `/dav` does its own Basic authentication and so ran outside the chain that applies the tenant scope. Also: uploads work on strict S3 providers that require a `Content-Length`, a transient 503 no longer kills a whole sync run, and per-user enable/disable and quota reporting land on the user object.
-
-**New**
-
-- **Users** — Carry used_bytes and quota_bytes on the user object.
-- **Users** — Honour provider_id when creating a user.
-- **Users** — Per-user enable/disable switch.
-
-**Fixed**
-
-- **WebDAV** — Scope /dav to the caller's tenant.
-- **Grants** — Require a qualified path, and apply the tenant gate.
-- **Quota** — 404 for an unknown user, and serve quota under /users/{id}.
-- **S3** — Send Content-Length on PutObject so uploads work on strict providers.
-- **S3** — Stat a prefix as a directory.
-- **S3** — Transient 503 no longer kills a whole sync run + name the file that failed to thumbnail.
-- **UI** — Surface upload failures to the user.
-- **Users** — Confine Get/Update/Delete to the caller's tenant.
-
-**Other changes**
-
-- **Backend** — Correct the admin users surface, document delete semantics.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.9.0) · `ghcr.io/brf-tech/filex:slim-v0.9.0`
-
-## v0.8.0
-
-<span class="filex-release-date">29 July 2026</span>
-
-filex now knows which releases exist, and can install them. What it does is decided by which part of the version moved: a patch applies itself when the policy allows, a minor is announced and applied with one click, a major is announced with instructions. Nothing moves until you opt in — the default only checks and tells you. Container installs never self-apply by design, because a binary replaced inside a running container disappears at the next `docker compose up` and the version silently reverts.
-
-**New**
-
-- **Update** — Release awareness + self-upgrade (x.y.z policy)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.8.0) · `ghcr.io/brf-tech/filex:slim-v0.8.0`
-
-## v0.7.6
-
-<span class="filex-release-date">29 July 2026</span>
-
-Denials on the AI/MCP surface answer `403` instead of `500`. A `5xx` reads as "server glitch, retry", so agents and HTTP clients were retrying requests that could never succeed while the real cause — a path outside the token's confined root, or a missing grant — hid behind a generic server error.
-
-**Fixed**
-
-- **AI** — Map confinement and permission denials to 403 instead of 500.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.6) · `ghcr.io/brf-tech/filex:slim-v0.7.6`
-
-## v0.7.5
-
-<span class="filex-release-date">19 July 2026</span>
-
-An internal refactor with no behaviour change: the storage-scoped path hash had been copy-pasted across nine call sites, so the same file could map to different rows if any copy drifted. It is now one function, moved verbatim, with a test pinning it byte-for-byte against the old implementation.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.5) · `ghcr.io/brf-tech/filex:slim-v0.7.5`
-
-## v0.7.4
-
-<span class="filex-release-date">18 July 2026</span>
-
-Two explorer fixes: the trash bin now appears in the secondary pane of split view (the two panes were offset by a row), and tall listings scroll inside their pane instead of scrolling the whole page.
-
-**Fixed**
-
-- **UI** — v0.7.4 split view trash-row parity + standalone page-scroll.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.4) · `ghcr.io/brf-tech/filex:slim-v0.7.4`
-
-## v0.7.3
-
-<span class="filex-release-date">18 July 2026</span>
-
-Split view's right-click menu now matches the main panel exactly — it was a shorter, separate list missing rename, delete, share, convert and tags. Dropping a file onto the folder it already lives in is a silent no-op rather than an error, and the two panes' breadcrumbs finally line up.
-
-**Fixed**
-
-- **UI** — v0.7.3 split view menu parity + same-dir drop no-op + breadcrumb alignment.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.3) · `ghcr.io/brf-tech/filex:slim-v0.7.3`
-
-## v0.7.2
-
-<span class="filex-release-date">18 July 2026</span>
-
-Split-view polish: the main panel's breadcrumb no longer spans the full width, and right-clicking a row in the secondary pane opens a real menu instead of only selecting the row.
-
-**Fixed**
-
-- **UI** — v0.7.2 split view breadcrumb width + secondary pane context menu.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.2) · `ghcr.io/brf-tech/filex:slim-v0.7.2`
-
-## v0.7.1
-
-<span class="filex-release-date">18 July 2026</span>
-
-A round of layout and accessibility fixes for embedders. The explorer no longer overflows its host by 2px (the outer scrollbar that produced in embeds is gone), the toolbar folds overflowing actions into a `⋯` menu instead of wrapping, split view renders both panes with the same view components, and the default accent colour was darkened so white text on primary buttons meets WCAG AA.
-
-**Fixed**
-
-- **UI** — v0.7.1 polish round.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.1) · `ghcr.io/brf-tech/filex:slim-v0.7.1`
-
-## v0.7.0
-
-<span class="filex-release-date">17 July 2026</span>
-
-Three additions. **Branding** — a settings-driven identity (name, logo, accent, footer) for the public share, PIN, file-drop and folder-browse pages plus the admin login, with per-tenant overrides. **End-to-end encrypted folders (MVP)** — a password-protected folder encrypted in the browser, where the server never sees the password, a key or plaintext; there is no recovery, so read the threat model first. Plus a `FILEX_CLOUD` flag that is off by default and changes nothing while off.
-
-**New**
-
-- **Kimlik** — v0.7.0 identity & trust wave.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.7.0) · `ghcr.io/brf-tech/filex:slim-v0.7.0`
-
-## v0.6.0
-
-<span class="filex-release-date">17 July 2026</span>
-
-Tabs and split view. Open several locations as tabs, split the active tab into two panes that navigate independently, and drag files between them to move (same storage) or copy (across storages). Also a gallery view, browsable public folder shares that open a navigable page instead of jumping straight to a ZIP, and per-file comment threads.
-
-**New**
-
-- **Calisma** — v0.6.0 workspace wave.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.6.0) · `ghcr.io/brf-tech/filex:slim-v0.6.0`
-
 ## Earlier releases
 
-The 34 releases before v0.6.0, in brief. Full notes are on GitHub.
+The 52 releases before v0.13.4, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.13.3](https://github.com/BRF-Tech/filex/releases/tag/v0.13.3) | 7 August 2026 | The share button now appears in the desktop app. The explorer has always had one, but it was gated on the Web Share API, which Electron does not ship — so rather than build a second share UI, the app puts a native handler behind… |
+| [v0.13.2](https://github.com/BRF-Tech/filex/releases/tag/v0.13.2) | 7 August 2026 | Sixteen components were rendering as raw, unstyled HTML in every embedded surface — the share dialog, the convert dialog, the presence bar and nine file viewers. |
+| [v0.13.1](https://github.com/BRF-Tech/filex/releases/tag/v0.13.1) | 7 August 2026 | The explorer's onboarding tour sat on top of the desktop app's Settings panel. The tour attaches to `<body>`, so hiding the explorer left it exactly where it was. |
+| [v0.13.0](https://github.com/BRF-Tech/filex/releases/tag/v0.13.0) | 7 August 2026 | The desktop app is a file manager, not an admin console. Signing in used to land you on the server's dashboard because the shell embedded the whole admin SPA; it now shows the file explorer, an account rail down the left, and a… |
+| [v0.12.0](https://github.com/BRF-Tech/filex/releases/tag/v0.12.0) | 7 August 2026 | Selective folder sync. A folder on your computer and a folder on a filex server are kept in step in both directions, in the background. |
+| [v0.11.0](https://github.com/BRF-Tech/filex/releases/tag/v0.11.0) | 7 August 2026 | The desktop app, for Windows and Linux. It runs the same web UI this repo already ships, and sign-in happens in your browser — the app opens the server's own login page and waits, so installs behind an identity provider (OIDC,… |
+| [v0.10.2](https://github.com/BRF-Tech/filex/releases/tag/v0.10.2) | 6 August 2026 | Completes the guard added in 0.10.1: a sweep found four more places that could still write a file onto a folder — archive extraction and creation, the OnlyOffice save-back, and version restore — plus replication, where a… |
+| [v0.10.0](https://github.com/BRF-Tech/filex/releases/tag/v0.10.0) | 6 August 2026 | Two explorer changes reported by a deployment whose users mount WebDAV from macOS. Dot-prefixed files can now be shown or hidden and are hidden by default (a Mac leaves `.DS_Store` and `._name` litter in every folder it opens),… |
+| [v0.9.0](https://github.com/BRF-Tech/filex/releases/tag/v0.9.0) | 6 August 2026 | Closes the ten items a multi-tenant deployment filed against v0.8.0. The important one is a security fix: a tenant admin could reach every other tenant's storages over WebDAV, because `/dav` does its own Basic authentication and… |
+| [v0.8.0](https://github.com/BRF-Tech/filex/releases/tag/v0.8.0) | 29 July 2026 | filex now knows which releases exist, and can install them. What it does is decided by which part of the version moved: a patch applies itself when the policy allows, a minor is announced and applied with one click, a major is… |
+| [v0.7.6](https://github.com/BRF-Tech/filex/releases/tag/v0.7.6) | 29 July 2026 | Denials on the AI/MCP surface answer `403` instead of `500`. A `5xx` reads as "server glitch, retry", so agents and HTTP clients were retrying requests that could never succeed while the real cause — a path outside the token's… |
+| [v0.7.5](https://github.com/BRF-Tech/filex/releases/tag/v0.7.5) | 19 July 2026 | An internal refactor with no behaviour change: the storage-scoped path hash had been copy-pasted across nine call sites, so the same file could map to different rows if any copy drifted. |
+| [v0.7.4](https://github.com/BRF-Tech/filex/releases/tag/v0.7.4) | 18 July 2026 | Two explorer fixes: the trash bin now appears in the secondary pane of split view (the two panes were offset by a row), and tall listings scroll inside their pane instead of scrolling the whole page. |
+| [v0.7.3](https://github.com/BRF-Tech/filex/releases/tag/v0.7.3) | 18 July 2026 | Split view's right-click menu now matches the main panel exactly — it was a shorter, separate list missing rename, delete, share, convert and tags. |
+| [v0.7.2](https://github.com/BRF-Tech/filex/releases/tag/v0.7.2) | 18 July 2026 | Split-view polish: the main panel's breadcrumb no longer spans the full width, and right-clicking a row in the secondary pane opens a real menu instead of only selecting the row. |
+| [v0.7.1](https://github.com/BRF-Tech/filex/releases/tag/v0.7.1) | 18 July 2026 | A round of layout and accessibility fixes for embedders. The explorer no longer overflows its host by 2px (the outer scrollbar that produced in embeds is gone), the toolbar folds overflowing actions into a `⋯` menu instead of… |
+| [v0.7.0](https://github.com/BRF-Tech/filex/releases/tag/v0.7.0) | 17 July 2026 | Three additions. **Branding** — a settings-driven identity (name, logo, accent, footer) for the public share, PIN, file-drop and folder-browse pages plus the admin login, with per-tenant overrides. |
+| [v0.6.0](https://github.com/BRF-Tech/filex/releases/tag/v0.6.0) | 17 July 2026 | Tabs and split view. Open several locations as tabs, split the active tab into two panes that navigate independently, and drag files between them to move (same storage) or copy (across storages). |
 | [v0.5.0](https://github.com/BRF-Tech/filex/releases/tag/v0.5.0) | 17 July 2026 | A large interface release: eight built-in themes with independent light and dark variants, fully rebindable keyboard shortcuts, Quick Look (peek the selected file with Space), an operations centre that collects uploads and… |
 | [v0.4.2](https://github.com/BRF-Tech/filex/releases/tag/v0.4.2) | 17 July 2026 | Cleanup release. Moving a folder to trash no longer wedges storage sync (a trashed folder's leftovers could block sync from ever re-creating those names), `versions.keep_n` above 20 works instead of being silently capped, and… |
 | [v0.4.1](https://github.com/BRF-Tech/filex/releases/tag/v0.4.1) | 17 July 2026 | Packaging and documentation. Ready-to-submit app-store manifests for Umbrel, CasaOS, Runtipi, Unraid and Portainer, a refreshed Helm chart, and this documentation site. |
@@ -357,4 +348,4 @@ The 34 releases before v0.6.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-10 from 54 published releases.</small>
+<small>Generated 2026-08-19 from 72 published releases.</small>

@@ -224,6 +224,9 @@ func ValidateDescribe(d *DescribeResponse) error {
 	if d.Capabilities.Write != d.Capabilities.Delete {
 		return errors.New("plugin declares write without delete (or the reverse): a writable driver must be able to remove what it creates")
 	}
+	if d.Capabilities.Multipart && !d.Capabilities.Writable() {
+		return errors.New("plugin declares multipart without write+delete: a resumable upload is still an upload")
+	}
 	seen := map[string]bool{}
 	for _, f := range d.Fields {
 		if f.Key == "" {
@@ -355,6 +358,84 @@ func (c *Client) Mkdir(ctx context.Context, id, path string) error {
 
 func (c *Client) SetMtime(ctx context.Context, id, path string, t time.Time) error {
 	return c.doJSON(ctx, http.MethodPost, inst(id, "set-mtime"), nil, MtimeRequest{Path: path, Mtime: t}, nil)
+}
+
+// SelfTest asks the plugin for a THROWAWAY instance to run conformance
+// probes against (POST /v1/selftest). A plugin that does not offer one
+// answers 404/unsupported, and the host says so rather than pretending it
+// verified something.
+func (c *Client) SelfTest(ctx context.Context) (string, error) {
+	var out InstanceResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/selftest", nil, nil, &out); err != nil {
+		return "", err
+	}
+	if out.Instance == "" {
+		return "", errors.New("plugin: selftest returned no instance")
+	}
+	return out.Instance, nil
+}
+
+// PresignUpload asks for a URL the CLIENT can PUT to directly.
+func (c *Client) PresignUpload(ctx context.Context, id, path string, size int64) (PresignResponse, error) {
+	var out PresignResponse
+	err := c.doJSON(ctx, http.MethodPost, inst(id, "presign-upload"), nil, PresignRequest{Path: path, Size: size}, &out)
+	return out, err
+}
+
+// PresignDownload asks for a URL the CLIENT can GET directly.
+func (c *Client) PresignDownload(ctx context.Context, id, path string, ttl time.Duration) (PresignResponse, error) {
+	var out PresignResponse
+	err := c.doJSON(ctx, http.MethodPost, inst(id, "presign-download"), nil,
+		PresignRequest{Path: path, TTLSeconds: int64(ttl / time.Second)}, &out)
+	return out, err
+}
+
+// InitMultipart starts a resumable upload.
+func (c *Client) InitMultipart(ctx context.Context, id, path string, totalSize int64, partCount int) (MultipartInitResponse, error) {
+	var out MultipartInitResponse
+	err := c.doJSON(ctx, http.MethodPost, inst(id, "multipart/init"), nil,
+		MultipartInitRequest{Path: path, TotalSize: totalSize, PartCount: partCount}, &out)
+	return out, err
+}
+
+// UploadPart sends ONE part from the server side (the staged-upload path
+// holds the bytes itself, so it cannot use a presigned part URL).
+func (c *Client) UploadPart(ctx context.Context, id, path, uploadID string, part int, r io.Reader, size int64) (string, error) {
+	q := url.Values{"path": {path}, "upload_id": {uploadID}, "part": {strconv.Itoa(part)}}
+	req, err := c.newRequest(ctx, http.MethodPut, inst(id, "multipart/part"), q, r)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set(SizeHeader, strconv.FormatInt(size, 10))
+	if size >= 0 {
+		req.ContentLength = size
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("plugin: upload part %d: %w", part, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", readError(resp)
+	}
+	var out MultipartPartResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Etag, nil
+}
+
+// CompleteMultipart finishes an upload.
+func (c *Client) CompleteMultipart(ctx context.Context, id, path, uploadID string, parts []MultipartPart) error {
+	return c.doJSON(ctx, http.MethodPost, inst(id, "multipart/complete"), nil,
+		MultipartCompleteRequest{Path: path, UploadID: uploadID, Parts: parts}, nil)
+}
+
+// AbortMultipart throws an unfinished upload away.
+func (c *Client) AbortMultipart(ctx context.Context, id, path, uploadID string) error {
+	return c.doJSON(ctx, http.MethodPost, inst(id, "multipart/abort"), nil,
+		MultipartCompleteRequest{Path: path, UploadID: uploadID}, nil)
 }
 
 // Watch opens the SSE stream and forwards events until ctx ends or the

@@ -14,6 +14,14 @@ be reached *as*:
 | SMB / CIFS | ✅ | ❌ — see [Why no SMB server](#why-there-is-no-smb-server) |
 | HTTPS (`filex mount`) | — | ✅ always, no server-side switch |
 
+A backend that is in **neither** column can still be mounted: a
+[storage plugin](PLUGINS.md) is a separate program that teaches filex a backend
+it does not ship, and a storage on one is served over every protocol in the
+right-hand column exactly like a built-in — WebDAV, SFTP, FTPS, NFS and the S3
+endpoint each have a test against a live plugin. ⚠ When such a plugin is down,
+those surfaces answer an **error**, never an empty listing: a mirroring client
+that saw an empty success would delete the user's local copy.
+
 Everything below lands in the **same tree**, with the same RBAC grants, the same trash,
 the same quota, the same search index and the same audit trail as the web UI. A file
 uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped in the

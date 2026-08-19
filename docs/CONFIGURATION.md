@@ -240,11 +240,28 @@ Drivers that live outside the binary — see [PLUGINS.md](PLUGINS.md).
 | Variable | Default | Meaning |
 |---|---|---|
 | `FILEX_PLUGINS_DISABLED` | `0` | Turns the whole subsystem off: nothing under `<data-dir>/plugins` is launched, no remote plugin is contacted, and the admin API answers 503 saying so. On by default, because a plugin is only ever installed by an admin — but an operator hardening a shared instance may not want the admin role to include “run a program on the server”. |
+| `FILEX_PLUGIN_CONFORMANCE` | `enforce` | `enforce` · `warn` · `off`. filex **probes every capability a plugin declares** — at install against the plugin's own throwaway area, and again when a storage on it is saved, against that real configuration. `enforce` refuses a plugin that fails its own claims and refuses to save a storage on it. `warn` registers it anyway and keeps the report — for somebody *writing* a plugin, never for a shared instance: the cost of a broken claim is paid by the user, who meets an operation the UI offered and reads the failure as filex being broken. `off` skips both gates. Anything unrecognised falls back to `enforce`. |
+| `FILEX_PLUGIN_TRUSTED_KEYS` | — | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
+| `FILEX_PLUGIN_MAX_INFLIGHT` | `10` | Concurrent operations allowed **per plugin**. A caller that waits 5 s for a slot is refused rather than queued, and counted as `outcome="busy"` in [the metrics](METRICS.md#storage-plugins) — a sizing signal, not a bug. Raise it for a fast local plugin, lower it to keep a slow remote one from occupying the server. `0` or nonsense keeps the default. |
 | `FILEX_SECRET_KEY` | — | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). |
 
 Installed binaries live in `<data-dir>/plugins/<name>/`, and a plugin's socket
 in `<data-dir>/plugins/<name>/run/` (mode 0600). In multi-tenant mode the admin
 surface is supertenant-only.
+
+What is **not** configurable from the environment, and is cheaper to read here
+than to search for:
+
+- **The waiting and deadline figures around the ceiling**: 5 seconds waiting for
+  a slot, 60 seconds on metadata calls. Streaming reads and writes are
+  deliberately exempt — a 20 GB upload is legitimately slow, and a deadline
+  there turns a working transfer into a failed one.
+- **The plugin log rate limit** (50 lines/s, burst 200). Dropped lines are
+  reported once per window rather than silently lost.
+
+> ⚠ Signature enforcement is **off until you set `FILEX_PLUGIN_TRUSTED_KEYS`**.
+> Until then a plugin is accepted on the strength of its sha256, which proves
+> only that the file has not changed since it arrived — never who it came from.
 
 ---
 

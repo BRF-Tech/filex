@@ -47,6 +47,29 @@ type Config struct {
 	// hardening a shared instance may not want the admin role to include
 	// "run a program on the server". See docs/PLUGINS.md.
 	PluginsDisabled bool `yaml:"plugins_disabled"`
+	// PluginConformance (FILEX_PLUGIN_CONFORMANCE) is enforce | warn | off.
+	//
+	// enforce (default): a plugin that fails a probe of a capability IT
+	// DECLARED is refused, and a storage cannot be saved on it. The reason a
+	// half-working plugin must not be usable is that the user cannot tell
+	// whose fault it is: they meet an upload button that fails and read it as
+	// filex being broken. warn registers it anyway and keeps the report (for
+	// somebody writing a plugin); off skips the probes.
+	PluginConformance string `yaml:"plugin_conformance"`
+	// PluginTrustedKeys (FILEX_PLUGIN_TRUSTED_KEYS, comma-separated) are
+	// ed25519 public keys, hex or base64. Set ANY key and filex refuses a
+	// plugin binary that is not signed by one of them.
+	//
+	// ⚠ The sha256 an install already records proves only that the file has
+	// not changed since it arrived — never that it came from somebody you
+	// trust. This is the setting that answers the second question, and until
+	// it is set nothing is asked.
+	PluginTrustedKeys []string `yaml:"plugin_trusted_keys"`
+	// PluginMaxInFlight (FILEX_PLUGIN_MAX_INFLIGHT) bounds concurrent
+	// operations per plugin. 0 keeps the default; a plugin at its ceiling
+	// refuses new work rather than queueing it, which is what stops one slow
+	// plugin from becoming one slow filex.
+	PluginMaxInFlight int `yaml:"plugin_max_in_flight"`
 	// SecretKey (FILEX_SECRET_KEY) encrypts the secrets filex has to be able to
 	// read back rather than merely compare — today the S3 access keys, because
 	// SigV4 derives an HMAC chain from the secret and so cannot work off a
@@ -653,6 +676,22 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_PLUGINS_DISABLED"); v == "1" || v == "true" {
 		c.PluginsDisabled = true
+	}
+	if v := os.Getenv("FILEX_PLUGIN_CONFORMANCE"); v != "" {
+		c.PluginConformance = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("FILEX_PLUGIN_TRUSTED_KEYS"); v != "" {
+		c.PluginTrustedKeys = nil
+		for _, k := range strings.Split(v, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				c.PluginTrustedKeys = append(c.PluginTrustedKeys, k)
+			}
+		}
+	}
+	if v := os.Getenv("FILEX_PLUGIN_MAX_INFLIGHT"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			c.PluginMaxInFlight = n
+		}
 	}
 	if v := os.Getenv("FILEX_COOKIE_DOMAIN"); v != "" {
 		c.CookieDomain = v

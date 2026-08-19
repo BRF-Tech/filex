@@ -166,6 +166,12 @@ func main() {
 				Root: true, Placeholder: "demo",
 			},
 		},
+		// SelfTest hands filex a throwaway area to probe. Without it the
+		// plugin is registered UNVERIFIED and the checks fall on somebody's
+		// first real storage instead.
+		SelfTest: func(_ context.Context) (*memFS, error) {
+			return &memFS{prefix: "selftest", files: map[string]*file{}}, nil
+		},
 		Open: func(_ context.Context, cfg map[string]any) (*memFS, error) {
 			prefix := pluginsdk.String(cfg, "prefix")
 			if prefix == "" {

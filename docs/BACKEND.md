@@ -225,27 +225,52 @@ For files >5 MB. Smaller files can use `POST /api/files/upload` (single-shot
 **Request**
 ```json
 {
-  "path": "/storage1/big.iso",
+  "storage_id": 1,
+  "path": "storage1://big.iso",
+  "filename": "big.iso",
   "size": 5368709120,
   "mime": "application/octet-stream",
-  "chunk_size": 16777216
+  "chunk_bytes": 16777216
 }
 ```
+`storage_id` may be omitted when `path` carries an adapter prefix; `filename` is
+optional and folded onto `path` when both are sent (an upload to a storage root
+arrives as `path: "adapter://"` plus a filename). `chunk_bytes` is a request:
+the server raises anything below 5 MiB and re-balances so an upload never
+exceeds 10 000 parts — **use the `part_size` it answers with**.
+
 **Response 200**
 ```json
 {
   "upload_id": "u_AbCdEf",
-  "presigned_urls": [
-    { "part": 1, "url": "https://s3.example.com/...&X-Amz-Sig=...", "expires_at": "..." },
-    { "part": 2, "url": "https://s3.example.com/...&X-Amz-Sig=...", "expires_at": "..." },
-    "..."
+  "part_urls": [
+    "https://s3.example.com/...&partNumber=1&X-Amz-Sig=...",
+    "https://s3.example.com/...&partNumber=2&X-Amz-Sig=..."
   ],
+  "part_size": 16777216,
+  "part_count": 320,
   "expires_at": "2026-04-29T00:00:00Z"
 }
 ```
-Browser PUTs each chunk directly to the URL. For drivers that don't support
-presigned multipart (sftp, webdav), `presigned_urls` is null and the client
-posts each chunk to `POST /api/files/upload/chunk?upload_id=…&part=…`.
+`part_urls` is a **flat list of URLs**, one per part in order — the browser PUTs
+each chunk straight to its own URL, then calls `/finalize` (or `/abort`).
+
+> ⚠ There is **no chunk-through-filex fallback on this endpoint**. A driver that
+> cannot do multipart at all (local, sftp, ftp, webdav) answers
+> **`501 storage does not support multipart upload`** at `init` — earlier
+> versions of this page described a `POST /api/files/upload/chunk` route as the
+> fallback; that route does not exist. Measured 2026-08-19.
+
+> ⚠⚠ A [plugin](PLUGINS.md) storage that declares `multipart` passes the check
+> at `init` and then usually answers **no part URLs** (`part_urls: null`),
+> because a plugin's multipart is built for the staged-upload commit, where
+> filex pushes the parts itself. There is nothing for the browser to PUT to —
+> use the staged path for plugin storages.
+
+> ⚠ This whole endpoint is the **older** browser-chunked path, kept for older
+> embedders. No filex client speaks it any more: the staged path
+> ([UPLOADS.md](UPLOADS.md)) replaced it everywhere, works on every driver, and
+> is the only one that can resume.
 
 ### `POST /api/files/upload/finalize` ![user](https://img.shields.io/badge/-user-blue)
 ```json
@@ -453,12 +478,24 @@ the state is what the manager sees right now.
 ```json
 {
   "dir": "/data/plugins",
+  "requires_signature": false,
+  "conformance": "enforce",
   "plugins": [
     { "id": 1, "name": "memfs", "kind": "binary", "binary": "memfs",
       "sha256": "9f2c…", "enabled": true, "version": "1.0.0",
       "driver": "memfs", "state": "running", "restarts": 0,
       "label": "In-memory (example)", "field_count": 1, "in_use": 1,
-      "capabilities": { "write": true, "delete": true, "set_mtime": true } }
+      "capabilities": { "write": true, "delete": true, "set_mtime": true,
+                        "presign": false, "multipart": true },
+      "conformance": {
+        "verified": true, "scratch": "selftest",
+        "ran_at": "2026-08-19T09:14:02Z",
+        "results": [
+          { "name": "write", "status": "pass", "took_ms": 1180400 },
+          { "name": "presign", "status": "skip", "detail": "not declared", "took_ms": 0 }
+        ]
+      },
+      "load": { "in_flight": 0, "waited": 0, "rejected": 0, "max_in_flight": 10 } }
   ]
 }
 ```
@@ -466,25 +503,71 @@ the state is what the manager sees right now.
 `state_error` carries the reason for the last two. `in_use` counts storages on
 this plugin's driver.
 
+Top level: **`requires_signature`** says this instance refuses unsigned binaries
+(trusted keys are configured), and **`conformance`** is the *mode* —
+`enforce` · `warn` · `off`. Both are published so a surface can state the rules
+before an install instead of after a rejection.
+
+Per plugin: **`conformance`** is the last probe *report* — `verified`, `scratch`
+(`selftest` when it ran against the plugin's own throwaway instance, `storage`
+when it ran against a real storage), and one `results` entry per probe with
+`status` `pass` · `fail` · `skip` and a `detail` written for the plugin's
+author. **Absent means never probed** — "unverified", which is not the same as
+failed. **`load`** is live: in-flight operations, callers that had to wait, and
+callers that were **rejected** (anything above 0 is a user meeting an error
+because the plugin is saturated).
+
+> ⚠ Two different things are called `conformance` in one document: a **mode**
+> at the top level, a **report** inside each plugin. Read the level before the
+> name.
+
+> ⚠ `took_ms` is a Go `time.Duration`, which `encoding/json` writes as
+> **nanoseconds** despite the field name. Divide by 1e6 before printing
+> milliseconds.
+
 ### `POST /api/admin/plugins` ![admin](https://img.shields.io/badge/-admin-red)
 Install, in one of three shapes — the Content-Type picks which:
 
 | Shape | Body |
 |---|---|
-| upload | `multipart/form-data` with `name` and `file` |
-| download | `{"name":"…","url":"https://…","sha256":"…"}` — the hash is **required** |
+| upload | `multipart/form-data` with `name`, `file` and optionally `signature` |
+| download | `{"name":"…","url":"https://…","sha256":"…","signature":"…"}` — the hash is **required** |
 | remote | `{"name":"…","kind":"remote","address":"http(s)://…","token":"…"}` |
 
 **201** with the same object as above. `409` when the name is taken, `400` for
-a bad name (`[a-z0-9][a-z0-9_-]{0,31}`), a missing hash, or a remote plugin
-with no `FILEX_SECRET_KEY` configured to seal its token.
+a bad name (`[a-z0-9][a-z0-9_-]{0,31}`), a missing hash, a remote plugin
+with no `FILEX_SECRET_KEY` configured to seal its token, or — when
+`requires_signature` is true — a missing or unverifiable `signature` (a detached
+ed25519 signature over the binary's lower-case hex sha256).
+
+> ⚠ **201 does not mean usable.** Installing writes the row and starts the
+> plugin; describe and the conformance probes happen after that, asynchronously.
+> A plugin that declares a capability it cannot perform is accepted here and
+> then lands in `refused` with `state_error` containing *"fails its own
+> claims"*, and its driver is never registered. Poll `GET /api/admin/plugins`
+> for the state rather than treating the 201 as the answer.
+
+### `POST /api/admin/plugins/{id}/upgrade` ![admin](https://img.shields.io/badge/-admin-red)
+`multipart/form-data` with `file` (and `signature` when required). Replaces a
+**binary** plugin's file while keeping the row, the name, the driver and every
+storage built on it — remove+install would take the registration with it, and a
+storage whose driver has gone cannot open.
+
+Sequence: stop → swap the file → start → describe → conformance. **200** with
+the plugin's status when the new binary comes up. Otherwise **400** with
+`{"error": "…the previous one was restored", "plugin": {…}}` — the old binary is
+put back and started again, and the body carries the status so a page can show
+what is running now instead of leaving the operator guessing. `400` too for a
+remote plugin: it is upgraded where it runs.
 
 ### `PATCH /api/admin/plugins/{id}` ![admin](https://img.shields.io/badge/-admin-red)
 `{"enabled": true|false}`. Disabling unregisters the driver, so storages on it
 stop opening — they are not deleted.
 
 ### `POST /api/admin/plugins/{id}/restart` ![admin](https://img.shields.io/badge/-admin-red)
-Stop and start it. The way out of `refused` once the cause is fixed.
+Stop and start it. The way out of `refused` once the cause is fixed. The
+conformance probes run again on every start, so a fixed plugin proves itself
+without an extra step.
 
 ### `DELETE /api/admin/plugins/{id}` ![admin](https://img.shields.io/badge/-admin-red)
 **204.** Removes the registration and, for a binary plugin, its directory.
@@ -517,8 +600,22 @@ Storages created on it are left in place.
 ```
 **Response 200** `{ "id": 7, "name": "Hetzner archive", ... }`
 
+> ⚠ A storage on a **plugin** driver (`plugin:<name>`) is probed against this
+> exact configuration *before the row is written*: filex opens the driver,
+> exercises every capability the plugin declared inside a scratch folder
+> (`.filex-conformance-<random>`, removed afterwards) and answers **400** with
+> the failing probe if it does not hold up — including `the plugin providing
+> "plugin:x" is not running` when the driver is not currently registered.
+> Built-in drivers are not probed; `FILEX_PLUGIN_CONFORMANCE=off` (or `warn`)
+> skips the gate. The whole check is bounded at 2 minutes, so a plugin that
+> accepts connections and then says nothing cannot hang the save.
+> See [PLUGINS.md → Conformance](PLUGINS.md#conformance-a-plugin-has-to-prove-its-claims).
+
 ### `PUT /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
-Same body shape; partial updates allowed.
+Same body shape; partial updates allowed. A plugin storage is **re-probed on
+every change** — the operator may have just pointed it at a different bucket,
+and a configuration that half works fails the same way a half-working plugin
+does: in the user's hands, looking like filex.
 
 ### `DELETE /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Removes the storage and its DB cache rows. Files in the underlying backend

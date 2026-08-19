@@ -47,7 +47,16 @@ type harness struct {
 // a temp dir, and the /dav handler on an httptest server.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	_, store := dbtest.NewTestDB(t)
+	return newHarnessStore(t, func(s db.Store) db.Store { return s })
+}
+
+// newHarnessStore is newHarness with a say in the store the handler gets, so a
+// test can measure a decorated one (quota accounting, say) through the same
+// wiring rather than through a second harness that drifts from this one.
+func newHarnessStore(t *testing.T, wrap func(db.Store) db.Store) *harness {
+	t.Helper()
+	_, raw := dbtest.NewTestDB(t)
+	store := wrap(raw)
 	adminEmail, adminPass := dbtest.SeedAdmin(t, store)
 
 	drivers := map[int64]storage.Driver{}

@@ -12,16 +12,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 // StoragesAdmin holds extra admin actions on storages.
 type StoragesAdmin struct {
 	Store db.Store
+	// Plugins is set when the plugin subsystem is on; Test then probes a
+	// plugin driver's real capabilities instead of only listing its root.
+	Plugins *plugin.Manager
 }
 
 // NewStoragesAdmin constructs the handler.
@@ -67,11 +72,29 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 	if len(preview) > 10 {
 		preview = preview[:10]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"ok":             true,
 		"sample_listing": preview,
 		"object_count":   len(objects),
-	})
+	}
+
+	// ⚠ For a PLUGIN driver, "it listed the root" is a weak test. The whole
+	// point of a plugin is that somebody else wrote the write path, the
+	// ranged read and the delete — so Test runs the same conformance probes
+	// the save gate does, and reports which capability failed. A listing that
+	// succeeds while write silently drops bytes is exactly the case this
+	// button exists to catch.
+	if h.Plugins != nil && strings.HasPrefix(req.Driver, plugin.DriverPrefix) {
+		if caps, known := h.Plugins.CapabilitiesFor(req.Driver); known {
+			rep := plugin.VerifyStorage(ctx, drv, caps)
+			resp["conformance"] = rep
+			if !rep.Verified {
+				resp["ok"] = false
+				resp["error"] = rep.FailureError().Error()
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // SyncRuns returns the recent sync_runs for a single storage.

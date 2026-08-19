@@ -319,6 +319,9 @@ func BuildRouter(d *Deps) http.Handler {
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	stg := handlers.NewStorages(d.Store, d.Worker)
+	// The plugin conformance gate on storage save (handlers/plugin_gate.go).
+	stg.Plugins = d.Plugins
+	stg.StorageResolver = d.StorageResolver
 	ush := handlers.NewUsers(d.Store)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
@@ -336,6 +339,8 @@ func BuildRouter(d *Deps) http.Handler {
 	externalH := handlers.NewExternalAdmin(d.Store, d.Caps)
 	authProvH := handlers.NewAuthProviders(d.Store)
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
+	// Test probes a plugin driver properly (handlers/storages_admin.go).
+	storagesAdmH.Plugins = d.Plugins
 	usersAdmH := handlers.NewUsersAdmin(d.Store)
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
 	queueH := handlers.NewQueue(d.Queue)
@@ -711,6 +716,7 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/{id}", pluginsH.Get)
 				r.Patch("/{id}", pluginsH.Patch)
 				r.Post("/{id}/restart", pluginsH.Restart)
+				r.Post("/{id}/upgrade", pluginsH.Upgrade)
 				r.Delete("/{id}", pluginsH.Delete)
 			})
 

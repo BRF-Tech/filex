@@ -2,8 +2,10 @@ package plugin
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -30,7 +33,21 @@ const (
 	StateStarting = "starting" // launched, no handshake/describe yet
 	StateRunning  = "running"  // described, driver registered
 	StateFailed   = "failed"   // last attempt failed; a binary is backing off, a remote is re-checked
-	StateRefused  = "refused"  // describe rejected by the host; not retried until restart
+	StateRefused  = "refused"  // describe or conformance rejected it; not retried until restart
+)
+
+// Conformance modes (FILEX_PLUGIN_CONFORMANCE).
+const (
+	// ConformanceEnforce is the default: a plugin that fails its own claims
+	// is refused, so nobody can build a storage on half a driver.
+	ConformanceEnforce = "enforce"
+	// ConformanceWarn registers the plugin anyway and keeps the report. For
+	// an operator debugging a plugin they are writing — never the default,
+	// because the cost of a broken claim is paid by the user, who reads it as
+	// filex being broken.
+	ConformanceWarn = "warn"
+	// ConformanceOff skips the probes entirely.
+	ConformanceOff = "off"
 )
 
 // Status is one plugin as the admin sees it: the row plus what is happening.
@@ -45,6 +62,13 @@ type Status struct {
 	// InUse counts storage rows on this plugin's driver — shown before a
 	// remove so the admin knows what will stop working.
 	InUse int `json:"in_use"`
+	// Conformance is the last verification of the plugin's own claims. Nil
+	// when it has not been probed (an older row, or probing is off).
+	Conformance *Report `json:"conformance,omitempty"`
+	// Load is what this plugin is doing right now: in-flight operations, and
+	// how often callers have had to wait or been refused a slot. A plugin
+	// that is merely SLOW shows up here long before it shows up as an error.
+	Load Stats `json:"load"`
 }
 
 // Options configure a Manager.
@@ -62,17 +86,29 @@ type Options struct {
 	// HTTP downloads plugins from URLs; nil → http.DefaultClient with a
 	// timeout.
 	HTTP *http.Client
+	// Conformance is enforce (default), warn or off.
+	Conformance string
+	// MaxInFlight bounds concurrent operations per plugin (0 → the default).
+	MaxInFlight int
+	// TrustedKeys are ed25519 public keys (hex or base64) that may sign a
+	// plugin binary. When ANY key is configured, an unsigned or badly signed
+	// binary is refused at install: the sha256 only proves the file has not
+	// changed since it arrived, never that it came from someone you trust.
+	TrustedKeys []string
 }
 
 // Manager owns every plugin's lifecycle and its place in the storage
 // registry. One per server.
 type Manager struct {
-	store db.Store
-	dir   string
-	box   *secretbox.Box
-	log   *slog.Logger
-	maxB  int64
-	http  *http.Client
+	store       db.Store
+	dir         string
+	box         *secretbox.Box
+	log         *slog.Logger
+	maxB        int64
+	http        *http.Client
+	conf        string
+	maxInFlight int
+	trusted     []ed25519.PublicKey
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -88,11 +124,13 @@ type Manager struct {
 type entry struct {
 	m   *Manager
 	row *model.Plugin
+	lim *limiter
 
 	mu       sync.Mutex
 	proc     *Process // binary
 	client   *Client  // remote, or the binary's current client
 	desc     *DescribeResponse
+	report   *Report
 	state    string
 	stateErr string
 	stopFn   context.CancelFunc // remote checker / binary supervisor ctx
@@ -110,6 +148,17 @@ func (e *entry) Client() (*Client, error) {
 		return nil, fmt.Errorf("plugin %s is %s: %s", e.row.Name, e.state, e.stateErr)
 	}
 	return nil, fmt.Errorf("plugin %s is %s", e.row.Name, e.state)
+}
+
+// limits and metricName make an entry a limitedHandle: every operation a
+// storage performs on this plugin passes through the same ceiling and lands
+// on the same Prometheus labels.
+func (e *entry) limits() *limiter { return e.lim }
+
+func (e *entry) metricName() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.row.Name
 }
 
 func (e *entry) DriverName() string {
@@ -139,9 +188,23 @@ func New(o Options) (*Manager, error) {
 	if o.HTTP == nil {
 		o.HTTP = &http.Client{Timeout: 10 * time.Minute}
 	}
+	var trusted []ed25519.PublicKey
+	for _, k := range o.TrustedKeys {
+		pub, err := parsePublicKey(k)
+		if err != nil {
+			return nil, fmt.Errorf("plugin: trusted key %q: %w", short(k), err)
+		}
+		trusted = append(trusted, pub)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
+	switch o.Conformance {
+	case ConformanceWarn, ConformanceOff:
+	default:
+		o.Conformance = ConformanceEnforce
+	}
 	return &Manager{
 		store: o.Store, dir: o.Dir, box: box, log: o.Log, maxB: o.MaxBinaryBytes, http: o.HTTP,
+		conf: o.Conformance, maxInFlight: o.MaxInFlight, trusted: trusted,
 		ctx: ctx, cancel: cancel,
 		entries: map[int64]*entry{}, drivers: map[string]int64{},
 	}, nil
@@ -149,6 +212,29 @@ func New(o Options) (*Manager, error) {
 
 // Dir is the plugins directory.
 func (m *Manager) Dir() string { return m.dir }
+
+// ConformanceMode is enforce | warn | off.
+func (m *Manager) ConformanceMode() string { return m.conf }
+
+// CapabilitiesFor returns what the plugin behind a driver name declared, and
+// whether that driver is currently provided at all. The second return is the
+// honest answer to "why can I not save a storage on this": a plugin that is
+// stopped or refused provides nothing.
+func (m *Manager) CapabilitiesFor(driver string) (Capabilities, bool) {
+	m.mu.Lock()
+	id, ok := m.drivers[driver]
+	e := m.entries[id]
+	m.mu.Unlock()
+	if !ok || e == nil {
+		return Capabilities{}, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.desc == nil || e.state != StateRunning {
+		return Capabilities{}, false
+	}
+	return e.desc.Capabilities, true
+}
 
 // Load starts every enabled plugin from the database. Start-up is
 // asynchronous; WaitReady bounds how long the caller waits for the first
@@ -224,7 +310,7 @@ func (m *Manager) ensureEntry(row *model.Plugin) *entry {
 		e.mu.Unlock()
 		return e
 	}
-	e := &entry{m: m, row: row, state: StateDisabled}
+	e := &entry{m: m, row: row, state: StateDisabled, lim: newLimiter(row.Name, m.maxInFlight)}
 	m.entries[row.ID] = e
 	return e
 }
@@ -252,6 +338,7 @@ func (m *Manager) start(e *entry) {
 }
 
 func (m *Manager) stop(e *entry) {
+	metrics.PluginUp.WithLabelValues(e.row.Name).Set(0)
 	e.mu.Lock()
 	cancel := e.stopFn
 	e.stopFn = nil
@@ -299,6 +386,10 @@ func (m *Manager) runBinary(ctx context.Context, e *entry) {
 		return m.adopt(ctx, e, c)
 	}
 	proc.OnDown = func(err error) {
+		metrics.PluginUp.WithLabelValues(row.Name).Set(0)
+		if err != nil && !errors.Is(err, ErrStopped) {
+			metrics.PluginRestarts.WithLabelValues(row.Name).Inc()
+		}
 		m.unregister(e)
 		e.mu.Lock()
 		e.client = nil
@@ -413,9 +504,28 @@ func (m *Manager) adopt(ctx context.Context, e *entry, c *Client) error {
 	m.drivers[driver] = e.row.ID
 	m.mu.Unlock()
 
+	// ⚠⚠ PROBE BEFORE REGISTERING. Once the driver is in the registry the
+	// UI offers every operation the plugin claimed, and a claim that does not
+	// hold up is read by the user as filex being broken — so the claims are
+	// tested first, against a throwaway instance the plugin opens for exactly
+	// this (POST /v1/selftest). A plugin that has no selftest endpoint is
+	// registered but marked UNVERIFIED, and the same probes then run when a
+	// storage is saved on it.
+	report, confErr := m.verify(ctx, c, desc, e)
+	if confErr != nil {
+		m.mu.Lock()
+		delete(m.drivers, driver)
+		m.mu.Unlock()
+		e.mu.Lock()
+		e.report = report
+		e.mu.Unlock()
+		return confErr
+	}
+
 	e.mu.Lock()
 	e.desc = desc
 	e.client = c
+	e.report = report
 	e.state, e.stateErr = StateRunning, ""
 	row := e.row
 	e.mu.Unlock()
@@ -447,9 +557,62 @@ func (m *Manager) adopt(ctx context.Context, e *entry, c *Client) error {
 			m.log.Warn("plugin: persist describe", slog.String("plugin", row.Name), slog.Any("err", err))
 		}
 	}
+	metrics.PluginUp.WithLabelValues(row.Name).Set(1)
 	m.log.Info("plugin up", slog.String("plugin", row.Name), slog.String("driver", driver), slog.String("version", desc.Version))
 	return nil
 }
+
+// verify runs the conformance probes against a throwaway instance the plugin
+// opens for POST /v1/selftest.
+//
+// Returns (report, error). A non-nil error means the plugin must not be
+// registered; the report is kept either way so the admin page can show which
+// probe failed rather than a sentence.
+func (m *Manager) verify(ctx context.Context, c *Client, desc *DescribeResponse, e *entry) (*Report, error) {
+	if m.conf == ConformanceOff {
+		return nil, nil
+	}
+	inst, err := c.SelfTest(ctx)
+	if err != nil {
+		// No selftest endpoint is not a failure: an older plugin, or one
+		// whose backend has no throwaway space. It stays UNVERIFIED until a
+		// storage is saved on it, and the admin list says so.
+		m.log.Info("plugin has no selftest endpoint; conformance will run when a storage is saved",
+			slog.String("plugin", e.row.Name), slog.Any("err", err))
+		return nil, nil
+	}
+	defer func() {
+		delCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = c.DeleteInstance(delCtx, inst)
+	}()
+
+	// A driver bound to the scratch instance, without going through the
+	// registry: nothing may be registered until the probes pass.
+	drv := newBoundDriver(fixedHandle{c: c, name: desc.Name}, desc.Capabilities, c, inst)
+	rep := RunConformance(ctx, drv, desc.Capabilities, "", "selftest")
+	if rep.Verified {
+		m.log.Info("plugin conformance", slog.String("plugin", e.row.Name), slog.String("result", rep.Summary()))
+		return rep, nil
+	}
+	if m.conf == ConformanceWarn {
+		m.log.Warn("plugin fails its own claims but FILEX_PLUGIN_CONFORMANCE=warn — registering anyway",
+			slog.String("plugin", e.row.Name), slog.String("result", rep.Summary()))
+		return rep, nil
+	}
+	return rep, rep.FailureError()
+}
+
+// fixedHandle hands the conformance run one specific client, with no
+// re-instantiation: the scratch instance must not be silently recreated
+// underneath a probe.
+type fixedHandle struct {
+	c    *Client
+	name string
+}
+
+func (h fixedHandle) Client() (*Client, error) { return h.c, nil }
+func (h fixedHandle) DriverName() string       { return DriverPrefix + h.name }
 
 func builtinDriver(name string) (string, bool) {
 	// Anything without the prefix would be a built-in; the prefix rule alone
@@ -566,7 +729,7 @@ var ErrBadName = errors.New("plugin name must match [a-z0-9][a-z0-9_-]{0,31}")
 // InstallBinary stores an uploaded plugin binary and starts it. filename is
 // the name the file will have inside the plugin's directory (its basename
 // is used; an empty one becomes "plugin" or "plugin.exe").
-func (m *Manager) InstallBinary(ctx context.Context, name, filename string, r io.Reader) (*Status, error) {
+func (m *Manager) InstallBinary(ctx context.Context, name, filename string, r io.Reader, signature string) (*Status, error) {
 	if !validName(name) {
 		return nil, ErrBadName
 	}
@@ -584,6 +747,10 @@ func (m *Manager) InstallBinary(ctx context.Context, name, filename string, r io
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
+	if err := m.checkSignature(sum, signature); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
 	row := &model.Plugin{Name: name, Kind: model.PluginKindBinary, Binary: filename, SHA256: sum, Enabled: true}
 	row, err = m.store.CreatePlugin(ctx, row)
 	if err != nil {
@@ -595,10 +762,198 @@ func (m *Manager) InstallBinary(ctx context.Context, name, filename string, r io
 	return m.statusOf(ctx, e), nil
 }
 
+// parsePublicKey accepts an ed25519 key as hex or standard base64.
+func parsePublicKey(k string) (ed25519.PublicKey, error) {
+	k = strings.TrimSpace(k)
+	if b, err := hex.DecodeString(k); err == nil && len(b) == ed25519.PublicKeySize {
+		return ed25519.PublicKey(b), nil
+	}
+	if b, err := base64.StdEncoding.DecodeString(k); err == nil && len(b) == ed25519.PublicKeySize {
+		return ed25519.PublicKey(b), nil
+	}
+	return nil, fmt.Errorf("not a %d-byte ed25519 public key in hex or base64", ed25519.PublicKeySize)
+}
+
+func short(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "…"
+	}
+	return s
+}
+
+// RejectedError marks a failure caused by what the CALLER supplied — a
+// missing signature, one that does not verify — rather than by filex failing.
+//
+// ⚠ This exists because the handler used to classify these by SEARCHING THE
+// MESSAGE for words like "required" or "sha256". Under that scheme "this
+// instance only accepts signed plugins …" happened to contain "sha256" and
+// answered 400, while "signature does not verify against any trusted key"
+// matched nothing and answered 500 — the same class of mistake, reported as
+// two different kinds of event, one of them blamed on the server. A rejected
+// upload is not an outage; it should not spend the server's error budget or
+// page anybody.
+type RejectedError struct{ err error }
+
+func (e RejectedError) Error() string { return e.err.Error() }
+func (e RejectedError) Unwrap() error { return e.err }
+
+func reject(format string, a ...any) error { return RejectedError{fmt.Errorf(format, a...)} }
+
+// RequiresSignature reports whether this instance will refuse an unsigned
+// plugin. Surfaces show it so nobody discovers the rule from a rejection.
+func (m *Manager) RequiresSignature() bool { return len(m.trusted) > 0 }
+
+// checkSignature verifies a detached ed25519 signature over the binary's
+// sha256, against any configured trusted key.
+//
+// ⚠ Signing the HASH rather than the file keeps verification cheap and lets
+// an operator sign with the same digest they already publish. The hash is
+// hex-encoded exactly as it appears in the plugin row, so
+//
+//	sha256sum myfs | cut -d' ' -f1 | tr -d '\n' | signify-like-tool
+//
+// and filex agree on what was signed.
+func (m *Manager) checkSignature(sha, signature string) error {
+	if len(m.trusted) == 0 {
+		return nil
+	}
+	signature = strings.TrimSpace(signature)
+	if signature == "" {
+		return reject("this instance only accepts signed plugins (FILEX_PLUGIN_TRUSTED_KEYS is set) — supply the detached signature over the binary's sha256")
+	}
+	sig, err := hex.DecodeString(signature)
+	if err != nil {
+		if sig, err = base64.StdEncoding.DecodeString(signature); err != nil {
+			return reject("signature is neither hex nor base64")
+		}
+	}
+	for _, pub := range m.trusted {
+		if ed25519.Verify(pub, []byte(strings.ToLower(sha)), sig) {
+			return nil
+		}
+	}
+	return reject("signature does not verify against any trusted key")
+}
+
+// Upgrade replaces a binary plugin's file in place, keeping the row, the
+// name, the driver and every storage built on it.
+//
+// # Why this is not remove + install
+//
+// Removing takes the registration with it, and a storage whose driver has
+// gone is a storage that cannot open. An upgrade is the ordinary thing an
+// operator does — a new build of the same plugin — and it must not put the
+// storages through a window where they are broken, nor make the operator
+// re-enter the configuration. So: stop, swap the file, verify it, start. If
+// the new binary fails to start or fails conformance, the plugin is refused
+// and the old file is restored, because a failed upgrade must not also be a
+// lost plugin.
+func (m *Manager) Upgrade(ctx context.Context, id int64, filename string, r io.Reader, signature string) (*Status, error) {
+	e, err := m.entryFor(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	row := e.row
+	e.mu.Unlock()
+	if row.Kind != model.PluginKindBinary {
+		// Return the status with every failure, not only after a rollback:
+		// the page's "running now" line should never be missing because the
+		// upgrade was refused early rather than late.
+		return m.statusOf(ctx, e), errors.New("only a binary plugin can be upgraded; a remote one is upgraded where it runs")
+	}
+
+	dir := filepath.Join(m.dir, row.Name)
+	target := filepath.Join(dir, execName(filename, runtime.GOOS))
+	staged := target + ".upgrade"
+
+	sum, err := writeBinary(staged, r, m.maxB)
+	if err != nil {
+		return m.statusOf(ctx, e), err
+	}
+	if err := m.checkSignature(sum, signature); err != nil {
+		_ = os.Remove(staged)
+		return m.statusOf(ctx, e), err
+	}
+
+	// Stop first: a running executable cannot be replaced on Linux (ETXTBSY),
+	// and a plugin serving requests should not have the ground moved under it.
+	wasEnabled := row.Enabled
+	m.stop(e)
+
+	backup := target + ".previous"
+	_ = os.Remove(backup)
+	oldExists := false
+	if _, statErr := os.Stat(target); statErr == nil {
+		oldExists = true
+		if err := os.Rename(target, backup); err != nil {
+			_ = os.Remove(staged)
+			return nil, fmt.Errorf("could not set the running binary aside: %w", err)
+		}
+	}
+	if err := os.Rename(staged, target); err != nil {
+		if oldExists {
+			_ = os.Rename(backup, target)
+		}
+		return nil, fmt.Errorf("could not put the new binary in place: %w", err)
+	}
+
+	prevBinary, prevSum := row.Binary, row.SHA256
+	row.Binary, row.SHA256 = filepath.Base(target), sum
+	if err := m.store.UpdatePlugin(ctx, row); err != nil {
+		row.Binary, row.SHA256 = prevBinary, prevSum
+		if oldExists {
+			_ = os.Remove(target)
+			_ = os.Rename(backup, target)
+		}
+		return nil, err
+	}
+
+	if !wasEnabled {
+		_ = os.Remove(backup)
+		return m.statusOf(ctx, e), nil
+	}
+
+	m.start(e)
+	st := m.waitOutOfStarting(ctx, e, 45*time.Second)
+	if st.State == StateRunning {
+		_ = os.Remove(backup)
+		return st, nil
+	}
+
+	// The new binary does not work. Put the old one back and start it, so an
+	// upgrade that fails costs an error message rather than a storage.
+	m.log.Warn("plugin upgrade failed; rolling back",
+		slog.String("plugin", row.Name), slog.String("state", st.State), slog.String("err", st.StateError))
+	m.stop(e)
+	if oldExists {
+		_ = os.Remove(target)
+		_ = os.Rename(backup, filepath.Join(dir, prevBinary))
+		row.Binary, row.SHA256 = prevBinary, prevSum
+		_ = m.store.UpdatePlugin(ctx, row)
+		m.start(e)
+		m.waitOutOfStarting(ctx, e, 45*time.Second)
+	}
+	return m.statusOf(ctx, e), fmt.Errorf("the new binary did not come up (%s: %s) — the previous one was restored", st.State, st.StateError)
+}
+
+// waitOutOfStarting blocks until the plugin settles or d elapses.
+func (m *Manager) waitOutOfStarting(ctx context.Context, e *entry, d time.Duration) *Status {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		st := m.statusOf(ctx, e)
+		if st.State != StateStarting {
+			return st
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return m.statusOf(ctx, e)
+}
+
 // InstallFromURL downloads a plugin binary. sha256 is REQUIRED: a URL is
 // not a promise about bytes, and the operator has to say what they expect
 // to receive — the same rule the self-update follows.
-func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha string) (*Status, error) {
+func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha, signature string) (*Status, error) {
 	if !validName(name) {
 		return nil, ErrBadName
 	}
@@ -622,7 +977,7 @@ func (m *Manager) InstallFromURL(ctx context.Context, name, rawURL, sha string) 
 		return nil, fmt.Errorf("download: http %d", resp.StatusCode)
 	}
 	filename := filepath.Base(req.URL.Path)
-	st, err := m.InstallBinary(ctx, name, filename, resp.Body)
+	st, err := m.InstallBinary(ctx, name, filename, resp.Body, signature)
 	if err != nil {
 		return nil, err
 	}
@@ -778,6 +1133,8 @@ func (m *Manager) statusOf(ctx context.Context, e *entry) *Status {
 		st.Label = e.desc.Label
 		st.FieldCount = len(e.desc.Fields)
 	}
+	st.Conformance = e.report
+	st.Load = e.lim.stats()
 	driver := rowCopy.Driver
 	e.mu.Unlock()
 	if driver != "" {

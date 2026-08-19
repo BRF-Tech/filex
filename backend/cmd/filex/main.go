@@ -31,6 +31,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/observability"
+	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/server"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/version"
@@ -358,6 +359,14 @@ func storageScanCollisions(only, root string) error {
 		}
 		drv, err := storage.Get(st.Driver)
 		if err != nil {
+			// ⚠ A plugin driver only exists inside a RUNNING server: the
+			// manager starts the plugin process and registers it. A CLI
+			// process has no manager, so "unknown driver" here is expected
+			// and says nothing useful on its own — say the useful thing.
+			if strings.HasPrefix(st.Driver, plugin.DriverPrefix) {
+				fmt.Printf("%-20s  SKIP (%s is provided by a plugin, which only runs inside the server — use the admin API or the web UI for this storage)\n", st.Name, st.Driver)
+				continue
+			}
 			fmt.Printf("%-20s  SKIP (%v)\n", st.Name, err)
 			continue
 		}

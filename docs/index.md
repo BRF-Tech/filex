@@ -47,7 +47,7 @@ features:
     linkText: Protocol docs
   - icon: 🧩
     title: Teach it a new storage
-    details: A backend filex has never heard of is a separate program you install from the admin panel — it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods.
+    details: A backend filex has never heard of is a separate program you install from the admin panel — it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. Every capability it claims is probed before anyone can build a storage on it.
     link: /PLUGINS
     linkText: Plugin docs
   - icon: 💾

@@ -160,6 +160,10 @@ func (p *Process) runOnce(ctx context.Context) error {
 		"FILEX_PLUGIN_NAME="+p.Name,
 		"FILEX_PLUGIN_PROTOCOL=1",
 	)
+	// Its own process group and resource ceilings — see limits_unix.go for
+	// what these are and, more importantly, what they are not.
+	applyLimits(cmd)
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -273,13 +277,57 @@ func (p *Process) runOnce(ctx context.Context) error {
 	}
 }
 
+// relay copies a plugin's output into filex's log, RATE LIMITED.
+//
+// ⚠ A plugin's stdout and stderr are somebody else's code writing into
+// filex's log file. A debug build left chatty, or a tight retry loop printing
+// an error per attempt, becomes filex filling the disk — and the first
+// symptom is not "the plugin is noisy", it is "the server ran out of space".
+// So the relay carries a per-second budget and says, once, when it starts
+// dropping lines. The budget is generous enough that ordinary logging is
+// untouched.
+const (
+	logLinesPerSecond = 50
+	logBurst          = 200
+)
+
 func (p *Process) relay(r io.Reader, stream string) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 16<<10), 256<<10)
+
+	budget := logBurst
+	window := time.Now()
+	dropped := 0
+
 	for sc.Scan() {
-		if line := strings.TrimSpace(sc.Text()); line != "" {
-			p.Log.Info("plugin", slog.String("plugin", p.Name), slog.String(stream, line))
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
 		}
+		if elapsed := time.Since(window); elapsed >= time.Second {
+			// Refill, and report what was lost in the window that just ended
+			// — a silent drop would leave somebody debugging from a log that
+			// lies by omission.
+			if dropped > 0 {
+				p.Log.Warn("plugin output rate-limited",
+					slog.String("plugin", p.Name), slog.String("stream", stream),
+					slog.Int("dropped_lines", dropped))
+				dropped = 0
+			}
+			budget = logBurst
+			window = time.Now()
+		}
+		if budget <= 0 {
+			dropped++
+			continue
+		}
+		budget--
+		p.Log.Info("plugin", slog.String("plugin", p.Name), slog.String(stream, line))
+	}
+	if dropped > 0 {
+		p.Log.Warn("plugin output rate-limited",
+			slog.String("plugin", p.Name), slog.String("stream", stream),
+			slog.Int("dropped_lines", dropped))
 	}
 }
 
@@ -294,8 +342,11 @@ func terminate(cmd *exec.Cmd) {
 		return
 	}
 	_ = cmd.Process.Signal(os.Interrupt)
-	go func(pr *os.Process) {
+	go func(pid int) {
 		time.Sleep(5 * time.Second)
-		_ = pr.Kill()
-	}(cmd.Process)
+		// ⚠ The GROUP, not just the process: a plugin that spawned a helper
+		// otherwise leaves it holding the socket, and the next start fails
+		// with an address already in use that nothing on screen explains.
+		killGroup(pid)
+	}(cmd.Process.Pid)
 }

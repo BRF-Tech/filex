@@ -56,6 +56,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -227,6 +228,46 @@ type Watcher interface {
 	Watch(ctx context.Context) (<-chan Event, error)
 }
 
+// Presigner hands out URLs the CLIENT uses directly, so bytes never pass
+// through filex.
+//
+// ⚠ Only implement this when the URL is reachable from where the client is
+// — a browser, not the filex host. A plugin that returns a loopback URL
+// passes conformance (which only checks that a URL comes back and parses) and
+// then fails in every browser.
+type Presigner interface {
+	PresignUpload(ctx context.Context, path string, size int64) (Presigned, error)
+	PresignDownload(ctx context.Context, path string, ttl time.Duration) (Presigned, error)
+}
+
+// Presigned is one signed URL.
+type Presigned struct {
+	URL       string            `json:"url"`
+	Method    string            `json:"method,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	ExpiresAt time.Time         `json:"expires_at"`
+}
+
+// Multipart is a resumable upload in parts. Implementing it requires Writer
+// and Deleter too — filex refuses the combination otherwise, because a
+// resumable upload is still an upload.
+//
+// PartURLs may be empty: filex then pushes each part itself through
+// UploadPart, which is what the staged-upload path does (it holds the bytes,
+// so it cannot hand a browser a URL).
+type Multipart interface {
+	InitMultipart(ctx context.Context, path string, totalSize int64, partCount int) (uploadID string, partURLs []string, err error)
+	UploadPart(ctx context.Context, path, uploadID string, partNumber int, r io.Reader, size int64) (etag string, err error)
+	CompleteMultipart(ctx context.Context, path, uploadID string, parts []Part) error
+	AbortMultipart(ctx context.Context, path, uploadID string) error
+}
+
+// Part is one finished piece of a multipart upload.
+type Part struct {
+	PartNumber int    `json:"part_number"`
+	Etag       string `json:"etag"`
+}
+
 // Closer is called when filex releases an instance (storage edited, plugin
 // stopping). Optional.
 type Closer interface {
@@ -247,6 +288,18 @@ type Plugin[T Backend] struct {
 	Label   string // human name in the driver picker
 	Fields  []Field
 	Open    func(ctx context.Context, config map[string]any) (T, error)
+	// SelfTest opens a THROWAWAY backend for filex's conformance probes.
+	//
+	// ⚠⚠ Provide it. filex probes every capability a plugin declares before
+	// it will let anybody build a storage on it — because a plugin that claims
+	// write and cannot write produces failures the user reads as filex being
+	// broken. Without a self-test area the plugin is registered UNVERIFIED and
+	// the probes run against somebody's first real storage instead.
+	//
+	// Return a backend over scratch space you are happy to have written to and
+	// deleted (a temp directory, a throwaway prefix, an in-memory area). filex
+	// releases it with DELETE /v1/instances/{id} when it is done.
+	SelfTest func(ctx context.Context) (T, error)
 }
 
 // ── config helpers, so a plugin does not re-implement them ─────────────────
@@ -323,6 +376,15 @@ func Run[T Backend](ctx context.Context, p Plugin[T]) error {
 		token:    token,
 		backends: map[string]Backend{},
 	}
+	if p.SelfTest != nil {
+		s.selfTest = func(ctx context.Context) (Backend, error) {
+			b, err := p.SelfTest(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return b, nil
+		}
+	}
 
 	ln, addr, err := listen()
 	if err != nil {
@@ -395,8 +457,10 @@ type server struct {
 	label   string
 	fields  []Field
 	open    func(ctx context.Context, cfg map[string]any) (Backend, error)
-	caps    map[string]bool
-	token   string
+	// selfTest is nil when the plugin provides no scratch area.
+	selfTest func(ctx context.Context) (Backend, error)
+	caps     map[string]bool
+	token    string
 
 	mu       sync.Mutex
 	backends map[string]Backend
@@ -448,6 +512,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.describe(w)
 	case r.URL.Path == "/v1/instances" && r.Method == http.MethodPost:
 		s.createInstance(w, r)
+	case r.URL.Path == "/v1/selftest" && r.Method == http.MethodPost:
+		s.handleSelfTest(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/instances/"):
 		s.instance(w, r)
 	default:
@@ -492,6 +558,10 @@ func capsOfType[T Backend]() map[string]bool {
 		"mkdir":     has((*Mkdirer)(nil)),
 		"set_mtime": has((*Toucher)(nil)),
 		"watch":     has((*Watcher)(nil)),
+		"presign":   has((*Presigner)(nil)),
+		// Multipart is only offered on a writable backend, for the same
+		// reason filex refuses the pair split.
+		"multipart": rw && has((*Multipart)(nil)),
 	}
 }
 
@@ -670,9 +740,132 @@ func (s *server) instance(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case "watch":
 		s.watch(w, r, b)
+	case "presign-upload", "presign-download":
+		s.presign(w, r, b, op)
+	case "multipart/init", "multipart/complete", "multipart/abort":
+		s.multipart(w, r, b, op)
+	case "multipart/part":
+		s.multipartPart(w, r, b, q)
 	default:
 		s.fail(w, http.StatusNotFound, "not_found", op)
 	}
+}
+
+// handleSelfTest opens a throwaway backend for filex's conformance probes.
+func (s *server) handleSelfTest(w http.ResponseWriter, r *http.Request) {
+	if s.selfTest == nil {
+		s.fail(w, http.StatusNotFound, "unsupported", "this plugin offers no selftest area")
+		return
+	}
+	b, err := s.selfTest(r.Context())
+	if err != nil {
+		s.failErr(w, err)
+		return
+	}
+	if b == nil {
+		s.fail(w, http.StatusInternalServerError, "error", "SelfTest returned no backend and no error")
+		return
+	}
+	s.mu.Lock()
+	s.next++
+	id := "i" + strconv.Itoa(s.next)
+	s.backends[id] = b
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"instance": id})
+}
+
+func (s *server) presign(w http.ResponseWriter, r *http.Request, b Backend, op string) {
+	p, ok := b.(Presigner)
+	if !ok {
+		s.fail(w, http.StatusBadRequest, "unsupported", "presign")
+		return
+	}
+	var req struct {
+		Path       string `json:"path"`
+		Size       int64  `json:"size"`
+		TTLSeconds int64  `json:"ttl_s"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	var (
+		out Presigned
+		err error
+	)
+	if op == "presign-upload" {
+		out, err = p.PresignUpload(r.Context(), req.Path, req.Size)
+	} else {
+		ttl := time.Duration(req.TTLSeconds) * time.Second
+		if ttl <= 0 {
+			ttl = 15 * time.Minute
+		}
+		out, err = p.PresignDownload(r.Context(), req.Path, ttl)
+	}
+	if err != nil {
+		s.failErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *server) multipart(w http.ResponseWriter, r *http.Request, b Backend, op string) {
+	m, ok := b.(Multipart)
+	if !ok {
+		s.fail(w, http.StatusBadRequest, "unsupported", "multipart")
+		return
+	}
+	var req struct {
+		Path      string `json:"path"`
+		UploadID  string `json:"upload_id"`
+		TotalSize int64  `json:"total_size"`
+		PartCount int    `json:"part_count"`
+		Parts     []Part `json:"parts"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	switch op {
+	case "multipart/init":
+		id, urls, err := m.InitMultipart(r.Context(), req.Path, req.TotalSize, req.PartCount)
+		if err != nil {
+			s.failErr(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": id, "part_urls": urls})
+	case "multipart/complete":
+		if err := m.CompleteMultipart(r.Context(), req.Path, req.UploadID, req.Parts); err != nil {
+			s.failErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default: // abort
+		if err := m.AbortMultipart(r.Context(), req.Path, req.UploadID); err != nil {
+			s.failErr(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (s *server) multipartPart(w http.ResponseWriter, r *http.Request, b Backend, q url.Values) {
+	m, ok := b.(Multipart)
+	if !ok {
+		s.fail(w, http.StatusBadRequest, "unsupported", "multipart")
+		return
+	}
+	part, _ := strconv.Atoi(q.Get("part"))
+	size := int64(-1)
+	if v := r.Header.Get("X-Filex-Size"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			size = n
+		}
+	}
+	etag, err := m.UploadPart(r.Context(), q.Get("path"), q.Get("upload_id"), part, r.Body, size)
+	if err != nil {
+		s.failErr(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"etag": etag})
 }
 
 func (s *server) read(w http.ResponseWriter, r *http.Request, b Backend, path string) {

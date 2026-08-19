@@ -119,7 +119,15 @@ func newHarness(t *testing.T, multiTenant bool) *harness {
 			if err := json.Unmarshal(st.ConfigJSON, &cfg); err != nil {
 				return nil, err
 			}
-			drv := &local.Driver{}
+			// Anything that is not the built-in local driver — a storage
+			// PLUGIN, in practice — comes out of the registry by name, which
+			// is how the server resolves every driver in production.
+			var drv storage.Driver = &local.Driver{}
+			if st.Driver != "local" {
+				if drv, err = storage.Get(st.Driver); err != nil {
+					return nil, err
+				}
+			}
 			if err := drv.Init(context.Background(), cfg); err != nil {
 				return nil, err
 			}

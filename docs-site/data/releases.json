@@ -1,7 +1,523 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-08-10",
+  "generatedAt": "2026-08-19",
   "releases": [
+    {
+      "tag": "v0.21.1",
+      "date": "2026-08-19T08:51:06Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.1",
+      "prerelease": false,
+      "headline": "Paste into a storage root works again.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.21.1",
+        "ghcr.io/brf-tech/filex:full-v0.21.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.21.0",
+      "date": "2026-08-19T07:42:41Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.0",
+      "prerelease": false,
+      "headline": "A storage driver can live outside the binary.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.21.0",
+        "ghcr.io/brf-tech/filex:full-v0.21.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.20.3",
+      "date": "2026-08-18T21:40:17Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.3",
+      "prerelease": false,
+      "headline": "Mac desktop fixes + packages, Connections page dark mode.",
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Core",
+              "text": "The connections panel painted its own page ground; five theme tokens did not exist."
+            },
+            {
+              "scope": "Desktop",
+              "text": "Compile the embedded CLI for the host arch, not amd64."
+            },
+            {
+              "scope": "Release",
+              "text": "The pull command names ghcr.io, not a registry that does not exist."
+            },
+            {
+              "scope": "Web",
+              "text": "Desktop pairing survives an already-signed-in browser."
+            },
+            {
+              "scope": "Docs-site",
+              "text": "The release cron never rebuilt — no PATH under cron, and two guards."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Ship macOS packages — dmg + zip, ad-hoc sealed."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.20.3",
+        "ghcr.io/brf-tech/filex:full-v0.20.3"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.20.2",
+      "date": "2026-08-17T13:43:08Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The tag is the version, not desktop/package.json."
+            },
+            {
+              "scope": "Desktop",
+              "text": "Wait for the release before uploading to it."
+            },
+            {
+              "scope": null,
+              "text": "Release: v0.20.2 — desktop packaging fixes take effect."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.20.2",
+        "ghcr.io/brf-tech/filex:full-v0.20.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 19
+    },
+    {
+      "tag": "v0.20.1",
+      "date": "2026-08-17T13:16:43Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": null,
+              "text": "Release: v0.20.1 — FTPS starts when you give it a host name."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.20.1",
+        "ghcr.io/brf-tech/filex:full-v0.20.1"
+      ],
+      "hasDesktop": false,
+      "assetCount": 13
+    },
+    {
+      "tag": "v0.20.0",
+      "date": "2026-08-17T12:19:56Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The package README described an app that no longer exists."
+            },
+            {
+              "scope": null,
+              "text": "Release: v0.20.0 — the protocol gateway."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.20.0",
+        "ghcr.io/brf-tech/filex:full-v0.20.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 13
+    },
+    {
+      "tag": "v0.19.0",
+      "date": "2026-08-14T13:34:45Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.19.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Choose the app's language."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Say how the update actually behaves, and why per-user matters."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.19.0",
+        "ghcr.io/brf-tech/filex:full-v0.19.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 16
+    },
+    {
+      "tag": "v0.18.2",
+      "date": "2026-08-14T12:45:53Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.18.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Install per-user, because a Program Files install cannot update itself."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.18.2",
+        "ghcr.io/brf-tech/filex:full-v0.18.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 16
+    },
+    {
+      "tag": "v0.18.1",
+      "date": "2026-08-14T12:22:54Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.18.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The update stops handing you an installer window."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Release",
+              "text": "Publish an unversioned linux binary, so the documented install works."
+            },
+            {
+              "scope": "Contributing",
+              "text": "The screenshot step's install command needs `run`"
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.18.1",
+        "ghcr.io/brf-tech/filex:full-v0.18.1"
+      ],
+      "hasDesktop": false,
+      "assetCount": 13
+    },
+    {
+      "tag": "v0.18.0",
+      "date": "2026-08-14T10:53:23Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.18.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Profile",
+              "text": "A profile picture, shown wherever that account is present."
+            }
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Share",
+              "text": "A download cap that could be exceeded, and a dialog that lost its curl."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Screenshots",
+              "text": "Retake them in English, and make checking them a release step."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.18.0",
+        "ghcr.io/brf-tech/filex:full-v0.18.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 11
+    },
+    {
+      "tag": "v0.17.1",
+      "date": "2026-08-12T15:37:17Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.17.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The package shipped without its updater, and nothing said so."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.17.1",
+        "ghcr.io/brf-tech/filex:full-v0.17.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.17.0",
+      "date": "2026-08-12T14:13:38Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.17.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The app keeps itself up to date."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.17.0",
+        "ghcr.io/brf-tech/filex:full-v0.17.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.16.3",
+      "date": "2026-08-12T14:07:42Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.16.3",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Tabs",
+              "text": "The strip differed between surfaces, wore a scrollbar it should not have, and grew instead of scrolling."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.16.3",
+        "ghcr.io/brf-tech/filex:full-v0.16.3"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.16.2",
+      "date": "2026-08-12T12:59:06Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.16.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Share",
+              "text": "A share link changed language when you entered its PIN, and the download cap could not be set."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.16.2",
+        "ghcr.io/brf-tech/filex:full-v0.16.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.16.1",
+      "date": "2026-08-12T09:57:33Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.16.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Share",
+              "text": "Render a shared folder's tiles when the link is created."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.16.1",
+        "ghcr.io/brf-tech/filex:full-v0.16.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.16.0",
+      "date": "2026-08-12T09:48:55Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.16.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Share",
+              "text": "A shared folder was serving originals as its gallery tiles, and zipping on click."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.16.0",
+        "ghcr.io/brf-tech/filex:full-v0.16.0"
+      ],
+      "hasDesktop": false,
+      "assetCount": 7
+    },
+    {
+      "tag": "v0.15.1",
+      "date": "2026-08-12T09:27:45Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.15.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The rail's two identities were the wrong way round."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The login-item checks now branch on packaging."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.15.1",
+        "ghcr.io/brf-tech/filex:full-v0.15.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
+    {
+      "tag": "v0.15.0",
+      "date": "2026-08-12T07:12:42Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.15.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "The app that started itself as a bare electron, and three things that looked wrong."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.15.0",
+        "ghcr.io/brf-tech/filex:full-v0.15.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 10
+    },
     {
       "tag": "v0.14.0",
       "date": "2026-08-10T15:26:05Z",

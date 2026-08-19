@@ -364,10 +364,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	var pluginMgr *plugin.Manager
 	if !cfg.PluginsDisabled {
 		pluginMgr, err = plugin.New(plugin.Options{
-			Store:     store,
-			Dir:       filepath.Join(cfg.DataDir, "plugins"),
-			SecretKey: cfg.SecretKey,
-			Log:       slog.Default(),
+			Store:       store,
+			Dir:         filepath.Join(cfg.DataDir, "plugins"),
+			SecretKey:   cfg.SecretKey,
+			Log:         slog.Default(),
+			Conformance: cfg.PluginConformance,
+			TrustedKeys: cfg.PluginTrustedKeys,
+			MaxInFlight: cfg.PluginMaxInFlight,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: plugins: %w", err)

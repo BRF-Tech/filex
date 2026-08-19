@@ -1055,6 +1055,8 @@
       "driver": "Sürücü",
       "state": "Durum",
       "capabilities": "Yapabildikleri",
+      "conformance": "Doğrulama",
+      "load": "Yük",
       "inUse": "Depo",
       "enabled": "Açık",
       "binary": "Eklenti dosyası",
@@ -1069,7 +1071,55 @@
       "move": "taşıma",
       "copy": "kopyalama",
       "mtime": "zaman damgası",
-      "watch": "değişim olayları"
+      "watch": "değişim olayları",
+      "presign": "doğrudan bağlantı",
+      "multipart": "kaldığı yerden yükleme"
+    },
+    "conformance": {
+      "verified": "Doğrulandı",
+      "unverified": "Doğrulanmadı — sınama yapılmadı",
+      "failed": "{count} sınama başarısız",
+      "unverifiedHint": "Rapor yok: eklenti kendini sınayan bir uç sunmuyor ya da bu kurulumda doğrulama kapalı. Bir şey başarısız olmadı — hiçbir şey denetlenmedi.",
+      "reportTitle": "Uygunluk raporu — {name}",
+      "summary": "{pass} geçti, {fail} kaldı, {skip} atlandı",
+      "ranAt": "{when} tarihinde sınandı",
+      "scratchLabel": "{where} üzerinde",
+      "refusedNote": "Kendi iddialarını karşılayamayan eklenti reddedilir: filex yarım bir sürücüyü tam sürücü diye sunmaz. Aşağıdaki sınamayı düzeltip yeni derlemeyi kurun.",
+      "took": "{ms} ms",
+      "scratch": {
+        "selftest": "eklentinin kendi geçici alanı",
+        "storage": "gerçek bir deponun ayarları"
+      },
+      "result": {
+        "pass": "geçti",
+        "fail": "kaldı",
+        "skip": "atlandı"
+      },
+      "mode": {
+        "warn": "Bu kurulumda doğrulama “warn” modunda: kendi iddialarını karşılayamayan eklenti yine de kurulur, yalnızca günlüğe yazılır. Güvenlik ağı devre dışı.",
+        "off": "Bu kurulumda doğrulama kapalı: bir eklentinin iddia ettiği işi gerçekten yapıp yapmadığı, üzerine depo kurulmadan önce hiçbir şekilde denetlenmiyor. Güvenlik ağı devre dışı."
+      }
+    },
+    "load": {
+      "inFlight": "{current}/{max} işlem sürüyor",
+      "waited": "{count} çağrı yuva bekledi",
+      "waitedTitle": "Boş yuva için sıraya girmek zorunda kalan çağrılar. Yalnızca yavaşlamış bir eklenti, hata vermeye başlamadan önce burada görünür.",
+      "rejected": "{count} geri çevrildi",
+      "rejectedTitle": "Boş yuva beklemekten vazgeçip hata cevabı alan çağrılar. Eklentinin neden yavaş olduğunu bulun ya da eşzamanlılık sınırını yükseltin.",
+      "rejectingBanner": "İşlem geri çeviriyor: {names}. Bütün yuvalar dolu; çağrılar sıraya alınmak yerine hatayla geri çevriliyor."
+    },
+    "upgrade": {
+      "action": "Yükselt",
+      "title": "{name} eklentisini yükselt",
+      "hint": "İkili dosyayı yerinde değiştirir. Eklenti adını, sürücüsünü ve üzerine kurulmuş her depoyu korur: durdurulur, dosya değiştirilir, yeniden başlatılır.",
+      "errFile": "Yeni eklenti dosyasını seçin",
+      "done": "{name} yükseltildi",
+      "rollback": "Yükseltme başarısız oldu. Önceki ikili dosya geri kondu, hiçbir şey kaybolmadı.",
+      "restored": "Şu an çalışan: {state}, dosya {binary}."
+    },
+    "signature": {
+      "label": "İmza",
+      "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: ikili dosyanın SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir."
     }
   }
 }
