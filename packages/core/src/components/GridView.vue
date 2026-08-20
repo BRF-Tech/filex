@@ -23,7 +23,7 @@ const props = defineProps<{
   thumbSrc?: (n: FileNode) => string | null;
   /** Desktop selective sync: availability badge per tile. Absent on the
    *  web — no badge renders at all. */
-  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | null;
+  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
 }>();
 
 const emit = defineEmits<{
@@ -126,8 +126,11 @@ function parentDir(path: string): string {
 
 // Special rows keep their emoji (trash/storage are not file-TYPE icons);
 // everything else renders the SVG icon set from lib/fileIcons.
-function keepGlyph(b: 'kept' | 'syncing' | 'cloud'): string {
-  return b === 'kept' ? '\u2713' : b === 'syncing' ? '\u27f3' : '\u2601';
+function keepGlyph(b: 'kept' | 'syncing' | 'cloud' | 'partial'): string {
+  if (b === 'kept') return '\u2713';
+  if (b === 'syncing') return '\u27f3';
+  if (b === 'partial') return '\u25d0';
+  return '\u2601';
 }
 
 function specialEmojiFor(n: FileNode): string | null {

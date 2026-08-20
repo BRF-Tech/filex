@@ -32,6 +32,7 @@ export const tr: Record<string, string> = {
   'keep.badge_kept': 'Bilgisayarda',
   'keep.badge_syncing': 'Eşitleniyor…',
   'keep.badge_cloud': 'Yalnızca çevrimiçi',
+  'keep.badge_partial': 'İçinde bilgisayarda tutulanlar var',
   'keep.strip_transfer': '{name} eşitleniyor — {done}/{total} (%{pct})',
   'keep.strip_inventory': '{name} eşitleniyor — sunucu taranıyor…',
   'keep.strip_settling': '{name} eşitleniyor — son durum kaydediliyor…',

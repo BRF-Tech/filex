@@ -32,6 +32,7 @@ export const en: Record<string, string> = {
   'keep.badge_kept': 'On this computer',
   'keep.badge_syncing': 'Syncing…',
   'keep.badge_cloud': 'Online only',
+  'keep.badge_partial': 'Contains items kept on this computer',
   'keep.strip_transfer': 'Syncing {name} — {done}/{total} ({pct}%)',
   'keep.strip_inventory': 'Syncing {name} — scanning the server…',
   'keep.strip_settling': 'Syncing {name} — settling…',

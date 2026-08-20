@@ -59,7 +59,7 @@ const props = defineProps<{
   /** ui-fix — authenticated thumb resolver, forwarded to grid/gallery. */
   thumbSrc?: (n: FileNode) => string | null;
   /** Desktop selective sync badge resolver, forwarded to the views. */
-  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | null;
+  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
   /** ui-fix — mirror the main panel's virtual `.trash` row at storage root
    *  so both split panes list identical rows (no row-offset). Defaults on. */
   trashVisible?: boolean;

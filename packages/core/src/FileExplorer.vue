@@ -1506,13 +1506,15 @@ function keepStateOf(remote: string): KeepState {
   return 'none';
 }
 
-type KeepBadge = 'kept' | 'syncing' | 'cloud';
+type KeepBadge = 'kept' | 'syncing' | 'cloud' | 'partial';
 
 /**
  * The availability badge for one row: on this computer, being synced right
- * now, or online-only. Every row gets one — that is the OneDrive/Drive
- * grammar people already read — except the rows where it would be a lie or
- * noise: trash, and the `.trash` row itself.
+ * now, holding kept items somewhere below (partial), or online-only. Every
+ * row gets one — that is the OneDrive/Drive grammar people already read —
+ * except the rows where it would be a lie or noise: trash, and the `.trash`
+ * row itself. `partial` is what saves the user from drilling into every
+ * folder to find out whether anything inside is on this computer.
  */
 function keepBadgeFor(n: FileNode): KeepBadge | null {
   if (!desktopSync.value || trashActive.value) return null;
@@ -1524,6 +1526,7 @@ function keepBadgeFor(n: FileNode): KeepBadge | null {
   }
   const st = keepStateOf(r);
   if (st === 'kept' || st === 'inherited') return 'kept';
+  if (st === 'partial') return 'partial';
   return 'cloud';
 }
 

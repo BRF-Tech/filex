@@ -42,7 +42,7 @@ const props = defineProps<{
   /** Desktop selective sync: availability badge per row (kept on this
    *  computer / syncing right now / online only). Absent on the web —
    *  no badge renders at all. */
-  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | null;
+  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
 }>();
 
 const emit = defineEmits<{
@@ -148,8 +148,11 @@ function specialEmojiFor(n: FileNode): string | null {
   return null;
 }
 
-function keepGlyph(b: 'kept' | 'syncing' | 'cloud'): string {
-  return b === 'kept' ? '\u2713' : b === 'syncing' ? '\u27f3' : '\u2601';
+function keepGlyph(b: 'kept' | 'syncing' | 'cloud' | 'partial'): string {
+  if (b === 'kept') return '\u2713';
+  if (b === 'syncing') return '\u27f3';
+  if (b === 'partial') return '\u25d0';
+  return '\u2601';
 }
 
 function isPinnedSpecial(n: FileNode): boolean {
