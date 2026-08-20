@@ -145,6 +145,12 @@ export async function removePair(id: string): Promise<void> {
   await run(['sync', 'remove', id]);
 }
 
+/** Repoints a pair at a folder that physically moved. The engine keeps the
+ *  pair's baseline, so the next run is an ordinary incremental pass. */
+export async function movePair(id: string, newLocal: string): Promise<void> {
+  await run(['sync', 'move', id, newLocal]);
+}
+
 /**
  * Keeps one `filex sync run --watch` process alive per signed-in account.
  *
@@ -263,6 +269,23 @@ export class SyncSupervisor {
       }
       this.onChange();
     });
+  }
+
+  /** Kills ONE account's watcher. Root migration renames mirrors on disk;
+   *  a watcher mid-round holds the old paths in memory and would read the
+   *  half-moved tree as a mass local delete. reconcile() restarts it. */
+  stop(accountId: string): void {
+    const proc = this.procs.get(accountId);
+    if (proc) {
+      proc.kill();
+      this.procs.delete(accountId);
+    }
+    const st = this.status.get(accountId);
+    if (st) {
+      st.running = false;
+      st.active = null;
+    }
+    this.onChange();
   }
 
   stopAll(): void {

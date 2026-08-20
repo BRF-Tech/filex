@@ -43,7 +43,7 @@ import {
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
-import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, removePair, type Pair } from './sync.js';
+import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'app');
@@ -1405,6 +1405,11 @@ function wireIpc(): void {
     if (!newRoot || newRoot === acc.syncRoot) return publicState();
     const oldRoot = acc.syncRoot ?? null;
     if (oldRoot) {
+      // The watcher stops FIRST. It holds the pair list in memory for the
+      // round it is in, and a mirror renamed under it mid-run reads as a
+      // mass local delete — which, now that baselines survive migration,
+      // would become a mass REMOTE delete. refreshPairs() restarts it.
+      supervisor?.stop(acc.id);
       // Only mirrors under the old root move; a hand-picked pair living
       // elsewhere was placed there on purpose and stays put.
       const mine = accountPairs(acc.id).filter(
@@ -1413,10 +1418,18 @@ function wireIpc(): void {
       for (const p of mine) {
         const dest = path.join(newRoot, path.relative(oldRoot, p.local));
         try {
-          await removePair(p.id);
           await fs.promises.mkdir(path.dirname(dest), { recursive: true });
           await fs.promises.rename(p.local, dest);
-          await addPair(dest, p.remote, acc.id, p.file === true);
+          try {
+            // `sync move` keeps the pair's BASELINE, so the next run is an
+            // ordinary incremental pass. The old remove + re-add threw it
+            // away, and the first-run merge that followed conflicted every
+            // file this machine had ever uploaded.
+            await movePair(p.id, dest);
+          } catch (e) {
+            await fs.promises.rename(dest, p.local); // pointer unmoved — put the folder back
+            throw e;
+          }
           await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
         } catch (e) {
           dialog.showErrorBox(
