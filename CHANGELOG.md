@@ -47,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   printing nothing at all, and looked broken enough to cancel; that cancel is
   exactly the path into the two unpair bugs above.
 
+- **"Keep on this computer" — selective sync from the explorer's own menu.**
+  Keeping a server folder local used to mean Settings → pair a folder → pick a
+  directory, once per folder. Now the first keep asks for ONE root (default
+  `~/filex/<server>`), and from then on right-clicking any folder — or a whole
+  storage on the drives screen — offers *Keep on this computer*: it mirrors
+  under `<root>/<storage>/<path…>` and syncs both ways, while everything else
+  stays online-only in the window. Kept folders gain *Open local folder* and
+  *Keep online only*; the latter asks, natively, whether the local copy goes
+  to the OS Trash or stays. Keeping a parent absorbs already-kept subfolders
+  into the one pair. The hooks ride `config.desktopSync` and exist only when
+  the desktop shell mounts the explorer — the web admin and the embeds see
+  none of it.
+
 ## [0.21.6] - 2026-08-19
 
 ### Changed
