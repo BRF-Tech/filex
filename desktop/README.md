@@ -115,10 +115,16 @@ macOS specifics, because the failure mode there is not a warning but a wall:
 - First launch of a downloaded copy: macOS blocks once — open **System
   Settings → Privacy & Security → Open Anyway** (or right-click → Open on
   older versions). A locally built copy has no quarantine flag and just opens.
-- **Auto-update is inert on macOS until real signing lands**: Squirrel.Mac
-  refuses to swap an unsigned app. The `zip` target and `latest-mac.yml` ship
-  anyway so the feed is already correct the day a Developer ID certificate
-  (and notarization) arrives — which is the actual fix for all of the above.
+- **Self-update is impossible on macOS until real signing lands**: Squirrel.Mac
+  refuses to swap an app without a Developer ID signature, and electron-updater
+  finds that out only *after* the download. So the build reads its own
+  signature once at startup (`codesign -dv`, `main.ts`) and, when it is the
+  ad-hoc one, never wires the auto-updater at all: it reads `latest-mac.yml`
+  from the feed on the same cadence and Settings offers the new version's
+  `.dmg` as a **Download** button, rather than announcing an install it cannot
+  perform. The `zip` target and `latest-mac.yml` ship anyway so the feed is
+  already correct the day a Developer ID certificate (and notarization)
+  arrives — which is the actual fix for all of the above.
 
 ## Packaging traps (each of these shipped once)
 

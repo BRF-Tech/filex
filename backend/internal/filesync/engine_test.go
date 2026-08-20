@@ -518,6 +518,25 @@ func TestOverlappingPairsAreRefused(t *testing.T) {
 	}
 }
 
+// A remote path is the server's answer, not the user's typing, and callers
+// build local directory names out of it — so a `..` in it is a way to name a
+// folder outside the mirror root, which a first run would then merge INTO the
+// server. Refused at the door.
+func TestARemoteThatClimbsOutIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: filepath.Join(dir, "state")}
+
+	for _, remote := range []string{"docs://../secrets", "docs://a/../../secrets", "docs://.."} {
+		if _, err := s.AddPair(Pair{Local: filepath.Join(dir, "x"), Remote: remote}); err == nil {
+			t.Errorf("%q must be refused", remote)
+		}
+	}
+	// A folder that merely CONTAINS dots in its name is legitimate.
+	if _, err := s.AddPair(Pair{Local: filepath.Join(dir, "ok"), Remote: "docs://a..b/c"}); err != nil {
+		t.Errorf("a dotted folder name is not a traversal: %v", err)
+	}
+}
+
 func TestRemovingAPairLeavesTheFilesAlone(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: filepath.Join(dir, "state")}

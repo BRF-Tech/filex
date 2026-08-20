@@ -10,9 +10,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/brf-tech/filex/backend/internal/cliclient"
 	"github.com/brf-tech/filex/backend/internal/filesync"
-	"github.com/spf13/cobra"
 )
 
 // apiAdapter bridges the REST client to the narrow interface the sync engine
@@ -274,7 +274,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 	c.Flags().StringVar(&account, "account", "", "sync only pairs recorded against this account")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would happen without changing anything")
 	c.Flags().DurationVar(&watch, "watch", 0, "keep running, re-checking at this interval (e.g. 30s)")
-	c.Flags().BoolVar(&quietOut, "quiet", false, "print only the summary line per pair")
+	c.Flags().BoolVar(&quietOut, "quiet", false, "print only the summary line per pair (progress lines still print)")
 	return quiet(c)
 }
 

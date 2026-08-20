@@ -87,6 +87,19 @@ func (s *Store) AddPair(p Pair) (Pair, error) {
 	if !strings.Contains(p.Remote, "://") {
 		return p, fmt.Errorf("remote must look like adapter://path, got %q", p.Remote)
 	}
+	// ⚠ A `..` segment is refused rather than cleaned. The remote is a WIRE
+	// path that callers derive local directory names from — the desktop app
+	// mirrors `adapter://a/b` at `<root>/adapter/a/b` — and the listing it
+	// comes from is the server's answer, not the user's typing. A remote of
+	// `docs://../../Documents` would name a folder outside the mirror root,
+	// where a first run (which merges both sides) would happily upload
+	// whatever it found. Nothing legitimate needs it: the server resolves
+	// paths from its storage root, so `..` cannot address anything real.
+	for _, seg := range strings.Split(p.Remote[strings.Index(p.Remote, "://")+3:], "/") {
+		if seg == ".." {
+			return p, fmt.Errorf("remote path may not contain a %q segment: %q", "..", p.Remote)
+		}
+	}
 
 	pairs, err := s.LoadPairs()
 	if err != nil {

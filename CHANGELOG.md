@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-20
+
+### Security
+
+- **A server cannot name a local folder outside the one you chose.** The path a
+  kept folder mirrors under is built from the wire path in the server's own
+  listing, so a hostile or compromised server answering with
+  `docs://../../Documents` would have had the desktop app create — and then
+  two-way sync — a folder outside the account's mirror root, uploading whatever
+  it found there on the first pass. Climbing segments are dropped before a path
+  is built, the keep is refused before anything is created, and `sync add`
+  refuses such a remote outright, so the CLI and every other caller are covered
+  rather than one screen.
+
 ### Fixed
+
+- **Unkeeping says which folder it is about to bin.** "Keep online only" asked
+  what should happen to the local copy without naming it, with *Move to Trash*
+  pre-selected — right for a mirror the app made, one Enter away from binning a
+  folder it did not for a pair made by hand in Settings. The dialog carries the
+  path now, and anything outside the account's root defaults to leaving it.
+
+- **"Open local folder" on a folder whose first sync has not reached it opens
+  the nearest one that exists** instead of appearing to do nothing (opening a
+  path that is not there yet fails silently).
 
 - **A pair added while the watcher runs is picked up on the next round.**
   `filex sync run --watch` read pairs.json once at start, and the desktop app

@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.21.5, 19 August 2026
-Plugins no longer outlive filex on Windows. If filex was stopped without a chance to clean up — a crash, a hard kill, a service restart — every plugin it had launched kept running; and since a running plugin holds its own .exe open, the next install or upgrade of that plugin failed with a sharing violation. Plugins now live in a job object, so the kernel reaps them with filex.
+::: tip Latest — v0.21.6, 19 August 2026
+Two decisions about noise and blast radius. A demo instance no longer accepts any new storage backend — 0.21.4 stopped it reaching the server's own filesystem, and now the remote drivers go too, because "attach your own bucket" asks the server to connect wherever a stranger points it. And a single failed sync run is no longer reported as an error: an object store answering 504 under load costs one skipped refresh, not an incident. Three failures in a row still is one.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.21.5
-docker pull ghcr.io/brf-tech/filex:full-v0.21.5
+docker pull ghcr.io/brf-tech/filex:slim-v0.21.6
+docker pull ghcr.io/brf-tech/filex:full-v0.21.6
 ```
+
+## v0.21.6
+
+<span class="filex-release-date">19 August 2026</span>
+
+Two decisions about noise and blast radius. A demo instance no longer accepts any new storage backend — 0.21.4 stopped it reaching the server's own filesystem, and now the remote drivers go too, because "attach your own bucket" asks the server to connect wherever a stranger points it. And a single failed sync run is no longer reported as an error: an object store answering 504 under load costs one skipped refresh, not an incident. Three failures in a row still is one.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.6) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.6`
 
 ## v0.21.5
 
@@ -255,24 +263,13 @@ Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the l
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.16.1`
 
-## v0.16.0
-
-<span class="filex-release-date">12 August 2026</span>
-
-Two things a shared folder was doing the slow way. Its gallery tiles were the original photos — the page asked for a thumbnail and the server streamed the whole file — so a folder of a few dozen photos shipped tens of megabytes to paint one screen and crawled until it settled; tiles now come from the same cached thumbnails the app itself uses, with the originals kept as the fallback for anything that has none. And a folder share's ZIP is now built when you create the link rather than when somebody clicks download, so the wait lands before anyone is waiting instead of on whoever opened the link.
-
-**New**
-
-- **Share** — A shared folder was serving originals as its gallery tiles, and zipping on click.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) · `ghcr.io/brf-tech/filex:slim-v0.16.0`
-
 ## Earlier releases
 
-The 56 releases before v0.16.0, in brief. Full notes are on GitHub.
+The 57 releases before v0.16.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.16.0](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) | 12 August 2026 | Two things a shared folder was doing the slow way. Its gallery tiles were the original photos — the page asked for a thumbnail and the server streamed the whole file — so a folder of a few dozen photos shipped tens of megabytes… |
 | [v0.15.1](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) | 12 August 2026 | The desktop app's account rail had its two identities the wrong way round. Each row of that rail is a server — a tenant — so it now carries that server's own Branding logo, which is a better label than initials taken from an… |
 | [v0.15.0](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) | 12 August 2026 | Mostly the desktop app, and one thing that was writing to your operating system. "Start when I sign in" registered whichever executable happened to be running the app — which, for anyone who had ever run it from source, was a… |
 | [v0.14.0](https://github.com/BRF-Tech/filex/releases/tag/v0.14.0) | 10 August 2026 | The desktop app can reach its own server again. Opening any office document showed "Config fetch 401", starred files and recently-opened were silently empty, and "Open in new tab" did nothing at all — one cause under the first… |
@@ -332,4 +329,4 @@ The 56 releases before v0.16.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-19 from 76 published releases.</small>
+<small>Generated 2026-08-20 from 77 published releases.</small>
