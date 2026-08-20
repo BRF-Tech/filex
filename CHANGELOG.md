@@ -58,7 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the OS Trash or stays. Keeping a parent absorbs already-kept subfolders
   into the one pair. The hooks ride `config.desktopSync` and exist only when
   the desktop shell mounts the explorer — the web admin and the embeds see
-  none of it.
+  none of it. Settings shows the root and can move it: kept mirrors migrate
+  to the new location (rename + re-pair; the settling pass transfers
+  nothing), and only empty leftover dirs are swept — never `rm -rf`.
 
 - **Availability at a glance.** Every row in the desktop explorer carries the
   glyph grammar every drive client already taught: ✓ kept on this computer,

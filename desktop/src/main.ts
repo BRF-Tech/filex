@@ -770,6 +770,10 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'The folder is no longer kept, but its local copy could not be moved to the Trash: {err}',
     'Klasör artık tutulmuyor ama yerel kopya Çöp Kutusuna taşınamadı: {err}',
   ],
+  moveFailed: [
+    'Could not move {name} to the new folder: {err}',
+    '{name} yeni klasöre taşınamadı: {err}',
+  ],
 };
 
 function syncText(key: string, vars: Record<string, string> = {}): string {
@@ -1249,6 +1253,67 @@ function wireIpc(): void {
       }
     }
     if (local) await shell.openPath(local);
+    return publicState();
+  });
+
+  // Settings: view or change the account's mirror root. Kept folders MOVE
+  // with it — each pair is removed, its mirror renamed under the new root,
+  // and the pair re-added there. The re-added pair's first run walks two
+  // identical trees, so it settles without transferring a byte; the removed
+  // baseline only costs that one settling pass.
+  ipcMain.handle('sync:setRoot', async (_e, accountId: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    let def = acc.syncRoot;
+    if (!def) {
+      try {
+        def = path.join(app.getPath('home'), 'filex', new URL(acc.serverUrl).hostname);
+      } catch {
+        def = path.join(app.getPath('home'), 'filex');
+      }
+    }
+    await fs.promises.mkdir(def, { recursive: true });
+    const picked = await dialog.showOpenDialog({
+      title: syncText('rootTitle'),
+      buttonLabel: syncText('rootButton'),
+      defaultPath: def,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    const newRoot = picked.canceled ? null : (picked.filePaths[0] ?? null);
+    if (!newRoot || newRoot === acc.syncRoot) return publicState();
+    const oldRoot = acc.syncRoot ?? null;
+    if (oldRoot) {
+      // Only mirrors under the old root move; a hand-picked pair living
+      // elsewhere was placed there on purpose and stays put.
+      const mine = accountPairs(acc.id).filter((p) => p.local.startsWith(oldRoot + path.sep));
+      for (const p of mine) {
+        const dest = path.join(newRoot, path.relative(oldRoot, p.local));
+        try {
+          await removePair(p.id);
+          await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+          await fs.promises.rename(p.local, dest);
+          await addPair(dest, p.remote, acc.id);
+        } catch (e) {
+          dialog.showErrorBox(
+            syncText('rootTitle'),
+            syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),
+          );
+        }
+      }
+      // Sweep the empty storage dirs left behind — rmdir only, never rm -rf:
+      // anything non-empty under the old root is not ours to judge.
+      try {
+        for (const entry of await fs.promises.readdir(oldRoot)) {
+          await fs.promises.rmdir(path.join(oldRoot, entry)).catch(() => {});
+        }
+        await fs.promises.rmdir(oldRoot).catch(() => {});
+      } catch {
+        // Old root already gone; nothing to sweep.
+      }
+    }
+    acc.syncRoot = newRoot;
+    saveState(state);
+    await refreshPairs();
     return publicState();
   });
 

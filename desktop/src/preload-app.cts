@@ -60,5 +60,6 @@ contextBridge.exposeInMainWorld('filexApp', {
   syncUnkeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:unkeep', accountId, remote),
   syncReveal: (accountId: string, remote: string) => ipcRenderer.invoke('sync:reveal', accountId, remote),
   syncStatus: (accountId: string) => ipcRenderer.invoke('sync:status', accountId),
+  setSyncRoot: (accountId: string) => ipcRenderer.invoke('sync:setRoot', accountId),
   onOpenSettings: (fn: () => void) => ipcRenderer.on('app:open-settings', () => fn()),
 });

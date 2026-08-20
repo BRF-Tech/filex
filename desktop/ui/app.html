@@ -442,6 +442,12 @@
         'set.open_folder':      ['Open folder', 'Klasörü aç'],
         'set.stop_sync':        ['Stop syncing', 'Eşitlemeyi durdur'],
         'set.add_sync':         ['Sync a folder…', 'Klasör eşitle…'],
+        'set.sync_root':        ['filex folder on this computer', 'Bu bilgisayardaki filex klasörü'],
+        'set.sync_root_sub':    ['Kept folders mirror under it as storage/path.',
+                                 '"Bilgisayarda tut" dediklerin bunun altına depo/yol düzeninde iner.'],
+        'set.sync_root_none':   ['Not chosen yet — you will be asked at the first "Keep on this computer".',
+                                 'Henüz seçilmedi — ilk "Bilgisayarda tut" dediğinde sorulur.'],
+        'set.sync_root_change': ['Change…', 'Değiştir…'],
         'set.trash':            ['Recently deleted', 'Son silinenler'],
         'set.sync_note':        ['The first sync of a folder merges both sides and deletes nothing. After that deletes carry across; anything removed from this computer is kept for 30 days.',
                                  'Bir klasörün ilk eşitlemesi iki tarafı birleştirir, hiçbir şeyi silmez. Sonrasında silmeler karşı tarafa geçer; bu bilgisayardan silinen her şey 30 gün saklanır.'],
@@ -843,6 +849,18 @@
 
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
+          ${active ? `<div class="card"><div class="between">
+            <div style="min-width:0">
+              <div><strong>${esc(T('set.sync_root'))}</strong></div>
+              <div class="muted" style="overflow-wrap:anywhere">${
+                active.syncRoot ? esc(active.syncRoot) : esc(T('set.sync_root_none'))}</div>
+              <div class="muted">${esc(T('set.sync_root_sub'))}</div>
+            </div>
+            <div class="row">
+              <button data-openlocal="${esc(active.syncRoot || '')}" ${active.syncRoot ? '' : 'disabled'}>${esc(T('set.open_folder'))}</button>
+              <button id="sync-root-change">${esc(T('set.sync_root_change'))}</button>
+            </div>
+          </div></div>` : ''}
           ${pairs}
           <div class="row" style="margin-top:6px">
             <button class="primary" id="add-sync" ${active ? '' : 'disabled'}>${esc(T('set.add_sync'))}</button>
@@ -946,6 +964,11 @@
         if (connGuide) connGuide.addEventListener('click', () => openConnections('connect'));
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
+        const rootChange = $('#sync-root-change', el);
+        if (rootChange) rootChange.addEventListener('click', async () => {
+          state = await window.filexApp.setSyncRoot(state.activeId);
+          renderSettings();
+        });
         $('#sync-trash', el).addEventListener('click', async () => {
           const items = await window.filexApp.syncTrash();
           alert(items.length
