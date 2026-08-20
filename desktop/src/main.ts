@@ -814,18 +814,47 @@ function accountPairs(accountId: string): Pair[] {
   return knownPairs.filter((p) => p.account === accountId);
 }
 
-/** rmdir-only sweep of empty dirs from `from` up to (never including)
+/** Names the OS drops into folders it merely LOOKED at. A folder holding
+ *  nothing else is empty in every sense the user means — measured: Finder
+ *  planted .DS_Store in the mirror's parents and the plain-rmdir sweep
+ *  stopped dead on it, leaving the "empty" skeleton the sweep exists to
+ *  remove. Mirrors the engine's own skip list. */
+const OS_LITTER = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
+/** Removes a dir that is empty apart from OS litter (the litter goes too).
+ *  Anything with real content — including a `._*`-only AppleDouble we cannot
+ *  be sure about — is left alone. */
+async function removeIfEffectivelyEmpty(dir: string): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await fs.promises.readdir(dir);
+  } catch {
+    return false;
+  }
+  if (entries.some((e) => !OS_LITTER.has(e))) return false;
+  for (const e of entries) {
+    try {
+      await fs.promises.unlink(path.join(dir, e));
+    } catch {
+      return false;
+    }
+  }
+  try {
+    await fs.promises.rmdir(dir);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** Sweep of effectively-empty dirs from `from` up to (never including)
  *  `stopAt`. The mirror layout mkdirs intermediate folders on keep; after an
  *  unkeep moves the mirror to the Trash, this takes the empty skeleton with
- *  it. Stops at the first non-empty dir — nothing with content is touched. */
+ *  it. Stops at the first dir with real content. */
 async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
   let dir = from;
   while (dir !== stopAt && dir.startsWith(stopAt + path.sep)) {
-    try {
-      await fs.promises.rmdir(dir);
-    } catch {
-      return;
-    }
+    if (!(await removeIfEffectivelyEmpty(dir))) return;
     dir = path.dirname(dir);
   }
 }
@@ -1325,7 +1354,8 @@ function wireIpc(): void {
           await removePair(p.id);
           await fs.promises.mkdir(path.dirname(dest), { recursive: true });
           await fs.promises.rename(p.local, dest);
-          await addPair(dest, p.remote, acc.id);
+          await addPair(dest, p.remote, acc.id, p.file === true);
+          await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
         } catch (e) {
           dialog.showErrorBox(
             syncText('rootTitle'),
@@ -1333,13 +1363,14 @@ function wireIpc(): void {
           );
         }
       }
-      // Sweep the empty storage dirs left behind — rmdir only, never rm -rf:
-      // anything non-empty under the old root is not ours to judge.
+      // Sweep the effectively-empty storage dirs left behind — litter-aware
+      // rmdir only, never rm -rf: real content under the old root is not
+      // ours to judge.
       try {
         for (const entry of await fs.promises.readdir(oldRoot)) {
-          await fs.promises.rmdir(path.join(oldRoot, entry)).catch(() => {});
+          await removeIfEffectivelyEmpty(path.join(oldRoot, entry));
         }
-        await fs.promises.rmdir(oldRoot).catch(() => {});
+        await removeIfEffectivelyEmpty(oldRoot);
       } catch {
         // Old root already gone; nothing to sweep.
       }
