@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,10 @@ type Pair struct {
 	// server this pair belongs to. The engine only carries it.
 	Account string `json:"account,omitempty"`
 	Paused  bool   `json:"paused,omitempty"`
+	// File marks a single-file pair: Local is a file path and Remote names a
+	// file on the server. Same planner, same rules, same trash — the
+	// snapshots just carry one entry.
+	File bool `json:"file,omitempty"`
 }
 
 // Result reports what one run did. Every field is a measurement, not an
@@ -115,6 +120,9 @@ func (e *Engine) remoteProgress(phase string) func(dirs, items int) {
 // settled and gets retried next time. That is what stops one broken file from
 // permanently wedging a folder.
 func (e *Engine) Run(ctx context.Context) (Result, error) {
+	if e.Pair.File {
+		return e.runFile(ctx)
+	}
 	started := e.now()
 	var res Result
 
@@ -169,6 +177,136 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		return res, fmt.Errorf("re-read %s: %w", e.Pair.Local, err)
 	}
 	remote2, err := e.walkRemoteRoot(ctx, "settling")
+	if err != nil {
+		return res, err
+	}
+	if err := e.Store.SaveBaseline(e.Pair.ID, NextBaseline(local2, remote2)); err != nil {
+		return res, err
+	}
+
+	if n, err := e.Store.PruneTrash(e.Pair.ID, e.trashDays(), e.now()); err != nil {
+		res.Errors = append(res.Errors, "prune trash: "+err.Error())
+	} else if n > 0 {
+		e.logf("trash: removed %d expired item(s)", n)
+	}
+
+	res.Duration = e.now().Sub(started)
+	return res, nil
+}
+
+// parentRemote is the folder holding a remote file path:
+// docs://a/b.txt → docs://a, docs://b.txt → docs://.
+func parentRemote(remote string) string {
+	idx := strings.Index(remote, "://")
+	root, rel := remote[:idx+3], strings.Trim(remote[idx+3:], "/")
+	if rel == "" {
+		return root
+	}
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return root + rel[:i]
+	}
+	return root
+}
+
+// runFile is Run for a single-file pair. The planner and apply() are reused
+// unchanged: both snapshots carry at most one entry, keyed by the file's
+// basename under its PARENT folders — so upload, download, conflict copies
+// and the local trash all work exactly as they do for a folder of one.
+func (e *Engine) runFile(ctx context.Context) (Result, error) {
+	started := e.now()
+	var res Result
+
+	name := filepath.Base(e.Pair.Local)
+	parent := *e
+	parent.Pair.Local = filepath.Dir(e.Pair.Local)
+	parent.Pair.Remote = parentRemote(e.Pair.Remote)
+
+	if err := os.MkdirAll(parent.Pair.Local, 0o755); err != nil {
+		return res, fmt.Errorf("sync folder %s: %w", parent.Pair.Local, err)
+	}
+
+	statLocal := func() (Snapshot, error) {
+		out := Snapshot{}
+		info, err := os.Lstat(e.Pair.Local)
+		if errors.Is(err, os.ErrNotExist) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s is not a regular file any more; remove the pair", e.Pair.Local)
+		}
+		out[name] = Node{Rel: name, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}
+		return out, nil
+	}
+	listRemote := func() (Snapshot, error) {
+		out := Snapshot{}
+		listing, err := e.API.List(ctx, parent.Pair.Remote)
+		if err != nil {
+			// The parent may simply not exist yet — the first upload of a kept
+			// file into a fresh tree. Create it; a real failure comes back on
+			// the retry.
+			if mkErr := e.API.Mkdir(ctx, parent.Pair.Remote); mkErr != nil {
+				return nil, err
+			}
+			if listing, err = e.API.List(ctx, parent.Pair.Remote); err != nil {
+				return nil, err
+			}
+		}
+		for _, f := range listing.Files {
+			if f.Basename != name {
+				continue
+			}
+			if f.IsDir {
+				return nil, fmt.Errorf("%s is a folder on the server; remove the pair", e.Pair.Remote)
+			}
+			out[name] = Node{Rel: name, Size: f.Size, ModMillis: f.LastModified}
+		}
+		return out, nil
+	}
+
+	base, hadBaseline, err := e.Store.LoadBaseline(e.Pair.ID)
+	if err != nil {
+		return res, err
+	}
+	res.FirstRun = !hadBaseline
+
+	local, err := statLocal()
+	if err != nil {
+		return res, err
+	}
+	remote, err := listRemote()
+	if err != nil {
+		return res, err
+	}
+
+	actions := Plan(local, remote, base, Options{FirstRun: res.FirstRun, Now: e.now()})
+	res.Planned = len(actions)
+	if res.Planned > 0 {
+		e.progressf("plan: %d change(s) to make", res.Planned)
+	}
+	for i, a := range actions {
+		if err := ctx.Err(); err != nil {
+			res.Errors = append(res.Errors, "stopped: "+err.Error())
+			break
+		}
+		if err := parent.apply(ctx, a, &res); err != nil {
+			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
+			e.logf("!! %s %s: %v", a.Kind, a.Rel, err)
+		} else {
+			res.Applied++
+		}
+		if i+1 == res.Planned {
+			e.progressf("transfer: %d/%d", i+1, res.Planned)
+		}
+	}
+
+	local2, err := statLocal()
+	if err != nil {
+		return res, err
+	}
+	remote2, err := listRemote()
 	if err != nil {
 		return res, err
 	}

@@ -94,17 +94,20 @@ func syncCmd() *cobra.Command {
 }
 
 func syncAddCmd() *cobra.Command {
-	var account string
+	var (
+		account string
+		isFile  bool
+	)
 	c := &cobra.Command{
 		Use:   "add <local-folder> <adapter://remote/path>",
-		Short: "Pair a local folder with a server folder",
+		Short: "Pair a local folder (or, with --file, a single file) with the server",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := syncStore()
 			if err != nil {
 				return err
 			}
-			p, err := st.AddPair(filesync.Pair{Local: args[0], Remote: args[1], Account: account})
+			p, err := st.AddPair(filesync.Pair{Local: args[0], Remote: args[1], Account: account, File: isFile})
 			if err != nil {
 				return err
 			}
@@ -114,6 +117,7 @@ func syncAddCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&account, "account", "", "label recording which signed-in server this pair belongs to")
+	c.Flags().BoolVar(&isFile, "file", false, "pair a single file instead of a folder")
 	return quiet(c)
 }
 
@@ -394,7 +398,12 @@ func syncTrashCmd() *cobra.Command {
 						if it.Rel != restore {
 							continue
 						}
-						dest := filepath.Join(p.Local, filepath.FromSlash(it.Rel))
+						root := p.Local
+						if p.File {
+							// A file pair's Local IS the file; restores land beside it.
+							root = filepath.Dir(p.Local)
+						}
+						dest := filepath.Join(root, filepath.FromSlash(it.Rel))
 						if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 							return err
 						}
