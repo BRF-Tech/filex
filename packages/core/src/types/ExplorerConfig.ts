@@ -323,14 +323,32 @@ export interface ExplorerConfig {
   desktopSync?: {
     /** Kept folders for the mounted account, adapter-qualified remotes. */
     kept: () => Promise<Array<{ remote: string; local: string }>>;
-    /** Start keeping a folder. Resolves once the pair is registered (or the
-     *  user cancelled the shell's root-folder prompt — re-read `kept`). */
-    keep: (remote: string) => Promise<void>;
+    /** Start keeping a folder — or, with kind 'file', a single file.
+     *  Resolves once the pair is registered (or the user cancelled the
+     *  shell's root-folder prompt — re-read `kept`). */
+    keep: (remote: string, kind: 'dir' | 'file') => Promise<void>;
     /** Stop keeping. The SHELL owns the "what happens to the local copy"
      *  question — it asks natively and may cancel; re-read `kept` after. */
     unkeep: (remote: string) => Promise<void>;
     /** Open the folder's local mirror in the OS file manager. */
     reveal: (remote: string) => Promise<void>;
+    /** Live engine state, for the row badges and the bottom progress strip.
+     *  `active` is the folder being worked on right now — the engine walks
+     *  its pairs one at a time — or null between runs. */
+    status?: () => Promise<{
+      running: boolean;
+      lastError?: string | null;
+      active: {
+        remote: string;
+        phase: 'inventory' | 'plan' | 'transfer' | 'settling';
+        done: number;
+        total: number;
+      } | null;
+    }>;
+    /** Subscribe to "something about sync changed" pokes from the shell —
+     *  the explorer re-reads `kept` and `status` when poked. The shell keeps
+     *  ONE subscriber (the mounted explorer) and overwrites it on remount. */
+    onChange?: (cb: () => void) => void;
   };
 }
 

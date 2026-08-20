@@ -1436,7 +1436,51 @@ async function refreshKept(): Promise<void> {
     // Shell went away mid-call; a stale entry only mislabels a menu item.
   }
 }
-onMounted(() => void refreshKept());
+
+/** The folder the engine is working on RIGHT NOW (null between runs). Drives
+ *  the ⟳ row badges and the bottom progress strip. */
+const keepActive = ref<{
+  remote: string;
+  phase: 'inventory' | 'plan' | 'transfer' | 'settling';
+  done: number;
+  total: number;
+} | null>(null);
+
+async function refreshKeepStatus(): Promise<void> {
+  const ds = desktopSync.value;
+  if (!ds?.status) return;
+  try {
+    keepActive.value = (await ds.status()).active ?? null;
+  } catch {
+    keepActive.value = null;
+  }
+}
+
+// The shell pokes on every engine output line — during a transfer that can be
+// several a second, and each refresh is an IPC round-trip. Trailing-edge
+// throttle: at most one refresh per 300ms, and the FINAL poke always lands,
+// so the strip cannot get stuck showing a finished transfer.
+let keepPokeTimer: ReturnType<typeof setTimeout> | null = null;
+function onKeepPoke(): void {
+  if (keepPokeTimer) return;
+  keepPokeTimer = setTimeout(() => {
+    keepPokeTimer = null;
+    void refreshKeepStatus();
+    void refreshKept();
+  }, 300);
+}
+
+onMounted(() => {
+  void refreshKept();
+  void refreshKeepStatus();
+  desktopSync.value?.onChange?.(onKeepPoke);
+});
+onBeforeUnmount(() => {
+  if (keepPokeTimer) {
+    clearTimeout(keepPokeTimer);
+    keepPokeTimer = null;
+  }
+});
 
 /** Adapter-qualified remote for a row. Virtual storage rows carry a bare
  *  name (`docs`), real rows a wire path (`docs://reports`). */
@@ -1447,26 +1491,75 @@ function keepRemoteOf(node: FileNode): string {
 
 type KeepState = 'none' | 'kept' | 'inherited' | 'partial';
 
+/** True when `child` lives strictly inside `parent` (both wire-form). */
+function remoteInside(child: string, parent: string): boolean {
+  if (parent.endsWith('://')) return child.startsWith(parent) && child !== parent;
+  return child === parent ? false : child.startsWith(parent + '/');
+}
+
 /** How `remote` relates to the kept set: exactly a pair, inside one
  *  (inherited), an ancestor of some (partial), or unrelated. */
 function keepStateOf(remote: string): KeepState {
-  const inside = (child: string, parent: string) =>
-    parent.endsWith('://')
-      ? child.startsWith(parent) && child !== parent
-      : child === parent
-        ? false
-        : child.startsWith(parent + '/');
   if (keptPairs.value.some((p) => p.remote === remote)) return 'kept';
-  if (keptPairs.value.some((p) => inside(remote, p.remote))) return 'inherited';
-  if (keptPairs.value.some((p) => inside(p.remote, remote))) return 'partial';
+  if (keptPairs.value.some((p) => remoteInside(remote, p.remote))) return 'inherited';
+  if (keptPairs.value.some((p) => remoteInside(p.remote, remote))) return 'partial';
   return 'none';
 }
 
-/** Menu entries for one selected folder, by its keep state. Empty for
- *  multi-selections, files, trash, encrypted folders, or a web mount. */
+type KeepBadge = 'kept' | 'syncing' | 'cloud' | 'partial';
+
+/**
+ * The availability badge for one row: on this computer, being synced right
+ * now, holding kept items somewhere below (partial), or online-only. Every
+ * row gets one — that is the OneDrive/Drive grammar people already read —
+ * except the rows where it would be a lie or noise: trash, and the `.trash`
+ * row itself. `partial` is what saves the user from drilling into every
+ * folder to find out whether anything inside is on this computer.
+ */
+function keepBadgeFor(n: FileNode): KeepBadge | null {
+  if (!desktopSync.value || trashActive.value) return null;
+  if (n.basename === '.trash') return null;
+  const r = keepRemoteOf(n);
+  const act = keepActive.value;
+  if (act && (r === act.remote || remoteInside(r, act.remote) || remoteInside(act.remote, r))) {
+    return 'syncing';
+  }
+  const st = keepStateOf(r);
+  if (st === 'kept' || st === 'inherited') return 'kept';
+  if (st === 'partial') return 'partial';
+  return 'cloud';
+}
+
+/** Bottom strip: what to say while the engine works. */
+const keepStripLabel = computed<string>(() => {
+  const act = keepActive.value;
+  if (!act) return '';
+  const name = act.remote.endsWith('://')
+    ? act.remote.slice(0, -'://'.length)
+    : act.remote.slice(act.remote.lastIndexOf('/') + 1);
+  if (act.phase === 'transfer' && act.total > 0) {
+    return t('keep.strip_transfer', {
+      name,
+      done: String(act.done),
+      total: String(act.total),
+      pct: String(Math.min(100, Math.round((act.done * 100) / act.total))),
+    });
+  }
+  if (act.phase === 'settling') return t('keep.strip_settling', { name });
+  return t('keep.strip_inventory', { name });
+});
+
+const keepStripPercent = computed<number | null>(() => {
+  const act = keepActive.value;
+  if (!act || act.phase !== 'transfer' || act.total <= 0) return null;
+  return Math.min(100, Math.round((act.done * 100) / act.total));
+});
+
+/** Menu entries for one selected folder OR file, by its keep state. Empty
+ *  for multi-selections, trash, encrypted folders, or a web mount. */
 function keepActionsFor(sel: FileNode[]): ContextAction[] {
   const ds = desktopSync.value;
-  const single = sel.length === 1 && sel[0]?.type === 'dir';
+  const single = sel.length === 1 && (sel[0]?.type === 'dir' || sel[0]?.type === 'file');
   if (!ds || !single || trashActive.value || e2eActive.value || sel[0]?.e2e === true) return [];
   const st = keepStateOf(keepRemoteOf(sel[0]!));
   return [
@@ -1701,7 +1794,7 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       if (!ds || !targets[0]) break;
       const remote = keepRemoteOf(targets[0]);
       try {
-        await ds.keep(remote);
+        await ds.keep(remote, targets[0].type === 'file' ? 'file' : 'dir');
         await refreshKept();
         // The shell may have shown its root-folder prompt and been cancelled —
         // only claim success when the pair is really there now.
@@ -3514,6 +3607,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         :show-parent-path="!!searchQuery"
         :locale="locale"
         :loading="loading"
+        :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
         :starred-ids="starredIds"
         :api-base="props.config.apiBase ?? ''"
         :auth-headers="() => buildAuthHeaders()"
@@ -3533,6 +3627,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         :show-parent-path="!!searchQuery"
         :locale="locale"
         :loading="loading"
+        :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
         :thumb-src="thumbs.src"
         @click-card="(n, m) => selection.click(n.path, m)"
         @dbl-card="openNode"
@@ -3564,6 +3659,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
          :key tab kimliğine bağlı — tab geçişinde pane kendi konumuyla temiz
          remount olur. -->
     <SecondaryPane
+      :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
       v-if="splitVisible && activeSplit"
       ref="splitPaneRef"
       :key="'split-' + tabsActiveId"
@@ -3668,6 +3764,16 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         <path d="M12 5v14M5 12h14" />
       </svg>
     </button>
+
+    <!-- selective-sync progress: the folder the engine is moving RIGHT NOW.
+         Overlay, pointer-events none — status is never in the way of work. -->
+    <div v-if="keepActive" class="fe-keep-strip" role="status" aria-live="polite">
+      <span class="fe-keep-strip__icon" aria-hidden="true">⟳</span>
+      <span class="fe-keep-strip__label">{{ keepStripLabel }}</span>
+      <div v-if="keepStripPercent !== null" class="fe-keep-strip__bar" aria-hidden="true">
+        <div class="fe-keep-strip__fill" :style="{ width: keepStripPercent + '%' }"></div>
+      </div>
+    </div>
 
     <ContextMenu
       ref="ctxRef"

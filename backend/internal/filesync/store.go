@@ -100,6 +100,17 @@ func (s *Store) AddPair(p Pair) (Pair, error) {
 			return p, fmt.Errorf("remote path may not contain a %q segment: %q", "..", p.Remote)
 		}
 	}
+	if p.File {
+		rel := strings.Trim(p.Remote[strings.Index(p.Remote, "://")+3:], "/")
+		if rel == "" {
+			return p, fmt.Errorf("a file pair needs a file path, not a storage root")
+		}
+		// The engine keys both sides by ONE basename; a rename across the
+		// pair would silently sync the wrong entry.
+		if base := rel[strings.LastIndex(rel, "/")+1:]; base != filepath.Base(p.Local) {
+			return p, fmt.Errorf("a file pair keeps its name: local %q vs remote %q", filepath.Base(p.Local), base)
+		}
+	}
 
 	pairs, err := s.LoadPairs()
 	if err != nil {

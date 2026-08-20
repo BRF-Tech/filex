@@ -39,6 +39,10 @@ const props = defineProps<{
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
+  /** Desktop selective sync: availability badge per row (kept on this
+   *  computer / syncing right now / online only). Absent on the web —
+   *  no badge renders at all. */
+  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
 }>();
 
 const emit = defineEmits<{
@@ -142,6 +146,13 @@ function specialEmojiFor(n: FileNode): string | null {
   if (n.mime_type === 'inode/storage') return '💾';
   if (n.type === 'dir' && n.e2e === true) return '🔒'; /* wiring:e2 — şifreli klasör rozeti */
   return null;
+}
+
+function keepGlyph(b: 'kept' | 'syncing' | 'cloud' | 'partial'): string {
+  if (b === 'kept') return '\u2713';
+  if (b === 'syncing') return '\u27f3';
+  if (b === 'partial') return '\u25d0';
+  return '\u2601';
 }
 
 function isPinnedSpecial(n: FileNode): boolean {
@@ -397,6 +408,11 @@ const segments = computed<Segment[]>(() => {
               {{ nodeDisplayName(n) }}
               <!-- bul:s3 — content-match badge -->
               <span v-if="rowInContent(n)" class="fe-list__badge">{{ t('search.in_content') }}</span>
+              <span
+                v-if="keepBadgeFor && keepBadgeFor(n)"
+                :class="['fe-keepbadge', 'fe-keepbadge--' + keepBadgeFor(n)]"
+                :title="t('keep.badge_' + keepBadgeFor(n))"
+              >{{ keepGlyph(keepBadgeFor(n)!) }}</span>
             </span>
             <span
               v-if="showParentPath"

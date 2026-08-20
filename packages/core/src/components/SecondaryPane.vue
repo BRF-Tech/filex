@@ -58,6 +58,8 @@ const props = defineProps<{
   viewMode?: ViewMode;
   /** ui-fix — authenticated thumb resolver, forwarded to grid/gallery. */
   thumbSrc?: (n: FileNode) => string | null;
+  /** Desktop selective sync badge resolver, forwarded to the views. */
+  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
   /** ui-fix — mirror the main panel's virtual `.trash` row at storage root
    *  so both split panes list identical rows (no row-offset). Defaults on. */
   trashVisible?: boolean;
@@ -396,6 +398,7 @@ defineExpose({ reload, goUp, selectAll, openSelected, selectedNodes, getPath });
         :selected="selected"
         :locale="locale"
         :loading="loading"
+        :keep-badge-for="keepBadgeFor"
         @click-row="onViewClick"
         @dbl-row="onRowDbl"
         @context-row="onViewContext"
@@ -409,6 +412,7 @@ defineExpose({ reload, goUp, selectAll, openSelected, selectedNodes, getPath });
         :locale="locale"
         :loading="loading"
         :thumb-src="thumbSrc"
+        :keep-badge-for="keepBadgeFor"
         @click-card="onViewClick"
         @dbl-card="onRowDbl"
         @context-card="onViewContext"

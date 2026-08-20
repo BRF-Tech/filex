@@ -25,6 +25,17 @@ export interface Pair {
   remote: string;
   account?: string;
   paused?: boolean;
+  /** Single-file pair: local is a file path, remote names a file. */
+  file?: boolean;
+}
+
+/** One pair's live phase, parsed from the engine's progress lines. */
+export interface SyncActivity {
+  pairId: string;
+  phase: 'inventory' | 'plan' | 'transfer' | 'settling';
+  /** transfer only: actions done / planned. 0/0 elsewhere. */
+  done: number;
+  total: number;
 }
 
 /** What the supervisor has observed about one account's sync process. */
@@ -34,6 +45,9 @@ export interface SyncStatus {
   lastLine: string;
   lastRunAt: string | null;
   lastError: string | null;
+  /** The pair the engine is working on RIGHT NOW, or null between runs.
+   *  One value, not a map: the engine walks its pairs sequentially. */
+  active: SyncActivity | null;
 }
 
 /** How often each account's watcher re-checks. Frequent enough to feel live,
@@ -98,8 +112,15 @@ export async function listPairs(): Promise<Pair[]> {
   }
 }
 
-export async function addPair(local: string, remote: string, accountId: string): Promise<void> {
-  await run(['sync', 'add', local, remote, '--account', accountId]);
+export async function addPair(
+  local: string,
+  remote: string,
+  accountId: string,
+  isFile = false,
+): Promise<void> {
+  const args = ['sync', 'add', local, remote, '--account', accountId];
+  if (isFile) args.push('--file');
+  await run(args);
 }
 
 export interface TrashItem {
@@ -187,18 +208,42 @@ export class SyncSupervisor {
       lastLine: 'starting…',
       lastRunAt: null,
       lastError: null,
+      active: null,
     };
     this.status.set(acc.id, st);
     this.procs.set(acc.id, proc);
 
+    // The engine's progress lines are `<pair-id>: <phase>: <detail>` (Engine
+    // .Progress, printed even under --quiet); a run ends with the summary
+    // `<pair-id>: N/N done — …` or `<pair-id>: already in step`. Parsing them
+    // HERE keeps the string format in one place — the UI gets typed data.
+    const progressRe = /^(\S+): (inventory|plan|transfer|settling): (.*)$/;
+    const settledRe = /^(\S+): (?:already in step$|\d+\/\d+ done\b)/;
     const absorb = (chunk: Buffer, isErr: boolean) => {
       for (const line of chunk.toString().split('\n')) {
         const t = line.trim();
         if (!t) continue;
-        if (isErr) st.lastError = t;
-        else {
+        if (isErr) {
+          st.lastError = t;
+          // `<pair-id>: <error>` means that pair's run died — it is not active.
+          const ep = /^(\S+): /.exec(t);
+          if (ep && st.active?.pairId === ep[1]) st.active = null;
+        } else {
           st.lastLine = t;
           st.lastRunAt = new Date().toISOString();
+          const p = progressRe.exec(t);
+          if (p) {
+            const tr = p[2] === 'transfer' ? /^(\d+)\/(\d+)/.exec(p[3]) : null;
+            st.active = {
+              pairId: p[1],
+              phase: p[2] as SyncActivity['phase'],
+              done: tr ? Number(tr[1]) : 0,
+              total: tr ? Number(tr[2]) : 0,
+            };
+          } else {
+            const s = settledRe.exec(t);
+            if (s && st.active?.pairId === s[1]) st.active = null;
+          }
         }
       }
       this.onChange();
@@ -209,6 +254,7 @@ export class SyncSupervisor {
     proc.on('exit', (code) => {
       this.procs.delete(acc.id);
       st.running = false;
+      st.active = null;
       // A watcher is meant to run forever. Exiting means the server went away,
       // the token expired, or the binary crashed — say so instead of leaving a
       // panel that claims everything is fine.

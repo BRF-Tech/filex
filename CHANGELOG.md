@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Availability at a glance.** Every row in the desktop explorer carries the
+  glyph grammar every drive client already taught: ✓ kept on this computer,
+  ◐ holding kept items somewhere below, ⟳ being synced right now, ☁
+  online-only — so a root listing answers "is anything in here on my disk?"
+  without drilling in. And while the engine works, a strip along the bottom
+  of the window names the folder and shows live progress — counts and a
+  percent bar — parsed by the shell from the same progress lines `--quiet`
+  emits, so the CLI output stays the single source of truth.
+
+- **Single FILES can be kept on this computer too.** The sync engine grew
+  first-class file pairs (`filex sync add --file`): same planner, same rules,
+  same 30-day local trash — the snapshots just carry one entry. The desktop's
+  menu offers *Keep on this computer* on files as well; a kept file mirrors
+  to `<root>/<storage>/<path>` beside everything else, syncs both ways, and
+  *Open local folder* reveals it next to its neighbours instead of launching
+  it.
+
+- **Settings shows the mirror root, and can move it.** The root was chosen at
+  the first keep and then lived nowhere the user could see. A card in
+  Settings now names it, opens it, and changes it: kept mirrors migrate
+  (rename + re-pair — the settling pass transfers nothing, and a file pair
+  stays a file pair), hand-picked pairs outside the root stay put, and only
+  effectively-empty leftovers are swept, never `rm -rf`.
+
+### Fixed
+
+- **"Keep online only" no longer leaves an empty folder skeleton behind.**
+  The mirror's intermediate directories (created at keep time) are swept
+  after the local copy moves to the Trash — and a folder holding nothing but
+  OS litter (`.DS_Store`, `Thumbs.db`, `desktop.ini`) counts as empty, since
+  Finder plants `.DS_Store` in any folder the user merely looked at and the
+  plain-rmdir sweep stopped dead on it. Anything with real content still
+  stops the walk cold.
+
 ## [0.22.0] - 2026-08-20
 
 ### Security

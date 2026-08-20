@@ -770,6 +770,10 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'The folder is no longer kept, but its local copy could not be moved to the Trash: {err}',
     'Klasör artık tutulmuyor ama yerel kopya Çöp Kutusuna taşınamadı: {err}',
   ],
+  moveFailed: [
+    'Could not move {name} to the new folder: {err}',
+    '{name} yeni klasöre taşınamadı: {err}',
+  ],
 };
 
 function syncText(key: string, vars: Record<string, string> = {}): string {
@@ -831,6 +835,54 @@ function localMirrorPath(root: string, remote: string): string {
 
 function accountPairs(accountId: string): Pair[] {
   return knownPairs.filter((p) => p.account === accountId);
+}
+
+/** Names the OS drops into folders it merely LOOKED at. A folder holding
+ *  nothing else is empty in every sense the user means — measured: Finder
+ *  planted .DS_Store in the mirror's parents and the plain-rmdir sweep
+ *  stopped dead on it, leaving the "empty" skeleton the sweep exists to
+ *  remove. Mirrors the engine's own skip list. */
+const OS_LITTER = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
+/** Removes a dir that is empty apart from OS litter (the litter goes too).
+ *  Anything with real content — including a `._*`-only AppleDouble we cannot
+ *  be sure about — is left alone. */
+async function removeIfEffectivelyEmpty(dir: string): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await fs.promises.readdir(dir);
+  } catch {
+    return false;
+  }
+  if (entries.some((e) => !OS_LITTER.has(e))) return false;
+  for (const e of entries) {
+    try {
+      await fs.promises.unlink(path.join(dir, e));
+    } catch {
+      return false;
+    }
+  }
+  try {
+    await fs.promises.rmdir(dir);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** Sweep of effectively-empty dirs from `from` up to (never including)
+ *  `stopAt`. The mirror layout mkdirs intermediate folders on keep; after an
+ *  unkeep moves the mirror to the Trash, this takes the empty skeleton with
+ *  it. Stops at the first dir with real content. */
+async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
+  let dir = from;
+  // isInsideDir, not startsWith: a Windows drive letter can come back in
+  // either case, and a missed boundary here would walk the sweep out of the
+  // root — or stop it for no reason.
+  while (dir !== stopAt && isInsideDir(stopAt, dir)) {
+    if (!(await removeIfEffectivelyEmpty(dir))) return;
+    dir = path.dirname(dir);
+  }
 }
 
 /**
@@ -1205,7 +1257,7 @@ function wireIpc(): void {
   ipcMain.handle('sync:kept', (_e, accountId: string) =>
     accountPairs(String(accountId)).map((p) => ({ remote: p.remote, local: p.local })));
 
-  ipcMain.handle('sync:keep', async (_e, accountId: string, remotePath: string) => {
+  ipcMain.handle('sync:keep', async (_e, accountId: string, remotePath: string, isFile?: boolean) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
     const remote = normRemote(remotePath);
@@ -1228,9 +1280,10 @@ function wireIpc(): void {
       await removePair(child.id);
     }
     const local = localMirrorPath(root, remote);
-    await fs.promises.mkdir(local, { recursive: true });
+    // A folder mirror IS a folder; a file mirror needs only its parents.
+    await fs.promises.mkdir(isFile ? path.dirname(local) : local, { recursive: true });
     try {
-      await addPair(local, remote, acc.id);
+      await addPair(local, remote, acc.id, isFile === true);
     } finally {
       await refreshPairs(); // reconcile even on failure — the children are already gone
     }
@@ -1272,6 +1325,13 @@ function wireIpc(): void {
       // To the OS trash, not deletion — same restore story every user knows.
       try {
         await shell.trashItem(pair.local);
+        // The mirror's empty ancestor skeleton (mkdir'ed at keep time) goes
+        // too — bare folders left behind read as "it deleted my files but
+        // kept the folders". Only under the account's own root: `ours` is
+        // the same judgement the dialog default was based on.
+        if (ours && acc?.syncRoot) {
+          await pruneEmptyDirsUpTo(path.dirname(pair.local), acc.syncRoot);
+        }
       } catch (e) {
         dialog.showErrorBox(
           syncText('unkeepTitle'),
@@ -1298,6 +1358,15 @@ function wireIpc(): void {
         local = path.join(anc.local, ...safeSegments(rest));
       }
     }
+    // A file mirror is revealed beside its neighbours — openPath would
+    // LAUNCH it instead.
+    if (local) {
+      const st = await fs.promises.stat(local).catch(() => null);
+      if (st?.isFile()) {
+        shell.showItemInFolder(local);
+        return publicState();
+      }
+    }
     // A folder kept a moment ago — or one inside a parent whose first run has
     // not reached it yet — has no directory on disk, and openPath on a missing
     // path fails silently. Climb to the nearest ancestor that does exist so
@@ -1309,6 +1378,87 @@ function wireIpc(): void {
     }
     if (local) await shell.openPath(local);
     return publicState();
+  });
+
+  // Settings: view or change the account's mirror root. Kept folders MOVE
+  // with it — each pair is removed, its mirror renamed under the new root,
+  // and the pair re-added there. The re-added pair's first run walks two
+  // identical trees, so it settles without transferring a byte; the removed
+  // baseline only costs that one settling pass.
+  ipcMain.handle('sync:setRoot', async (_e, accountId: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    let def = acc.syncRoot;
+    if (!def) {
+      try {
+        def = path.join(app.getPath('home'), 'filex', new URL(acc.serverUrl).hostname);
+      } catch {
+        def = path.join(app.getPath('home'), 'filex');
+      }
+    }
+    await fs.promises.mkdir(def, { recursive: true });
+    const newRoot = await pickDirectory({
+      title: syncText('rootTitle'),
+      buttonLabel: syncText('rootButton'),
+      defaultPath: def,
+    });
+    if (!newRoot || newRoot === acc.syncRoot) return publicState();
+    const oldRoot = acc.syncRoot ?? null;
+    if (oldRoot) {
+      // Only mirrors under the old root move; a hand-picked pair living
+      // elsewhere was placed there on purpose and stays put.
+      const mine = accountPairs(acc.id).filter(
+        (p) => p.local !== oldRoot && isInsideDir(oldRoot, p.local),
+      );
+      for (const p of mine) {
+        const dest = path.join(newRoot, path.relative(oldRoot, p.local));
+        try {
+          await removePair(p.id);
+          await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+          await fs.promises.rename(p.local, dest);
+          await addPair(dest, p.remote, acc.id, p.file === true);
+          await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
+        } catch (e) {
+          dialog.showErrorBox(
+            syncText('rootTitle'),
+            syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),
+          );
+        }
+      }
+      // Sweep the effectively-empty storage dirs left behind — litter-aware
+      // rmdir only, never rm -rf: real content under the old root is not
+      // ours to judge.
+      try {
+        for (const entry of await fs.promises.readdir(oldRoot)) {
+          await removeIfEffectivelyEmpty(path.join(oldRoot, entry));
+        }
+        await removeIfEffectivelyEmpty(oldRoot);
+      } catch {
+        // Old root already gone; nothing to sweep.
+      }
+    }
+    acc.syncRoot = newRoot;
+    saveState(state);
+    await refreshPairs();
+    return publicState();
+  });
+
+  // Live sync state for the explorer's badges and its bottom progress strip.
+  // The pair id from the supervisor is resolved to its remote here, so the
+  // component never learns about pair ids at all.
+  ipcMain.handle('sync:status', (_e, accountId: string) => {
+    const st = supervisor?.statuses().find((s) => s.accountId === accountId);
+    if (!st) return { running: false, lastError: null, active: null };
+    const remote = st.active
+      ? (knownPairs.find((p) => p.id === st.active?.pairId)?.remote ?? null)
+      : null;
+    return {
+      running: st.running,
+      lastError: st.lastError,
+      active: st.active && remote
+        ? { remote, phase: st.active.phase, done: st.active.done, total: st.active.total }
+        : null,
+    };
   });
 
   // Test-only: feed a deep link straight in. Guarded by the same env flag that

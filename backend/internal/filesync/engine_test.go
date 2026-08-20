@@ -607,6 +607,97 @@ func TestProgressReportsInventoryAndTransfer(t *testing.T) {
 	}
 }
 
+// fileRig wires a single-FILE pair against the same fake server.
+func fileRig(t *testing.T) (*rig, *Engine) {
+	t.Helper()
+	r := newRig(t)
+	eng := &Engine{
+		Pair: Pair{
+			ID:     "f1",
+			Local:  filepath.Join(filepath.Dir(r.dir), "mirror", "a.txt"),
+			Remote: "docs://work/a.txt",
+			File:   true,
+		},
+		API:   r.srv,
+		Store: r.engine.Store,
+		Now:   func() time.Time { return r.clock },
+	}
+	return r, eng
+}
+
+func TestFilePairFirstRunDownloads(t *testing.T) {
+	r, eng := fileRig(t)
+	r.srv.files["a.txt"] = []byte("from the server")
+	r.srv.mod["a.txt"] = r.srv.clock
+
+	res, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Downloaded != 1 {
+		t.Fatalf("want 1 download, got %+v", res)
+	}
+	b, err := os.ReadFile(eng.Pair.Local)
+	if err != nil || string(b) != "from the server" {
+		t.Fatalf("local copy wrong: %q %v", b, err)
+	}
+}
+
+func TestFilePairUploadsALocalEdit(t *testing.T) {
+	r, eng := fileRig(t)
+	r.srv.files["a.txt"] = []byte("v1")
+	r.srv.mod["a.txt"] = r.srv.clock
+	if _, err := eng.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	r.clock = r.clock.Add(time.Hour)
+	if err := os.WriteFile(eng.Pair.Local, []byte("v2 edited here"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(eng.Pair.Local, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Uploaded != 1 {
+		t.Fatalf("want 1 upload, got %+v", res)
+	}
+	if string(r.srv.files["a.txt"]) != "v2 edited here" {
+		t.Fatalf("server copy wrong: %q", r.srv.files["a.txt"])
+	}
+}
+
+func TestFilePairRemoteDeleteTrashesTheLocalCopy(t *testing.T) {
+	r, eng := fileRig(t)
+	r.srv.files["a.txt"] = []byte("short-lived")
+	r.srv.mod["a.txt"] = r.srv.clock
+	if _, err := eng.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	delete(r.srv.files, "a.txt")
+	delete(r.srv.mod, "a.txt")
+	res, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DeletedLocal != 1 {
+		t.Fatalf("want the local copy trashed, got %+v", res)
+	}
+	if _, err := os.Stat(eng.Pair.Local); !os.IsNotExist(err) {
+		t.Fatalf("local copy should be gone: %v", err)
+	}
+	items, err := eng.Store.ListTrash("f1")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("want 1 trashed item, got %v %v", items, err)
+	}
+}
+
 // A corrupt baseline must degrade to a merge, never to "everything was deleted".
 func TestACorruptBaselineFallsBackToAFirstRun(t *testing.T) {
 	r := newRig(t)
