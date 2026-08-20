@@ -126,8 +126,13 @@ func relOf(root, p string) string {
 // remoteRoot is an `adapter://path` prefix; every returned Node.Rel is relative
 // to it, so local and remote snapshots share one key space and the planner can
 // compare them directly.
-func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string) (Snapshot, error) {
+//
+// progress, when non-nil, is called after each listed directory with the
+// running totals. One network round-trip per folder makes this walk the slow
+// phase of a big first sync, and the only one with nothing else to show.
+func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string, progress func(dirsListed, itemsSeen int)) (Snapshot, error) {
 	out := Snapshot{}
+	dirsListed := 0
 	// Iterative rather than recursive: a deep tree on the server should not be
 	// able to exhaust this process's stack.
 	queue := []string{""}
@@ -143,6 +148,7 @@ func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string) (Snaps
 			// A folder that vanished mid-walk is not fatal; the next run sees it.
 			continue
 		}
+		dirsListed++
 		for _, f := range res.Files {
 			if skipNames[f.Basename] {
 				continue
@@ -161,6 +167,9 @@ func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string) (Snaps
 				Size:      f.Size,
 				ModMillis: f.LastModified,
 			}
+		}
+		if progress != nil {
+			progress(dirsListed, len(out))
 		}
 	}
 	return out, nil

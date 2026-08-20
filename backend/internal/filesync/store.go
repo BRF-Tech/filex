@@ -129,7 +129,15 @@ func (s *Store) RemovePair(id string) error {
 	if err := s.SavePairs(out); err != nil {
 		return err
 	}
-	return os.Remove(s.path("baseline", id+".json"))
+	// The baseline only appears once a pair's first run has COMPLETED. A pair
+	// removed before that — typically a large first sync the user cancels by
+	// unpairing — has no file here, and that must not read as failure: the
+	// pair is already gone from pairs.json by this line, and callers treat an
+	// error as "the remove failed" and skip their own follow-up.
+	if err := os.Remove(s.path("baseline", id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func overlaps(a, b string) bool {
