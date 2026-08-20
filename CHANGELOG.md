@@ -33,7 +33,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays a file pair), hand-picked pairs outside the root stay put, and only
   effectively-empty leftovers are swept, never `rm -rf`.
 
+- **Transfers run in parallel.** The engine walked its plan one action at a
+  time, so a tree of small files was priced at one full round-trip each —
+  measured on a live deployment, 2 GB of ~400 KB files crawled at 0.24 MB/s
+  with the network mostly idle. Uploads and downloads now run on a small
+  worker pool (default 4, `--transfers` to tune, 1 restores the serial
+  engine); directory creation stays first and deletes/conflicts stay serial
+  in the planner's careful order.
+
 ### Fixed
+
+- **An interrupted first run RESUMES instead of conflicting every finished
+  file.** With no baseline, "present on both sides" always meant a conflict —
+  so a restart mid-first-run turned every already-downloaded file into a
+  "(remote copy)" duplicate; on the tree above that would have been ~7,800 of
+  them. Downloads now stamp the server's own mtime on the local copy, and
+  twins with no history that match by (size, mtime) are adopted silently.
+
+- **Changing the mirror root keeps each pair's history.** Migration used to
+  remove and re-add the pair, throwing the baseline away — and the first-run
+  merge that followed conflicted every file the machine had ever uploaded.
+  New `filex sync move <id> <path>` repoints a pair and keeps its baseline;
+  the desktop root change uses it, and stops the account's watcher first so
+  a mid-round rename can never read as a mass delete.
 
 - **"Keep online only" no longer leaves an empty folder skeleton behind.**
   The mirror's intermediate directories (created at keep time) are swept

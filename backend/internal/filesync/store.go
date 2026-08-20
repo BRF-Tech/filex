@@ -130,6 +130,43 @@ func (s *Store) AddPair(p Pair) (Pair, error) {
 	return p, s.SavePairs(append(pairs, p))
 }
 
+// MovePairLocal repoints a pair at a new local path, keeping its identity —
+// and, crucially, its BASELINE: baselines store relative paths only, so a
+// mirror that physically moved keeps its whole history and the next run is an
+// ordinary incremental pass. The alternative (remove + re-add) throws the
+// baseline away, and the first-run merge that follows conflicts every file
+// whose two sides carry different mtimes — which is every file this machine
+// ever uploaded.
+func (s *Store) MovePairLocal(id, newLocal string) (Pair, error) {
+	abs, err := filepath.Abs(newLocal)
+	if err != nil {
+		return Pair{}, err
+	}
+	pairs, err := s.LoadPairs()
+	if err != nil {
+		return Pair{}, err
+	}
+	idx := -1
+	for i, p := range pairs {
+		if p.ID == id {
+			idx = i
+			continue
+		}
+		if overlaps(p.Local, abs) {
+			return Pair{}, fmt.Errorf("new path overlaps the existing pair %s (%s)", p.ID, p.Local)
+		}
+	}
+	if idx < 0 {
+		return Pair{}, fmt.Errorf("no such pair: %s", id)
+	}
+	if pairs[idx].File && filepath.Base(abs) != filepath.Base(pairs[idx].Local) {
+		return Pair{}, fmt.Errorf("a file pair keeps its name: %q vs %q",
+			filepath.Base(pairs[idx].Local), filepath.Base(abs))
+	}
+	pairs[idx].Local = abs
+	return pairs[idx], s.SavePairs(pairs)
+}
+
 // RemovePair forgets a mapping. Files on either side are left exactly where
 // they are — unpairing is not deleting, and a user who wanted the files gone
 // would have deleted them.

@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -62,6 +63,9 @@ type Engine struct {
 	// TrashDays is how long locally-deleted files are kept before being
 	// dropped. Zero means the default (TrashRetentionDays).
 	TrashDays int
+	// Transfers caps how many uploads/downloads run at once. 0 means
+	// DefaultTransfers; 1 restores the fully serial engine.
+	Transfers int
 	// Log receives one line per action. Optional.
 	Log func(string)
 	// Progress receives one short status line per phase — inventory counts,
@@ -154,20 +158,98 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		e.progressf("plan: %d change(s) to make", res.Planned)
 	}
 
-	for i, a := range actions {
-		if err := ctx.Err(); err != nil {
-			res.Errors = append(res.Errors, "stopped: "+err.Error())
-			break
+	// Three phases. Directory creation first (parents must exist, and it is
+	// cheap), then the TRANSFERS — concurrently, because a tree of small
+	// files is otherwise priced at one full round-trip each: measured on a
+	// live deployment, 2 GB of ~400 KB files crawled at 0.24 MB/s under the
+	// serial loop, gated purely on latency — and finally deletes and
+	// conflicts, serial, in the planner's careful deepest-first order.
+	var mkdirs, transfers, rest []Action
+	for _, a := range actions {
+		switch a.Kind {
+		case ActionMkdirLocal, ActionMkdirRemote:
+			mkdirs = append(mkdirs, a)
+		case ActionUpload, ActionDownload:
+			transfers = append(transfers, a)
+		default:
+			rest = append(rest, a)
 		}
-		if err := e.apply(ctx, a, &res); err != nil {
+	}
+
+	var mu sync.Mutex // guards res and the progress counter; the IO runs unlocked
+	done := 0
+	settle := func(a Action, tmp Result, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
 			e.logf("!! %s %s: %v", a.Kind, a.Rel, err)
 		} else {
 			res.Applied++
+			res.Uploaded += tmp.Uploaded
+			res.Downloaded += tmp.Downloaded
+			res.DeletedLocal += tmp.DeletedLocal
+			res.DeletedRemot += tmp.DeletedRemot
+			res.Conflicts += tmp.Conflicts
 		}
-		if (i+1)%10 == 0 || i+1 == res.Planned {
-			e.progressf("transfer: %d/%d", i+1, res.Planned)
+		done++
+		if done%10 == 0 || done == res.Planned {
+			e.progressf("transfer: %d/%d", done, res.Planned)
 		}
+	}
+	runSerial := func(batch []Action) bool {
+		for _, a := range batch {
+			if ctx.Err() != nil {
+				return false
+			}
+			var tmp Result
+			err := e.apply(ctx, a, &tmp)
+			settle(a, tmp, err)
+		}
+		return true
+	}
+
+	stopped := !runSerial(mkdirs)
+	if !stopped && len(transfers) > 0 {
+		workers := e.transferWorkers()
+		if workers > len(transfers) {
+			workers = len(transfers)
+		}
+		if workers <= 1 {
+			stopped = !runSerial(transfers)
+		} else {
+			jobs := make(chan Action)
+			var wg sync.WaitGroup
+			for w := 0; w < workers; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for a := range jobs {
+						if ctx.Err() != nil {
+							continue
+						}
+						var tmp Result
+						err := e.apply(ctx, a, &tmp)
+						settle(a, tmp, err)
+					}
+				}()
+			}
+			for _, a := range transfers {
+				if ctx.Err() != nil {
+					break
+				}
+				jobs <- a
+			}
+			close(jobs)
+			wg.Wait()
+			stopped = ctx.Err() != nil
+		}
+	}
+	if !stopped {
+		runSerial(rest)
+	}
+	if err := ctx.Err(); err != nil {
+		res.Errors = append(res.Errors, "stopped: "+err.Error())
 	}
 
 	// Re-snapshot. Using the post-run state rather than assuming the plan
@@ -348,6 +430,18 @@ func (e *Engine) walkRemoteRoot(ctx context.Context, phase string) (Snapshot, er
 	return WalkRemote(ctx, e.API, e.Pair.Remote, e.remoteProgress(phase))
 }
 
+// DefaultTransfers is how many uploads/downloads run concurrently. Four is
+// enough to stop a tree of small files being priced at one full round-trip
+// each, without stampeding a small server.
+const DefaultTransfers = 4
+
+func (e *Engine) transferWorkers() int {
+	if e.Transfers > 0 {
+		return e.Transfers
+	}
+	return DefaultTransfers
+}
+
 func (e *Engine) trashDays() int {
 	if e.TrashDays > 0 {
 		return e.TrashDays
@@ -385,7 +479,7 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 
 	case ActionDownload:
 		e.logf("<- %s  (%s)", a.Rel, a.Reason)
-		if err := e.download(ctx, rp, lp); err != nil {
+		if err := e.download(ctx, rp, lp, a.RemoteMod); err != nil {
 			return err
 		}
 		res.Downloaded++
@@ -414,7 +508,7 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 		// files in their own folder.
 		e.logf("!! %s  (%s) — keeping both", a.Rel, a.Reason)
 		sidePath := filepath.Join(filepath.Dir(lp), a.ConflictName)
-		if err := e.download(ctx, rp, sidePath); err != nil {
+		if err := e.download(ctx, rp, sidePath, a.RemoteMod); err != nil {
 			return err
 		}
 		res.Conflicts++
@@ -430,7 +524,7 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 // download writes to a temporary file in the destination directory and renames
 // it into place, so an interrupted transfer can never be mistaken for a
 // complete file by the next run's snapshot.
-func (e *Engine) download(ctx context.Context, remote, dest string) error {
+func (e *Engine) download(ctx context.Context, remote, dest string, remoteMod int64) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -453,5 +547,17 @@ func (e *Engine) download(ctx context.Context, remote, dest string) error {
 	if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.Rename(tmpName, dest)
+	if err := os.Rename(tmpName, dest); err != nil {
+		return err
+	}
+	// Stamp the server's own mtime on the copy. (size, mtime) equality is how
+	// a later run with NO baseline recognises settled work — the interrupted
+	// first run that used to conflict every finished file on resume.
+	if remoteMod > 0 {
+		t := time.UnixMilli(remoteMod)
+		if err := os.Chtimes(dest, t, t); err != nil {
+			e.logf("!! stamp mtime %s: %v", dest, err)
+		}
+	}
+	return nil
 }

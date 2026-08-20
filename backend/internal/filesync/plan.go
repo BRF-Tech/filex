@@ -98,6 +98,10 @@ type Action struct {
 	// Reason is human-readable and shown in `filex sync run` output. Sync is
 	// the one subsystem where people need to see why their file moved.
 	Reason string
+	// RemoteMod carries the server file's mtime (Unix millis) on download
+	// and conflict actions, so the local copy can be stamped with it. 0 =
+	// the storage reported none.
+	RemoteMod int64
 }
 
 // Options tunes a plan.
@@ -197,6 +201,14 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 
 		// ── files ──────────────────────────────────────────────────────
 		case hasL && hasR:
+			// Twins with no history adopt each other: same size, same mtime,
+			// no baseline row. That is exactly what an interrupted first run
+			// leaves behind — downloads carry the server's own mtime — and
+			// without this rule, RESUMING one conflicted every finished file:
+			// thousands of "(remote copy)" duplicates from a single restart.
+			if !hasB && l.Signature() == r.Signature() {
+				continue
+			}
 			lChanged := !hasB || b.Local != l.Signature()
 			rChanged := !hasB || b.Remote != r.Signature()
 			switch {
@@ -207,12 +219,13 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 					Reason: "changed locally"})
 			case !lChanged && rChanged:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					Reason: "changed on the server"})
+					RemoteMod: r.ModMillis, Reason: "changed on the server"})
 			default:
 				// Both moved. Same size is not proof of same content, so we do
 				// not try to be clever: keep both and let the person decide.
 				out = append(out, Action{Kind: ActionConflict, Rel: rel,
 					ConflictName: conflictName(rel, SideRemote, opts.Now),
+					RemoteMod:    r.ModMillis,
 					Reason:       "changed in both places"})
 			}
 
@@ -236,13 +249,13 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 			switch {
 			case !hasB:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					Reason: "new file on the server"})
+					RemoteMod: r.ModMillis, Reason: "new file on the server"})
 			case opts.FirstRun:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					Reason: "first run — nothing is deleted"})
+					RemoteMod: r.ModMillis, Reason: "first run — nothing is deleted"})
 			case b.Remote != r.Signature():
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					Reason: "deleted here but edited on the server — kept"})
+					RemoteMod: r.ModMillis, Reason: "deleted here but edited on the server — kept"})
 			default:
 				out = append(out, Action{Kind: ActionDeleteRemot, Rel: rel,
 					Reason: "deleted locally"})
