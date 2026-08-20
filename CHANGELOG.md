@@ -62,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the new location (rename + re-pair; the settling pass transfers
   nothing), and only empty leftover dirs are swept — never `rm -rf`.
 
+- **Single FILES can be kept on this computer too.** The sync engine grew
+  first-class file pairs (`filex sync add --file`): same planner, same rules,
+  same 30-day local trash — the snapshots just carry one entry. The desktop's
+  folder menu now offers *Keep on this computer* on files as well; a kept
+  file mirrors to `<root>/<storage>/<path>` beside everything else, syncs
+  both ways, and *Open local folder* reveals it next to its neighbours
+  instead of launching it.
+
+- **"Keep online only" no longer leaves an empty folder skeleton behind.**
+  The mirror's intermediate directories (created at keep time) are swept with
+  an rmdir-only walk up to the root after the local copy moves to the Trash —
+  bare folders left on disk read as "it deleted my files but kept the
+  folders". Nothing with content is ever touched.
+
 - **Availability at a glance.** Every row in the desktop explorer carries the
   glyph grammar every drive client already taught: ✓ kept on this computer,
   ⟳ being synced right now, ☁ online-only. And while the engine works, a

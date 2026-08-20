@@ -25,6 +25,8 @@ export interface Pair {
   remote: string;
   account?: string;
   paused?: boolean;
+  /** Single-file pair: local is a file path, remote names a file. */
+  file?: boolean;
 }
 
 /** One pair's live phase, parsed from the engine's progress lines. */
@@ -110,8 +112,15 @@ export async function listPairs(): Promise<Pair[]> {
   }
 }
 
-export async function addPair(local: string, remote: string, accountId: string): Promise<void> {
-  await run(['sync', 'add', local, remote, '--account', accountId]);
+export async function addPair(
+  local: string,
+  remote: string,
+  accountId: string,
+  isFile = false,
+): Promise<void> {
+  const args = ['sync', 'add', local, remote, '--account', accountId];
+  if (isFile) args.push('--file');
+  await run(args);
 }
 
 export interface TrashItem {

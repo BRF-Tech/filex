@@ -27,7 +27,7 @@ export const tr: Record<string, string> = {
   'ctx.keep_online': 'Yalnızca çevrimiçi tut',
   'ctx.keep_reveal': 'Yerel klasörü aç',
   'ctx.keep_inherited': 'Üst klasörle bilgisayarda tutuluyor',
-  'keep.started': 'Klasör bilgisayarda tutulacak — eşitleme başladı',
+  'keep.started': 'Bilgisayarda tutulacak — eşitleme başladı',
   'keep.failed': 'Bilgisayarda tutulamadı',
   'keep.badge_kept': 'Bilgisayarda',
   'keep.badge_syncing': 'Eşitleniyor…',

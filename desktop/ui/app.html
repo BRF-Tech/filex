@@ -664,7 +664,7 @@
           // the whole explorer, so these hooks can never cross accounts.
           desktopSync: {
             kept: () => window.filexApp.syncKept(account.id),
-            keep: (remote) => window.filexApp.syncKeep(account.id, remote),
+            keep: (remote, kind) => window.filexApp.syncKeep(account.id, remote, kind === 'file'),
             unkeep: (remote) => window.filexApp.syncUnkeep(account.id, remote),
             reveal: (remote) => window.filexApp.syncReveal(account.id, remote),
             status: () => window.filexApp.syncStatus(account.id),

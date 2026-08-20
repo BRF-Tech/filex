@@ -814,6 +814,22 @@ function accountPairs(accountId: string): Pair[] {
   return knownPairs.filter((p) => p.account === accountId);
 }
 
+/** rmdir-only sweep of empty dirs from `from` up to (never including)
+ *  `stopAt`. The mirror layout mkdirs intermediate folders on keep; after an
+ *  unkeep moves the mirror to the Trash, this takes the empty skeleton with
+ *  it. Stops at the first non-empty dir — nothing with content is touched. */
+async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
+  let dir = from;
+  while (dir !== stopAt && dir.startsWith(stopAt + path.sep)) {
+    try {
+      await fs.promises.rmdir(dir);
+    } catch {
+      return;
+    }
+    dir = path.dirname(dir);
+  }
+}
+
 /**
  * The account's mirror root, prompting on first use. The default —
  * `~/filex/<host>` — is pre-created so the dialog opens INSIDE it and a plain
@@ -1168,7 +1184,7 @@ function wireIpc(): void {
   ipcMain.handle('sync:kept', (_e, accountId: string) =>
     accountPairs(String(accountId)).map((p) => ({ remote: p.remote, local: p.local })));
 
-  ipcMain.handle('sync:keep', async (_e, accountId: string, remotePath: string) => {
+  ipcMain.handle('sync:keep', async (_e, accountId: string, remotePath: string, isFile?: boolean) => {
     const acc = state.accounts.find((a) => a.id === accountId);
     if (!acc) throw new Error('unknown account');
     const remote = normRemote(remotePath);
@@ -1187,9 +1203,10 @@ function wireIpc(): void {
       await removePair(child.id);
     }
     const local = localMirrorPath(root, remote);
-    await fs.promises.mkdir(local, { recursive: true });
+    // A folder mirror IS a folder; a file mirror needs only its parents.
+    await fs.promises.mkdir(isFile ? path.dirname(local) : local, { recursive: true });
     try {
-      await addPair(local, remote, acc.id);
+      await addPair(local, remote, acc.id, isFile === true);
     } finally {
       await refreshPairs(); // reconcile even on failure — the children are already gone
     }
@@ -1226,6 +1243,13 @@ function wireIpc(): void {
       // To the OS trash, not deletion — same restore story every user knows.
       try {
         await shell.trashItem(pair.local);
+        // The mirror's empty ancestor skeleton (mkdir'ed at keep time) goes
+        // too — bare folders left behind read as "it deleted my files but
+        // kept the folders".
+        const acc = state.accounts.find((a) => a.id === accountId);
+        if (acc?.syncRoot && pair.local.startsWith(acc.syncRoot + path.sep)) {
+          await pruneEmptyDirsUpTo(path.dirname(pair.local), acc.syncRoot);
+        }
       } catch (e) {
         dialog.showErrorBox(
           syncText('unkeepTitle'),
@@ -1252,7 +1276,16 @@ function wireIpc(): void {
         local = path.join(anc.local, ...rest.split('/').filter(Boolean).map(fsSegment));
       }
     }
-    if (local) await shell.openPath(local);
+    if (local) {
+      // A file mirror is revealed beside its neighbours; openPath would
+      // LAUNCH it instead.
+      const isFile = await fs.promises
+        .stat(local)
+        .then((st) => st.isFile())
+        .catch(() => false);
+      if (isFile) shell.showItemInFolder(local);
+      else await shell.openPath(local);
+    }
     return publicState();
   });
 

@@ -323,9 +323,10 @@ export interface ExplorerConfig {
   desktopSync?: {
     /** Kept folders for the mounted account, adapter-qualified remotes. */
     kept: () => Promise<Array<{ remote: string; local: string }>>;
-    /** Start keeping a folder. Resolves once the pair is registered (or the
-     *  user cancelled the shell's root-folder prompt — re-read `kept`). */
-    keep: (remote: string) => Promise<void>;
+    /** Start keeping a folder — or, with kind 'file', a single file.
+     *  Resolves once the pair is registered (or the user cancelled the
+     *  shell's root-folder prompt — re-read `kept`). */
+    keep: (remote: string, kind: 'dir' | 'file') => Promise<void>;
     /** Stop keeping. The SHELL owns the "what happens to the local copy"
      *  question — it asks natively and may cancel; re-read `kept` after. */
     unkeep: (remote: string) => Promise<void>;

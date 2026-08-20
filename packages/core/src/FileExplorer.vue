@@ -1555,11 +1555,11 @@ const keepStripPercent = computed<number | null>(() => {
   return Math.min(100, Math.round((act.done * 100) / act.total));
 });
 
-/** Menu entries for one selected folder, by its keep state. Empty for
- *  multi-selections, files, trash, encrypted folders, or a web mount. */
+/** Menu entries for one selected folder OR file, by its keep state. Empty
+ *  for multi-selections, trash, encrypted folders, or a web mount. */
 function keepActionsFor(sel: FileNode[]): ContextAction[] {
   const ds = desktopSync.value;
-  const single = sel.length === 1 && sel[0]?.type === 'dir';
+  const single = sel.length === 1 && (sel[0]?.type === 'dir' || sel[0]?.type === 'file');
   if (!ds || !single || trashActive.value || e2eActive.value || sel[0]?.e2e === true) return [];
   const st = keepStateOf(keepRemoteOf(sel[0]!));
   return [
@@ -1794,7 +1794,7 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       if (!ds || !targets[0]) break;
       const remote = keepRemoteOf(targets[0]);
       try {
-        await ds.keep(remote);
+        await ds.keep(remote, targets[0].type === 'file' ? 'file' : 'dir');
         await refreshKept();
         // The shell may have shown its root-folder prompt and been cancelled —
         // only claim success when the pair is really there now.

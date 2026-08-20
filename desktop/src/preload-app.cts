@@ -56,7 +56,7 @@ contextBridge.exposeInMainWorld('filexApp', {
   // these through config.desktopSync; the account id pins which server's
   // pairs are meant, so a rail switch mid-flight cannot cross wires.
   syncKept: (accountId: string) => ipcRenderer.invoke('sync:kept', accountId),
-  syncKeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:keep', accountId, remote),
+  syncKeep: (accountId: string, remote: string, isFile?: boolean) => ipcRenderer.invoke('sync:keep', accountId, remote, isFile === true),
   syncUnkeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:unkeep', accountId, remote),
   syncReveal: (accountId: string, remote: string) => ipcRenderer.invoke('sync:reveal', accountId, remote),
   syncStatus: (accountId: string) => ipcRenderer.invoke('sync:status', accountId),

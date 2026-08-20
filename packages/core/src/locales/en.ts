@@ -27,7 +27,7 @@ export const en: Record<string, string> = {
   'ctx.keep_online': 'Keep online only',
   'ctx.keep_reveal': 'Open local folder',
   'ctx.keep_inherited': 'Kept on this computer with its parent',
-  'keep.started': 'This folder will be kept on this computer — sync started',
+  'keep.started': 'Will be kept on this computer — sync started',
   'keep.failed': 'Could not keep on this computer',
   'keep.badge_kept': 'On this computer',
   'keep.badge_syncing': 'Syncing…',
