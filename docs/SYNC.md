@@ -73,6 +73,24 @@ between your machine and the server changes nothing.
 
 ---
 
+## In the desktop app: "Keep on this computer"
+
+Nothing below changes when the desktop app drives the engine — but you rarely
+type any of it there. Right-click a folder (or a whole storage) in the window →
+**Keep on this computer**, and the app makes the pair for you: one root folder
+per account, chosen once, with every kept folder mirrored under it as
+`<root>/<storage>/<path…>`. Keeping a parent absorbs kept children into a single
+pair; **Keep online only** removes the pair and asks whether the local copy
+should go to the Trash or stay. See
+**[docs/DESKTOP.md](DESKTOP.md#keeping-folders-on-this-computer)**.
+
+⚠ A pair's remote path may not contain a `..` segment. Nothing legitimate needs
+one — the server resolves paths from its own storage root — and a client that
+turns a remote path into a local folder name would otherwise be told, by the
+server, to write outside the folder the user chose.
+
+---
+
 ## Commands
 
 ```
@@ -89,6 +107,17 @@ the first time you pair a folder that already has files in it.
 `--account` limits a run to the pairs recorded against one signed-in server. One
 token authenticates against exactly one server, so the desktop app runs one
 watcher per account rather than one for all of them.
+
+`--quiet` drops the per-file lines and keeps the summary — but progress lines
+still print: inventory counts while the server tree is listed, `transfer: 12/345`,
+settling. The desktop app runs the engine exactly this way and mirrors the last
+line into its panel, and a first sync of a large store spends minutes listing
+before it transfers anything; silence there reads as a broken app.
+
+A watcher started with `--watch` **re-reads `pairs.json` between rounds**, so a
+folder paired — or unpaired — while it runs joins (or leaves) the next round.
+The desktop app keeps one watcher per account alive for days and does not
+restart it for a new pair.
 
 Removing a pair stops the syncing and **leaves every file where it is**, on both
 sides. Unpairing is not deleting.

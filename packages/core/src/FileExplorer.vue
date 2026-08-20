@@ -1419,8 +1419,68 @@ async function onToolbarAction(key: string) {
   await dispatchItemAction(key, sel);
 }
 
+// ─── desktop selective sync — "keep on this computer" ──────────────────
+// Present only when the desktop shell passes config.desktopSync; the web
+// admin and the embeds never see these entries. State is PULLED, not pushed:
+// the kept list is re-read as a menu opens, so the component needs no event
+// channel back to the shell and cannot go stale in a way that outlives one
+// right-click.
+const desktopSync = computed(() => props.config.desktopSync ?? null);
+const keptPairs = ref<Array<{ remote: string; local: string }>>([]);
+
+async function refreshKept(): Promise<void> {
+  if (!desktopSync.value) return;
+  try {
+    keptPairs.value = await desktopSync.value.kept();
+  } catch {
+    // Shell went away mid-call; a stale entry only mislabels a menu item.
+  }
+}
+onMounted(() => void refreshKept());
+
+/** Adapter-qualified remote for a row. Virtual storage rows carry a bare
+ *  name (`docs`), real rows a wire path (`docs://reports`). */
+function keepRemoteOf(node: FileNode): string {
+  const p = String(node.path ?? '');
+  return p.includes('://') ? p.replace(/\/+$/, '') : `${p}://`;
+}
+
+type KeepState = 'none' | 'kept' | 'inherited' | 'partial';
+
+/** How `remote` relates to the kept set: exactly a pair, inside one
+ *  (inherited), an ancestor of some (partial), or unrelated. */
+function keepStateOf(remote: string): KeepState {
+  const inside = (child: string, parent: string) =>
+    parent.endsWith('://')
+      ? child.startsWith(parent) && child !== parent
+      : child === parent
+        ? false
+        : child.startsWith(parent + '/');
+  if (keptPairs.value.some((p) => p.remote === remote)) return 'kept';
+  if (keptPairs.value.some((p) => inside(remote, p.remote))) return 'inherited';
+  if (keptPairs.value.some((p) => inside(p.remote, remote))) return 'partial';
+  return 'none';
+}
+
+/** Menu entries for one selected folder, by its keep state. Empty for
+ *  multi-selections, files, trash, encrypted folders, or a web mount. */
+function keepActionsFor(sel: FileNode[]): ContextAction[] {
+  const ds = desktopSync.value;
+  const single = sel.length === 1 && sel[0]?.type === 'dir';
+  if (!ds || !single || trashActive.value || e2eActive.value || sel[0]?.e2e === true) return [];
+  const st = keepStateOf(keepRemoteOf(sel[0]!));
+  return [
+    { divider: true, key: 'sep-keep', label: '' },
+    { key: 'keep-local', label: t('ctx.keep_local'), icon: '📌', hidden: st === 'kept' || st === 'inherited' },
+    { key: 'keep-online', label: t('ctx.keep_online'), icon: '☁', hidden: st !== 'kept' },
+    { key: 'keep-inherited', label: t('ctx.keep_inherited'), icon: '📌', disabled: true, hidden: st !== 'inherited' },
+    { key: 'keep-reveal', label: t('ctx.keep_reveal'), icon: '📂', hidden: st !== 'kept' && st !== 'inherited' },
+  ];
+}
+
 async function onContextTarget(node: FileNode, ev: MouseEvent) {
   ctxMode.value = 'selection';
+  void refreshKept(); // menu labels react if the kept set changed since last look
   if (!selection.has(node.path)) {
     selection.click(node.path);
     await nextTick();
@@ -1447,6 +1507,7 @@ function onCrumbContext(payload: { x: number; y: number; adapterPath: string; la
  * dispatchItemAction'a gider ve ctxMode==='pane' iken pane-route'lanır. */
 function onPaneContext(node: FileNode | null, ev: MouseEvent) {
   activePane.value = 'split';
+  void refreshKept();
   const sel = splitPaneRef.value?.selectedNodes() ?? [];
   // node=null (boş alana sağ-tık): seçimsiz menü (Yeni Klasör + Yapıştır).
   // Aksi halde pane seçimi (yoksa tıklanan node) hedeftir.
@@ -1507,6 +1568,9 @@ const contextActions = computed<ContextAction[]>(() => {
     return [
       { key: 'open', label: t('ctx.open'), icon: '↗' },
       { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉' } /* wiring:d1 */,
+      // A whole storage can be kept too — that IS the "sync everything"
+      // shape, and it is one pair, not one per subfolder.
+      ...keepActionsFor(sel),
     ];
   }
 
@@ -1571,6 +1635,7 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     { key: 'paste', label: t('ctx.paste'), icon: '📋', hidden: !w, disabled: !clipboard.value.mode },
     { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId },
     { key: 'tags', label: tagsLabel, icon: '🏷', hidden: !singleHasId, disabled: !singleHasId },
+    ...keepActionsFor(sel),
     { divider: true, key: 'sep2', label: '', hidden: !w },
     { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true, hidden: !any || !w, disabled: !any },
   ];
@@ -1631,6 +1696,38 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'download':
       if (targets[0]) downloadFile(targets[0]);
       break;
+    case 'keep-local': {
+      const ds = desktopSync.value;
+      if (!ds || !targets[0]) break;
+      const remote = keepRemoteOf(targets[0]);
+      try {
+        await ds.keep(remote);
+        await refreshKept();
+        // The shell may have shown its root-folder prompt and been cancelled —
+        // only claim success when the pair is really there now.
+        if (keepStateOf(remote) !== 'none') flashToast(t('keep.started'));
+      } catch (e) {
+        await refreshKept();
+        flashToast(`${t('keep.failed')}: ${String((e as Error)?.message ?? e)}`);
+      }
+      break;
+    }
+    case 'keep-online': {
+      const ds = desktopSync.value;
+      if (!ds || !targets[0]) break;
+      try {
+        await ds.unkeep(keepRemoteOf(targets[0]));
+      } catch {
+        // The shell owns the confirm dialog and reports its own failures.
+      }
+      await refreshKept();
+      break;
+    }
+    case 'keep-reveal': {
+      const ds = desktopSync.value;
+      if (ds && targets[0]) void ds.reveal(keepRemoteOf(targets[0]));
+      break;
+    }
     case 'convert':
       if (targets[0]) openConvert(targets[0]);
       break;

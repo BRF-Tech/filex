@@ -59,6 +59,14 @@ type Engine struct {
 	TrashDays int
 	// Log receives one line per action. Optional.
 	Log func(string)
+	// Progress receives one short status line per phase — inventory counts,
+	// transfer counts, settling — and stays on even when the per-action Log
+	// is silenced. The desktop app runs the engine with --quiet and mirrors
+	// the last stdout line into its panel; before this hook a large first
+	// sync spent its whole inventory phase (minutes of per-folder listings)
+	// printing nothing, and looked dead enough that people cancelled it.
+	// Optional.
+	Progress func(string)
 	// Now is injectable for tests.
 	Now func() time.Time
 }
@@ -73,6 +81,28 @@ func (e *Engine) now() time.Time {
 func (e *Engine) logf(format string, a ...any) {
 	if e.Log != nil {
 		e.Log(fmt.Sprintf(format, a...))
+	}
+}
+
+func (e *Engine) progressf(format string, a ...any) {
+	if e.Progress != nil {
+		e.Progress(fmt.Sprintf(format, a...))
+	}
+}
+
+// remoteProgress emits a listing count for one remote walk, throttled so a
+// huge tree reports every 25 folders rather than every one.
+func (e *Engine) remoteProgress(phase string) func(dirs, items int) {
+	if e.Progress == nil {
+		return nil
+	}
+	next := 1
+	return func(dirs, items int) {
+		if dirs < next {
+			return
+		}
+		next = dirs + 25
+		e.progressf("%s: listed %d server folder(s), %d item(s) so far", phase, dirs, items)
 	}
 }
 
@@ -103,16 +133,20 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		return res, fmt.Errorf("read %s: %w", e.Pair.Local, err)
 	}
 	res.Skipped = skipped
+	e.progressf("inventory: %d item(s) here, listing the server…", len(local))
 
-	remote, err := e.walkRemoteRoot(ctx)
+	remote, err := e.walkRemoteRoot(ctx, "inventory")
 	if err != nil {
 		return res, err
 	}
 
 	actions := Plan(local, remote, base, Options{FirstRun: res.FirstRun, Now: e.now()})
 	res.Planned = len(actions)
+	if res.Planned > 0 {
+		e.progressf("plan: %d change(s) to make", res.Planned)
+	}
 
-	for _, a := range actions {
+	for i, a := range actions {
 		if err := ctx.Err(); err != nil {
 			res.Errors = append(res.Errors, "stopped: "+err.Error())
 			break
@@ -120,9 +154,12 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		if err := e.apply(ctx, a, &res); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
 			e.logf("!! %s %s: %v", a.Kind, a.Rel, err)
-			continue
+		} else {
+			res.Applied++
 		}
-		res.Applied++
+		if (i+1)%10 == 0 || i+1 == res.Planned {
+			e.progressf("transfer: %d/%d", i+1, res.Planned)
+		}
 	}
 
 	// Re-snapshot. Using the post-run state rather than assuming the plan
@@ -131,7 +168,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	if err != nil {
 		return res, fmt.Errorf("re-read %s: %w", e.Pair.Local, err)
 	}
-	remote2, err := e.walkRemoteRoot(ctx)
+	remote2, err := e.walkRemoteRoot(ctx, "settling")
 	if err != nil {
 		return res, err
 	}
@@ -158,8 +195,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 // web UI. Pairing is a statement of intent; the folder is part of it. The
 // mkdir is only attempted after a failed listing, so the ordinary case still
 // costs one request.
-func (e *Engine) walkRemoteRoot(ctx context.Context) (Snapshot, error) {
-	snap, err := WalkRemote(ctx, e.API, e.Pair.Remote)
+func (e *Engine) walkRemoteRoot(ctx context.Context, phase string) (Snapshot, error) {
+	snap, err := WalkRemote(ctx, e.API, e.Pair.Remote, e.remoteProgress(phase))
 	if err == nil {
 		return snap, nil
 	}
@@ -170,7 +207,7 @@ func (e *Engine) walkRemoteRoot(ctx context.Context) (Snapshot, error) {
 		return nil, err
 	}
 	e.logf("+> created %s on the server", e.Pair.Remote)
-	return WalkRemote(ctx, e.API, e.Pair.Remote)
+	return WalkRemote(ctx, e.API, e.Pair.Remote, e.remoteProgress(phase))
 }
 
 func (e *Engine) trashDays() int {

@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('filexApp', {
   // updates — the app keeps itself current; these are the manual affordances.
   checkUpdate: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
+  // Only meaningful on a macOS build that cannot swap itself (ad-hoc seal):
+  // opens the feed's dmg in the browser instead of pretending to self-update.
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
 
   /** Backs the navigator.share polyfill the page installs. See main.ts. */
   share: (data: unknown) => ipcRenderer.invoke('app:share', data),
@@ -48,5 +51,13 @@ contextBridge.exposeInMainWorld('filexApp', {
   // tray, so the page is told when to repaint rather than only being right at
   // the moment it opened.
   onChanged: (fn: () => void) => ipcRenderer.on('sync:changed', () => fn()),
+
+  // selective sync — "keep on this computer". The explorer component calls
+  // these through config.desktopSync; the account id pins which server's
+  // pairs are meant, so a rail switch mid-flight cannot cross wires.
+  syncKept: (accountId: string) => ipcRenderer.invoke('sync:kept', accountId),
+  syncKeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:keep', accountId, remote),
+  syncUnkeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:unkeep', accountId, remote),
+  syncReveal: (accountId: string, remote: string) => ipcRenderer.invoke('sync:reveal', accountId, remote),
   onOpenSettings: (fn: () => void) => ipcRenderer.on('app:open-settings', () => fn()),
 });

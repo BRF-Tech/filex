@@ -55,8 +55,9 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   *and* in embedded contexts (short-lived ticket auth, API-polling fallback).
 - **On your desktop too** — the same explorer ships as a Windows/Linux/macOS app that keeps
   local folders in step with the server from the tray, updates itself, and holds several
-  accounts (or tenants) side by side. Headless machines get the same engine as
-  `filex sync` / `filex client`.
+  accounts (or tenants) side by side. Right-click a folder → **Keep on this computer** and
+  it mirrors under one filex folder; everything else stays online-only in the window.
+  Headless machines get the same engine as `filex sync` / `filex client`.
 - **Speaks the protocols both ways** — filex can *connect to* local disks, S3, FTP, SFTP,
   WebDAV and SMB/NAS shares, and it can *be reached as* **S3**, **SFTP**, **FTPS**,
   **NFSv3** and **WebDAV**. Point `rclone`, `restic`, `aws s3`, WinSCP, FileZilla, a
@@ -209,6 +210,10 @@ The explorer also ships as a **Windows / Linux desktop app** — the same compon
 UI and the embeds render, not a separate half-copy:
 
 - **Several accounts at once** — a rail of servers/tenants, each showing its own branding.
+- **Keep on this computer** — right-click any folder (or a whole storage) to mirror it
+  under one filex folder on the machine; everything else stays online-only in the window.
+  "Keep online only" hands the local copy back to the Trash, or leaves it
+  ([docs/DESKTOP.md](docs/DESKTOP.md#keeping-folders-on-this-computer)).
 - **Folder sync** — pair a local folder with a server folder and they stay in step both
   ways while the app sits in the tray ([docs/SYNC.md](docs/SYNC.md)).
 - **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
@@ -254,7 +259,7 @@ Details: [docs/MCP.md](docs/MCP.md).
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings.
 - **Sharing** — public links with PIN, expiry and max-downloads; folder links stream as ZIP (cached + pre-warmed); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint.
-- **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, several accounts at once, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
 - **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
 - **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).

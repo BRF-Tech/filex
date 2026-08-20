@@ -17,6 +17,10 @@ export interface Account {
   email: string;
   token: string;
   addedAt: string;
+  /** Root folder for "keep on this computer" mirrors. Chosen once, at the
+   *  first keep; every kept folder lands under it as
+   *  `<syncRoot>/<storage>/<path…>`. Absent until then. */
+  syncRoot?: string;
 }
 
 export interface DesktopState {

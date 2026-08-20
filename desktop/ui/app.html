@@ -469,6 +469,11 @@
         'upd.ready':            ['Version {v} installs itself shortly', '{v} sürümü birazdan kendiliğinden kurulacak'],
         'upd.restart':          ['Install it now', 'Şimdi kur'],
         'upd.error':            ['Could not check for updates', 'Güncelleme denetlenemedi'],
+        'upd.manual':           ['Version {v} is out — install it by downloading',
+                                 '{v} sürümü çıktı — indirerek kurun'],
+        'upd.manual_idea':      ['This macOS build is not signed for self-update; new versions install as a fresh download.',
+                                 'Bu macOS paketi kendini güncellemek için imzalı değil; yeni sürümler indirilerek kurulur.'],
+        'upd.download':         ['Download', 'İndir'],
         'upd.dev':              ['Only the installed app updates itself.',
                                  'Yalnızca kurulu uygulama kendini günceller.'],
         'set.on':               ['On', 'Açık'],
@@ -647,6 +652,15 @@
           // Turkish, so without this an English desktop showed English chrome
           // around a Turkish file list.
           locale: LANG,
+          // Selective sync — folder menus grow "Keep on this computer".
+          // The account id is captured HERE, at mount: a rail switch swaps
+          // the whole explorer, so these hooks can never cross accounts.
+          desktopSync: {
+            kept: () => window.filexApp.syncKept(account.id),
+            keep: (remote) => window.filexApp.syncKeep(account.id, remote),
+            unkeep: (remote) => window.filexApp.syncUnkeep(account.id, remote),
+            reveal: (remote) => window.filexApp.syncReveal(account.id, remote),
+          },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
         slot.appendChild(explorer);
@@ -870,19 +884,25 @@
       function updateCard() {
         const u = state.update || { status: 'idle' };
         const supported = state.launchAtLoginSupported !== false; // packaged run
+        // An ad-hoc sealed mac build cannot swap itself; its story is a
+        // download, and pretending otherwise is what this card used to do.
+        const manual = state.updateManualOnly === true;
         let line = T('upd.current');
         if (!supported) line = T('upd.dev');
         else if (u.status === 'checking') line = T('upd.checking');
+        else if (u.status === 'manual') line = T('upd.manual', { v: u.version || '' });
         else if (u.status === 'available') line = T('upd.available', { v: u.version || '' });
         else if (u.status === 'downloading') line = T('upd.downloading', { p: u.percent ?? 0 });
         else if (u.status === 'ready') line = T('upd.ready', { v: u.version || '' });
         else if (u.status === 'error') line = T('upd.error');
         const btn = u.status === 'ready'
           ? `<button class="primary" id="upd-install">${esc(T('upd.restart'))}</button>`
-          : `<button id="upd-check" ${supported ? '' : 'disabled'}>${esc(T('upd.check'))}</button>`;
+          : u.status === 'manual'
+            ? `<button class="primary" id="upd-download">${esc(T('upd.download'))}</button>`
+            : `<button id="upd-check" ${supported ? '' : 'disabled'}>${esc(T('upd.check'))}</button>`;
         return `<div class="card"><div class="between">
             <div><strong>${esc(line)}</strong>
-              <div class="muted">${esc(T('upd.idea'))}</div></div>
+              <div class="muted">${esc(T(manual && supported ? 'upd.manual_idea' : 'upd.idea'))}</div></div>
             ${btn}
           </div></div>`;
       }
@@ -947,6 +967,8 @@
         });
         const updInstall = $('#upd-install', el);
         if (updInstall) updInstall.addEventListener('click', () => window.filexApp.installUpdate());
+        const updDownload = $('#upd-download', el);
+        if (updDownload) updDownload.addEventListener('click', () => window.filexApp.downloadUpdate());
         $('#login-item', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ launchAtLogin: !state.launchAtLogin });
           renderSettings();

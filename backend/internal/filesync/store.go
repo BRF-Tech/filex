@@ -87,6 +87,19 @@ func (s *Store) AddPair(p Pair) (Pair, error) {
 	if !strings.Contains(p.Remote, "://") {
 		return p, fmt.Errorf("remote must look like adapter://path, got %q", p.Remote)
 	}
+	// ⚠ A `..` segment is refused rather than cleaned. The remote is a WIRE
+	// path that callers derive local directory names from — the desktop app
+	// mirrors `adapter://a/b` at `<root>/adapter/a/b` — and the listing it
+	// comes from is the server's answer, not the user's typing. A remote of
+	// `docs://../../Documents` would name a folder outside the mirror root,
+	// where a first run (which merges both sides) would happily upload
+	// whatever it found. Nothing legitimate needs it: the server resolves
+	// paths from its storage root, so `..` cannot address anything real.
+	for _, seg := range strings.Split(p.Remote[strings.Index(p.Remote, "://")+3:], "/") {
+		if seg == ".." {
+			return p, fmt.Errorf("remote path may not contain a %q segment: %q", "..", p.Remote)
+		}
+	}
 
 	pairs, err := s.LoadPairs()
 	if err != nil {
@@ -129,7 +142,15 @@ func (s *Store) RemovePair(id string) error {
 	if err := s.SavePairs(out); err != nil {
 		return err
 	}
-	return os.Remove(s.path("baseline", id+".json"))
+	// The baseline only appears once a pair's first run has COMPLETED. A pair
+	// removed before that — typically a large first sync the user cancels by
+	// unpairing — has no file here, and that must not read as failure: the
+	// pair is already gone from pairs.json by this line, and callers treat an
+	// error as "the remove failed" and skip their own follow-up.
+	if err := os.Remove(s.path("baseline", id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func overlaps(a, b string) bool {

@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-20
+
+### Security
+
+- **A server cannot name a local folder outside the one you chose.** The path a
+  kept folder mirrors under is built from the wire path in the server's own
+  listing, so a hostile or compromised server answering with
+  `docs://../../Documents` would have had the desktop app create — and then
+  two-way sync — a folder outside the account's mirror root, uploading whatever
+  it found there on the first pass. Climbing segments are dropped before a path
+  is built, the keep is refused before anything is created, and `sync add`
+  refuses such a remote outright, so the CLI and every other caller are covered
+  rather than one screen.
+
+### Fixed
+
+- **Unkeeping says which folder it is about to bin.** "Keep online only" asked
+  what should happen to the local copy without naming it, with *Move to Trash*
+  pre-selected — right for a mirror the app made, one Enter away from binning a
+  folder it did not for a pair made by hand in Settings. The dialog carries the
+  path now, and anything outside the account's root defaults to leaving it.
+
+- **"Open local folder" on a folder whose first sync has not reached it opens
+  the nearest one that exists** instead of appearing to do nothing (opening a
+  path that is not there yet fails silently).
+
+- **A pair added while the watcher runs is picked up on the next round.**
+  `filex sync run --watch` read pairs.json once at start, and the desktop app
+  keeps one watcher per account alive for days — so a second folder paired
+  later was silently never synced until the app restarted, while the panel
+  looked exactly as if it were. The watcher now re-reads the pair list between
+  rounds: adds join in, removes drop out. (Reported by the olivov deployment,
+  which hit this whole cluster in one afternoon.)
+
+- **Removing a pair before its first run finished no longer fails.** The
+  baseline file only exists once a first run completes; unpairing earlier hit
+  the missing file and handed the desktop a raw ENOENT error dialog — for a
+  remove that had, in fact, already happened.
+
+- **A failed unpair no longer leaves a ghost watcher.** The desktop only told
+  the supervisor to reconcile after a successful remove, so the error above
+  left a `filex sync run --watch` process syncing a pair that was already gone
+  from pairs.json — measurably listing the server every 30 seconds, and
+  unstoppable from the UI. Reconciliation now runs whether or not the remove
+  threw.
+
+- **The ad-hoc sealed macOS build tells the truth about updates.** Squirrel.Mac
+  refuses to swap an app without a Developer ID signature, and electron-updater
+  only finds that out after downloading — so "Check now" announced a version
+  about to install itself, then fell to a permanent "could not check for
+  updates". When the build's own signature says self-update cannot work, the
+  app now skips the download entirely, reads the update feed directly, and
+  offers the honest thing: the new version's number and a Download button.
+
+### Added
+
+- **Sync progress is visible while it happens — including under `--quiet`.**
+  The engine reports phases now (inventory counts while the server tree is
+  listed folder by folder, `transfer: 12/345`, settling), and the CLI prints
+  them even in quiet mode, which is how the desktop app runs it. A large first
+  sync used to spend its entire inventory phase — minutes, on a big tree —
+  printing nothing at all, and looked broken enough to cancel; that cancel is
+  exactly the path into the two unpair bugs above.
+
+- **"Keep on this computer" — selective sync from the explorer's own menu.**
+  Keeping a server folder local used to mean Settings → pair a folder → pick a
+  directory, once per folder. Now the first keep asks for ONE root (default
+  `~/filex/<server>`), and from then on right-clicking any folder — or a whole
+  storage on the drives screen — offers *Keep on this computer*: it mirrors
+  under `<root>/<storage>/<path…>` and syncs both ways, while everything else
+  stays online-only in the window. Kept folders gain *Open local folder* and
+  *Keep online only*; the latter asks, natively, whether the local copy goes
+  to the OS Trash or stays. Keeping a parent absorbs already-kept subfolders
+  into the one pair. The hooks ride `config.desktopSync` and exist only when
+  the desktop shell mounts the explorer — the web admin and the embeds see
+  none of it.
+
 ## [0.21.6] - 2026-08-19
 
 ### Changed

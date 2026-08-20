@@ -518,6 +518,25 @@ func TestOverlappingPairsAreRefused(t *testing.T) {
 	}
 }
 
+// A remote path is the server's answer, not the user's typing, and callers
+// build local directory names out of it — so a `..` in it is a way to name a
+// folder outside the mirror root, which a first run would then merge INTO the
+// server. Refused at the door.
+func TestARemoteThatClimbsOutIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: filepath.Join(dir, "state")}
+
+	for _, remote := range []string{"docs://../secrets", "docs://a/../../secrets", "docs://.."} {
+		if _, err := s.AddPair(Pair{Local: filepath.Join(dir, "x"), Remote: remote}); err == nil {
+			t.Errorf("%q must be refused", remote)
+		}
+	}
+	// A folder that merely CONTAINS dots in its name is legitimate.
+	if _, err := s.AddPair(Pair{Local: filepath.Join(dir, "ok"), Remote: "docs://a..b/c"}); err != nil {
+		t.Errorf("a dotted folder name is not a traversal: %v", err)
+	}
+}
+
 func TestRemovingAPairLeavesTheFilesAlone(t *testing.T) {
 	dir := t.TempDir()
 	s := &Store{Dir: filepath.Join(dir, "state")}
@@ -541,6 +560,50 @@ func TestRemovingAPairLeavesTheFilesAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("unpairing must not touch the user's files: %v", err)
+	}
+}
+
+// The baseline file only exists after a first run has COMPLETED. Unpairing
+// before that (a long first sync the user cancels by removing the pair) used
+// to fail with the raw ENOENT, which the desktop surfaced as an error dialog —
+// and then skipped its own watcher cleanup because the remove "failed".
+func TestRemovingAPairBeforeItsFirstRunSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: filepath.Join(dir, "state")}
+	p, err := s.AddPair(Pair{Local: filepath.Join(dir, "docs"), Remote: "docs://a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemovePair(p.ID); err != nil {
+		t.Fatalf("removing a never-run pair must not fail: %v", err)
+	}
+	pairs, err := s.LoadPairs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pairs) != 0 {
+		t.Errorf("pair still present after remove: %v", pairs)
+	}
+}
+
+// Progress must speak even when Log is silent: the desktop runs the engine
+// with --quiet and shows only the last stdout line, and the inventory phase
+// of a big first sync otherwise prints nothing for minutes.
+func TestProgressReportsInventoryAndTransfer(t *testing.T) {
+	r := newRig(t)
+	r.srv.files["a.txt"] = []byte("one")
+	r.srv.files["sub/b.txt"] = []byte("two")
+	r.srv.dirs["sub"] = true
+
+	var lines []string
+	r.engine.Progress = func(s string) { lines = append(lines, s) }
+	r.run()
+
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"inventory:", "plan:", "transfer:", "settling:"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("progress lines missing %q:\n%s", want, joined)
+		}
 	}
 }
 

@@ -124,10 +124,43 @@ nothing reloads.
 
 ---
 
-## Syncing folders
+## Keeping folders on this computer
+
+The window is the online view of everything on the server. A folder you also
+want *on the machine* — offline, in Explorer/Finder, open to every other program
+— is one right-click away:
+
+**Right-click a folder → 📌 Keep on this computer.**
+
+- The **first** keep asks where filex may put things on this computer. The
+  default is `~/filex/<server>`; anywhere else works too, and the answer is
+  remembered per account (re-signing in does not ask again).
+- Every kept folder mirrors under that root as `<root>/<storage>/<path…>`, so
+  the disk reads exactly like the server does.
+- A whole **storage** can be kept — right-click it on the drives screen. That is
+  the "sync everything" shape, and it stays one pair.
+- Keeping a **parent** absorbs folders already kept inside it: one pair, nothing
+  re-downloaded. A folder inside a kept parent says *Kept on this computer with
+  its parent* rather than pretending it could leave on its own.
+- Kept folders offer **📂 Open local folder** and **☁ Keep online only**. Online
+  only asks what should happen to the local copy — move it to the Trash, or
+  leave it where it is — and names the folder it means. Cancel cancels.
+
+Everything else stays online-only: the window shows it, the disk does not carry
+it.
+
+> Sync runs while the app does, so a folder kept a moment ago starts filling on
+> the next round (30 seconds) — no restart. The engine's rules below apply
+> unchanged: the first pass deletes nothing.
+
+---
+
+## Syncing folders by hand
 
 **Settings ⚙ → Sync a folder…** picks a folder on the server by browsing it, then
-asks which folder on this computer to keep it in step with.
+asks which folder on this computer to keep it in step with. Use it when the
+local folder already exists somewhere else — a photo library, a project checkout
+— and should stay there instead of moving under the filex root.
 
 The engine is the same one `filex sync` uses from a terminal — one
 implementation, one list of pairs — so the app and the CLI can never disagree
@@ -198,7 +231,10 @@ anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
 > ⚠ **On macOS the app does not update itself yet.** The updater refuses to
 > swap an unsigned app (Squirrel.Mac checks the signature of what it installs),
 > so until the build is signed a new version means downloading the new `.dmg`
-> yourself — the feed and the *Install it now* button cannot do it for you there.
+> yourself. The app knows that about itself and says so: a build that cannot
+> swap itself downloads nothing, and *Settings → Updates* shows the new
+> version with a **Download** button instead of promising an install that
+> never arrives.
 
 ---
 

@@ -29,6 +29,7 @@ import {
   shell,
 } from 'electron';
 import electronUpdater from 'electron-updater';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -38,6 +39,7 @@ import {
   removeAccount,
   saveState,
   upsertAccount,
+  type Account,
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
@@ -76,7 +78,7 @@ let pendingAuth: PendingAuth | null = null;
 let quitting = false;
 let supervisor: SyncSupervisor | null = null;
 /** What the updater is doing, as far as the UI is concerned. */
-let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'; version?: string; percent?: number; error?: string } = { status: 'idle' };
+let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -454,10 +456,83 @@ function pushUpdateState(next: typeof updateState): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
 }
 
+// ─── macOS without a Developer ID: honesty instead of a broken swap ───
+//
+// Squirrel.Mac refuses to replace an app that is not Developer-ID signed, and
+// electron-updater only finds that out AFTER the download: the check announced
+// "version X installs itself shortly", the download completed, the swap was
+// refused — and the user was left with a generic "could not check for
+// updates". A permanent, known limitation of the ad-hoc sealed build was being
+// dressed up as a transient error, on every check, forever.
+//
+// So the build's own signature is read once at startup. When it turns out to
+// be ad-hoc, electron-updater is never wired at all — nothing is downloaded
+// that can never be applied — and the same check cadence (and the Settings
+// button) instead reads the static feed's latest-mac.yml directly and says the
+// honest thing: a newer version exists, here is the download.
+
+const MAC_FEED_URL = 'https://filex.sh/desktop/latest-mac.yml';
+
+let macManualUpdates = false;
+
+async function detectMacManualUpdates(): Promise<void> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  const out = await new Promise<string>((resolve) => {
+    execFile('/usr/bin/codesign', ['-dv', app.getPath('exe')], (err, stdout, stderr) => {
+      // codesign prints the signature details on stderr; an error still
+      // carries them (or means no signature at all, which is also "manual").
+      resolve(String(stderr || stdout || err?.message || ''));
+    });
+  });
+  macManualUpdates = !/Developer ID Application/.test(out);
+}
+
+/** Numeric, segment-wise. Good for x.y.z; anything odd compares equal. */
+function isNewerVersion(candidate: string, current: string): boolean {
+  const a = candidate.split('.').map((n) => parseInt(n, 10) || 0);
+  const b = current.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
+async function checkFeedForManualUpdate(): Promise<void> {
+  pushUpdateState({ status: 'checking' });
+  try {
+    const res = await net.fetch(MAC_FEED_URL, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`feed answered ${res.status}`);
+    const yml = await res.text();
+    const version = /^version:\s*(\S+)/m.exec(yml)?.[1];
+    if (!version) throw new Error('feed carries no version');
+    if (!isNewerVersion(version, app.getVersion())) {
+      pushUpdateState({ status: 'idle' });
+      return;
+    }
+    // Hand the browser the dmg itself when the feed names one; the plain
+    // downloads directory otherwise.
+    const dmg = /^\s*-\s*url:\s*(\S+\.dmg)\s*$/m.exec(yml)?.[1];
+    const url = dmg
+      ? new URL(dmg, 'https://filex.sh/desktop/').toString()
+      : 'https://filex.sh/desktop/';
+    pushUpdateState({ status: 'manual', version, url });
+  } catch (e) {
+    pushUpdateState({ status: 'error', error: String((e as Error)?.message ?? e).slice(0, 200) });
+  }
+}
+
 function wireAutoUpdate(): void {
   // Unpackaged runs have no updater metadata and would log an error on every
   // check; a machine told not to update must not phone home at all.
   if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return;
+
+  if (macManualUpdates) {
+    // Same cadence as the real updater — but only ever LOOKING. No download
+    // starts on a machine that cannot apply it.
+    setTimeout(() => void checkFeedForManualUpdate(), 30_000);
+    setInterval(() => void checkFeedForManualUpdate(), 6 * 60 * 60 * 1000);
+    return;
+  }
 
   autoUpdater.autoDownload = true;
   // ⚠ The install must happen on quit, not mid-session: the sync engine is a
@@ -652,6 +727,10 @@ function publicState() {
     launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
     appVersion: app.getVersion(),
     update: updateState,
+    // True on a macOS build whose signature cannot carry a self-update
+    // (ad-hoc sealed). Settings swaps its "updates itself" copy for the
+    // honest download story when this is set.
+    updateManualOnly: macManualUpdates,
   };
 }
 
@@ -662,6 +741,152 @@ let knownPairs: Pair[] = [];
 async function refreshPairs(): Promise<void> {
   knownPairs = await listPairs();
   await supervisor?.reconcile(state.accounts, (id) => state.accounts.find((a) => a.id === id)?.token ?? null);
+}
+
+// ─────────────────────────── selective sync ───────────────────────────
+//
+// "Keep on this computer" — the explorer's folder menu drives these (the
+// shared component takes the hooks via config.desktopSync). One ROOT folder
+// per account, chosen the first time something is kept; every kept folder
+// mirrors under it as `<root>/<storage>/<path…>`, so the disk reads like the
+// server does. Everything else stays online-only in the window: the explorer
+// is the view, the root folder is the subset that also lives here.
+
+/** Native-dialog strings for the keep flow. The window carries the real
+ *  catalogue; these render in OS dialogs, which the renderer cannot draw. */
+const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
+  rootTitle: ['Choose where filex keeps folders on this computer', 'filex klasörlerinin bu bilgisayarda tutulacağı yeri seç'],
+  rootButton: ['Use this folder', 'Bu klasörü kullan'],
+  unkeepTitle: ['Keep online only', 'Yalnızca çevrimiçi tut'],
+  unkeepMessage: ['Stop keeping “{name}” on this computer?', '“{name}” bilgisayarda tutulmayı bıraksın mı?'],
+  unkeepDetail: [
+    'The folder stays on the server and in this window. What should happen to the local copy?',
+    'Klasör sunucuda ve bu penceredeki görünümde durur. Yerel kopyaya ne olsun?',
+  ],
+  unkeepTrash: ['Move local copy to Trash', 'Yerel kopyayı Çöp Kutusuna taşı'],
+  unkeepLeave: ['Leave the local copy', 'Yerel kopya yerinde kalsın'],
+  cancel: ['Cancel', 'Vazgeç'],
+  trashFailed: [
+    'The folder is no longer kept, but its local copy could not be moved to the Trash: {err}',
+    'Klasör artık tutulmuyor ama yerel kopya Çöp Kutusuna taşınamadı: {err}',
+  ],
+};
+
+function syncText(key: string, vars: Record<string, string> = {}): string {
+  const pair = SYNC_STRINGS[key];
+  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
+  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+}
+
+/** `docs://reports/` → `docs://reports`; the bare storage form `docs://`
+ *  keeps its slashes — that is the whole-storage pair the engine takes. */
+function normRemote(remote: string): string {
+  const r = String(remote ?? '').trim();
+  return r.endsWith('://') ? r : r.replace(/\/+$/, '');
+}
+
+/** True when `child` lives strictly inside `parent` (both wire-form). */
+function remoteInside(child: string, parent: string): boolean {
+  if (parent.endsWith('://')) return child.startsWith(parent) && child !== parent;
+  return child.startsWith(parent + '/');
+}
+
+/** Windows refuses these characters in a path segment; everywhere else only
+ *  the separator matters.
+ *
+ *  ⚠ `..` is dropped on EVERY platform, and that is a security guard, not
+ *  tidiness: the wire path comes from the SERVER's listing, so a hostile or
+ *  compromised server could answer with `docs://../../Documents`. Joined
+ *  naively that escapes the account's mirror root, and the engine's first run
+ *  merges both sides — it would upload whatever it found there. Segments are
+ *  therefore filtered before they ever reach path.join. */
+function fsSegment(seg: string): string {
+  return process.platform === 'win32' ? seg.replace(/[<>:"\\|?*]/g, '_') : seg;
+}
+
+/** Path segments of a wire remote, with anything that could climb out of the
+ *  root removed. Exported shape kept tiny on purpose — see fsSegment. */
+function safeSegments(rel: string): string[] {
+  return rel
+    .split('/')
+    .filter((s) => s && s !== '.' && s !== '..')
+    .map(fsSegment);
+}
+
+/** True when `child` sits under `parent`. A different drive on Windows makes
+ *  path.relative return an absolute path, which is NOT "inside". */
+function isInsideDir(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/** `<root>/<storage>/<path…>` for a wire remote. */
+function localMirrorPath(root: string, remote: string): string {
+  const idx = remote.indexOf('://');
+  const storage = remote.slice(0, idx);
+  const rel = remote.slice(idx + 3).replace(/^\/+|\/+$/g, '');
+  const segs = [...safeSegments(storage), ...safeSegments(rel)];
+  return path.join(root, ...segs);
+}
+
+function accountPairs(accountId: string): Pair[] {
+  return knownPairs.filter((p) => p.account === accountId);
+}
+
+/**
+ * The folder picker, in ONE place.
+ *
+ * ⚠ The env hook is why this is shared rather than called inline: a native
+ * dialog is OS chrome an automated run cannot reach, so the same flag that
+ * suppresses the browser supplies the answer instead — and the test then
+ * drives the REAL handler. A second call site with its own showOpenDialog is
+ * a flow the suite cannot reach at all.
+ */
+async function pickDirectory(opts: { title?: string; buttonLabel?: string; defaultPath?: string } = {}): Promise<string | null> {
+  const preset = process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
+  if (preset) return preset;
+  const dialogOpts = { ...opts, properties: ['openDirectory', 'createDirectory'] as const };
+  const picked = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, { ...dialogOpts, properties: [...dialogOpts.properties] })
+    : await dialog.showOpenDialog({ ...dialogOpts, properties: [...dialogOpts.properties] });
+  return picked.canceled ? null : (picked.filePaths[0] ?? null);
+}
+
+/** A native question, with the same test hook as the picker above: the index
+ *  of the button the run would have clicked. */
+async function askChoice(opts: Electron.MessageBoxOptions): Promise<number> {
+  const preset = process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_DIALOG_CHOICE : undefined;
+  if (preset !== undefined && preset !== '') return Number(preset);
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, opts)
+    : await dialog.showMessageBox(opts);
+  return response;
+}
+
+/**
+ * The account's mirror root, prompting on first use. The default —
+ * `~/filex/<host>` — is pre-created so the dialog opens INSIDE it and a plain
+ * "Use this folder" does the obvious thing; picking anywhere else works too.
+ * Cancelling the dialog cancels the keep: null, nothing recorded.
+ */
+async function ensureSyncRoot(acc: Account): Promise<string | null> {
+  if (acc.syncRoot) return acc.syncRoot;
+  let def: string;
+  try {
+    def = path.join(app.getPath('home'), 'filex', new URL(acc.serverUrl).hostname);
+  } catch {
+    def = path.join(app.getPath('home'), 'filex');
+  }
+  await fs.promises.mkdir(def, { recursive: true });
+  const dir = await pickDirectory({
+    title: syncText('rootTitle'),
+    buttonLabel: syncText('rootButton'),
+    defaultPath: def,
+  });
+  if (!dir) return null;
+  acc.syncRoot = dir;
+  saveState(state);
+  return dir;
 }
 
 function wireIpc(): void {
@@ -899,8 +1124,19 @@ function wireIpc(): void {
   // "Check now" from Settings — the same check the timer runs.
   ipcMain.handle('update:check', () => {
     if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return publicState();
+    if (macManualUpdates) {
+      void checkFeedForManualUpdate();
+      return publicState();
+    }
     pushUpdateState({ status: 'checking' });
     autoUpdater.checkForUpdates().catch(() => {});
+    return publicState();
+  });
+
+  // Opens the manual download in the browser. Only meaningful on a mac build
+  // that cannot swap itself; the URL comes from the feed, never the renderer.
+  ipcMain.handle('update:download', () => {
+    if (updateState.status === 'manual' && updateState.url) void shell.openExternal(updateState.url);
     return publicState();
   });
 
@@ -938,31 +1174,140 @@ function wireIpc(): void {
     if (!remote.includes('://')) {
       throw new Error('Enter the server folder as storage://path, for example docs://reports');
     }
-    // The folder picker is OS chrome that an automated run cannot reach. Rather
-    // than let the sync path go untested, the same env flag that suppresses the
-    // browser also supplies the folder — so the test drives the REAL handler,
-    // and this hook is unreachable in a normal run.
-    const preset =
-      process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
-    let localDir = preset;
-    if (!localDir) {
-      const picked = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
-      if (picked.canceled || !picked.filePaths[0]) return publicState();
-      localDir = picked.filePaths[0];
-    }
+    const localDir = await pickDirectory();
+    if (!localDir) return publicState();
     await addPair(localDir, remote, acc.id);
     await refreshPairs();
     return publicState();
   });
 
   ipcMain.handle('sync:remove', async (_e, id: string) => {
-    await removePair(id);
-    await refreshPairs();
+    try {
+      await removePair(id);
+    } finally {
+      // Reconcile EVEN IF the remove threw. The watcher process only re-reads
+      // the pair list when the supervisor restarts it; skipping this on error
+      // left a process syncing a pair that was in fact already gone from
+      // pairs.json — visibly listing the server every 30s until someone killed
+      // it by hand. Measured, not theorised.
+      await refreshPairs();
+    }
     return publicState();
   });
 
   ipcMain.handle('sync:refresh', async () => {
     await refreshPairs();
+    return publicState();
+  });
+
+  // ── selective sync — the explorer's "keep on this computer" menu ──
+
+  ipcMain.handle('sync:kept', (_e, accountId: string) =>
+    accountPairs(String(accountId)).map((p) => ({ remote: p.remote, local: p.local })));
+
+  ipcMain.handle('sync:keep', async (_e, accountId: string, remotePath: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    const remote = normRemote(remotePath);
+    if (!remote.includes('://')) throw new Error(`not a server folder: ${remote}`);
+    // Refused here as well as in the engine, and BEFORE any mkdir: the wire
+    // path comes from the server's listing, and a rejected keep should not
+    // leave a directory behind for a folder it never paired.
+    if (remote.split('/').includes('..')) throw new Error(`not a server folder: ${remote}`);
+    const pairs = accountPairs(acc.id);
+    // Covered already — by itself or an ancestor pair — is a no-op, not an error.
+    if (pairs.some((p) => p.remote === remote || remoteInside(remote, p.remote))) return publicState();
+    const root = await ensureSyncRoot(acc);
+    if (!root) return publicState(); // the root prompt was cancelled — so is the keep
+    // Keeping a parent absorbs kept children: their mirrors already sit at
+    // exactly the paths the parent pair walks (same root, same mapping), so
+    // dropping the child pairs first avoids the engine's overlap refusal and
+    // loses nothing. A hand-made pair with a custom local path is the one
+    // case that re-downloads — visible in the sync panel, and acceptable.
+    for (const child of pairs.filter((p) => remoteInside(p.remote, remote))) {
+      await removePair(child.id);
+    }
+    const local = localMirrorPath(root, remote);
+    await fs.promises.mkdir(local, { recursive: true });
+    try {
+      await addPair(local, remote, acc.id);
+    } finally {
+      await refreshPairs(); // reconcile even on failure — the children are already gone
+    }
+    return publicState();
+  });
+
+  ipcMain.handle('sync:unkeep', async (_e, accountId: string, remotePath: string) => {
+    const remote = normRemote(remotePath);
+    const pair = accountPairs(String(accountId)).find((p) => p.remote === remote);
+    if (!pair) return publicState(); // already gone — the menu was stale
+    const name = remote.endsWith('://')
+      ? remote.slice(0, -'://'.length)
+      : remote.slice(remote.lastIndexOf('/') + 1);
+    // ⚠ Which button is the default depends on WHOSE folder it is. A mirror
+    // this app created under the account's root is the app's to bin. A pair
+    // made by hand in Settings points at a folder the user already had —
+    // their Documents, a photo library — and "Move to Trash" pre-selected
+    // there is one Enter away from binning it. Say the path out loud, and
+    // default to leaving anything we did not create.
+    const acc = state.accounts.find((a) => a.id === accountId);
+    const ours = !!acc?.syncRoot && isInsideDir(acc.syncRoot, pair.local);
+    const response = await askChoice({
+      type: 'question',
+      title: syncText('unkeepTitle'),
+      message: syncText('unkeepMessage', { name }),
+      detail: `${syncText('unkeepDetail')}\n\n${pair.local}`,
+      buttons: [syncText('unkeepTrash'), syncText('unkeepLeave'), syncText('cancel')],
+      defaultId: ours ? 0 : 1,
+      cancelId: 2,
+      noLink: true,
+    });
+    if (response === 2) return publicState();
+    try {
+      await removePair(pair.id);
+    } finally {
+      await refreshPairs();
+    }
+    if (response === 0) {
+      // To the OS trash, not deletion — same restore story every user knows.
+      try {
+        await shell.trashItem(pair.local);
+      } catch (e) {
+        dialog.showErrorBox(
+          syncText('unkeepTitle'),
+          syncText('trashFailed', { err: String((e as Error)?.message ?? e) }),
+        );
+      }
+    }
+    return publicState();
+  });
+
+  ipcMain.handle('sync:reveal', async (_e, accountId: string, remotePath: string) => {
+    const remote = normRemote(remotePath);
+    const pairs = accountPairs(String(accountId));
+    const exact = pairs.find((p) => p.remote === remote);
+    let local = exact?.local ?? null;
+    if (!local) {
+      // Kept via a parent: the mirror sits at the parent's local path plus
+      // the remainder of the wire path, mapped exactly like localMirrorPath.
+      const anc = pairs.find((p) => remoteInside(remote, p.remote));
+      if (anc) {
+        const rest = anc.remote.endsWith('://')
+          ? remote.slice(anc.remote.length)
+          : remote.slice(anc.remote.length + 1);
+        local = path.join(anc.local, ...safeSegments(rest));
+      }
+    }
+    // A folder kept a moment ago — or one inside a parent whose first run has
+    // not reached it yet — has no directory on disk, and openPath on a missing
+    // path fails silently. Climb to the nearest ancestor that does exist so
+    // the menu entry always opens SOMETHING the user can see, rather than
+    // looking broken.
+    while (local && !fs.existsSync(local)) {
+      const up = path.dirname(local);
+      local = up === local ? null : up;
+    }
+    if (local) await shell.openPath(local);
     return publicState();
   });
 
@@ -1019,7 +1364,8 @@ if (!app.requestSingleInstanceLock()) {
     });
     wireIpc();
     buildTray();
-    wireAutoUpdate();
+    // The signature check decides WHICH updater to wire, so it runs first.
+    void detectMacManualUpdates().then(wireAutoUpdate);
     // Re-assert the login item on every packaged start. The command stored in
     // the registry is a full path, and an install that MOVES leaves it pointing
     // at nothing — which is what an upgrade from a per-machine install to a
