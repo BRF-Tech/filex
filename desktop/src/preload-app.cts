@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('filexApp', {
   // updates — the app keeps itself current; these are the manual affordances.
   checkUpdate: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
+  // Only meaningful on a macOS build that cannot swap itself (ad-hoc seal):
+  // opens the feed's dmg in the browser instead of pretending to self-update.
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
 
   /** Backs the navigator.share polyfill the page installs. See main.ts. */
   share: (data: unknown) => ipcRenderer.invoke('app:share', data),

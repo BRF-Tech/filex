@@ -29,6 +29,7 @@ import {
   shell,
 } from 'electron';
 import electronUpdater from 'electron-updater';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -76,7 +77,7 @@ let pendingAuth: PendingAuth | null = null;
 let quitting = false;
 let supervisor: SyncSupervisor | null = null;
 /** What the updater is doing, as far as the UI is concerned. */
-let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'; version?: string; percent?: number; error?: string } = { status: 'idle' };
+let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
@@ -454,10 +455,83 @@ function pushUpdateState(next: typeof updateState): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
 }
 
+// ─── macOS without a Developer ID: honesty instead of a broken swap ───
+//
+// Squirrel.Mac refuses to replace an app that is not Developer-ID signed, and
+// electron-updater only finds that out AFTER the download: the check announced
+// "version X installs itself shortly", the download completed, the swap was
+// refused — and the user was left with a generic "could not check for
+// updates". A permanent, known limitation of the ad-hoc sealed build was being
+// dressed up as a transient error, on every check, forever.
+//
+// So the build's own signature is read once at startup. When it turns out to
+// be ad-hoc, electron-updater is never wired at all — nothing is downloaded
+// that can never be applied — and the same check cadence (and the Settings
+// button) instead reads the static feed's latest-mac.yml directly and says the
+// honest thing: a newer version exists, here is the download.
+
+const MAC_FEED_URL = 'https://filex.sh/desktop/latest-mac.yml';
+
+let macManualUpdates = false;
+
+async function detectMacManualUpdates(): Promise<void> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  const out = await new Promise<string>((resolve) => {
+    execFile('/usr/bin/codesign', ['-dv', app.getPath('exe')], (err, stdout, stderr) => {
+      // codesign prints the signature details on stderr; an error still
+      // carries them (or means no signature at all, which is also "manual").
+      resolve(String(stderr || stdout || err?.message || ''));
+    });
+  });
+  macManualUpdates = !/Developer ID Application/.test(out);
+}
+
+/** Numeric, segment-wise. Good for x.y.z; anything odd compares equal. */
+function isNewerVersion(candidate: string, current: string): boolean {
+  const a = candidate.split('.').map((n) => parseInt(n, 10) || 0);
+  const b = current.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
+async function checkFeedForManualUpdate(): Promise<void> {
+  pushUpdateState({ status: 'checking' });
+  try {
+    const res = await net.fetch(MAC_FEED_URL, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`feed answered ${res.status}`);
+    const yml = await res.text();
+    const version = /^version:\s*(\S+)/m.exec(yml)?.[1];
+    if (!version) throw new Error('feed carries no version');
+    if (!isNewerVersion(version, app.getVersion())) {
+      pushUpdateState({ status: 'idle' });
+      return;
+    }
+    // Hand the browser the dmg itself when the feed names one; the plain
+    // downloads directory otherwise.
+    const dmg = /^\s*-\s*url:\s*(\S+\.dmg)\s*$/m.exec(yml)?.[1];
+    const url = dmg
+      ? new URL(dmg, 'https://filex.sh/desktop/').toString()
+      : 'https://filex.sh/desktop/';
+    pushUpdateState({ status: 'manual', version, url });
+  } catch (e) {
+    pushUpdateState({ status: 'error', error: String((e as Error)?.message ?? e).slice(0, 200) });
+  }
+}
+
 function wireAutoUpdate(): void {
   // Unpackaged runs have no updater metadata and would log an error on every
   // check; a machine told not to update must not phone home at all.
   if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return;
+
+  if (macManualUpdates) {
+    // Same cadence as the real updater — but only ever LOOKING. No download
+    // starts on a machine that cannot apply it.
+    setTimeout(() => void checkFeedForManualUpdate(), 30_000);
+    setInterval(() => void checkFeedForManualUpdate(), 6 * 60 * 60 * 1000);
+    return;
+  }
 
   autoUpdater.autoDownload = true;
   // ⚠ The install must happen on quit, not mid-session: the sync engine is a
@@ -652,6 +726,10 @@ function publicState() {
     launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
     appVersion: app.getVersion(),
     update: updateState,
+    // True on a macOS build whose signature cannot carry a self-update
+    // (ad-hoc sealed). Settings swaps its "updates itself" copy for the
+    // honest download story when this is set.
+    updateManualOnly: macManualUpdates,
   };
 }
 
@@ -899,8 +977,19 @@ function wireIpc(): void {
   // "Check now" from Settings — the same check the timer runs.
   ipcMain.handle('update:check', () => {
     if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return publicState();
+    if (macManualUpdates) {
+      void checkFeedForManualUpdate();
+      return publicState();
+    }
     pushUpdateState({ status: 'checking' });
     autoUpdater.checkForUpdates().catch(() => {});
+    return publicState();
+  });
+
+  // Opens the manual download in the browser. Only meaningful on a mac build
+  // that cannot swap itself; the URL comes from the feed, never the renderer.
+  ipcMain.handle('update:download', () => {
+    if (updateState.status === 'manual' && updateState.url) void shell.openExternal(updateState.url);
     return publicState();
   });
 
@@ -956,8 +1045,16 @@ function wireIpc(): void {
   });
 
   ipcMain.handle('sync:remove', async (_e, id: string) => {
-    await removePair(id);
-    await refreshPairs();
+    try {
+      await removePair(id);
+    } finally {
+      // Reconcile EVEN IF the remove threw. The watcher process only re-reads
+      // the pair list when the supervisor restarts it; skipping this on error
+      // left a process syncing a pair that was in fact already gone from
+      // pairs.json — visibly listing the server every 30s until someone killed
+      // it by hand. Measured, not theorised.
+      await refreshPairs();
+    }
     return publicState();
   });
 
@@ -1019,7 +1116,8 @@ if (!app.requestSingleInstanceLock()) {
     });
     wireIpc();
     buildTray();
-    wireAutoUpdate();
+    // The signature check decides WHICH updater to wire, so it runs first.
+    void detectMacManualUpdates().then(wireAutoUpdate);
     // Re-assert the login item on every packaged start. The command stored in
     // the registry is a full path, and an install that MOVES leaves it pointing
     // at nothing — which is what an upgrade from a per-machine install to a
