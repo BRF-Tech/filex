@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // RemoteLister is the slice of the API client this package needs. Declaring it
@@ -127,56 +128,93 @@ func relOf(root, p string) string {
 	return filepath.ToSlash(rel)
 }
 
-// WalkRemote snapshots a server folder by listing it depth-first.
+// listWorkers is how many directory listings run at once inside WalkRemote.
+// One round-trip per folder is what makes this walk the slow phase of a big
+// sync: measured on a live deployment behind a CDN proxy (~0.35s per
+// request), a 3,328-folder tree took ~19 minutes to list serially — twice
+// per run, since the settle pass walks again. Eight at a time turns that
+// into a couple of minutes without hammering the server: listings are cheap
+// index reads, and they multiplex over one HTTP/2 connection anyway.
+const listWorkers = 8
+
+// WalkRemote snapshots a server folder by listing it breadth-first, one
+// level at a time with listWorkers concurrent listings per level. The
+// snapshot itself is only written by this goroutine — workers hand their
+// listings back and the merge stays single-threaded.
 //
 // remoteRoot is an `adapter://path` prefix; every returned Node.Rel is relative
 // to it, so local and remote snapshots share one key space and the planner can
 // compare them directly.
 //
-// progress, when non-nil, is called after each listed directory with the
-// running totals. One network round-trip per folder makes this walk the slow
-// phase of a big first sync, and the only one with nothing else to show.
+// progress, when non-nil, is called after each merged directory with the
+// running totals.
 func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string, progress func(dirsListed, itemsSeen int)) (Snapshot, error) {
 	out := Snapshot{}
 	dirsListed := 0
-	// Iterative rather than recursive: a deep tree on the server should not be
-	// able to exhaust this process's stack.
-	queue := []string{""}
-	for len(queue) > 0 {
-		rel := queue[0]
-		queue = queue[1:]
+	level := []string{""}
+	for len(level) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		type listed struct {
+			rel     string
+			listing *Listing
+			err     error
+		}
+		results := make([]listed, len(level))
+		sem := make(chan struct{}, listWorkers)
+		var wg sync.WaitGroup
+		for i, rel := range level {
+			wg.Add(1)
+			go func(i int, rel string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				if err := ctx.Err(); err != nil {
+					results[i] = listed{rel: rel, err: err}
+					return
+				}
+				l, err := api.List(ctx, joinRemote(remoteRoot, rel))
+				results[i] = listed{rel: rel, listing: l, err: err}
+			}(i, rel)
+		}
+		wg.Wait()
 
-		res, err := api.List(ctx, joinRemote(remoteRoot, rel))
-		if err != nil {
-			if rel == "" {
-				return nil, fmt.Errorf("list %s: %w", remoteRoot, err)
-			}
-			// A folder that vanished mid-walk is not fatal; the next run sees it.
-			continue
-		}
-		dirsListed++
-		for _, f := range res.Files {
-			if skipNames[f.Basename] {
+		var next []string
+		for _, r := range results {
+			if r.err != nil {
+				if r.rel == "" {
+					return nil, fmt.Errorf("list %s: %w", remoteRoot, r.err)
+				}
+				// A folder that vanished mid-walk is not fatal; the next run
+				// sees it.
 				continue
 			}
-			childRel := f.Basename
-			if rel != "" {
-				childRel = rel + "/" + f.Basename
+			dirsListed++
+			for _, f := range r.listing.Files {
+				if skipNames[f.Basename] {
+					continue
+				}
+				childRel := f.Basename
+				if r.rel != "" {
+					childRel = r.rel + "/" + f.Basename
+				}
+				if f.IsDir {
+					out[childRel] = Node{Rel: childRel, IsDir: true}
+					next = append(next, childRel)
+					continue
+				}
+				out[childRel] = Node{
+					Rel:       childRel,
+					Size:      f.Size,
+					ModMillis: f.LastModified,
+				}
 			}
-			if f.IsDir {
-				out[childRel] = Node{Rel: childRel, IsDir: true}
-				queue = append(queue, childRel)
-				continue
-			}
-			out[childRel] = Node{
-				Rel:       childRel,
-				Size:      f.Size,
-				ModMillis: f.LastModified,
+			if progress != nil {
+				progress(dirsListed, len(out))
 			}
 		}
-		if progress != nil {
-			progress(dirsListed, len(out))
-		}
+		level = next
 	}
 	return out, nil
 }

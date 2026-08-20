@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the desktop root change uses it, and stops the account's watcher first so
   a mid-round rename can never read as a mass delete.
 
+- **The remote walk lists eight folders at a time.** One round-trip per
+  folder made the inventory the slow phase of a big sync: measured behind a
+  CDN proxy (~0.35s per request), a 3,328-folder invoice tree took ~19
+  minutes to list serially — twice per run, since the settle pass walks
+  again. The walk is breadth-first by level now, eight listings in flight,
+  with the snapshot merge kept single-threaded; the same tree lists in a
+  couple of minutes.
+
 - **A half-dead connection can no longer freeze a sync forever.** All the
   CLI's parallel streams ride one HTTP/2 connection; when a CDN proxy killed
   it silently mid-first-sync, every stream blocked — for good, since Go's
