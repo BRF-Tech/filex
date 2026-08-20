@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the desktop root change uses it, and stops the account's watcher first so
   a mid-round rename can never read as a mass delete.
 
+- **A half-dead connection can no longer freeze a sync forever.** All the
+  CLI's parallel streams ride one HTTP/2 connection; when a CDN proxy killed
+  it silently mid-first-sync, every stream blocked — for good, since Go's
+  http2 sends no health pings by default and the client had no transport
+  limits at all. The client now pings an idle connection (ReadIdleTimeout
+  30s), bounds dialing, TLS and response headers, and leaves bodies
+  unbounded — a big transfer may take long, a hang may not.
+
 - **"Keep online only" no longer leaves an empty folder skeleton behind.**
   The mirror's intermediate directories (created at keep time) are swept
   after the local copy moves to the Trash — and a folder holding nothing but
