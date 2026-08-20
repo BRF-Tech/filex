@@ -105,17 +105,27 @@ try {
 
   // The share dialog, opened the way a user opens it: select a file, then the
   // toolbar/context action.
-  await win.evaluate(() => {
-    const row = [...document.querySelectorAll('*')].find((e) =>
-      e.textContent?.trim() === 'sozlesme.pdf');
-    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
-  await win.waitForTimeout(600);
-  await win.evaluate(() => {
-    const row = [...document.querySelectorAll('*')].find((e) =>
-      e.textContent?.trim() === 'sozlesme.pdf');
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 250 }));
-  });
+  await win.evaluate(([n, ts]) => (function robustRowEvent(n, types) {
+  const byTitle = [...document.querySelectorAll('.fe-list__name, .fe-grid__label')]
+    .find((e) => e.getAttribute('title') === n);
+  // ⚠ Not textContent === name: the name span also holds the row's badges
+  // (search "in content", and the desktop's availability glyph ✓ ◐ ⟳ ☁), so
+  // an exact-text match finds nothing and looks like a lost row.
+  const row = byTitle ?? [...document.querySelectorAll('*')].find(
+    (e) => e.children.length === 0 && (e.textContent ?? '').trim() === n);
+  for (const t of types) row?.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: 300, clientY: 250 }));
+})(n, ts), ['sozlesme.pdf', ['click']]);
+  await win.waitForTimeout(500);
+  await win.evaluate(([n, ts]) => (function robustRowEvent(n, types) {
+  const byTitle = [...document.querySelectorAll('.fe-list__name, .fe-grid__label')]
+    .find((e) => e.getAttribute('title') === n);
+  // ⚠ Not textContent === name: the name span also holds the row's badges
+  // (search "in content", and the desktop's availability glyph ✓ ◐ ⟳ ☁), so
+  // an exact-text match finds nothing and looks like a lost row.
+  const row = byTitle ?? [...document.querySelectorAll('*')].find(
+    (e) => e.children.length === 0 && (e.textContent ?? '').trim() === n);
+  for (const t of types) row?.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: 300, clientY: 250 }));
+})(n, ts), ['sozlesme.pdf', ['contextmenu']]);
   await win.waitForTimeout(900);
   await shot(win, '05-context-menu');
 

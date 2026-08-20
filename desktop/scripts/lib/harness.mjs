@@ -165,3 +165,33 @@ export async function skipTour(win) {
   });
   await win.waitForTimeout(300);
 }
+
+/**
+ * Fires mouse events at the row (or grid tile) for `name`.
+ *
+ * ⚠ Match on the name element's `title`, never on `textContent === name`.
+ * A row's name span also holds its badges — the search "in content" one, and
+ * since selective sync an availability glyph (✓ ◐ ⟳ ☁) — so the text reads
+ * "report.pdf ☁" and an exact-text match finds NOTHING while looking exactly
+ * like a UI that lost the row. Measured: the whole keep suite went red the day
+ * badges landed, none of it a product fault.
+ *
+ * types: any of 'click' | 'dblclick' | 'contextmenu' (in order). Returns
+ * whether a row was found.
+ */
+export async function rowEvent(win, name, types = ['click']) {
+  const found = await win.evaluate(({ n, ts }) => {
+    const byTitle = [...document.querySelectorAll('.fe-list__name, .fe-grid__label')]
+      .find((e) => e.getAttribute('title') === n);
+    const row = byTitle
+      ?? [...document.querySelectorAll('*')].find(
+        (e) => e.children.length === 0 && (e.textContent ?? '').trim() === n);
+    if (!row) return false;
+    for (const t of ts) {
+      row.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: 320, clientY: 260 }));
+    }
+    return true;
+  }, { n: name, ts: types });
+  await win.waitForTimeout(types.includes('contextmenu') ? 700 : 400);
+  return found;
+}

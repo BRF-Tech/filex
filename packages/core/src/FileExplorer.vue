@@ -1461,10 +1461,15 @@ async function refreshKeepStatus(): Promise<void> {
 // throttle: at most one refresh per 300ms, and the FINAL poke always lands,
 // so the strip cannot get stuck showing a finished transfer.
 let keepPokeTimer: ReturnType<typeof setTimeout> | null = null;
+// The shell holds the callback and only drops it on the NEXT mount, so a poke
+// can arrive after this instance is gone — pokes then set refs nothing reads.
+// Cheap to make explicit rather than rely on that being harmless.
+let keepAlive = true;
 function onKeepPoke(): void {
-  if (keepPokeTimer) return;
+  if (keepPokeTimer || !keepAlive) return;
   keepPokeTimer = setTimeout(() => {
     keepPokeTimer = null;
+    if (!keepAlive) return;
     void refreshKeepStatus();
     void refreshKept();
   }, 300);
@@ -1476,6 +1481,7 @@ onMounted(() => {
   desktopSync.value?.onChange?.(onKeepPoke);
 });
 onBeforeUnmount(() => {
+  keepAlive = false;
   if (keepPokeTimer) {
     clearTimeout(keepPokeTimer);
     keepPokeTimer = null;

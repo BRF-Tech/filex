@@ -142,12 +142,43 @@ want *on the machine* — offline, in Explorer/Finder, open to every other progr
 - Keeping a **parent** absorbs folders already kept inside it: one pair, nothing
   re-downloaded. A folder inside a kept parent says *Kept on this computer with
   its parent* rather than pretending it could leave on its own.
+- **A single file** can be kept as well — right-click the file. It mirrors to
+  the same place its folder would (`<root>/<storage>/<path>`), syncs both ways,
+  and *Open local folder* shows it among its neighbours rather than opening it.
 - Kept folders offer **📂 Open local folder** and **☁ Keep online only**. Online
   only asks what should happen to the local copy — move it to the Trash, or
-  leave it where it is — and names the folder it means. Cancel cancels.
+  leave it where it is — and names the folder it means. Cancel cancels. When
+  the copy goes to the Trash the empty folders the mirror created go with it;
+  anything holding real content stays.
 
 Everything else stays online-only: the window shows it, the disk does not carry
 it.
+
+### Reading the badges
+
+Every row says where it lives, in the grammar drive clients already taught:
+
+| | |
+|---|---|
+| ✓ | on this computer |
+| ◐ | holding kept items somewhere below — the answer to "is anything in here on my disk?" without opening the folder |
+| ⟳ | being synced right now |
+| ☁ | online-only |
+
+While the engine is working, a strip along the bottom of the window names the
+folder it is on and shows what it is doing — listing, or `12/345` with a
+progress bar. It disappears when the run settles.
+
+### The filex folder on this computer
+
+*Settings ⚙ → filex folder on this computer* names the root, opens it, and can
+**change it**. Kept folders move with it: each mirror is relocated under the new
+root and re-paired there, and the pass that follows walks two identical trees,
+so nothing is downloaded again. Pairs you made by hand somewhere else stay where
+you put them. A folder inside the current root (or one that contains it) is
+refused rather than half-moved, and a move to another drive is copied across
+rather than failing.
+
 
 > Sync runs while the app does, so a folder kept a moment ago starts filling on
 > the next round (30 seconds) — no restart. The engine's rules below apply

@@ -76,10 +76,12 @@ between your machine and the server changes nothing.
 ## In the desktop app: "Keep on this computer"
 
 Nothing below changes when the desktop app drives the engine — but you rarely
-type any of it there. Right-click a folder (or a whole storage) in the window →
+type any of it there. Right-click a folder, a single file, or a whole storage in the window →
 **Keep on this computer**, and the app makes the pair for you: one root folder
-per account, chosen once, with every kept folder mirrored under it as
-`<root>/<storage>/<path…>`. Keeping a parent absorbs kept children into a single
+per account, chosen once (and movable later from Settings), with every kept item
+mirrored under it as `<root>/<storage>/<path…>`. Every row then carries a badge
+saying where it lives — ✓ here, ◐ holding kept items below, ⟳ syncing now,
+☁ online-only. Keeping a parent absorbs kept children into a single
 pair; **Keep online only** removes the pair and asks whether the local copy
 should go to the Trash or stay. See
 **[docs/DESKTOP.md](DESKTOP.md#keeping-folders-on-this-computer)**.
@@ -94,7 +96,7 @@ server, to write outside the folder the user chose.
 ## Commands
 
 ```
-filex sync add <local-folder> <storage://path> [--account <label>]
+filex sync add <local-folder> <storage://path> [--account <label>] [--file]
 filex sync list [--json]
 filex sync remove <pair-id>
 filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet]
@@ -103,6 +105,12 @@ filex sync trash [--pair <id>] [--restore <path>]
 
 `--dry-run` prints exactly what would happen and touches nothing — worth running
 the first time you pair a folder that already has files in it.
+
+`--file` pairs **one file** instead of a folder: `filex sync add ~/notes.md
+docs://team/notes.md --file`. Same planner, same rules, same 30-day local trash —
+the snapshots simply carry one entry. Both sides keep the file's name (a pair
+that renamed across would sync the wrong entry, so it is refused), and a restore
+from `sync trash` lands beside the file rather than inside it.
 
 `--account` limits a run to the pairs recorded against one signed-in server. One
 token authenticates against exactly one server, so the desktop app runs one

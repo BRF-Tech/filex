@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-20
+
 ### Added
 
 - **Availability at a glance.** Every row in the desktop explorer carries the
@@ -34,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effectively-empty leftovers are swept, never `rm -rf`.
 
 ### Fixed
+
+- **Moving the filex folder to another drive no longer unpairs what it moves.**
+  The migration removed each pair before relocating its mirror, and `rename`
+  cannot cross devices — which is the usual reason to move the root at all — so
+  a move to a second disk left every folder sitting where it was, no longer
+  synced, with only a dialog to say so. Cross-device moves are copied across
+  now, and any failure puts the pair back where its content actually is. A root
+  inside the current one (or containing it) is refused outright rather than
+  half-applied, and the sweep afterwards touches only the storage folders the
+  mirrors emptied — never the root the user chose, and never a folder that was
+  already there.
 
 - **"Keep online only" no longer leaves an empty folder skeleton behind.**
   The mirror's intermediate directories (created at keep time) are swept

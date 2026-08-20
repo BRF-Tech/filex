@@ -774,6 +774,10 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'Could not move {name} to the new folder: {err}',
     '{name} yeni klasöre taşınamadı: {err}',
   ],
+  rootNested: [
+    'Pick a folder that is not inside the current one (and does not contain it).',
+    'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
+  ],
 };
 
 function syncText(key: string, vars: Record<string, string> = {}): string {
@@ -876,10 +880,7 @@ async function removeIfEffectivelyEmpty(dir: string): Promise<boolean> {
  *  it. Stops at the first dir with real content. */
 async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
   let dir = from;
-  // isInsideDir, not startsWith: a Windows drive letter can come back in
-  // either case, and a missed boundary here would walk the sweep out of the
-  // root — or stop it for no reason.
-  while (dir !== stopAt && isInsideDir(stopAt, dir)) {
+  while (dir !== stopAt && dir.startsWith(stopAt + path.sep)) {
     if (!(await removeIfEffectivelyEmpty(dir))) return;
     dir = path.dirname(dir);
   }
@@ -894,9 +895,18 @@ async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
  * drives the REAL handler. A second call site with its own showOpenDialog is
  * a flow the suite cannot reach at all.
  */
+let pickQueue: string[] | null = null;
+
 async function pickDirectory(opts: { title?: string; buttonLabel?: string; defaultPath?: string } = {}): Promise<string | null> {
   const preset = process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
-  if (preset) return preset;
+  if (preset) {
+    // One flow can open the picker TWICE with different answers — the first
+    // keep chooses the root, Settings later moves it — so the hook takes a
+    // queue (path.delimiter separated) and hands out one answer per call. A
+    // single path (the common case) simply repeats.
+    pickQueue ??= preset.split(path.delimiter).filter(Boolean);
+    return pickQueue.length > 1 ? pickQueue.shift()! : (pickQueue[0] ?? null);
+  }
   const dialogOpts = { ...opts, properties: ['openDirectory', 'createDirectory'] as const };
   const picked = mainWindow
     ? await dialog.showOpenDialog(mainWindow, { ...dialogOpts, properties: [...dialogOpts.properties] })
@@ -1404,37 +1414,58 @@ function wireIpc(): void {
     });
     if (!newRoot || newRoot === acc.syncRoot) return publicState();
     const oldRoot = acc.syncRoot ?? null;
+    // ⚠ One root inside the other cannot be moved: renaming a folder into its
+    // own child fails, and the sweep afterwards would be walking the tree it
+    // just filled. Say so instead of half-moving.
+    if (oldRoot && (isInsideDir(oldRoot, newRoot) || isInsideDir(newRoot, oldRoot))) {
+      dialog.showErrorBox(syncText('rootTitle'), syncText('rootNested'));
+      return publicState();
+    }
     if (oldRoot) {
       // Only mirrors under the old root move; a hand-picked pair living
       // elsewhere was placed there on purpose and stays put.
-      const mine = accountPairs(acc.id).filter(
-        (p) => p.local !== oldRoot && isInsideDir(oldRoot, p.local),
-      );
+      const mine = accountPairs(acc.id).filter((p) => isInsideDir(oldRoot, p.local) && p.local !== oldRoot);
+      // Remember which top-level dirs (the storage names) we emptied, so the
+      // sweep below touches only those — the root may be a folder the user
+      // already had things in, and their empty folders are not ours to bin.
+      const touched = new Set<string>();
       for (const p of mine) {
-        const dest = path.join(newRoot, path.relative(oldRoot, p.local));
+        const rel = path.relative(oldRoot, p.local);
+        touched.add(rel.split(path.sep)[0]!);
+        const dest = path.join(newRoot, rel);
         try {
           await removePair(p.id);
           await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-          await fs.promises.rename(p.local, dest);
+          try {
+            await fs.promises.rename(p.local, dest);
+          } catch (e) {
+            // ⚠ A move to another DRIVE is the usual reason to change the
+            // root at all, and rename cannot cross devices (EXDEV). Copy and
+            // remove instead — slower, but it is what the user asked for.
+            if ((e as NodeJS.ErrnoException)?.code !== 'EXDEV') throw e;
+            await fs.promises.cp(p.local, dest, { recursive: true, force: true, errorOnExist: false });
+            await fs.promises.rm(p.local, { recursive: true, force: true });
+          }
           await addPair(dest, p.remote, acc.id, p.file === true);
           await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
         } catch (e) {
+          // ⚠ The pair was removed FIRST, so a failure here would otherwise
+          // leave the folder silently unpaired — files intact, syncing over,
+          // and nothing but a dialog to say so. Put it back where it was
+          // (whichever side of the move its content is on) and report.
+          const stillHome = fs.existsSync(p.local);
+          await addPair(stillHome ? p.local : dest, p.remote, acc.id, p.file === true).catch(() => {});
           dialog.showErrorBox(
             syncText('rootTitle'),
             syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),
           );
         }
       }
-      // Sweep the effectively-empty storage dirs left behind — litter-aware
-      // rmdir only, never rm -rf: real content under the old root is not
-      // ours to judge.
-      try {
-        for (const entry of await fs.promises.readdir(oldRoot)) {
-          await removeIfEffectivelyEmpty(path.join(oldRoot, entry));
-        }
-        await removeIfEffectivelyEmpty(oldRoot);
-      } catch {
-        // Old root already gone; nothing to sweep.
+      // Sweep what the mirrors left behind — litter-aware rmdir only, and
+      // ONLY the storage dirs we just emptied. The old root itself stays: the
+      // user chose that folder, and it may be one they already had.
+      for (const entry of touched) {
+        await removeIfEffectivelyEmpty(path.join(oldRoot, entry)).catch(() => false);
       }
     }
     acc.syncRoot = newRoot;
