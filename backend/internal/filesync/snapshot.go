@@ -75,6 +75,12 @@ func WalkLocal(root string) (Snapshot, []string, error) {
 			}
 			return nil
 		}
+		// Half-written downloads from an interrupted run. Never sync
+		// material: treating one as a user file uploads crash debris to the
+		// server with a name nobody chose.
+		if strings.HasPrefix(name, ".filex-part-") {
+			return nil
+		}
 		// Symlinks are not followed. A link pointing outside the pair would
 		// upload files the user never put in the folder, and a link pointing
 		// inside it makes the walk infinite.
