@@ -876,7 +876,10 @@ async function removeIfEffectivelyEmpty(dir: string): Promise<boolean> {
  *  it. Stops at the first dir with real content. */
 async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
   let dir = from;
-  while (dir !== stopAt && dir.startsWith(stopAt + path.sep)) {
+  // isInsideDir, not startsWith: a Windows drive letter can come back in
+  // either case, and a missed boundary here would walk the sweep out of the
+  // root — or stop it for no reason.
+  while (dir !== stopAt && isInsideDir(stopAt, dir)) {
     if (!(await removeIfEffectivelyEmpty(dir))) return;
     dir = path.dirname(dir);
   }
@@ -1404,7 +1407,9 @@ function wireIpc(): void {
     if (oldRoot) {
       // Only mirrors under the old root move; a hand-picked pair living
       // elsewhere was placed there on purpose and stays put.
-      const mine = accountPairs(acc.id).filter((p) => p.local.startsWith(oldRoot + path.sep));
+      const mine = accountPairs(acc.id).filter(
+        (p) => p.local !== oldRoot && isInsideDir(oldRoot, p.local),
+      );
       for (const p of mine) {
         const dest = path.join(newRoot, path.relative(oldRoot, p.local));
         try {
