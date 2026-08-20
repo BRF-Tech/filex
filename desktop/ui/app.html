@@ -652,6 +652,15 @@
           // Turkish, so without this an English desktop showed English chrome
           // around a Turkish file list.
           locale: LANG,
+          // Selective sync — folder menus grow "Keep on this computer".
+          // The account id is captured HERE, at mount: a rail switch swaps
+          // the whole explorer, so these hooks can never cross accounts.
+          desktopSync: {
+            kept: () => window.filexApp.syncKept(account.id),
+            keep: (remote) => window.filexApp.syncKeep(account.id, remote),
+            unkeep: (remote) => window.filexApp.syncUnkeep(account.id, remote),
+            reveal: (remote) => window.filexApp.syncReveal(account.id, remote),
+          },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
         slot.appendChild(explorer);

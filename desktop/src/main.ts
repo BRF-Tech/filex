@@ -39,6 +39,7 @@ import {
   removeAccount,
   saveState,
   upsertAccount,
+  type Account,
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
@@ -742,6 +743,101 @@ async function refreshPairs(): Promise<void> {
   await supervisor?.reconcile(state.accounts, (id) => state.accounts.find((a) => a.id === id)?.token ?? null);
 }
 
+// ─────────────────────────── selective sync ───────────────────────────
+//
+// "Keep on this computer" — the explorer's folder menu drives these (the
+// shared component takes the hooks via config.desktopSync). One ROOT folder
+// per account, chosen the first time something is kept; every kept folder
+// mirrors under it as `<root>/<storage>/<path…>`, so the disk reads like the
+// server does. Everything else stays online-only in the window: the explorer
+// is the view, the root folder is the subset that also lives here.
+
+/** Native-dialog strings for the keep flow. The window carries the real
+ *  catalogue; these render in OS dialogs, which the renderer cannot draw. */
+const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
+  rootTitle: ['Choose where filex keeps folders on this computer', 'filex klasörlerinin bu bilgisayarda tutulacağı yeri seç'],
+  rootButton: ['Use this folder', 'Bu klasörü kullan'],
+  unkeepTitle: ['Keep online only', 'Yalnızca çevrimiçi tut'],
+  unkeepMessage: ['Stop keeping “{name}” on this computer?', '“{name}” bilgisayarda tutulmayı bıraksın mı?'],
+  unkeepDetail: [
+    'The folder stays on the server and in this window. What should happen to the local copy?',
+    'Klasör sunucuda ve bu penceredeki görünümde durur. Yerel kopyaya ne olsun?',
+  ],
+  unkeepTrash: ['Move local copy to Trash', 'Yerel kopyayı Çöp Kutusuna taşı'],
+  unkeepLeave: ['Leave the local copy', 'Yerel kopya yerinde kalsın'],
+  cancel: ['Cancel', 'Vazgeç'],
+  trashFailed: [
+    'The folder is no longer kept, but its local copy could not be moved to the Trash: {err}',
+    'Klasör artık tutulmuyor ama yerel kopya Çöp Kutusuna taşınamadı: {err}',
+  ],
+};
+
+function syncText(key: string, vars: Record<string, string> = {}): string {
+  const pair = SYNC_STRINGS[key];
+  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
+  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+}
+
+/** `docs://reports/` → `docs://reports`; the bare storage form `docs://`
+ *  keeps its slashes — that is the whole-storage pair the engine takes. */
+function normRemote(remote: string): string {
+  const r = String(remote ?? '').trim();
+  return r.endsWith('://') ? r : r.replace(/\/+$/, '');
+}
+
+/** True when `child` lives strictly inside `parent` (both wire-form). */
+function remoteInside(child: string, parent: string): boolean {
+  if (parent.endsWith('://')) return child.startsWith(parent) && child !== parent;
+  return child.startsWith(parent + '/');
+}
+
+/** Windows refuses these characters in a path segment; everywhere else only
+ *  the separator matters, and a wire path cannot smuggle one in. */
+function fsSegment(seg: string): string {
+  return process.platform === 'win32' ? seg.replace(/[<>:"\\|?*]/g, '_') : seg;
+}
+
+/** `<root>/<storage>/<path…>` for a wire remote. */
+function localMirrorPath(root: string, remote: string): string {
+  const idx = remote.indexOf('://');
+  const storage = remote.slice(0, idx);
+  const rel = remote.slice(idx + 3).replace(/^\/+|\/+$/g, '');
+  const segs = [storage, ...rel.split('/').filter(Boolean)].map(fsSegment);
+  return path.join(root, ...segs);
+}
+
+function accountPairs(accountId: string): Pair[] {
+  return knownPairs.filter((p) => p.account === accountId);
+}
+
+/**
+ * The account's mirror root, prompting on first use. The default —
+ * `~/filex/<host>` — is pre-created so the dialog opens INSIDE it and a plain
+ * "Use this folder" does the obvious thing; picking anywhere else works too.
+ * Cancelling the dialog cancels the keep: null, nothing recorded.
+ */
+async function ensureSyncRoot(acc: Account): Promise<string | null> {
+  if (acc.syncRoot) return acc.syncRoot;
+  let def: string;
+  try {
+    def = path.join(app.getPath('home'), 'filex', new URL(acc.serverUrl).hostname);
+  } catch {
+    def = path.join(app.getPath('home'), 'filex');
+  }
+  await fs.promises.mkdir(def, { recursive: true });
+  const picked = await dialog.showOpenDialog({
+    title: syncText('rootTitle'),
+    buttonLabel: syncText('rootButton'),
+    defaultPath: def,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  const dir = picked.canceled ? null : (picked.filePaths[0] ?? null);
+  if (!dir) return null;
+  acc.syncRoot = dir;
+  saveState(state);
+  return dir;
+}
+
 function wireIpc(): void {
   ipcMain.handle('state:get', () => publicState());
 
@@ -1060,6 +1156,99 @@ function wireIpc(): void {
 
   ipcMain.handle('sync:refresh', async () => {
     await refreshPairs();
+    return publicState();
+  });
+
+  // ── selective sync — the explorer's "keep on this computer" menu ──
+
+  ipcMain.handle('sync:kept', (_e, accountId: string) =>
+    accountPairs(String(accountId)).map((p) => ({ remote: p.remote, local: p.local })));
+
+  ipcMain.handle('sync:keep', async (_e, accountId: string, remotePath: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    const remote = normRemote(remotePath);
+    if (!remote.includes('://')) throw new Error(`not a server folder: ${remote}`);
+    const pairs = accountPairs(acc.id);
+    // Covered already — by itself or an ancestor pair — is a no-op, not an error.
+    if (pairs.some((p) => p.remote === remote || remoteInside(remote, p.remote))) return publicState();
+    const root = await ensureSyncRoot(acc);
+    if (!root) return publicState(); // the root prompt was cancelled — so is the keep
+    // Keeping a parent absorbs kept children: their mirrors already sit at
+    // exactly the paths the parent pair walks (same root, same mapping), so
+    // dropping the child pairs first avoids the engine's overlap refusal and
+    // loses nothing. A hand-made pair with a custom local path is the one
+    // case that re-downloads — visible in the sync panel, and acceptable.
+    for (const child of pairs.filter((p) => remoteInside(p.remote, remote))) {
+      await removePair(child.id);
+    }
+    const local = localMirrorPath(root, remote);
+    await fs.promises.mkdir(local, { recursive: true });
+    try {
+      await addPair(local, remote, acc.id);
+    } finally {
+      await refreshPairs(); // reconcile even on failure — the children are already gone
+    }
+    return publicState();
+  });
+
+  ipcMain.handle('sync:unkeep', async (_e, accountId: string, remotePath: string) => {
+    const remote = normRemote(remotePath);
+    const pair = accountPairs(String(accountId)).find((p) => p.remote === remote);
+    if (!pair) return publicState(); // already gone — the menu was stale
+    const name = remote.endsWith('://')
+      ? remote.slice(0, -'://'.length)
+      : remote.slice(remote.lastIndexOf('/') + 1);
+    const opts = {
+      type: 'question' as const,
+      title: syncText('unkeepTitle'),
+      message: syncText('unkeepMessage', { name }),
+      detail: syncText('unkeepDetail'),
+      buttons: [syncText('unkeepTrash'), syncText('unkeepLeave'), syncText('cancel')],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    };
+    const { response } = mainWindow
+      ? await dialog.showMessageBox(mainWindow, opts)
+      : await dialog.showMessageBox(opts);
+    if (response === 2) return publicState();
+    try {
+      await removePair(pair.id);
+    } finally {
+      await refreshPairs();
+    }
+    if (response === 0) {
+      // To the OS trash, not deletion — same restore story every user knows.
+      try {
+        await shell.trashItem(pair.local);
+      } catch (e) {
+        dialog.showErrorBox(
+          syncText('unkeepTitle'),
+          syncText('trashFailed', { err: String((e as Error)?.message ?? e) }),
+        );
+      }
+    }
+    return publicState();
+  });
+
+  ipcMain.handle('sync:reveal', async (_e, accountId: string, remotePath: string) => {
+    const remote = normRemote(remotePath);
+    const pairs = accountPairs(String(accountId));
+    const exact = pairs.find((p) => p.remote === remote);
+    let local = exact?.local ?? null;
+    if (!local) {
+      // Kept via a parent: the mirror sits at the parent's local path plus
+      // the remainder of the wire path, mapped exactly like localMirrorPath.
+      const anc = pairs.find((p) => remoteInside(remote, p.remote));
+      if (anc) {
+        const rest = anc.remote.endsWith('://')
+          ? remote.slice(anc.remote.length)
+          : remote.slice(anc.remote.length + 1);
+        local = path.join(anc.local, ...rest.split('/').filter(Boolean).map(fsSegment));
+      }
+    }
+    if (local) await shell.openPath(local);
     return publicState();
   });
 
