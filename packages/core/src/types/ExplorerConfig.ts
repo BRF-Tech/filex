@@ -308,6 +308,30 @@ export interface ExplorerConfig {
     driver?: string;
     readOnly?: boolean;
   }>;
+
+  /**
+   * Desktop-shell hook — selective sync ("keep on this computer").
+   *
+   * Present only when the explorer runs inside the filex desktop app; the
+   * shell passes functions that talk to its sync engine, and the explorer
+   * grows "Keep on this computer" / "Online only" entries on folder menus.
+   * Absent (web admin, embeds): nothing about it renders.
+   *
+   * Folders only, by design: the sync engine pairs directories, and a file
+   * rides along with the folder that holds it.
+   */
+  desktopSync?: {
+    /** Kept folders for the mounted account, adapter-qualified remotes. */
+    kept: () => Promise<Array<{ remote: string; local: string }>>;
+    /** Start keeping a folder. Resolves once the pair is registered (or the
+     *  user cancelled the shell's root-folder prompt — re-read `kept`). */
+    keep: (remote: string) => Promise<void>;
+    /** Stop keeping. The SHELL owns the "what happens to the local copy"
+     *  question — it asks natively and may cancel; re-read `kept` after. */
+    unkeep: (remote: string) => Promise<void>;
+    /** Open the folder's local mirror in the OS file manager. */
+    reveal: (remote: string) => Promise<void>;
+  };
 }
 
 /** Component emits — the parent listens for these events. */
