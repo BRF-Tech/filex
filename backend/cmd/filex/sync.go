@@ -10,9 +10,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/brf-tech/filex/backend/internal/cliclient"
 	"github.com/brf-tech/filex/backend/internal/filesync"
+	"github.com/spf13/cobra"
 )
 
 // apiAdapter bridges the REST client to the narrow interface the sync engine
@@ -210,7 +210,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return fmt.Errorf("no folders are paired; add one with `filex sync add`")
 			}
 
-			run := func() error {
+			run := func(pairs []filesync.Pair) error {
 				for _, p := range pairs {
 					// ⚠ One token cannot speak for two servers. The desktop app
 					// runs one process per signed-in account and filters here;
@@ -227,6 +227,11 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 						continue
 					}
 					eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st}
+					// Progress prints even with --quiet. The desktop app starts
+					// this command with --quiet and mirrors the LAST stdout line
+					// into its panel; without these lines a big first sync spent
+					// its whole inventory phase looking dead.
+					eng.Progress = func(s string) { fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", p.ID, s) }
 					if !quietOut {
 						eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
 					}
@@ -241,17 +246,26 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			}
 
 			if watch <= 0 {
-				return run()
+				return run(pairs)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Watching %d pair(s); checking every %s. Ctrl-C to stop.\n", len(pairs), watch)
 			for {
-				if err := run(); err != nil {
+				if err := run(pairs); err != nil {
 					return err
 				}
 				select {
 				case <-cmd.Context().Done():
 					return nil
 				case <-time.After(watch):
+				}
+				// Re-read between rounds. pairs.json is edited by OTHER
+				// processes — the desktop app writes it while this watcher
+				// runs — and the old one-time load meant a pair added after
+				// start was silently never synced until the next restart,
+				// while a removed one kept going. The file is tiny; the
+				// re-read costs nothing.
+				if pairs, err = st.LoadPairs(); err != nil {
+					return fmt.Errorf("re-read pairs: %w", err)
 				}
 			}
 		},
@@ -271,7 +285,7 @@ func printPlan(cmd *cobra.Command, api *cliclient.Client, st *filesync.Store, p 
 	if err != nil {
 		return err
 	}
-	remote, err := filesync.WalkRemote(cmd.Context(), apiAdapter{api}, p.Remote)
+	remote, err := filesync.WalkRemote(cmd.Context(), apiAdapter{api}, p.Remote, nil)
 	if err != nil {
 		return err
 	}

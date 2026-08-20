@@ -544,6 +544,50 @@ func TestRemovingAPairLeavesTheFilesAlone(t *testing.T) {
 	}
 }
 
+// The baseline file only exists after a first run has COMPLETED. Unpairing
+// before that (a long first sync the user cancels by removing the pair) used
+// to fail with the raw ENOENT, which the desktop surfaced as an error dialog —
+// and then skipped its own watcher cleanup because the remove "failed".
+func TestRemovingAPairBeforeItsFirstRunSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: filepath.Join(dir, "state")}
+	p, err := s.AddPair(Pair{Local: filepath.Join(dir, "docs"), Remote: "docs://a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemovePair(p.ID); err != nil {
+		t.Fatalf("removing a never-run pair must not fail: %v", err)
+	}
+	pairs, err := s.LoadPairs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pairs) != 0 {
+		t.Errorf("pair still present after remove: %v", pairs)
+	}
+}
+
+// Progress must speak even when Log is silent: the desktop runs the engine
+// with --quiet and shows only the last stdout line, and the inventory phase
+// of a big first sync otherwise prints nothing for minutes.
+func TestProgressReportsInventoryAndTransfer(t *testing.T) {
+	r := newRig(t)
+	r.srv.files["a.txt"] = []byte("one")
+	r.srv.files["sub/b.txt"] = []byte("two")
+	r.srv.dirs["sub"] = true
+
+	var lines []string
+	r.engine.Progress = func(s string) { lines = append(lines, s) }
+	r.run()
+
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"inventory:", "plan:", "transfer:", "settling:"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("progress lines missing %q:\n%s", want, joined)
+		}
+	}
+}
+
 // A corrupt baseline must degrade to a merge, never to "everything was deleted".
 func TestACorruptBaselineFallsBackToAFirstRun(t *testing.T) {
 	r := newRig(t)
