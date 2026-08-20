@@ -1252,6 +1252,24 @@ function wireIpc(): void {
     return publicState();
   });
 
+  // Live sync state for the explorer's badges and its bottom progress strip.
+  // The pair id from the supervisor is resolved to its remote here, so the
+  // component never learns about pair ids at all.
+  ipcMain.handle('sync:status', (_e, accountId: string) => {
+    const st = supervisor?.statuses().find((s) => s.accountId === accountId);
+    if (!st) return { running: false, lastError: null, active: null };
+    const remote = st.active
+      ? (knownPairs.find((p) => p.id === st.active?.pairId)?.remote ?? null)
+      : null;
+    return {
+      running: st.running,
+      lastError: st.lastError,
+      active: st.active && remote
+        ? { remote, phase: st.active.phase, done: st.active.done, total: st.active.total }
+        : null,
+    };
+  });
+
   // Test-only: feed a deep link straight in. Guarded by the same env flag that
   // suppresses the browser, so it cannot be reached in a normal run.
   ipcMain.handle('test:deepLink', async (_e, url: string) => {

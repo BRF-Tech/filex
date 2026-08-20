@@ -510,6 +510,7 @@
 
       let state = { accounts: [], activeId: null, syncFolders: [], syncStatuses: [] };
       let explorer = null;
+      let explorerSyncCb = null;
       let mountedFor = null;
 
       // ── the explorer ──────────────────────────────────────────
@@ -660,6 +661,10 @@
             keep: (remote) => window.filexApp.syncKeep(account.id, remote),
             unkeep: (remote) => window.filexApp.syncUnkeep(account.id, remote),
             reveal: (remote) => window.filexApp.syncReveal(account.id, remote),
+            status: () => window.filexApp.syncStatus(account.id),
+            // One subscriber — the mounted explorer. A rail switch remounts
+            // and overwrites it, so a stale component never gets poked.
+            onChange: (cb) => { explorerSyncCb = cb; },
           },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
@@ -1116,7 +1121,10 @@
       }
       relabelStatic();
 
-      window.filexApp.onChanged(() => refresh());
+      window.filexApp.onChanged(() => {
+        refresh();
+        if (explorerSyncCb) explorerSyncCb();
+      });
       window.filexApp.onOpenSettings(() => toggleSettings(true));
       refresh();
     </script>
