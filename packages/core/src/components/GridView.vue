@@ -21,6 +21,9 @@ const props = defineProps<{
    *  root-relative and unauthenticated — a bare <img src> only works for the
    *  native same-origin SPA, so embedded hosts NEED this. null = icon. */
   thumbSrc?: (n: FileNode) => string | null;
+  /** Desktop selective sync: availability badge per tile. Absent on the
+   *  web — no badge renders at all. */
+  keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | null;
 }>();
 
 const emit = defineEmits<{
@@ -123,6 +126,10 @@ function parentDir(path: string): string {
 
 // Special rows keep their emoji (trash/storage are not file-TYPE icons);
 // everything else renders the SVG icon set from lib/fileIcons.
+function keepGlyph(b: 'kept' | 'syncing' | 'cloud'): string {
+  return b === 'kept' ? '\u2713' : b === 'syncing' ? '\u27f3' : '\u2601';
+}
+
 function specialEmojiFor(n: FileNode): string | null {
   if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
@@ -205,6 +212,11 @@ function snippetTitle(snippet: string): string {
       </div>
       <div class="fe-grid__label" :title="n.basename">
         {{ nodeDisplayName(n) }}
+        <span
+          v-if="keepBadgeFor && keepBadgeFor(n)"
+          :class="['fe-keepbadge', 'fe-keepbadge--' + keepBadgeFor(n)]"
+          :title="t('keep.badge_' + keepBadgeFor(n))"
+        >{{ keepGlyph(keepBadgeFor(n)!) }}</span>
       </div>
       <div
         v-if="showParentPath"

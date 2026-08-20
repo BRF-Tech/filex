@@ -331,6 +331,23 @@ export interface ExplorerConfig {
     unkeep: (remote: string) => Promise<void>;
     /** Open the folder's local mirror in the OS file manager. */
     reveal: (remote: string) => Promise<void>;
+    /** Live engine state, for the row badges and the bottom progress strip.
+     *  `active` is the folder being worked on right now — the engine walks
+     *  its pairs one at a time — or null between runs. */
+    status?: () => Promise<{
+      running: boolean;
+      lastError?: string | null;
+      active: {
+        remote: string;
+        phase: 'inventory' | 'plan' | 'transfer' | 'settling';
+        done: number;
+        total: number;
+      } | null;
+    }>;
+    /** Subscribe to "something about sync changed" pokes from the shell —
+     *  the explorer re-reads `kept` and `status` when poked. The shell keeps
+     *  ONE subscriber (the mounted explorer) and overwrites it on remount. */
+    onChange?: (cb: () => void) => void;
   };
 }
 

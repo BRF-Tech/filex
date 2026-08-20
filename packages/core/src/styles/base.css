@@ -3928,3 +3928,79 @@ filex-explorer {
   }
 }
 /* === /ui-fix ========================================================= */
+
+/* ── selective sync (desktop shell only): availability badges + strip ──
+   The glyphs read in the OneDrive/Drive grammar: ✓ on this computer,
+   ⟳ being synced right now, ☁ online-only. Rendered only when the host
+   passes keepBadgeFor — the web admin and the embeds never show them. */
+.fe-keepbadge {
+  flex: 0 0 auto;
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 11px;
+  line-height: 1;
+  vertical-align: middle;
+}
+.fe-keepbadge--kept {
+  color: var(--fe-keep-ok, #16a34a);
+}
+.fe-keepbadge--cloud {
+  color: var(--fe-text-muted);
+  opacity: 0.7;
+}
+.fe-keepbadge--syncing {
+  color: var(--fe-primary);
+  animation: fe-keep-spin 1.2s linear infinite;
+}
+@keyframes fe-keep-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Bottom overlay strip: progress of the folder being synced right now.
+   pointer-events none — it reports, it never blocks a click. */
+.fe-keep-strip {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--fe-border);
+  border-radius: 10px;
+  background: var(--fe-bg-elev);
+  box-shadow: var(--fe-shadow-sm, 0 2px 6px rgba(0, 0, 0, 0.18));
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+  pointer-events: none;
+}
+.fe-keep-strip__icon {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--fe-primary);
+  animation: fe-keep-spin 1.2s linear infinite;
+}
+.fe-keep-strip__label {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-keep-strip__bar {
+  flex: 1 1 80px;
+  min-width: 60px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fe-primary) 18%, transparent);
+  overflow: hidden;
+}
+.fe-keep-strip__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--fe-primary);
+  transition: width 0.3s ease;
+}
