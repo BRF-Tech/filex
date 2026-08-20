@@ -388,7 +388,7 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 		return
 	}
 	rel = strings.TrimSpace(strings.TrimPrefix(rel, "/"))
-	if rel == "" || strings.Contains(rel, "..") {
+	if rel == "" || pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
 	}

@@ -198,7 +198,7 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "rename across adapters not supported"})
 		return
 	}
-	if srcRel == "" || strings.Contains(srcRel, "..") {
+	if srcRel == "" || pathHasDotDot(srcRel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path"})
 		return
 	}
@@ -290,7 +290,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "move across adapters not supported: " + it.Path})
 			return
 		}
-		if srcRel == "" || strings.Contains(srcRel, "..") {
+		if srcRel == "" || pathHasDotDot(srcRel) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
@@ -369,7 +369,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "delete across adapters not supported: " + it.Path})
 			return
 		}
-		if srcRel == "" || strings.Contains(srcRel, "..") {
+		if srcRel == "" || pathHasDotDot(srcRel) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad item path: " + it.Path})
 			return
 		}
@@ -750,7 +750,7 @@ func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, path
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
 		return nil, "", nil, false
 	}
-	if strings.Contains(rel, "..") {
+	if pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return nil, "", nil, false
 	}

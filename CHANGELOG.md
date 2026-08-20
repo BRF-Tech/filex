@@ -65,6 +65,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the snapshot merge kept single-threaded; the same tree lists in a
   couple of minutes.
 
+- **A filename containing ".." is a filename, not a traversal.** Eleven API
+  guards rejected any path CONTAINING the substring — so a real invoice
+  named "… Tic. Sic. Gaz..pdf" could be stored but never previewed,
+  downloaded or synced (400 "bad path" everywhere). Traversal needs a whole
+  `../` segment, and that is what every guard now checks — the same rule
+  `sync add` already applied.
+
+- **No-history adoption tolerates coarse mtimes (±2s).** FAT stores mtimes
+  in 2-second steps, and any tool that stamps times through float seconds
+  can land a millisecond off — measured: a repair pass one millisecond short
+  turned 1,667 identical files into conflict pairs. Change detection against
+  a baseline stays exact; only the adopt rule for twins with no history is
+  tolerant, rsync's modify-window logic.
+
 - **A half-dead connection can no longer freeze a sync forever.** All the
   CLI's parallel streams ride one HTTP/2 connection; when a CDN proxy killed
   it silently mid-first-sync, every stream blocked — for good, since Go's

@@ -116,7 +116,7 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
 		return
 	}
-	if strings.Contains(target, "..") {
+	if pathHasDotDot(target) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
 	}

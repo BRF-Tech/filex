@@ -331,7 +331,7 @@ func (h *WS) handleSubscribe(ctx context.Context, client *realtime.Client, rawPa
 	// Frames still echo the client's own path (Hub stamps c.path).
 	resolvePath := rawPath
 	if client.Confined && client.ConfineRel != "" {
-		if strings.Contains(rawPath, "..") {
+		if pathHasDotDot(rawPath) {
 			h.sendError(client, rawPath, "forbidden")
 			return
 		}
@@ -387,7 +387,7 @@ func (h *WS) resolveSubscribe(ctx context.Context, rawPath string) (storageID in
 	if st == nil {
 		return 0, "", "", "", false
 	}
-	if strings.Contains(rel, "..") {
+	if pathHasDotDot(rel) {
 		return 0, "", "", "", false
 	}
 	cleanDir = normalizeDBPath(rel)

@@ -744,6 +744,45 @@ func TestInterruptedFirstRunResumesWithoutConflicts(t *testing.T) {
 	}
 }
 
+// The slack in adoption is two seconds — FAT's mtime step, and a cover for
+// tools that stamp times through float seconds and land a millisecond off
+// (measured: 1,667 conflict pairs from exactly that). Outside it, the
+// planner stays as suspicious as ever.
+func TestAdoptionToleratesCoarseMtimes(t *testing.T) {
+	r := newRig(t)
+	r.srv.files["a.txt"] = []byte("same bytes")
+	r.srv.mod["a.txt"] = r.srv.clock
+	res := r.run()
+	if res.Downloaded != 1 {
+		t.Fatalf("seed: %+v", res)
+	}
+	if err := os.Remove(filepath.Join(r.engine.Store.Dir, "baseline", "p1.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	lp := filepath.Join(r.dir, "a.txt")
+	off := time.UnixMilli(r.srv.mod["a.txt"] - 1500)
+	if err := os.Chtimes(lp, off, off); err != nil {
+		t.Fatal(err)
+	}
+	res = r.run()
+	if res.Planned != 0 {
+		t.Fatalf("1.5s off must adopt, planned %d: %+v", res.Planned, res)
+	}
+
+	if err := os.Remove(filepath.Join(r.engine.Store.Dir, "baseline", "p1.json")); err != nil {
+		t.Fatal(err)
+	}
+	far := time.UnixMilli(r.srv.mod["a.txt"] - 5000)
+	if err := os.Chtimes(lp, far, far); err != nil {
+		t.Fatal(err)
+	}
+	res = r.run()
+	if res.Conflicts != 1 {
+		t.Fatalf("5s off must conflict, got %+v", res)
+	}
+}
+
 // The transfer pool must produce exactly the serial results — run under
 // -race, with the fake server shared by every worker.
 func TestParallelTransfersDownloadEverything(t *testing.T) {

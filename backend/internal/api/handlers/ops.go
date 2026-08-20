@@ -223,7 +223,7 @@ func (o *Ops) resolveBatch(ctx context.Context, sources []string) (int64, []stri
 			return 0, nil, errMixedAdapters
 		}
 		rel = strings.Trim(path.Clean("/"+rel), "/")
-		if rel == "" || strings.Contains(rel, "..") {
+		if rel == "" || pathHasDotDot(rel) {
 			return 0, nil, errBadPath
 		}
 		out = append(out, rel)

@@ -201,12 +201,20 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 
 		// ── files ──────────────────────────────────────────────────────
 		case hasL && hasR:
-			// Twins with no history adopt each other: same size, same mtime,
-			// no baseline row. That is exactly what an interrupted first run
-			// leaves behind — downloads carry the server's own mtime — and
-			// without this rule, RESUMING one conflicted every finished file:
-			// thousands of "(remote copy)" duplicates from a single restart.
-			if !hasB && l.Signature() == r.Signature() {
+			// Twins with no history adopt each other: same size, near-same
+			// mtime, no baseline row. That is exactly what an interrupted
+			// first run leaves behind — downloads carry the server's own
+			// mtime — and without this rule, RESUMING one conflicted every
+			// finished file: thousands of "(server copy)" duplicates from a
+			// single restart.
+			//
+			// "Near-same" is deliberate (±2s, rsync's modify-window): FAT
+			// stores mtimes in 2-second steps, and any tool that stamps
+			// times through float seconds can land 1ms off — measured: a
+			// repair pass one millisecond short turned 1,667 identical
+			// files into conflict pairs. Change detection against a
+			// baseline stays EXACT; only no-history adoption is tolerant.
+			if !hasB && nearlySameFile(l, r) {
 				continue
 			}
 			lChanged := !hasB || b.Local != l.Signature()
@@ -282,6 +290,19 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 		return strings.Count(out[i].Rel, "/") > strings.Count(out[j].Rel, "/")
 	})
 	return out
+}
+
+// nearlySameFile is the no-history adoption test: equal size, mtimes within
+// two seconds. See the adopt rule in Plan for why the slack exists.
+func nearlySameFile(l, r Node) bool {
+	if l.IsDir || r.IsDir || l.Size != r.Size {
+		return false
+	}
+	d := l.ModMillis - r.ModMillis
+	if d < 0 {
+		d = -d
+	}
+	return d <= 2000
 }
 
 func isDelete(k ActionKind) bool {

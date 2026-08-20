@@ -88,7 +88,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	adapter, rel := splitAdapterPath(req.Path)
-	if rel == "" || strings.Contains(rel, "..") {
+	if rel == "" || pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
 	}
