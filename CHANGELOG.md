@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the desktop shell mounts the explorer — the web admin and the embeds see
   none of it.
 
+- **Availability at a glance.** Every row in the desktop explorer carries the
+  glyph grammar every drive client already taught: ✓ kept on this computer,
+  ⟳ being synced right now, ☁ online-only. And while the engine works, a
+  strip along the bottom of the window names the folder and shows live
+  progress — counts and a percent bar — parsed by the shell from the same
+  progress lines `--quiet` now emits, so the CLI output stays the single
+  source of truth.
+
 ## [0.21.6] - 2026-08-19
 
 ### Changed
