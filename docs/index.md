@@ -27,12 +27,12 @@ hero:
 features:
   - icon: 🖥️
     title: Desktop app
-    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, and sync that keeps running when the window is closed.
+    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder to keep it on the computer, and sync that keeps running when the window is closed.
     link: /DESKTOP
     linkText: Desktop docs
   - icon: 🔁
     title: Folder sync
-    details: A folder on your PC kept in step with a folder on the server, both ways. The first sync deletes nothing and a delete never beats an edit.
+    details: A folder on your PC kept in step with a folder on the server, both ways — from the desktop menu or the CLI. The first sync deletes nothing and a delete never beats an edit.
     link: /SYNC
     linkText: Sync docs
   - icon: 🔍

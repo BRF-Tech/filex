@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Availability at a glance.** Every row in the desktop explorer carries the
+  glyph grammar every drive client already taught: ✓ kept on this computer,
+  ◐ holding kept items somewhere below, ⟳ being synced right now, ☁
+  online-only — so a root listing answers "is anything in here on my disk?"
+  without drilling in. And while the engine works, a strip along the bottom
+  of the window names the folder and shows live progress — counts and a
+  percent bar — parsed by the shell from the same progress lines `--quiet`
+  emits, so the CLI output stays the single source of truth.
+
+- **Single FILES can be kept on this computer too.** The sync engine grew
+  first-class file pairs (`filex sync add --file`): same planner, same rules,
+  same 30-day local trash — the snapshots just carry one entry. The desktop's
+  menu offers *Keep on this computer* on files as well; a kept file mirrors
+  to `<root>/<storage>/<path>` beside everything else, syncs both ways, and
+  *Open local folder* reveals it next to its neighbours instead of launching
+  it.
+
+- **Settings shows the mirror root, and can move it.** The root was chosen at
+  the first keep and then lived nowhere the user could see. A card in
+  Settings now names it, opens it, and changes it: kept mirrors migrate
+  (rename + re-pair — the settling pass transfers nothing, and a file pair
+  stays a file pair), hand-picked pairs outside the root stay put, and only
+  effectively-empty leftovers are swept, never `rm -rf`.
+
 ### Fixed
+
+- **"Keep online only" no longer leaves an empty folder skeleton behind.**
+  The mirror's intermediate directories (created at keep time) are swept
+  after the local copy moves to the Trash — and a folder holding nothing but
+  OS litter (`.DS_Store`, `Thumbs.db`, `desktop.ini`) counts as empty, since
+  Finder plants `.DS_Store` in any folder the user merely looked at and the
+  plain-rmdir sweep stopped dead on it. Anything with real content still
+  stops the walk cold.
+
+## [0.22.0] - 2026-08-20
+
+### Security
+
+- **A server cannot name a local folder outside the one you chose.** The path a
+  kept folder mirrors under is built from the wire path in the server's own
+  listing, so a hostile or compromised server answering with
+  `docs://../../Documents` would have had the desktop app create — and then
+  two-way sync — a folder outside the account's mirror root, uploading whatever
+  it found there on the first pass. Climbing segments are dropped before a path
+  is built, the keep is refused before anything is created, and `sync add`
+  refuses such a remote outright, so the CLI and every other caller are covered
+  rather than one screen.
+
+### Fixed
+
+- **Unkeeping says which folder it is about to bin.** "Keep online only" asked
+  what should happen to the local copy without naming it, with *Move to Trash*
+  pre-selected — right for a mirror the app made, one Enter away from binning a
+  folder it did not for a pair made by hand in Settings. The dialog carries the
+  path now, and anything outside the account's root defaults to leaving it.
+
+- **"Open local folder" on a folder whose first sync has not reached it opens
+  the nearest one that exists** instead of appearing to do nothing (opening a
+  path that is not there yet fails silently).
 
 - **A pair added while the watcher runs is picked up on the next round.**
   `filex sync run --watch` read pairs.json once at start, and the desktop app
@@ -58,31 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the OS Trash or stays. Keeping a parent absorbs already-kept subfolders
   into the one pair. The hooks ride `config.desktopSync` and exist only when
   the desktop shell mounts the explorer — the web admin and the embeds see
-  none of it. Settings shows the root and can move it: kept mirrors migrate
-  to the new location (rename + re-pair; the settling pass transfers
-  nothing), and only empty leftover dirs are swept — never `rm -rf`.
-
-- **Single FILES can be kept on this computer too.** The sync engine grew
-  first-class file pairs (`filex sync add --file`): same planner, same rules,
-  same 30-day local trash — the snapshots just carry one entry. The desktop's
-  folder menu now offers *Keep on this computer* on files as well; a kept
-  file mirrors to `<root>/<storage>/<path>` beside everything else, syncs
-  both ways, and *Open local folder* reveals it next to its neighbours
-  instead of launching it.
-
-- **"Keep online only" no longer leaves an empty folder skeleton behind.**
-  The mirror's intermediate directories (created at keep time) are swept with
-  an rmdir-only walk up to the root after the local copy moves to the Trash —
-  bare folders left on disk read as "it deleted my files but kept the
-  folders". Nothing with content is ever touched.
-
-- **Availability at a glance.** Every row in the desktop explorer carries the
-  glyph grammar every drive client already taught: ✓ kept on this computer,
-  ⟳ being synced right now, ☁ online-only. And while the engine works, a
-  strip along the bottom of the window names the folder and shows live
-  progress — counts and a percent bar — parsed by the shell from the same
-  progress lines `--quiet` now emits, so the CLI output stays the single
-  source of truth.
+  none of it.
 
 ## [0.21.6] - 2026-08-19
 

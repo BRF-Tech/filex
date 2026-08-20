@@ -796,9 +796,32 @@ function remoteInside(child: string, parent: string): boolean {
 }
 
 /** Windows refuses these characters in a path segment; everywhere else only
- *  the separator matters, and a wire path cannot smuggle one in. */
+ *  the separator matters.
+ *
+ *  ⚠ `..` is dropped on EVERY platform, and that is a security guard, not
+ *  tidiness: the wire path comes from the SERVER's listing, so a hostile or
+ *  compromised server could answer with `docs://../../Documents`. Joined
+ *  naively that escapes the account's mirror root, and the engine's first run
+ *  merges both sides — it would upload whatever it found there. Segments are
+ *  therefore filtered before they ever reach path.join. */
 function fsSegment(seg: string): string {
   return process.platform === 'win32' ? seg.replace(/[<>:"\\|?*]/g, '_') : seg;
+}
+
+/** Path segments of a wire remote, with anything that could climb out of the
+ *  root removed. Exported shape kept tiny on purpose — see fsSegment. */
+function safeSegments(rel: string): string[] {
+  return rel
+    .split('/')
+    .filter((s) => s && s !== '.' && s !== '..')
+    .map(fsSegment);
+}
+
+/** True when `child` sits under `parent`. A different drive on Windows makes
+ *  path.relative return an absolute path, which is NOT "inside". */
+function isInsideDir(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 /** `<root>/<storage>/<path…>` for a wire remote. */
@@ -806,7 +829,7 @@ function localMirrorPath(root: string, remote: string): string {
   const idx = remote.indexOf('://');
   const storage = remote.slice(0, idx);
   const rel = remote.slice(idx + 3).replace(/^\/+|\/+$/g, '');
-  const segs = [storage, ...rel.split('/').filter(Boolean)].map(fsSegment);
+  const segs = [...safeSegments(storage), ...safeSegments(rel)];
   return path.join(root, ...segs);
 }
 
@@ -860,6 +883,36 @@ async function pruneEmptyDirsUpTo(from: string, stopAt: string): Promise<void> {
 }
 
 /**
+ * The folder picker, in ONE place.
+ *
+ * ⚠ The env hook is why this is shared rather than called inline: a native
+ * dialog is OS chrome an automated run cannot reach, so the same flag that
+ * suppresses the browser supplies the answer instead — and the test then
+ * drives the REAL handler. A second call site with its own showOpenDialog is
+ * a flow the suite cannot reach at all.
+ */
+async function pickDirectory(opts: { title?: string; buttonLabel?: string; defaultPath?: string } = {}): Promise<string | null> {
+  const preset = process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
+  if (preset) return preset;
+  const dialogOpts = { ...opts, properties: ['openDirectory', 'createDirectory'] as const };
+  const picked = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, { ...dialogOpts, properties: [...dialogOpts.properties] })
+    : await dialog.showOpenDialog({ ...dialogOpts, properties: [...dialogOpts.properties] });
+  return picked.canceled ? null : (picked.filePaths[0] ?? null);
+}
+
+/** A native question, with the same test hook as the picker above: the index
+ *  of the button the run would have clicked. */
+async function askChoice(opts: Electron.MessageBoxOptions): Promise<number> {
+  const preset = process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_DIALOG_CHOICE : undefined;
+  if (preset !== undefined && preset !== '') return Number(preset);
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, opts)
+    : await dialog.showMessageBox(opts);
+  return response;
+}
+
+/**
  * The account's mirror root, prompting on first use. The default —
  * `~/filex/<host>` — is pre-created so the dialog opens INSIDE it and a plain
  * "Use this folder" does the obvious thing; picking anywhere else works too.
@@ -874,13 +927,11 @@ async function ensureSyncRoot(acc: Account): Promise<string | null> {
     def = path.join(app.getPath('home'), 'filex');
   }
   await fs.promises.mkdir(def, { recursive: true });
-  const picked = await dialog.showOpenDialog({
+  const dir = await pickDirectory({
     title: syncText('rootTitle'),
     buttonLabel: syncText('rootButton'),
     defaultPath: def,
-    properties: ['openDirectory', 'createDirectory'],
   });
-  const dir = picked.canceled ? null : (picked.filePaths[0] ?? null);
   if (!dir) return null;
   acc.syncRoot = dir;
   saveState(state);
@@ -1172,18 +1223,8 @@ function wireIpc(): void {
     if (!remote.includes('://')) {
       throw new Error('Enter the server folder as storage://path, for example docs://reports');
     }
-    // The folder picker is OS chrome that an automated run cannot reach. Rather
-    // than let the sync path go untested, the same env flag that suppresses the
-    // browser also supplies the folder — so the test drives the REAL handler,
-    // and this hook is unreachable in a normal run.
-    const preset =
-      process.env.FILEX_NO_BROWSER === '1' ? process.env.FILEX_TEST_PICK_DIR : undefined;
-    let localDir = preset;
-    if (!localDir) {
-      const picked = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
-      if (picked.canceled || !picked.filePaths[0]) return publicState();
-      localDir = picked.filePaths[0];
-    }
+    const localDir = await pickDirectory();
+    if (!localDir) return publicState();
     await addPair(localDir, remote, acc.id);
     await refreshPairs();
     return publicState();
@@ -1218,6 +1259,10 @@ function wireIpc(): void {
     if (!acc) throw new Error('unknown account');
     const remote = normRemote(remotePath);
     if (!remote.includes('://')) throw new Error(`not a server folder: ${remote}`);
+    // Refused here as well as in the engine, and BEFORE any mkdir: the wire
+    // path comes from the server's listing, and a rejected keep should not
+    // leave a directory behind for a folder it never paired.
+    if (remote.split('/').includes('..')) throw new Error(`not a server folder: ${remote}`);
     const pairs = accountPairs(acc.id);
     // Covered already — by itself or an ancestor pair — is a no-op, not an error.
     if (pairs.some((p) => p.remote === remote || remoteInside(remote, p.remote))) return publicState();
@@ -1249,19 +1294,24 @@ function wireIpc(): void {
     const name = remote.endsWith('://')
       ? remote.slice(0, -'://'.length)
       : remote.slice(remote.lastIndexOf('/') + 1);
-    const opts = {
-      type: 'question' as const,
+    // ⚠ Which button is the default depends on WHOSE folder it is. A mirror
+    // this app created under the account's root is the app's to bin. A pair
+    // made by hand in Settings points at a folder the user already had —
+    // their Documents, a photo library — and "Move to Trash" pre-selected
+    // there is one Enter away from binning it. Say the path out loud, and
+    // default to leaving anything we did not create.
+    const acc = state.accounts.find((a) => a.id === accountId);
+    const ours = !!acc?.syncRoot && isInsideDir(acc.syncRoot, pair.local);
+    const response = await askChoice({
+      type: 'question',
       title: syncText('unkeepTitle'),
       message: syncText('unkeepMessage', { name }),
-      detail: syncText('unkeepDetail'),
+      detail: `${syncText('unkeepDetail')}\n\n${pair.local}`,
       buttons: [syncText('unkeepTrash'), syncText('unkeepLeave'), syncText('cancel')],
-      defaultId: 0,
+      defaultId: ours ? 0 : 1,
       cancelId: 2,
       noLink: true,
-    };
-    const { response } = mainWindow
-      ? await dialog.showMessageBox(mainWindow, opts)
-      : await dialog.showMessageBox(opts);
+    });
     if (response === 2) return publicState();
     try {
       await removePair(pair.id);
@@ -1274,9 +1324,9 @@ function wireIpc(): void {
         await shell.trashItem(pair.local);
         // The mirror's empty ancestor skeleton (mkdir'ed at keep time) goes
         // too — bare folders left behind read as "it deleted my files but
-        // kept the folders".
-        const acc = state.accounts.find((a) => a.id === accountId);
-        if (acc?.syncRoot && pair.local.startsWith(acc.syncRoot + path.sep)) {
+        // kept the folders". Only under the account's own root: `ours` is
+        // the same judgement the dialog default was based on.
+        if (ours && acc?.syncRoot) {
           await pruneEmptyDirsUpTo(path.dirname(pair.local), acc.syncRoot);
         }
       } catch (e) {
@@ -1302,19 +1352,28 @@ function wireIpc(): void {
         const rest = anc.remote.endsWith('://')
           ? remote.slice(anc.remote.length)
           : remote.slice(anc.remote.length + 1);
-        local = path.join(anc.local, ...rest.split('/').filter(Boolean).map(fsSegment));
+        local = path.join(anc.local, ...safeSegments(rest));
       }
     }
+    // A file mirror is revealed beside its neighbours — openPath would
+    // LAUNCH it instead.
     if (local) {
-      // A file mirror is revealed beside its neighbours; openPath would
-      // LAUNCH it instead.
-      const isFile = await fs.promises
-        .stat(local)
-        .then((st) => st.isFile())
-        .catch(() => false);
-      if (isFile) shell.showItemInFolder(local);
-      else await shell.openPath(local);
+      const st = await fs.promises.stat(local).catch(() => null);
+      if (st?.isFile()) {
+        shell.showItemInFolder(local);
+        return publicState();
+      }
     }
+    // A folder kept a moment ago — or one inside a parent whose first run has
+    // not reached it yet — has no directory on disk, and openPath on a missing
+    // path fails silently. Climb to the nearest ancestor that does exist so
+    // the menu entry always opens SOMETHING the user can see, rather than
+    // looking broken.
+    while (local && !fs.existsSync(local)) {
+      const up = path.dirname(local);
+      local = up === local ? null : up;
+    }
+    if (local) await shell.openPath(local);
     return publicState();
   });
 
@@ -1335,13 +1394,11 @@ function wireIpc(): void {
       }
     }
     await fs.promises.mkdir(def, { recursive: true });
-    const picked = await dialog.showOpenDialog({
+    const newRoot = await pickDirectory({
       title: syncText('rootTitle'),
       buttonLabel: syncText('rootButton'),
       defaultPath: def,
-      properties: ['openDirectory', 'createDirectory'],
     });
-    const newRoot = picked.canceled ? null : (picked.filePaths[0] ?? null);
     if (!newRoot || newRoot === acc.syncRoot) return publicState();
     const oldRoot = acc.syncRoot ?? null;
     if (oldRoot) {
