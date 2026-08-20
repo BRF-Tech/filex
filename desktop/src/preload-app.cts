@@ -51,5 +51,13 @@ contextBridge.exposeInMainWorld('filexApp', {
   // tray, so the page is told when to repaint rather than only being right at
   // the moment it opened.
   onChanged: (fn: () => void) => ipcRenderer.on('sync:changed', () => fn()),
+
+  // selective sync — "keep on this computer". The explorer component calls
+  // these through config.desktopSync; the account id pins which server's
+  // pairs are meant, so a rail switch mid-flight cannot cross wires.
+  syncKept: (accountId: string) => ipcRenderer.invoke('sync:kept', accountId),
+  syncKeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:keep', accountId, remote),
+  syncUnkeep: (accountId: string, remote: string) => ipcRenderer.invoke('sync:unkeep', accountId, remote),
+  syncReveal: (accountId: string, remote: string) => ipcRenderer.invoke('sync:reveal', accountId, remote),
   onOpenSettings: (fn: () => void) => ipcRenderer.on('app:open-settings', () => fn()),
 });
