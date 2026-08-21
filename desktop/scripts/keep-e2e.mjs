@@ -19,15 +19,28 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DESKTOP, STORAGE, api, check, finish, launchApp, signIn, skipTour, sleep } from './lib/harness.mjs';
+import { DESKTOP, STORAGE, api, check, finish, launchApp, rowEvent, signIn, skipTour, sleep } from './lib/harness.mjs';
 
 const DIR = 'keep-e2e';
 const REMOTE = `${STORAGE}://${DIR}`;
 const SUB = `${REMOTE}/sub`;
+// A second folder, never kept as a whole — it carries the single FILE keep and
+// proves an untouched folder stays online-only.
+const OTHER = 'keep-e2e-other';
+const OTHER_REMOTE = `${STORAGE}://${OTHER}`;
 
 // Where the app will mirror. Handed over as the answer to the root picker, so
 // the first keep does not stop at a dialog.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-keeproot-'));
+// The root is MOVED to this one later; the picker hook hands out one answer
+// per prompt, in order.
+// ⚠ Set FILEX_TEST_ROOT2_BASE to a path on ANOTHER DRIVE to exercise the
+// cross-device move: rename() cannot cross devices (EXDEV), and moving the
+// root to a second disk is the usual reason to move it at all.
+const root2 = fs.mkdtempSync(path.join(process.env.FILEX_TEST_ROOT2_BASE || os.tmpdir(), 'filex-keeproot2-'));
+// A third answer for the picker: a folder INSIDE the new root, which the move
+// must refuse rather than half-apply.
+const nestedRoot = path.join(root2, 'nested');
 const UNKEEP_CHOICE = process.env.FILEX_TEST_DIALOG_CHOICE ?? '1';
 
 const cli = path.join(DESKTOP, 'build', 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex');
@@ -38,7 +51,7 @@ if (!fs.existsSync(cli)) {
 
 const { app } = await launchApp({
   env: {
-    FILEX_TEST_PICK_DIR: root,
+    FILEX_TEST_PICK_DIR: [root, root2, nestedRoot].join(path.delimiter),
     // The unkeep question: 0 = move the local copy to the Trash, 1 = leave it.
     // Both branches matter, so the run takes the answer from the environment
     // and asserts whichever one it was given.
@@ -58,13 +71,7 @@ async function menuLabels(win) {
 }
 
 async function openMenuOn(win, name) {
-  await win.evaluate((n) => {
-    const row = [...document.querySelectorAll('*')].find(
-      (e) => e.children.length === 0 && e.textContent?.trim() === n);
-    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 320, clientY: 260 }));
-  }, name);
-  await win.waitForTimeout(700);
+  return rowEvent(win, name, ['click', 'contextmenu']);
 }
 
 async function clickMenuItem(win, label) {
@@ -94,7 +101,12 @@ try {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items: [{ path: REMOTE, type: 'dir' }] }),
   }, token).catch(() => {});
-  for (const [parent, name] of [[`${STORAGE}://`, DIR], [REMOTE, 'sub']]) {
+  await api('/api/files/manager?action=delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: [{ path: OTHER_REMOTE, type: 'dir' }] }),
+  }, token).catch(() => {});
+  for (const [parent, name] of [[`${STORAGE}://`, DIR], [REMOTE, 'sub'], [`${STORAGE}://`, OTHER]]) {
     const mk = await api('/api/files/manager?action=newfolder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -102,7 +114,12 @@ try {
     }, token);
     if (!mk.ok) throw new Error(`seeding ${parent}${name} failed (${mk.status})`);
   }
-  for (const [dir, name, body] of [[REMOTE, 'notes.md', '# kept\n'], [SUB, 'deep.txt', 'inside\n']]) {
+  for (const [dir, name, body] of [
+    [REMOTE, 'notes.md', '# kept\n'],
+    [SUB, 'deep.txt', 'inside\n'],
+    [OTHER_REMOTE, 'solo.txt', 'just me\n'],
+    [OTHER_REMOTE, 'ignored.txt', 'not kept\n'],
+  ]) {
     const form = new FormData();
     form.append('path', `${dir}/`);
     form.append('file[]', new Blob([body], { type: 'text/plain' }), name);
@@ -160,12 +177,8 @@ try {
     !labels.includes('Keep on this computer') && labels.includes('Keep online only')
       && labels.includes('Open local folder'), labels.join(' | '));
 
-  await win.evaluate((n) => {
-    const row = [...document.querySelectorAll('*')].find(
-      (e) => e.children.length === 0 && e.textContent?.trim() === n);
-    row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-  }, DIR);
-  await win.waitForTimeout(2000);
+  await rowEvent(win, DIR, ['dblclick']);
+  await win.waitForTimeout(1600);
   await openMenuOn(win, 'sub');
   labels = await menuLabels(win);
   check('a folder inside a kept parent says so instead of pretending it is separate',
@@ -180,6 +193,79 @@ try {
   check('a remote that climbs out of the root is refused, and nothing is created outside it',
     escape !== 'accepted' && !st.syncFolders.some((p) => p.remotePath.includes('..')) && !fs.existsSync(outside),
     escape);
+
+
+  // ── availability badges ──────────────────────────────────────────
+  // Back to the storage listing first: the checks below are about rows that
+  // live there, and the previous phase walked INTO the kept folder.
+  await win.evaluate(() => window.location.reload());
+  await win.waitForLoadState('domcontentloaded');
+  await win.waitForTimeout(2500);
+  await skipTour(win);
+  const badgeOf = (name) => win.evaluate((n) => {
+    const el = [...document.querySelectorAll('.fe-list__name, .fe-grid__label')]
+      .find((e) => e.getAttribute('title') === n);
+    const b = el?.querySelector('.fe-keepbadge');
+    return b ? ([...b.classList].find((c) => c.startsWith('fe-keepbadge--')) ?? null) : null;
+  }, name);
+
+  check('a kept folder wears the kept badge', (await badgeOf(DIR)) === 'fe-keepbadge--kept',
+    String(await badgeOf(DIR)));
+  check('an untouched folder is marked online-only',
+    (await badgeOf(OTHER)) === 'fe-keepbadge--cloud', String(await badgeOf(OTHER)));
+
+  // ── a single FILE can be kept ────────────────────────────────────
+  await rowEvent(win, OTHER, ['dblclick']);
+  await win.waitForTimeout(1600);
+  await openMenuOn(win, 'solo.txt');
+  let fileLabels = await menuLabels(win);
+  check('a file offers to be kept too', fileLabels.includes('Keep on this computer'), fileLabels.join(' | '));
+  check('keeping the file starts it', await clickMenuItem(win, 'Keep on this computer'));
+  await win.waitForTimeout(1200);
+  st = await win.evaluate(() => window.filexApp.getState());
+  const soloLocal = path.join(root, STORAGE, OTHER, 'solo.txt');
+  const solo = st.syncFolders.find((p) => p.remotePath === `${STORAGE}://${OTHER}/solo.txt`);
+  check('the file is paired as a FILE, at its mirror path',
+    !!solo && solo.localPath === soloLocal, pairsOf(st).join(' | '));
+
+  waited = 0;
+  while (waited < 90_000 && !fs.existsSync(soloLocal)) {
+    await sleep(2000);
+    waited += 2000;
+  }
+  check('the kept file lands on disk — and nothing else from its folder',
+    fs.existsSync(soloLocal) && !fs.existsSync(path.join(root, STORAGE, OTHER, 'ignored.txt')),
+    `${Math.round(waited / 1000)}s`);
+
+  // ── the mirror root can be moved, and pairs survive it ───────────
+  const before = (await win.evaluate(() => window.filexApp.getState())).syncFolders.length;
+  await win.evaluate((acc) => window.filexApp.setSyncRoot(acc), accountId);
+  await win.waitForTimeout(2500);
+  st = await win.evaluate(() => window.filexApp.getState());
+  check('the account now mirrors under the new root', st.accounts[0].syncRoot === root2,
+    String(st.accounts[0].syncRoot));
+  check('every pair survived the move — none silently unpaired',
+    st.syncFolders.length === before, `${st.syncFolders.length} vs ${before}: ${pairsOf(st).join(' | ')}`);
+  check('the pairs point INTO the new root',
+    st.syncFolders.every((p) => p.localPath.startsWith(root2)), pairsOf(st).join(' | '));
+  check('the files moved with them',
+    fs.existsSync(path.join(root2, STORAGE, DIR, 'notes.md'))
+      && fs.existsSync(path.join(root2, STORAGE, OTHER, 'solo.txt')),
+    `${fs.existsSync(path.join(root2, STORAGE, DIR, 'notes.md'))} ${fs.existsSync(path.join(root2, STORAGE, OTHER, 'solo.txt'))}`);
+  // A root inside the current one cannot be moved into itself — refused, and
+  // nothing is touched on the way to finding that out.
+  fs.mkdirSync(nestedRoot, { recursive: true });
+  const beforeNested = pairsOf(await win.evaluate(() => window.filexApp.getState())).join(' | ');
+  await win.evaluate((acc) => window.filexApp.setSyncRoot(acc), accountId);
+  await win.waitForTimeout(1500);
+  st = await win.evaluate(() => window.filexApp.getState());
+  check('a root inside the current one is refused, and the pairs are left alone',
+    st.accounts[0].syncRoot === root2 && pairsOf(st).join(' | ') === beforeNested,
+    `${st.accounts[0].syncRoot} | ${pairsOf(st).join(' | ')}`);
+
+  check('the emptied storage folder under the old root is swept, the root itself left alone',
+    !fs.existsSync(path.join(root, STORAGE)) && fs.existsSync(root),
+    `${fs.existsSync(path.join(root, STORAGE))} ${fs.existsSync(root)}`);
 
   // ── unkeep, choosing to leave the local copy ─────────────────────
   // Back to the parent listing. A reload rather than history.back(): the
@@ -196,7 +282,7 @@ try {
   await win.waitForTimeout(1500);
   st = await win.evaluate(() => window.filexApp.getState());
   check('unkeeping removes the pair', !st.syncFolders.some((p) => p.remotePath === REMOTE), pairsOf(st).join(' | '));
-  const stillThere = fs.existsSync(path.join(parentLocal, 'notes.md'));
+  const stillThere = fs.existsSync(path.join(root2, STORAGE, DIR, 'notes.md'));
   check(
     UNKEEP_CHOICE === '0'
       ? '"move the local copy to the Trash" really takes it off the disk'
@@ -204,6 +290,12 @@ try {
     UNKEEP_CHOICE === '0' ? !stillThere : stillThere,
     `choice=${UNKEEP_CHOICE} present=${stillThere}`,
   );
+  if (UNKEEP_CHOICE === '0') {
+    check('the empty mirror skeleton goes with it, but a sibling keep is untouched',
+      !fs.existsSync(path.join(root2, STORAGE, DIR))
+        && fs.existsSync(path.join(root2, STORAGE, OTHER, 'solo.txt')),
+      `${fs.existsSync(path.join(root2, STORAGE, DIR))} ${fs.existsSync(path.join(root2, STORAGE, OTHER, 'solo.txt'))}`);
+  }
 } catch (e) {
   check(`the run reached the end (${e?.message ?? e})`, false);
 } finally {
@@ -211,11 +303,12 @@ try {
     await api('/api/files/manager?action=delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [{ path: REMOTE, type: 'dir' }] }),
+      body: JSON.stringify({ items: [{ path: REMOTE, type: 'dir' }, { path: OTHER_REMOTE, type: 'dir' }] }),
     }, token).catch(() => {});
   }
   await app.close().catch(() => {});
   fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(root2, { recursive: true, force: true });
 }
 
 finish();

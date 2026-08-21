@@ -412,6 +412,8 @@ const segments = computed<Segment[]>(() => {
                 v-if="keepBadgeFor && keepBadgeFor(n)"
                 :class="['fe-keepbadge', 'fe-keepbadge--' + keepBadgeFor(n)]"
                 :title="t('keep.badge_' + keepBadgeFor(n))"
+                role="img"
+                :aria-label="t('keep.badge_' + keepBadgeFor(n))"
               >{{ keepGlyph(keepBadgeFor(n)!) }}</span>
             </span>
             <span

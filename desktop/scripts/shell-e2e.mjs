@@ -13,7 +13,7 @@
 import path from 'node:path';
 import {
   REPO, STORAGE,
-  api, check, finish, launchApp, signIn, skipTour,
+  api, check, finish, launchApp, rowEvent, signIn, skipTour,
 } from './lib/harness.mjs';
 
 const { app } = await launchApp();
@@ -190,11 +190,8 @@ try {
   // the middle of the window swallowing clicks. Dismiss it before driving
   // anything — measured: every click below landed on the tour instead.
   await skipTour(win);
-  await win.evaluate((name) => {
-    const row = [...document.querySelectorAll('*')].find((e) => e.textContent?.trim() === name);
-    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  }, seeded);
-  await win.waitForTimeout(500);
+  await rowEvent(win, seeded);
+  await win.waitForTimeout(300);
   // ⚠ Share does not sit on the toolbar at this width — it is inside the "⋯"
   // overflow. Looking for the button on the toolbar found nothing and reported
   // a missing DIALOG, which is a different bug entirely.

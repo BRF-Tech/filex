@@ -210,9 +210,10 @@ The explorer also ships as a **Windows / Linux desktop app** — the same compon
 UI and the embeds render, not a separate half-copy:
 
 - **Several accounts at once** — a rail of servers/tenants, each showing its own branding.
-- **Keep on this computer** — right-click any folder (or a whole storage) to mirror it
-  under one filex folder on the machine; everything else stays online-only in the window.
-  "Keep online only" hands the local copy back to the Trash, or leaves it
+- **Keep on this computer** — right-click any folder, file or whole storage to mirror it
+  under one filex folder on the machine (movable from Settings); everything else stays
+  online-only, and every row says which it is (✓ ◐ ⟳ ☁). "Keep online only" hands the
+  local copy back to the Trash, or leaves it
   ([docs/DESKTOP.md](docs/DESKTOP.md#keeping-folders-on-this-computer)).
 - **Folder sync** — pair a local folder with a server folder and they stay in step both
   ways while the app sits in the tray ([docs/SYNC.md](docs/SYNC.md)).

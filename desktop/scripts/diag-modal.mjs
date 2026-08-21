@@ -52,10 +52,16 @@ await w.evaluate(() => {
 await w.waitForTimeout(500);
 
 // Open the share dialog through the toolbar (select + click the button).
-await w.evaluate(() => {
-  const row = [...document.querySelectorAll('*')].find((e) => e.textContent?.trim() === 'sozlesme.pdf');
-  row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-});
+await w.evaluate(([n, ts]) => (function robustRowEvent(n, types) {
+  const byTitle = [...document.querySelectorAll('.fe-list__name, .fe-grid__label')]
+    .find((e) => e.getAttribute('title') === n);
+  // ⚠ Not textContent === name: the name span also holds the row's badges
+  // (search "in content", and the desktop's availability glyph ✓ ◐ ⟳ ☁), so
+  // an exact-text match finds nothing and looks like a lost row.
+  const row = byTitle ?? [...document.querySelectorAll('*')].find(
+    (e) => e.children.length === 0 && (e.textContent ?? '').trim() === n);
+  for (const t of types) row?.dispatchEvent(new MouseEvent(t, { bubbles: true, clientX: 300, clientY: 250 }));
+})(n, ts), ['sozlesme.pdf', ['click']]);
 await w.waitForTimeout(500);
 await w.evaluate(() => {
   const b = [...document.querySelectorAll('button')].find((x) => /Payla[sş] \/ [İI]zinler/i.test(x.textContent ?? ''));

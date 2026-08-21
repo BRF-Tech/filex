@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.21.6, 19 August 2026
-Two decisions about noise and blast radius. A demo instance no longer accepts any new storage backend — 0.21.4 stopped it reaching the server's own filesystem, and now the remote drivers go too, because "attach your own bucket" asks the server to connect wherever a stranger points it. And a single failed sync run is no longer reported as an error: an object store answering 504 under load costs one skipped refresh, not an incident. Three failures in a row still is one.
+::: tip Latest — v0.22.0, 20 August 2026
+Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays online-only in the window; kept folders offer the way back, and unkeeping asks whether the local copy goes to the Trash or stays. Sync also stopped looking dead on a big first run: it reports what it is doing even in quiet mode, a folder paired while the app runs is picked up without a restart, and unpairing one mid-first-sync no longer fails or leaves a background process syncing a folder you removed. The macOS build stopped promising a self-update it cannot perform and offers the download instead. Security: a server can no longer name a local folder outside the one you chose — a remote path containing “..” is refused rather than resolved.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.21.6
-docker pull ghcr.io/brf-tech/filex:full-v0.21.6
+docker pull ghcr.io/brf-tech/filex:slim-v0.22.0
+docker pull ghcr.io/brf-tech/filex:full-v0.22.0
 ```
+
+## v0.22.0
+
+<span class="filex-release-date">20 August 2026</span>
+
+Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays online-only in the window; kept folders offer the way back, and unkeeping asks whether the local copy goes to the Trash or stays. Sync also stopped looking dead on a big first run: it reports what it is doing even in quiet mode, a folder paired while the app runs is picked up without a restart, and unpairing one mid-first-sync no longer fails or leaves a background process syncing a folder you removed. The macOS build stopped promising a self-update it cannot perform and offers the download instead. Security: a server can no longer name a local folder outside the one you chose — a remote path containing “..” is refused rather than resolved.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.22.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.22.0`
 
 ## v0.21.6
 
@@ -251,24 +259,13 @@ Two things a share link got wrong. It changed language when you entered its PIN 
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.16.2`
 
-## v0.16.1
-
-<span class="filex-release-date">12 August 2026</span>
-
-Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the link is created rather than when the first visitor arrives, so the first open is fast too — which is the open that matters, since whoever creates a link usually checks it immediately. Capped at 500 tiles per share; anything past that still renders on first view.
-
-**New**
-
-- **Share** — Render a shared folder's tiles when the link is created.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.16.1`
-
 ## Earlier releases
 
-The 57 releases before v0.16.1, in brief. Full notes are on GitHub.
+The 58 releases before v0.16.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.16.1](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) | 12 August 2026 | Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the link is created rather than when the first visitor arrives, so the first open is fast too — which is the open that matters, since whoever creates a… |
 | [v0.16.0](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) | 12 August 2026 | Two things a shared folder was doing the slow way. Its gallery tiles were the original photos — the page asked for a thumbnail and the server streamed the whole file — so a folder of a few dozen photos shipped tens of megabytes… |
 | [v0.15.1](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) | 12 August 2026 | The desktop app's account rail had its two identities the wrong way round. Each row of that rail is a server — a tenant — so it now carries that server's own Branding logo, which is a better label than initials taken from an… |
 | [v0.15.0](https://github.com/BRF-Tech/filex/releases/tag/v0.15.0) | 12 August 2026 | Mostly the desktop app, and one thing that was writing to your operating system. "Start when I sign in" registered whichever executable happened to be running the app — which, for anyone who had ever run it from source, was a… |
@@ -329,4 +326,4 @@ The 57 releases before v0.16.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-20 from 77 published releases.</small>
+<small>Generated 2026-08-20 from 78 published releases.</small>

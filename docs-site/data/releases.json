@@ -3,6 +3,21 @@
   "generatedAt": "2026-08-20",
   "releases": [
     {
+      "tag": "v0.22.0",
+      "date": "2026-08-20T15:41:19Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.22.0",
+      "prerelease": false,
+      "headline": "Keep a folder on this computer.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.22.0",
+        "ghcr.io/brf-tech/filex:full-v0.22.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
       "tag": "v0.21.6",
       "date": "2026-08-19T14:59:12Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.21.6",
