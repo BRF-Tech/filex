@@ -151,7 +151,7 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 	}
 	for _, s := range storages {
 		if s.Name == adapter {
-			if strings.Contains(rel, "..") {
+			if pathHasDotDot(rel) {
 				return nil, "", errors.New("bad path")
 			}
 			clean := strings.Trim(rel, "/")

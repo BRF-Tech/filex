@@ -6,9 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"golang.org/x/net/http2"
 )
 
 // Client is a thin REST client for one filex server. Token may be either
@@ -33,6 +37,36 @@ type Client struct {
 	ResumeDir string
 }
 
+// newHTTPClient is an http.Client that cannot hang forever on a half-dead
+// connection. Everything here exists because of one measured failure: four
+// parallel downloads sharing one HTTP/2 connection through a CDN proxy froze
+// mid-first-sync when the connection died silently — Go's http2 sends no
+// health pings by default, so every stream blocked until someone killed the
+// process. ReadIdleTimeout is that ping. The other limits bound the steps of
+// a request that may only legitimately take long in its BODY (a big
+// transfer), never in dialing or waiting for headers. There is still no
+// whole-request timeout: bodies stream arbitrarily large files.
+func newHTTPClient() *http.Client {
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		ExpectContinueTimeout: 5 * time.Second,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+	if h2, err := http2.ConfigureTransports(tr); err == nil {
+		h2.ReadIdleTimeout = 30 * time.Second
+		h2.PingTimeout = 15 * time.Second
+	}
+	return &http.Client{Transport: tr}
+}
+
 // New builds a Client from a resolved Conn. No global timeout is set —
 // uploads/downloads stream arbitrarily large bodies; cancellation is the
 // caller's context (Ctrl-C in the CLI).
@@ -40,7 +74,7 @@ func New(conn Conn) *Client {
 	c := &Client{
 		BaseURL: strings.TrimRight(conn.URL, "/"),
 		Token:   conn.Token,
-		HTTP:    &http.Client{},
+		HTTP:    newHTTPClient(),
 	}
 	// A missing home directory is not a reason to refuse to upload; it only
 	// costs cross-restart resume, and the error would be reported at a point

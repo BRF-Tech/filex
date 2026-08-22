@@ -35,7 +35,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays a file pair), hand-picked pairs outside the root stay put, and only
   effectively-empty leftovers are swept, never `rm -rf`.
 
+- **Transfers run in parallel.** The engine walked its plan one action at a
+  time, so a tree of small files was priced at one full round-trip each —
+  measured on a live deployment, 2 GB of ~400 KB files crawled at 0.24 MB/s
+  with the network mostly idle. Uploads and downloads now run on a small
+  worker pool (default 4, `--transfers` to tune, 1 restores the serial
+  engine); directory creation stays first and deletes/conflicts stay serial
+  in the planner's careful order.
+
 ### Fixed
+
+- **An interrupted first run RESUMES instead of conflicting every finished
+  file.** With no baseline, "present on both sides" always meant a conflict —
+  so a restart mid-first-run turned every already-downloaded file into a
+  "(remote copy)" duplicate; on the tree above that would have been ~7,800 of
+  them. Downloads now stamp the server's own mtime on the local copy, and
+  twins with no history that match by (size, mtime) are adopted silently.
+
+- **Changing the mirror root keeps each pair's history.** Migration used to
+  remove and re-add the pair, throwing the baseline away — and the first-run
+  merge that followed conflicted every file the machine had ever uploaded.
+  New `filex sync move <id> <path>` repoints a pair and keeps its baseline;
+  the desktop root change uses it, and stops the account's watcher first so
+  a mid-round rename can never read as a mass delete.
+
+- **The remote walk lists eight folders at a time.** One round-trip per
+  folder made the inventory the slow phase of a big sync: measured behind a
+  CDN proxy (~0.35s per request), a 3,328-folder invoice tree took ~19
+  minutes to list serially — twice per run, since the settle pass walks
+  again. The walk is breadth-first by level now, eight listings in flight,
+  with the snapshot merge kept single-threaded; the same tree lists in a
+  couple of minutes.
+
+- **A filename containing ".." is a filename, not a traversal.** Eleven API
+  guards rejected any path CONTAINING the substring — so a real invoice
+  named "… Tic. Sic. Gaz..pdf" could be stored but never previewed,
+  downloaded or synced (400 "bad path" everywhere). Traversal needs a whole
+  `../` segment, and that is what every guard now checks — the same rule
+  `sync add` already applied.
+
+- **No-history adoption tolerates coarse mtimes (±2s).** FAT stores mtimes
+  in 2-second steps, and any tool that stamps times through float seconds
+  can land a millisecond off — measured: a repair pass one millisecond short
+  turned 1,667 identical files into conflict pairs. Change detection against
+  a baseline stays exact; only the adopt rule for twins with no history is
+  tolerant, rsync's modify-window logic.
+
+- **A half-dead connection can no longer freeze a sync forever.** All the
+  CLI's parallel streams ride one HTTP/2 connection; when a CDN proxy killed
+  it silently mid-first-sync, every stream blocked — for good, since Go's
+  http2 sends no health pings by default and the client had no transport
+  limits at all. The client now pings an idle connection (ReadIdleTimeout
+  30s), bounds dialing, TLS and response headers, and leaves bodies
+  unbounded — a big transfer may take long, a hang may not.
 
 - **Moving the filex folder to another drive no longer unpairs what it moves.**
   The migration removed each pair before relocating its mirror, and `rename`

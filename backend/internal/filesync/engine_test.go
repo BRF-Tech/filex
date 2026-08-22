@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,6 +20,7 @@ import (
 // trees agree, and only a server that actually stores what it is told can prove
 // that happened.
 type fakeServer struct {
+	mu    sync.Mutex
 	root  string // adapter://root prefix this fake answers for
 	files map[string][]byte
 	dirs  map[string]bool
@@ -50,6 +52,8 @@ func (f *fakeServer) rel(remote string) (string, error) {
 }
 
 func (f *fakeServer) List(_ context.Context, remote string) (*Listing, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
 		return nil, err
@@ -90,6 +94,8 @@ func dirOf(rel string) string {
 }
 
 func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
 		return 0, err
@@ -107,6 +113,8 @@ func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (in
 }
 
 func (f *fakeServer) Upload(_ context.Context, localPath, remote string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
 		return err
@@ -129,6 +137,8 @@ func (f *fakeServer) Upload(_ context.Context, localPath, remote string) error {
 }
 
 func (f *fakeServer) Mkdir(_ context.Context, remote string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
 		return err
@@ -144,6 +154,8 @@ func (f *fakeServer) Mkdir(_ context.Context, remote string) error {
 }
 
 func (f *fakeServer) Remove(_ context.Context, remote string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
 		return err
@@ -695,6 +707,148 @@ func TestFilePairRemoteDeleteTrashesTheLocalCopy(t *testing.T) {
 	items, err := eng.Store.ListTrash("f1")
 	if err != nil || len(items) != 1 {
 		t.Fatalf("want 1 trashed item, got %v %v", items, err)
+	}
+}
+
+// The exact disaster the adopt rule prevents: a first run interrupted after
+// most of the tree came down. On resume there is no baseline, both sides hold
+// the same files — and every one of them used to become a "changed in both
+// places" conflict pair. Thousands of "(remote copy)" duplicates from one
+// restart, measured almost-live on a 7,800-file tree.
+func TestInterruptedFirstRunResumesWithoutConflicts(t *testing.T) {
+	r := newRig(t)
+	for i := 0; i < 12; i++ {
+		rel := fmt.Sprintf("docs/f%02d.txt", i)
+		r.srv.files[rel] = []byte(strings.Repeat("x", i+1))
+		r.srv.mod[rel] = r.srv.clock + int64(i)*1000
+	}
+	r.srv.dirs["docs"] = true
+
+	res := r.run()
+	if res.Downloaded != 12 {
+		t.Fatalf("seed run: want 12 downloads, got %+v", res)
+	}
+
+	// Simulate the interruption: the work is on disk, the baseline is not.
+	if err := os.Remove(filepath.Join(r.engine.Store.Dir, "baseline", "p1.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	res = r.run()
+	if res.Planned != 0 {
+		t.Fatalf("resume must adopt settled files, planned %d: %+v", res.Planned, res)
+	}
+	copies, _ := filepath.Glob(filepath.Join(r.dir, "docs", "* copy*"))
+	if len(copies) != 0 {
+		t.Fatalf("resume made conflict copies: %v", copies)
+	}
+}
+
+// The slack in adoption is two seconds — FAT's mtime step, and a cover for
+// tools that stamp times through float seconds and land a millisecond off
+// (measured: 1,667 conflict pairs from exactly that). Outside it, the
+// planner stays as suspicious as ever.
+func TestAdoptionToleratesCoarseMtimes(t *testing.T) {
+	r := newRig(t)
+	r.srv.files["a.txt"] = []byte("same bytes")
+	r.srv.mod["a.txt"] = r.srv.clock
+	res := r.run()
+	if res.Downloaded != 1 {
+		t.Fatalf("seed: %+v", res)
+	}
+	if err := os.Remove(filepath.Join(r.engine.Store.Dir, "baseline", "p1.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	lp := filepath.Join(r.dir, "a.txt")
+	off := time.UnixMilli(r.srv.mod["a.txt"] - 1500)
+	if err := os.Chtimes(lp, off, off); err != nil {
+		t.Fatal(err)
+	}
+	res = r.run()
+	if res.Planned != 0 {
+		t.Fatalf("1.5s off must adopt, planned %d: %+v", res.Planned, res)
+	}
+
+	if err := os.Remove(filepath.Join(r.engine.Store.Dir, "baseline", "p1.json")); err != nil {
+		t.Fatal(err)
+	}
+	far := time.UnixMilli(r.srv.mod["a.txt"] - 5000)
+	if err := os.Chtimes(lp, far, far); err != nil {
+		t.Fatal(err)
+	}
+	res = r.run()
+	if res.Conflicts != 1 {
+		t.Fatalf("5s off must conflict, got %+v", res)
+	}
+}
+
+// The transfer pool must produce exactly the serial results — run under
+// -race, with the fake server shared by every worker.
+func TestParallelTransfersDownloadEverything(t *testing.T) {
+	r := newRig(t)
+	want := 0
+	for d := 0; d < 4; d++ {
+		dir := fmt.Sprintf("d%d", d)
+		r.srv.dirs[dir] = true
+		for i := 0; i < 10; i++ {
+			rel := fmt.Sprintf("%s/f%02d.bin", dir, i)
+			r.srv.files[rel] = []byte(strings.Repeat("y", 100+i))
+			r.srv.mod[rel] = r.srv.clock + int64(want)*500
+			want++
+		}
+	}
+	r.engine.Transfers = 6
+
+	res := r.run()
+	if res.Downloaded != want || len(res.Errors) != 0 {
+		t.Fatalf("want %d downloads and no errors, got %+v", want, res)
+	}
+	local, _, err := WalkLocal(r.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := 0
+	for _, n := range local {
+		if !n.IsDir {
+			files++
+		}
+	}
+	if files != want {
+		t.Fatalf("want %d files on disk, got %d", want, files)
+	}
+}
+
+// Moving a mirror keeps its baseline, so the next run is an ordinary
+// incremental pass — not a first-run merge.
+func TestMovePairLocalKeepsBaseline(t *testing.T) {
+	r := newRig(t)
+	// The rig drives the engine directly; MovePairLocal reads pairs.json, so
+	// the pair has to exist on disk the way a real one would.
+	if _, err := r.engine.Store.AddPair(Pair{ID: "p1", Local: r.dir, Remote: "docs://work"}); err != nil {
+		t.Fatal(err)
+	}
+	r.srv.files["a.txt"] = []byte("hello")
+	r.srv.mod["a.txt"] = r.srv.clock
+	r.writeLocal("b.txt", "local born")
+	r.run()
+
+	newLocal := filepath.Join(filepath.Dir(r.dir), "moved-folder")
+	if err := os.Rename(r.dir, newLocal); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := r.engine.Store.MovePairLocal("p1", newLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Local != newLocal {
+		t.Fatalf("pair not repointed: %+v", moved)
+	}
+
+	r.engine.Pair.Local = newLocal
+	res := r.run()
+	if res.Planned != 0 {
+		t.Fatalf("moved mirror must settle with zero work, planned %d: %+v", res.Planned, res)
 	}
 }
 

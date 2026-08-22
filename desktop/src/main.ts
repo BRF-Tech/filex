@@ -43,7 +43,7 @@ import {
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
-import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, removePair, type Pair } from './sync.js';
+import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'app');
@@ -1422,6 +1422,11 @@ function wireIpc(): void {
       return publicState();
     }
     if (oldRoot) {
+      // The watcher stops FIRST. It holds the pair list in memory for the
+      // round it is in, and a mirror renamed under it mid-run reads as a
+      // mass local delete — which, now that baselines survive migration,
+      // would become a mass REMOTE delete. refreshPairs() restarts it.
+      supervisor?.stop(acc.id);
       // Only mirrors under the old root move; a hand-picked pair living
       // elsewhere was placed there on purpose and stays put.
       const mine = accountPairs(acc.id).filter((p) => isInsideDir(oldRoot, p.local) && p.local !== oldRoot);
@@ -1434,27 +1439,40 @@ function wireIpc(): void {
         touched.add(rel.split(path.sep)[0]!);
         const dest = path.join(newRoot, rel);
         try {
-          await removePair(p.id);
           await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+          // ⚠ A move to another DRIVE is the usual reason to change the
+          // root at all, and rename cannot cross devices (EXDEV). Copy and
+          // remove instead — slower, but it is what the user asked for.
+          const relocate = async (from: string, to: string) => {
+            try {
+              await fs.promises.rename(from, to);
+            } catch (e) {
+              if ((e as NodeJS.ErrnoException)?.code !== 'EXDEV') throw e;
+              await fs.promises.cp(from, to, { recursive: true, force: true, errorOnExist: false });
+              await fs.promises.rm(from, { recursive: true, force: true });
+            }
+          };
+          await relocate(p.local, dest);
           try {
-            await fs.promises.rename(p.local, dest);
+            // `sync move` keeps the pair's BASELINE, so the next run is an
+            // ordinary incremental pass. The old remove + re-add threw it
+            // away, and the first-run merge that followed conflicted every
+            // file this machine had ever uploaded.
+            await movePair(p.id, dest);
           } catch (e) {
-            // ⚠ A move to another DRIVE is the usual reason to change the
-            // root at all, and rename cannot cross devices (EXDEV). Copy and
-            // remove instead — slower, but it is what the user asked for.
-            if ((e as NodeJS.ErrnoException)?.code !== 'EXDEV') throw e;
-            await fs.promises.cp(p.local, dest, { recursive: true, force: true, errorOnExist: false });
-            await fs.promises.rm(p.local, { recursive: true, force: true });
+            await relocate(dest, p.local); // pointer unmoved — put the folder back
+            throw e;
           }
-          await addPair(dest, p.remote, acc.id, p.file === true);
           await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
         } catch (e) {
-          // ⚠ The pair was removed FIRST, so a failure here would otherwise
-          // leave the folder silently unpaired — files intact, syncing over,
-          // and nothing but a dialog to say so. Put it back where it was
-          // (whichever side of the move its content is on) and report.
-          const stillHome = fs.existsSync(p.local);
-          await addPair(stillHome ? p.local : dest, p.remote, acc.id, p.file === true).catch(() => {});
+          // Whatever failed, make the POINTER agree with where the content
+          // actually sits: with `sync move` the pair was never removed, but
+          // a pair aimed at a now-empty path plus a SURVIVING baseline would
+          // read as a mass local delete on the next round — and become a
+          // mass remote one.
+          if (!fs.existsSync(p.local) && fs.existsSync(dest)) {
+            await movePair(p.id, dest).catch(() => {});
+          }
           dialog.showErrorBox(
             syncText('rootTitle'),
             syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),

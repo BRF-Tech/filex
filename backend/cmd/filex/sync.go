@@ -86,6 +86,7 @@ func syncCmd() *cobra.Command {
 	c.AddCommand(
 		syncAddCmd(),
 		syncListCmd(),
+		syncMoveCmd(),
 		syncRemoveCmd(),
 		syncRunCmd(opts),
 		syncTrashCmd(),
@@ -166,6 +167,27 @@ func syncListCmd() *cobra.Command {
 	return quiet(c)
 }
 
+func syncMoveCmd() *cobra.Command {
+	return quiet(&cobra.Command{
+		Use:   "move <pair-id> <new-local-path>",
+		Short: "Repoint a pair at a folder that moved (its sync history moves with it)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := syncStore()
+			if err != nil {
+				return err
+			}
+			p, err := st.MovePairLocal(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  <->  %s\n", p.ID, p.Local, p.Remote)
+			fmt.Fprintln(cmd.OutOrStdout(), "History kept - the next run is an ordinary incremental one.")
+			return nil
+		},
+	})
+}
+
 func syncRemoveCmd() *cobra.Command {
 	return quiet(&cobra.Command{
 		Use:   "remove <pair-id>",
@@ -187,11 +209,12 @@ func syncRemoveCmd() *cobra.Command {
 
 func syncRunCmd(opts *clientOpts) *cobra.Command {
 	var (
-		pairID   string
-		account  string
-		dryRun   bool
-		watch    time.Duration
-		quietOut bool
+		pairID    string
+		account   string
+		dryRun    bool
+		watch     time.Duration
+		quietOut  bool
+		transfers int
 	)
 	c := &cobra.Command{
 		Use:   "run",
@@ -230,7 +253,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 						}
 						continue
 					}
-					eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st}
+					eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers}
 					// Progress prints even with --quiet. The desktop app starts
 					// this command with --quiet and mirrors the LAST stdout line
 					// into its panel; without these lines a big first sync spent
@@ -279,6 +302,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would happen without changing anything")
 	c.Flags().DurationVar(&watch, "watch", 0, "keep running, re-checking at this interval (e.g. 30s)")
 	c.Flags().BoolVar(&quietOut, "quiet", false, "print only the summary line per pair (progress lines still print)")
+	c.Flags().IntVar(&transfers, "transfers", 0, "concurrent uploads/downloads per pair (0 = default 4, 1 = fully serial)")
 	return quiet(c)
 }
 
