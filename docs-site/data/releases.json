@@ -1,7 +1,102 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-08-20",
+  "generatedAt": "2026-08-22",
   "releases": [
+    {
+      "tag": "v0.23.0",
+      "date": "2026-08-20T18:39:11Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.23.0",
+      "prerelease": false,
+      "headline": "Badges, live progress, single-file keeps, a movable root.",
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Core",
+              "text": "A folder holding kept items says so — the partial badge."
+            },
+            {
+              "scope": "Core",
+              "text": "Availability badges on every row, and a live progress strip for the folder being synced."
+            },
+            {
+              "scope": "Core",
+              "text": "Folder menus offer keeping a folder on this computer when a desktop shell mounts the explorer."
+            },
+            {
+              "scope": "Desktop",
+              "text": "Settings shows the mirror root and can move it."
+            },
+            {
+              "scope": "Desktop",
+              "text": "Files can be kept too, and online-only sweeps the empty skeleton."
+            },
+            {
+              "scope": "Desktop",
+              "text": "Selective sync — one root folder, keep and unkeep from the explorer menu."
+            },
+            {
+              "scope": "Desktop",
+              "text": "The supervisor parses engine progress into typed per-account state."
+            },
+            {
+              "scope": "Sync",
+              "text": "Single-file pairs — keep one file, not its whole folder."
+            }
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Mirror-root containment goes through isInsideDir everywhere."
+            },
+            {
+              "scope": "Desktop",
+              "text": "The skeleton sweep is not defeated by .DS_Store, and a migrated file pair stays a file pair."
+            },
+            {
+              "scope": "Desktop",
+              "text": "Unpairing cannot leave a ghost watcher, and the ad-hoc mac build stops promising self-updates."
+            },
+            {
+              "scope": "Sync",
+              "text": "A first sync you can see, cancel safely, and add pairs to while it runs."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": null,
+              "text": "Merge origin/main (v0.22.0) — keep the maintainer's security guard, dialog helpers and reveal climb under the polish work."
+            },
+            {
+              "scope": "Changelog",
+              "text": "Availability badges and the progress strip."
+            },
+            {
+              "scope": "Changelog",
+              "text": "Keep on this computer."
+            },
+            {
+              "scope": "Changelog",
+              "text": "The desktop sync findings, under Unreleased."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.23.0",
+        "ghcr.io/brf-tech/filex:full-v0.23.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
     {
       "tag": "v0.22.0",
       "date": "2026-08-20T15:41:19Z",

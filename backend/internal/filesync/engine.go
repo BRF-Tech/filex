@@ -130,15 +130,17 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	started := e.now()
 	var res Result
 
-	if err := os.MkdirAll(e.Pair.Local, 0o755); err != nil {
-		return res, fmt.Errorf("sync folder %s: %w", e.Pair.Local, err)
-	}
-
 	base, hadBaseline, err := e.Store.LoadBaseline(e.Pair.ID)
 	if err != nil {
 		return res, err
 	}
 	res.FirstRun = !hadBaseline
+	if err := e.guardMissingMirror(e.Pair.Local, base); err != nil {
+		return res, err
+	}
+	if err := os.MkdirAll(e.Pair.Local, 0o755); err != nil {
+		return res, fmt.Errorf("sync folder %s: %w", e.Pair.Local, err)
+	}
 
 	local, skipped, err := WalkLocal(e.Pair.Local)
 	if err != nil {
@@ -303,10 +305,6 @@ func (e *Engine) runFile(ctx context.Context) (Result, error) {
 	parent.Pair.Local = filepath.Dir(e.Pair.Local)
 	parent.Pair.Remote = parentRemote(e.Pair.Remote)
 
-	if err := os.MkdirAll(parent.Pair.Local, 0o755); err != nil {
-		return res, fmt.Errorf("sync folder %s: %w", parent.Pair.Local, err)
-	}
-
 	statLocal := func() (Snapshot, error) {
 		out := Snapshot{}
 		info, err := os.Lstat(e.Pair.Local)
@@ -353,6 +351,14 @@ func (e *Engine) runFile(ctx context.Context) (Result, error) {
 		return res, err
 	}
 	res.FirstRun = !hadBaseline
+	// The file's parent folder plays the mirror's role here: recreating it
+	// empty under a baseline that remembers the file reads as "deleted here".
+	if err := e.guardMissingMirror(parent.Pair.Local, base); err != nil {
+		return res, err
+	}
+	if err := os.MkdirAll(parent.Pair.Local, 0o755); err != nil {
+		return res, fmt.Errorf("sync folder %s: %w", parent.Pair.Local, err)
+	}
 
 	local, err := statLocal()
 	if err != nil {
@@ -428,6 +434,28 @@ func (e *Engine) walkRemoteRoot(ctx context.Context, phase string) (Snapshot, er
 	}
 	e.logf("+> created %s on the server", e.Pair.Remote)
 	return WalkRemote(ctx, e.API, e.Pair.Remote, e.remoteProgress(phase))
+}
+
+// guardMissingMirror refuses to run a pair whose local folder is GONE while
+// its baseline still remembers files. Creating the folder empty and carrying
+// on — which is what MkdirAll followed by a walk would do — makes every
+// remembered file look deleted here, and the planner would carry that to the
+// server as a mass delete. The folder is gone for one of three reasons (it
+// moved, its drive is unplugged, the user removed it) and none of them is
+// "please delete everything on the server"; the message names the command
+// for each. An EMPTY baseline (a pair that never synced a file) may still
+// have its folder created: there is nothing to lose.
+func (e *Engine) guardMissingMirror(dir string, base Baseline) error {
+	if len(base) == 0 {
+		return nil
+	}
+	if _, err := os.Lstat(dir); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf("sync folder %s is missing but pair %s has history; nothing was touched. "+
+		"If the folder moved: filex sync move %s <new-path>. If its drive is unplugged: plug it back in. "+
+		"To stop syncing it: filex sync remove %s",
+		dir, e.Pair.ID, e.Pair.ID, e.Pair.ID)
 }
 
 // DefaultTransfers is how many uploads/downloads run concurrently. Four is

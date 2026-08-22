@@ -216,7 +216,9 @@ UI and the embeds render, not a separate half-copy:
   local copy back to the Trash, or leaves it
   ([docs/DESKTOP.md](docs/DESKTOP.md#keeping-folders-on-this-computer)).
 - **Folder sync** — pair a local folder with a server folder and they stay in step both
-  ways while the app sits in the tray ([docs/SYNC.md](docs/SYNC.md)).
+  ways while the app sits in the tray: parallel transfers and listings, a first run that
+  resumes where it was interrupted, 30-day local trash, and an engine that refuses to
+  turn a missing folder into a mass delete ([docs/SYNC.md](docs/SYNC.md)).
 - **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
 - **Updates itself** — downloads quietly, installs on quit; `FILEX_NO_UPDATE=1` opts out.
 

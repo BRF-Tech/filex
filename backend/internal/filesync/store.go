@@ -142,6 +142,15 @@ func (s *Store) MovePairLocal(id, newLocal string) (Pair, error) {
 	if err != nil {
 		return Pair{}, err
 	}
+	// The new path must already hold the content. Repointing a pair at a
+	// path that is not there is the one thing this command must never do:
+	// the next run would create it empty, and an empty mirror under a
+	// surviving baseline reads as "every file deleted here" — which the
+	// planner dutifully carries to the server.
+	info, err := os.Stat(abs)
+	if err != nil {
+		return Pair{}, fmt.Errorf("new path %s: %w (move the folder there first; the pair keeps pointing at its current location)", abs, err)
+	}
 	pairs, err := s.LoadPairs()
 	if err != nil {
 		return Pair{}, err
@@ -162,6 +171,12 @@ func (s *Store) MovePairLocal(id, newLocal string) (Pair, error) {
 	if pairs[idx].File && filepath.Base(abs) != filepath.Base(pairs[idx].Local) {
 		return Pair{}, fmt.Errorf("a file pair keeps its name: %q vs %q",
 			filepath.Base(pairs[idx].Local), filepath.Base(abs))
+	}
+	if pairs[idx].File && !info.Mode().IsRegular() {
+		return Pair{}, fmt.Errorf("%s is a file pair but %s is not a regular file", id, abs)
+	}
+	if !pairs[idx].File && !info.IsDir() {
+		return Pair{}, fmt.Errorf("%s is a folder pair but %s is not a folder", id, abs)
 	}
 	pairs[idx].Local = abs
 	return pairs[idx], s.SavePairs(pairs)

@@ -172,12 +172,17 @@ progress bar. It disappears when the run settles.
 ### The filex folder on this computer
 
 *Settings ⚙ → filex folder on this computer* names the root, opens it, and can
-**change it**. Kept folders move with it: each mirror is relocated under the new
-root and re-paired there, and the pass that follows walks two identical trees,
-so nothing is downloaded again. Pairs you made by hand somewhere else stay where
-you put them. A folder inside the current root (or one that contains it) is
-refused rather than half-moved, and a move to another drive is copied across
-rather than failing.
+**change it**. Kept folders move with it: the account's watcher is stopped, each
+mirror is relocated under the new root and its pair is **repointed** there
+(`filex sync move`), history and all — so the pass that follows is an ordinary
+incremental one, not a first-run merge, and nothing is downloaded or uploaded
+again. Pairs you made by hand somewhere else stay where you put them. A folder
+inside the current root (or one that contains it) is refused rather than
+half-moved, and a move to another drive is copied across — with modification
+times preserved, since those are what the engine reads change from — rather
+than failing. If a move fails halfway, the pair follows whichever side holds the
+complete folder; if even that cannot be arranged, the folder is unpaired rather
+than left pointing at a partial tree, and the dialog says so.
 
 
 > Sync runs while the app does, so a folder kept a moment ago starts filling on

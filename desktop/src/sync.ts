@@ -258,6 +258,13 @@ export class SyncSupervisor {
     proc.stderr?.on('data', (c: Buffer) => absorb(c, true));
 
     proc.on('exit', (code) => {
+      // A watcher this supervisor already let go of — stop() during a root
+      // move, reconcile() after a sign-out — must not touch the bookkeeping
+      // of its successor. Its exit can land AFTER the replacement started,
+      // and deleting the new process's entry here would make the next
+      // reconcile() start a second watcher for the same account: two
+      // engines racing over one baseline.
+      if (this.procs.get(acc.id) !== proc) return;
       this.procs.delete(acc.id);
       st.running = false;
       st.active = null;

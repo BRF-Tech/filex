@@ -2,6 +2,7 @@ package filesync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -137,6 +138,20 @@ func relOf(root, p string) string {
 // index reads, and they multiplex over one HTTP/2 connection anyway.
 const listWorkers = 8
 
+// ErrRemoteNotFound marks a listing error that means "this folder does not
+// exist on the server" — the ONE kind of failure WalkRemote may skip (a
+// folder deleted between its parent's listing and its own). The API adapter
+// wraps a 404 with it.
+//
+// Every other error fails the walk. A folder that merely could not be listed
+// — a timeout, a 5xx, the half-dead connection this client now detects — must
+// never come back as "gone from the server": the planner would read that as
+// a delete and bin the local copy of the whole subtree, and if it happened in
+// the settle pass the baseline would lose the subtree instead, turning every
+// uploaded file in it into a conflict pair on the next round. The walk is
+// eight listings wide now, so one bad second can touch eight folders at once.
+var ErrRemoteNotFound = errors.New("remote folder not found")
+
 // WalkRemote snapshots a server folder by listing it breadth-first, one
 // level at a time with listWorkers concurrent listings per level. The
 // snapshot itself is only written by this goroutine — workers hand their
@@ -183,12 +198,12 @@ func WalkRemote(ctx context.Context, api RemoteLister, remoteRoot string, progre
 		var next []string
 		for _, r := range results {
 			if r.err != nil {
-				if r.rel == "" {
-					return nil, fmt.Errorf("list %s: %w", remoteRoot, r.err)
+				if r.rel != "" && errors.Is(r.err, ErrRemoteNotFound) {
+					// A folder that vanished mid-walk is not fatal; the next
+					// run sees it.
+					continue
 				}
-				// A folder that vanished mid-walk is not fatal; the next run
-				// sees it.
-				continue
+				return nil, fmt.Errorf("list %s: %w", joinRemote(remoteRoot, r.rel), r.err)
 			}
 			dirsListed++
 			for _, f := range r.listing.Files {

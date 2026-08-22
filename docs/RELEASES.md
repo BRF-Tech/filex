@@ -18,14 +18,47 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.22.0, 20 August 2026
-Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays online-only in the window; kept folders offer the way back, and unkeeping asks whether the local copy goes to the Trash or stays. Sync also stopped looking dead on a big first run: it reports what it is doing even in quiet mode, a folder paired while the app runs is picked up without a restart, and unpairing one mid-first-sync no longer fails or leaves a background process syncing a folder you removed. The macOS build stopped promising a self-update it cannot perform and offers the download instead. Security: a server can no longer name a local folder outside the one you chose — a remote path containing “..” is refused rather than resolved.
+::: tip Latest — v0.23.0, 20 August 2026
+The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window shows what the engine is doing while it does it. Single files can be kept, not just folders. The filex folder itself is now visible in Settings and can be moved, kept folders and all: a move to another drive is copied across rather than failing, a folder inside the current one is refused rather than half-applied, and if anything goes wrong the pair goes back where its files are instead of quietly unpairing. Unkeeping also stops leaving an empty folder skeleton behind — including one holding nothing but the .DS_Store the Finder dropped in it.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.22.0
-docker pull ghcr.io/brf-tech/filex:full-v0.22.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.23.0
+docker pull ghcr.io/brf-tech/filex:full-v0.23.0
 ```
+
+## v0.23.0
+
+<span class="filex-release-date">20 August 2026</span>
+
+The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window shows what the engine is doing while it does it. Single files can be kept, not just folders. The filex folder itself is now visible in Settings and can be moved, kept folders and all: a move to another drive is copied across rather than failing, a folder inside the current one is refused rather than half-applied, and if anything goes wrong the pair goes back where its files are instead of quietly unpairing. Unkeeping also stops leaving an empty folder skeleton behind — including one holding nothing but the .DS_Store the Finder dropped in it.
+
+**New**
+
+- **Core** — A folder holding kept items says so — the partial badge.
+- **Core** — Availability badges on every row, and a live progress strip for the folder being synced.
+- **Core** — Folder menus offer keeping a folder on this computer when a desktop shell mounts the explorer.
+- **Desktop** — Settings shows the mirror root and can move it.
+- **Desktop** — Files can be kept too, and online-only sweeps the empty skeleton.
+- **Desktop** — Selective sync — one root folder, keep and unkeep from the explorer menu.
+- **Desktop** — The supervisor parses engine progress into typed per-account state.
+- **Sync** — Single-file pairs — keep one file, not its whole folder.
+
+**Fixed**
+
+- **Desktop** — Mirror-root containment goes through isInsideDir everywhere.
+- **Desktop** — The skeleton sweep is not defeated by .DS_Store, and a migrated file pair stays a file pair.
+- **Desktop** — Unpairing cannot leave a ghost watcher, and the ad-hoc mac build stops promising self-updates.
+- **Sync** — A first sync you can see, cancel safely, and add pairs to while it runs.
+
+**Other changes**
+
+- Merge origin/main (v0.22.0) — keep the maintainer's security guard, dialog helpers and reveal climb under the polish work.
+- **Changelog** — Availability badges and the progress strip.
+- **Changelog** — Keep on this computer.
+- **Changelog** — The desktop sync findings, under Unreleased.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.23.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.23.0`
 
 ## v0.22.0
 
@@ -247,24 +280,13 @@ The tab strip, fixed properly. It was permanent in the desktop app and came and 
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.3) · `ghcr.io/brf-tech/filex:slim-v0.16.3`
 
-## v0.16.2
-
-<span class="filex-release-date">12 August 2026</span>
-
-Two things a share link got wrong. It changed language when you entered its PIN — the gate was English, the page behind it Turkish, and the screen in between managed both at once. Those pages have no session and no user, so the language now comes from the request (an explicit ?lang=, then the browser's Accept-Language, then the server's own default) and is resolved once per request, so a page can no longer mix two. And the download limit is settable again: it lived in the old standalone share dialog and was left behind when link creation moved into the Share / Permissions panel, so the server kept honouring a cap that nothing could set.
-
-**Fixed**
-
-- **Share** — A share link changed language when you entered its PIN, and the download cap could not be set.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.16.2`
-
 ## Earlier releases
 
-The 58 releases before v0.16.2, in brief. Full notes are on GitHub.
+The 59 releases before v0.16.3, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.16.2](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) | 12 August 2026 | Two things a share link got wrong. It changed language when you entered its PIN — the gate was English, the page behind it Turkish, and the screen in between managed both at once. |
 | [v0.16.1](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) | 12 August 2026 | Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the link is created rather than when the first visitor arrives, so the first open is fast too — which is the open that matters, since whoever creates a… |
 | [v0.16.0](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) | 12 August 2026 | Two things a shared folder was doing the slow way. Its gallery tiles were the original photos — the page asked for a thumbnail and the server streamed the whole file — so a folder of a few dozen photos shipped tens of megabytes… |
 | [v0.15.1](https://github.com/BRF-Tech/filex/releases/tag/v0.15.1) | 12 August 2026 | The desktop app's account rail had its two identities the wrong way round. Each row of that rail is a server — a tenant — so it now carries that server's own Branding logo, which is a better label than initials taken from an… |
@@ -326,4 +348,4 @@ The 58 releases before v0.16.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-20 from 78 published releases.</small>
+<small>Generated 2026-08-22 from 79 published releases.</small>

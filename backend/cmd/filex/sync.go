@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
@@ -23,6 +25,11 @@ type apiAdapter struct{ c *cliclient.Client }
 func (a apiAdapter) List(ctx context.Context, remote string) (*filesync.Listing, error) {
 	res, err := a.c.List(ctx, remote)
 	if err != nil {
+		// Only a 404 may be skipped by the walk; see ErrRemoteNotFound.
+		var ae *cliclient.APIError
+		if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: %v", filesync.ErrRemoteNotFound, err)
+		}
 		return nil, err
 	}
 	out := &filesync.Listing{Files: make([]filesync.ListedFile, 0, len(res.Files))}

@@ -1438,6 +1438,11 @@ function wireIpc(): void {
         const rel = path.relative(oldRoot, p.local);
         touched.add(rel.split(path.sep)[0]!);
         const dest = path.join(newRoot, rel);
+        // `arrived` says the content is COMPLETE at dest: the rename went
+        // through, or the cross-device copy finished (whatever the rm of the
+        // source did afterwards). A rollback flips it back. It decides which
+        // side the pair follows if something fails halfway — see the catch.
+        let arrived = false;
         try {
           await fs.promises.mkdir(path.dirname(dest), { recursive: true });
           // ⚠ A move to another DRIVE is the usual reason to change the
@@ -1446,11 +1451,23 @@ function wireIpc(): void {
           const relocate = async (from: string, to: string) => {
             try {
               await fs.promises.rename(from, to);
+              arrived = to === dest;
+              return;
             } catch (e) {
               if ((e as NodeJS.ErrnoException)?.code !== 'EXDEV') throw e;
-              await fs.promises.cp(from, to, { recursive: true, force: true, errorOnExist: false });
-              await fs.promises.rm(from, { recursive: true, force: true });
             }
+            // ⚠ preserveTimestamps is not optional: the engine detects
+            // change by (size, mtime), so a copy stamped "now" reads as every
+            // file edited here and re-uploads the whole tree — the history
+            // `sync move` keeps below would be worth nothing across drives.
+            await fs.promises.cp(from, to, {
+              recursive: true,
+              force: true,
+              errorOnExist: false,
+              preserveTimestamps: true,
+            });
+            arrived = to === dest;
+            await fs.promises.rm(from, { recursive: true, force: true });
           };
           await relocate(p.local, dest);
           try {
@@ -1466,12 +1483,26 @@ function wireIpc(): void {
           await pruneEmptyDirsUpTo(path.dirname(p.local), oldRoot);
         } catch (e) {
           // Whatever failed, make the POINTER agree with where the content
-          // actually sits: with `sync move` the pair was never removed, but
-          // a pair aimed at a now-empty path plus a SURVIVING baseline would
-          // read as a mass local delete on the next round — and become a
-          // mass remote one.
-          if (!fs.existsSync(p.local) && fs.existsSync(dest)) {
-            await movePair(p.id, dest).catch(() => {});
+          // is COMPLETE: with `sync move` the pair was never removed, but a
+          // pair aimed at a partial tree plus a SURVIVING baseline reads as
+          // a mass local delete on the next round — and becomes a mass
+          // remote one. Two half-states exist: the copy finished and only
+          // the rm of the old tree failed partway (dest complete, old path
+          // a partial leftover → follow dest, even though the old path still
+          // exists), or the copy itself failed (old path intact, dest is our
+          // partial litter → leave the pair alone and discard the litter).
+          if (arrived && fs.existsSync(dest)) {
+            try {
+              await movePair(p.id, dest);
+            } catch {
+              // The pointer cannot be made to agree with the content. An
+              // unpaired folder syncs nothing — and deletes nothing; a pair
+              // left on the partial side would. The dialog says the move
+              // failed; the user re-keeps the folder from the explorer.
+              await removePair(p.id).catch(() => {});
+            }
+          } else if (!arrived && fs.existsSync(dest) && fs.existsSync(p.local)) {
+            await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {});
           }
           dialog.showErrorBox(
             syncText('rootTitle'),

@@ -3,6 +3,7 @@ package filesync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,9 @@ type fakeServer struct {
 	mod   map[string]int64
 	clock int64
 	fail  map[string]error // path → error to return once
+	// listErr makes List fail for a folder, every time, until cleared — a
+	// proxy that cannot reach the server for one subtree.
+	listErr map[string]error
 }
 
 func newFake(root string) *fakeServer {
@@ -56,6 +60,9 @@ func (f *fakeServer) List(_ context.Context, remote string) (*Listing, error) {
 	defer f.mu.Unlock()
 	rel, err := f.rel(remote)
 	if err != nil {
+		return nil, err
+	}
+	if err := f.listErr[rel]; err != nil {
 		return nil, err
 	}
 	if rel != "" && !f.dirs[rel] {
@@ -849,6 +856,114 @@ func TestMovePairLocalKeepsBaseline(t *testing.T) {
 	res := r.run()
 	if res.Planned != 0 {
 		t.Fatalf("moved mirror must settle with zero work, planned %d: %+v", res.Planned, res)
+	}
+}
+
+// A subtree that could not be LISTED is not a subtree that is gone. The
+// walk runs eight listings wide through proxies that the client now knows
+// can die under it; if one failed listing came back as "absent", the planner
+// would bin the local copy of that whole subtree ("folder removed on the
+// server") — and if it happened in the settle pass, the baseline would lose
+// the subtree instead and every uploaded file in it would become a conflict
+// pair next round. The run must fail, loudly, and touch nothing.
+func TestATransientListingFailureDoesNotBinTheLocalCopy(t *testing.T) {
+	r := newRig(t)
+	r.writeRemote("docs/a.txt", "kept")
+	r.writeRemote("docs/deeper/b.txt", "kept too")
+	r.run()
+	if !r.localExists("docs/a.txt") || !r.localExists("docs/deeper/b.txt") {
+		t.Fatal("seed run did not download the tree")
+	}
+
+	r.srv.listErr = map[string]error{"docs": errors.New("HTTP 502: bad gateway")}
+	if _, err := r.engine.Run(context.Background()); err == nil {
+		t.Fatal("a listing failure must fail the run, not read as an empty folder")
+	}
+	if !r.localExists("docs/a.txt") || !r.localExists("docs/deeper/b.txt") {
+		t.Fatal("a listing failure binned the local copies")
+	}
+	if _, ok := r.srv.files["docs/a.txt"]; !ok {
+		t.Fatal("a listing failure deleted on the server")
+	}
+
+	// The baseline survived untouched: once the proxy is back there is
+	// nothing to do — no re-download, no conflict copies.
+	r.srv.listErr = nil
+	if res := r.run(); res.Planned != 0 {
+		t.Fatalf("after the outage the pair must be in step, planned %d: %+v", res.Planned, res)
+	}
+
+	// A folder that truly vanished between its parent's listing and its own
+	// is the one case the walk may skip.
+	r.srv.listErr = map[string]error{"docs/deeper": fmt.Errorf("%w: HTTP 404", ErrRemoteNotFound)}
+	if _, err := r.engine.Run(context.Background()); err != nil {
+		t.Fatalf("a 404 mid-walk must not fail the run: %v", err)
+	}
+}
+
+// `sync move` exists so a baseline survives a move; pointing a pair at a
+// path that is NOT there would turn that surviving baseline into a mass
+// delete on the next run (empty mirror = every file deleted here).
+func TestMovePairLocalRefusesAMissingOrWrongKindPath(t *testing.T) {
+	r := newRig(t)
+	if _, err := r.engine.Store.AddPair(Pair{ID: "p1", Local: r.dir, Remote: "docs://work"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.engine.Store.MovePairLocal("p1", filepath.Join(filepath.Dir(r.dir), "nowhere")); err == nil {
+		t.Fatal("moved a pair to a path that does not exist")
+	}
+	file := filepath.Join(filepath.Dir(r.dir), "a-file.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.engine.Store.MovePairLocal("p1", file); err == nil {
+		t.Fatal("moved a folder pair onto a file")
+	}
+	pairs, _ := r.engine.Store.LoadPairs()
+	if len(pairs) != 1 || pairs[0].Local != r.dir {
+		t.Fatalf("a refused move changed the pair: %+v", pairs)
+	}
+}
+
+// The mirror folder is gone — unplugged drive, moved by hand, deleted — and
+// the baseline still remembers files. Recreating it empty and running would
+// make every remembered file "deleted here" and delete it on the server.
+// The run refuses instead, names the way out, and creates nothing.
+func TestAVanishedMirrorWithHistoryRefusesToRun(t *testing.T) {
+	r := newRig(t)
+	r.writeRemote("a.txt", "on the server")
+	r.writeLocal("b.txt", "on the laptop")
+	r.run()
+	if _, ok := r.srv.files["b.txt"]; !ok {
+		t.Fatal("seed run did not upload")
+	}
+
+	if err := os.RemoveAll(r.dir); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("a vanished mirror with history must refuse to run")
+	}
+	if !strings.Contains(err.Error(), "sync move") {
+		t.Fatalf("the refusal must name the way out, got: %v", err)
+	}
+	for _, rel := range []string{"a.txt", "b.txt"} {
+		if _, ok := r.srv.files[rel]; !ok {
+			t.Fatalf("%s was deleted on the server", rel)
+		}
+	}
+	if _, statErr := os.Stat(r.dir); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatal("the refused run recreated the mirror folder")
+	}
+
+	// With no history there is nothing to lose: a fresh pair's folder is
+	// still created on demand.
+	if err := os.Remove(filepath.Join(r.engine.Store.Dir, "baseline", "p1.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.engine.Run(context.Background()); err != nil {
+		t.Fatalf("a pair without history must create its folder: %v", err)
 	}
 }
 

@@ -51,6 +51,29 @@ from *"you have not downloaded it yet"*. Guessing wrong empties someone's
 folder, so the first pass is a union merge. From the second run on, deletes
 propagate.
 
+### An interrupted first run resumes
+
+A first run of a large tree can be cut short — a closed laptop, a dropped
+connection. On the next run there is still no history, and both sides hold the
+files that already came down. Those are **adopted**, not conflicted: a download
+stamps the server's own modification time on the local copy, and two files with
+no history, the same size and a modification time within **two seconds** of each
+other are taken to be the same file (FAT stores times in two-second steps, and
+some tools land a millisecond off). Outside that window the usual rule applies
+and both copies are kept. Change detection against a recorded baseline stays
+exact — the tolerance exists only for files with no history.
+
+### A mirror that is missing is not a mirror that was emptied
+
+If a pair's local folder is **gone** — its drive unplugged, the folder moved by
+hand — while the pair still has history, the run refuses and says so. Creating
+the folder empty and carrying on would read as "every file deleted here", and
+the next round would carry that to the server. Use `filex sync move` if the
+folder moved, plug the drive back in, or `filex sync remove` to stop syncing
+it. The same holds for the server side: a folder that could not be **listed**
+(a timeout, a proxy error) fails the run instead of reading as deleted — only a
+folder the server says does not exist is skipped.
+
 ### Deletions are recoverable for 30 days
 
 Anything sync removes **from your machine** is moved aside, not deleted:
@@ -98,10 +121,29 @@ server, to write outside the folder the user chose.
 ```
 filex sync add <local-folder> <storage://path> [--account <label>] [--file]
 filex sync list [--json]
+filex sync move <pair-id> <new-local-path>
 filex sync remove <pair-id>
-filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet]
+filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet] [--transfers <n>]
 filex sync trash [--pair <id>] [--restore <path>]
 ```
+
+`move` repoints a pair at a folder (or file) that you have **already moved** on
+disk, and keeps its sync history — the next run is an ordinary incremental pass,
+not a first-run merge. Removing and re-adding the pair instead throws the history
+away, and the merge that follows treats every file the machine ever uploaded as
+changed in both places. The new path must exist: a pair pointed at nothing would
+be created empty on the next run, and an empty mirror under surviving history
+reads as "every file deleted here". (The desktop app's *change the filex folder*
+uses `move` for exactly this reason.)
+
+`--transfers` caps how many uploads and downloads run at once — **4 by default**,
+`1` restores the fully serial engine. A tree of small files is otherwise priced
+at one full round-trip per file; measured on a live deployment, 2 GB of ~400 KB
+files crawled at 0.24 MB/s with the network idle. Folder creation still goes
+first, and deletes and conflict copies still run one at a time in the planner's
+deepest-first order. Server folders are listed eight at a time for the same
+reason: the inventory of a 3,000-folder tree is minutes rather than a quarter of
+an hour.
 
 `--dry-run` prints exactly what would happen and touches nothing — worth running
 the first time you pair a folder that already has files in it.
@@ -136,6 +178,10 @@ sides. Unpairing is not deleting.
 
 - The engine's own state (`.filex-sync`), or it would sync its bookkeeping,
   which changes, which schedules another sync — forever.
+- Its own half-written downloads (`.filex-part-*`). A download lands in a
+  temporary file beside its destination and is renamed into place when
+  complete; one left behind by a crash is never uploaded as a file nobody
+  named.
 - Symlinks. A link pointing outside the folder would upload files you never put
   there; one pointing inside makes the walk infinite.
 - OS clutter: `.DS_Store`, `Thumbs.db`, `desktop.ini`, recycle bins.
@@ -152,7 +198,12 @@ sides. Unpairing is not deleting.
   trade-off rsync makes by default.
 - **Polling, not file-system events.** `--watch` re-scans on an interval
   (the desktop app uses 30 seconds). Very large folders take as long as a walk
-  takes.
+  takes — the server side is listed eight folders at a time, the local side is
+  one directory walk.
+- **A dead connection is detected, not waited out.** The client pings an idle
+  HTTP/2 connection (30 s) and bounds dialing, TLS and the wait for response
+  headers; a transfer's body is deliberately unbounded, so a large file may
+  take as long as it takes — a hang may not.
 - **Moves are a delete plus an add.** A renamed 2 GB file is re-uploaded, not
   moved server-side.
 - **A failed transfer is retried on the next run,** and is deliberately *not*
@@ -177,3 +228,14 @@ the same thing with more detail.
 **A conflict copy appeared and I only edited it in one place.** Something else
 wrote to the server copy — another device, a share, or a web-UI save. Both
 versions are on disk; keep the one you want and delete the other.
+
+**"sync folder … is missing but pair … has history; nothing was touched."** The
+pair's local folder is not where the pair says it is. If you moved it,
+`filex sync move <pair-id> <new-path>` keeps the history; if it lives on a drive
+that is not plugged in, plug it in; if you meant to stop syncing it,
+`filex sync remove <pair-id>`. The engine will not create the folder empty for
+you — see above.
+
+**"list …: HTTP 502" (or a timeout) and nothing happened.** The server folder
+could not be listed, so the run stopped rather than treat the folder as gone.
+It is retried on the next round.

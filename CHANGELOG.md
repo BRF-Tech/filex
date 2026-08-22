@@ -7,33 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.23.0] - 2026-08-20
+## [0.24.0] - 2026-08-22
 
 ### Added
-
-- **Availability at a glance.** Every row in the desktop explorer carries the
-  glyph grammar every drive client already taught: ✓ kept on this computer,
-  ◐ holding kept items somewhere below, ⟳ being synced right now, ☁
-  online-only — so a root listing answers "is anything in here on my disk?"
-  without drilling in. And while the engine works, a strip along the bottom
-  of the window names the folder and shows live progress — counts and a
-  percent bar — parsed by the shell from the same progress lines `--quiet`
-  emits, so the CLI output stays the single source of truth.
-
-- **Single FILES can be kept on this computer too.** The sync engine grew
-  first-class file pairs (`filex sync add --file`): same planner, same rules,
-  same 30-day local trash — the snapshots just carry one entry. The desktop's
-  menu offers *Keep on this computer* on files as well; a kept file mirrors
-  to `<root>/<storage>/<path>` beside everything else, syncs both ways, and
-  *Open local folder* reveals it next to its neighbours instead of launching
-  it.
-
-- **Settings shows the mirror root, and can move it.** The root was chosen at
-  the first keep and then lived nowhere the user could see. A card in
-  Settings now names it, opens it, and changes it: kept mirrors migrate
-  (rename + re-pair — the settling pass transfers nothing, and a file pair
-  stays a file pair), hand-picked pairs outside the root stay put, and only
-  effectively-empty leftovers are swept, never `rm -rf`.
 
 - **Transfers run in parallel.** The engine walked its plan one action at a
   time, so a tree of small files was priced at one full round-trip each —
@@ -88,6 +64,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   limits at all. The client now pings an idle connection (ReadIdleTimeout
   30s), bounds dialing, TLS and response headers, and leaves bodies
   unbounded — a big transfer may take long, a hang may not.
+
+- **A folder that could not be listed is not a folder that is gone.** The
+  remote walk skipped ANY failed sub-listing as "vanished" — and it now runs
+  eight listings wide through proxies the client expects to die under it.
+  One 502 on a subtree would have read as "folder removed on the server"
+  and binned the local copy of everything below it; in the settle pass it
+  would have dropped the subtree from the baseline instead, and every
+  uploaded file in it would have come back as a conflict pair next round.
+  Only a 404 is skipped now; any other listing error fails the run, names
+  the folder, and touches nothing.
+
+- **A pair cannot be pointed at a path that is not there.** `sync move`
+  accepted a non-existent path; the next run would have created it empty
+  under a surviving baseline, and an empty mirror with history means "every
+  file deleted here" — carried to the server. The path must exist and be
+  the pair's kind: a folder for a folder pair, a file for a file pair.
+
+- **A missing mirror with history refuses to run.** The engine created a
+  missing sync folder and carried on, which turned an unplugged drive or a
+  folder moved by hand into a mass delete on the server. A pair whose
+  folder is gone while its baseline still remembers files now stops and
+  says what to do — `sync move` if it moved, plug the drive back in, `sync
+  remove` to stop syncing it. A pair that never synced a file still gets
+  its folder created: there is nothing to lose.
+
+- **Moving the filex folder to another drive keeps modification times.**
+  The cross-device copy stamped every file "now", and change detection is
+  (size, mtime) — so the very history `sync move` preserves would have read
+  as every file edited here, and re-uploaded the whole tree. The copy now
+  preserves timestamps. If a move fails halfway the pair follows whichever
+  side holds the COMPLETE tree (a finished copy with a half-failed cleanup
+  points at the new place; a failed copy discards its partial litter), and
+  unpairs as the last resort — an unpaired folder syncs nothing and deletes
+  nothing.
+
+- **A replaced watcher's late exit no longer unhooks its successor.**
+  Stopping an account's watcher for the root move and starting a new one
+  could race: the old process's exit handler deleted the supervisor's entry
+  for the NEW process, so the next reconcile started a second watcher for
+  the same account — two engines over one baseline.
+
+- **The ".." guard also reads Windows paths.** Segments are split on both
+  separators, and a segment made only of dots and spaces is refused
+  (Windows trims ".. " to "..").
+
+## [0.23.0] - 2026-08-20
+
+### Added
+
+- **Availability at a glance.** Every row in the desktop explorer carries the
+  glyph grammar every drive client already taught: ✓ kept on this computer,
+  ◐ holding kept items somewhere below, ⟳ being synced right now, ☁
+  online-only — so a root listing answers "is anything in here on my disk?"
+  without drilling in. And while the engine works, a strip along the bottom
+  of the window names the folder and shows live progress — counts and a
+  percent bar — parsed by the shell from the same progress lines `--quiet`
+  emits, so the CLI output stays the single source of truth.
+
+- **Single FILES can be kept on this computer too.** The sync engine grew
+  first-class file pairs (`filex sync add --file`): same planner, same rules,
+  same 30-day local trash — the snapshots just carry one entry. The desktop's
+  menu offers *Keep on this computer* on files as well; a kept file mirrors
+  to `<root>/<storage>/<path>` beside everything else, syncs both ways, and
+  *Open local folder* reveals it next to its neighbours instead of launching
+  it.
+
+- **Settings shows the mirror root, and can move it.** The root was chosen at
+  the first keep and then lived nowhere the user could see. A card in
+  Settings now names it, opens it, and changes it: kept mirrors migrate
+  (rename + re-pair — the settling pass transfers nothing, and a file pair
+  stays a file pair), hand-picked pairs outside the root stay put, and only
+  effectively-empty leftovers are swept, never `rm -rf`.
+
+### Fixed
 
 - **Moving the filex folder to another drive no longer unpairs what it moves.**
   The migration removed each pair before relocating its mirror, and `rename`
