@@ -31,6 +31,9 @@ type fakeServer struct {
 	// listErr makes List fail for a folder, every time, until cleared — a
 	// proxy that cannot reach the server for one subtree.
 	listErr map[string]error
+	// afterTransfer runs at the end of every successful Download/Upload —
+	// the place a test pulls the plug mid-run.
+	afterTransfer func()
 }
 
 func newFake(root string) *fakeServer {
@@ -116,6 +119,9 @@ func (f *fakeServer) Download(_ context.Context, remote string, w io.Writer) (in
 		return 0, fmt.Errorf("no such file: %s", rel)
 	}
 	n, err := w.Write(b)
+	if err == nil && f.afterTransfer != nil {
+		f.afterTransfer()
+	}
 	return int64(n), err
 }
 
@@ -140,6 +146,9 @@ func (f *fakeServer) Upload(_ context.Context, localPath, remote string) error {
 	f.files[rel] = b
 	f.clock += 1000
 	f.mod[rel] = f.clock
+	if f.afterTransfer != nil {
+		f.afterTransfer()
+	}
 	return nil
 }
 
@@ -964,6 +973,61 @@ func TestAVanishedMirrorWithHistoryRefusesToRun(t *testing.T) {
 	}
 	if _, err := r.engine.Run(context.Background()); err != nil {
 		t.Fatalf("a pair without history must create its folder: %v", err)
+	}
+}
+
+// A run that dies mid-way — the laptop closed, the watcher killed — continues
+// from its checkpoint, UPLOADS included. The adopt rule covers downloads; an
+// uploaded file gets the server's own mtime, so without a baseline row every
+// one of them used to come back as a conflict pair on the next run.
+func TestAnInterruptedRunResumesFromItsCheckpoint(t *testing.T) {
+	r := newRig(t)
+	for i := 0; i < 12; i++ {
+		r.writeRemote(fmt.Sprintf("down/d%02d.txt", i), "from the server")
+	}
+	for i := 0; i < 12; i++ {
+		r.writeLocal(fmt.Sprintf("up/u%02d.txt", i), "from the laptop")
+	}
+	r.engine.Transfers = 1 // planner order: the 12 downloads, then the 12 uploads
+	r.engine.CheckpointEvery = 5
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	transfers := 0
+	r.srv.afterTransfer = func() {
+		transfers++
+		if transfers == 16 { // 12 downloads + 4 uploads, then the plug is pulled
+			cancel()
+		}
+	}
+	res, _ := r.engine.Run(ctx)
+	if res.Downloaded != 12 || res.Uploaded != 4 {
+		t.Fatalf("the interruption did not land where intended: %+v", res)
+	}
+
+	rows, had, err := r.engine.Store.LoadBaseline("p1")
+	if err != nil || !had {
+		t.Fatalf("no checkpoint on disk: had=%v err=%v", had, err)
+	}
+	if len(rows) != 16 {
+		t.Fatalf("checkpoint must hold the 16 settled files, has %d", len(rows))
+	}
+	if e, ok := rows["up/u03.txt"]; !ok || e.Remote == "" || e.Local == "" {
+		t.Fatalf("an upload's row must carry BOTH signatures (the remote one from a listing): %+v ok=%v", e, ok)
+	}
+
+	r.srv.afterTransfer = nil
+	res2 := r.run()
+	if res2.Conflicts != 0 {
+		t.Fatalf("resume made conflict copies: %+v", res2)
+	}
+	if res2.Uploaded != 8 || res2.Downloaded != 0 {
+		t.Fatalf("resume must finish exactly the 8 pending uploads and redo nothing: %+v", res2)
+	}
+	for i := 0; i < 12; i++ {
+		if _, ok := r.srv.files[fmt.Sprintf("up/u%02d.txt", i)]; !ok {
+			t.Fatalf("up/u%02d.txt never reached the server", i)
+		}
 	}
 }
 

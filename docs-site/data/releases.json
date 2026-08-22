@@ -3,6 +3,65 @@
   "generatedAt": "2026-08-22",
   "releases": [
     {
+      "tag": "v0.24.0",
+      "date": "2026-08-22T05:12:19Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.24.0",
+      "prerelease": false,
+      "headline": "Parallel sync, resumable first runs, a move that keeps history.",
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "Desktop",
+              "text": "Root migration rides sync move, with the watcher stopped."
+            },
+            {
+              "scope": "Sync",
+              "text": "Parallel transfers, resumable first runs, and a move that keeps history."
+            },
+            {
+              "scope": "Sync",
+              "text": "The remote walk lists eight folders at a time."
+            }
+          ]
+        },
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Cliclient",
+              "text": "A half-dead connection cannot freeze a sync forever."
+            },
+            {
+              "scope": "Sync",
+              "text": "A half-written .filex-part-* download is never sync material."
+            },
+            {
+              "scope": "Api,sync",
+              "text": "A dotdot FILENAME is not a traversal, and adoption tolerates coarse mtimes."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": null,
+              "text": "Merge origin/main (v0.23.0) — the night's engine work rides on the release."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.24.0",
+        "ghcr.io/brf-tech/filex:full-v0.24.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
       "tag": "v0.23.0",
       "date": "2026-08-20T18:39:11Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.23.0",

@@ -53,15 +53,26 @@ propagate.
 
 ### An interrupted first run resumes
 
-A first run of a large tree can be cut short — a closed laptop, a dropped
-connection. On the next run there is still no history, and both sides hold the
-files that already came down. Those are **adopted**, not conflicted: a download
-stamps the server's own modification time on the local copy, and two files with
-no history, the same size and a modification time within **two seconds** of each
-other are taken to be the same file (FAT stores times in two-second steps, and
-some tools land a millisecond off). Outside that window the usual rule applies
-and both copies are kept. Change detection against a recorded baseline stays
-exact — the tolerance exists only for files with no history.
+A run of a large tree can be cut short — a closed laptop, a killed watcher, a
+dropped connection. Two things make the next run pick up where it stopped
+instead of starting over:
+
+- **The engine checkpoints its history while it works.** Every 50 settled
+  transfers (or 15 seconds), the files that are now in step on both sides are
+  written to the pair's history — uploads included, with the server asked for
+  what it stored. The next run is then an ordinary incremental one: it finishes
+  the transfers that were still pending and touches nothing that settled.
+- **Files with no history that match are adopted, not conflicted.** A download
+  stamps the server's own modification time on the local copy, and two files
+  with no history, the same size and a modification time within **two
+  seconds** of each other are taken to be the same file (FAT stores times in
+  two-second steps, and some tools land a millisecond off). Outside that window
+  the usual rule applies and both copies are kept. Change detection against a
+  recorded baseline stays exact — the tolerance exists only for files with no
+  history.
+
+A checkpoint records only files that settled on both sides; everything else is
+still "never synced" and is copied across, never deleted.
 
 ### A mirror that is missing is not a mirror that was emptied
 

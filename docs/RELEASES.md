@@ -18,14 +18,38 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.23.0, 20 August 2026
-The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window shows what the engine is doing while it does it. Single files can be kept, not just folders. The filex folder itself is now visible in Settings and can be moved, kept folders and all: a move to another drive is copied across rather than failing, a folder inside the current one is refused rather than half-applied, and if anything goes wrong the pair goes back where its files are instead of quietly unpairing. Unkeeping also stops leaving an empty folder skeleton behind — including one holding nothing but the .DS_Store the Finder dropped in it.
+::: tip Latest — v0.24.0, 22 August 2026
+A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at 0.24 MB/s moves at the speed of the network, and its inventory takes minutes rather than a quarter of an hour. A first sync that is interrupted resumes where it was instead of turning every finished file into a conflict copy, and moving the filex folder — to another drive included — keeps each folder's history, so nothing is transferred twice. A connection that dies quietly behind a proxy is noticed rather than waited on forever. A file whose name happens to contain ".." (Turkish company names end in "A.Ş.") can be previewed, downloaded and synced again. And three ways a sync could have read a missing or unlistable folder as "delete everything" are closed: a folder the server could not list fails the run instead of reading as gone, a pair cannot be pointed at a path that is not there, and a mirror whose drive is unplugged refuses to run rather than emptying the server.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.23.0
-docker pull ghcr.io/brf-tech/filex:full-v0.23.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.24.0
+docker pull ghcr.io/brf-tech/filex:full-v0.24.0
 ```
+
+## v0.24.0
+
+<span class="filex-release-date">22 August 2026</span>
+
+A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at 0.24 MB/s moves at the speed of the network, and its inventory takes minutes rather than a quarter of an hour. A first sync that is interrupted resumes where it was instead of turning every finished file into a conflict copy, and moving the filex folder — to another drive included — keeps each folder's history, so nothing is transferred twice. A connection that dies quietly behind a proxy is noticed rather than waited on forever. A file whose name happens to contain ".." (Turkish company names end in "A.Ş.") can be previewed, downloaded and synced again. And three ways a sync could have read a missing or unlistable folder as "delete everything" are closed: a folder the server could not list fails the run instead of reading as gone, a pair cannot be pointed at a path that is not there, and a mirror whose drive is unplugged refuses to run rather than emptying the server.
+
+**New**
+
+- **Desktop** — Root migration rides sync move, with the watcher stopped.
+- **Sync** — Parallel transfers, resumable first runs, and a move that keeps history.
+- **Sync** — The remote walk lists eight folders at a time.
+
+**Fixed**
+
+- **Cliclient** — A half-dead connection cannot freeze a sync forever.
+- **Sync** — A half-written .filex-part-* download is never sync material.
+- **Api,sync** — A dotdot FILENAME is not a traversal, and adoption tolerates coarse mtimes.
+
+**Other changes**
+
+- Merge origin/main (v0.23.0) — the night's engine work rides on the release.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.24.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.24.0`
 
 ## v0.23.0
 
@@ -268,24 +292,13 @@ The desktop app keeps itself up to date. It checks a static feed on filex.sh (no
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.17.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.17.0`
 
-## v0.16.3
-
-<span class="filex-release-date">12 August 2026</span>
-
-The tab strip, fixed properly. It was permanent in the desktop app and came and went on the web, because 0.16.0 gave the two surfaces different defaults — this package exists so they are one product, so the default is now the same everywhere. A scrollbar had appeared across the 30px row of tabs (a themed-scrollbar rule added at the end of the stylesheet outranked the strip's own), the strip had grown a vertical scrollbar it could never use, and — the real one — enough tabs did not overflow the strip but GREW it, pushing the whole layout off the right edge with no scrollbar anywhere: an embedded custom element is nearly always a flex item, and a flex item will not shrink below its content unless told to. Also: "new tab" no longer scrolls away with the tabs it creates.
-
-**Fixed**
-
-- **Tabs** — The strip differed between surfaces, wore a scrollbar it should not have, and grew instead of scrolling.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.16.3) · `ghcr.io/brf-tech/filex:slim-v0.16.3`
-
 ## Earlier releases
 
-The 59 releases before v0.16.3, in brief. Full notes are on GitHub.
+The 60 releases before v0.17.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.16.3](https://github.com/BRF-Tech/filex/releases/tag/v0.16.3) | 12 August 2026 | The tab strip, fixed properly. It was permanent in the desktop app and came and went on the web, because 0.16.0 gave the two surfaces different defaults — this package exists so they are one product, so the default is now the… |
 | [v0.16.2](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) | 12 August 2026 | Two things a share link got wrong. It changed language when you entered its PIN — the gate was English, the page behind it Turkish, and the screen in between managed both at once. |
 | [v0.16.1](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) | 12 August 2026 | Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the link is created rather than when the first visitor arrives, so the first open is fast too — which is the open that matters, since whoever creates a… |
 | [v0.16.0](https://github.com/BRF-Tech/filex/releases/tag/v0.16.0) | 12 August 2026 | Two things a shared folder was doing the slow way. Its gallery tiles were the original photos — the page asked for a thumbnail and the server streamed the whole file — so a folder of a few dozen photos shipped tens of megabytes… |
@@ -348,4 +361,4 @@ The 59 releases before v0.16.3, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-22 from 79 published releases.</small>
+<small>Generated 2026-08-22 from 80 published releases.</small>

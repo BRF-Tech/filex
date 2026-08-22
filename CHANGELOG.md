@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-08-22
+
+### Fixed
+
+- **An interrupted run — uploads included — continues from a checkpoint.**
+  0.24.0 made an interrupted first run resume for DOWNLOADS (the copy carries
+  the server's mtime, so twins adopt). Uploads could not: the server stamps
+  its own mtime on what it receives, and with the history written only by
+  the settle pass at the very end, a run killed at file 9,000 of 10,000
+  started the next one with no history — every file this machine had pushed
+  came back as a "(server copy)" conflict pair. The engine now writes the
+  baseline every 50 settled transfers (or 15 seconds): download rows are
+  recorded exactly, upload rows are resolved by listing each touched folder
+  once, a cancelled run flushes on a short detached context, and the next
+  run finishes only what was still pending. Measured in the test: 12
+  downloads + 4 uploads, plug pulled — resume does exactly the 8 remaining
+  uploads, zero conflicts.
+
 ## [0.24.0] - 2026-08-22
 
 ### Added

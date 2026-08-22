@@ -66,6 +66,10 @@ type Engine struct {
 	// Transfers caps how many uploads/downloads run at once. 0 means
 	// DefaultTransfers; 1 restores the fully serial engine.
 	Transfers int
+	// CheckpointEvery is how many settled transfers may pass before the
+	// baseline is written mid-run (see checkpoint). 0 means
+	// DefaultCheckpointEvery.
+	CheckpointEvery int
 	// Log receives one line per action. Optional.
 	Log func(string)
 	// Progress receives one short status line per phase — inventory counts,
@@ -178,7 +182,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		}
 	}
 
-	var mu sync.Mutex // guards res and the progress counter; the IO runs unlocked
+	cp := e.newCheckpoint(base, local, remote)
+	var mu sync.Mutex // guards res, the progress counter and cp; the IO runs unlocked
 	done := 0
 	settle := func(a Action, tmp Result, err error) {
 		mu.Lock()
@@ -193,6 +198,10 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 			res.DeletedLocal += tmp.DeletedLocal
 			res.DeletedRemot += tmp.DeletedRemot
 			res.Conflicts += tmp.Conflicts
+			cp.note(a)
+			if cp.due() {
+				cp.flush(ctx)
+			}
 		}
 		done++
 		if done%10 == 0 || done == res.Planned {
@@ -249,6 +258,19 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	}
 	if !stopped {
 		runSerial(rest)
+	}
+	// The last checkpoint. If the run was cancelled, the remaining upload
+	// rows are resolved on a short detached context: the process is leaving,
+	// and five seconds of listing is what makes the next run incremental
+	// instead of a merge.
+	if cp.dirty > 0 {
+		fctx := ctx
+		if ctx.Err() != nil {
+			var cancel context.CancelFunc
+			fctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+		}
+		cp.flush(fctx)
 	}
 	if err := ctx.Err(); err != nil {
 		res.Errors = append(res.Errors, "stopped: "+err.Error())
@@ -456,6 +478,138 @@ func (e *Engine) guardMissingMirror(dir string, base Baseline) error {
 		"If the folder moved: filex sync move %s <new-path>. If its drive is unplugged: plug it back in. "+
 		"To stop syncing it: filex sync remove %s",
 		dir, e.Pair.ID, e.Pair.ID, e.Pair.ID)
+}
+
+// DefaultCheckpointEvery is how many settled transfers pass between two
+// mid-run baseline writes; checkpointInterval caps the wait in time.
+const (
+	DefaultCheckpointEvery = 50
+	checkpointInterval     = 15 * time.Second
+)
+
+// checkpoint writes the baseline DURING a run, not only at its end.
+//
+// The baseline is what makes a run incremental: without it every file present
+// on both sides is a "changed in both places" candidate. It used to be written
+// once, from the settle pass after all the work — so a first run of 10,000
+// files that died at 9,000 (a closed laptop, a killed watcher, a dropped
+// connection) started the next run with no history at all. Downloads survive
+// that thanks to the adopt rule (the copy carries the server's mtime); UPLOADS
+// do not — the server stamps its own mtime on what it receives, so every file
+// this machine had pushed came back as a conflict pair.
+//
+// Rows are recorded as transfers settle: a download's row is exact (the local
+// file was just written and stamped, the remote side is the snapshot the plan
+// was made from); an upload's remote signature is unknown until the server is
+// asked, so uploads are held and resolved at flush time by listing each
+// touched folder ONCE — the same source of truth the settle pass uses. The
+// final settle pass still rewrites the whole baseline from fresh snapshots; a
+// checkpoint only matters when that pass never happens.
+//
+// A checkpoint turns the NEXT run into a non-first run, which enables
+// deletes — deliberately safe: rows exist only for files that settled on both
+// sides, and everything else is still "never synced" and is copied, not
+// deleted.
+type checkpoint struct {
+	e       *Engine
+	rows    Baseline // working copy of the loaded baseline
+	local   Snapshot // pre-run snapshots: the signatures that were transferred
+	remote  Snapshot
+	pending map[string]Node // uploaded rel → its local node, remote side not yet listed
+	dirty   int
+	last    time.Time
+}
+
+func (e *Engine) newCheckpoint(base Baseline, local, remote Snapshot) *checkpoint {
+	rows := make(Baseline, len(base))
+	for k, v := range base {
+		rows[k] = v
+	}
+	return &checkpoint{e: e, rows: rows, local: local, remote: remote, pending: map[string]Node{}, last: time.Now()}
+}
+
+func (c *checkpoint) every() int {
+	if c.e.CheckpointEvery > 0 {
+		return c.e.CheckpointEvery
+	}
+	return DefaultCheckpointEvery
+}
+
+// note records one SETTLED action. Called under the engine's mutex.
+func (c *checkpoint) note(a Action) {
+	switch a.Kind {
+	case ActionDownload:
+		r, ok := c.remote[a.Rel]
+		if !ok {
+			return
+		}
+		lp, err := localPathOf(c.e.Pair.Local, a.Rel)
+		if err != nil {
+			return
+		}
+		info, err := os.Lstat(lp)
+		if err != nil || !info.Mode().IsRegular() {
+			return
+		}
+		l := Node{Rel: a.Rel, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}
+		c.rows[a.Rel] = BaselineEntry{Local: l.Signature(), Remote: r.Signature()}
+	case ActionUpload:
+		l, ok := c.local[a.Rel]
+		if !ok || l.IsDir {
+			return
+		}
+		c.pending[a.Rel] = l
+	case ActionDeleteLocal, ActionDeleteRemot:
+		delete(c.rows, a.Rel)
+		delete(c.pending, a.Rel)
+	default:
+		return
+	}
+	c.dirty++
+}
+
+func (c *checkpoint) due() bool {
+	return c.dirty >= c.every() || (c.dirty > 0 && time.Since(c.last) >= checkpointInterval)
+}
+
+// flush resolves the held uploads and writes the baseline. A folder that
+// cannot be listed right now simply keeps its uploads pending; they are
+// recorded at the next flush or by the settle pass.
+func (c *checkpoint) flush(ctx context.Context) {
+	byDir := map[string][]string{}
+	for rel := range c.pending {
+		d := path.Dir(rel)
+		if d == "." {
+			d = ""
+		}
+		byDir[d] = append(byDir[d], rel)
+	}
+	for d, rels := range byDir {
+		listing, err := c.e.API.List(ctx, joinRemote(c.e.Pair.Remote, d))
+		if err != nil {
+			continue
+		}
+		seen := make(map[string]ListedFile, len(listing.Files))
+		for _, f := range listing.Files {
+			seen[f.Basename] = f
+		}
+		for _, rel := range rels {
+			f, ok := seen[path.Base(rel)]
+			if !ok || f.IsDir {
+				continue
+			}
+			r := Node{Rel: rel, Size: f.Size, ModMillis: f.LastModified}
+			c.rows[rel] = BaselineEntry{Local: c.pending[rel].Signature(), Remote: r.Signature()}
+			delete(c.pending, rel)
+		}
+	}
+	if err := c.e.Store.SaveBaseline(c.e.Pair.ID, c.rows); err != nil {
+		c.e.logf("!! checkpoint: %v", err)
+	} else {
+		c.e.logf("checkpoint: %d row(s) recorded, %d upload(s) awaiting a listing", len(c.rows), len(c.pending))
+	}
+	c.dirty = 0
+	c.last = time.Now()
 }
 
 // DefaultTransfers is how many uploads/downloads run concurrently. Four is
