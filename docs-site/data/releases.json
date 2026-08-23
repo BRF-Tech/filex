@@ -3,6 +3,21 @@
   "generatedAt": "2026-08-23",
   "releases": [
     {
+      "tag": "v0.25.1",
+      "date": "2026-08-23T08:58:53Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.25.1",
+      "prerelease": false,
+      "headline": "FTPS survives a DNS hiccup at start-up.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.25.1",
+        "ghcr.io/brf-tech/filex:full-v0.25.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
       "tag": "v0.25.0",
       "date": "2026-08-23T08:29:59Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.25.0",

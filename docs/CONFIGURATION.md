@@ -433,6 +433,28 @@ off.
 | `FILEX_SENTRY_DSN` | — | Sentry/GlitchTip DSN. |
 | `FILEX_SENTRY_ENVIRONMENT` | — | Tag events (e.g. `production`). |
 
+**What is reported.** filex does not sprinkle capture calls through the code;
+it forwards its own log. Every `ERROR` record and every `WARN` record that
+carries an `err` attribute becomes one event, grouped by the log message
+(`thumb generate failed`, `ops: step failed`, …). `INFO` never reaches the
+tracker — a listener closed by a shutdown, for instance, is an `INFO` line.
+
+**Log attributes travel with the event.** Everything the log line carries —
+`path`, `err`, `driver`, `attempt`, `storage`, `node`, … plus `source`
+(`file.go:line` of the call site) — is attached twice:
+
+- as **tags** when the value is short (first line, up to 120 characters), so
+  the issue list and the tag filter show *which* file, driver or error;
+- in full under the **`log` context** of the event (an ffmpeg transcript in
+  `err` is kept whole there, untruncated).
+
+Values whose key names a credential (`token`, `password`, `secret`,
+`authorization`, `cookie`, `credential`, `private`, `*_key`, `key`) are
+replaced with `[filtered]` before either. Log sites do not log secrets on
+purpose, but a wrapped HTTP error or a config dump can carry one, and the key
+is the cheapest reliable signal; an S3 object key is caught by the same rule —
+the `path` beside it says the same thing.
+
 ---
 
 ## Updates

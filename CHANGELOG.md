@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-08-23
+
+### Fixed
+
+- **Error-tracker events carry the log line's context again.** The slog →
+  Sentry/GlitchTip bridge forwarded the message and nothing a person could
+  act on: eleven `thumb generate failed` events with no file and no error in
+  the issue list or the API, `driver init attempt failed` without the driver.
+  Every attribute of the record now travels with the event — as **tags**
+  when short (`path`, `err`'s first line, `driver`, `attempt`, `node`, …,
+  plus `source` = `file.go:line`), and in full under the **`log` context**
+  (a multi-page ffmpeg transcript in `err` is kept whole there). Keys that
+  name a credential (`token`, `password`, `secret`, `authorization`,
+  `cookie`, `credential`, `private`, `*_key`) are replaced with `[filtered]`
+  before either. Proven by a bridge test with a capture transport that fails
+  on the previous code (`tags=map[]`, `client_secret` in clear).
+- **A listener closed by a shutdown is no longer an error.** `ftps: listener
+  stopped` (and its SFTP/NFS twins) logged at `ERROR` on every deploy and
+  filed an issue each time. The line is `INFO` with `reason=shutdown` when
+  the server is stopping or the listener returned cleanly; only a listener
+  that dies while the server is meant to be running is `ERROR` with
+  `reason=unexpected` and the error.
+- **`driver init attempt failed` says which driver, which error, which
+  attempt.** Intermediate attempts are `WARN` (`driver init attempt failed,
+  will retry` with `driver`, `attempt`, `of`, `err`); only the last one is
+  `ERROR` (`driver init failed after all attempts`). The OIDC caller's
+  follow-up line (`oidc: SSO disabled until restart`) states the consequence
+  without re-filing the error, so one failure is one issue.
+
 ## [0.25.1] - 2026-08-23
 
 ### Fixed

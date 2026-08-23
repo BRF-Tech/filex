@@ -202,8 +202,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				return d.Init(c, oidcCfg)
 			}, []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second})
 			if oidcErr != nil {
-				slog.Warn("oidc driver init failed after retries; SSO disabled until restart",
-					slog.String("err", oidcErr.Error()))
+				// The failure itself was just logged at ERROR by
+				// initWithBackoff (driver, error, attempt count); this line
+				// states the consequence and deliberately carries no `err`,
+				// so the error tracker files one issue, not two.
+				slog.Warn("oidc: SSO disabled until restart",
+					slog.String("driver", "oidc"),
+					slog.String("reason", oidcErr.Error()))
 				continue
 			}
 			enabled = append(enabled, d)
@@ -1198,30 +1203,16 @@ func (s *Server) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Same rule as above for every protocol listener: the port failing to
+	// bind is a complaint, not a reason to stop serving the web app.
 	if s.sftp != nil {
-		go func() {
-			if err := s.sftp.ListenAndServe(); err != nil {
-				// Same rule as above: the SFTP port failing to bind is a
-				// complaint, not a reason to stop serving the web app.
-				slog.Error("sftp: listener stopped", slog.String("err", err.Error()))
-			}
-		}()
+		go serveListener(ctx, "sftp", s.sftp.ListenAndServe)
 	}
-
 	if s.ftps != nil {
-		go func() {
-			if err := s.ftps.ListenAndServe(); err != nil {
-				slog.Error("ftps: listener stopped", slog.String("err", err.Error()))
-			}
-		}()
+		go serveListener(ctx, "ftps", s.ftps.ListenAndServe)
 	}
-
 	if s.nfs != nil {
-		go func() {
-			if err := s.nfs.ListenAndServe(); err != nil {
-				slog.Error("nfs: listener stopped", slog.String("err", err.Error()))
-			}
-		}()
+		go serveListener(ctx, "nfs", s.nfs.ListenAndServe)
 	}
 
 	slog.Info("filex listening", slog.String("addr", s.cfg.Listen))
@@ -1261,13 +1252,54 @@ func initWithBackoff(ctx context.Context, driver string, init func(context.Conte
 			}
 			return nil
 		}
-		slog.Warn("driver init attempt failed",
+		// An attempt that still has retries behind it is a warning; the
+		// last one is the failure. Both name the driver, the error and the
+		// count, because "driver init attempt failed" alone was the whole of
+		// what the error tracker showed.
+		attrs := []any{
 			slog.String("driver", driver),
 			slog.Int("attempt", i+1),
-			slog.Int("remaining", len(backoffs)-i-1),
-			slog.String("err", err.Error()))
+			slog.Int("of", len(backoffs)),
+			slog.String("err", err.Error()),
+		}
+		if i+1 < len(backoffs) {
+			slog.Warn("driver init attempt failed, will retry", attrs...)
+		} else {
+			slog.Error("driver init failed after all attempts", attrs...)
+		}
 	}
 	return err
+}
+
+// serveListener runs one protocol listener and reports how it ended. A
+// listener that returns while the server is shutting down ended because we
+// closed it, and that is an INFO line, not an error — before this, every
+// deploy logged "ftps: listener stopped" at ERROR and filed an issue with the
+// error tracker. Only a listener that stops while the server is still meant
+// to be running is a failure.
+func serveListener(ctx context.Context, name string, serve func() error) {
+	err := serve()
+	slog.Log(ctx, listenerStopLevel(ctx, err), name+": listener stopped", listenerStopAttrs(ctx, err)...)
+}
+
+// listenerStopLevel decides how loud a listener's exit is: INFO when it
+// returned cleanly or the server was shutting down, ERROR otherwise.
+func listenerStopLevel(ctx context.Context, err error) slog.Level {
+	if err == nil || ctx.Err() != nil {
+		return slog.LevelInfo
+	}
+	return slog.LevelError
+}
+
+func listenerStopAttrs(ctx context.Context, err error) []any {
+	attrs := []any{slog.String("reason", "shutdown")}
+	if ctx.Err() == nil {
+		attrs[0] = slog.String("reason", "unexpected")
+	}
+	if err != nil {
+		attrs = append(attrs, slog.String("err", err.Error()))
+	}
+	return attrs
 }
 
 // quotaMetrics bridges the accounting store to the Prometheus exposition.
