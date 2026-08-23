@@ -1,9 +1,25 @@
 name: Release
 
-# On a version tag (v*): publish the binaries (goreleaser -> GitHub Release) and
-# the Docker images (-> ghcr.io/brf-tech/filex). The frontend is built and
-# embedded first so the binaries carry the admin UI. The images rebuild the
-# frontend themselves inside their multi-stage Dockerfiles.
+# On a version tag (v*): publish the binaries (goreleaser -> GitHub Release),
+# the Docker images (-> ghcr.io/brf-tech/filex), the npm packages and the
+# desktop installers. The frontend is built and embedded first so the
+# binaries carry the admin UI. The images rebuild the frontend themselves
+# inside their multi-stage Dockerfiles.
+#
+# Job graph — and why it is shaped like this:
+#
+#   binaries ──┬── docker   (multi-arch images, ~20-30 min under QEMU)
+#              └── desktop  (three installers, attached to the Release)
+#   npm            (independent)
+#
+# `binaries` is goreleaser alone: it is what CREATES the GitHub Release, and
+# the only thing the other two need. Until v0.25.0 goreleaser and the docker
+# builds were ONE job, so `desktop` (needs: that job) waited for the arm64
+# QEMU emulation to finish before it could upload — measured on v0.20.2:
+# goreleaser done at minute 5, the job done at minute 30, the installers idle
+# for the 25 minutes in between. Splitting the job lets docker and desktop run
+# side by side and puts the installers on the Release while the images are
+# still building.
 #
 # npm publishing is a SEPARATE job (`npm`) so it can be re-run on its own — a
 # failed publish (e.g. a bad token) does not force goreleaser to re-run, which
@@ -20,7 +36,10 @@ permissions:
   packages: write   # push images to ghcr.io
 
 jobs:
-  release:
+  # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
+  # Creates the Release. Everything that uploads to it depends on this job
+  # and on nothing else.
+  binaries:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +65,6 @@ jobs:
           cp -r web/dist/. backend/embed/admin/
           cp -r packages/webcomponent/dist/. backend/embed/web/
 
-      # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
@@ -57,10 +75,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Docker images → ghcr.io/brf-tech/filex (multi-arch) ─────────────
-      # QEMU is only exercised by the final runtime stage (apk installs);
-      # the Node/Go build stages are pinned to $BUILDPLATFORM and the Go
-      # binary cross-compiles via TARGETARCH — see docker/Dockerfile.
+  # ── Docker images → ghcr.io/brf-tech/filex (multi-arch) ─────────────────
+  # Its own job since v0.25.0 (see the header). `needs: binaries` is not a
+  # build dependency — the Dockerfiles build everything from source — it keeps
+  # the order the operators rely on: a tag whose binaries failed to release
+  # must not quietly publish `:latest`.
+  #
+  # QEMU is only exercised by the final runtime stage (apk installs);
+  # the Node/Go build stages are pinned to $BUILDPLATFORM and the Go
+  # binary cross-compiles via TARGETARCH — see docker/Dockerfile.
+  docker:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - id: meta
         run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
@@ -81,9 +109,15 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.date }}
+          # `slim`/`slim-vX` are the names the release notes (.goreleaser.yml
+          # header) and docs/DOCKER.md have advertised all along; until
+          # v0.25.0 they were never actually pushed, so every release note's
+          # `docker pull …:slim-vX` 404'd. Same image as :latest / :vX.
           tags: |
             ghcr.io/brf-tech/filex:latest
             ghcr.io/brf-tech/filex:${{ github.ref_name }}
+            ghcr.io/brf-tech/filex:slim
+            ghcr.io/brf-tech/filex:slim-${{ github.ref_name }}
       - name: Full image (extra thumbnail tools)
         uses: docker/build-push-action@v6
         with:
@@ -100,7 +134,7 @@ jobs:
             ghcr.io/brf-tech/filex:full-${{ github.ref_name }}
 
   # ── npm packages → npmjs (@brftech scope) ─────────────────────────────
-  # Independent of `release` so it can be re-run on its own. Publishes only if
+  # Independent of `binaries` so it can be re-run on its own. Publishes only if
   # an NPM_TOKEN repo secret is set — and that token MUST be an npm *Automation*
   # token (or a granular access token), which bypasses 2FA; a "Publish" token
   # still demands an OTP and fails with EOTP in CI. Package versions are pinned
@@ -139,13 +173,15 @@ jobs:
   # installed it. A package that is produced only when somebody remembers is a
   # package that is two releases old.
   #
-  # ⚠⚠ `needs: release`, and the reason is the UPLOAD rather than the build.
+  # ⚠⚠ `needs: binaries`, and the reason is the UPLOAD rather than the build.
   # The installer embeds the CLI, but desktop/scripts/fetch-cli.mjs builds that
   # from source when FILEX_CLI_BIN is unset, so the build itself waits for
   # nothing — which is why this job first ran in parallel. The GitHub Release
-  # is created by goreleaser inside `release`, and `gh release upload` against
+  # is created by goreleaser inside `binaries`, and `gh release upload` against
   # a tag with no release yet fails: v0.20.1 duly produced a 125 MB AppImage
-  # and an 87 MB .deb, then attached neither.
+  # and an 87 MB .deb, then attached neither. It does NOT wait for `docker`:
+  # the images are not an input to the installers, and waiting for them cost
+  # every release ~25 minutes of idle (v0.20.2 measurement in the header).
   #
   # ⚠ macOS ships UNSIGNED but ad-hoc SEALED (desktop/scripts/adhoc-sign.cjs).
   # The distinction is what dialog the user gets: a linker-signed-only bundle
@@ -165,7 +201,7 @@ jobs:
   # these files.
   desktop:
     name: Desktop packages (${{ matrix.label }})
-    needs: release
+    needs: binaries
     strategy:
       fail-fast: false
       matrix:
