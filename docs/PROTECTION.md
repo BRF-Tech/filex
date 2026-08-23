@@ -1,11 +1,13 @@
-# Protection: antivirus, trash retention & version retention
+# Protection: antivirus, trash retention, version retention & share-link life
 
 The v0.4 "Koru" wave groups filex's data-protection knobs behind one admin
 surface: optional **ClamAV upload scanning**, the existing **trash retention**
-window, and a new **version retention** count. Trash and versioning themselves
-are documented in [TRASH-VERSIONING.md](TRASH-VERSIONING.md).
+window, a **version retention** count and — since v0.25 — the **maximum life of
+a share link**. Trash and versioning themselves are documented in
+[TRASH-VERSIONING.md](TRASH-VERSIONING.md); share links in [SHARING.md](SHARING.md).
 
 - [Protection settings API](#protection-settings-api)
+- [Share-link life (`share.max_ttl_days`)](#share-link-life-sharemax_ttl_days)
 - [Antivirus (ClamAV)](#antivirus-clamav)
 - [Version retention (`versions.keep_n`)](#version-retention-versionskeep_n)
 - [The `file.infected` event](#the-fileinfected-event)
@@ -18,13 +20,33 @@ Admin-only, session or admin-scoped token:
 
 | Method & path | Body | Notes |
 |---|---|---|
-| `GET /api/admin/protection` | — | Returns `{"trash_retention_days":30,"versions_keep_n":0,"antivirus":{"enabled":false,"binary":""}}`. `antivirus` is a **live probe** of the resolved ClamAV binary (`binary` is its base name — `clamscan` / `clamdscan` — or `""`). |
-| `PATCH /api/admin/protection` | `{"trash_retention_days"?: n, "versions_keep_n"?: n}` | Partial update; echoes the fresh GET shape. Validation: retention **1–3650** days, keep_n **0–1000** (`0` = unlimited, retention job off). Out-of-range → **400**. |
+| `GET /api/admin/protection` | — | Returns `{"trash_retention_days":30,"versions_keep_n":0,"share_max_ttl_days":7,"shares_over_max_ttl":0,"antivirus":{"enabled":false,"binary":""}}`. `antivirus` is a **live probe** of the resolved ClamAV binary (`binary` is its base name — `clamscan` / `clamdscan` — or `""`). `shares_over_max_ttl` is a read-only count (below). |
+| `PATCH /api/admin/protection` | `{"trash_retention_days"?: n, "versions_keep_n"?: n, "share_max_ttl_days"?: n}` | Partial update; echoes the fresh GET shape. Validation: retention **1–3650** days, keep_n **0–1000** (`0` = unlimited, retention job off), share TTL **0–3650** days (`0` = no ceiling). Out-of-range → **400**. |
 
-Both values live in the `settings` table (`trash.retention_days`,
-`versions.keep_n`) — no migration, and the generic
+The values live in the `settings` table (`trash.retention_days`,
+`versions.keep_n`, `share.max_ttl_days`) — no migration, and the generic
 `/api/admin/settings` endpoints see the same rows. Antivirus availability is
 **not** a DB setting; it is an operator/environment concern (below).
+
+## Share-link life (`share.max_ttl_days`)
+
+The longest life a **new** share link or file request may be given. Default
+**7 days**; `0` removes the ceiling; `FILEX_SHARE_MAX_TTL` seeds it once on a
+fresh install. A link created with no expiry gets `now + max`, a longer request
+is shortened, and the create response reports the stored `expires_at` plus
+`expiry_clamped: true` when the server changed the request. The share dialogs
+read the ceiling from `GET /api/capabilities` (`share_max_ttl_days`) and only
+offer expiries under it. Cached folder archives are swept on the same clock
+(`FILEX_SHAREZIP_MAX_AGE`), so a week-old share has neither a working link nor a
+ZIP on disk.
+
+**Existing links are never modified.** Changing the ceiling is a rule for links
+created from then on. `shares_over_max_ttl` tells the operator how many live
+links currently outlive the ceiling (no expiry, or an expiry later than
+`now + max`); the Protection page shows the number and the boot log prints it.
+Revoking any of them is a manual decision under **Shares** — the intended case
+is a hosting operator whose tenants handed customers long-lived links before the
+limit existed.
 
 ## Antivirus (ClamAV)
 

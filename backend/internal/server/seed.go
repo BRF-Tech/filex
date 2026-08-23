@@ -4,13 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strconv"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
+
+// shareMaxTTLDaysSeed turns FILEX_SHARE_MAX_TTL ("7", "7d", "168h", "0") into
+// the whole-day string the setting stores. Anything unparsable seeds nothing,
+// so the default applies rather than a garbage value.
+func shareMaxTTLDaysSeed(v string) string {
+	if v == "" {
+		return ""
+	}
+	d, err := config.ParseDurationDays(v)
+	if err != nil || d < 0 {
+		slog.Warn("seed setting", slog.String("key", share.SettingKeyMaxTTLDays), slog.String("err", "unparsable FILEX_SHARE_MAX_TTL, ignored"), slog.String("value", v))
+		return ""
+	}
+	days := int((d + 24*time.Hour - 1) / (24 * time.Hour))
+	return strconv.Itoa(days)
+}
 
 // seedFromEnv applies one-time bootstrap config from env to the DB, only when
 // the target record is ABSENT. It lets a fresh `helm install` / `docker
@@ -35,6 +54,7 @@ func seedFromEnv(ctx context.Context, store db.Store, cfg config.Config) {
 	// Branding + trash retention.
 	seedSetting("site_name", cfg.Seed.SiteName)
 	seedSetting("trash.retention_days", cfg.Seed.TrashDays)
+	seedSetting(share.SettingKeyMaxTTLDays, shareMaxTTLDaysSeed(cfg.Seed.ShareMaxTTLDays))
 
 	// SMTP — seed the mailer's settings keys when host/port/from are all set.
 	if cfg.Seed.SMTP.Configured() {

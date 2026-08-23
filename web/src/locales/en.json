@@ -924,7 +924,7 @@
   },
   "protection": {
     "title": "Protection",
-    "subtitle": "Trash retention, version policy and antivirus status",
+    "subtitle": "Trash retention, version policy, share-link life and antivirus status",
     "unsupported": "The server does not support this version — the protection settings API was not found. This page activates after a backend update.",
     "savedOk": "Protection settings saved",
     "trash": {
@@ -940,6 +940,14 @@
       "label": "Versions to keep",
       "hint": "0 = unlimited (no cleanup)",
       "errMin": "Enter an integer greater than or equal to 0"
+    },
+    "share": {
+      "title": "Share links",
+      "desc": "The longest life a new share link can be given. A link created without an expiry gets this one; a longer request is shortened to it. Folder archives built for share links are discarded after the same period. Links that already exist are never changed.",
+      "label": "Maximum link life (days)",
+      "hint": "0 = no limit. Default 7.",
+      "errMin": "Enter an integer greater than or equal to 0",
+      "overMax": "{n} existing link(s) outlive this limit. They keep working — revoke them under Shares if you want them gone."
     },
     "av": {
       "title": "Antivirus",

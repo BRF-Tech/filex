@@ -37,10 +37,11 @@ import (
 const testPassword = "FtpPass!1"
 
 type harness struct {
-	srv   *ftpsrv.Server
-	store db.Store
-	addr  string
-	roots map[int64]string
+	srv     *ftpsrv.Server
+	store   db.Store
+	addr    string
+	roots   map[int64]string
+	certDir string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -53,7 +54,7 @@ func newHarness(t *testing.T) *harness {
 	// credential rather than refusing it — same as SFTP.
 	res.Confine = protocolauth.ConfineHonor
 
-	hz := &harness{store: store, roots: map[int64]string{}}
+	hz := &harness{store: store, roots: map[int64]string{}, certDir: t.TempDir()}
 	srv, err := ftpsrv.New(ftpsrv.Config{
 		Enabled:    true,
 		Addr:       "127.0.0.1:0",
@@ -62,7 +63,7 @@ func newHarness(t *testing.T) *harness {
 		// wide one on a shared machine is a good way to collide with something.
 		PassivePortMin: 0,
 		PassivePortMax: 0,
-		CertDir:        t.TempDir(),
+		CertDir:        hz.certDir,
 		Store:          store,
 		Auth:           res,
 		ACL:            acl.New(store),

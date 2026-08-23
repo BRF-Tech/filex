@@ -132,6 +132,18 @@ type CacheConfig struct {
 	// Disabled turns the whole thing off (FILEX_CACHE=0). With no slow
 	// storage configured it never does anything anyway.
 	Disabled bool `yaml:"disabled"`
+
+	// ShareZipWarmMaxBytes is the largest folder (sum of file sizes) the
+	// folder-share ZIP warmer pre-builds (FILEX_SHAREZIP_WARM_MAX_BYTES,
+	// default 2 GiB; 0 = no ceiling). Bigger folders are still zipped — on
+	// demand, when a visitor clicks download — they are just not built
+	// speculatively. See docs/SHARING.md.
+	ShareZipWarmMaxBytes int64 `yaml:"sharezip_warm_max_bytes"`
+	// ShareZipMaxAge is how long a cached folder-share ZIP may sit on disk
+	// before the sweeper removes it even though its share is still live
+	// (FILEX_SHAREZIP_MAX_AGE, default 7d; 0 = keep for the share's life).
+	// Accepts Go durations plus a `d` suffix ("7d", "36h").
+	ShareZipMaxAge time.Duration `yaml:"sharezip_max_age"`
 }
 
 // UploadConfig — staged (resumable, driver-agnostic) uploads. See
@@ -302,12 +314,17 @@ type NFSConfig struct {
 // internal/server/seed.go. (Auth/OIDC is env-authoritative already via
 // AuthConfig, so it is not duplicated here.)
 type SeedConfig struct {
-	AdminEmail    string      `yaml:"admin_email"`
-	AdminPassword string      `yaml:"admin_password"`
-	SiteName      string      `yaml:"site_name"`
-	TrashDays     string      `yaml:"trash_retention_days"`
-	SMTP          SeedSMTP    `yaml:"smtp"`
-	Storage       SeedStorage `yaml:"storage"`
+	AdminEmail    string `yaml:"admin_email"`
+	AdminPassword string `yaml:"admin_password"`
+	SiteName      string `yaml:"site_name"`
+	TrashDays     string `yaml:"trash_retention_days"`
+	// ShareMaxTTLDays seeds the `share.max_ttl_days` setting — the longest
+	// life a NEW share link may be given (FILEX_SHARE_MAX_TTL, e.g. "7" or
+	// "30d"; "0" = unlimited). Like the other seeds it only applies when the
+	// setting has never been written; after that the admin UI owns it.
+	ShareMaxTTLDays string      `yaml:"share_max_ttl_days"`
+	SMTP            SeedSMTP    `yaml:"smtp"`
+	Storage         SeedStorage `yaml:"storage"`
 }
 
 // SeedSMTP mirrors the mailer's smtp.* settings keys.
@@ -578,6 +595,10 @@ func Default() Config {
 			StagingTTL:    24 * time.Hour,
 			SweepInterval: time.Hour,
 		},
+		Cache: CacheConfig{
+			ShareZipWarmMaxBytes: 2 << 30,
+			ShareZipMaxAge:       7 * 24 * time.Hour,
+		},
 		Demo: DemoConfig{
 			Mode: false,
 			User: "demo@demo.com",
@@ -589,6 +610,28 @@ func Default() Config {
 			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin"},
 		},
 	}
+}
+
+// ParseDurationDays is time.ParseDuration plus a `d` (day) suffix, which Go's
+// parser lacks and which is the unit people actually write retention in.
+// "7d" = 168h. A bare number is also accepted as days, so FILEX_SHARE_MAX_TTL=7
+// and =7d mean the same thing.
+func ParseDurationDays(v string) (time.Duration, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, errors.New("empty duration")
+	}
+	if n, err := strconv.ParseFloat(v, 64); err == nil {
+		return time.Duration(n * float64(24*time.Hour)), nil
+	}
+	if strings.HasSuffix(v, "d") {
+		n, err := strconv.ParseFloat(strings.TrimSuffix(v, "d"), 64)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(n * float64(24*time.Hour)), nil
+	}
+	return time.ParseDuration(v)
 }
 
 // Load reads a YAML file and applies environment overrides. Pass empty
@@ -738,6 +781,20 @@ func applyEnv(c *Config) {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			c.Cache.SlowBytesPerSec = n
 		}
+	}
+	if v := os.Getenv("FILEX_SHAREZIP_WARM_MAX_BYTES"); v != "" {
+		// 0 is a legal value here (no ceiling), unlike the sizes above.
+		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && n >= 0 {
+			c.Cache.ShareZipWarmMaxBytes = n
+		}
+	}
+	if v := os.Getenv("FILEX_SHAREZIP_MAX_AGE"); v != "" {
+		if d, err := ParseDurationDays(v); err == nil && d >= 0 {
+			c.Cache.ShareZipMaxAge = d
+		}
+	}
+	if v := os.Getenv("FILEX_SHARE_MAX_TTL"); v != "" {
+		c.Seed.ShareMaxTTLDays = v
 	}
 	/* kimlik:e3 cloud */
 	if v := os.Getenv("FILEX_CLOUD"); v != "" {

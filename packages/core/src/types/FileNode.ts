@@ -54,6 +54,9 @@ export interface ShareInfo {
   url: string;
   password_pin?: string | null;
   expires_at?: string | null;
+  /** True when the server shortened (or set) the expiry to honour its
+   *  max-TTL setting — the UI then shows the real date, not the request. */
+  expiry_clamped?: boolean;
   max_downloads?: number | null;
   downloads?: number;
   created_at?: string;
@@ -82,6 +85,9 @@ export interface Capabilities {
   convert_url?: string | null;
   max_chunk_mb?: number;
   upload_limit_mb?: number;
+  /** Longest life a new share link may be given, in days (0 = no ceiling).
+   *  Read by the share dialogs so they offer only expiries the server keeps. */
+  share_max_ttl_days?: number;
   external?: {
     onlyoffice?: ExternalServiceStatus;
     drawio?: ExternalServiceStatus;

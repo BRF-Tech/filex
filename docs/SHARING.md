@@ -45,8 +45,24 @@ if requested, the one‑time PIN.
 | Option | Meaning |
 |---|---|
 | `password` | Generate a random PIN (shown once). |
-| `expires_at` | Absolute expiry (RFC3339). |
+| `expires_at` | Absolute expiry (RFC3339). Capped by the server's **maximum link life** (below). |
 | `max_downloads` | Auto‑expire after N downloads. |
+
+**Every new link has a maximum life.** The admin sets it under **Protection →
+Share links** (`share.max_ttl_days`, default **7 days**, `0` = no ceiling;
+seeded once from `FILEX_SHARE_MAX_TTL`). A link created without `expires_at`
+gets `now + max`; one asking for more is shortened to it. The response says so
+— `expires_at` is the date actually stored and `expiry_clamped: true` marks a
+request the server changed — and the dialogs only offer choices the server will
+keep (a 7-day server shows *1 day / 7 days*, not *30 days* or *Never*), with the
+real expiry printed under the fresh link.
+
+⚠ **Links that already exist are never touched.** Lowering the ceiling changes
+what new links get, not what old ones have: a customer's link minted last month
+keeps its own expiry (or none). What the server does instead is *count* them —
+`GET /api/admin/protection` returns `shares_over_max_ttl`, the Protection page
+shows the number, and the boot log prints it — so whoever lowered the limit can
+revoke any of them by hand under **Shares**, or leave them alone.
 
 **The download cap is exact.** A download is claimed against the cap *before*
 the bytes are served, so "3 downloads" hands out three files even when several
@@ -82,19 +98,30 @@ the folder invalidates the archive and the next pass rebuilds it. While a build
 is running, `/s/{token}` shows a "preparing… %" page (`?zip=status` polls,
 `?zip=wait` blocks); nothing about that is counted as a download.
 
-Two rules keep that cache from becoming a disk problem:
+Four rules keep that cache from becoming a disk problem:
 
 - **Nothing outlives its share.** Each warmer pass deletes every archive whose
   node no longer has an active folder share — expired, revoked, or out of
-  downloads — plus the leftovers of builds that died with a restart. There is no
-  retention to configure: an archive is regenerable, so a link that cannot be
-  used has no archive.
+  downloads — plus the leftovers of builds that died with a restart. An archive
+  is regenerable, so a link that cannot be used has no archive.
 - **A build stops when its share does.** A build that is still running when its
   share expires abandons itself within about a minute and deletes its partial
   file. (A 16.7 GB folder shared for eleven minutes once kept reading from S3
   for three hours after the link had died, then left a 15 GB archive nobody ever
-  downloaded.) Nothing is ever refused for being large: a live share is built
-  however big it is, and a visitor who clicks always gets a build.
+  downloaded.)
+- **The warmer has a ceiling; the download button does not.** Folders whose
+  files add up to more than `FILEX_SHAREZIP_WARM_MAX_BYTES` (default **2 GiB**,
+  `0` = no ceiling) are *not* pre-built — not when the link is created, not on
+  the five-minute pass. They are zipped the moment a visitor clicks download,
+  with the same "preparing… %" page as before, and cached from then on like any
+  other. Nothing is refused for being large; the server just does not spend
+  hours of object-storage reads on a link nobody may ever open. The warmer logs
+  each such folder once.
+- **No archive older than a week.** Whatever its share's state, a cached ZIP
+  older than `FILEX_SHAREZIP_MAX_AGE` (default **7d**, `0` = keep for the
+  share's life) is swept and rebuilt on demand — or by the next warm pass, if
+  the folder is under the ceiling. Together with the 7-day default link life
+  this bounds the cache to what is actually being shared this week.
 
 ⚠ **Operators: exclude the cache directory from backups.** `<data_dir>/cache`
 (prepared copies *and* folder-share ZIPs) is regenerable by definition; backing

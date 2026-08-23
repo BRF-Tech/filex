@@ -345,10 +345,17 @@ Maintainer-only. Reproducible, automated by CI.
 7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
 8. Push: `git push origin main --tags`.
 
-CI does the rest:
-- `release:goreleaser` — multi-arch binaries → GitLab Release.
-- `release:npm` — publishes `@brftech/filex-core`, `@brftech/filex`,
-  `@brftech/filex-react` to the GitLab npm registry.
-- `release:docker` — pushes `:slim-vX.Y.Z`, `:full-vX.Y.Z`, `:latest`.
+CI does the rest (GitHub Actions `release.yml`, four jobs):
+- `binaries` — goreleaser: multi-arch binaries → the GitHub Release. It is
+  what *creates* the Release, so the two uploaders below depend on it and on
+  nothing else.
+- `docker` (needs `binaries`) — pushes `:vX.Y.Z`, `:slim-vX.Y.Z`,
+  `:full-vX.Y.Z`, `:latest`, `:slim`, `:full` to ghcr.io. The slow one
+  (arm64 under QEMU, 20-30 min).
+- `desktop` (needs `binaries`, **not** `docker`) — three installers, attached
+  to the Release while the images are still building. Before v0.25.0 it
+  waited for the docker builds it never needed — ~25 idle minutes a release.
+- `npm` (independent) — publishes `@brftech/filex-core`, `@brftech/filex`,
+  `@brftech/filex-react`.
 
 If something fails, fix forward — never delete a published tag.

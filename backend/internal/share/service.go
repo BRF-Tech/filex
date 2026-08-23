@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,20 @@ var ErrExpired = errors.New("share: expired")
 
 // ErrBadPIN is returned when an incorrect PIN is supplied.
 var ErrBadPIN = errors.New("share: bad pin")
+
+// SettingKeyMaxTTLDays is the settings row holding the longest life a NEW
+// share link may be given, in days. Absent = DefaultMaxTTLDays; "0" = no
+// ceiling. Written by the admin Protection page (PATCH /api/admin/protection
+// {share_max_ttl_days}) and seeded once from FILEX_SHARE_MAX_TTL.
+const SettingKeyMaxTTLDays = "share.max_ttl_days"
+
+// DefaultMaxTTLDays applies when the setting has never been written. Seven
+// days: a link that is meant to be opened this week, and a folder archive
+// that does not have to be kept warm for a month.
+const DefaultMaxTTLDays = 7
+
+// MaxTTLDaysLimit bounds the setting itself.
+const MaxTTLDaysLimit = 3650
 
 // Service provides high-level share operations.
 type Service struct {
@@ -47,11 +62,49 @@ type CreateOpts struct {
 	DropSettings *string // JSON limits blob
 }
 
+// MaxTTLDays returns the configured ceiling on a new link's life in days
+// (0 = none). A missing or unparsable setting is the default, never "no
+// ceiling": a typo in the settings table must not quietly mint permanent
+// links.
+func (s *Service) MaxTTLDays(ctx context.Context) int {
+	v, err := s.store.GetSetting(ctx, SettingKeyMaxTTLDays)
+	if err != nil || strings.TrimSpace(v) == "" {
+		return DefaultMaxTTLDays
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 || n > MaxTTLDaysLimit {
+		return DefaultMaxTTLDays
+	}
+	return n
+}
+
+// ClampExpiry applies the max-TTL ceiling to a requested expiry: nil (never)
+// becomes now+max, a later date is pulled back to now+max, anything within
+// the ceiling is returned as is. The bool reports whether the request was
+// changed, so the caller can tell the user the link's real life. With no
+// ceiling (maxDays == 0) the request is returned untouched.
+func ClampExpiry(requested *time.Time, maxDays int, now time.Time) (*time.Time, bool) {
+	if maxDays <= 0 {
+		return requested, false
+	}
+	limit := now.Add(time.Duration(maxDays) * 24 * time.Hour)
+	if requested == nil || requested.After(limit) {
+		return &limit, true
+	}
+	return requested, false
+}
+
 // Create issues a fresh share token.
+//
+// The link's expiry is clamped to the max-TTL setting (see ClampExpiry): a
+// request with no expiry gets one, a request past the ceiling is shortened.
+// The returned Share carries the expiry that was actually stored. Links that
+// already exist are never touched by this — only new ones.
 func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, error) {
 	if opts.NodeID == 0 {
 		return nil, errors.New("share: missing node_id")
 	}
+	opts.ExpiresAt, _ = ClampExpiry(opts.ExpiresAt, s.MaxTTLDays(ctx), time.Now())
 	tok, err := randomToken(16)
 	if err != nil {
 		return nil, err
@@ -101,6 +154,40 @@ func (s *Service) Resolve(ctx context.Context, token, pin string) (*model.Share,
 		}
 	}
 	return sh, nil
+}
+
+// CountOverMaxTTL counts the EXISTING live links that outlive the current
+// ceiling — no expiry at all, or an expiry later than now+max. They are
+// reported, never modified: the ceiling is a rule for new links, and a
+// customer's link that was minted under the old rule keeps working. The
+// number is what an operator needs to decide whether to revoke any by hand.
+// 0 when there is no ceiling.
+func (s *Service) CountOverMaxTTL(ctx context.Context, now time.Time) (int, error) {
+	maxDays := s.MaxTTLDays(ctx)
+	if maxDays <= 0 {
+		return 0, nil
+	}
+	limit := now.Add(time.Duration(maxDays) * 24 * time.Hour)
+	const page, maxShares = 500, 100000
+	over := 0
+	for offset := 0; offset < maxShares; offset += page {
+		rows, total, err := s.store.ListAllShares(ctx, nil, true, page, offset)
+		if err != nil {
+			return 0, err
+		}
+		for _, sm := range rows {
+			if sm.Share == nil {
+				continue
+			}
+			if sm.Share.ExpiresAt == nil || sm.Share.ExpiresAt.After(limit) {
+				over++
+			}
+		}
+		if len(rows) < page || int64(offset+len(rows)) >= total {
+			break
+		}
+	}
+	return over, nil
 }
 
 // IncrementDownload bumps the counter — caller decides whether to call

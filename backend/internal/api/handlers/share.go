@@ -137,17 +137,21 @@ type shareCreateReq struct {
 // shareCreateRespInner is the payload nested under `share` in the
 // response — the SFC accesses it as `body.share.*`.
 type shareCreateRespInner struct {
-	ID           int64      `json:"id"`
-	UUID         string     `json:"uuid"` // alias for token (frontend uses uuid in delete URL)
-	Token        string     `json:"token"`
-	URL          string     `json:"url"`
-	Kind         string     `json:"kind,omitempty"` // "download" | "drop"
-	Path         string     `json:"path,omitempty"`
-	Filename     string     `json:"filename,omitempty"`
-	HasPin       bool       `json:"has_pin"`
-	PasswordPin  string     `json:"password_pin,omitempty"` // ONLY on creation when we generated it
-	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
-	MaxDownloads *int       `json:"max_downloads,omitempty"`
+	ID          int64      `json:"id"`
+	UUID        string     `json:"uuid"` // alias for token (frontend uses uuid in delete URL)
+	Token       string     `json:"token"`
+	URL         string     `json:"url"`
+	Kind        string     `json:"kind,omitempty"` // "download" | "drop"
+	Path        string     `json:"path,omitempty"`
+	Filename    string     `json:"filename,omitempty"`
+	HasPin      bool       `json:"has_pin"`
+	PasswordPin string     `json:"password_pin,omitempty"` // ONLY on creation when we generated it
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	// ExpiryClamped is true when the server shortened (or set) the expiry to
+	// honour the max-TTL setting — so a UI can say "valid until X" instead of
+	// echoing a date the user never picked.
+	ExpiryClamped bool `json:"expiry_clamped,omitempty"`
+	MaxDownloads  *int `json:"max_downloads,omitempty"`
 }
 
 // HandleCreate mints a new share token.
@@ -255,26 +259,32 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 			opts.DropSettings = &ds
 		}
 	}
+	requestedExpiry := opts.ExpiresAt
 	sh, err := h.Service.Create(r.Context(), opts)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The service may have shortened (or set) the expiry — see
+	// share.ClampExpiry. Say so explicitly rather than letting the caller
+	// notice a date it did not ask for.
+	expiryClamped := sh.ExpiresAt != nil && (requestedExpiry == nil || !requestedExpiry.Equal(*sh.ExpiresAt))
 
 	linkURL := h.shareURL(sh.Token)
 	if sh.IsDrop() {
 		linkURL = h.dropURL(sh.Token)
 	}
 	inner := shareCreateRespInner{
-		ID:           sh.ID,
-		UUID:         sh.Token,
-		Token:        sh.Token,
-		URL:          linkURL,
-		Kind:         sh.Kind,
-		HasPin:       sh.PinHash != "",
-		PasswordPin:  pinGenerated,
-		ExpiresAt:    sh.ExpiresAt,
-		MaxDownloads: sh.MaxDownloads,
+		ID:            sh.ID,
+		UUID:          sh.Token,
+		Token:         sh.Token,
+		URL:           linkURL,
+		Kind:          sh.Kind,
+		HasPin:        sh.PinHash != "",
+		PasswordPin:   pinGenerated,
+		ExpiresAt:     sh.ExpiresAt,
+		ExpiryClamped: expiryClamped,
+		MaxDownloads:  sh.MaxDownloads,
 	}
 	node, _ := h.Store.GetNode(r.Context(), nodeID)
 	if node != nil {
@@ -312,14 +322,15 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// Dual envelope: nested `share` for the SFC + flat fields at the
 	// top level for legacy embed.js. Cheap to ship both.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"share":         inner,
-		"id":            inner.ID,
-		"token":         inner.Token,
-		"url":           inner.URL,
-		"kind":          inner.Kind,
-		"has_pin":       inner.HasPin,
-		"expires_at":    inner.ExpiresAt,
-		"max_downloads": inner.MaxDownloads,
+		"share":          inner,
+		"id":             inner.ID,
+		"token":          inner.Token,
+		"url":            inner.URL,
+		"kind":           inner.Kind,
+		"has_pin":        inner.HasPin,
+		"expires_at":     inner.ExpiresAt,
+		"expiry_clamped": inner.ExpiryClamped,
+		"max_downloads":  inner.MaxDownloads,
 	})
 }
 

@@ -646,6 +646,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	zipDir := filepath.Join(cfg.Cache.Dir, "sharezips")
 	migrateShareZipDir(filepath.Join(cfg.DataDir, "sharezips"), zipDir)
 	zipCache := sharezip.New(zipDir)
+	zipCache.WarmMaxBytes = cfg.Cache.ShareZipWarmMaxBytes
+	zipCache.MaxAge = cfg.Cache.ShareZipMaxAge
 	srvObj.zipWarmer = sharezip.NewWarmer(
 		zipCache,
 		func(ctx context.Context) ([]sharezip.DirShare, error) {
@@ -1037,6 +1039,17 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.zipWarmer != nil {
 		s.zipWarmer.Start(ctx)
 	}
+	// Share max-TTL report: existing links are never shortened by the ceiling
+	// (a customer's link minted under the old rule keeps working), so the
+	// operator is told how many outlive it — here at boot and in
+	// GET /api/admin/protection — and decides by hand.
+	go func() {
+		svc := share.NewService(s.store)
+		if n, err := svc.CountOverMaxTTL(ctx, time.Now()); err == nil && n > 0 {
+			slog.Info("share: existing links outlive the max-TTL ceiling (left untouched; see /api/admin/protection)",
+				slog.Int("links", n), slog.Int("max_ttl_days", svc.MaxTTLDays(ctx)))
+		}
+	}()
 	// Staging sweeper — an upload area with no GC is a disk incident waiting.
 	// Sweeps once at boot, then on the configured interval; every removal is
 	// logged with its id, path and staged size.

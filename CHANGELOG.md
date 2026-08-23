@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-23
+
+### Added
+
+- **Every new share link has a maximum life, and the admin sets it.** A new
+  Protection setting, `share.max_ttl_days` (default **7 days**, `0` = no
+  ceiling, seeded once from `FILEX_SHARE_MAX_TTL`), caps what a new link or
+  file request may be given: a link created without an expiry gets `now +
+  max`, a longer request is shortened, and the create response carries the
+  stored `expires_at` plus `expiry_clamped: true` when the server changed the
+  request. The share dialogs read the ceiling from `/api/capabilities`
+  (`share_max_ttl_days`) and offer only choices the server will keep — a 7-day
+  server shows *1 day / 7 days*, not *30 days* or *Never* — and print the real
+  expiry under the fresh link. **Existing links are never modified**: the
+  Protection page and `GET /api/admin/protection` (`shares_over_max_ttl`)
+  report how many live links outlive the ceiling, the boot log prints the
+  number, and revoking any of them stays a manual decision. One rule, one
+  helper (`lib/shareTtl.ts`), every surface: web, desktop and the embeds
+  behave the same.
+- **The folder-ZIP warmer has a size ceiling; the download button does not.**
+  `FILEX_SHAREZIP_WARM_MAX_BYTES` (default **2 GiB**, `0` = unlimited) stops
+  the background warmer from pre-building folders bigger than that — the
+  16.7 GB incident was three hours of object-storage reads for a link nobody
+  opened. Such a folder is zipped the moment a visitor clicks, with the same
+  progress page, and cached from then on; nothing is refused for being large.
+  Logged once per folder, not once per pass.
+- **No cached folder archive older than a week.** `FILEX_SHAREZIP_MAX_AGE`
+  (default **7d**, `0` = keep for the share's life) sweeps an archive whatever
+  its share's state; the next warm pass or download click rebuilds it. With
+  the 7-day link life this bounds the cache to what is actually being shared
+  this week.
+
+### Fixed
+
+- **FTPS re-reads its certificate when the files change.** The pair was
+  loaded once at start-up, so a mounted, auto-renewing certificate (Caddy,
+  certbot) would have been served expired from its first renewal on — with
+  `/healthz` green and nothing in the log — which is why FTPS could only be
+  run self-signed. Every handshake now checks the files' mtime and size and
+  reloads on change; a renewal that lands half-written keeps the previous
+  pair serving and warns once. Proven by a test that swaps the files under a
+  running server and sees the new serial on the next connection.
+- The standalone share dialog's close button was Turkish in every language.
+
+### Changed
+
+- **Release workflow split into `binaries` → `docker` + `desktop`.**
+  goreleaser (which creates the GitHub Release) and the multi-arch Docker
+  builds were one job, so the desktop installers waited ~25 minutes for
+  arm64 QEMU emulation they never needed (v0.20.2: goreleaser done at
+  minute 5, job done at minute 30). The installers now attach to the Release
+  while the images are still building.
+- **`ghcr.io/brf-tech/filex:slim` and `:slim-vX.Y.Z` are pushed.** The
+  release notes and `docs/DOCKER.md` have advertised them since the first
+  image, but the workflow only ever pushed `:vX.Y.Z`/`:latest` — every
+  release page's `docker pull …:slim-vX` was a 404. Same image as `:latest`.
+
 ## [0.24.1] - 2026-08-22
 
 ### Fixed

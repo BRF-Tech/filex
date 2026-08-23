@@ -4,10 +4,11 @@
 // from the explorer's unified "Paylaş / İzinler" action. The layout is a fixed
 // header/tabs with a single scrollable body so the popup never grows into one
 // long scroll. Styling uses the SFC's --fe-* theme variables (light/dark).
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
 import { shareCliCommand } from '../lib/shareCli';
+import { STOCK_EXPIRY_DAYS, clampExpiryOptions, defaultExpiryDays, ttlCeilingHint, validUntilLine } from '../lib/shareTtl';
 
 const props = defineProps<{
   api: FileApi;
@@ -15,6 +16,9 @@ const props = defineProps<{
   isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
   size?: number; // bytes, for the share-mail body (files only)
   locale?: 'tr' | 'en';
+  /** Server ceiling on a new link's life in days (capabilities.share_max_ttl_days).
+   *  undefined/0 = no ceiling. The expiry choices are derived from it. */
+  shareMaxTtlDays?: number;
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -66,8 +70,8 @@ function levelLabel(v: string): string {
 const shares = ref<ShareInfo[]>([]);
 const shareBusy = ref(false);
 const sharePwd = ref(false);
-const shareExpiry = ref(0); // days; 0 = never
-const shareResult = ref<{ url: string; pin?: string | null } | null>(null);
+const shareExpiry = ref(defaultExpiryDays(props.shareMaxTtlDays)); // days; 0 = never
+const shareResult = ref<{ url: string; pin?: string | null; expiresAt?: string | null; clamped?: boolean } | null>(null);
 const shareErr = ref('');
 const copied = ref('');
 // prefilled recipient when the owner chose "share link" for a no-account email
@@ -75,12 +79,25 @@ const shareMailTo = ref('');
 const shareMailBusy = ref(false);
 const shareMailNotice = ref('');
 
-const expiryOptions = [
-  { v: 0, l: L('Süresiz', 'Never') },
-  { v: 1, l: L('1 gün', '1 day') },
-  { v: 7, l: L('7 gün', '7 days') },
-  { v: 30, l: L('30 gün', '30 days') },
-];
+// ⚠ Derived from the server's ceiling, never a fixed list: offering "30 days"
+// on a server that keeps links for 7 would show a choice that is not one.
+// The same helper drives every surface (see lib/shareTtl.ts).
+function expiryLabel(days: number): string {
+  if (days === 0) return L('Süresiz', 'Never');
+  return tr.value ? `${days} gün` : `${days} day${days === 1 ? '' : 's'}`;
+}
+const expiryOptions = computed(() => clampExpiryOptions(STOCK_EXPIRY_DAYS, props.shareMaxTtlDays, expiryLabel));
+const ttlHint = computed(() => ttlCeilingHint(props.shareMaxTtlDays, tr.value ? 'tr' : 'en'));
+watch(
+  () => props.shareMaxTtlDays,
+  () => {
+    // The ceiling can arrive after mount (capabilities load async): snap a
+    // selection the server would not honour back to what it will.
+    const allowed = expiryOptions.value.map((o) => o.v);
+    if (!allowed.includes(shareExpiry.value)) shareExpiry.value = defaultExpiryDays(props.shareMaxTtlDays);
+    if (!allowed.includes(dropExpiry.value)) dropExpiry.value = defaultExpiryDays(props.shareMaxTtlDays);
+  },
+);
 
 // ⚠ The download cap lived in the old standalone ShareModal and was left
 // behind when this panel took over link creation — the server has honoured
@@ -117,7 +134,7 @@ const shareCli = computed(() =>
 
 // ── file-drop (public upload link) state ──
 const dropPwd = ref(false);
-const dropExpiry = ref(0); // days; 0 = never
+const dropExpiry = ref(defaultExpiryDays(props.shareMaxTtlDays)); // days; 0 = never
 const dropShowAdv = ref(false);
 const dropMaxFiles = ref<string>('');
 const dropMaxSizeMB = ref<string>('');
@@ -125,7 +142,7 @@ const dropAllowedExt = ref<string>('');
 const dropAskName = ref(true);
 const dropBusy = ref(false);
 const dropErr = ref('');
-const dropResult = ref<{ url: string; pin?: string | null } | null>(null);
+const dropResult = ref<{ url: string; pin?: string | null; expiresAt?: string | null; clamped?: boolean } | null>(null);
 const dropMailTo = ref('');
 const dropMailBusy = ref(false);
 const dropMailNotice = ref('');
@@ -328,7 +345,12 @@ async function createLink() {
       // null says it explicitly and keeps the payload honest.
       max_downloads: shareMaxDl.value || null,
     });
-    shareResult.value = { url: r.share.url, pin: r.share.password_pin ?? null };
+    shareResult.value = {
+      url: r.share.url,
+      pin: r.share.password_pin ?? null,
+      expiresAt: r.share.expires_at ?? null,
+      clamped: !!r.share.expiry_clamped,
+    };
     await reloadShares();
   } catch (e) {
     shareErr.value = e instanceof Error ? e.message : String(e);
@@ -392,7 +414,12 @@ async function createDropLink() {
       expires_at: dropExpiresAtISO(),
       drop_settings,
     });
-    dropResult.value = { url: r.share.url, pin: r.share.password_pin ?? null };
+    dropResult.value = {
+      url: r.share.url,
+      pin: r.share.password_pin ?? null,
+      expiresAt: r.share.expires_at ?? null,
+      clamped: !!r.share.expiry_clamped,
+    };
   } catch (e) {
     dropErr.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -463,6 +490,11 @@ function humanSize(b?: number): string {
 function expiryLine(days: number): string {
   if (days > 0) return L(`Bu bağlantı ${days} gün geçerlidir.`, `This link is valid for ${days} day(s).`);
   return L('Bu bağlantının süresi yoktur.', 'This link does not expire.');
+}
+// What the server actually stored — shown under a fresh link so the real
+// expiry is visible even when the server shortened the request.
+function validUntil(r: { expiresAt?: string | null } | null): string {
+  return validUntilLine(r?.expiresAt ?? null, tr.value ? 'tr' : 'en');
 }
 
 // Text + title for a download-share link, mirroring shareMailText().
@@ -651,7 +683,7 @@ async function nativeShare(body: { title: string; text: string }) {
               </label>
               <label class="fx-perm-field">
                 <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
-                <select v-model.number="shareExpiry" class="fx-perm-sel fx-perm-sel--sm">
+                <select v-model.number="shareExpiry" class="fx-perm-sel fx-perm-sel--sm" data-testid="share-expiry">
                   <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                 </select>
               </label>
@@ -662,6 +694,7 @@ async function nativeShare(body: { title: string; text: string }) {
                 </select>
               </label>
             </div>
+            <p v-if="ttlHint" class="fx-perm-hint fx-perm-ttlhint" data-testid="share-ttl-hint">{{ ttlHint }}</p>
             <button class="fx-perm-btn fx-perm-btn--primary fx-perm-create" :disabled="shareBusy" @click="createLink">
               {{ L('Bağlantı oluştur', 'Create link') }}
             </button>
@@ -674,6 +707,10 @@ async function nativeShare(body: { title: string; text: string }) {
                 <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareResult.url, 'new')">
                   {{ copied === 'new' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
                 </button>
+              </div>
+              <div class="fx-perm-muted fx-perm-validuntil" data-testid="share-valid-until">
+                {{ validUntil(shareResult) }}
+                <span v-if="shareResult.clamped">{{ L('(sunucu sınırı uygulandı)', '(server limit applied)') }}</span>
               </div>
               <div v-if="shareResult.pin" class="fx-perm-pin">
                 <span>PIN: <code>{{ shareResult.pin }}</code></span>
@@ -740,11 +777,12 @@ async function nativeShare(body: { title: string; text: string }) {
               </label>
               <label class="fx-perm-field">
                 <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
-                <select v-model.number="dropExpiry" class="fx-perm-sel fx-perm-sel--sm">
+                <select v-model.number="dropExpiry" class="fx-perm-sel fx-perm-sel--sm" data-testid="drop-expiry">
                   <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
                 </select>
               </label>
             </div>
+            <p v-if="ttlHint" class="fx-perm-hint fx-perm-ttlhint">{{ ttlHint }}</p>
             <button class="fx-perm-btn fx-perm-btn--primary fx-perm-create" :disabled="dropBusy" @click="createDropLink">
               {{ L('Bağlantı oluştur', 'Create link') }}
             </button>
@@ -779,6 +817,10 @@ async function nativeShare(body: { title: string; text: string }) {
                 <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(dropResult.url, 'drop')">
                   {{ copied === 'drop' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
                 </button>
+              </div>
+              <div class="fx-perm-muted fx-perm-validuntil">
+                {{ validUntil(dropResult) }}
+                <span v-if="dropResult.clamped">{{ L('(sunucu sınırı uygulandı)', '(server limit applied)') }}</span>
               </div>
               <div v-if="dropResult.pin" class="fx-perm-pin">
                 <span>PIN: <code>{{ dropResult.pin }}</code></span>
@@ -966,6 +1008,8 @@ async function nativeShare(body: { title: string; text: string }) {
 .fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
 .fx-perm-mailrow .fx-perm-input { flex: 1; }
 .fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }
+.fx-perm-ttlhint { margin: 4px 0 8px; }
+.fx-perm-validuntil { margin: 4px 0 6px; }
 /* native "Paylaş" button — sits under the mail row, full width */
 .fx-perm-sharebtn { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
 

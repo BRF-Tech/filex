@@ -49,6 +49,13 @@ services:
       FILEX_SFTP: ${FILEX_SFTP:-0}
       FILEX_FTPS: ${FILEX_FTPS:-0}
       FILEX_FTPS_PUBLIC_HOST: ${FILEX_DOMAIN}
+      # Optional: hand FTPS the real certificate Caddy already renews for
+      # FILEX_DOMAIN instead of the generated self-signed one. The files are
+      # re-read when they change, so a renewal needs no restart. Mount the
+      # certificate directory read-only (see the volumes block) and point at
+      # the two files inside it.
+      # FILEX_FTPS_CERT: /certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${FILEX_DOMAIN}/${FILEX_DOMAIN}.crt
+      # FILEX_FTPS_KEY:  /certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${FILEX_DOMAIN}/${FILEX_DOMAIN}.key
       FILEX_NFS: ${FILEX_NFS:-0}
       # External integrations — each is blank unless you enable it (see header).
       # filex hides an integration whose URL is blank or unreachable.
@@ -105,6 +112,7 @@ services:
     #   - "2049:2049"               # ⚠ FILEX_NFS — unencrypted, LAN/VPN only
     volumes:
       - filex-data:/data          # DB (if you switch to sqlite), search index, thumbs, first-run secret
+      # - caddy-data:/certs:ro    # FILEX_FTPS_CERT/_KEY — Caddy's certificate store, read-only
       - ./files:/srv/files        # default local storage folder (seeded on boot)
     depends_on:
       postgres:

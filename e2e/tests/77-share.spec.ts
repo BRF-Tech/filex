@@ -70,7 +70,7 @@ async function mintShare(
   request: APIRequestContext,
   body: Record<string, unknown>,
 ): Promise<{
-  share: { id: number; token: string; url: string; has_pin: boolean; password_pin?: string };
+  share: { id: number; token: string; url: string; has_pin: boolean; password_pin?: string; expires_at: string; expiry_clamped?: boolean };
   url: string;
   token: string;
   id: number;
@@ -290,6 +290,74 @@ test.describe('Share — create + public access (path + node_id shapes)', () => 
     expect(body.token).toBe(body.share.token);
 
     created.push({ id: body.share.id, token: body.share.token });
+  });
+
+  // v0.25.0: every new link lives at most `share.max_ttl_days` (default 7).
+  // The ceiling is an admin setting, the create response says what was
+  // stored, and links that already exist are only counted, never changed.
+  test('a new link is capped at the max-TTL setting; existing links are counted, not changed', async ({
+    authedRequest: request,
+  }) => {
+    const prot = await request.get('/api/admin/protection');
+    expect(prot.ok(), `protection status ${prot.status()}`).toBeTruthy();
+    const before: { share_max_ttl_days: number } = await prot.json();
+    expect(before.share_max_ttl_days, 'default ceiling').toBe(7);
+
+    const caps = await request.get('/api/capabilities');
+    expect(caps.ok()).toBeTruthy();
+    expect((await caps.json()).share_max_ttl_days, 'dialogs read the ceiling from capabilities').toBe(7);
+
+    // No expiry asked → one week granted, and the response says it was set.
+    const never = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: false,
+      expires_at: null,
+      max_downloads: null,
+    });
+    expect(never.share.expiry_clamped, 'a link minted with no expiry is clamped').toBe(true);
+    const weekMs = 7 * 86400000;
+    const got = new Date(never.share.expires_at).getTime();
+    expect(Math.abs(got - (Date.now() + weekMs)), 'expires_at ≈ now + 7 days').toBeLessThan(5 * 60_000);
+
+    // 30 days asked → shortened to the week.
+    const month = new Date(Date.now() + 30 * 86400000).toISOString();
+    const long = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: false,
+      expires_at: month,
+      max_downloads: null,
+    });
+    expect(long.share.expiry_clamped).toBe(true);
+    expect(new Date(long.share.expires_at).getTime()).toBeLessThan(new Date(month).getTime());
+
+    // One day asked → honoured as is.
+    const day = new Date(Date.now() + 86400000).toISOString();
+    const short = await mintShare(request, {
+      path: `${STORAGE}://${FILE_NAME}`,
+      password: false,
+      expires_at: day,
+      max_downloads: null,
+    });
+    expect(short.share.expiry_clamped ?? false).toBe(false);
+    expect(Math.abs(new Date(short.share.expires_at).getTime() - new Date(day).getTime())).toBeLessThan(2000);
+
+    // Lower the ceiling to 1 day: the week-long links above now outlive it.
+    // They are REPORTED — and untouched.
+    const lowered = await request.patch('/api/admin/protection', { data: { share_max_ttl_days: 1 } });
+    expect(lowered.ok(), `patch status ${lowered.status()}`).toBeTruthy();
+    try {
+      const after: { share_max_ttl_days: number; shares_over_max_ttl: number } = await lowered.json();
+      expect(after.share_max_ttl_days).toBe(1);
+      expect(after.shares_over_max_ttl, 'the two week-long links outlive a 1-day ceiling').toBeGreaterThanOrEqual(2);
+
+      const still = await request.get(`/api/files/share/${never.share.token}`);
+      expect(still.ok()).toBeTruthy();
+      const meta: { expires_at: string } = await still.json();
+      expect(Math.abs(new Date(meta.expires_at).getTime() - got), 'an existing link keeps its expiry').toBeLessThan(2000);
+    } finally {
+      const restored = await request.patch('/api/admin/protection', { data: { share_max_ttl_days: 7 } });
+      expect(restored.ok()).toBeTruthy();
+    }
   });
 
   test('admin GET /api/admin/shares carries BOTH SPA + legacy envelopes', async ({

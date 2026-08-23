@@ -126,6 +126,18 @@ multifunction printers, older cameras, industrial controllers.
 > impossible to guess at from the client end. Set `FILEX_FTPS_PASV_MIN`/`_MAX` and open
 > both.
 
+**Certificates.** Without `FILEX_FTPS_CERT`/`_KEY` filex generates a self-signed
+pair and the connection guide says so. With them, the files are **re-read
+whenever they change** — every handshake checks their mtime and size — so a real,
+auto-renewing certificate can be bound: mount your reverse proxy's certificate
+directory read-only, point the two variables at the `.crt`/`.key`, and the
+renewal Caddy or certbot writes every couple of months is what the next FTPS
+client sees, with no restart. (Before v0.25 the pair was read once at start-up,
+which is why a renewed certificate would have been served expired for weeks
+while `/healthz` stayed green.) A renewal that lands half-written, or a key that
+does not match its certificate, keeps the previous pair serving and logs a
+warning once; a good pair written afterwards is picked up.
+
 ## NFSv3
 
 `FILEX_NFS=1`, **off by default and meant for a LAN or a VPN**.

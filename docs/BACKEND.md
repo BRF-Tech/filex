@@ -133,10 +133,12 @@ disabled features.
   "limits": {
     "max_upload_bytes": 5368709120,
     "max_archive_bytes": 1073741824
-  }
+  },
+  "share_max_ttl_days": 7
 }
 ```
-Cached client-side for 1h.
+Cached client-side for 1h. `share_max_ttl_days` is the longest life a new share
+link may be given (0 = no ceiling; [PROTECTION.md](PROTECTION.md)).
 
 ---
 
@@ -356,9 +358,17 @@ PIN-protected, time-limited, optionally download-capped public links.
   "url": "https://files.example.com/s/Xy3kPq",
   "token": "Xy3kPq",
   "expires_at": "2026-05-05T12:00:00Z",
+  "expiry_clamped": false,
   "max_downloads": 10
 }
 ```
+
+`expires_at` is what was **stored**, not what was asked: every new link is
+capped at the admin's maximum link life (`share.max_ttl_days`, default 7 days —
+[PROTECTION.md](PROTECTION.md)). A request with no expiry gets one, a longer
+request is shortened, and `expiry_clamped: true` marks either case. The ceiling
+itself is public in `GET /api/capabilities` as `share_max_ttl_days` so a client
+can offer only expiries the server will keep.
 
 ### `GET /api/files/share` ![user](https://img.shields.io/badge/-user-blue)
 List shares the caller owns.

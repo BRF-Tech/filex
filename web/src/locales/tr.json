@@ -924,7 +924,7 @@
   },
   "protection": {
     "title": "Koruma",
-    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası ve antivirüs durumu",
+    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi ve antivirüs durumu",
     "unsupported": "Sunucu bu sürümü desteklemiyor — koruma ayarları API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
     "savedOk": "Koruma ayarları kaydedildi",
     "trash": {
@@ -940,6 +940,14 @@
       "label": "Saklanacak sürüm sayısı",
       "hint": "0 = sınırsız (temizlik yapılmaz)",
       "errMin": "0 veya daha büyük bir tam sayı girin"
+    },
+    "share": {
+      "title": "Paylaşım bağlantıları",
+      "desc": "Yeni bir paylaşım bağlantısına verilebilecek en uzun süre. Süresiz oluşturulan bağlantı bu süreyi alır; daha uzun istenen süre buna kırpılır. Paylaşımlar için üretilen klasör arşivleri de aynı süre sonunda silinir. Var olan bağlantılara dokunulmaz.",
+      "label": "En uzun bağlantı süresi (gün)",
+      "hint": "0 = sınırsız. Varsayılan 7.",
+      "errMin": "0 veya daha büyük bir tam sayı girin",
+      "overMax": "Mevcut {n} bağlantı bu sınırı aşıyor. Çalışmaya devam ederler — kaldırmak isterseniz Paylaşımlar sayfasından iptal edin."
     },
     "av": {
       "title": "Antivirüs",

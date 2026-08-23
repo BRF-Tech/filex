@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
@@ -24,6 +25,8 @@ import (
 type protectionBody struct {
 	TrashRetentionDays int `json:"trash_retention_days"`
 	VersionsKeepN      int `json:"versions_keep_n"`
+	ShareMaxTTLDays    int `json:"share_max_ttl_days"`
+	SharesOverMaxTTL   int `json:"shares_over_max_ttl"`
 	Antivirus          struct {
 		Enabled bool   `json:"enabled"`
 		Binary  string `json:"binary"`
@@ -56,6 +59,8 @@ func TestProtection_GetDefaults(t *testing.T) {
 	testutil.ReadJSON(t, resp, &got)
 	assert.Equal(t, trash.DefaultRetentionDays, got.TrashRetentionDays)
 	assert.Equal(t, 0, got.VersionsKeepN)
+	assert.Equal(t, share.DefaultMaxTTLDays, got.ShareMaxTTLDays)
+	assert.Equal(t, 0, got.SharesOverMaxTTL)
 	assert.False(t, got.Antivirus.Enabled)
 	assert.Equal(t, "", got.Antivirus.Binary)
 }
@@ -106,6 +111,8 @@ func TestProtection_PatchValidation(t *testing.T) {
 		"retention too high": {"trash_retention_days": 3651},
 		"keep_n negative":    {"versions_keep_n": -1},
 		"keep_n too high":    {"versions_keep_n": 1001},
+		"share ttl negative": {"share_max_ttl_days": -1},
+		"share ttl too high": {"share_max_ttl_days": 3651},
 		"empty body":         {},
 	} {
 		resp := patchProtection(t, client, srv.URL, body)
@@ -116,6 +123,35 @@ func TestProtection_PatchValidation(t *testing.T) {
 	// Invalid writes must not have touched the settings.
 	_, err := store.GetSetting(context.Background(), versioning.SettingKeyKeepN)
 	assert.Error(t, err, "no keep_n row should exist after rejected PATCHes")
+	_, err = store.GetSetting(context.Background(), share.SettingKeyMaxTTLDays)
+	assert.Error(t, err, "no share ttl row should exist after rejected PATCHes")
+}
+
+// The share ceiling is an admin setting: PATCH writes it, GET reads it back,
+// and the count of existing links outliving it is reported — never acted on.
+func TestProtection_ShareMaxTTL(t *testing.T) {
+	t.Setenv("FILEX_CLAMAV", "0")
+	srv, client, store := testutil.NewTestServer(t)
+	email, pw := testutil.SeedAdmin(t, store)
+	testutil.LoginAs(t, srv, client, email, pw)
+
+	resp := patchProtection(t, client, srv.URL, map[string]any{"share_max_ttl_days": 3})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var got protectionBody
+	testutil.ReadJSON(t, resp, &got)
+	assert.Equal(t, 3, got.ShareMaxTTLDays)
+	v, err := store.GetSetting(context.Background(), share.SettingKeyMaxTTLDays)
+	require.NoError(t, err)
+	assert.Equal(t, "3", v)
+
+	// 0 = no ceiling is a legal write, not "absent".
+	resp0 := patchProtection(t, client, srv.URL, map[string]any{"share_max_ttl_days": 0})
+	defer resp0.Body.Close()
+	require.Equal(t, http.StatusOK, resp0.StatusCode)
+	var got0 protectionBody
+	testutil.ReadJSON(t, resp0, &got0)
+	assert.Equal(t, 0, got0.ShareMaxTTLDays)
 }
 
 func TestProtection_RequiresAdmin(t *testing.T) {

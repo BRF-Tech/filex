@@ -221,13 +221,16 @@ func (s *Server) Addr() string {
 // encrypted channel is strictly better than a plaintext one. Most FTPS clients
 // do not verify by default anyway, which is a fact about the ecosystem rather
 // than an endorsement.
+//
+// Either way the files are re-read when they change (see certSource): a
+// renewed certificate is presented by the next handshake, with no restart.
 func (s *Server) tlsConfig() (*tls.Config, error) {
 	if s.cfg.CertFile != "" && s.cfg.KeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(s.cfg.CertFile, s.cfg.KeyFile)
+		src, err := newCertSource(s.cfg.CertFile, s.cfg.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("ftpsrv: load certificate: %w", err)
 		}
-		return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
+		return src.tlsConfig(), nil
 	}
 
 	dir := s.cfg.CertDir
@@ -248,11 +251,11 @@ func (s *Server) tlsConfig() (*tls.Config, error) {
 			slog.String("file", certPath),
 			slog.String("note", "it encrypts the channel but proves nothing about the server; supply a real certificate for anything that matters"))
 	}
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	src, err := newCertSource(certPath, keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("ftpsrv: load generated certificate: %w", err)
 	}
-	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, nil
+	return src.tlsConfig(), nil
 }
 
 func generateSelfSigned(certPath, keyPath, host string) error {

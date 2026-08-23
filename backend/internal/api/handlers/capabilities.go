@@ -7,6 +7,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/share"
 )
 
 // Capabilities exposes /api/capabilities.
@@ -96,6 +97,12 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	/* kimlik:e3 cloud */
 	if h.CloudEnabled {
 		merged["cloud"] = map[string]any{"enabled": true, "signup_url": "/api/cloud/signup"}
+	}
+	// The longest life a new share link may be given (0 = no ceiling). The
+	// share dialog reads it to offer only expiries the server will honour,
+	// instead of letting someone pick "30 days" and get 7.
+	if h.Store != nil {
+		merged["share_max_ttl_days"] = share.NewService(h.Store).MaxTTLDays(r.Context())
 	}
 	writeJSON(w, http.StatusOK, merged)
 }

@@ -61,6 +61,8 @@ export const en: Record<string, string> = {
   'modal.share.max_downloads': 'Download limit',
   'modal.share.create': 'Share',
   'modal.share.cancel': 'Cancel',
+  'modal.share.close': 'Close',
+  'modal.share.limit_applied': '(server limit applied)',
   'modal.share.copy': 'Copy',
   'modal.share.url_copied': 'Link copied',
   'modal.share.pin_copied': 'PIN copied',

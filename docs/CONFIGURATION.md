@@ -160,6 +160,7 @@ so are configured in [Authentication](#authentication), not here.)
 |---|---|
 | `FILEX_SITE_NAME` | Instance display name shown in the UI. |
 | `FILEX_TRASH_RETENTION_DAYS` | Days to keep trashed items before purge (see [TRASH-VERSIONING.md](TRASH-VERSIONING.md)). |
+| `FILEX_SHARE_MAX_TTL` | Longest life a **new** share link may be given — `7`, `7d` or `168h`; `0` = no ceiling. Seeds `share.max_ttl_days` (default 7) once; afterwards the admin **Protection** page owns it. Existing links are never changed (see [SHARING.md](SHARING.md)). |
 
 **Default storage** — seeds one initial storage when **no storage exists yet**, so
 a fresh install already has a working place for files. Leave
@@ -225,7 +226,7 @@ requested is not something to open for them.
 | `FILEX_FTPS_ADDR` | `:2121` | Control channel. Port 21 needs root. |
 | `FILEX_FTPS_PASV_MIN` / `_MAX` | `30000` / `30100` | The passive data-port range. ⚠⚠ **Open it on the firewall too** — a blocked range makes every transfer *hang* with no error on either side, which is the classic FTP failure and impossible to guess at from the client end. |
 | `FILEX_FTPS_PUBLIC_HOST` | — | The address to advertise for passive connections, when it differs from what the server sees (NAT, Docker). A host name or an IPv4 address; a name is resolved at startup, because the PASV reply itself can only carry a dotted quad. ⚠ IPv6 has no PASV representation at all — a v6-only deployment must rely on EPSV, which needs no address and so needs no setting. |
-| `FILEX_FTPS_CERT` / `_KEY` | — | TLS certificate. Absent, filex generates a self-signed one and the guide says so, so nobody has to discover it from a client warning. |
+| `FILEX_FTPS_CERT` / `_KEY` | — | TLS certificate. Absent, filex generates a self-signed one and the guide says so, so nobody has to discover it from a client warning. **Re-read when the files change** (mtime/size checked on every handshake), so a real, auto-renewing certificate — Caddy's, certbot's — can be mounted read-only and is picked up by the next connection with no restart. A renewal that lands half-written keeps the previous certificate serving and logs a warning. |
 | `FILEX_FTPS_BANNER` | — | Greeting line shown on connect. |
 | `FILEX_NFS` | `0` | The NFSv3 endpoint. ⚠⚠ **NFSv3 is unencrypted** — anyone who can read the traffic sees the files, and anyone who learns an export path can mount it. LAN or VPN only; for anything off-LAN the answer is `filex mount`. |
 | `FILEX_NFS_ADDR` | `:2049` | Listen address. ⚠ There is no portmapper on 111, so clients must be given `port=` and `mountport=` explicitly — and Windows' "Client for NFS" cannot say that at all, so it only works on the standard 2049. |
@@ -343,9 +344,15 @@ served exactly as they were before: nothing is prepared and nobody waits.
 
 **The cache directory also holds folder-share ZIPs** (`<cache_dir>/sharezips`,
 moved there from `<data_dir>/sharezips` on first start of v0.19.1+). They are
-not covered by `FILEX_CACHE_MAX_BYTES`; they are bounded by their shares
-instead — an archive is deleted as soon as no active share can serve it. See
-*Folder ZIPs are cached* in [SHARING.md](SHARING.md).
+not covered by `FILEX_CACHE_MAX_BYTES`; they are bounded by their shares and by
+two knobs of their own — an archive is deleted as soon as no active share can
+serve it, and in any case after a week. See *Folder ZIPs are cached* in
+[SHARING.md](SHARING.md).
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_SHAREZIP_WARM_MAX_BYTES` | `2147483648` (2 GiB) | Largest folder (sum of file sizes) the background warmer pre-builds. Bigger folders are zipped on demand when a visitor clicks, never refused. `0` = no ceiling. |
+| `FILEX_SHAREZIP_MAX_AGE` | `7d` | A cached archive older than this is swept even if its share is still live, and rebuilt when next needed. Go durations plus a `d` suffix. `0` = keep for the share's life. |
 
 ⚠ **Exclude `<data_dir>/cache` from your backups.** Everything under it is
 regenerable, and a single folder-share archive can be tens of gigabytes.
@@ -515,6 +522,7 @@ seed:                              # first-boot only-if-absent (see Zero-touch s
   admin_password: ""
   site_name: ""
   trash_retention_days: ""
+  share_max_ttl_days: ""           # FILEX_SHARE_MAX_TTL — "7", "7d", "0" = no ceiling
   smtp:    { host: "", port: "", username: "", password: "", from: "", tls: starttls }
   storage: { driver: "", name: "", mount_path: "/", path: "",
              bucket: "", prefix: "", endpoint: "", region: "",

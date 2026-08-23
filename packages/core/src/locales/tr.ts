@@ -61,6 +61,8 @@ export const tr: Record<string, string> = {
   'modal.share.max_downloads': 'İndirme limiti',
   'modal.share.create': 'Paylaş',
   'modal.share.cancel': 'Vazgeç',
+  'modal.share.close': 'Kapat',
+  'modal.share.limit_applied': '(sunucu sınırı uygulandı)',
   'modal.share.copy': 'Kopyala',
   'modal.share.url_copied': 'Link kopyalandı',
   'modal.share.pin_copied': 'PIN kopyalandı',

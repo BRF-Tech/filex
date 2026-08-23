@@ -46,6 +46,19 @@ import (
 // Callers treat it as "no cached archive" — there is nobody left to serve.
 var ErrShareGone = errors.New("sharezip: build abandoned, the share is no longer active")
 
+// ErrTooLargeToWarm is Warm's answer for a folder over WarmMaxBytes: nothing
+// was built and nothing will be until somebody actually asks for the archive.
+var ErrTooLargeToWarm = errors.New("sharezip: folder is over the warm ceiling, left for on-demand build")
+
+const (
+	// DefaultWarmMaxBytes bounds what the background warmer pre-builds
+	// (2 GiB). On-demand builds are not bounded by it.
+	DefaultWarmMaxBytes = int64(2) << 30
+	// DefaultMaxAge is how long a cached archive may sit on disk before the
+	// sweeper removes it regardless of whether its share is still live.
+	DefaultMaxAge = 7 * 24 * time.Hour
+)
+
 // activeCheckInterval throttles the "is this share still there?" check a
 // running build makes. The check is a mutex and a map lookup — no query, no
 // listing — so this is only here to keep it off the per-chunk path. A var so
@@ -125,12 +138,25 @@ type Cache struct {
 	// nil until a Warmer wires one up, and everything that reads it treats
 	// nil as "I know nothing", which deletes nothing and abandons nothing.
 	active *ActiveShares
+
+	// WarmMaxBytes is the largest folder (sum of file sizes) Warm will
+	// pre-build; 0 = no ceiling. It bounds SPECULATIVE work only — the
+	// on-demand path (StartOrGet, what a download click takes) ignores it,
+	// so no folder is ever refused, it just is not built before anyone asks.
+	// Set by the server from FILEX_SHAREZIP_WARM_MAX_BYTES; New defaults it
+	// to DefaultWarmMaxBytes.
+	WarmMaxBytes int64
+	// MaxAge is how old a published archive may get before Sweep removes it
+	// even though its share is still live; 0 = never. A regenerable file
+	// nobody has asked for in a week is disk, not cache. Set by the server
+	// from FILEX_SHAREZIP_MAX_AGE; New defaults it to DefaultMaxAge.
+	MaxAge time.Duration
 }
 
 // New returns a Cache rooted at dir. An empty dir disables caching (Enabled
 // reports false and callers fall back to streaming).
 func New(dir string) *Cache {
-	return &Cache{dir: dir, gens: map[string]*Gen{}, tmps: map[string]struct{}{}}
+	return &Cache{dir: dir, gens: map[string]*Gen{}, tmps: map[string]struct{}{}, WarmMaxBytes: DefaultWarmMaxBytes, MaxAge: DefaultMaxAge}
 }
 
 // Track wires the cache to the view of active folder shares. Both things that
@@ -193,6 +219,13 @@ func (c *Cache) StartOrGet(cachePath string, files []File, nodeID int64, drv sto
 // missing. Blocks until the (possibly already-running) build completes. The
 // bool reports whether a (re)generation was needed (false = cache already
 // fresh). Used by the background warmer. A no-op when caching is disabled.
+//
+// A folder whose files add up to more than WarmMaxBytes is NOT built here:
+// Warm returns ErrTooLargeToWarm and leaves the archive to the on-demand path
+// (StartOrGet), which a visitor's download click still drives to completion
+// with the progress page. The ceiling is about not spending hours of object
+// storage reads on a link nobody may ever open — the 16.7 GB incident — not
+// about refusing anything.
 func (c *Cache) Warm(ctx context.Context, drv storage.Driver, root string, nodeID int64) (bool, error) {
 	if !c.Enabled() {
 		return false, nil
@@ -204,7 +237,20 @@ func (c *Cache) Warm(ctx context.Context, drv storage.Driver, root string, nodeI
 	if _, ok := c.Cached(cachePath); ok {
 		return false, nil
 	}
+	if c.WarmMaxBytes > 0 && totalSize(files) > c.WarmMaxBytes {
+		return false, ErrTooLargeToWarm
+	}
 	return true, c.StartOrGet(cachePath, files, nodeID, drv).Wait(ctx)
+}
+
+// totalSize is the sum of the listed files' sizes — the archive's input, which
+// is what the warm ceiling is measured against.
+func totalSize(files []File) int64 {
+	var n int64
+	for _, f := range files {
+		n += f.Size
+	}
+	return n
 }
 
 // run builds the archive into a temp file then publishes it atomically. The
@@ -383,14 +429,13 @@ func (r *gatedReader) Read(p []byte) (int, error) {
 // shareGone reports whether nodeID's folder share has been observed to be gone
 // by a view of the shares taken AFTER this build started.
 //
-// ⚠ This is NOT a size limit and must never become one. It refuses no folder
-// and changes nothing a visitor can download: a live share is built however
-// large it is, and the on-demand path is untouched. All it does is stop
-// working for something that has ceased to exist — the incident behind it was
-// a 16.7 GB folder shared for eleven minutes whose ZIP went on building for
-// three hours after the link had died, then sat on disk forever. Please do not
-// "restore symmetry" by adding a byte ceiling next to it; the owner considered
-// one and rejected it.
+// ⚠ This is NOT a size limit. It refuses no folder and changes nothing a
+// visitor can download; all it does is stop working for something that has
+// ceased to exist — the incident behind it was a 16.7 GB folder shared for
+// eleven minutes whose ZIP went on building for three hours after the link had
+// died, then sat on disk forever. The size question is answered elsewhere and
+// only for speculative work: Warm honours WarmMaxBytes, the on-demand build a
+// visitor starts does not (decided 2026-08-23).
 //
 // The "after this build started" clause is what protects a brand-new share: a
 // build kicked off on demand seconds after a link is minted must not be killed
@@ -439,13 +484,16 @@ func (c *Cache) busy(path string) bool {
 // when a share expires its archive was simply immortal — one such file was
 // 15 GB, was never downloaded once, and rode into three backups.
 //
-// It deletes exactly two things:
+// It deletes exactly three things:
 //
 //   - <nodeID>-<sig>.zip whose node has no active folder share. "Active" is
 //     not re-defined here: it is whatever the shared ActiveShares view says,
 //     which is the same query the warmer builds from. Two definitions of
 //     "active" in two places is how a sweeper eventually deletes something
 //     that was still being served.
+//   - <nodeID>-<sig>.zip older than MaxAge, live share or not (MaxAge > 0).
+//     It is regenerable — the warmer's next pass rebuilds it if the folder is
+//     under the warm ceiling, a download click rebuilds it otherwise.
 //   - .tmp-*.zip older than tmpMaxAge that no running build claims.
 //
 // It refuses to touch: any name that is not one of those two shapes (a cache
@@ -500,10 +548,12 @@ func (c *Cache) Sweep() (removed int, freed int64) {
 			if perr != nil {
 				continue
 			}
-			if _, live := nodes[id]; live {
+			if c.busy(path) {
 				continue
 			}
-			if c.busy(path) {
+			_, live := nodes[id]
+			aged := c.MaxAge > 0 && now.Sub(fi.ModTime()) > c.MaxAge
+			if live && !aged {
 				continue
 			}
 		}

@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-08-22",
+  "generatedAt": "2026-08-23",
   "releases": [
+    {
+      "tag": "v0.24.1",
+      "date": "2026-08-22T06:08:49Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.24.1",
+      "prerelease": false,
+      "headline": "An interrupted run resumes from a checkpoint, uploads included.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.24.1",
+        "ghcr.io/brf-tech/filex:full-v0.24.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
     {
       "tag": "v0.24.0",
       "date": "2026-08-22T05:12:19Z",

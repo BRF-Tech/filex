@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.24.0, 22 August 2026
-A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at 0.24 MB/s moves at the speed of the network, and its inventory takes minutes rather than a quarter of an hour. A first sync that is interrupted resumes where it was instead of turning every finished file into a conflict copy, and moving the filex folder — to another drive included — keeps each folder's history, so nothing is transferred twice. A connection that dies quietly behind a proxy is noticed rather than waited on forever. A file whose name happens to contain ".." (Turkish company names end in "A.Ş.") can be previewed, downloaded and synced again. And three ways a sync could have read a missing or unlistable folder as "delete everything" are closed: a folder the server could not list fails the run instead of reading as gone, a pair cannot be pointed at a path that is not there, and a mirror whose drive is unplugged refuses to run rather than emptying the server.
+::: tip Latest — v0.24.1, 22 August 2026
+A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engine writes its sync history while it works — every 50 transfers or 15 seconds — instead of only at the very end, so a run interrupted at file 9,000 of 10,000 picks up with the pending 1,000 on the next round rather than turning everything it had already pushed into conflict copies.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.24.0
-docker pull ghcr.io/brf-tech/filex:full-v0.24.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.24.1
+docker pull ghcr.io/brf-tech/filex:full-v0.24.1
 ```
+
+## v0.24.1
+
+<span class="filex-release-date">22 August 2026</span>
+
+A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engine writes its sync history while it works — every 50 transfers or 15 seconds — instead of only at the very end, so a run interrupted at file 9,000 of 10,000 picks up with the pending 1,000 on the next round rather than turning everything it had already pushed into conflict copies.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.24.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.24.1`
 
 ## v0.24.0
 
@@ -280,24 +288,13 @@ A packaging fix, and the first release whose tag matches what ships. The desktop
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.17.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.17.1`
 
-## v0.17.0
-
-<span class="filex-release-date">12 August 2026</span>
-
-The desktop app keeps itself up to date. It checks a static feed on filex.sh (not GitHub — that mirror is private and the provider would need a token inside the app), downloads quietly, and installs when you quit, because an update that interrupts a file transfer to restart itself is worse than one that waits. The tray offers "Restart to update" once one is staged and Settings gained an Updates row. Failures stay silent while the app works. Note that this is the first version that can update itself: reaching it still takes one manual install.
-
-**New**
-
-- **Desktop** — The app keeps itself up to date.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.17.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.17.0`
-
 ## Earlier releases
 
-The 60 releases before v0.17.0, in brief. Full notes are on GitHub.
+The 61 releases before v0.17.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.17.0](https://github.com/BRF-Tech/filex/releases/tag/v0.17.0) | 12 August 2026 | The desktop app keeps itself up to date. It checks a static feed on filex.sh (not GitHub — that mirror is private and the provider would need a token inside the app), downloads quietly, and installs when you quit, because an… |
 | [v0.16.3](https://github.com/BRF-Tech/filex/releases/tag/v0.16.3) | 12 August 2026 | The tab strip, fixed properly. It was permanent in the desktop app and came and went on the web, because 0.16.0 gave the two surfaces different defaults — this package exists so they are one product, so the default is now the… |
 | [v0.16.2](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) | 12 August 2026 | Two things a share link got wrong. It changed language when you entered its PIN — the gate was English, the page behind it Turkish, and the screen in between managed both at once. |
 | [v0.16.1](https://github.com/BRF-Tech/filex/releases/tag/v0.16.1) | 12 August 2026 | Follow-up to 0.16.0: a shared folder's gallery tiles are now rendered when the link is created rather than when the first visitor arrives, so the first open is fast too — which is the open that matters, since whoever creates a… |
@@ -361,4 +358,4 @@ The 60 releases before v0.17.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-22 from 80 published releases.</small>
+<small>Generated 2026-08-23 from 81 published releases.</small>

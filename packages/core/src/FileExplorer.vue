@@ -353,6 +353,9 @@ watch(
 const clipboard = ref<ClipboardState>({ mode: null, items: [], sourcePath: null });
 
 const capabilitiesData = ref<Capabilities | null>(null);
+// Longest life a new share link may be given (server setting, days; 0 = no
+// ceiling). Both share dialogs derive their expiry choices from it.
+const shareMaxTtlDays = computed(() => capabilitiesData.value?.share_max_ttl_days ?? 0);
 
 // Creative UI state: starred / tags / recently-opened. The component
 // helpers (StarButton, TagPicker, RecentlyOpened) handle their own
@@ -3825,6 +3828,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :open="showShare"
       :locale="locale"
       :share="activeShare"
+      :share-max-ttl-days="shareMaxTtlDays"
       @close="closeShare"
       @submit="submitShare"
       @toast="flashToast"
@@ -3865,6 +3869,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :is-dir="permTarget.type === 'dir'"
       :size="typeof permTarget.size === 'number' ? permTarget.size : undefined"
       :locale="locale === 'en' ? 'en' : 'tr'"
+      :share-max-ttl-days="shareMaxTtlDays"
       @close="showPerm = false"
     />
 

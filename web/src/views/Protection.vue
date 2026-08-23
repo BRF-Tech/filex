@@ -4,7 +4,7 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import axios from 'axios';
-import { Save, Shield, ShieldAlert, History, Trash2, ExternalLink } from 'lucide-vue-next';
+import { Save, Shield, ShieldAlert, History, Trash2, ExternalLink, Link2 } from 'lucide-vue-next';
 
 import { ProtectionApi, type ProtectionAntivirus } from '@/api/protection';
 import { extractError } from '@/api/client';
@@ -28,12 +28,16 @@ const loadError = ref<string | null>(null);
 
 const trashDays = ref<number>(30);
 const versionsKeepN = ref<number>(0);
+const shareMaxTtl = ref<number>(7);
+const sharesOverMax = ref<number>(0);
 const antivirus = ref<ProtectionAntivirus | null>(null);
 
 const savingTrash = ref(false);
 const savingVersions = ref(false);
+const savingShare = ref(false);
 const errTrash = ref<string | null>(null);
 const errVersions = ref<string | null>(null);
+const errShare = ref<string | null>(null);
 
 function isMissingEndpoint(e: unknown): boolean {
   if (!axios.isAxiosError(e)) return false;
@@ -49,6 +53,8 @@ async function load() {
     const s = await ProtectionApi.get();
     trashDays.value = s.trash_retention_days;
     versionsKeepN.value = s.versions_keep_n;
+    shareMaxTtl.value = s.share_max_ttl_days ?? 0;
+    sharesOverMax.value = s.shares_over_max_ttl ?? 0;
     antivirus.value = s.antivirus ?? { enabled: false, binary: '' };
   } catch (e: unknown) {
     if (isMissingEndpoint(e)) {
@@ -84,6 +90,25 @@ async function saveTrash() {
     errTrash.value = extractError(e, t('errors.generic'));
   } finally {
     savingTrash.value = false;
+  }
+}
+
+async function saveShare() {
+  errShare.value = null;
+  if (!validInt(shareMaxTtl.value, 0)) {
+    errShare.value = t('protection.share.errMin');
+    return;
+  }
+  savingShare.value = true;
+  try {
+    const s = await ProtectionApi.update({ share_max_ttl_days: shareMaxTtl.value });
+    shareMaxTtl.value = s.share_max_ttl_days;
+    sharesOverMax.value = s.shares_over_max_ttl ?? 0;
+    toast.success(t('protection.savedOk'));
+  } catch (e: unknown) {
+    errShare.value = extractError(e, t('errors.generic'));
+  } finally {
+    savingShare.value = false;
   }
 }
 
@@ -181,6 +206,39 @@ async function saveVersions() {
         />
         <div class="flex justify-end pt-1">
           <Button type="submit" :loading="savingVersions">
+            <Save class="h-4 w-4" />
+            {{ t('common.save') }}
+          </Button>
+        </div>
+      </form>
+
+      <!-- Share-link ceiling. Applies to NEW links only; existing ones are
+           counted so the operator can decide about them by hand. -->
+      <form class="card card-body space-y-3" novalidate @submit.prevent="saveShare">
+        <h2 class="flex items-center gap-2 text-base font-semibold">
+          <Link2 class="h-4 w-4" /> {{ t('protection.share.title') }}
+        </h2>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('protection.share.desc') }}</p>
+        <Input
+          :model-value="shareMaxTtl"
+          type="number"
+          :min="0"
+          :step="1"
+          :label="t('protection.share.label')"
+          :hint="t('protection.share.hint')"
+          :error="errShare"
+          class="max-w-xs"
+          @update:model-value="(v) => ((shareMaxTtl = v as number), (errShare = null))"
+        />
+        <p
+          v-if="shareMaxTtl > 0 && sharesOverMax > 0"
+          class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200"
+          data-testid="shares-over-max"
+        >
+          {{ t('protection.share.overMax', { n: sharesOverMax }) }}
+        </p>
+        <div class="flex justify-end pt-1">
+          <Button type="submit" :loading="savingShare">
             <Save class="h-4 w-4" />
             {{ t('common.save') }}
           </Button>

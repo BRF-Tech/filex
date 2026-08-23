@@ -108,6 +108,10 @@ type Warmer struct {
 	resolver func(int64) (storage.Driver, error)
 	interval time.Duration
 	logf     func(format string, args ...any)
+	// tooLarge remembers the nodes already reported as over the warm ceiling,
+	// so a big folder is logged once rather than on every pass for as long as
+	// its share lives. Cleared when the node stops being listed.
+	tooLarge map[int64]struct{}
 }
 
 // NewWarmer builds a Warmer. interval<=0 uses DefaultWarmInterval; logf==nil
@@ -120,7 +124,7 @@ func NewWarmer(cache *Cache, list func(ctx context.Context) ([]DirShare, error),
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	w := &Warmer{cache: cache, active: NewActiveShares(list), resolver: resolver, interval: interval, logf: logf}
+	w := &Warmer{cache: cache, active: NewActiveShares(list), resolver: resolver, interval: interval, logf: logf, tooLarge: map[int64]struct{}{}}
 	if cache != nil && w.active != nil {
 		cache.Track(w.active)
 	}
@@ -185,7 +189,9 @@ func (w *Warmer) runOnce(ctx context.Context) {
 		w.logf("sharezip warmer: swept %d dead folder-share zip(s), freed %d bytes", n, freed)
 	}
 	regenerated := 0
+	listed := make(map[int64]struct{}, len(shares))
 	for _, s := range shares {
+		listed[s.NodeID] = struct{}{}
 		select {
 		case <-ctx.Done():
 			return
@@ -201,11 +207,25 @@ func (w *Warmer) runOnce(ctx context.Context) {
 				// Not a failure: the share died while we built for it.
 				continue
 			}
+			if errors.Is(err, ErrTooLargeToWarm) {
+				// Not a failure either: deliberately left for a visitor to
+				// start. Said once per share, not once per pass.
+				if _, said := w.tooLarge[s.NodeID]; !said {
+					w.tooLarge[s.NodeID] = struct{}{}
+					w.logf("sharezip warmer: node %d is over the warm ceiling (%d bytes); its archive builds on demand", s.NodeID, w.cache.WarmMaxBytes)
+				}
+				continue
+			}
 			w.logf("sharezip warmer: warm node %d failed: %v", s.NodeID, err)
 			continue
 		}
 		if did {
 			regenerated++
+		}
+	}
+	for id := range w.tooLarge {
+		if _, still := listed[id]; !still {
+			delete(w.tooLarge, id)
 		}
 	}
 	if regenerated > 0 {
