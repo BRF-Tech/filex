@@ -18,14 +18,26 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.24.1, 22 August 2026
-A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engine writes its sync history while it works — every 50 transfers or 15 seconds — instead of only at the very end, so a run interrupted at file 9,000 of 10,000 picks up with the pending 1,000 on the next round rather than turning everything it had already pushed into conflict copies.
+::: tip Latest — v0.25.0, 23 August 2026
+Share links now have a ceiling on how long they live, and the admin holds it: a new Protection setting (default seven days) caps every new link and file request — a link created without an expiry gets one, a longer request is shortened, and the dialog only offers choices the server will keep, printing the real expiry under the fresh link. Links that already exist are left exactly as they are; the page and the log only tell you how many outlive the limit. The folder-ZIP cache is bounded the same way: the background warmer no longer pre-builds folders over 2 GiB (they are zipped when somebody actually clicks, never refused) and no cached archive outlives a week. FTPS re-reads its certificate when the files change, so a real, auto-renewing certificate can finally be mounted instead of the self-signed one — before, a renewal would have been served expired for weeks with the health check green. And the release pipeline builds the desktop installers alongside the Docker images instead of after them, which puts them on the release about twenty-five minutes earlier.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.24.1
-docker pull ghcr.io/brf-tech/filex:full-v0.24.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.25.0
+docker pull ghcr.io/brf-tech/filex:full-v0.25.0
 ```
+
+## v0.25.0
+
+<span class="filex-release-date">23 August 2026</span>
+
+Share links now have a ceiling on how long they live, and the admin holds it: a new Protection setting (default seven days) caps every new link and file request — a link created without an expiry gets one, a longer request is shortened, and the dialog only offers choices the server will keep, printing the real expiry under the fresh link. Links that already exist are left exactly as they are; the page and the log only tell you how many outlive the limit. The folder-ZIP cache is bounded the same way: the background warmer no longer pre-builds folders over 2 GiB (they are zipped when somebody actually clicks, never refused) and no cached archive outlives a week. FTPS re-reads its certificate when the files change, so a real, auto-renewing certificate can finally be mounted instead of the self-signed one — before, a renewal would have been served expired for weeks with the health check green. And the release pipeline builds the desktop installers alongside the Docker images instead of after them, which puts them on the release about twenty-five minutes earlier.
+
+**Other changes**
+
+- **Release** — Split the release job — binaries → docker + desktop in parallel; push the :slim tags.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.0`
 
 ## v0.24.1
 
@@ -276,24 +288,13 @@ Share links keep their word, and you get a face. A link capped at three download
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.18.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.18.0`
 
-## v0.17.1
-
-<span class="filex-release-date">12 August 2026</span>
-
-A packaging fix, and the first release whose tag matches what ships. The desktop package could be built without the updater inside it: in a pnpm workspace the dependency is a symlink pointing outside the app directory and electron-builder does not follow those, so the app launched and simply never opened a window — no dialog, no log. The main process is bundled now, so the package carries its own code and nothing else. There is also a suite that points a packaged app at a feed advertising a newer version and watches it download and stage the update, because "the installer built" is not "the app works".
-
-**Fixed**
-
-- **Desktop** — The package shipped without its updater, and nothing said so.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.17.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.17.1`
-
 ## Earlier releases
 
-The 61 releases before v0.17.1, in brief. Full notes are on GitHub.
+The 62 releases before v0.18.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.17.1](https://github.com/BRF-Tech/filex/releases/tag/v0.17.1) | 12 August 2026 | A packaging fix, and the first release whose tag matches what ships. The desktop package could be built without the updater inside it: in a pnpm workspace the dependency is a symlink pointing outside the app directory and… |
 | [v0.17.0](https://github.com/BRF-Tech/filex/releases/tag/v0.17.0) | 12 August 2026 | The desktop app keeps itself up to date. It checks a static feed on filex.sh (not GitHub — that mirror is private and the provider would need a token inside the app), downloads quietly, and installs when you quit, because an… |
 | [v0.16.3](https://github.com/BRF-Tech/filex/releases/tag/v0.16.3) | 12 August 2026 | The tab strip, fixed properly. It was permanent in the desktop app and came and went on the web, because 0.16.0 gave the two surfaces different defaults — this package exists so they are one product, so the default is now the… |
 | [v0.16.2](https://github.com/BRF-Tech/filex/releases/tag/v0.16.2) | 12 August 2026 | Two things a share link got wrong. It changed language when you entered its PIN — the gate was English, the page behind it Turkish, and the screen in between managed both at once. |
@@ -358,4 +359,4 @@ The 61 releases before v0.17.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-23 from 81 published releases.</small>
+<small>Generated 2026-08-23 from 82 published releases.</small>

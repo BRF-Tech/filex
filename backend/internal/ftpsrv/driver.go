@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	ftpserver "github.com/fclairamb/ftpserverlib"
 
@@ -25,12 +26,17 @@ type driver struct {
 	// there has to be somewhere to look the session up on the way out.
 	liveMu sync.Mutex
 	live   map[uint32]*protocolauth.LiveSession
+
+	// host is the resolved PASV address, kept once resolution succeeded.
+	hostMu       sync.Mutex
+	host         string
+	hostResolved bool
 }
 
 // GetSettings describes the endpoint to the library.
 func (d *driver) GetSettings() (*ftpserver.Settings, error) {
 	c := d.srv.cfg
-	host, err := passiveAddress(c.PublicHost)
+	host, err := d.passiveHostWithRetry()
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +165,54 @@ func principalOf(cd ftpserver.ClientDriver) *protocolauth.Principal {
 	return nil
 }
 
+// lookupIP is net.LookupIP, swappable by tests that need DNS to fail on cue.
+var lookupIP = net.LookupIP
+
+// errPublicHostUnresolved marks a lookup failure — the one settings error that
+// is worth retrying, because at container start it is usually the resolver
+// that is not ready rather than the name that is wrong.
+var errPublicHostUnresolved = errors.New("ftpsrv: cannot resolve public host")
+
+// listenRetry / listenAttempts bound the start-up retry: two minutes in
+// five-second steps. Vars so tests can shrink them.
+var (
+	listenRetry    = 5 * time.Second
+	listenAttempts = 24
+)
+
+// passiveHostWithRetry resolves the public host for the PASV reply, retrying
+// a failed LOOKUP for up to listenAttempts × listenRetry before giving up.
+// Resolved once, then memoised: the library asks for settings at Listen time
+// and the answer must not change underneath a running listener.
+func (d *driver) passiveHostWithRetry() (string, error) {
+	d.hostMu.Lock()
+	defer d.hostMu.Unlock()
+	if d.hostResolved {
+		return d.host, nil
+	}
+	var err error
+	for attempt := 1; ; attempt++ {
+		var host string
+		host, err = passiveAddress(d.srv.cfg.PublicHost)
+		if err == nil {
+			d.host, d.hostResolved = host, true
+			return host, nil
+		}
+		if !errors.Is(err, errPublicHostUnresolved) || attempt >= listenAttempts {
+			return "", err
+		}
+		// ⚠ Measured on fm.example.com (v0.25.0 rollout): Docker's embedded DNS
+		// timed out once, four seconds into the container's life, and FTPS
+		// stayed down for the life of that container with /healthz green and
+		// the host port still published. The resolver not being ready yet is
+		// the normal case at boot, not a misconfiguration.
+		slog.Warn("ftps: public host not resolvable yet, retrying",
+			slog.String("host", d.srv.cfg.PublicHost), slog.Int("attempt", attempt),
+			slog.Int("of", listenAttempts), slog.String("err", err.Error()))
+		time.Sleep(listenRetry)
+	}
+}
+
 // passiveAddress turns whatever the operator put in FILEX_FTPS_PUBLIC_HOST
 // into the literal IPv4 address passive replies have to carry.
 //
@@ -187,9 +241,9 @@ func passiveAddress(publicHost string) (string, error) {
 		}
 		return h, nil
 	}
-	ips, err := net.LookupIP(h)
+	ips, err := lookupIP(h)
 	if err != nil {
-		return "", fmt.Errorf("ftpsrv: cannot resolve public host %q: %w (an IPv4 address is also accepted)", h, err)
+		return "", fmt.Errorf("%w %q: %w (an IPv4 address is also accepted)", errPublicHostUnresolved, h, err)
 	}
 	for _, ip := range ips {
 		if v4 := ip.To4(); v4 != nil {

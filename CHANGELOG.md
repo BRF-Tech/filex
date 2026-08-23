@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-08-23
+
+### Fixed
+
+- **FTPS survives a DNS hiccup at start-up.** `FILEX_FTPS_PUBLIC_HOST` is
+  resolved when the listener starts, and that single lookup was final: on
+  the v0.25.0 rollout Docker's embedded DNS timed out four seconds into the
+  container's life, the listener never started, and nothing said so except
+  one ERROR line at boot — the host port stayed published, `/healthz` stayed
+  green. The lookup is now retried for up to two minutes (every 5 s) before
+  the listener gives up; a name that truly does not resolve still fails with
+  the name in the message. Proven by a test that fails the lookup twice and
+  expects the third to be used.
+
 ## [0.25.0] - 2026-08-23
 
 ### Added

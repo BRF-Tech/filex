@@ -3,6 +3,31 @@
   "generatedAt": "2026-08-23",
   "releases": [
     {
+      "tag": "v0.25.0",
+      "date": "2026-08-23T08:29:59Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.25.0",
+      "prerelease": false,
+      "headline": "A life for every share link, a ceiling for the ZIP warmer, FTPS certificates that renew.",
+      "groups": [
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Release",
+              "text": "Split the release job — binaries → docker + desktop in parallel; push the :slim tags."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.25.0",
+        "ghcr.io/brf-tech/filex:full-v0.25.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
       "tag": "v0.24.1",
       "date": "2026-08-22T06:08:49Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.24.1",
