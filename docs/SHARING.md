@@ -178,6 +178,12 @@ per‑file size, an optional extension allowlist, an optional PIN, an expiry, a
 lifetime `max_uploads` cap, and **per‑IP rate limiting** on the anonymous upload
 endpoint. Read‑only storages reject drops.
 
+**Language.** Every public page — the PIN gate, the uploader, the error pages
+and the download-share pages — renders in ONE language per visitor, resolved
+from `?lang=` (`tr` / `en`), then `Accept-Language`, then the server's
+`default_locale`. Add `?lang=en` to a link you are sending to somebody whose
+browser is set to neither.
+
 **Options.**
 
 | `drop_settings` key | Default | Meaning |
@@ -210,6 +216,14 @@ admin settings.)
   are folder‑only), or you lack ≥editor on it.
 - **Drop rejected** — hit `max_files`, `max_file_size_mb`, a disallowed
   extension, the per‑IP rate limit, or a read‑only storage. The page shows which.
+- **"The file storage is unreachable right now"** — the link, the PIN and the
+  files are all fine; the storage behind the folder refused the write. The
+  endpoint answers **`503` `{"error":"storage_unavailable"}`** (not a 500) and
+  logs the failure with the storage name and driver, so an outage is visible
+  where outages are looked for. The link stays valid — the same upload works
+  once the backend is back. Out of space is the neighbouring case: **`507`
+  `{"error":"quota_exceeded"}`**, which is the *owner's* problem, not the
+  uploader's.
 - **Uploader sees folder contents?** — they don't; the drop page never lists the
   folder. If you want them to *see* files, use a download share instead.
 - **Share link opens the wrong URL / host** — `FILEX_PUBLIC_URL` is wrong. It's

@@ -300,6 +300,10 @@ func BuildRouter(d *Deps) http.Handler {
 	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
 	// exactly like authenticated uploads (mime, node cache, thumbnails).
 	dh := handlers.NewDrop(d.Store, mh, d.Share, d.Notify, d.Mailer, d.Cfg.PublicURL)
+	// Same fallback language as the share pages — without this a drop page
+	// renders in whatever the two-language table falls back to, independently
+	// of the server's own default.
+	dh.AttachLocale(d.Cfg.DefaultLocale)
 	oh := handlers.NewOps(d.Ops, d.Store)
 	oh.AttachACL(d.ACL)
 	if d.Ops != nil {

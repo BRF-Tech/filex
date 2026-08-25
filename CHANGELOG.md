@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.3] - 2026-08-25
+
+### Fixed
+
+- **A PIN-protected file-request page rendered blank.** The gate on a
+  `/d/{token}` drop link came out with an empty `<title>`, an empty heading, an
+  unlabelled PIN box and a blank submit button — nothing on the card told the
+  visitor what it wanted. `Drop` reused the shared PIN template but passed no
+  string table and no language: the template asks for `{{.T.pin_heading}}`,
+  `html/template` renders a missing key as the empty string, and the `Execute`
+  error was assigned to `_`. Every drop page (gate, uploader, error pages) now
+  goes through the same one-language-per-visitor resolver the share pages use,
+  so `?lang=` / `Accept-Language` / `default_locale` decide it — and the
+  uploader script's own messages travel with the page instead of being
+  hard-coded Turkish for every visitor on Earth.
+- **A drop into unreachable storage answered `500` and logged nothing.** When
+  the object store behind the folder refuses the write, the upload now answers
+  **`503` `{"error":"storage_unavailable"}`** with a message that says the
+  storage is down and the link is still good — instead of a generic "could not
+  send, try again" that sends people retrying into a wall — and the failure is
+  logged at `ERROR` with the storage name, driver, stage and destination, so it
+  reaches the error tracker. Out of space is now its own answer: **`507`
+  `{"error":"quota_exceeded"}`**. Found the hard way when Hetzner's object
+  storage returned `503` for eleven hours and every drop hung for over a minute
+  before failing silently.
+
 ## [0.25.2] - 2026-08-23
 
 ### Fixed

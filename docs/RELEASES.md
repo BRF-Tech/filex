@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.25.1, 23 August 2026
-A same-day fix for FTPS: the public host name is looked up when the listener starts, and a single DNS timeout in the container's first seconds used to leave FTPS off for good while everything else reported healthy. The lookup is now retried for up to two minutes before giving up.
+::: tip Latest — v0.25.2, 23 August 2026
+A patch for whoever reads the error tracker. Events forwarded from filex's log used to arrive as a bare message — "thumb generate failed" eleven times with no file and no error to act on. Every attribute of the log line now travels with the event, as searchable tags when short and in full under a log context, with anything named like a credential replaced by a marker. Two noisy lines were reclassified as well: a listener closed by a shutdown is an INFO line instead of an error filed on every deploy, and a failed driver-init attempt says which driver, which error and which attempt, with only the last attempt logged as an error.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.25.1
-docker pull ghcr.io/brf-tech/filex:full-v0.25.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.25.2
+docker pull ghcr.io/brf-tech/filex:full-v0.25.2
 ```
+
+## v0.25.2
+
+<span class="filex-release-date">23 August 2026</span>
+
+A patch for whoever reads the error tracker. Events forwarded from filex's log used to arrive as a bare message — "thumb generate failed" eleven times with no file and no error to act on. Every attribute of the log line now travels with the event, as searchable tags when short and in full under a log context, with anything named like a credential replaced by a marker. Two noisy lines were reclassified as well: a listener closed by a shutdown is an INFO line instead of an error filed on every deploy, and a failed driver-init attempt says which driver, which error and which attempt, with only the last attempt logged as an error.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.2`
 
 ## v0.25.1
 
@@ -259,29 +267,13 @@ The Windows app installs per-user now, and that is what makes the quiet update i
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.18.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.18.2`
 
-## v0.18.1
-
-<span class="filex-release-date">14 August 2026</span>
-
-The desktop app updates itself the way it always should have. Downloading was quiet and quitting installed silently, but the tray entry and the Settings button ran the installer with its wizard — so the one visible path through the feature was the one that made a background updater feel like being sent back through setup. Every install is silent now, and the app comes back in the tray rather than throwing a window at you. It also stops waiting for a quit that may never come: an app that lives in the tray applies the update at a quiet moment — ten minutes idle, no window open — after stopping its sync watchers so nothing is interrupted.
-
-**Fixed**
-
-- **Desktop** — The update stops handing you an installer window.
-
-**Other changes**
-
-- **Release** — Publish an unversioned linux binary, so the documented install works.
-- **Contributing** — The screenshot step's install command needs `run`
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.18.1) · `ghcr.io/brf-tech/filex:slim-v0.18.1`
-
 ## Earlier releases
 
-The 63 releases before v0.18.1, in brief. Full notes are on GitHub.
+The 64 releases before v0.18.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.18.1](https://github.com/BRF-Tech/filex/releases/tag/v0.18.1) | 14 August 2026 | The desktop app updates itself the way it always should have. Downloading was quiet and quitting installed silently, but the tray entry and the Settings button ran the installer with its wizard — so the one visible path through… |
 | [v0.18.0](https://github.com/BRF-Tech/filex/releases/tag/v0.18.0) | 14 August 2026 | Share links keep their word, and you get a face. A link capped at three downloads could hand out four: the cap was checked against a counter that was only bumped after the bytes had left, so any request that started while an… |
 | [v0.17.1](https://github.com/BRF-Tech/filex/releases/tag/v0.17.1) | 12 August 2026 | A packaging fix, and the first release whose tag matches what ships. The desktop package could be built without the updater inside it: in a pnpm workspace the dependency is a symlink pointing outside the app directory and… |
 | [v0.17.0](https://github.com/BRF-Tech/filex/releases/tag/v0.17.0) | 12 August 2026 | The desktop app keeps itself up to date. It checks a static feed on filex.sh (not GitHub — that mirror is private and the provider would need a token inside the app), downloads quietly, and installs when you quit, because an… |
@@ -348,4 +340,4 @@ The 63 releases before v0.18.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-23 from 83 published releases.</small>
+<small>Generated 2026-08-25 from 84 published releases.</small>

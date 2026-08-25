@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net"
 	"net/http"
 	"path"
@@ -19,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -40,13 +43,26 @@ type Drop struct {
 	limiter   *ipLimiter
 	// Branding resolves the public pages' identity (wiring:e1). Nil-safe.
 	Branding *BrandingSource
+	// DefaultLocale is the fallback language for the drop pages — used when
+	// the visitor's browser asks for neither of the two we ship. Same
+	// contract as Share.DefaultLocale; see publicLocale.
+	DefaultLocale string
 }
 
 // AttachBranding wires the shared branding source (wiring:e1).
 func (h *Drop) AttachBranding(b *BrandingSource) { h.Branding = b }
 
+// AttachLocale sets the fallback language for the drop pages.
+func (h *Drop) AttachLocale(def string) { h.DefaultLocale = def }
+
 // chrome computes the branded page fragments for one request (wiring:e1).
 func (h *Drop) chrome(r *http.Request) publicChrome { return publicChromeFor(h.Branding, r) }
+
+// pub resolves the language, string table, chrome and footer for one public
+// drop request — the same single-language contract Share.pub keeps.
+func (h *Drop) pub(r *http.Request) (string, map[string]string, publicChrome, template.HTML) {
+	return publicPageLang(h.Branding, r, h.DefaultLocale)
+}
 
 // NewDrop constructs the file-drop handler. mgr provides the shared ingest
 // path (IngestFile / EnsureDir); notify + mailer are optional (nil disables
@@ -185,7 +201,7 @@ func (h *Drop) Upload(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	pin := r.PostForm.Get("pin")
 	if _, err := h.Service.Resolve(r.Context(), tok, pin); err != nil {
-		h.renderDropPinForm(w, r, tok, "Yanlış PIN — tekrar deneyin.")
+		h.renderDropPinForm(w, r, tok, "pin_wrong")
 		return
 	}
 	h.renderUploader(w, r, tok, sh, pin)
@@ -311,26 +327,31 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 		subRel = path.Join(node.Path, sub)
 	}
 	if _, err := h.Manager.EnsureDir(r.Context(), st, subRel); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "mkdir_failed"})
+		h.failWrite(w, err, "mkdir", st, subRel, 0)
 		return
 	}
 
 	saved := 0
+	// Keep the LAST write error: with `saved == 0` it is the only account of
+	// why nothing landed, and it decides what the visitor is told.
+	var lastErr error
 	for _, fh := range files {
 		src, err := fh.Open()
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		ingested, err := h.Manager.IngestFile(r.Context(), st, subRel, fh.Filename, src, fh.Size)
 		_ = src.Close()
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		enqueueAntivirusScan(r.Context(), ingested) /* koru:k2 av */
 		saved++
 	}
 	if saved == 0 {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "write_failed"})
+		h.failWrite(w, lastErr, "ingest", st, subRel, len(files))
 		return
 	}
 
@@ -354,6 +375,52 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	emitFolderChange(node.StorageID, node.Path, realtime.ChangeEvent{Action: "create", Name: sub})
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": saved, "folder": sub})
+}
+
+// failWrite answers a drop whose bytes never landed, and — this is the point —
+// says WHY, in three places at once.
+//
+// It used to answer a bare 500 `{"error":"mkdir_failed"}` with nothing logged.
+// When Hetzner's object storage went 503 on 2026-08-25, every drop into an S3
+// folder hung for over a minute and then returned that 500: the uploader was
+// told "could not send, please try again" (so they retried, into the same dead
+// storage), the owner saw nothing, and the server log carried no trace of the
+// failure at all — the cause had to be inferred from the *sync worker's*
+// unrelated warnings. So:
+//
+//   - the visitor gets a message that distinguishes "the storage is down, your
+//     link is fine, come back shortly" from "you did something wrong",
+//   - a 503 (not a 500) says the request was fine and the dependency was not,
+//     which is also what stops a retry loop from looking like success,
+//   - slog.Error carries it to the error tracker with the storage and path
+//     attached, so the outage shows up where outages are looked for.
+func (h *Drop) failWrite(w http.ResponseWriter, err error, stage string, st *model.Storage, dest string, files int) {
+	code := "storage_unavailable"
+	status := http.StatusServiceUnavailable
+	if errors.Is(err, quota.ErrQuotaExceeded) {
+		// Not an outage: the owner is out of room. Different message, and a
+		// 507 so a client can tell the two apart without parsing prose.
+		code = "quota_exceeded"
+		status = http.StatusInsufficientStorage
+	}
+	msg := "no error" // saved==0 with every file open+ingest succeeding is impossible, but never log a nil deref
+	if err != nil {
+		msg = err.Error()
+	}
+	attrs := []any{
+		slog.String("stage", stage),
+		slog.String("dest", dest),
+		slog.String("code", code),
+		slog.String("err", msg),
+	}
+	if st != nil {
+		attrs = append(attrs, slog.String("storage", st.Name), slog.String("driver", st.Driver))
+	}
+	if files > 0 {
+		attrs = append(attrs, slog.Int("files", files))
+	}
+	slog.Error("drop: upload could not be written", attrs...)
+	writeJSON(w, status, map[string]any{"error": code})
 }
 
 // notifyOwner fires the in-app notification + owner email after a successful
@@ -403,15 +470,15 @@ func (h *Drop) notifyOwner(ctx context.Context, sh *model.Share, node *model.Nod
 func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (*model.Share, bool) {
 	sh, err := h.Store.GetShareByToken(r.Context(), tok)
 	if err != nil {
-		h.renderDropError(w, r, http.StatusNotFound, "Bulunamadı", "Bu bağlantı mevcut değil veya kaldırılmış.")
+		h.renderDropError(w, r, http.StatusNotFound, "drop_notfound")
 		return nil, false
 	}
 	if !sh.IsDrop() {
-		h.renderDropError(w, r, http.StatusNotFound, "Bulunamadı", "Bu bağlantı bir dosya yükleme bağlantısı değil.")
+		h.renderDropError(w, r, http.StatusNotFound, "drop_notdrop")
 		return nil, false
 	}
 	if sh.IsExpired(time.Now()) {
-		h.renderDropError(w, r, http.StatusGone, "Süresi doldu", "Bu yükleme bağlantısının süresi dolmuş veya limiti dolmuş.")
+		h.renderDropError(w, r, http.StatusGone, "drop_expired")
 		return nil, false
 	}
 	return sh, true
@@ -420,6 +487,7 @@ func (h *Drop) resolveKind(w http.ResponseWriter, r *http.Request, tok string) (
 // ─────────────────── rendering ───────────────────
 
 func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string, sh *model.Share, pin string) {
+	lang, t, chrome, footer := h.pub(r)
 	ds := parseDropSettings(sh.DropSettings)
 	folderName := ""
 	if node, err := h.Store.GetNode(r.Context(), sh.NodeID); err == nil && node != nil {
@@ -435,22 +503,56 @@ func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string
 		"pin":           pin,
 		"folder":        folderName,
 		"requiresPin":   sh.PinHash != "",
+		// The script's own strings travel WITH the page, in the page's
+		// language. Hard-coding them in the script is how this page stayed
+		// Turkish for every visitor while its PIN gate rendered blank.
+		"t": dropScriptStrings(t),
 	}
 	cfgJSON, _ := json.Marshal(cfg)
-	chrome := h.chrome(r) /* wiring:e1 */
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = dropUploaderTemplate.Execute(w, map[string]any{
+	if err := dropUploaderTemplate.Execute(w, map[string]any{
+		"Lang":      lang,
+		"T":         t,
 		"Folder":    folderName,
 		"Config":    template.JS(cfgJSON),
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,
-		"Footer":    chrome.FooterTR,
-	})
+		"Footer":    footer,
+	}); err != nil {
+		slog.Error("drop: uploader render failed", slog.String("err", err.Error()))
+	}
 }
 
-func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, token, errMsg string) {
-	chrome := h.chrome(r) /* wiring:e1 */
+// dropScriptStrings is the subset of the string table the uploader script
+// needs at runtime (client-side validation, progress, the result screen).
+func dropScriptStrings(t map[string]string) map[string]string {
+	keys := []string{
+		"drop_send", "drop_sending", "drop_remove_aria",
+		"drop_limit_files", "drop_limit_size", "drop_limit_ext",
+		"drop_done_heading", "drop_done_sub",
+		"drop_err_too_many", "drop_err_too_large", "drop_err_ext",
+		"drop_err_ext_any", "drop_err_large_any",
+		"drop_err_bad_pin", "drop_err_expired", "drop_err_rate",
+		"drop_err_no_files", "drop_err_storage", "drop_err_quota",
+		"drop_err_generic",
+	}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[k] = t[k]
+	}
+	return out
+}
+
+// renderDropPinForm renders the gate on a PIN-protected drop link. errKey is a
+// string-table key ("pin_wrong") or empty — never a sentence, so the gate and
+// the uploader behind it cannot end up in different languages.
+func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, token, errKey string) {
+	lang, t, chrome, footer := h.pub(r)
+	errMsg := ""
+	if errKey != "" {
+		errMsg = t[errKey]
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -458,28 +560,41 @@ func (h *Drop) renderDropPinForm(w http.ResponseWriter, r *http.Request, token, 
 		w.WriteHeader(http.StatusOK)
 	}
 	// Reuse the shared PIN form template; Action posts back to /d/{token}.
-	_ = pinFormTemplate.Execute(w, map[string]any{
+	// Lang + T are NOT optional here: the template asks for {{.T.pin_heading}}
+	// and friends, and html/template renders a missing key as "" — which is
+	// how this page shipped with an empty title, heading and button.
+	if err := pinFormTemplate.Execute(w, map[string]any{
+		"Lang":      lang,
+		"T":         t,
 		"Action":    "/d/" + path.Clean(token),
 		"Error":     errMsg,
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,
-		"Footer":    chrome.FooterEN,
-	})
+		"Footer":    footer,
+	}); err != nil {
+		slog.Error("drop: pin form render failed", slog.String("err", err.Error()))
+	}
 }
 
-func (h *Drop) renderDropError(w http.ResponseWriter, r *http.Request, status int, title, body string) {
-	chrome := h.chrome(r) /* wiring:e1 */
+// renderDropError shows a styled error page. It takes string-table KEYS, not
+// sentences: the caller is a code path and the language belongs to the visitor.
+func (h *Drop) renderDropError(w http.ResponseWriter, r *http.Request, status int, key string) {
+	lang, t, chrome, footer := h.pub(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	// Reuse the shared error page template.
-	_ = errorPageTemplate.Execute(w, map[string]any{
-		"Title":     title,
-		"Body":      body,
+	if err := errorPageTemplate.Execute(w, map[string]any{
+		"Lang":      lang,
+		"T":         t,
+		"Title":     t["err_"+key+"_title"],
+		"Body":      t["err_"+key+"_body"],
 		"Code":      status,
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,
-		"Footer":    chrome.FooterEN,
-	})
+		"Footer":    footer,
+	}); err != nil {
+		slog.Error("drop: error page render failed", slog.String("err", err.Error()))
+	}
 }
 
 // sanitizeSubName reduces a free-text uploader name to a safe, short folder
@@ -574,10 +689,10 @@ func clientIP(r *http.Request) string {
 // one or many files, optional name/note, live progress. All limits are echoed
 // so the visitor sees them; the actual enforcement is server-side.
 var dropUploaderTemplate = template.Must(template.New("drop").Parse(`<!doctype html>
-<html lang="tr"><head>
+<html lang="{{.Lang}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Dosya gönder{{if .Folder}} — {{.Folder}}{{end}}</title>
+<title>{{.T.drop_title}}{{if .Folder}} — {{.Folder}}{{end}}</title>
 ` + publicPageStyle + `
 {{.BrandCSS}}
 <style>
@@ -613,29 +728,29 @@ textarea { resize: vertical; min-height: 64px; }
 <main class="wrap">
 {{.BrandHead}}
 <div class="card" id="card">
-  <h1>Dosya gönder{{if .Folder}} · {{.Folder}}{{end}}</h1>
-  <p class="sub" id="sub">Aşağıya dosyaları sürükleyin veya seçin. Yalnızca yükleyebilirsiniz; klasördeki dosyalar size görünmez.</p>
+  <h1>{{.T.drop_heading}}{{if .Folder}} · {{.Folder}}{{end}}</h1>
+  <p class="sub" id="sub">{{.T.drop_sub}}</p>
 
-  <div class="drop" id="drop" role="button" tabindex="0" aria-label="Dosya seçin veya sürükleyip bırakın">
+  <div class="drop" id="drop" role="button" tabindex="0" aria-label="{{.T.drop_zone_aria}}">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14.9A7 7 0 1 1 15.7 8h1.8a4.5 4.5 0 0 1 2.5 8.2"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
-    <div class="big">Dosyaları buraya bırakın</div>
-    <div class="hint" id="hint">veya seçmek için tıklayın</div>
+    <div class="big">{{.T.drop_zone_big}}</div>
+    <div class="hint" id="hint">{{.T.drop_zone_hint}}</div>
   </div>
   <input type="file" id="file" multiple>
 
   <div class="field" id="nameField" style="display:none">
-    <label for="uploaderName">Adınız (isteğe bağlı)</label>
-    <input type="text" id="uploaderName" maxlength="60" placeholder="Örn. Ahmet Yılmaz">
+    <label for="uploaderName">{{.T.drop_name_label}}</label>
+    <input type="text" id="uploaderName" maxlength="60" placeholder="{{.T.drop_name_ph}}">
   </div>
   <div class="field">
-    <label for="note">Not (isteğe bağlı)</label>
-    <textarea id="note" maxlength="2000" placeholder="Kısa bir mesaj ekleyebilirsiniz"></textarea>
+    <label for="note">{{.T.drop_note_label}}</label>
+    <textarea id="note" maxlength="2000" placeholder="{{.T.drop_note_ph}}"></textarea>
   </div>
 
   <div class="files" id="files"></div>
   <div class="bar" id="bar"><i id="barfill"></i></div>
   <div class="msg" id="msg" role="status"></div>
-  <button class="btn" id="send" disabled>Gönder</button>
+  <button class="btn" id="send" disabled>{{.T.drop_send}}</button>
   <div class="foot" id="foot"></div>
 </div>
 {{.Footer}}
@@ -648,8 +763,12 @@ var el = function(id){ return document.getElementById(id); };
 var drop = el('drop'), fileInput = el('file'), filesBox = el('files'), sendBtn = el('send'), msg = el('msg');
 
 if (CFG.askName) el('nameField').style.display = 'block';
-var limitBits = ['En fazla ' + CFG.maxFiles + ' dosya', 'dosya başına ' + CFG.maxFileSizeMB + ' MB'];
-if (CFG.allowedExt && CFG.allowedExt.length) limitBits.push('izinli türler: ' + CFG.allowedExt.join(', '));
+// sub() fills the %s placeholders in a table string, left to right, so the
+// script's messages come from the same table as the page around it.
+function sub(tpl){ var a=[].slice.call(arguments,1), i=0; return String(tpl||'').replace(/%s/g, function(){ return i<a.length ? a[i++] : ''; }); }
+var T = CFG.t || {};
+var limitBits = [sub(T.drop_limit_files, CFG.maxFiles), sub(T.drop_limit_size, CFG.maxFileSizeMB)];
+if (CFG.allowedExt && CFG.allowedExt.length) limitBits.push(sub(T.drop_limit_ext, CFG.allowedExt.join(', ')));
 el('foot').textContent = limitBits.join(' · ');
 // Restrict the native file picker to the allowed extensions when set.
 if (CFG.allowedExt && CFG.allowedExt.length) { fileInput.setAttribute('accept', CFG.allowedExt.map(function(e){ return '.' + e; }).join(',')); }
@@ -665,7 +784,7 @@ function render(){
     var nm=document.createElement('span'); nm.className='nm'; nm.textContent=f.name;
     var sz=document.createElement('span'); sz.className='sz'; sz.textContent=human(f.size);
     var x=document.createElement('button'); x.className='x'; x.type='button'; x.textContent='✕';
-    x.setAttribute('aria-label','Kaldır: '+f.name);
+    x.setAttribute('aria-label', sub(T.drop_remove_aria, f.name));
     x.onclick=function(){ picked.splice(idx,1); render(); };
     row.appendChild(nm); row.appendChild(sz); row.appendChild(x); filesBox.appendChild(row);
   });
@@ -676,9 +795,9 @@ function add(list){
   msg.className='msg'; msg.textContent='';
   for(var i=0;i<list.length;i++){
     var f=list[i];
-    if(picked.length>=CFG.maxFiles){ msg.className='msg err'; msg.textContent='En fazla '+CFG.maxFiles+' dosya gönderebilirsiniz.'; break; }
-    if(f.size > CFG.maxFileSizeMB*1024*1024){ msg.className='msg err'; msg.textContent=f.name+' çok büyük (en fazla '+CFG.maxFileSizeMB+' MB).'; continue; }
-    if(!extOk(f.name)){ msg.className='msg err'; msg.textContent=f.name+' için izin verilmeyen dosya türü.'; continue; }
+    if(picked.length>=CFG.maxFiles){ msg.className='msg err'; msg.textContent=sub(T.drop_err_too_many, CFG.maxFiles); break; }
+    if(f.size > CFG.maxFileSizeMB*1024*1024){ msg.className='msg err'; msg.textContent=sub(T.drop_err_too_large, f.name, CFG.maxFileSizeMB); continue; }
+    if(!extOk(f.name)){ msg.className='msg err'; msg.textContent=sub(T.drop_err_ext, f.name); continue; }
     picked.push(f);
   }
   render();
@@ -698,7 +817,7 @@ sendBtn.onclick=function(){
   if(CFG.pin) fd.append('pin', CFG.pin);
   var nm=el('uploaderName'); if(nm) fd.append('uploader_name', nm.value||'');
   fd.append('note', el('note').value||'');
-  sendBtn.disabled=true; sendBtn.textContent='Gönderiliyor…';
+  sendBtn.disabled=true; sendBtn.textContent=T.drop_sending;
   el('bar').style.display='block'; msg.className='msg'; msg.textContent='';
   var xhr=new XMLHttpRequest();
   xhr.open('POST', CFG.action, true);
@@ -714,15 +833,21 @@ sendBtn.onclick=function(){
 };
 
 function success(n){
-  el('card').innerHTML =
-    '<div class="done"><div class="icon-badge ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11"/></svg></div>'+
-    '<h1>Teşekkürler!</h1>'+
-    '<p class="sub" style="margin-bottom:0">'+n+' dosya başarıyla gönderildi.</p></div>';
+  var done=document.createElement('div'); done.className='done';
+  var badge=document.createElement('div'); badge.className='icon-badge ok';
+  badge.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11"/></svg>';
+  var h=document.createElement('h1'); h.textContent=T.drop_done_heading;
+  var p=document.createElement('p'); p.className='sub'; p.style.marginBottom='0'; p.textContent=sub(T.drop_done_sub, n);
+  done.appendChild(badge); done.appendChild(h); done.appendChild(p);
+  var card=el('card'); card.innerHTML=''; card.appendChild(done);
 }
 function fail(code, res){
-  sendBtn.disabled=false; sendBtn.textContent='Gönder'; el('bar').style.display='none'; el('barfill').style.width='0';
-  var m={ too_many_files:'Çok fazla dosya.', file_too_large:'Bir dosya izin verilen boyuttan büyük.', ext_not_allowed:'İzin verilmeyen dosya türü.', bad_pin:'Yanlış PIN.', expired:'Bağlantının süresi dolmuş.', rate_limited:'Çok fazla deneme — biraz sonra tekrar deneyin.', no_files:'Dosya seçilmedi.' };
-  msg.className='msg err'; msg.textContent = (m[code]||'Gönderilemedi, lütfen tekrar deneyin.');
+  sendBtn.disabled=false; sendBtn.textContent=T.drop_send; el('bar').style.display='none'; el('barfill').style.width='0';
+  // storage_unavailable is deliberately NOT the generic "try again" line: the
+  // link and the files are fine, the backing storage is down, and telling the
+  // visitor that is the difference between waiting and retrying into a wall.
+  var m={ too_many_files:sub(T.drop_err_too_many, CFG.maxFiles), file_too_large:sub(T.drop_err_large_any, CFG.maxFileSizeMB), ext_not_allowed:T.drop_err_ext_any, bad_pin:T.drop_err_bad_pin, expired:T.drop_err_expired, rate_limited:T.drop_err_rate, no_files:T.drop_err_no_files, storage_unavailable:T.drop_err_storage, quota_exceeded:T.drop_err_quota };
+  msg.className='msg err'; msg.textContent = (m[code]||T.drop_err_generic);
 }
 render();
 </script>

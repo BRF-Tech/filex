@@ -282,7 +282,9 @@ Details: [docs/MCP.md](docs/MCP.md).
 - **CLI client** — the same binary reaches a remote server (`filex client`, `filex sync`) with no server-side plugin ([docs/CLI.md](docs/CLI.md)).
 - **Self-updating** — patch releases install themselves, minor ones are announced for one-click upgrade ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Single binary** — goreleaser matrix: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
-- **i18n** — English + Turkish out of the box.
+- **i18n** — English + Turkish out of the box, **public pages included**: a
+  share link, a PIN gate or a file-request page renders in the visitor's
+  language (`?lang=`, then `Accept-Language`, then the server default).
 
 ## Architecture
 

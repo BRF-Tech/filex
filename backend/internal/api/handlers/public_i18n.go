@@ -15,6 +15,7 @@ and handed to the template, so every string on a page comes from the same
 table. */
 
 import (
+	"html/template"
 	"net/http"
 	"strings"
 )
@@ -101,6 +102,51 @@ var publicText = map[string]map[string]string{
 		"err_unavailable_body":  "Paylaşılan öğe okunamadı. Bağlantıyı paylaşan kişiye bildirin.",
 		"err_limit_title":       "İndirme limiti doldu",
 		"err_limit_body":        "Bu bağlantı izin verilen sayıda indirildi.",
+
+		// File-drop (public upload link) — the inverse of a download share.
+		"drop_title":        "Dosya gönder",
+		"drop_heading":      "Dosya gönder",
+		"drop_sub":          "Aşağıya dosyaları sürükleyin veya seçin. Yalnızca yükleyebilirsiniz; klasördeki dosyalar size görünmez.",
+		"drop_zone_big":     "Dosyaları buraya bırakın",
+		"drop_zone_hint":    "veya seçmek için tıklayın",
+		"drop_zone_aria":    "Dosya seçin veya sürükleyip bırakın",
+		"drop_name_label":   "Adınız (isteğe bağlı)",
+		"drop_name_ph":      "Örn. Ahmet Yılmaz",
+		"drop_note_label":   "Not (isteğe bağlı)",
+		"drop_note_ph":      "Kısa bir mesaj ekleyebilirsiniz",
+		"drop_send":         "Gönder",
+		"drop_sending":      "Gönderiliyor…",
+		"drop_remove_aria":  "Kaldır: %s",
+		"drop_limit_files":  "En fazla %s dosya",
+		"drop_limit_size":   "dosya başına %s MB",
+		"drop_limit_ext":    "izinli türler: %s",
+		"drop_done_heading": "Teşekkürler!",
+		"drop_done_sub":     "%s dosya başarıyla gönderildi.",
+
+		// Drop failures the visitor sees. `drop_err_storage` is the one that
+		// matters most: the link is fine and the files are fine — the backing
+		// storage is unreachable — so the message says so instead of leaving
+		// somebody retrying a link they think is broken.
+		"drop_err_too_many":  "En fazla %s dosya gönderebilirsiniz.",
+		"drop_err_too_large": "%s çok büyük (en fazla %s MB).",
+		"drop_err_ext":       "%s için izin verilmeyen dosya türü.",
+		"drop_err_ext_any":   "İzin verilmeyen dosya türü.",
+		"drop_err_large_any": "Bir dosya izin verilen boyuttan büyük (en fazla %s MB).",
+		"drop_err_bad_pin":   "Yanlış PIN.",
+		"drop_err_expired":   "Bağlantının süresi dolmuş.",
+		"drop_err_rate":      "Çok fazla deneme — biraz sonra tekrar deneyin.",
+		"drop_err_no_files":  "Dosya seçilmedi.",
+		"drop_err_storage":   "Dosya deposuna şu an ulaşılamıyor, gönderiminiz kaydedilemedi. Biraz sonra tekrar deneyin — bağlantınız geçerli kalmaya devam ediyor.",
+		"drop_err_quota":     "Bu bağlantının klasöründe yeterli yer kalmamış. Bağlantıyı paylaşan kişiye bildirin.",
+		"drop_err_generic":   "Gönderilemedi, lütfen tekrar deneyin.",
+
+		// Drop error pages (link resolution — before any upload)
+		"err_drop_notfound_title": "Bulunamadı",
+		"err_drop_notfound_body":  "Bu bağlantı mevcut değil veya kaldırılmış.",
+		"err_drop_notdrop_title":  "Bulunamadı",
+		"err_drop_notdrop_body":   "Bu bağlantı bir dosya yükleme bağlantısı değil.",
+		"err_drop_expired_title":  "Süresi doldu",
+		"err_drop_expired_body":   "Bu yükleme bağlantısının süresi dolmuş veya limiti dolmuş.",
 	},
 	"en": {
 		"pin_title":    "Enter PIN",
@@ -144,7 +190,66 @@ var publicText = map[string]map[string]string{
 		"err_unavailable_body":  "The shared item could not be read. Let whoever sent you the link know.",
 		"err_limit_title":       "Download limit reached",
 		"err_limit_body":        "This link has been downloaded the maximum number of times.",
+
+		"drop_title":        "Send files",
+		"drop_heading":      "Send files",
+		"drop_sub":          "Drag files below or pick them. You can only upload; the folder's contents stay hidden from you.",
+		"drop_zone_big":     "Drop your files here",
+		"drop_zone_hint":    "or click to choose",
+		"drop_zone_aria":    "Choose files or drag and drop them",
+		"drop_name_label":   "Your name (optional)",
+		"drop_name_ph":      "e.g. Alex Smith",
+		"drop_note_label":   "Note (optional)",
+		"drop_note_ph":      "You can add a short message",
+		"drop_send":         "Send",
+		"drop_sending":      "Sending…",
+		"drop_remove_aria":  "Remove: %s",
+		"drop_limit_files":  "Up to %s files",
+		"drop_limit_size":   "%s MB per file",
+		"drop_limit_ext":    "allowed types: %s",
+		"drop_done_heading": "Thank you!",
+		"drop_done_sub":     "%s file(s) sent successfully.",
+
+		"drop_err_too_many":  "You can send at most %s files.",
+		"drop_err_too_large": "%s is too big (max %s MB).",
+		"drop_err_ext":       "%s has a file type that is not allowed.",
+		"drop_err_ext_any":   "That file type is not allowed.",
+		"drop_err_large_any": "One of the files is over the size limit (max %s MB).",
+		"drop_err_bad_pin":   "Wrong PIN.",
+		"drop_err_expired":   "This link has expired.",
+		"drop_err_rate":      "Too many attempts — try again shortly.",
+		"drop_err_no_files":  "No file selected.",
+		"drop_err_storage":   "The file storage is unreachable right now, so your upload could not be saved. Try again shortly — your link stays valid.",
+		"drop_err_quota":     "The folder behind this link is out of space. Let whoever sent you the link know.",
+		"drop_err_generic":   "Could not send, please try again.",
+
+		"err_drop_notfound_title": "Not found",
+		"err_drop_notfound_body":  "This link does not exist or has been removed.",
+		"err_drop_notdrop_title":  "Not found",
+		"err_drop_notdrop_body":   "This link is not a file-upload link.",
+		"err_drop_expired_title":  "Expired",
+		"err_drop_expired_body":   "This upload link has expired or reached its limit.",
 	},
+}
+
+// publicPageLang resolves everything a public page needs to render in ONE
+// language: the tag for <html lang>, the string table, the branded chrome and
+// the footer that matches the language.
+//
+// Share and Drop both go through here. Drop used to render its own pages with
+// no table at all — the PIN gate on a drop link came out with an empty <title>,
+// an empty heading and an unlabelled input, because the template asks for
+// {{.T.pin_heading}} and nobody passed T (html/template renders a missing key
+// as the empty string, and the Execute error was discarded). A public surface
+// that renders its own strings is a surface that can silently lose them.
+func publicPageLang(br *BrandingSource, r *http.Request, defaultLocale string) (string, map[string]string, publicChrome, template.HTML) {
+	lang := publicLocale(r, defaultLocale)
+	t := publicT(lang)
+	c := publicChromeFor(br, r)
+	if lang == "tr" {
+		return lang, t, c, c.FooterTR
+	}
+	return lang, t, c, c.FooterEN
 }
 
 // publicT returns the string table for a language, always non-nil.

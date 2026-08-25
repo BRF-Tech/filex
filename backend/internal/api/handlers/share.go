@@ -77,13 +77,8 @@ func (h *Share) AttachLocale(def string) { h.DefaultLocale = def }
 // per request so a page cannot mix two languages (which is exactly what the PIN
 // gate and the page behind it used to do).
 func (h *Share) pub(r *http.Request) (lang string, t map[string]string, footer template.HTML) {
-	lang = publicLocale(r, h.DefaultLocale)
-	t = publicT(lang)
-	c := h.chrome(r)
-	if lang == "tr" {
-		return lang, t, c.FooterTR
-	}
-	return lang, t, c.FooterEN
+	lang, t, _, footer = publicPageLang(h.Branding, r, h.DefaultLocale)
+	return lang, t, footer
 }
 
 // chrome computes the branded page fragments for one request (wiring:e1).

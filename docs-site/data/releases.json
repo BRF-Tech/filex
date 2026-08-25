@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-08-23",
+  "generatedAt": "2026-08-25",
   "releases": [
+    {
+      "tag": "v0.25.2",
+      "date": "2026-08-23T10:19:05Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.25.2",
+      "prerelease": false,
+      "headline": "Error-tracker events carry the log line's context.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.25.2",
+        "ghcr.io/brf-tech/filex:full-v0.25.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
     {
       "tag": "v0.25.1",
       "date": "2026-08-23T08:58:53Z",

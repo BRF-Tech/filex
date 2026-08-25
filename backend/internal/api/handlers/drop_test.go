@@ -127,8 +127,10 @@ func TestDrop_BlindUpload(t *testing.T) {
 	sh, err := svc.Create(context.Background(), share.CreateOpts{NodeID: folder.ID, Kind: model.ShareKindDrop})
 	require.NoError(t, err)
 
-	// GET page renders the uploader, NOT the folder listing.
-	page := doGet(t, r, "/d/"+sh.Token)
+	// GET page renders the uploader, NOT the folder listing. The page follows
+	// the visitor's language now (it used to be Turkish for everyone), so the
+	// request has to say who is asking.
+	page := getPage(t, r, "/d/"+sh.Token, "tr")
 	require.Equal(t, http.StatusOK, page.Code)
 	assert.Contains(t, page.Body.String(), "Dosya gönder")
 	assert.NotContains(t, page.Body.String(), "SECRET.txt", "blind drop: existing contents must never leak")
