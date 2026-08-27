@@ -86,7 +86,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Backend](BACKEND.md) — internals
 - [HTTP / component API](API.md)
 - [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component
-- [AI & MCP](MCP.md) — API tokens, scopes, and the MCP endpoint for agents
+- [AI & MCP](MCP.md) — API tokens, scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
 - [Migration](MIGRATION.md) — moving off `@brftech/file-explorer`
 
 ## Repo only — not published to docs.filex.sh

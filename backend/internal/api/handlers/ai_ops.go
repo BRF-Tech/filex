@@ -51,6 +51,9 @@ type aiOps struct {
 	// body resolves where a file's bytes are: the driver, or filex's staging
 	// area while a staged upload is still transferring. Nil-safe.
 	body *filebody.Resolver
+	// tickets, when wired, lets this surface mint credential-free upload URLs
+	// for files too large to travel inside a tool call (see upload_ticket.go).
+	tickets *uploadTicketStore
 }
 
 // attachBody wires the byte-source resolver so the AI/REST read and zip

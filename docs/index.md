@@ -72,7 +72,7 @@ features:
     linkText: Integration docs
   - icon: 🤖
     title: MCP for AI agents
-    details: A token-authenticated automation surface that speaks Model Context Protocol — let agents browse, read and write files.
+    details: A token-authenticated automation surface that speaks Model Context Protocol — let agents browse, read and write files, and hand them credential-free upload tickets for files too big to pass through a model.
     link: /MCP
     linkText: MCP docs
   - icon: 🛡️

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-27
+
+### Added
+
+- **Upload tickets: an agent can finally upload a large local file.** Every
+  agent-facing write surface carried its bytes inside the call — `/api/ai/upload`'s
+  JSON body, the MCP `file_write` tool — and on an MCP transport that means through
+  the model's context. A 130 MB file is ~173 MB of base64 there: not slow,
+  impossible. The agent was left telling its user "I can't upload this" (one
+  spreadsheet cost an hour on 2026-08-27).
+
+  `POST /api/ai/upload/ticket` (scope `write`) now splits the job in two. The
+  authorized half resolves and **pins** the destination under the caller's own
+  token — confinement root, tenant scope and editor grant all checked there, and a
+  folder as the destination is refused before a byte moves. The transfer half is a
+  plain `PUT`/`POST` to **`/u/{ticket}`** that needs **no credentials at all**, so
+  an agent with no filex token (a Coder workspace, a fleet agent) can finish the
+  upload with the ready-made `curl -T <file> <url>` line the mint call returns.
+
+  The URL is not a key to filex, it is a key to **one write**: single-use, minutes
+  long by default (30 min, max 24 h), no read/list/delete, and the redeemer cannot
+  name a path. The bytes are written as — and billed to — the minter, and land on
+  the same staging/thumbnail/write-hook path as any other upload. Refusals are
+  distinct and non-guessy: `404` unknown *or already redeemed* (the same answer on
+  purpose), `410` expired, `409` in flight, `411` no `Content-Length`, `413` over
+  the ticket ceiling (the ticket survives, so a corrected upload still works), and
+  `503 storage_unavailable` / `507 quota_exceeded` when the backend is the problem.
+
+  Also exposed as the MCP tool **`file_upload_ticket`**, and `file_write`'s
+  description now sends anything already on disk there instead of to base64.
+
 ## [0.25.3] - 2026-08-25
 
 ### Fixed

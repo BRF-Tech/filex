@@ -300,6 +300,16 @@ func BuildRouter(d *Deps) http.Handler {
 	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
 	// exactly like authenticated uploads (mime, node cache, thumbnails).
 	dh := handlers.NewDrop(d.Store, mh, d.Share, d.Notify, d.Mailer, d.Cfg.PublicURL)
+
+	// Upload tickets: minted on the token-authenticated AI/MCP surfaces below,
+	// redeemed on the credential-free /u/{ticket} route. The store is shared by
+	// both halves, so it is built here — before either mounts.
+	uploadTickets := handlers.NewUploadTicketStore()
+	tuh := handlers.NewTicketUpload(d.Store, d.StorageResolver, uploadTickets)
+	tuh.AttachACL(d.ACL)
+	tuh.AttachThumbs(d.Thumbs)
+	tuh.AttachStaged(suh)
+	tuh.AttachBody(d.Body)
 	// Same fallback language as the share pages — without this a drop page
 	// renders in whatever the two-language table falls back to, independently
 	// of the server's own default.
@@ -383,6 +393,13 @@ func BuildRouter(d *Deps) http.Handler {
 	// are never listed ("blind drop").
 	r.Get("/d/{token}", dh.Page)
 	r.Post("/d/{token}", dh.Upload)
+
+	// ────── upload ticket redeem (credential-free, single-use) ──────
+	// PUT is what `curl -T` sends; POST accepts the same transfer as multipart
+	// `file`. No auth by design: the destination was fixed when an authorized
+	// caller minted the ticket, and the URL can do nothing but that one write.
+	r.Put("/u/{ticket}", tuh.Upload)
+	r.Post("/u/{ticket}", tuh.Upload)
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
 	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)
@@ -918,6 +935,7 @@ func BuildRouter(d *Deps) http.Handler {
 	aiH.AttachThumbs(d.Thumbs)
 	aiH.AttachStaged(suh)
 	aiH.AttachBody(d.Body)
+	aiH.AttachTickets(uploadTickets)
 	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
 		Store:           d.Store,
 		Caps:            d.Caps,
@@ -935,6 +953,7 @@ func BuildRouter(d *Deps) http.Handler {
 	aiMCP.AttachThumbs(d.Thumbs)
 	aiMCP.AttachStaged(suh)
 	aiMCP.AttachBody(d.Body)
+	aiMCP.AttachTickets(uploadTickets)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		// Agents are tenant-scoped too — resolve the token user's provider
@@ -957,6 +976,9 @@ func BuildRouter(d *Deps) http.Handler {
 
 		// Write surface.
 		r.With(auth.RequireScope("write")).Post("/upload", aiH.Upload)
+		// Mint a credential-free URL for a file too large to travel inside a
+		// call body (the redeem half is the public /u/{ticket} route).
+		r.With(auth.RequireScope("write")).Post("/upload/ticket", aiH.UploadTicket)
 		r.With(auth.RequireScope("write")).Post("/mkdir", aiH.Mkdir)
 		r.With(auth.RequireScope("write")).Post("/move", aiH.Move)
 		r.With(auth.RequireScope("delete")).Post("/delete", aiH.Delete)

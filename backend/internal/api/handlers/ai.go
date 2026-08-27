@@ -28,6 +28,8 @@ import (
 //	GET    /api/ai/info?path=<adapter://file>     → {entry:{…}}
 //	GET    /api/ai/download?path=<adapter://file> → raw bytes (stream)
 //	POST   /api/ai/upload                         → {entry:{…}}  (see body below)
+//	POST   /api/ai/upload/ticket {"path":"…"}     → {url,curl,…} (credential-free
+//	                                                 upload URL; upload_ticket.go)
 //	POST   /api/ai/delete  {"path":"…"}           → {ok:true}
 //	POST   /api/ai/mkdir   {"path":"…"}           → {entry:{…}}
 //	POST   /api/ai/move    {"src":"…","dst":"…"}  → {entry:{…}}

@@ -158,6 +158,8 @@ storage's root (or, when confined, your root).
 | GET | `/api/ai/download?path=` | `read` | → raw bytes (stream) |
 | GET | `/api/ai/search?path=&q=` | `read` | → `{entries:[…]}` |
 | POST | `/api/ai/upload` | `write` | `{path, content}` / `{path, content_base64}` / multipart `file` |
+| POST | `/api/ai/upload/ticket` | `write` | `{path, expires_in_seconds?, max_bytes?}` → `{url, ticket, path, max_bytes, expires_at, curl}` |
+| PUT/POST | `/u/{ticket}` | *(none — see below)* | raw body (`curl -T`) or multipart `file` → `{entry:{…}}` |
 | POST | `/api/ai/mkdir` | `write` | `{path}` |
 | POST | `/api/ai/move` | `write` | `{src, dst}` (same storage) |
 | POST | `/api/ai/delete` | `delete` | `{path}` → soft-delete to trash |
@@ -171,6 +173,17 @@ Notes:
 
 - **Upload** takes UTF-8 text (`content`), base64 (`content_base64`), or a
   `multipart/form-data` `file` field for large binaries.
+- **Upload tickets** solve the one case an agent cannot: a large file already on
+  its own disk. Anything sent through a tool call travels inside that call — on
+  MCP, through the model's context — so a 130 MB file (~173 MB of base64) simply
+  cannot go that way. `POST /api/ai/upload/ticket` splits the job: this
+  authorized call pins the destination under *your* token, and the `url` it
+  returns accepts exactly one upload **with no credentials at all**, so an agent
+  that has no filex token can still finish the transfer. The ticket is
+  single-use, short-lived (default 30 min, `max 24 h`), cannot read/list/delete,
+  and cannot be pointed anywhere else — the redeemer never supplies a path. The
+  bytes are written as, and billed to, the minter. Tickets live in memory, so a
+  restart drops the unredeemed ones (mint another).
 - **Share** mints a public `/s/<token>` link (folders download as a ZIP). The
   target must already be indexed — write or list it first. A generated PIN is
   returned **once**.
@@ -191,6 +204,15 @@ curl -H 'X-Filex-Token: <token>' \
 curl -X POST -H 'X-Filex-Token: <token>' -H 'Content-Type: application/json' \
   -d '{"path":"s3://projects/acme/notes.md","content":"# Notes\n"}' \
   https://files.example.com/api/ai/upload
+
+# Upload a big LOCAL file: mint a ticket, then transfer without any token
+curl -X POST -H 'X-Filex-Token: <token>' -H 'Content-Type: application/json' \
+  -d '{"path":"s3://projects/acme/dataset.parquet"}' \
+  https://files.example.com/api/ai/upload/ticket
+# → {"url":"https://files.example.com/u/9f3c…","curl":"curl -T <local-file> …",…}
+
+curl -T ./dataset.parquet 'https://files.example.com/u/9f3c…'
+# → {"entry":{"name":"dataset.parquet","size":136314880,…}}
 ```
 
 ---
@@ -243,7 +265,8 @@ user's role + grants + confinement):
 | `file_list` | List a directory (`adapter://dir`; empty = first storage root). |
 | `file_info` | Metadata (size, mime, type, modified time) for one path. |
 | `file_read` | Read a file. UTF-8 text when the bytes are valid UTF-8, else base64. **Rejects files > 8 MiB** — use the REST `download` stream for those. |
-| `file_write` | Create/overwrite a file (`content` text or `content_base64` binary). |
+| `file_write` | Create/overwrite a file (`content` text or `content_base64` binary). Content you generate — never a file off your disk. |
+| `file_upload_ticket` | Get a short-lived, **credential-free** URL (plus the ready `curl -T` line) for a LOCAL file of any size. The bytes never enter the conversation; the URL takes one upload to a fixed path. |
 | `file_delete` | Soft-delete to filex trash (recoverable from the UI). |
 | `file_move` | Move/rename within the same storage. |
 | `file_mkdir` | Create a directory. |
@@ -321,6 +344,16 @@ JSON-RPC response. Use the REST `GET /api/ai/download?path=…` stream, or
 ### `not indexed yet` when sharing
 `file_share` needs the target in filex's node cache. Write or list it first (or
 wait for a storage [sync](STORAGE.md#sync)) so the entry exists, then share.
+
+### Ticket redeem answers: `404`, `410`, `409`, `411`, `413`
+
+`404 ticket_not_found` — unknown **or already redeemed** (deliberately the same
+answer). `410 ticket_expired` — mint a new one. `409 ticket_in_use` — another
+transfer is in flight for that ticket. `411 content_length_required` — the body
+arrived chunked; `curl -T` always sends a length, but a hand-rolled client may
+not. `413 file_too_large` — above the ticket's `max_bytes`; the ticket survives,
+so a corrected upload still works. A `503 storage_unavailable` / `507
+quota_exceeded` means the storage backend refused, not your request.
 
 ### `no storage configured` (503)
 No enabled storage exists to serve the request. Add one (see

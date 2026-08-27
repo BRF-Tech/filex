@@ -50,6 +50,7 @@ type AIMCP struct {
 	thumbs     *thumb.Pipeline
 	staged     *StagedUpload
 	body       *filebody.Resolver
+	tickets    *uploadTicketStore
 	handler    http.Handler
 }
 
@@ -69,6 +70,10 @@ func (h *AIMCP) AttachStaged(s *StagedUpload) { h.staged = s }
 // AttachBody wires the byte-source resolver so MCP reads serve a file that is
 // still being transferred out of staging.
 func (h *AIMCP) AttachBody(b *filebody.Resolver) { h.body = b }
+
+// AttachTickets wires the shared upload-ticket store so the MCP surface can
+// mint credential-free upload URLs for large local files.
+func (h *AIMCP) AttachTickets(s *uploadTicketStore) { h.tickets = s }
 
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
@@ -99,6 +104,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	ops.thumbs = h.thumbs
 	ops.staged = h.staged
 	ops.body = h.body
+	ops.tickets = h.tickets
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",
@@ -144,6 +150,19 @@ type mcpWriteIn struct {
 }
 type mcpEntryOut struct {
 	Entry *aiEntry `json:"entry"`
+}
+
+type mcpUploadTicketIn struct {
+	Path             string `json:"path" jsonschema:"adapter://file path the upload will land at (a FILE path, not a folder)"`
+	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty" jsonschema:"how long the URL stays valid (default 1800, max 86400)"`
+	MaxBytes         int64  `json:"max_bytes,omitempty" jsonschema:"optional lower ceiling than the server maximum"`
+}
+type mcpUploadTicketOut struct {
+	URL       string `json:"url"`
+	Path      string `json:"path"`
+	MaxBytes  int64  `json:"max_bytes"`
+	ExpiresAt string `json:"expires_at"`
+	Curl      string `json:"curl"`
 }
 
 type mcpPathIn struct {
@@ -269,7 +288,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_write",
-		Description: "Create or overwrite a file. Provide UTF-8 text in `content`, or binary as base64 in `content_base64`.",
+		Description: "Create or overwrite a file from content you produce here: UTF-8 text in `content`, or small binary as base64 in `content_base64`. These bytes travel inside the tool call, so a file that already exists on YOUR disk — anything more than ~1 MB — must NOT be sent this way: call `file_upload_ticket` instead and stream it with curl.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpWriteIn) (*mcp.CallToolResult, mcpEntryOut, error) {
 		var data []byte
 		if in.ContentBase64 != "" {
@@ -286,6 +305,31 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 			return toolErr[mcpEntryOut](err)
 		}
 		return nil, mcpEntryOut{Entry: e}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "file_upload_ticket",
+		Description: "Upload a LOCAL file of any size (video, dataset, spreadsheet, archive) without its bytes " +
+			"passing through this conversation. Returns a short-lived, credential-free URL plus the exact `curl` " +
+			"line to run: `curl -T <local-file> <url>`. The destination is fixed by this call, the URL accepts " +
+			"exactly one upload and needs NO token, so an agent without filex credentials can still finish the " +
+			"transfer. Use this whenever the file is already on disk — never base64 it into file_write.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUploadTicketIn) (*mcp.CallToolResult, mcpUploadTicketOut, error) {
+		info, err := ops.CreateUploadTicket(ctx, uploadTicketRequest{
+			Path:             in.Path,
+			ExpiresInSeconds: in.ExpiresInSeconds,
+			MaxBytes:         in.MaxBytes,
+		})
+		if err != nil {
+			return toolErr[mcpUploadTicketOut](err)
+		}
+		return nil, mcpUploadTicketOut{
+			URL:       info.URL,
+			Path:      info.Path,
+			MaxBytes:  info.MaxBytes,
+			ExpiresAt: info.ExpiresAt,
+			Curl:      info.Curl,
+		}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{

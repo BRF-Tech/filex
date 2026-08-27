@@ -37,11 +37,23 @@ for this path.
 | Public drop links (`/d/{token}`) | synchronous write | staged ingest | — (one request; staging removes the *wait*, not the retry) |
 | ShareX (`/api/sharex/upload`) | synchronous write | staged ingest | — |
 | AI / REST (`/api/ai/upload`, MCP `file_write`) | synchronous write | staged ingest | — |
+| Upload tickets (`/u/{ticket}`, MCP `file_upload_ticket`) | synchronous write | staged ingest | — (one request, single-use ticket) |
 
 "Large" means **above the chunk size** — `FILEX_UPLOAD_CHUNK_SIZE`, 8 MiB by
 default — on every one of them, so the word means the same thing everywhere.
 
-The three whole-body surfaces cannot chunk: each is one request carrying the
+### Upload tickets: the agent's way past its own context
+
+An AI agent is the one client that cannot simply POST a local file: everything it
+sends goes inside a tool call, and on MCP that means through the model's context,
+where a 130 MB file (~173 MB base64) does not fit at all. A **ticket** splits the
+operation — the agent's authorized call pins the destination, and the URL it gets
+back accepts exactly one upload **with no credentials**, so an agent holding no
+filex token can still run `curl -T`. On the wire the redeem is just another
+whole-body upload, so everything below (staging, the disk guard, quota) applies
+to it unchanged. See [MCP.md](MCP.md) for the endpoint contract.
+
+The whole-body surfaces cannot chunk: each is one request carrying the
 whole file. They still get the second half of the contract through one shared
 helper (`StagedUpload.IngestStream`): the bytes land in staging, the node is
 created and listed at once, and the driver write happens afterwards in the ops

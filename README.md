@@ -251,7 +251,12 @@ claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
 Tokens are scoped by verb (`read,write,delete,share`), optionally **confined to a single
 folder**, gated by the same RBAC grants as the UI, and stamped with per-token identities
 so audit logs, shares and presence show *who* (which integration) did what.
-Details: [docs/MCP.md](docs/MCP.md).
+
+A large file already on the agent's disk never fits through a tool call — its bytes would
+have to travel through the model's context. **Upload tickets** fix that: one authorized
+call pins the destination and returns a short-lived, single-use URL that needs **no
+credentials**, so even an agent with no filex token can finish the transfer with
+`curl -T bigfile <url>`. Details: [docs/MCP.md](docs/MCP.md).
 
 ## Features
 
