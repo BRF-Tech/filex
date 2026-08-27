@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-08-27
+
+### Fixed
+
+- **Ticket refusals now say what to DO, not just what went wrong.** The redeem
+  endpoint answered bare codes — `{"error":"ticket_expired"}`,
+  `{"error":"file_too_large"}` — and the right reaction to each is different:
+  an expired ticket needs a new one, an **oversize upload must be retried
+  against the same still-valid ticket**, and a chunked body just needs
+  `curl -T`. A caller reading a bare code either gives up or mints tickets it
+  did not need. Every refusal now carries a `hint` naming the next step (413
+  also echoes `sent_bytes`), including the storage-side ones (`503`/`507`).
+- **A folder as the ticket destination is refused in the caller's own terms.**
+  It used to surface the driver's `storage: path exists with a different kind`,
+  which does not tell anyone what to send instead. The refusal now reads
+  `"…" already exists as a FOLDER. …` and shows the shape of a correct path
+  (`…/<filename>`).
+- **The mint reply no longer assumes curl.** Alongside `curl` it returns a
+  `powershell` line (`Invoke-WebRequest -Method Put -InFile`) and a `next`
+  line saying to run it **on the machine holding the file** — and to hand the
+  line to the user when the caller has no shell at all, which is the situation
+  of an MCP-only client. Both new fields are exposed through the
+  `file_upload_ticket` MCP tool.
+
 ## [0.26.0] - 2026-08-27
 
 ### Added

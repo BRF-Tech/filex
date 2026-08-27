@@ -18,14 +18,26 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.25.3, 25 August 2026
-- file-request pages render their text; dead storage says so.
+::: tip Latest — v0.26.0, 27 August 2026
+- agents can upload big local files without a token.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.25.3
-docker pull ghcr.io/brf-tech/filex:full-v0.25.3
+docker pull ghcr.io/brf-tech/filex:slim-v0.26.0
+docker pull ghcr.io/brf-tech/filex:full-v0.26.0
 ```
+
+## v0.26.0
+
+<span class="filex-release-date">27 August 2026</span>
+
+**- agents can upload big local files without a token.**
+
+**New**
+
+- **AI** — Credential-free upload tickets for large local files.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.26.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.26.0`
 
 ## v0.25.3
 
@@ -247,28 +259,13 @@ filex is now reachable without a browser. It could already use S3, SFTP, FTP and
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.0) · `ghcr.io/brf-tech/filex:slim-v0.20.0`
 
-## v0.19.0
-
-<span class="filex-release-date">14 August 2026</span>
-
-The desktop app gets a language setting — System, English or Türkçe — where before it followed the operating system and offered nothing to choose. The choice moves the whole app at once: the window, the tray menu built by a different process, and the file explorer inside it, which is a separate component with its own catalogue. Switching is immediate and keeps the folder you are looking at.
-
-**New**
-
-- **Desktop** — Choose the app's language.
-
-**Other changes**
-
-- **Desktop** — Say how the update actually behaves, and why per-user matters.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.19.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.19.0`
-
 ## Earlier releases
 
-The 65 releases before v0.19.0, in brief. Full notes are on GitHub.
+The 66 releases before v0.20.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.19.0](https://github.com/BRF-Tech/filex/releases/tag/v0.19.0) | 14 August 2026 | The desktop app gets a language setting — System, English or Türkçe — where before it followed the operating system and offered nothing to choose. |
 | [v0.18.2](https://github.com/BRF-Tech/filex/releases/tag/v0.18.2) | 14 August 2026 | The Windows app installs per-user now, and that is what makes the quiet update in 0.18.1 real: an app under C:Program Files needs administrator rights to replace its own files, so every background update ended in a UAC prompt —… |
 | [v0.18.1](https://github.com/BRF-Tech/filex/releases/tag/v0.18.1) | 14 August 2026 | The desktop app updates itself the way it always should have. Downloading was quiet and quitting installed silently, but the tray entry and the Settings button ran the installer with its wizard — so the one visible path through… |
 | [v0.18.0](https://github.com/BRF-Tech/filex/releases/tag/v0.18.0) | 14 August 2026 | Share links keep their word, and you get a face. A link capped at three downloads could hand out four: the cap was checked against a counter that was only bumped after the bytes had left, so any request that started while an… |
@@ -337,4 +334,4 @@ The 65 releases before v0.19.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-27 from 85 published releases.</small>
+<small>Generated 2026-08-27 from 86 published releases.</small>

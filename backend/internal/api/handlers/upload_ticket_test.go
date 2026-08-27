@@ -8,6 +8,7 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -58,6 +59,13 @@ func TestUploadTicket_RedeemNeedsNoToken(t *testing.T) {
 	require.NotEmpty(t, url)
 	assert.Contains(t, info["curl"], "curl -T")
 	assert.Equal(t, "main://reports/quarterly.xlsx", info["path"])
+	// A caller with no curl (a Windows box) and a caller with no shell at all
+	// (an MCP-only client) both need an answer here, or "run this curl line"
+	// is a dead end on exactly the machines where it fails.
+	assert.Contains(t, info["powershell"], "Invoke-WebRequest")
+	next, _ := info["next"].(string)
+	assert.Contains(t, next, "MACHINE THAT HOLDS THE FILE")
+	assert.Contains(t, next, "cannot run shell commands")
 
 	// The ticket URL is published with the configured public base, which is
 	// not the test server's address — redeem against the same path on srv.
@@ -232,4 +240,87 @@ func TestUploadTicket_FolderPathRefusedAtMint(t *testing.T) {
 	_, code := mintTicket(t, client, srv.URL, tok, map[string]any{"path": "main://adir"})
 	assert.NotEqual(t, http.StatusOK, code,
 		"a folder as the destination must be refused when the ticket is minted")
+}
+
+// readBody decodes a refusal reply so its hint can be asserted on.
+func readBody(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	var out map[string]any
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.NoError(t, json.Unmarshal(b, &out), "body: %s", string(b))
+	return out
+}
+
+// Every refusal must say what to DO next, because the reactions differ: an
+// expired ticket needs a new one, an oversize file must be retried against the
+// SAME ticket, and a chunked body just needs curl -T. A bare code cannot carry
+// that, and an agent reading one either gives up or mints tickets it does not
+// need — the exact stall this feature exists to end.
+func TestUploadTicket_RefusalsSayWhatToDoNext(t *testing.T) {
+	srv, client, _, tok := aiFixture(t)
+
+	t.Run("expired says mint a new one", func(t *testing.T) {
+		info, _ := mintTicket(t, client, srv.URL, tok, map[string]any{
+			"path": "main://hints/late.txt", "expires_in_seconds": 1,
+		})
+		redeem := srv.URL + info["url"].(string)[strings.Index(info["url"].(string), "/u/"):]
+		time.Sleep(1100 * time.Millisecond)
+		body := readBody(t, putNoAuth(t, client, redeem, "x"))
+		assert.Equal(t, "ticket_expired", body["error"])
+		assert.Contains(t, body["hint"], "Mint a new one")
+	})
+
+	t.Run("oversize says the ticket survives", func(t *testing.T) {
+		info, _ := mintTicket(t, client, srv.URL, tok, map[string]any{
+			"path": "main://hints/big.bin", "max_bytes": 8,
+		})
+		redeem := srv.URL + info["url"].(string)[strings.Index(info["url"].(string), "/u/"):]
+		body := readBody(t, putNoAuth(t, client, redeem, strings.Repeat("x", 64)))
+		assert.Equal(t, "file_too_large", body["error"])
+		assert.Contains(t, body["hint"], "STILL VALID")
+		assert.Equal(t, float64(8), body["max_bytes"])
+		assert.Equal(t, float64(64), body["sent_bytes"], "the caller should not have to measure the file itself")
+	})
+
+	t.Run("used ticket says mint a new one", func(t *testing.T) {
+		info, _ := mintTicket(t, client, srv.URL, tok, map[string]any{"path": "main://hints/once.txt"})
+		redeem := srv.URL + info["url"].(string)[strings.Index(info["url"].(string), "/u/"):]
+		resp := putNoAuth(t, client, redeem, "first")
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
+		body := readBody(t, putNoAuth(t, client, redeem, "second"))
+		assert.Equal(t, "ticket_not_found", body["error"])
+		assert.Contains(t, body["hint"], "already used")
+	})
+
+	t.Run("chunked body names the fix", func(t *testing.T) {
+		info, _ := mintTicket(t, client, srv.URL, tok, map[string]any{"path": "main://hints/len.txt"})
+		redeem := srv.URL + info["url"].(string)[strings.Index(info["url"].(string), "/u/"):]
+		req, err := http.NewRequest(http.MethodPut, redeem, io.NopCloser(strings.NewReader("body")))
+		require.NoError(t, err)
+		req.ContentLength = -1
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		body := readBody(t, resp)
+		assert.Equal(t, "content_length_required", body["error"])
+		assert.Contains(t, body["hint"], "curl -T")
+	})
+}
+
+// A folder as the destination is the mistake a caller actually makes, and
+// "path exists with a different kind" does not tell them what to send instead.
+func TestUploadTicket_FolderRefusalNamesTheFix(t *testing.T) {
+	srv, client, _, tok := aiFixture(t)
+
+	resp := aiReq(t, client, "POST", srv.URL+"/api/ai/mkdir", tok, map[string]any{"path": "main://reports"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	resp = aiReq(t, client, "POST", srv.URL+"/api/ai/upload/ticket", tok, map[string]any{"path": "main://reports"})
+	require.NotEqual(t, http.StatusOK, resp.StatusCode)
+	body := readBody(t, resp)
+	msg, _ := body["error"].(string)
+	assert.Contains(t, msg, "FOLDER")
+	assert.Contains(t, msg, "<filename>", "the refusal should show the shape of a correct path")
 }

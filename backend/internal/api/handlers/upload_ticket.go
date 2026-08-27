@@ -89,7 +89,9 @@ type uploadTicketStore struct {
 }
 
 // NewUploadTicketStore builds the in-memory ticket store.
-func NewUploadTicketStore() *uploadTicketStore { return &uploadTicketStore{m: map[string]*uploadTicket{}} }
+func NewUploadTicketStore() *uploadTicketStore {
+	return &uploadTicketStore{m: map[string]*uploadTicket{}}
+}
 
 // mint stores t under a fresh random token and returns it.
 func (s *uploadTicketStore) mint(t *uploadTicket) (string, error) {
@@ -184,6 +186,14 @@ type uploadTicketInfo struct {
 	// ready line is the whole point of the feature: the agent that reaches
 	// for this tool is one that already failed to move the bytes itself.
 	Curl string `json:"curl"`
+	// PowerShell is the same transfer for a caller with no curl (a Windows
+	// box, a restricted image). Without it "run this curl line" is a dead end
+	// on the machines where it happens to be missing.
+	PowerShell string `json:"powershell"`
+	// Next says what to do with the two lines above — including the case that
+	// has no shell at all (an MCP-only client), where the answer is to hand
+	// the line to the user rather than to give up.
+	Next string `json:"next"`
 }
 
 // CreateUploadTicket resolves and authorizes `p` under the CALLER's token,
@@ -219,6 +229,13 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 		return nil, err
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, rel); err != nil {
+		// "path exists with a different kind" is true and useless to a caller
+		// that just handed us a folder. Say what it did and what to send.
+		if errors.Is(err, storage.ErrKindConflict) {
+			return nil, denied(storage.ErrKindConflict,
+				"%q already exists as a FOLDER. A ticket uploads one file, so `path` must be the full destination file path (e.g. %q), not the folder to put it in",
+				req.Path, strings.TrimRight(req.Path, "/")+"/<filename>")
+		}
 		return nil, err
 	}
 
@@ -247,12 +264,16 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 
 	url := strings.TrimRight(a.publicURL, "/") + "/u/" + tok
 	return &uploadTicketInfo{
-		URL:       url,
-		Ticket:    tok,
-		Path:      dest,
-		MaxBytes:  max,
-		ExpiresAt: time.Now().Add(ttl).UTC().Format(time.RFC3339),
-		Curl:      "curl -T <local-file> " + url,
+		URL:        url,
+		Ticket:     tok,
+		Path:       dest,
+		MaxBytes:   max,
+		ExpiresAt:  time.Now().Add(ttl).UTC().Format(time.RFC3339),
+		Curl:       "curl -T <local-file> " + url,
+		PowerShell: "Invoke-WebRequest -Method Put -InFile <local-file> -Uri " + url,
+		Next: "Run one of the lines above ON THE MACHINE THAT HOLDS THE FILE, replacing <local-file> with its full path. " +
+			"No token or header is needed. If you cannot run shell commands, give the line to the user and ask them to run it. " +
+			"A successful upload answers {\"entry\":{...}}; confirm the size with file_info afterwards.",
 	}, nil
 }
 
@@ -310,11 +331,27 @@ func (h *TicketUpload) AttachStaged(s *StagedUpload) { h.ops.staged = s }
 // AttachBody wires the byte-source resolver.
 func (h *TicketUpload) AttachBody(b *filebody.Resolver) { h.ops.attachBody(b) }
 
+// ticketRefusal answers a refused redeem. Every reply carries a `hint` saying
+// what to DO, because the three refusals an agent actually hits need three
+// DIFFERENT reactions and a bare code cannot tell them apart: an expired
+// ticket needs a new one, an oversize file must be retried against the SAME
+// (still valid) ticket, and a chunked body just needs `curl -T`. A code alone
+// leaves the caller guessing, which is how an agent ends up either giving up
+// or minting tickets it did not need (lesson #39, applied to this endpoint).
+func ticketRefusal(w http.ResponseWriter, status int, code, hint string, extra map[string]any) {
+	body := map[string]any{"error": code, "hint": hint}
+	for k, v := range extra {
+		body[k] = v
+	}
+	writeJSON(w, status, body)
+}
+
 // Upload handles PUT /u/{ticket} (raw body, what `curl -T` sends) and
 // POST /u/{ticket} (multipart `file`, what a browser or `curl -F` sends).
 func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 	if !h.limiter.allow(clientIP(r)) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "rate_limited"})
+		ticketRefusal(w, http.StatusTooManyRequests, "rate_limited",
+			"Too many upload attempts from this address. Wait a minute, then retry the same URL — the ticket is still valid.", nil)
 		return
 	}
 	tok := chi.URLParam(r, "ticket")
@@ -322,13 +359,16 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, errTicketExpired):
-			writeJSON(w, http.StatusGone, map[string]any{"error": "ticket_expired"})
+			ticketRefusal(w, http.StatusGone, "ticket_expired",
+				"This ticket has expired. Mint a new one (file_upload_ticket / POST /api/ai/upload/ticket) and upload to the new URL.", nil)
 		case errors.Is(err, errTicketInFlight):
-			writeJSON(w, http.StatusConflict, map[string]any{"error": "ticket_in_use"})
+			ticketRefusal(w, http.StatusConflict, "ticket_in_use",
+				"Another transfer is already using this ticket. Wait for it to finish — do not start a second upload to the same URL.", nil)
 		default:
 			// Unknown and already-redeemed are the SAME answer: a consumed
 			// ticket must not be distinguishable from one that never existed.
-			writeJSON(w, http.StatusNotFound, map[string]any{"error": "ticket_not_found"})
+			ticketRefusal(w, http.StatusNotFound, "ticket_not_found",
+				"Unknown ticket, or it was already used (a ticket accepts exactly one upload). Mint a new one and upload to the new URL.", nil)
 		}
 		return
 	}
@@ -339,21 +379,23 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.tickets.release(tok)
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		ticketRefusal(w, http.StatusBadRequest, err.Error(),
+			"Send the file either as the raw request body (`curl -T <file> <url>`) or as multipart with a field named `file` (`curl -F file=@<file> <url>`). This ticket is still valid.", nil)
 		return
 	}
 	if size < 0 {
 		h.tickets.release(tok)
 		// Without a length the staging decision and the driver write have
 		// nothing to size the object by. curl -T always sends one.
-		writeJSON(w, http.StatusLengthRequired, map[string]any{"error": "content_length_required"})
+		ticketRefusal(w, http.StatusLengthRequired, "content_length_required",
+			"The body arrived chunked, with no Content-Length. Upload with `curl -T <file> <url>`, which always sends a length. This ticket is still valid.", nil)
 		return
 	}
 	if size > t.MaxBytes {
 		h.tickets.release(tok)
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
-			"error": "file_too_large", "max_bytes": t.MaxBytes,
-		})
+		ticketRefusal(w, http.StatusRequestEntityTooLarge, "file_too_large",
+			"The file is larger than this ticket allows. THE TICKET IS STILL VALID — retry the same URL with a file of at most max_bytes; you do not need a new ticket.",
+			map[string]any{"max_bytes": t.MaxBytes, "sent_bytes": size})
 		return
 	}
 
@@ -395,7 +437,13 @@ func (h *TicketUpload) failWrite(w http.ResponseWriter, err error, dest string, 
 		slog.String("code", code),
 		slog.String("err", err.Error()),
 	)
-	writeJSON(w, status, map[string]any{"error": code})
+	hint := map[string]string{
+		"storage_unavailable": "The storage backend refused the write — this is not your request. The ticket is still valid: retry it later, and tell the user storage is down if it keeps failing.",
+		"quota_exceeded":      "The ticket owner is out of storage. Free space or raise the quota; retrying will not help until then.",
+		"read_only":           "The destination storage is read-only. Mint a ticket for a writable storage instead.",
+		"forbidden":           "The ticket owner no longer has permission to write there. Ask for access, or mint a ticket for a path you can write.",
+	}[code]
+	ticketRefusal(w, status, code, hint, nil)
 }
 
 // ticketBody picks the bytes out of either request shape and reports the exact

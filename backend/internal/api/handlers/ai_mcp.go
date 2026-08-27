@@ -158,11 +158,13 @@ type mcpUploadTicketIn struct {
 	MaxBytes         int64  `json:"max_bytes,omitempty" jsonschema:"optional lower ceiling than the server maximum"`
 }
 type mcpUploadTicketOut struct {
-	URL       string `json:"url"`
-	Path      string `json:"path"`
-	MaxBytes  int64  `json:"max_bytes"`
-	ExpiresAt string `json:"expires_at"`
-	Curl      string `json:"curl"`
+	URL        string `json:"url"`
+	Path       string `json:"path"`
+	MaxBytes   int64  `json:"max_bytes"`
+	ExpiresAt  string `json:"expires_at"`
+	Curl       string `json:"curl"`
+	PowerShell string `json:"powershell"`
+	Next       string `json:"next"`
 }
 
 type mcpPathIn struct {
@@ -313,7 +315,9 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 			"passing through this conversation. Returns a short-lived, credential-free URL plus the exact `curl` " +
 			"line to run: `curl -T <local-file> <url>`. The destination is fixed by this call, the URL accepts " +
 			"exactly one upload and needs NO token, so an agent without filex credentials can still finish the " +
-			"transfer. Use this whenever the file is already on disk — never base64 it into file_write.",
+			"transfer. Use this whenever the file is already on disk — never base64 it into file_write. Run the " +
+			"returned line on the machine that HOLDS the file (a `powershell` variant is returned too); if you " +
+			"cannot run commands at all, hand the line to the user. Confirm the result with file_info afterwards.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUploadTicketIn) (*mcp.CallToolResult, mcpUploadTicketOut, error) {
 		info, err := ops.CreateUploadTicket(ctx, uploadTicketRequest{
 			Path:             in.Path,
@@ -324,11 +328,13 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 			return toolErr[mcpUploadTicketOut](err)
 		}
 		return nil, mcpUploadTicketOut{
-			URL:       info.URL,
-			Path:      info.Path,
-			MaxBytes:  info.MaxBytes,
-			ExpiresAt: info.ExpiresAt,
-			Curl:      info.Curl,
+			URL:        info.URL,
+			Path:       info.Path,
+			MaxBytes:   info.MaxBytes,
+			ExpiresAt:  info.ExpiresAt,
+			Curl:       info.Curl,
+			PowerShell: info.PowerShell,
+			Next:       info.Next,
 		}, nil
 	})
 

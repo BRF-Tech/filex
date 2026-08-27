@@ -179,7 +179,9 @@ Notes:
   cannot go that way. `POST /api/ai/upload/ticket` splits the job: this
   authorized call pins the destination under *your* token, and the `url` it
   returns accepts exactly one upload **with no credentials at all**, so an agent
-  that has no filex token can still finish the transfer. The ticket is
+  that has no filex token can still finish the transfer. The reply hands over a
+  ready `curl` line, a `powershell` equivalent for machines without curl, and a
+  `next` line for the case with no shell at all (give it to the user). The ticket is
   single-use, short-lived (default 30 min, `max 24 h`), cannot read/list/delete,
   and cannot be pointed anywhere else — the redeemer never supplies a path. The
   bytes are written as, and billed to, the minter. Tickets live in memory, so a
@@ -347,13 +349,21 @@ wait for a storage [sync](STORAGE.md#sync)) so the entry exists, then share.
 
 ### Ticket redeem answers: `404`, `410`, `409`, `411`, `413`
 
-`404 ticket_not_found` — unknown **or already redeemed** (deliberately the same
-answer). `410 ticket_expired` — mint a new one. `409 ticket_in_use` — another
-transfer is in flight for that ticket. `411 content_length_required` — the body
-arrived chunked; `curl -T` always sends a length, but a hand-rolled client may
-not. `413 file_too_large` — above the ticket's `max_bytes`; the ticket survives,
-so a corrected upload still works. A `503 storage_unavailable` / `507
-quota_exceeded` means the storage backend refused, not your request.
+Every refusal carries a **`hint`** saying what to do next, because the right
+reaction differs and a bare code cannot express it:
+
+| Status | `error` | What the `hint` tells you to do |
+|---|---|---|
+| 404 | `ticket_not_found` | Unknown **or already redeemed** (deliberately the same answer) — mint a new ticket. |
+| 410 | `ticket_expired` | Mint a new ticket and upload to the new URL. |
+| 409 | `ticket_in_use` | Another transfer is in flight — wait, don't start a second one. |
+| 411 | `content_length_required` | The body came chunked; use `curl -T`, which always sends a length. The ticket survives. |
+| 413 | `file_too_large` | **The ticket is still valid** — retry the *same* URL with a file within `max_bytes`. The reply also echoes `sent_bytes`. |
+| 503 / 507 | `storage_unavailable` / `quota_exceeded` | The storage backend refused, not your request: retry later, or free space. |
+
+Minting refuses in the caller's own terms too: pointing `path` at a folder
+answers `"…" already exists as a FOLDER. …`path` must be the full destination
+file path (e.g. "…/<filename>")` rather than a driver-level kind-conflict.
 
 ### `no storage configured` (503)
 No enabled storage exists to serve the request. Add one (see

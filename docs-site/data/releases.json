@@ -3,6 +3,31 @@
   "generatedAt": "2026-08-27",
   "releases": [
     {
+      "tag": "v0.26.0",
+      "date": "2026-08-27T19:14:52Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.26.0",
+      "prerelease": false,
+      "headline": "- agents can upload big local files without a token.",
+      "groups": [
+        {
+          "title": "New",
+          "items": [
+            {
+              "scope": "AI",
+              "text": "Credential-free upload tickets for large local files."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.26.0",
+        "ghcr.io/brf-tech/filex:full-v0.26.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
       "tag": "v0.25.3",
       "date": "2026-08-25T17:33:18Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.25.3",
