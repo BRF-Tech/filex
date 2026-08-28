@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-08-29
+
+### Fixed
+
+- **A drag-out could fill in the wrong folder.** The drop watcher matched the
+  stand-in by NAME across the local drives, so any file that happened to appear
+  under the same name while a drag was in flight — a backup job, another
+  download — looked like the drop and the user's file was written into that
+  folder instead. What was handed to the shell is known exactly (an EMPTY
+  stand-in, created inside this drag's window), so anything with content of its
+  own is now ignored. Measured: with the guard off, a same-named decoy file
+  received the transfer; with it on, the decoy is untouched and the real drop
+  still lands.
+
 ## [0.27.0] - 2026-08-29
 
 ### Added

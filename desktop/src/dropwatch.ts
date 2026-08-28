@@ -112,10 +112,31 @@ export function watchForDrop(opts: WatchOptions): { promise: Promise<DropLocatio
           const full = path.join(root, rel);
           const lower = path.resolve(full).toLowerCase();
           if (ignore.some((d) => lower.startsWith(d))) return; // our own copy
-          // The event can arrive before the byte-zero file is closed; a stat
-          // that fails means it is already gone again (a move-through), which
-          // is not a drop we can act on.
-          if (!fs.existsSync(full)) return;
+          // ⚠⚠ The name alone is not proof. A file called `rapor.txt` can
+          // appear anywhere on the machine while we are watching — a backup
+          // job, another download — and writing the user's file into THAT
+          // folder would be worse than not filling the drop in at all. What we
+          // dropped is known precisely: an EMPTY file (or an empty directory),
+          // created inside this drag's window. Anything else is somebody
+          // else's file and is ignored.
+          let st: fs.Stats;
+          try {
+            st = fs.statSync(full);
+          } catch {
+            // The event can arrive before the copy is closed, or after it has
+            // moved on again; either way there is nothing to act on.
+            return;
+          }
+          if (st.isDirectory()) {
+            try {
+              if (fs.readdirSync(full).length !== 0) return;
+            } catch {
+              return;
+            }
+          } else if (st.size !== 0) {
+            return;
+          }
+          if (st.birthtimeMs && st.birthtimeMs + 1000 < started) return;
           finish({ dir: path.dirname(full), droppedPath: full, name: path.basename(full), ms: Date.now() - started });
         });
         // A drive that refuses a recursive watch (network share, permissions)

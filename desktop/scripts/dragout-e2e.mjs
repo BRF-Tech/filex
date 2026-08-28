@@ -192,6 +192,25 @@ async function main() {
     fs.readdirSync(dropDir).join(', '),
   );
 
+  // ── 6a. a same-named file elsewhere is NOT the drop ─────────────
+  // The watcher matches by name across whole drives, so a file called
+  // `buyuk.bin` appearing anywhere while it waits would be a candidate. What
+  // we handed the shell is known exactly: an EMPTY stand-in. A decoy with the
+  // same name but content of its own must be ignored — writing the user's file
+  // into THAT folder is worse than not filling the drop in at all.
+  await win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, bigItems]);
+  const decoyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-decoy-'));
+  const decoy = path.join(decoyDir, 'buyuk.bin');
+  fs.writeFileSync(decoy, 'baskasinin dosyasi');
+  await sleep(2500);
+  check(
+    'a same-named file that is NOT our empty stand-in is left alone',
+    fs.readFileSync(decoy, 'utf8') === 'baskasinin dosyasi' &&
+      fs.readdirSync(decoyDir).length === 1,
+    fs.readdirSync(decoyDir).join(', '),
+  );
+  await win.evaluate(() => window.filexApp.dragCancel());
+
   // ── 6b. an internal drop calls the watcher off ────────────────────
   await win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, bigItems]);
   await win.evaluate(() => window.filexApp.dragCancel());
