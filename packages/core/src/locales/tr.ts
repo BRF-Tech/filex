@@ -379,7 +379,12 @@ export const tr: Record<string, string> = {
   'split.retry': 'Yeniden dene',
   'split.copy_queued': 'Kopyalama kuyruğa alındı',
   'split.cross_copy': 'Depolar farklı — kopyalama kuyruğa alındı',
-  'split.cross_failed': 'Depolar arası kopyalama bu sunucuda desteklenmiyor',
+  'dragout.downloading': 'Bırakılan klasöre indiriliyor…',
+  'dragout.not_found': 'Bırakılan yer bulunamadı — dosya bir klasöre değil bir uygulamaya bırakıldıysa indirme yapılamaz',
+  'dragout.done': 'İndirme tamamlandı',
+  'dragout.ready': 'Dosyalar hazır — masaüstüne sürükleyebilirsin',
+  'dragout.preparing': 'Sürükleme için hazırlanıyor…',
+  'split.cross_move': 'Depolar farklı — taşıma kuyruğa alındı (baytlar aktarılıp kaynak silinir)',
   /* === /wiring:d1 === */
   /* wiring:d2 — galeri görünümü */
   'toolbar.view.gallery': 'Galeri',

@@ -62,4 +62,15 @@ contextBridge.exposeInMainWorld('filexApp', {
   syncStatus: (accountId: string) => ipcRenderer.invoke('sync:status', accountId),
   setSyncRoot: (accountId: string) => ipcRenderer.invoke('sync:setRoot', accountId),
   onOpenSettings: (fn: () => void) => ipcRenderer.on('app:open-settings', () => fn()),
+
+  // drag-out — handing real files to the OS. Two calls on purpose: the bytes
+  // must be on disk before the drag can start (see src/dragout.ts), so the
+  // explorer prepares first and only switches to the native drag once this
+  // side says ready.
+  dragPrepare: (accountId: string, items: unknown) => ipcRenderer.invoke('drag:prepare', accountId, items),
+  dragStart: (accountId: string, items: unknown) => ipcRenderer.invoke('drag:start', accountId, items),
+  /** The drag ended inside the window — stop waiting for a drop out there. */
+  dragCancel: () => ipcRenderer.invoke('drag:cancel'),
+  onDragProgress: (fn: (p: unknown) => void) =>
+    ipcRenderer.on('drag:progress', (_e, p) => fn(p)),
 });

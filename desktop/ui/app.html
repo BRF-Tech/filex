@@ -517,6 +517,8 @@
       let state = { accounts: [], activeId: null, syncFolders: [], syncStatuses: [] };
       let explorer = null;
       let explorerSyncCb = null;
+      // Dışarı sürükleme hazırlığının ilerlemesi — tek abone, mount'ta yenilenir.
+      let explorerDragCb = null;
       let mountedFor = null;
 
       // ── the explorer ──────────────────────────────────────────
@@ -671,6 +673,17 @@
             // One subscriber — the mounted explorer. A rail switch remounts
             // and overwrites it, so a stale component never gets poked.
             onChange: (cb) => { explorerSyncCb = cb; },
+          },
+          // Dışarı sürükleme — masaüstüne / başka uygulamaya. Tarayıcı tek
+          // dosyayı kendi indirme yoluyla bırakabiliyor; klasör ve çoklu seçim
+          // GERÇEK yerel yollar ister, onları bu kabuk hazırlar (src/dragout.ts).
+          // Hesap kimliği burada, mount anında yakalanır: raydan hesap
+          // değişince explorer komple yeniden kurulur.
+          dragOut: {
+            prepare: (items) => window.filexApp.dragPrepare(account.id, items),
+            start: (items) => window.filexApp.dragStart(account.id, items),
+            cancel: () => window.filexApp.dragCancel(),
+            onProgress: (cb) => { explorerDragCb = cb; },
           },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
@@ -1147,6 +1160,9 @@
       window.filexApp.onChanged(() => {
         refresh();
         if (explorerSyncCb) explorerSyncCb();
+      });
+      window.filexApp.onDragProgress((p) => {
+        if (explorerDragCb) explorerDragCb(p);
       });
       window.filexApp.onOpenSettings(() => toggleSettings(true));
       refresh();

@@ -310,6 +310,53 @@ export interface ExplorerConfig {
   }>;
 
   /**
+   * Desktop-shell hook — dragging rows OUT of the window onto the OS.
+   *
+   * Present only in the filex desktop app. A web page cannot hand the OS a
+   * list of files: Chromium carries one `DownloadURL` per drag, so the browser
+   * gets a single-file drag-out for free (the explorer sets it itself) and
+   * folders/multi-selections need real local paths — which is what the shell
+   * provides here.
+   *
+   * The bytes have to exist BEFORE the drag starts — the OS copies from a path
+   * at drop time — and the shell has two ways to satisfy that, which is why
+   * this is more than one call:
+   *
+   *   `prepare` — fetch local copies up front. The explorer calls it for small
+   *     selections as soon as they are selected, so the common drag hands over
+   *     real, complete files (correct even when the drop target is an
+   *     application that reads the file immediately).
+   *   `start` — begin the OS drag, whatever the size. The shell may hand the
+   *     OS empty placeholders and download into wherever they land afterwards,
+   *     so this is never gated on `prepare` having finished.
+   *   `cancel` — the drag ended INSIDE the explorer (an internal move). The
+   *     shell stops waiting for a drop it will never see.
+   *
+   * `onProgress` drives the explorer's toast; `error: 'drop_not_found'` means
+   * the drop went somewhere the shell cannot write to (an application rather
+   * than a folder) and nothing was transferred.
+   */
+  dragOut?: {
+    prepare: (
+      items: Array<{ path: string; basename: string; type: 'file' | 'dir' }>,
+    ) => Promise<{ ready: boolean; error?: string }>;
+    start: (
+      items: Array<{ path: string; basename: string; type: 'file' | 'dir' }>,
+    ) => void | Promise<void>;
+    cancel?: () => void | Promise<void>;
+    onProgress?: (
+      cb: (p: {
+        done: number;
+        total: number;
+        name?: string;
+        dropped?: string;
+        finished?: boolean;
+        error?: string;
+      }) => void,
+    ) => void;
+  };
+
+  /**
    * Desktop-shell hook — selective sync ("keep on this computer").
    *
    * Present only when the explorer runs inside the filex desktop app; the

@@ -210,6 +210,10 @@ The explorer also ships as a **Windows / Linux desktop app** — the same compon
 UI and the embeds render, not a separate half-copy:
 
 - **Several accounts at once** — a rail of servers/tenants, each showing its own branding.
+- **Drag files out** — drag a selection onto the desktop or into another app: folders and
+  multi-selections arrive as separate real files and folders. Anything already kept on
+  this computer drags instantly; the rest is fetched once and cached
+  ([docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)).
 - **Keep on this computer** — right-click any folder, file or whole storage to mirror it
   under one filex folder on the machine (movable from Settings); everything else stays
   online-only, and every row says which it is (✓ ◐ ⟳ ☁). "Keep online only" hands the
@@ -260,7 +264,8 @@ credentials**, so even an agent with no filex token can finish the transfer with
 
 ## Features
 
-- **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder.
+- **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder. **Copy or cut in one and paste in another**: filex streams the tree between the two drivers, keeps each file's timestamp, and only removes the original once the copy is verified.
+- **Drag files out to your desktop** — in the desktop app, drag a selection into Explorer/Finder or another program and it lands as separate real files and folders, not an archive; in a browser, a single file drags out the same way ([docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)).
 - **Storage plugins** — a storage filex has never heard of is a **separate program** you install from the admin panel: it describes its own config form, filex speaks a small HTTP/JSON protocol to it, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. filex **probes every capability a plugin claims** — at install, and again against the configuration you type when you save a storage on it — and refuses one that cannot do what it says, because a half-working driver produces failures that look like filex being broken. Upgrades replace the binary in place and roll back if the new one does not come up ([docs/PLUGINS.md](docs/PLUGINS.md)).
 - **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate — it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
 - **`filex mount`** — attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.

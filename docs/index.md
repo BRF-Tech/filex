@@ -30,6 +30,11 @@ features:
     details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, and sync that keeps running when the window is closed.
     link: /DESKTOP
     linkText: Desktop docs
+  - icon: 🪄
+    title: Drag files out, copy between storages
+    details: Drag a selection onto your desktop and it lands as separate real files and folders, not an archive. Copy or cut in one storage and paste in another — filex streams the tree between the two backends, keeps every timestamp, and only removes the original once the copy is verified.
+    link: /DESKTOP#dragging-files-out
+    linkText: How dragging out works
   - icon: 🔁
     title: Folder sync
     details: A folder on your PC kept in step with a folder on the server, both ways — from the desktop menu or the CLI. The first sync deletes nothing and a delete never beats an edit.

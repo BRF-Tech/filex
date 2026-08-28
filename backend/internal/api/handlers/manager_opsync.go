@@ -8,6 +8,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -72,6 +73,68 @@ func (h *Manager) SyncHardDelete(ctx context.Context, storageID int64, src strin
 // SyncCopy inserts a DB node for a freshly written copy, cloning the source
 // node's type/size/mime. Idempotent: a node already at dst is left alone (a
 // later background sync would reconcile anyway).
+// SyncCopyAcross mirrors a copy whose ends live in two different storages —
+// the cross-depo paste. The node is created under the DESTINATION storage,
+// with the type/size/mime read from the source storage's node when there is
+// one; there need not be (a folder nobody has browsed yet has no row), so the
+// driver's own Stat is the fallback rather than a reason to skip the mirror.
+// Skipping it is what leaves a pasted file invisible until the next scan.
+func (h *Manager) SyncCopyAcross(ctx context.Context, srcStorageID int64, src string, dstStorageID int64, dst string) {
+	if srcStorageID == dstStorageID {
+		h.SyncCopy(ctx, srcStorageID, src, dst)
+		return
+	}
+	dstClean := normalizeDBPath(dst)
+	dstHash := pathkey.Hash(dstStorageID, dstClean)
+	if existing, _ := h.Store.GetNodeByPath(ctx, dstStorageID, dstHash); existing != nil {
+		return
+	}
+	// ⚠ ensureDirChain, not lookupDirID: the destination folder may have no
+	// node row yet (nobody has browsed that depo), and giving up there is what
+	// leaves a pasted file invisible. At the storage root the parent is "" and
+	// this correctly returns nil — `path.Dir` on a bare basename would say "."
+	// and find nothing.
+	parentID, err := h.ensureDirChain(ctx, dstStorageID, path.Dir(dstClean))
+	if err != nil {
+		return
+	}
+	n := &model.Node{
+		StorageID: dstStorageID,
+		ParentID:  parentID,
+		Name:      path.Base(dstClean),
+		Path:      dstClean,
+		PathHash:  dstHash,
+		Type:      model.NodeTypeFile,
+	}
+	srcClean := normalizeDBPath(src)
+	if srcNode, serr := h.Store.GetNodeByPath(ctx, srcStorageID, pathkey.Hash(srcStorageID, srcClean)); serr == nil && srcNode != nil {
+		n.Type, n.Size, n.Mime = srcNode.Type, srcNode.Size, srcNode.Mime
+		// Bill the new bytes to whoever owned the original, exactly as the
+		// same-storage copy does — the copy is a duplicate of their file.
+		if owner, oerr := h.Store.GetNodeOwner(ctx, srcNode.ID); oerr == nil && owner != nil && *owner > 0 {
+			ctx = quotastore.WithOwner(ctx, *owner)
+		}
+	} else if h.StorageResolver != nil {
+		// No cached source row — ask the destination driver what actually
+		// landed. Guessing "file, 0 bytes" would put a wrong size in the
+		// listing and in the quota.
+		if drv, derr := h.StorageResolver(dstStorageID); derr == nil {
+			if o, oerr := drv.Stat(ctx, strings.TrimPrefix(dstClean, "/")); oerr == nil {
+				n.Size, n.Mime = o.Size, o.Mime
+				if o.Kind == storage.KindDirectory {
+					n.Type = model.NodeTypeDirectory
+					n.Size = 0
+				}
+			}
+		}
+	}
+	if created, cerr := h.Store.CreateNode(ctx, n); cerr == nil && created != nil {
+		h.indexNode(ctx, created)
+		writehook.OnFileWritten(ctx, dstStorageID, created, writehook.OriginOps,
+			map[string]any{"copy": true, "from": srcClean, "cross_storage": true})
+	}
+}
+
 func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string) {
 	dstClean := normalizeDBPath(dst)
 	dstHash := pathkey.Hash(storageID, dstClean)
@@ -84,7 +147,11 @@ func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string
 	if err != nil || srcNode == nil {
 		return
 	}
-	parentID, err := h.lookupDirID(ctx, storageID, path.Dir(strings.TrimPrefix(dstClean, "/")))
+	// Same reasoning as SyncCopyAcross: `path.Dir("orig-copy.txt")` is "." —
+	// a directory that is never in the index — so a copy pasted at the STORAGE
+	// ROOT found no parent and was never mirrored. `path.Dir("/orig-copy.txt")`
+	// is "/", which ensureDirChain reads as the root.
+	parentID, err := h.ensureDirChain(ctx, storageID, path.Dir(dstClean))
 	if err != nil {
 		return
 	}

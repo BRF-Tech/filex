@@ -155,7 +155,15 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | `update-e2e.mjs` | The updater downloads and stages a newer version — and installs silently |
 | `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
 | `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
+| `dragout-e2e.mjs` | Dragging files OUT: what lands on this computer before an OS drag can start |
 | `plumbing-smoke.mjs` | `app://`, preload injection and `safeStorage`, without a server |
+
+⚠ `dragout-e2e.mjs` measures the **preparation** — which bytes reach the disk, a
+folder's subtree, the cache making the second drag free, and that an unprepared
+selection is refused. It never calls `dragStart` on a valid selection: that
+opens the OS drag loop, which cannot be driven from a script and would leave a
+modal drag hanging off the machine's mouse. Letting go over the desktop is the
+one step a human has to do.
 
 `look*.mjs` and `diag-*.mjs` are not suites — they open the app and take a
 screenshot of one surface, for looking at a change rather than asserting it.

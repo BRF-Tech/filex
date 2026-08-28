@@ -379,7 +379,12 @@ export const en: Record<string, string> = {
   'split.retry': 'Retry',
   'split.copy_queued': 'Copy queued',
   'split.cross_copy': 'Different storages — copy queued instead',
-  'split.cross_failed': 'Cross-storage copy is not supported by this server',
+  'dragout.downloading': 'Downloading into the folder you dropped on…',
+  'dragout.not_found': 'Could not find where it was dropped — a drop onto an application (rather than a folder) cannot be filled in',
+  'dragout.done': 'Download finished',
+  'dragout.ready': 'Files are ready — drag them to your desktop',
+  'dragout.preparing': 'Getting them ready to drag…',
+  'split.cross_move': 'Different storages — move queued (bytes travel, then the original is removed)',
   /* === /wiring:d1 === */
   /* wiring:d2 — gallery view */
   'toolbar.view.gallery': 'Gallery',

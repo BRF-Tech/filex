@@ -591,6 +591,42 @@ that nobody pays it twice, and that the person waiting is told why.
 
 ---
 
+## Moving files between storages
+
+Copy, cut and drag work **across** storages, not only inside one. What each
+gesture means is the rule every desktop file manager taught its users:
+
+| Gesture | Same storage | Different storages |
+|---|---|---|
+| Ctrl+C → paste | copy | copy |
+| Ctrl+X → paste | move | **move** — the bytes are streamed over, then the original is deleted |
+| Drag onto a folder | move | **copy** — the original stays, exactly like dragging between two drives |
+
+Across two storages there is no server-side rename to hand a driver (an S3
+bucket cannot rename a file into an SFTP host), so filex streams the bytes
+itself, one file at a time, through the queue you can watch in the ops tray:
+
+- a whole tree travels, **empty folders included**;
+- each file keeps **its own modification time** wherever the target can hold one,
+  so a moved tree does not read as "everything changed just now" to the next
+  sync run;
+- every file is **stat-checked on the far side before anything is deleted** — a
+  backend that accepts a write and stores fewer bytes fails the step instead of
+  turning a move into data loss;
+- a name already taken on the target becomes `name-copy`, `name-copy-2`, …;
+  nothing is overwritten;
+- filex's own `.filex-trash` and `.thumbs` are skipped — they belong to the
+  storage they are in.
+
+⚠ A cross-storage **move deletes the source outright**; it does not go through
+the trash. Moving between storages is usually done to free the first one, and a
+trashed copy would keep both the bytes and the quota until the trash is emptied.
+
+Refusals happen at submit time, with a reason: an unknown target storage is a
+`400`, a **read-only** target a `403` naming the storage, and a target folder you
+have no editor rights on a `403` — the permission is checked in the
+*destination's* storage, which is the one being written to.
+
 ## Read‑only mounts
 
 Set `read_only: true` to expose a storage for browsing/download but block every

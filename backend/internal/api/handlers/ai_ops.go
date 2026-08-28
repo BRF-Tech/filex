@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -604,9 +605,6 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sSrc.ID != sDst.ID {
-		return nil, errors.New("cross-storage move not supported")
-	}
 	if relSrc == "" || relDst == "" {
 		return nil, errors.New("src and dst required")
 	}
@@ -615,6 +613,12 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	}
 	if !a.allow(ctx, sSrc, relSrc, acl.LevelEditor) || !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
 		return nil, errAIForbidden
+	}
+	if sSrc.ID != sDst.ID {
+		// Two storages have no rename between them, so the bytes travel — the
+		// same engine the queue uses for a cross-depo paste, deliberately not a
+		// second copy of it (ops.Transfer).
+		return a.moveAcross(ctx, sSrc, relSrc, sDst, relDst)
 	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {
@@ -630,6 +634,59 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	a.cacheMove(ctx, sSrc, relSrc, relDst)
 	/* bag:b3 event */
 	writehook.OnFileMoved(ctx, sSrc.ID, normalizeDBPath(relSrc), normalizeDBPath(relDst), path.Base(relDst), a.origin)
+	return &aiEntry{
+		Path: joinAdapterPath(sDst.Name, relDst),
+		Name: path.Base(relDst),
+		Type: "file",
+	}, nil
+}
+
+// moveAcross carries src to another storage and then removes the original.
+//
+// The order is the point: the source is deleted only after every file has been
+// written AND stat-verified on the far side (ops.Transfer's contract), so a
+// transfer that fails leaves the original where it was. Like the queue's
+// cross-storage move — and unlike a same-storage delete — the source does NOT
+// go through the trash: moving between depolar is done to free the first one.
+func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc string, sDst *model.Storage, relDst string) (*aiEntry, error) {
+	if sDst.ReadOnly {
+		return nil, storage.ErrReadOnly
+	}
+	srcDrv, err := a.resolver(sSrc.ID)
+	if err != nil {
+		return nil, err
+	}
+	dstDrv, err := a.resolver(sDst.ID)
+	if err != nil {
+		return nil, err
+	}
+	del, ok := srcDrv.(storage.Deleter)
+	if !ok {
+		return nil, fmt.Errorf("%s cannot delete, so a move out of it would leave a duplicate: copy instead", sSrc.Name)
+	}
+
+	hooks := ops.TransferHooks{
+		OnDir:  func(_, dst string) { a.cacheUpsertDir(ctx, sDst, dst) },
+		OnFile: func(_, dst string, size int64) { a.cacheUpsertFile(ctx, sDst, dst, size, "") },
+	}
+	if err := ops.Transfer(ctx, srcDrv, dstDrv, relSrc, relDst, hooks); err != nil {
+		return nil, err
+	}
+
+	// Cache rows for the source side go before the bytes: a row pointing at a
+	// path that is about to disappear is what makes a listing show a file that
+	// is not there.
+	if files, lerr := a.listAllFiles(ctx, srcDrv, relSrc); lerr == nil {
+		for _, f := range files {
+			a.dropCacheRow(ctx, sSrc.ID, f)
+		}
+	}
+	a.dropCacheRow(ctx, sSrc.ID, relSrc)
+	if err := del.Delete(ctx, relSrc); err != nil {
+		return nil, fmt.Errorf("copied to %s, but deleting the source failed: %w", sDst.Name, err)
+	}
+	/* bag:b3 event — written on the far side, gone on this one */
+	writehook.OnFileDeleted(ctx, sSrc.ID, normalizeDBPath(relSrc), path.Base(relSrc), a.origin)
 	return &aiEntry{
 		Path: joinAdapterPath(sDst.Name, relDst),
 		Name: path.Base(relDst),

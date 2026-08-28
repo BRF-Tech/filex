@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-29
+
+### Added
+
+- **Copy in one storage, paste into another.** Copy/cut in one depo and paste in
+  the next now does what it says: the queue carries a destination storage of its
+  own and the worker streams the bytes between the two drivers — a whole tree,
+  empty folders included, with each file's own mtime and a size check on the far
+  side before anything is deleted. A cut across storages is a real move (the
+  original is removed once the copy is verified); a **drag** across storages
+  copies, the rule Explorer and Finder taught everyone. Pasting into a read-only
+  depo is refused with a reason instead of failing later in the worker.
+- **Drag files out of the app onto your desktop — at any size.** In the desktop
+  app a selection can be dragged out to Explorer/Finder or into another program,
+  and folders and multi-selections land as **separate real files and folders**,
+  not one archive. The OS copies a dragged file from a path at the moment of the
+  drop, so filex answers that in two ways and picks for you: anything it already
+  has (kept on this computer, or a small selection prepared in the background the
+  moment it was selected) is handed over as a real file, and everything else
+  drags as an empty **stand-in** — the shell copies it in microseconds, filex
+  finds the folder it landed in and downloads the real content there. A 100 GB
+  file therefore starts dragging as fast as a 1 KB one, with no ceiling and no
+  waiting ([docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)).
+  ⚠ A drop onto an *application* rather than a folder writes nothing to disk, so
+  the stand-in route cannot fill it in; the app says so instead of pretending it
+  worked, and the prepared-copy route (which covers that case) is what small
+  selections use. Downloads land on `.filexpart` and are renamed only when
+  complete. In a **browser**, a single file can be dragged out the same way
+  (Chromium's `DownloadURL`).
+- **The agent surface moves between storages too.** `file_move` (MCP) and
+  `POST /api/ai/move` no longer answer "cross-storage move not supported": they
+  run the same transfer engine as the queue, verify every file on the far side
+  and only then remove the source ([docs/MCP.md](docs/MCP.md#moving-files-between-storages)).
+
+### Fixed
+
+- **A cross-storage paste no longer lands in the wrong storage.** `POST
+  /api/files/copy|move` resolved the storage from the SOURCES only and applied
+  the target's relative path to it, so `alpha://a.txt` → `beta://hedef`
+  answered `202` and wrote the file to `alpha://hedef/a.txt` — a folder invented
+  inside the depo the user was copying *from*. The endpoint now resolves the
+  target's storage, checks editor permission **there**, and refuses an unknown
+  or read-only destination up front (measured 2026-08-29).
+- **A copy pasted at a storage root is listed again.** The DB mirror looked its
+  parent up as `path.Dir("file.txt")` — `"."`, a directory that is never in the
+  index — so a copy made at the top of a depo was written to disk and never
+  appeared in the listing until the next scan.
+
 ## [0.26.1] - 2026-08-27
 
 ### Fixed

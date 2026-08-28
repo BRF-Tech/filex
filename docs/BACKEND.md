@@ -186,15 +186,46 @@ Stream the raw file bytes. Sends `Content-Type`, `Content-Length`, and
 honours `Range:` for partial GETs (video / audio scrub).
 
 ### `POST /api/files/move` ![user](https://img.shields.io/badge/-user-blue)
-**Request**
+**Request** — sources and the destination FOLDER, both adapter-qualified.
+`sourceDir` is where the drag/cut came from (it stamps the undo).
 ```json
-{ "from": "/storage1/a.txt", "to": "/storage1/sub/a.txt", "overwrite": false }
+{
+  "source": ["alpha://a.txt", "alpha://klasor"],
+  "target": "beta://hedef",
+  "sourceDir": "alpha://"
+}
 ```
-**Response 200** `{ "ok": true }`
+**Response 202** `{ "op": { "id": 12, "kind": "move", "storage_id": 1, "dest_storage_id": 2, … } }`
+— the work is queued; poll `GET /api/files/ops`.
 
 ### `POST /api/files/copy` ![user](https://img.shields.io/badge/-user-blue)
-Same shape as move; may return `202 + operation_id` for large copies, see
-[operations](#operations-long-running).
+Same shape, same queued answer.
+
+**The two ends may live in different storages.** `dest_storage_id` on the queued
+op is the target's storage; when it differs from `storage_id`, the worker
+streams the bytes between the two drivers instead of asking one driver to
+rename — a whole tree, empty folders included, each file's mtime preserved where
+the target can hold one, and every file stat-checked on the far side before a
+move deletes anything. A cross-storage move removes the source outright (not to
+the trash); a name already taken becomes `name-copy`. Full behaviour:
+[Moving files between storages](STORAGE.md#moving-files-between-storages).
+
+**Refusals** are at submit time, not in the worker: `400` unknown target adapter
+· `403` read-only target storage (with a `hint`) · `403` no editor permission on
+the source, or on the target folder **in the destination's storage** · `400`
+mixed-adapter *sources* (one batch, one source storage).
+
+⚠ Before v0.27.0 the destination's `<adapter>://` prefix was dropped and the
+remaining relative path applied to the SOURCE storage, so a cross-storage paste
+answered `202` and wrote the file into the depo it was copied from.
+
+### `POST /api/files/ops` ![user](https://img.shields.io/badge/-user-blue)
+The unified form behind the three per-verb endpoints:
+```json
+{ "kind": "copy", "storage_id": 1, "dest_storage_id": 2,
+  "sources": ["a.txt"], "dest": "hedef/" }
+```
+`dest_storage_id` may be omitted or `0`, which means "the sources' storage".
 
 ### `POST /api/files/mkdir` ![user](https://img.shields.io/badge/-user-blue)
 ```json

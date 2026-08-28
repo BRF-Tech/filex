@@ -51,6 +51,13 @@ type Op struct {
 	ID         int64      `json:"id"`
 	Kind       string     `json:"kind"`
 	StorageID  int64      `json:"storage_id"`
+	// DestStorageID is the storage the destination lives in. It equals
+	// StorageID for the ordinary same-storage copy/move; a different value is
+	// what makes an op CROSS-STORAGE (paste from one depo into another),
+	// which the worker serves by streaming bytes between the two drivers.
+	// Zero means "same as StorageID" — the shape every row written before
+	// this column existed has.
+	DestStorageID int64    `json:"dest_storage_id,omitempty"`
 	Sources    []string   `json:"sources"`
 	Dest       string     `json:"dest,omitempty"`
 	Total      int        `json:"total"`
@@ -96,6 +103,13 @@ type DBSync interface {
 	SyncHardDelete(ctx context.Context, storageID int64, src string)
 	// SyncCopy inserts a DB node for the freshly written copy.
 	SyncCopy(ctx context.Context, storageID int64, src, dst string)
+	// SyncCopyAcross inserts a DB node for a copy whose two ends live in
+	// DIFFERENT storages. SyncCopy cannot serve this: it reads the source
+	// node and writes the new one under ONE storage id, so a cross-storage
+	// paste mirrored through it would either find no source node or attach
+	// the copy to the wrong depo — the listing would then show the file
+	// where it is not.
+	SyncCopyAcross(ctx context.Context, srcStorageID int64, src string, dstStorageID int64, dst string)
 }
 
 // SetSync wires the DB-sync hook. Call once at boot, before Run.
@@ -160,6 +174,14 @@ func (s *Service) Migrate(ctx context.Context) error {
 		return fmt.Errorf("ops: create table: %w", err)
 	}
 	_, _ = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_pending_ops_status ON pending_ops(status, created_at)`)
+	// Cross-storage destination. Added after the table shipped, so this is an
+	// ALTER whose "duplicate column name" error is the expected outcome on
+	// every boot but the first — the queue table is not driven by goose (see
+	// the comment above), and a table rebuild would drop in-flight work.
+	if _, aerr := s.db.ExecContext(ctx, `ALTER TABLE pending_ops ADD COLUMN dest_storage_id INTEGER NOT NULL DEFAULT 0`); aerr != nil &&
+		!strings.Contains(strings.ToLower(aerr.Error()), "duplicate column") {
+		slog.Warn("ops: add dest_storage_id column", slog.String("err", aerr.Error()))
+	}
 	// On boot, any row left in `running` is from a previous crash — re-queue.
 	if _, err := s.db.ExecContext(ctx, `UPDATE pending_ops SET status='pending', started_at=NULL WHERE status='running'`); err != nil {
 		slog.Warn("ops: requeue stale running rows", slog.String("err", err.Error()))
@@ -167,8 +189,23 @@ func (s *Service) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// Submit enqueues a new op and pokes the worker.
+// Submit enqueues a same-storage op and pokes the worker.
+//
+// Kept as the narrow form because most callers (delete, upload-commit, and
+// every copy/move that stays inside one storage) have nothing to say about a
+// destination storage. It delegates to SubmitTo with dest == source.
 func (s *Service) Submit(ctx context.Context, kind string, storageID int64, sources []string, dest string) (*Op, error) {
+	return s.SubmitTo(ctx, kind, storageID, storageID, sources, dest)
+}
+
+// SubmitTo enqueues an op whose destination may live in ANOTHER storage.
+//
+// destStorageID == storageID (or 0) is the ordinary same-storage op. A
+// different id makes the worker stream the bytes from one driver to the other
+// — the "copy from one depo, paste into the next" gesture, which used to be
+// accepted and then silently written into the SOURCE storage because the
+// queue had nowhere to put the target's storage.
+func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStorageID int64, sources []string, dest string) (*Op, error) {
 	switch kind {
 	case OpCopy, OpMove, OpDelete, OpUploadCommit:
 	default:
@@ -183,10 +220,17 @@ func (s *Service) Submit(ctx context.Context, kind string, storageID int64, sour
 	if (kind == OpCopy || kind == OpMove) && dest == "" {
 		return nil, errors.New("ops: dest required")
 	}
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	if kind == OpDelete || kind == OpUploadCommit {
+		// Neither has a destination; a stray id here would only be able to lie.
+		destStorageID = storageID
+	}
 	srcJSON, _ := json.Marshal(sources)
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO pending_ops (kind, storage_id, sources_json, dest, total, status) VALUES (?,?,?,?,?,?)`,
-		kind, storageID, string(srcJSON), dest, len(sources), StatusPending)
+		`INSERT INTO pending_ops (kind, storage_id, dest_storage_id, sources_json, dest, total, status) VALUES (?,?,?,?,?,?,?)`,
+		kind, storageID, destStorageID, string(srcJSON), dest, len(sources), StatusPending)
 	if err != nil {
 		return nil, fmt.Errorf("ops: insert: %w", err)
 	}
@@ -198,7 +242,7 @@ func (s *Service) Submit(ctx context.Context, kind string, storageID int64, sour
 // Get returns the current state of an op.
 func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, kind, storage_id, sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at
+		`SELECT id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at
 		 FROM pending_ops WHERE id=?`, id)
 	return scanOp(row)
 }
@@ -208,7 +252,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 // at 200 to keep the polling payload small. Used by the SPA's
 // PendingOpsTray which calls GET /api/files/ops?status=running every 2s.
 func (s *Service) List(ctx context.Context, status string) ([]*Op, error) {
-	const cols = `id, kind, storage_id, sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at`
+	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at`
 	var (
 		rows *sql.Rows
 		err  error
@@ -228,10 +272,13 @@ func (s *Service) List(ctx context.Context, status string) ([]*Op, error) {
 	for rows.Next() {
 		op := &Op{}
 		var srcJSON string
-		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
+		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
+		if op.DestStorageID == 0 {
+			op.DestStorageID = op.StorageID
+		}
 		out = append(out, op)
 	}
 	return out, rows.Err()
@@ -351,13 +398,24 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		s.fail(ctx, op, "storage: "+err.Error())
 		return
 	}
+	// Cross-storage ops need BOTH drivers up front: failing the whole op here
+	// is the honest answer when the target depo is offline, rather than
+	// discovering it per item after some bytes already moved.
+	dstDrv := drv
+	if op.DestStorageID != 0 && op.DestStorageID != op.StorageID {
+		dstDrv, err = s.storageResolver(op.DestStorageID)
+		if err != nil {
+			s.fail(ctx, op, "destination storage: "+err.Error())
+			return
+		}
+	}
 
 	var lastErr error
 	for _, src := range op.Sources {
 		if ctx.Err() != nil {
 			break
 		}
-		if err := s.runOne(ctx, drv, op, src); err != nil {
+		if err := s.runOne(ctx, drv, dstDrv, op, src); err != nil {
 			op.Failed++
 			lastErr = err
 			slog.Warn("ops: step failed",
@@ -388,7 +446,7 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		status, errMsg, op.ID)
 }
 
-func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src string) error {
+func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op, src string) error {
 	switch op.Kind {
 	case OpUploadCommit:
 		// `src` is the staged upload id. The committer owns the driver write
@@ -444,6 +502,9 @@ func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src st
 			return terr
 		}
 	case OpMove:
+		if s.isCross(op) {
+			return s.crossTransfer(ctx, drv, dstDrv, op, src, true)
+		}
 		m, ok := drv.(storage.Mover)
 		if !ok {
 			return errors.New("driver not movable")
@@ -466,6 +527,9 @@ func (s *Service) runOne(ctx context.Context, drv storage.Driver, op *Op, src st
 		}
 		return nil
 	case OpCopy:
+		if s.isCross(op) {
+			return s.crossTransfer(ctx, drv, dstDrv, op, src, false)
+		}
 		c, ok := drv.(storage.Copier)
 		if !ok {
 			return errors.New("driver not copyable")
@@ -598,9 +662,12 @@ func joinIntoDir(dest, src string) string {
 func scanOp(row *sql.Row) (*Op, error) {
 	op := &Op{}
 	var srcJSON string
-	if err := row.Scan(&op.ID, &op.Kind, &op.StorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
+	if err := row.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
+	if op.DestStorageID == 0 {
+		op.DestStorageID = op.StorageID
+	}
 	return op, nil
 }

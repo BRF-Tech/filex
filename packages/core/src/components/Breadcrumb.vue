@@ -20,6 +20,7 @@
  * navigates, Escape cancels.
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { hasInternalDrag } from '../lib/dragOut';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 
@@ -199,14 +200,14 @@ function onContext(ev: MouseEvent, crumb: Crumb) {
 }
 
 function onCrumbDragOver(ev: DragEvent) {
-  if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
+  if (!hasInternalDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
 }
 
 function onCrumbDrop(ev: DragEvent, crumb: Crumb) {
-  if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
+  if (!hasInternalDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   emit('crumb-drop', crumb.adapterPath, ev);

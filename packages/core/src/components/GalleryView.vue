@@ -9,6 +9,7 @@
  * below and size+date revealed on hover/focus. GridView itself is untouched.
  */
 import { ref } from 'vue';
+import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
@@ -74,7 +75,7 @@ const dropTargetPath = ref<string | null>(null);
 
 function onItemDragOver(n: FileNode, ev: DragEvent) {
   if (n.type !== 'dir') return;
-  if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
+  if (!hasInternalDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
@@ -88,7 +89,7 @@ function onItemDragLeave(n: FileNode) {
 function onItemDrop(n: FileNode, ev: DragEvent) {
   dropTargetPath.value = null;
   if (n.type !== 'dir') return;
-  if (!ev.dataTransfer?.types.includes('application/x-brf-files')) return;
+  if (!hasInternalDrag(ev)) return;
   ev.preventDefault();
   ev.stopPropagation();
   emit('item-drop-into', n, ev);

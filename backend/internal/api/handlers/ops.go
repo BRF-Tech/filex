@@ -52,6 +52,9 @@ func (e errsString) Error() string { return string(e) }
 type opsRequest struct {
 	Kind      string   `json:"kind"` // copy, move, delete
 	StorageID int64    `json:"storage_id"`
+	// DestStorageID targets another storage for copy/move (cross-depo paste).
+	// Omitted or 0 means "same storage as the sources".
+	DestStorageID int64  `json:"dest_storage_id,omitempty"`
 	Sources   []string `json:"sources"`
 	Dest      string   `json:"dest,omitempty"`
 }
@@ -83,13 +86,17 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 		if drel == "" {
 			drel = strings.Trim(req.Dest, "/")
 		}
-		if !aclAllowID(r.Context(), o.ACL, o.Store, req.StorageID, drel, acl.LevelEditor) {
+		destID := req.DestStorageID
+		if destID == 0 {
+			destID = req.StorageID
+		}
+		if !aclAllowID(r.Context(), o.ACL, o.Store, destID, drel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
 			return
 		}
 	}
 
-	op, err := o.Service.Submit(r.Context(), req.Kind, req.StorageID, req.Sources, req.Dest)
+	op, err := o.Service.SubmitTo(r.Context(), req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -180,20 +187,60 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		}
 	}
 
-	// RBAC: copy/move write into the destination dir — require ≥editor there.
+	// Which storage does the TARGET live in? For a paste inside one depo this
+	// is the source's storage; for a paste into another depo it is a second
+	// one, and the queue has to carry it.
+	//
+	// ⚠ This used to be dropped on the floor: `beta://hedef` had its prefix
+	// stripped and the remaining `hedef/` was applied to the SOURCE storage,
+	// so a cross-depo paste answered 202 and wrote the file into a folder it
+	// invented inside the depo the user was copying FROM (measured
+	// 2026-08-29). Silence, in the one direction where the user cannot see
+	// the mistake — the file simply is not where they put it.
+	destStorageID := storageID
+	if kind != "delete" && req.Target != "" {
+		if adapter := adapterOf(req.Target); adapter != "" {
+			st, gerr := o.Store.GetStorageByName(r.Context(), adapter)
+			if gerr != nil || st == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": errUnknownAdapter(adapter).Error()})
+				return
+			}
+			destStorageID = st.ID
+			if st.ReadOnly {
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error": "destination storage is read-only: " + st.Name,
+					"hint":  "paste into a writable storage, or clear the read-only flag on " + st.Name,
+				})
+				return
+			}
+		}
+	}
+
+	// RBAC: copy/move write into the destination dir — require ≥editor there,
+	// in the DESTINATION's storage (checking the source's would ask about a
+	// path in the wrong depo, and answer about permissions nobody granted).
 	if kind != "delete" && dest != "" {
-		if !aclAllowID(r.Context(), o.ACL, o.Store, storageID, strings.Trim(dest, "/"), acl.LevelEditor) {
+		if !aclAllowID(r.Context(), o.ACL, o.Store, destStorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
 			return
 		}
 	}
 
-	op, err := o.Service.Submit(r.Context(), kind, storageID, sources, dest)
+	op, err := o.Service.SubmitTo(r.Context(), kind, storageID, destStorageID, sources, dest)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+}
+
+// adapterOf returns the `<adapter>` of an `<adapter>://<rel>` path, or "" when
+// the path carries no prefix (legacy embedders send bare paths).
+func adapterOf(p string) string {
+	if i := strings.Index(p, "://"); i > 0 {
+		return p[:i]
+	}
+	return ""
 }
 
 // resolveBatch splits adapter prefixes off each path, ensures all

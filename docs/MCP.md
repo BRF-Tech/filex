@@ -371,6 +371,24 @@ No enabled storage exists to serve the request. Add one (see
 
 ---
 
+
+## Moving files between storages
+
+`file_move` (MCP) and `POST /api/ai/move` carry a file — or a whole folder —
+from one storage to another. There is no server-side rename between two
+backends, so filex streams the bytes through the same engine the queue uses for
+a cross-storage paste: every file is verified on the far side, and only then is
+the source removed.
+
+```json
+{ "src": "hot://raporlar/2026", "dst": "cold://arsiv/2026" }
+```
+
+⚠ The source is **deleted, not trashed** — moving between storages is done to
+free the first one. A read-only destination, or a folder you have no editor
+right on, is refused before a byte moves. Same-storage moves are unchanged (a
+plain rename).
+
 ## See also
 
 - [RBAC.md](RBAC.md) — per-file/folder permissions, self-service token endpoints, and the scope/grant ceiling model

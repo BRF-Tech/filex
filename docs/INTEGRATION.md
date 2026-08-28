@@ -171,6 +171,41 @@ Pick the confinement strength in §4b: the `X-Filex-Root` header alone is enough
 when filex is reachable ONLY through your proxy; a root-scoped token adds
 defense-in-depth (the token itself can't escape its folder).
 
+
+## 4d. Dragging files out (host hook)
+
+Dragging a **single file** out of the explorer onto the desktop works in any
+Chromium browser with no host involvement: the component puts a `DownloadURL`
+on the drag and the browser downloads it where it was dropped. It is offered
+only when the credential travels on its own — a cookie session or `auth: {kind:
+'none' | 'csrf'}`. With a bearer token the browser's download stack would send
+no Authorization header, so the drop would produce a `401` page named like the
+file; the component leaves the drag alone instead.
+
+A host that CAN hand the OS real paths (the desktop app) supplies `dragOut`, and
+folders and multi-selections then drop as separate real files:
+
+```ts
+config.dragOut = {
+  // Make local copies. Called as a drag begins, and for small selections as
+  // soon as they are selected. The ordinary HTML5 drag keeps running in the
+  // meantime, so an internal move never waits for a download.
+  prepare: (items) => shell.prepare(items),   // → { ready: boolean, error?: string }
+  // Begin the OS drag. Only called for a selection `prepare` already answered
+  // `ready` for — a native drag replaces the HTML5 one and cannot be undone
+  // mid-gesture.
+  start: (items) => shell.start(items),
+  onProgress: (cb) => { /* … */ },
+};
+```
+
+⚠ While a native drag is in flight the component's own drop targets no longer
+see `application/x-brf-files` — they see an OS file drag. The component keeps the
+payload on its side and every drop target reads it through the same helper, so a
+row dropped on a folder inside the app is still a server-side move rather than a
+re-upload of the temp copy. A host implementing `dragOut` does not have to do
+anything about that; a host writing its own drop targets does.
+
 ## 5. Backend side (what the host must provide)
 
 - A reachable filex backend (the Go binary) with the storages you want exposed.

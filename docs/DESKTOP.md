@@ -211,6 +211,63 @@ short:
 
 ---
 
+## Dragging files out
+
+Select anything and drag it onto your desktop, into an Explorer/Finder window,
+or into another program. Folders and multi-selections arrive as **separate real
+files and folders** — nothing is zipped on the way.
+
+**There is no size limit and no waiting.** A 100 GB file drags out as fast as a
+1 KB one. Understanding why takes one sentence:
+
+> The operating system copies a dragged file at the moment you let go, straight
+> from a path on this computer — so something has to be at that path already.
+
+filex satisfies that in one of two ways, and picks for you:
+
+**1. Real files, when it already has them.** Anything you keep on this computer,
+and any small selection you clicked a moment ago (up to ten files under 8 MB are
+fetched quietly in the background as soon as they are selected), is handed to the
+drag as a complete file. This is the route that also works when you drop onto an
+*application* — a chat window, an image editor — because the program receives a
+file that is genuinely there.
+
+**2. Stand-ins, for everything else.** The drag starts with empty placeholders
+carrying the right names, which the shell copies in microseconds. filex then
+finds the folder they landed in, removes them, and downloads the real content
+there, showing progress in the window. Nothing is fetched before the drag, so
+size stops mattering. Downloads land on `name.filexpart` and are renamed only
+once complete, so nothing ever wears the real name half-written.
+
+⚠ Route 2 cannot fill in a drop onto an **application**: nothing is written to
+disk, so there is no landing place to find, and the program is left holding the
+empty stand-in. The app tells you when it could not find where you dropped
+(*"Bırakılan yer bulunamadı"*) rather than pretending it worked. Dropping into a
+folder — Explorer, Finder, the desktop — is the case that always works. If you
+want a specific large file to be droppable into a program, keep it on this
+computer first: then route 1 applies.
+
+⚠ **A copy is always what leaves.** The app never hands the OS the file that
+lives inside your synced folder, even when it is identical: a drop the target
+completes as a *move* would take that file out of the mirror, and the next sync
+run would then remove it from the server too.
+
+Prepared copies live in the app's data folder and are swept after a week.
+
+⚠ Dragging **into** the app is unchanged, and so is dragging a row onto a folder
+inside the window: that still moves the file on the server, with no bytes
+travelling to this computer.
+
+Route 2 needs a recursive filesystem watch, which Windows and macOS have and
+Linux does not; on Linux the app stays on route 1 (prepared copies).
+
+### In a browser
+
+A single file can be dragged out of the web explorer as well — the browser
+downloads it into wherever you dropped it. Folders and multi-selections cannot:
+a web page can hand the operating system exactly one download. That is a browser
+limit, not a filex one, and it is what the desktop app is for.
+
 ## Sharing
 
 The share dialog is the same one the web app has — **Share / Permissions** on any
@@ -290,6 +347,11 @@ deleting.
 ---
 
 ## Troubleshooting
+
+**"Bırakılan yer bulunamadı" after dragging out** — the drop went to an
+application rather than a folder, so there was nowhere on disk to put the file.
+Drop into a folder (or the desktop), or keep the file on this computer first and
+drag it from there.
 
 **"Could not reach &lt;server&gt;"** on the file view — the app reached the sign-in
 step but not the file listing. Usually the token was revoked server-side; sign

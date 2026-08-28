@@ -106,6 +106,19 @@ import {
   injectTrashRow,
   hydrateTrashRow as hydrateTrashRowShared,
 } from './lib/listing';
+import { resolveTransfer, type TransferIntent } from './lib/transfer';
+import {
+  activeNativeDrag,
+  beginNativeDrag,
+  canDownloadUrlDrag,
+  dragKey,
+  downloadUrlPayload,
+  endNativeDrag,
+  hasInternalDrag,
+  internalDragItems,
+  internalDragOrigin,
+  type DragItem,
+} from './lib/dragOut';
 
 import NewFolderModal from './modals/NewFolderModal.vue';
 import RenameModal from './modals/RenameModal.vue';
@@ -1934,17 +1947,21 @@ async function paste() {
       return;
     }
 
+    const targetWire = qualify(currentPath.value);
+    // Depo farkı yalnız mesajı değiştirir: kes KESTİR, kopyala KOPYALAR —
+    // hedef başka depo olsa da. Aktarımı sunucu yapar (ops kuyruğu hem
+    // kaynak hem hedef depoyu taşır).
+    const plan = resolveTransfer(items, targetWire, cb.mode === 'cut' ? 'move' : 'copy');
     if (cb.mode === 'cut') {
-      const targetWire = qualify(currentPath.value);
       const originWire = qualify(sourceDir) || undefined;
       const { op } = await api.moveAsync(items, targetWire, originWire);
       registerMoveUndo(op.id, items, targetWire, originWire);
       pendingOps.register(op);
-      flashToast('Taşıma kuyruğa alındı');
+      flashToast(plan.cross ? t('split.cross_move') : 'Taşıma kuyruğa alındı');
     } else {
-      const { op } = await api.copy(items, qualify(currentPath.value));
+      const { op } = await api.copy(items, targetWire);
       pendingOps.register(op);
-      flashToast('Kopyalama kuyruğa alındı');
+      flashToast(plan.cross ? t('split.cross_copy') : 'Kopyalama kuyruğa alındı');
     }
     clipboard.value = { mode: null, items: [], sourcePath: null };
   } catch (err) {
@@ -2304,6 +2321,10 @@ function isExternalFileDrag(ev: DragEvent): boolean {
   const dt = ev.dataTransfer;
   if (!dt) return false;
   if (dt.types && dt.types.includes(FE_DND_MIME)) return false;
+  /* wiring:f1 — kendi başlattığımız işletim sistemi sürüklemesi 'Files' taşır
+     ama YÜKLEME değildir: aynı baytları sunucudan indirip geri yüklemek
+     (taşıma yerine kopya, üstelik iki kat trafik) olurdu. */
+  if (activeNativeDrag()) return false;
   // Some browsers expose `items` early in the drag, others only on
   // drop. When `items` is available we use it as the authoritative
   // signal — `kind === 'file'` means a real OS file. When unavailable
@@ -2336,7 +2357,7 @@ function onDragOver(ev: DragEvent) {
   /* wiring:d1 — iç sürüklemeler kök gövdeye de bırakılabilir olmalı ki split
      panelinden ana panelin BOŞLUĞUNA bırakmak çalışsın (origin dragover'da
      okunamaz — karar drop anında verilir; aynı-klasör drop'u no-op kalır). */
-  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
+  if (hasInternalDrag(ev)) {
     ev.preventDefault();
     return;
   }
@@ -2348,28 +2369,28 @@ function onDragOver(ev: DragEvent) {
 function onDropUpload(ev: DragEvent) {
   /* wiring:d1 — split panelinden ana panelin boşluğuna bırakma = geçerli
      klasöre aktar (aynı klasörden gelenler no-op, eski davranış korunur). */
-  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
-    const d1Origin = ev.dataTransfer.getData(FE_DND_SRC_MIME) || '';
+  if (hasInternalDrag(ev)) {
+    const d1Origin = internalDragOrigin(ev) || '';
     const d1Here = qualify(currentPath.value);
-    if (d1Origin && d1Here && d1Origin !== d1Here && !trashMode.value && canWriteHere.value) {
+    const d1Items = internalDragItems(ev);
+    if (d1Items && d1Origin && d1Here && d1Origin !== d1Here && !trashMode.value && canWriteHere.value) {
       ev.preventDefault();
       dragCounter.value = 0;
       dragOver.value = false;
-      try {
-        const d1Items = JSON.parse(ev.dataTransfer.getData(FE_DND_MIME)) as Array<{ path: string }>;
-        void transferItems(d1Items.map((i) => i.path), d1Here, d1Origin);
-      } catch {
-        /* bozuk payload — yok say */
-      }
+      endNativeDrag();
+      cancelShellDrag();
+      void transferItems(d1Items.map((i) => i.path), d1Here, d1Origin);
       return;
     }
   }
   /* /wiring:d1 */
   // Internal row drag — nothing to do here, the row drop handler
   // in GridView/ListView already resolved the move.
-  if (ev.dataTransfer?.types.includes(FE_DND_MIME)) {
+  if (hasInternalDrag(ev)) {
     dragCounter.value = 0;
     dragOver.value = false;
+    endNativeDrag();
+    cancelShellDrag();
     return;
   }
   // Browser-internal image drag without real files — bail before
@@ -2406,11 +2427,54 @@ function onWindowDrop(ev: DragEvent) {
 onMounted(() => {
   window.addEventListener('dragover', onWindowDragOver);
   window.addEventListener('drop', onWindowDrop);
+  window.addEventListener('pointerup', onGlobalPointerUp);
+  window.addEventListener('blur', onGlobalPointerUp);
+  /* wiring:f1 — kabuk hazırlarken tek bir "hazırlanıyor" der; her dosyada
+     toast atmak ilerlemeyi değil gürültüyü gösterirdi. Bitişi 'hazır'
+     toast'ı (prepareDragOut) duyurur. */
+  dragOut.value?.onProgress?.((p) => {
+    // Bırakma SONRASI iş (yer tutucu yolu) her zaman duyurulur — kullanıcı
+    // dosyayı bir klasöre bıraktı, orada ne olduğunu bilmeye hakkı var.
+    // Sessizlik yalnız kimsenin istemediği ön-hazırlık için geçerli.
+    const afterDrop = !!p?.dropped;
+    if (p?.error === 'drop_not_found') {
+      flashToast(t('dragout.not_found'));
+      return;
+    }
+    if (p?.error) {
+      if (afterDrop || !dragOutQuiet) flashToast(p.error);
+      return;
+    }
+    if (afterDrop) {
+      flashToast(p?.finished ? t('dragout.done') : t('dragout.downloading'));
+      return;
+    }
+    if (dragOutQuiet) return;
+    if (!p?.finished && p?.done === 0) flashToast(t('dragout.preparing'));
+  });
 });
+/* wiring:f1 — işletim sistemi sürüklemesi bizde 'dragend' üretmez (HTML5
+   sürüklemesi hiç başlamadı). Fare bırakıldığında kaydı düşürüyoruz; aksi
+   halde sonraki normal sürükleme bir önceki seçimi taşıdığını sanırdı. */
+function onGlobalPointerUp() {
+  if (activeNativeDrag()) {
+    endNativeDrag();
+    // Bırakma bizim penceremizde OLMAYABİLİR de; kabuğun izlemesini yalnız
+    // kendi bırakma yollarımız iptal eder (onDropUpload / onItemDropInto).
+  }
+}
+
+/** Sürükleme uygulama içinde bitti: kabuk artık bir bırakma beklemesin. */
+function cancelShellDrag() {
+  if (dragOut.value?.cancel) void Promise.resolve(dragOut.value.cancel()).catch(() => undefined);
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', onWindowDragOver);
   window.removeEventListener('drop', onWindowDrop);
   window.removeEventListener('hashchange', onHashChange);
+  window.removeEventListener('pointerup', onGlobalPointerUp);
+  window.removeEventListener('blur', onGlobalPointerUp);
 });
 
 const clippedPaths = computed<Set<string>>(() => {
@@ -2437,10 +2501,107 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
     .filter((n) => !clippedPaths.value.has(n.path))
     .filter((n) => n.basename !== '.trash')
     .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
+
+  /* wiring:f1 — dışarı sürükleme (masaüstü / başka uygulama).
+     Kabuk varsa sürükleme HER ZAMAN işletim sistemi sürüklemesidir: klasörler
+     ve çoklu seçim ayrı ayrı GERÇEK dosya olarak düşer, BOYUT SINIRI YOK.
+     Baytlar hazırsa gerçek dosyalar verilir; değilse kabuk boş "yer tutucu"
+     verir, nereye bırakıldığını bulur ve indirmeyi ORAYA yapar (bkz.
+     desktop/src/dropwatch.ts). Uygulama İÇİNDE bırakılırsa sürükleme yine
+     sunucu tarafı taşımadır — payload bizde durur — ve kabuğa "vazgeç" denir
+     ki sürücüleri boşuna dinlemesin. */
+  if (dragOut.value && items.length > 0) {
+    ev.preventDefault();
+    beginNativeDrag(items, qualify(currentPath.value));
+    void Promise.resolve(dragOut.value.start(items)).catch((err) => {
+      endNativeDrag();
+      cancelShellDrag();
+      emit('error', { message: (err as Error).message, context: { op: 'drag-out' } });
+    });
+    return;
+  }
+
   ev.dataTransfer.setData(FE_DND_MIME, JSON.stringify(items));
   ev.dataTransfer.setData(FE_DND_SRC_MIME, qualify(currentPath.value)); /* wiring:d1 — paneller arası origin damgası */
   ev.dataTransfer.setData('text/plain', items.map((i) => i.path).join('\n'));
   ev.dataTransfer.effectAllowed = 'move';
+
+  /* Tek dosya + çerezli oturum: tarayıcının kendi indirme yolu (DownloadURL)
+     bırakma anında dosyayı masaüstüne indirir; hiçbir hazırlık gerekmez.
+     Bearer token'lı kurulumda (masaüstü uygulaması) bu yol kimliksiz gider,
+     o yüzden orada üstteki yerel yol devrededir — bkz. lib/dragOut.ts. */
+  if (items.length === 1 && items[0] && canDownloadUrlDrag(props.config.auth)) {
+    const payload = downloadUrlPayload(items[0], api.downloadUrl(items[0].path), node.mime_type);
+    if (payload) ev.dataTransfer.setData('DownloadURL', payload);
+  }
+
+  if (dragOut.value && items.length > 0) void prepareDragOut(items);
+}
+
+/* === wiring:f1 — dışarı sürükleme hazırlığı ===
+ *
+ * Baytlar sürükleme BAŞLAMADAN diskte olmak zorunda (işletim sistemi bırakma
+ * anında yoldan kopyalar), o yüzden hazırlık ayrı bir adımdır. Bitince
+ * kullanıcıya "hazır" denir; ikinci sürükleme artık işletim sistemi
+ * sürüklemesidir ve anında başlar. Bu bilgisayarda tutulan (senkron) dosyalar
+ * için hazırlık ilk seferde de anında biter — kopya zaten yerelde.
+ */
+const dragOut = computed(() => props.config.dragOut ?? null);
+const dragOutReadyKey = ref('');
+const dragOutBusy = ref(false);
+/** True while a preparation nobody asked for is running. */
+let dragOutQuiet = false;
+
+/* Küçük seçimler SEÇİLDİĞİ anda hazırlanır, çünkü hazırlık bittikten sonraki
+   sürükleme işletim sistemi sürüklemesidir: bir belgeyi seçip masaüstüne
+   sürüklemek böylece İLK denemede çalışır. Tavan bilerek düşük — tıklayarak
+   gezinen biri her satırda film indirmemeli; sınırın üstündekiler ilk
+   sürüklemede hazırlanır, ikinci sürükleme anında başlar. */
+const DRAGOUT_PREFETCH_MAX_BYTES = 8 * 1024 * 1024;
+const DRAGOUT_PREFETCH_MAX_ITEMS = 10;
+let dragOutPrefetchTimer: ReturnType<typeof setTimeout> | undefined;
+
+watch(
+  () => selection.selected.value,
+  () => {
+    if (!dragOut.value) return;
+    clearTimeout(dragOutPrefetchTimer);
+    const nodes = selection.nodes.value;
+    if (nodes.length === 0 || nodes.length > DRAGOUT_PREFETCH_MAX_ITEMS) return;
+    // Klasörün boyutu listelemede bilinmez; onu tahmin etmek yerine ilk
+    // sürüklemeye bırakıyoruz.
+    if (nodes.some((n) => n.type !== 'file')) return;
+    const total = nodes.reduce((sum, n) => sum + (n.size ?? 0), 0);
+    if (total > DRAGOUT_PREFETCH_MAX_BYTES) return;
+    const items = nodes.map((n) => ({ path: n.path, basename: n.basename, type: n.type }));
+    dragOutPrefetchTimer = setTimeout(() => void prepareDragOut(items, true), 400);
+  },
+  { deep: true },
+);
+
+async function prepareDragOut(items: DragItem[], quiet = false): Promise<void> {
+  const hook = dragOut.value;
+  if (!hook || dragOutBusy.value) return;
+  const key = dragKey(items);
+  if (key === dragOutReadyKey.value) return;
+  dragOutBusy.value = true;
+  dragOutQuiet = quiet;
+  try {
+    const res = await hook.prepare(items);
+    if (res?.ready) {
+      dragOutReadyKey.value = key;
+      // Sessiz tur seçimle tetiklenir; kullanıcı bir şey İSTEMEDİ, o yüzden
+      // ona bir şey söylemek de gerekmez. Sürüklemeyle başlayan tur söyler.
+      if (!quiet) flashToast(t('dragout.ready'));
+    } else if (res?.error && !quiet) {
+      flashToast(res.error);
+    }
+  } catch (err) {
+    emit('error', { message: (err as Error).message, context: { op: 'drag-out-prepare' } });
+  } finally {
+    dragOutBusy.value = false;
+    dragOutQuiet = false;
+  }
 }
 
 async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string, originOverride?: string): Promise<void> {
@@ -2468,15 +2629,10 @@ async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: s
 
 async function onItemDropInto(target: FileNode, ev: DragEvent) {
   if (target.type !== 'dir') return;
-  const raw = ev.dataTransfer?.getData(FE_DND_MIME);
-  if (!raw) return;
-  let items: Array<{ path: string }> = [];
-  try {
-    items = JSON.parse(raw);
-  } catch {
-    return;
-  }
-  if (items.length === 0) return;
+  const items = internalDragItems(ev);
+  if (!items || items.length === 0) return;
+  endNativeDrag();
+  cancelShellDrag();
 
   const targetDir = target.path; // qualified
   const sources = items
@@ -2489,15 +2645,10 @@ async function onItemDropInto(target: FileNode, ev: DragEvent) {
 }
 
 async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
-  const raw = ev.dataTransfer?.getData(FE_DND_MIME);
-  if (!raw) return;
-  let items: Array<{ path: string }> = [];
-  try {
-    items = JSON.parse(raw);
-  } catch {
-    return;
-  }
-  if (items.length === 0) return;
+  const items = internalDragItems(ev);
+  if (!items || items.length === 0) return;
+  endNativeDrag();
+  cancelShellDrag();
 
   const targetDir = adapterPath; // already qualified by breadcrumb
   const sources = items
@@ -3012,33 +3163,31 @@ async function panePaste() {
     flashToast('Aynı klasöre kesilemez');
     return;
   }
-  await transferItems(cb.items.map((n) => n.path), targetWire, originWire, cb.mode === 'copy');
+  await transferItems(cb.items.map((n) => n.path), targetWire, originWire, cb.mode === 'copy' ? 'copy' : 'move');
   clipboard.value = { mode: null, items: [], sourcePath: null };
 }
 
 // ---- paneller arası aktarım ----------------------------------------
-
-function wireAdapterOf(p: string): string {
-  const i = p.indexOf('://');
-  return i === -1 ? '' : p.slice(0, i);
-}
 function dndOrigin(ev: DragEvent): string | undefined {
-  const v = ev.dataTransfer?.getData(FE_DND_SRC_MIME);
-  return v || undefined;
+  return internalDragOrigin(ev);
 }
 
 /**
  * transferItems — panel-arası / pano aktarımının tek kapısı.
- * Aynı depo → TAŞI (mevcut moveSourcesAsync yolu: kuyruk + geri al).
- * Farklı depo → KOPYALA dene; backend cross-storage desteklemiyorsa
- * i18n'li hata toast'ı. Bitince ikincil panel de tazelenir (ana panel
- * moveSourcesAsync / pendingOps onSettled üzerinden zaten tazelenir).
+ *
+ * Ne yapılacağını `resolveTransfer` söyler (lib/transfer.ts): sürükleme aynı
+ * depoda TAŞI, depolar arasında KOPYALA; panodan gelen kes/kopyala ise ne
+ * dendiyse odur — kes, hedef başka depo olsa da TAŞIR (sunucu baytları
+ * aktarıp kaynağı siler). ⚠ Eskiden depolar arası her aktarım sessizce
+ * kopyaya düşüyordu: kullanıcı "kes" deyip dosyayı iki yerde buluyordu.
+ * Bitince ikincil panel de tazelenir (ana panel moveSourcesAsync /
+ * pendingOps onSettled üzerinden zaten tazelenir).
  */
 async function transferItems(
   sources: string[],
   targetWire: string,
   originWire?: string,
-  forceCopy = false,
+  intent: TransferIntent = 'auto',
 ): Promise<void> {
   // ui-fix — yerinde bırakma (source parent === target) no-op: backend
   // "kendine kopyala" 400'ü engellenir (paneller arası + pano yolu).
@@ -3046,19 +3195,22 @@ async function transferItems(
     (p) => p && p !== targetWire && !targetWire.startsWith(p + '/') && !sameDir(wireParent(p), targetWire),
   );
   if (list.length === 0 || !targetWire) return;
-  const targetAdapter = wireAdapterOf(targetWire);
-  const cross = list.some((p) => wireAdapterOf(p) !== targetAdapter);
-  if (cross || forceCopy) {
+  const plan = resolveTransfer(list, targetWire, intent);
+  if (plan.kind === 'copy') {
     try {
       const { op } = await api.copy(list, targetWire);
       pendingOps.register(op);
-      flashToast(cross ? t('split.cross_copy') : t('split.copy_queued'));
+      flashToast(plan.cross ? t('split.cross_copy') : t('split.copy_queued'));
     } catch (err) {
+      // ⚠ Sunucunun kendi mesajını göster. Burada sabit bir "depolar arası
+      // desteklenmiyor" metni vardı; artık DESTEKLENİYOR, yani o metin
+      // gerçek sebebi (izin, salt-okunur depo, dolu kota) örterdi.
       emit('error', { message: (err as Error).message, context: { op: 'transfer', targetWire } });
-      flashToast(cross ? t('split.cross_failed') : (err as Error).message);
+      flashToast((err as Error).message);
       return;
     }
   } else {
+    if (plan.cross) flashToast(t('split.cross_move'));
     await moveSourcesAsync(list, targetWire, 'move-transfer', originWire);
   }
   void splitPaneRef.value?.reload();

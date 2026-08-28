@@ -18,6 +18,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 - [Storage](STORAGE.md) — how mounts work, adding one, and the adapters:
   local · S3 / S3‑compatible · SFTP · WebDAV · FTP · SMB/CIFS
+- [Moving files between storages](STORAGE.md#moving-files-between-storages) — what
+  copy, cut and drag mean when the two ends are different depolar
 - [NAS over NFS / SMB](STORAGE.md#nas-nfs-smb-and-friends) — mount it with the
   OS, serve it with `local`, and the three traps that come with it
 - [Slow storage](STORAGE.md#slow-storage) — what is already cached, and what is
@@ -50,7 +52,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 ## Features
 
-- [Desktop app](DESKTOP.md) — Windows/Linux/macOS app: multiple accounts, background sync
+- [Desktop app](DESKTOP.md) — Windows/Linux/macOS app: multiple accounts, background sync,
+  [dragging files out onto the desktop](DESKTOP.md#dragging-files-out)
 - [Folder sync](SYNC.md) — how a folder on your PC is kept in step with the server
 - [Uploads](UPLOADS.md) — the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection

@@ -31,6 +31,7 @@ import GalleryView from './GalleryView.vue';
 // undo) correctly across panes.
 const FE_DND_MIME = 'application/x-brf-files';
 const FE_DND_SRC_MIME = 'application/x-brf-files-src';
+import { hasInternalDrag, internalDragItems, internalDragOrigin } from '../lib/dragOut';
 
 const props = defineProps<{
   api: FileApi;
@@ -256,19 +257,13 @@ function onRowDragStart(n: FileNode, ev: DragEvent) {
 const dropBg = ref(false);
 
 function acceptDrag(ev: DragEvent): boolean {
-  return !!ev.dataTransfer?.types.includes(FE_DND_MIME);
+  return hasInternalDrag(ev);
 }
 
 function handleDropPayload(ev: DragEvent, targetWire: string) {
-  const raw = ev.dataTransfer?.getData(FE_DND_MIME);
-  if (!raw || !targetWire) return;
-  let items: Array<{ path: string }> = [];
-  try {
-    items = JSON.parse(raw);
-  } catch {
-    return;
-  }
-  const origin = ev.dataTransfer?.getData(FE_DND_SRC_MIME) || undefined;
+  const items = internalDragItems(ev);
+  if (!items || !targetWire) return;
+  const origin = internalDragOrigin(ev);
   const sources = items
     .map((i) => i.path)
     .filter((p) => p && p !== targetWire && !targetWire.startsWith(p + '/'));

@@ -43,6 +43,8 @@ import {
   type DesktopState,
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
+import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
+import { watchForDrop } from './dropwatch.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +79,14 @@ let tray: Tray | null = null;
 let pendingAuth: PendingAuth | null = null;
 let quitting = false;
 let supervisor: SyncSupervisor | null = null;
+/** Local copies for dragging files OUT onto the desktop. See dragout.ts. */
+let dragCache: DragOutCache | null = null;
+/** The paths the last successful prepare() produced, keyed by the selection,
+ *  so `drag:start` never has to re-derive (or re-check) them mid-gesture. */
+let dragReady: { key: string; paths: string[] } | null = null;
+let dragPrepare: AbortController | null = null;
+/** The placeholder drag in flight: its watcher, and the transfer it becomes. */
+let dragDrop: { cancel: () => void; dir: string } | null = null;
 /** What the updater is doing, as far as the UI is concerned. */
 let updateState: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error' | 'manual'; version?: string; percent?: number; error?: string; url?: string } = { status: 'idle' };
 
@@ -778,6 +788,11 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'Pick a folder that is not inside the current one (and does not contain it).',
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
+  dragFailedTitle: ['Drag out failed', 'Dışarı sürükleme başarısız'],
+  dragFailedBody: [
+    'The files were dropped in {dir} but could not be downloaded there: {err}',
+    'Dosyalar {dir} klasörüne bırakıldı ama oraya indirilemedi: {err}',
+  ],
 };
 
 function syncText(key: string, vars: Record<string, string> = {}): string {
@@ -835,6 +850,63 @@ function localMirrorPath(root: string, remote: string): string {
   const rel = remote.slice(idx + 3).replace(/^\/+|\/+$/g, '');
   const segs = [...safeSegments(storage), ...safeSegments(rel)];
   return path.join(root, ...segs);
+}
+
+/** Ends a placeholder drag that is still waiting to learn where it landed. */
+function dragDropCancel(): void {
+  if (!dragDrop) return;
+  const { cancel, dir } = dragDrop;
+  dragDrop = null;
+  cancel();
+  void fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/** Stable key for a dragged selection — the same one the explorer computes,
+ *  so "is this still what you prepared?" has one answer on both sides. */
+function dragKeyOf(items: Array<{ path: string }>): string {
+  return items
+    .map((i) => i.path)
+    .sort()
+    .join(' ');
+}
+
+/** The sync engine's local copy of a wire path, when it keeps one. Used only
+ *  to fill the drag cache without going over the network — the mirror itself
+ *  is never handed to the OS drag (a drop completed as a move would take the
+ *  user's synced file with it). */
+function mirrorPathFor(accountId: string, remote: string): string | null {
+  const wire = normRemote(remote);
+  const pairs = accountPairs(accountId);
+  const exact = pairs.find((p) => p.remote === wire);
+  if (exact) return exact.local;
+  const anc = pairs.find((p) => remoteInside(wire, p.remote));
+  if (!anc) return null;
+  const rest = anc.remote.endsWith('://')
+    ? wire.slice(anc.remote.length)
+    : wire.slice(anc.remote.length + 1);
+  return path.join(anc.local, ...safeSegments(rest));
+}
+
+/**
+ * Starts the OS drag — or, under the test hook, does everything except that.
+ *
+ * ⚠ `startDrag` opens the operating system's modal drag loop, attached to the
+ * real mouse. An unattended run cannot let go of it, so a suite that called it
+ * would hang the machine it runs on. FILEX_TEST_NO_OS_DRAG lets the rest of the
+ * route — placeholders, the drop watcher, the transfer — be measured for real;
+ * the hand-over to the OS is the one step a human has to do. Same convention as
+ * FILEX_TEST_PICK_DIR for the native folder picker.
+ */
+function beginOsDrag(sender: Electron.WebContents, paths: string[]): void {
+  if (process.env.FILEX_TEST_NO_OS_DRAG === '1') return;
+  sender.startDrag({ file: paths[0]!, files: paths, icon: dragIcon() });
+}
+
+/** The image under the cursor while an OS drag is in flight. Electron requires
+ *  one; an empty NativeImage makes the drag invisible on Windows. */
+function dragIcon(): Electron.NativeImage {
+  const img = nativeImage.createFromPath(ICON_PATH);
+  return img.isEmpty() ? img : img.resize({ width: 48, height: 48 });
 }
 
 function accountPairs(accountId: string): Pair[] {
@@ -1262,6 +1334,126 @@ function wireIpc(): void {
     return publicState();
   });
 
+  // ── dragging files OUT onto the desktop ──────────────────────────
+  //
+  // Two calls, because the bytes have to be on this computer before an OS drag
+  // can start (the shell copies from a path at DROP time — there is no
+  // virtual-file API to borrow). `drag:prepare` materialises the selection and
+  // `drag:start` hands the paths to the OS. The explorer only calls the second
+  // one after the first said ready, so an internal move never waits on a
+  // download it does not need.
+
+  ipcMain.handle('drag:prepare', async (_e, accountId: string, items: DragItem[]) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    if (!dragCache || !Array.isArray(items) || items.length === 0) return { ready: false };
+    const key = dragKeyOf(items);
+    if (dragReady?.key === key) return { ready: true, paths: dragReady.paths };
+
+    // A new selection cancels the previous preparation: the user has moved on,
+    // and two walks of two folder trees compete for the same network.
+    dragPrepare?.abort();
+    const ctrl = new AbortController();
+    dragPrepare = ctrl;
+    const res = await dragCache.prepare(
+      items,
+      {
+        accountId: acc.id,
+        serverUrl: acc.serverUrl,
+        token: acc.token,
+        mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
+        onProgress: (pr) => {
+          if (!ctrl.signal.aborted) mainWindow?.webContents.send('drag:progress', pr);
+        },
+      },
+      ctrl.signal,
+    );
+    if (dragPrepare === ctrl) dragPrepare = null;
+    if (res.ready) dragReady = { key, paths: res.paths };
+    // The paths travel back with the answer: the page is ours, a local path is
+    // not a secret (Settings shows the mirror roots), and a contract whose
+    // result can be looked at is one that can be MEASURED — the OS drag loop
+    // itself cannot be driven from a script.
+    return { ready: res.ready, error: res.error, paths: res.ready ? res.paths : [] };
+  });
+
+  ipcMain.handle('drag:start', async (e, accountId: string, items: DragItem[]) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc || !dragCache || !Array.isArray(items) || items.length === 0) return false;
+
+    // Route 1 — the bytes are already here. Hand the OS the real files: correct
+    // for every drop target, including an application that reads the file the
+    // moment it arrives.
+    //
+    // ⚠ Every path is re-checked rather than trusted from prepare(): a drop
+    // completed as a MOVE takes the cache entry with it, and a drag started on
+    // a path that is gone is a gesture that silently does nothing.
+    const key = dragKeyOf(items);
+    if (dragReady?.key === key && dragReady.paths.length > 0 && dragReady.paths.every((f) => fs.existsSync(f))) {
+      beginOsDrag(e.sender, dragReady.paths);
+      return 'files';
+    }
+
+    // Route 2 — placeholders. Empty stand-ins copy in microseconds, so the drag
+    // starts NOW whatever the size; we then find where they landed and put the
+    // real bytes there. See dropwatch.ts for what this can and cannot see.
+    dragDropCancel();
+    const session = await createPlaceholders(dragCache.rootDir, acc.id, items);
+    dragDrop = { cancel: () => {}, dir: session.dir };
+    beginOsDrag(e.sender, session.paths);
+
+    const watch = watchForDrop({
+      names: session.paths.map((p) => path.basename(p)),
+      ignoreDirs: [dragCache.rootDir],
+      timeoutMs: 60_000,
+    });
+    dragDrop = { cancel: watch.cancel, dir: session.dir };
+
+    void watch.promise
+      .then(async (loc) => {
+        await fs.promises.rm(session.dir, { recursive: true, force: true }).catch(() => undefined);
+        if (!loc) {
+          // Nothing landed anywhere we can see: either the drag was let go over
+          // this window (an internal move — normal, and dragDropCancel already
+          // ran) or it went into an application, which never writes a file.
+          // Saying so is the honest end; pretending it worked is not.
+          if (dragDrop) mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, finished: true, error: 'drop_not_found' });
+          dragDrop = null;
+          return;
+        }
+        mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, name: loc.name, dropped: loc.dir });
+        const res = await fulfilDrop(dragCache!, loc.dir, items, {
+          accountId: acc.id,
+          serverUrl: acc.serverUrl,
+          token: acc.token,
+          mirrorFor: (remote) => mirrorPathFor(acc.id, remote),
+          onProgress: (pr) => mainWindow?.webContents.send('drag:progress', { ...pr, dropped: loc.dir }),
+        });
+        dragDrop = null;
+        if (!res.ok) {
+          // A failed transfer leaves the folder as it was: the stand-in is
+          // already gone, so there is no zero-byte file wearing the real name.
+          dialog.showErrorBox(
+            syncText('dragFailedTitle'),
+            syncText('dragFailedBody', { dir: loc.dir, err: res.error ?? '' }),
+          );
+        }
+      })
+      .catch(() => {
+        dragDrop = null;
+      });
+
+    return 'placeholder';
+  });
+
+  // The drag ended inside our own window (an internal move): stop watching the
+  // drives and take the stand-ins away. Without this the watcher would sit
+  // there for its whole timeout after every in-app drag.
+  ipcMain.handle('drag:cancel', () => {
+    dragDropCancel();
+    return true;
+  });
+
   // ── selective sync — the explorer's "keep on this computer" menu ──
 
   ipcMain.handle('sync:kept', (_e, accountId: string) =>
@@ -1592,6 +1784,12 @@ if (!app.requestSingleInstanceLock()) {
     supervisor = new SyncSupervisor(() => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
     });
+    // Local copies for dragging files out. Under userData rather than the OS
+    // temp dir: the point of keeping them is that the SECOND drag of the same
+    // file is instant, and a folder the OS may empty at any moment cannot
+    // promise that. Entries older than a week are swept here.
+    dragCache = new DragOutCache(path.join(app.getPath('userData'), 'drag-cache'));
+    void dragCache.sweep();
     wireIpc();
     buildTray();
     // The signature check decides WHICH updater to wire, so it runs first.
