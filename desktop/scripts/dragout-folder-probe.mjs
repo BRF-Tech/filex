@@ -21,9 +21,14 @@ import path from 'node:path';
 
 import { SERVER, STORAGE, api, launchApp, signIn, skipTour, sleep } from './lib/harness.mjs';
 
+// FILEX_PROBE_REMOTE lets the probe drag a folder that ALREADY exists — the
+// user's own, on a real server — instead of seeding one. Nothing is written to
+// the server in that mode.
+const EXISTING = process.env.FILEX_PROBE_REMOTE ?? '';
 const RUN = `folderprobe-${Date.now()}`;
 const REMOTE = `${STORAGE}://${RUN}`;
-const SUB = `${REMOTE}/klasor`;
+const SUB = EXISTING || `${REMOTE}/klasor`;
+const DRAG_NAME = EXISTING ? EXISTING.replace(/\/+$/, '').split('/').pop() : 'klasor';
 
 function shellCopy(src, dstDir) {
   // Explorer's own copy: Shell.Application → NameSpace(dst).CopyHere(src).
@@ -67,7 +72,7 @@ app.process().stderr?.on('data', (d) => mainLog.push('ERR ' + String(d)));
 const { win, adminToken: token } = await signIn(app);
 await skipTour(win).catch(() => {});
 
-for (const [parent, name] of [[`${STORAGE}://`, RUN], [REMOTE, 'klasor']]) {
+for (const [parent, name] of EXISTING ? [] : [[`${STORAGE}://`, RUN], [REMOTE, 'klasor']]) {
   const mk = await api('/api/files/manager?action=newfolder', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -77,7 +82,7 @@ for (const [parent, name] of [[`${STORAGE}://`, RUN], [REMOTE, 'klasor']]) {
 }
 // İç içe klasör + boş klasör + Türkçe adlı dosya + biraz kalabalık: gerçek
 // bir klasörün şekli.
-for (const [parent, name] of [[SUB, 'alt'], [SUB, 'bos-klasor'], [`${SUB}/alt`, 'daha-derin']]) {
+for (const [parent, name] of EXISTING ? [] : [[SUB, 'alt'], [SUB, 'bos-klasor'], [`${SUB}/alt`, 'daha-derin']]) {
   const mk = await api('/api/files/manager?action=newfolder', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -93,7 +98,7 @@ const seedFiles = [
   [`${SUB}/alt/daha-derin`, 'derin.bin', 'x'.repeat(200000)],
 ];
 for (let i = 0; i < 12; i++) seedFiles.push([SUB, `dosya-${i}.txt`, `icerik ${i}`]);
-for (const [dir, name, body] of seedFiles) {
+for (const [dir, name, body] of EXISTING ? [] : seedFiles) {
   const form = new FormData();
   form.append('path', `${dir}/`);
   form.append('file[]', new Blob([body], { type: 'text/plain' }), name);
@@ -102,30 +107,42 @@ for (const [dir, name, body] of seedFiles) {
 }
 
 const accountId = await win.evaluate(async () => (await window.filexApp.getState()).accounts[0].id);
-const items = [{ path: SUB, basename: 'klasor', type: 'dir' }];
+const items = [{ path: SUB, basename: DRAG_NAME, type: 'dir' }];
 
-console.log('--- drag:start (klasör, hazırlanmamış) ---');
-const mode = await win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, items]);
-console.log('mode =', mode);
+// ⚠⚠ The drag is started and NOT awaited, and the drop happens while it is
+// still in flight. That is the real sequence: on Windows `startDrag` hands
+// control to the OS drag loop and does not return until the user lets go, so
+// everything the app does "after starting the drag" actually happens after the
+// DROP. A probe that awaited first would arm the app's watcher before the copy
+// and miss the very bug this exists to catch.
+console.log('--- drag:start (klasör, hazırlanmamış) — beklemeden ---');
+const modePromise = win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, items]);
 
 const pendingRoot = path.join(profile, 'drag-cache', 'pending', accountId);
-const session = fs.existsSync(pendingRoot)
-  ? fs.readdirSync(pendingRoot).map((d) => path.join(pendingRoot, d)).pop()
-  : null;
+let session = null;
+for (let i = 0; i < 60 && !session; i++) {
+  await sleep(100);
+  if (fs.existsSync(pendingRoot)) {
+    const dirs = fs.readdirSync(pendingRoot).map((d) => path.join(pendingRoot, d));
+    session = dirs.length ? dirs[dirs.length - 1] : null;
+  }
+}
 console.log('stand-in dizini =', session);
 console.log('stand-in içeriği =', session ? fs.readdirSync(session) : '(yok)');
 
 const dropDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-shelldrop-'));
 console.log('bırakma hedefi =', dropDir);
 
-const res = await shellCopy(path.join(session, 'klasor'), dropDir);
+const res = await shellCopy(path.join(session, DRAG_NAME), dropDir);
+const mode = await modePromise;
+console.log('mode =', mode);
 console.log('CopyHere:', JSON.stringify(res));
 console.log('kopyadan hemen sonra:', tree(dropDir));
 
 for (let i = 0; i < 30; i++) {
   await sleep(1000);
   const t = tree(dropDir);
-  if (t.some((l) => l.includes('ic.txt'))) {
+  if (t.length > 1) {
     console.log(`${i + 1}. saniyede DOLDU:`);
     console.log(t.join('\n'));
     break;

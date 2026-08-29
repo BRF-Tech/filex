@@ -158,19 +158,33 @@ async function main() {
     { path: bigRel, basename: 'buyuk.bin', type: 'file' },
     { path: SUB, basename: 'klasor', type: 'dir' },
   ];
+  // ⚠⚠ The drag is started and NOT awaited, and the drop happens while it is
+  // still in flight — because that is the real sequence. `startDrag` hands
+  // control to the OS drag loop and, on Windows, does not return until the user
+  // lets go: everything the app does "after starting the drag" really happens
+  // after the DROP, with its own JavaScript frozen in between (the test hook
+  // blocks for the same reason). A suite that awaited the call first would arm
+  // the watcher before the copy and could not see the bug this guards:
+  // measured 2026-08-29, the folder came out EMPTY every time on the real thing
+  // while this file was green.
   t0 = Date.now();
-  const mode = await win.evaluate(
+  const modePromise = win.evaluate(
     ([acc, it]) => window.filexApp.dragStart(acc, it),
     [accountId, bigItems],
   );
-  const startMs = Date.now() - t0;
-  check('an unprepared selection still starts a drag — via placeholders', mode === 'placeholder', String(mode));
-  check('and it starts immediately, with nothing downloaded first', startMs < 1500, `${startMs} ms`);
 
   const pendingRoot = path.join(profile, 'drag-cache', 'pending', accountId);
-  const session = fs.existsSync(pendingRoot)
-    ? fs.readdirSync(pendingRoot).map((d) => path.join(pendingRoot, d)).pop()
-    : null;
+  let session = null;
+  for (let i = 0; i < 60 && !session; i++) {
+    await sleep(100);
+    if (fs.existsSync(pendingRoot)) {
+      const dirs = fs.readdirSync(pendingRoot).map((d) => path.join(pendingRoot, d));
+      session = dirs.length ? dirs[dirs.length - 1] : null;
+    }
+  }
+  const startMs = Date.now() - t0;
+  check('stand-ins appear while the drag is still in flight', !!session, `${startMs} ms`);
+  check('and they appear immediately, with nothing downloaded first', startMs < 2000, `${startMs} ms`);
   check('stand-ins exist on disk', !!session && fs.existsSync(session), String(session));
   const stand = session ? fs.readdirSync(session).sort() : [];
   check('one stand-in per dragged item, and they are EMPTY', stand.length === 2, stand.join(', '));
@@ -193,6 +207,9 @@ async function main() {
     if (fs.statSync(src).isDirectory()) fs.mkdirSync(dst, { recursive: true });
     else fs.copyFileSync(src, dst);
   }
+  // Only now does the "gesture" end.
+  const mode = await modePromise;
+  check('an unprepared selection still starts a drag — via placeholders', mode === 'placeholder', String(mode));
 
   const landed = path.join(dropDir, 'buyuk.bin');
   const deepest = path.join(dropDir, 'klasor', 'alt', 'derindeki.txt');
@@ -234,10 +251,11 @@ async function main() {
   // we handed the shell is known exactly: an EMPTY stand-in. A decoy with the
   // same name but content of its own must be ignored — writing the user's file
   // into THAT folder is worse than not filling the drop in at all.
-  await win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, bigItems]);
+  const pDecoy = win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, bigItems]);
   const decoyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-decoy-'));
   const decoy = path.join(decoyDir, 'buyuk.bin');
   fs.writeFileSync(decoy, 'baskasinin dosyasi');
+  await pDecoy;
   await sleep(2500);
   check(
     'a same-named file that is NOT our empty stand-in is left alone',
@@ -248,7 +266,8 @@ async function main() {
   await win.evaluate(() => window.filexApp.dragCancel());
 
   // ── 6b. an internal drop calls the watcher off ────────────────────
-  await win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, bigItems]);
+  const p6b = win.evaluate(([acc, it]) => window.filexApp.dragStart(acc, it), [accountId, bigItems]);
+  await p6b;
   await win.evaluate(() => window.filexApp.dragCancel());
   await sleep(300);
   const leftovers = fs.existsSync(pendingRoot) ? fs.readdirSync(pendingRoot) : [];
@@ -315,6 +334,20 @@ async function main() {
       cached,
     );
   }
+
+  // ── 8. the trail is readable after the fact ─────────────────────
+  // A packaged app has no console, so `console.log` goes nowhere — which is
+  // how a failed drag-out came to have no evidence but "the folder is empty".
+  const logFile = await win.evaluate(() => window.filexApp.logPath());
+  check('the app reports where its log lives', !!logFile && fs.existsSync(logFile), String(logFile));
+  const logText = logFile && fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
+  check(
+    'and every step of this drag is in it',
+    logText.includes('[drag] stand-ins') &&
+      logText.includes('[drag] watch result') &&
+      logText.includes('[xfer] file ok'),
+    logText.split(/\r?\n/).filter((l) => l.includes('[drag]') || l.includes('[xfer]')).length + ' satır',
+  );
 
   // ── cleanup ──────────────────────────────────────────────────────
   await api('/api/files/manager?action=delete', {

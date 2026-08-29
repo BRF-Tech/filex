@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld('filexApp', {
   dragStart: (accountId: string, items: unknown) => ipcRenderer.invoke('drag:start', accountId, items),
   /** The drag ended inside the window — stop waiting for a drop out there. */
   dragCancel: () => ipcRenderer.invoke('drag:cancel'),
+  /** The log file's path — for a bug report, and for Settings to reveal. */
+  logPath: () => ipcRenderer.invoke('app:logPath'),
   onDragProgress: (fn: (p: unknown) => void) =>
     ipcRenderer.on('drag:progress', (_e, p) => fn(p)),
 });

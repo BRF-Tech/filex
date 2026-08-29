@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.3] - 2026-08-29
+
+### Fixed
+
+- **A folder dragged out of the desktop app arrived empty.** The watcher that
+  finds where a stand-in landed was started *after* `webContents.startDrag()` —
+  and on Windows that call hands control to the operating system's own drag
+  loop, which does not return until the user lets go. The watcher therefore
+  went up after the drop had already happened. Worse, a recursive `fs.watch`
+  whose event loop is blocked does not deliver the change late; it misses it
+  outright (measured: a file created during a 4-second block was never
+  reported, before or after). Two changes: the watcher is armed **before** the
+  drag, and it runs in a **worker thread**, whose loop keeps running while the
+  main thread is inside the drag loop. Single files were never affected,
+  because a small selection is prepared in the background and handed to the OS
+  as a real file — which is why this only ever showed up on folders.
+- **The suite could not have caught it.** Its simulated drop happened after the
+  drag call returned, and its test hook skipped `startDrag` entirely rather than
+  blocking like the real one. Both are fixed: the drop is now performed *while*
+  the drag is in flight, and the hook blocks for the same reason the OS does.
+
+### Added
+
+- **The desktop app keeps a log** at `<userData>/logs/filex-desktop.log`
+  (rotated at 2 MB, one previous file kept). A packaged app has no console, so
+  `console.log` went nowhere: when a drag-out failed, the only evidence was an
+  empty folder. Every step of a drag and of a transfer is one line, and an
+  uncaught exception in the main process lands there too.
+
 ## [0.27.2] - 2026-08-29
 
 ### Fixed

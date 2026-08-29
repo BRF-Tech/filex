@@ -46,6 +46,7 @@ import {
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
+import { log, logPath } from './log.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -864,8 +865,7 @@ function localMirrorPath(root: string, remote: string): string {
  * first time a real folder failed to fill (2026-08-29).
  */
 function dragLog(step: string, detail?: unknown): void {
-  const at = new Date().toISOString().slice(11, 23);
-  console.log(`[drag ${at}] ${step}${detail === undefined ? '' : ' ' + JSON.stringify(detail)}`);
+  log('drag', step, detail);
 }
 
 /** Ends a placeholder drag that is still waiting to learn where it landed. */
@@ -914,7 +914,18 @@ function mirrorPathFor(accountId: string, remote: string): string | null {
  * FILEX_TEST_PICK_DIR for the native folder picker.
  */
 function beginOsDrag(sender: Electron.WebContents, paths: string[]): void {
-  if (process.env.FILEX_TEST_NO_OS_DRAG === '1') return;
+  if (process.env.FILEX_TEST_NO_OS_DRAG === '1') {
+    // ⚠ The hook does not just skip the call — it BLOCKS the way the real one
+    // does. A hook that returned immediately is what let the "watcher armed
+    // too late" bug through a green suite: with no block, everything after
+    // this line ran before the simulated drop, which is the opposite of what
+    // Windows does.
+    const until = Date.now() + Number(process.env.FILEX_TEST_DRAG_BLOCK_MS ?? 1500);
+    const buf = new SharedArrayBuffer(4);
+    const arr = new Int32Array(buf);
+    while (Date.now() < until) Atomics.wait(arr, 0, 0, 50);
+    return;
+  }
   sender.startDrag({ file: paths[0]!, files: paths, icon: dragIcon() });
 }
 
@@ -1191,6 +1202,9 @@ function wireIpc(): void {
     return out;
   });
 
+  // Where the log lives, so a report can name it and Settings can open it.
+  ipcMain.handle('app:logPath', () => logPath());
+
   ipcMain.handle('shell:openPath', (_e, target: string) => {
     void shell.openPath(target);
   });
@@ -1416,17 +1430,31 @@ function wireIpc(): void {
     dragDropCancel();
     const session = await createPlaceholders(dragCache.rootDir, acc.id, items);
     dragLog('stand-ins', { dir: session.dir, names: session.paths.map((p) => path.basename(p)) });
-    dragDrop = { cancel: () => {}, dir: session.dir };
-    beginOsDrag(e.sender, session.paths);
-
+    // ⚠⚠ THE WATCHER GOES UP FIRST, AND IT IS NOT A STYLE CHOICE.
+    // `startDrag` hands control to the operating system's own drag loop, and on
+    // Windows that loop is MODAL: the call does not return until the user lets
+    // go. Arming the watcher after it therefore arms it after the drop has
+    // already happened — the creation event is long gone, nothing is ever
+    // found, and the folder the user dropped stays exactly as the shell left
+    // it: EMPTY. (Measured 2026-08-29, Burak: "klasör çekiyorum masaüstüne ve
+    // içi yine boş geliyor". Single files worked because a small selection is
+    // prepared in the background and handed over as a real file, which needs no
+    // watcher at all — that is why this only ever showed up on folders.)
     const watch = watchForDrop({
       names: session.paths.map((p) => path.basename(p)),
       ignoreDirs: [dragCache.rootDir],
       timeoutMs: 60_000,
     });
     dragDrop = { cancel: watch.cancel, dir: session.dir };
-
+    // ⚠ Wait for the watchers to be UP, not merely asked for. Bounded, because
+    // a drag that never starts is worse than one whose first moments are
+    // unwatched: if the worker cannot arm in two seconds, go anyway and let the
+    // timeout report it.
+    await Promise.race([watch.ready, new Promise((r) => setTimeout(r, 2000))]);
     dragLog('watching', { roots: localDriveRoots(), ignore: dragCache.rootDir });
+
+    beginOsDrag(e.sender, session.paths);
+    dragLog('os drag returned', { note: 'on Windows this means the user has let go' });
     void watch.promise
       .then(async (loc) => {
         dragLog('watch result', loc ?? 'BULUNAMADI');
@@ -1803,7 +1831,7 @@ if (!app.requestSingleInstanceLock()) {
   // an ordinary notification; the app keeps running, and the trail says what
   // happened.
   process.on('uncaughtException', (err) => {
-    console.error('[filex] uncaught exception in the main process:', err);
+    log('error', 'uncaught exception in the main process', String(err?.stack ?? err));
     try {
       if (Notification.isSupported()) {
         new Notification({
@@ -1816,7 +1844,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   process.on('unhandledRejection', (reason) => {
-    console.error('[filex] unhandled rejection in the main process:', reason);
+    log('error', 'unhandled rejection in the main process', String(reason));
   });
 
   app.whenReady().then(() => {

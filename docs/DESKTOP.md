@@ -348,7 +348,12 @@ deleting.
 
 ## Troubleshooting
 
-**A folder dragged out stayed empty** — fixed in 0.27.2. A file inside it whose
+**A folder dragged out stayed empty** — two separate causes, both fixed by
+0.27.3; update the app. If it still happens, the log at
+`%APPDATA%\@brftech\filex-desktop\logs\filex-desktop.log` (Windows) says which
+step stopped: look for the `[drag]` and `[xfer]` lines of that gesture.
+
+**A folder dragged out stayed empty (0.27.1 and older)** — fixed in 0.27.2. A file inside it whose
 name was not ASCII (`Türkçe adlı dosya.txt`) made the transfer throw while
 reading the response, and everything after it stopped. Update the app; the
 server no longer sends such a header either.

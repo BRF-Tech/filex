@@ -42,6 +42,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { log } from './log.js';
+
 export interface DragItem {
   path: string; // wire path: `<depo>://rel`
   basename: string;
@@ -456,8 +458,7 @@ export async function fulfilDrop(
  * symptom when it stalls is a folder that stays empty.
  */
 function xferLog(step: string, detail?: unknown): void {
-  const at = new Date().toISOString().slice(11, 23);
-  console.log(`[xfer ${at}] ${step}${detail === undefined ? '' : ' ' + JSON.stringify(detail)}`);
+  log('xfer', step, detail);
 }
 
 /** One path segment, with the characters Windows actually refuses taken

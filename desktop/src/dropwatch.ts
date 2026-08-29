@@ -7,27 +7,36 @@
 // name, which copies in microseconds — then find out where that copy landed and
 // put the real bytes there instead.
 //
-// Finding it is this module's whole job. `fs.watch(root, {recursive: true})` on
-// Windows is `ReadDirectoryChangesW` over a volume: a new file anywhere on the
-// drive arrives as an event within milliseconds (measured 2026-08-29: ~6 ms
-// from write to callback across a whole C:). We watch every local drive for a
-// short window, filter by the exact placeholder names, and the first hit tells
-// us the folder.
+// Finding it is this module's whole job, and the hard part is not the watching.
+// It is WHERE the watching runs:
 //
-// ⚠⚠ What this cannot do, stated plainly rather than discovered later: if the
-// drop target is an APPLICATION rather than a folder — a chat window, an editor
-// — nothing is written to disk, the app receives the empty placeholder, and no
-// amount of watching will find anything. That is why the caller keeps the
-// prepared-copy path for small selections: those are the ones people drop into
-// programs. A large file dropped somewhere we cannot see is reported to the
-// user, never silently forgotten.
+// ⚠⚠ `webContents.startDrag()` hands control to the operating system's own drag
+// loop, and on Windows that loop is modal — it does not return until the user
+// lets go. The main process's JavaScript is therefore NOT RUNNING for the whole
+// gesture, including the moment of the drop. And a recursive `fs.watch` whose
+// loop is blocked does not merely deliver late: it MISSES the change outright.
+// Measured 2026-08-29 — a file created during a 4-second block was never
+// reported, before or after:
 //
-// ⚠ `recursive: true` is supported on Windows and macOS. On Linux it is not
-// (Node falls back to non-recursive, which would only see the drive root), so
+//	blok bitti (4065 ms), o ana kadar görülen: null
+//	bloktan sonra görülen: HİÇBİR ŞEY
+//
+// So the watchers live in a WORKER THREAD, whose event loop keeps running while
+// the main thread is inside the drag loop. The same measurement with a worker
+// reported the file the moment the main thread was free again. This is the
+// difference between "the folder fills in" and Burak's "klasör çekiyorum
+// masaüstüne ve içi yine boş geliyor".
+//
+// ⚠ What this still cannot do: if the drop target is an APPLICATION rather than
+// a folder, nothing is written to disk, so there is nothing to find. The caller
+// keeps the prepared-copy path for small selections for exactly that reason.
+//
+// ⚠ `recursive: true` is supported on Windows and macOS. On Linux it is not, so
 // callers there stay on prepared copies.
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 
 export interface DropLocation {
   /** The folder the placeholder landed in. */
@@ -67,99 +76,146 @@ export interface WatchOptions {
 }
 
 /**
+ * The worker's whole program, as source.
+ *
+ * Inlined and run with `eval: true` rather than shipped as a second file: the
+ * main process is bundled to one `dist/main.js`, and a worker kept in its own
+ * file would have to be built, copied into the package and found again at
+ * runtime — three more things to get wrong at packaging time for twenty lines
+ * of code.
+ *
+ * The guard lives here, with the watching: what we handed the shell is known
+ * exactly — an EMPTY file (or an empty directory), created inside this drag's
+ * window — so anything with content of its own belongs to somebody else and is
+ * ignored. Without that, a file that merely shares the name (a backup job,
+ * another download) would be treated as the drop and the user's file written
+ * into that folder.
+ */
+const WORKER_SOURCE = `
+const fs = require('node:fs');
+const path = require('node:path');
+const { parentPort, workerData } = require('node:worker_threads');
+
+const started = workerData.started;
+const names = new Set(workerData.names.map((n) => n.toLowerCase()));
+const ignore = workerData.ignoreDirs.map((d) => path.resolve(d).toLowerCase());
+const watchers = [];
+let done = false;
+
+function finish(loc) {
+  if (done) return;
+  done = true;
+  for (const w of watchers) { try { w.close(); } catch (e) {} }
+  parentPort.postMessage(loc);
+}
+
+for (const root of workerData.roots) {
+  try {
+    const w = fs.watch(root, { recursive: true }, (_event, file) => {
+      if (!file || done) return;
+      const rel = String(file);
+      if (!names.has(path.basename(rel).toLowerCase())) return;
+      const full = path.join(root, rel);
+      const lower = path.resolve(full).toLowerCase();
+      if (ignore.some((d) => lower.startsWith(d))) return;
+      let st;
+      try { st = fs.statSync(full); } catch (e) { return; }
+      if (st.isDirectory()) {
+        try { if (fs.readdirSync(full).length !== 0) return; } catch (e) { return; }
+      } else if (st.size !== 0) {
+        return;
+      }
+      if (st.birthtimeMs && st.birthtimeMs + 1000 < started) return;
+      finish({ dir: path.dirname(full), droppedPath: full, name: path.basename(full), ms: Date.now() - started });
+    });
+    w.on('error', () => { try { w.close(); } catch (e) {} });
+    watchers.push(w);
+  } catch (e) { /* a drive that refuses a recursive watch is skipped */ }
+}
+
+// ⚠ Readiness is ANNOUNCED, not assumed. Spawning a worker and arming five
+// recursive volume watchers takes a moment; a drag that starts before that is
+// a drag whose drop nobody is listening for. The main thread waits for this
+// line before it hands control to the OS.
+parentPort.postMessage({ ready: true, watching: watchers.length });
+if (watchers.length === 0) finish(null);
+parentPort.on('message', (m) => { if (m === 'cancel') finish(null); });
+`;
+
+/**
  * Watches for one of `names` to appear anywhere on the local drives.
  *
- * Resolves with the location, or `null` on timeout/cancel. Always tears its
- * watchers down — a recursive volume watcher left running is a stream of every
+ * Resolves with the location, or `null` on timeout/cancel. The worker is always
+ * terminated — a recursive volume watcher left running is a stream of every
  * file event on the machine.
  */
-export function watchForDrop(opts: WatchOptions): { promise: Promise<DropLocation | null>; cancel: () => void } {
+export function watchForDrop(opts: WatchOptions): {
+  promise: Promise<DropLocation | null>;
+  /** Resolves once the worker's watchers are actually up. Await it before
+   *  starting the OS drag: a drop that happens first is a drop nobody sees. */
+  ready: Promise<void>;
+  cancel: () => void;
+} {
   const started = Date.now();
-  const names = new Set(opts.names.map((n) => n.toLowerCase()));
-  const ignore = opts.ignoreDirs.map((d) => path.resolve(d).toLowerCase());
   const roots = opts.roots ?? localDriveRoots();
-  const watchers: fs.FSWatcher[] = [];
   let settled = false;
+  let worker: Worker | null = null;
   let timer: NodeJS.Timeout | undefined;
   let finish: (v: DropLocation | null) => void = () => {};
 
-  const stop = () => {
-    if (timer) clearTimeout(timer);
-    for (const w of watchers) {
-      try {
-        w.close();
-      } catch {
-        /* already closed */
-      }
-    }
-    watchers.length = 0;
-  };
+  let markReady: () => void = () => {};
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
 
   const promise = new Promise<DropLocation | null>((resolve) => {
     finish = (v) => {
       if (settled) return;
       settled = true;
-      stop();
+      markReady(); // nobody may be left waiting on a watch that is over
+      if (timer) clearTimeout(timer);
+      void worker?.terminate().catch(() => undefined);
+      worker = null;
       resolve(v);
     };
 
-    for (const root of roots) {
-      try {
-        const w = fs.watch(root, { recursive: true }, (_event, file) => {
-          if (!file) return;
-          const rel = String(file);
-          if (!names.has(path.basename(rel).toLowerCase())) return;
-          const full = path.join(root, rel);
-          const lower = path.resolve(full).toLowerCase();
-          if (ignore.some((d) => lower.startsWith(d))) return; // our own copy
-          // ⚠⚠ The name alone is not proof. A file called `rapor.txt` can
-          // appear anywhere on the machine while we are watching — a backup
-          // job, another download — and writing the user's file into THAT
-          // folder would be worse than not filling the drop in at all. What we
-          // dropped is known precisely: an EMPTY file (or an empty directory),
-          // created inside this drag's window. Anything else is somebody
-          // else's file and is ignored.
-          let st: fs.Stats;
-          try {
-            st = fs.statSync(full);
-          } catch {
-            // The event can arrive before the copy is closed, or after it has
-            // moved on again; either way there is nothing to act on.
-            return;
-          }
-          if (st.isDirectory()) {
-            try {
-              if (fs.readdirSync(full).length !== 0) return;
-            } catch {
-              return;
-            }
-          } else if (st.size !== 0) {
-            return;
-          }
-          if (st.birthtimeMs && st.birthtimeMs + 1000 < started) return;
-          finish({ dir: path.dirname(full), droppedPath: full, name: path.basename(full), ms: Date.now() - started });
-        });
-        // A drive that refuses a recursive watch (network share, permissions)
-        // is skipped, not fatal: the others still cover the common targets.
-        w.on('error', () => {
-          try {
-            w.close();
-          } catch {
-            /* nothing to close */
-          }
-        });
-        watchers.push(w);
-      } catch {
-        /* same reasoning as the error handler */
-      }
-    }
-
-    if (watchers.length === 0) {
+    try {
+      worker = new Worker(WORKER_SOURCE, {
+        eval: true,
+        workerData: { names: opts.names, ignoreDirs: opts.ignoreDirs, roots, started },
+      });
+    } catch {
+      markReady();
       finish(null);
       return;
     }
+    worker.on('message', (msg: DropLocation | { ready: true } | null) => {
+      if (msg && typeof msg === 'object' && 'ready' in msg) {
+        markReady();
+        return;
+      }
+      finish(msg as DropLocation | null);
+    });
+    worker.on('error', () => {
+      markReady();
+      finish(null);
+    });
+    // ⚠ `unref` so a watch still running cannot hold the app open at quit; the
+    // drag is over long before anybody closes the window.
+    worker.unref();
     timer = setTimeout(() => finish(null), opts.timeoutMs ?? 30_000);
   });
 
-  return { promise, cancel: () => finish(null) };
+  return {
+    promise,
+    ready,
+    cancel: () => {
+      try {
+        worker?.postMessage('cancel');
+      } catch {
+        /* already gone */
+      }
+      finish(null);
+    },
+  };
 }
