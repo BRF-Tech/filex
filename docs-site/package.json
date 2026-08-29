@@ -1,7 +1,7 @@
 {
   "name": "@brftech/filex-docs",
   "private": true,
-  "version": "0.27.3",
+  "version": "0.27.4",
   "type": "module",
   "description": "docs.filex.sh — VitePress documentation site (sources live in ../docs)",
   "scripts": {

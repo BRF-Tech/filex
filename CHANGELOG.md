@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.4] - 2026-08-29
+
 ### Fixed
 
 - **The Helm chart shipped a 23-release-old image.** `values.yaml` leaves the
@@ -15,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at `v0.4.0` since it was written. It now tracks the release, moved by
   `scripts/sync-chart-version.mjs` as part of the release steps, and
   `web/tests/deploy/chartVersion.test.ts` fails the build if the two ever drift
-  again.
+  again — and the release workflow itself now refuses to publish a tag whose
+  chart is behind, before a single artefact is built. **Every release updates
+  the chart; it is a step of the process, not a chore to remember.**
 
 ## [0.27.3] - 2026-08-29
 

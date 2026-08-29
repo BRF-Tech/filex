@@ -329,6 +329,9 @@ Maintainer-only. Reproducible, automated by CI.
    # every YAML you touched still parses — breaking a store listing is silent
    python3 -c "import yaml,glob; [yaml.safe_load(open(f,encoding='utf-8')) \
      for f in glob.glob('deploy/**/*.yml', recursive=True)]; print('yaml ok')"
+
+   # the Helm chart ships the version you are about to release
+   node scripts/sync-chart-version.mjs --check
    ```
 
    ⚠ A relative link to a page that is in `srcExclude` is a dead link *on the
@@ -337,7 +340,9 @@ Maintainer-only. Reproducible, automated by CI.
    first time it was written.
 
 4. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
-5. Bump `package.json` versions across all packages, then the Helm chart:
+5. **Every release updates the Helm chart. No exceptions.** (Burak's rule,
+   2026-08-29: *"her yeni tag'de versiyonda helm zorunlu"*.) Bump the
+   `package.json` versions across all packages, then the chart:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
    node scripts/sync-chart-version.mjs      # Chart.yaml appVersion + chart version
