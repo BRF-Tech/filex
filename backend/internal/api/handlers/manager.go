@@ -24,6 +24,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+
+	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
 // Manager handles read-only browsing endpoints under /api/files/manager.
@@ -465,7 +467,7 @@ func (h *Manager) vfStream(w http.ResponseWriter, r *http.Request, s *model.Stor
 	w.Header().Set("Content-Type", mime)
 	if asAttachment {
 		base := path.Base(rel)
-		w.Header().Set("Content-Disposition", `attachment; filename="`+base+`"`)
+		w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", base))
 	} else {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}
@@ -1111,7 +1113,7 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Type", nodeMime)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, sanitizeFilename(nodeName)))
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, nodeName))
 	if nodeSize > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(nodeSize, 10))
 	}

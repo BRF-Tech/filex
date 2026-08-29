@@ -40,7 +40,6 @@ import { net } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 export interface DragItem {
@@ -71,6 +70,47 @@ const MAX_BYTES = 4 * 1024 * 1024 * 1024; // 4 GiB per drag
 const MAX_FILES = 5000;
 /** Cache entries older than this are swept at boot. */
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * One GET, through Electron's `net.request` rather than `net.fetch`.
+ *
+ * ⚠⚠ This is not a style preference. `net.fetch` builds a WHATWG `Headers`
+ * object from the response, and that validates every value as a ByteString —
+ * so a server that puts a raw non-ASCII byte in a header (a
+ * `Content-Disposition` naming `Türkçe adlı dosya.txt`, say) makes it throw:
+ *
+ *   TypeError: Cannot convert argument to a ByteString because the character
+ *   at index 32 has a value of 305 which is greater than 255
+ *
+ * The throw happens inside the response event, where the caller's try/catch
+ * cannot reach it: it lands as an UNCAUGHT EXCEPTION in the main process, which
+ * Electron shows as a raw JavaScript error box, and the await it was serving
+ * never settles — a folder being dragged out stops filling in, forever.
+ * Measured 2026-08-29 against filex's own server, which is being fixed to send
+ * RFC 6266 headers; this side is fixed too, because the app also talks to
+ * servers it did not ship.
+ *
+ * `net.request` hands back headers as a plain object and never validates them.
+ */
+function get(ctx: PrepareContext, url: string): Promise<Electron.IncomingMessage> {
+  return new Promise((resolve, reject) => {
+    const req = net.request({ method: 'GET', url });
+    req.setHeader('Authorization', `Bearer ${ctx.token}`);
+    req.on('response', (res) => resolve(res));
+    req.on('error', (e) => reject(e));
+    req.end();
+  });
+}
+
+/** Reads a whole response into a string — used for the JSON listings. */
+function readAll(res: Electron.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    res.on('data', (c: Buffer) => chunks.push(c));
+    res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    res.on('error', (e: Error) => reject(e));
+  });
+}
 
 export class DragOutCache {
   constructor(private readonly root: string) {}
@@ -200,6 +240,7 @@ export class DragOutCache {
    * Used by the placeholder route, which writes into the user's own folder.
    */
   async downloadFileTo(ctx: PrepareContext, remote: string, dest: string): Promise<number> {
+    xferLog('file ->', remote);
     await fs.promises.mkdir(path.dirname(dest), { recursive: true });
     const mirror = ctx.mirrorFor?.(remote) ?? null;
     if (mirror) {
@@ -212,12 +253,17 @@ export class DragOutCache {
     const url = new URL('/api/files/manager', ctx.serverUrl);
     url.searchParams.set('action', 'download');
     url.searchParams.set('path', remote);
-    const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${ctx.token}` } });
-    if (!res.ok || !res.body) throw new Error(`downloading ${remote} failed: server said ${res.status}`);
+    const res = await get(ctx, url.toString());
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`downloading ${remote} failed: server said ${res.statusCode}`);
+    }
     const tmp = `${dest}.filexpart`;
-    await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), fs.createWriteStream(tmp));
+    xferLog('streaming', { remote, status: res.statusCode });
+    await pipeline(res as unknown as NodeJS.ReadableStream, fs.createWriteStream(tmp));
     await fs.promises.rename(tmp, dest);
-    return (await fs.promises.stat(dest)).size;
+    const size = (await fs.promises.stat(dest)).size;
+    xferLog('file ok', { dest, size });
+    return size;
   }
 
   /** Same, for a whole remote folder — the tree is rebuilt under `dest`. */
@@ -228,13 +274,17 @@ export class DragOutCache {
     signal?: AbortSignal,
   ): Promise<void> {
     if (signal?.aborted) throw new Error('cancelled');
+    xferLog('dir ->', remoteDir);
     await fs.promises.mkdir(dest, { recursive: true });
     const url = new URL('/api/files/manager', ctx.serverUrl);
     url.searchParams.set('action', 'index');
     url.searchParams.set('path', remoteDir);
-    const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${ctx.token}` } });
-    if (!res.ok) throw new Error(`listing ${remoteDir} failed: server said ${res.status}`);
-    const body = (await res.json()) as { files?: Array<{ basename: string; type: string }> };
+    const res = await get(ctx, url.toString());
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`listing ${remoteDir} failed: server said ${res.statusCode}`);
+    }
+    const body = JSON.parse(await readAll(res)) as { files?: Array<{ basename: string; type: string }> };
+    xferLog('dir listed', { remoteDir, entries: (body.files ?? []).length });
     const base = remoteDir.endsWith('://') || remoteDir.endsWith('/') ? remoteDir : `${remoteDir}/`;
     for (const f of body.files ?? []) {
       if (!f.basename || f.basename === '.trash') continue;
@@ -258,9 +308,11 @@ export class DragOutCache {
     const url = new URL('/api/files/manager', ctx.serverUrl);
     url.searchParams.set('action', 'index');
     url.searchParams.set('path', remoteDir);
-    const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${ctx.token}` } });
-    if (!res.ok) throw new Error(`listing ${remoteDir} failed: server said ${res.status}`);
-    const body = (await res.json()) as { files?: Array<{ basename: string; type: string; size?: number }> };
+    const res = await get(ctx, url.toString());
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`listing ${remoteDir} failed: server said ${res.statusCode}`);
+    }
+    const body = JSON.parse(await readAll(res)) as { files?: Array<{ basename: string; type: string; size?: number }> };
     const base = remoteDir.endsWith('://') || remoteDir.endsWith('/') ? remoteDir : `${remoteDir}/`;
     for (const f of body.files ?? []) {
       if (!f.basename || f.basename === '.trash') continue;
@@ -307,12 +359,14 @@ export class DragOutCache {
     const url = new URL('/api/files/manager', ctx.serverUrl);
     url.searchParams.set('action', 'download');
     url.searchParams.set('path', remote);
-    const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${ctx.token}` } });
-    if (!res.ok || !res.body) throw new Error(`downloading ${remote} failed: server said ${res.status}`);
+    const res = await get(ctx, url.toString());
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`downloading ${remote} failed: server said ${res.statusCode}`);
+    }
     // ⚠ Written to `.part` and renamed: a half-written file left at the real
     // path would be handed to the OS by the next drag and copied as if whole.
     const tmp = `${local}.part`;
-    await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), fs.createWriteStream(tmp));
+    await pipeline(res as unknown as NodeJS.ReadableStream, fs.createWriteStream(tmp));
     await fs.promises.rename(tmp, local);
     const st = await fs.promises.stat(local);
     return st.size;
@@ -394,6 +448,16 @@ export async function fulfilDrop(
   }
   ctx.onProgress?.({ done, total: items.length, finished: true });
   return { ok: true, written };
+}
+
+/**
+ * One line per step of a transfer, on stdout. Same reasoning as main.ts's
+ * dragLog: this work happens after the gesture is over and its only visible
+ * symptom when it stalls is a folder that stays empty.
+ */
+function xferLog(step: string, detail?: unknown): void {
+  const at = new Date().toISOString().slice(11, 23);
+  console.log(`[xfer ${at}] ${step}${detail === undefined ? '' : ' ' + JSON.stringify(detail)}`);
 }
 
 /** One path segment, with the characters Windows actually refuses taken

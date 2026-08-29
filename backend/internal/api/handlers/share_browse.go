@@ -34,6 +34,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+
+	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
 // browseSkipNames are filex-internal entries never shown on (or served
@@ -295,7 +297,7 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Type", share.MimeForName(obj.Name))
-	w.Header().Set("Content-Disposition", disposition+`; filename="`+sanitizeFilename(obj.Name)+`"`)
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, obj.Name))
 	if obj.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
 	}

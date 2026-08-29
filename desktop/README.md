@@ -165,5 +165,11 @@ opens the OS drag loop, which cannot be driven from a script and would leave a
 modal drag hanging off the machine's mouse. Letting go over the desktop is the
 one step a human has to do.
 
+`dragout-folder-probe.mjs` is a diagnostic, not a suite: it drags a folder the
+app has not prepared and then copies the stand-in with **Explorer's own copy
+engine** (`Shell.Application.CopyHere`) rather than `fs.mkdirSync`, printing
+every `[drag …]` / `[xfer …]` step. That difference is what caught the header
+bug in 0.27.2 — the suite's simulated drop could not see it.
+
 `look*.mjs` and `diag-*.mjs` are not suites — they open the app and take a
 screenshot of one surface, for looking at a change rather than asserting it.

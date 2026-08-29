@@ -348,6 +348,11 @@ deleting.
 
 ## Troubleshooting
 
+**A folder dragged out stayed empty** — fixed in 0.27.2. A file inside it whose
+name was not ASCII (`Türkçe adlı dosya.txt`) made the transfer throw while
+reading the response, and everything after it stopped. Update the app; the
+server no longer sends such a header either.
+
 **"Bırakılan yer bulunamadı" after dragging out** — the drop went to an
 application rather than a folder, so there was nowhere on disk to put the file.
 Drop into a folder (or the desktop), or keep the file on this computer first and

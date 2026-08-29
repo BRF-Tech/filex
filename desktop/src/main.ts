@@ -21,6 +21,7 @@ import {
   dialog,
   ipcMain,
   nativeImage,
+  Notification,
   nativeTheme,
   net,
   powerMonitor,
@@ -44,7 +45,7 @@ import {
 } from './accounts.js';
 import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } from './browser-auth.js';
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
-import { watchForDrop } from './dropwatch.js';
+import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -788,6 +789,7 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'Pick a folder that is not inside the current one (and does not contain it).',
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
+  unexpectedTitle: ['filex hit an unexpected error', 'filex beklenmedik bir hatayla karşılaştı'],
   dragFailedTitle: ['Drag out failed', 'Dışarı sürükleme başarısız'],
   dragFailedBody: [
     'The files were dropped in {dir} but could not be downloaded there: {err}',
@@ -850,6 +852,20 @@ function localMirrorPath(root: string, remote: string): string {
   const rel = remote.slice(idx + 3).replace(/^\/+|\/+$/g, '');
   const segs = [...safeSegments(storage), ...safeSegments(rel)];
   return path.join(root, ...segs);
+}
+
+/**
+ * One line per step of a drag-out, on stdout.
+ *
+ * ⚠ Not debug scaffolding to be removed later: the whole route runs AFTER the
+ * gesture is over, with no window of its own, so when it goes wrong the only
+ * thing the user sees is a folder that stays empty. Without a trail there is
+ * nothing to look at — which is exactly the position this feature put us in the
+ * first time a real folder failed to fill (2026-08-29).
+ */
+function dragLog(step: string, detail?: unknown): void {
+  const at = new Date().toISOString().slice(11, 23);
+  console.log(`[drag ${at}] ${step}${detail === undefined ? '' : ' ' + JSON.stringify(detail)}`);
 }
 
 /** Ends a placeholder drag that is still waiting to learn where it landed. */
@@ -1399,6 +1415,7 @@ function wireIpc(): void {
     // real bytes there. See dropwatch.ts for what this can and cannot see.
     dragDropCancel();
     const session = await createPlaceholders(dragCache.rootDir, acc.id, items);
+    dragLog('stand-ins', { dir: session.dir, names: session.paths.map((p) => path.basename(p)) });
     dragDrop = { cancel: () => {}, dir: session.dir };
     beginOsDrag(e.sender, session.paths);
 
@@ -1409,8 +1426,10 @@ function wireIpc(): void {
     });
     dragDrop = { cancel: watch.cancel, dir: session.dir };
 
+    dragLog('watching', { roots: localDriveRoots(), ignore: dragCache.rootDir });
     void watch.promise
       .then(async (loc) => {
+        dragLog('watch result', loc ?? 'BULUNAMADI');
         await fs.promises.rm(session.dir, { recursive: true, force: true }).catch(() => undefined);
         if (!loc) {
           // Nothing landed anywhere we can see: either the drag was let go over
@@ -1422,6 +1441,7 @@ function wireIpc(): void {
           return;
         }
         mainWindow?.webContents.send('drag:progress', { done: 0, total: items.length, name: loc.name, dropped: loc.dir });
+        dragLog('filling in', { dir: loc.dir, items: items.length });
         const res = await fulfilDrop(dragCache!, loc.dir, items, {
           accountId: acc.id,
           serverUrl: acc.serverUrl,
@@ -1430,16 +1450,30 @@ function wireIpc(): void {
           onProgress: (pr) => mainWindow?.webContents.send('drag:progress', { ...pr, dropped: loc.dir }),
         });
         dragDrop = null;
+        dragLog('fill result', res.ok ? { ok: true, written: res.written } : { ok: false, error: res.error });
         if (!res.ok) {
-          // A failed transfer leaves the folder as it was: the stand-in is
-          // already gone, so there is no zero-byte file wearing the real name.
-          dialog.showErrorBox(
-            syncText('dragFailedTitle'),
-            syncText('dragFailedBody', { dir: loc.dir, err: res.error ?? '' }),
-          );
+          // ⚠⚠ NOT dialog.showErrorBox. This runs long after the gesture, on
+          // the main process, and showErrorBox is MODAL: the box freezes the
+          // whole app until somebody clicks it — which is what a user gets for
+          // having dragged a folder (measured 2026-08-29, Burak: "açtığın filex
+          // hata veriyor"). The failure is reported where the user is looking
+          // (the explorer's toast) and, if the window is not in front, as an OS
+          // notification they can ignore.
+          const body = syncText('dragFailedBody', { dir: loc.dir, err: res.error ?? '' });
+          mainWindow?.webContents.send('drag:progress', {
+            done: 0,
+            total: items.length,
+            dropped: loc.dir,
+            finished: true,
+            error: body,
+          });
+          if (Notification.isSupported() && !mainWindow?.isFocused()) {
+            new Notification({ title: syncText('dragFailedTitle'), body }).show();
+          }
         }
       })
-      .catch(() => {
+      .catch((e) => {
+        dragLog('fill threw', String((e as Error)?.stack ?? e));
         dragDrop = null;
       });
 
@@ -1758,6 +1792,31 @@ if (!app.requestSingleInstanceLock()) {
   app.on('open-url', (e, url) => {
     e.preventDefault();
     void handleDeepLink(url);
+  });
+
+  // ⚠⚠ A file manager must not die of a background error. Electron's default
+  // for an uncaught exception in the main process is a raw JavaScript error
+  // box — modal, in the user's face, with a stack trace in it — and the app
+  // sits frozen behind it. Burak got exactly that (2026-08-29) because a
+  // response header made a transfer throw from inside an event handler, where
+  // no try/catch could reach it. Anything that escapes is logged and shown as
+  // an ordinary notification; the app keeps running, and the trail says what
+  // happened.
+  process.on('uncaughtException', (err) => {
+    console.error('[filex] uncaught exception in the main process:', err);
+    try {
+      if (Notification.isSupported()) {
+        new Notification({
+          title: syncText('unexpectedTitle'),
+          body: String(err?.message ?? err).slice(0, 300),
+        }).show();
+      }
+    } catch {
+      /* the notification is a courtesy; never let it throw here */
+    }
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[filex] unhandled rejection in the main process:', reason);
   });
 
   app.whenReady().then(() => {

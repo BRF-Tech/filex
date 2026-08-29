@@ -44,9 +44,23 @@ async function main() {
     }, token);
     if (!mk.ok) throw new Error(`seeding ${parent}${name} failed (${mk.status})`);
   }
+  for (const [parent, name] of [[SUB, 'alt']]) {
+    const mk = await api('/api/files/manager?action=newfolder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: parent, name }),
+    }, token);
+    if (!mk.ok) throw new Error(`seeding ${parent}/${name} failed (${mk.status})`);
+  }
   for (const [dir, name, body] of [
     [REMOTE, 'tek.txt', BODY],
     [SUB, 'ic.txt', `${BODY} (klasorde)`],
+    // ⚠ Not decoration. Its name travels back in `Content-Disposition`, and a
+    // raw non-ASCII byte there made Electron's fetch throw from inside an
+    // event handler: the transfer hung, the folder stayed empty, and the app
+    // showed a raw JavaScript error box.
+    [SUB, 'Türkçe adlı dosya.txt', 'türkçe içerik'],
+    [`${SUB}/alt`, 'derindeki.txt', 'alt klasordeki dosya'],
   ]) {
     const form = new FormData();
     form.append('path', `${dir}/`);
@@ -96,6 +110,16 @@ async function main() {
     'its contents came with it',
     !!pf && fs.existsSync(path.join(pf, 'ic.txt')),
     path.join(pf, 'ic.txt'),
+  );
+  check(
+    'a file whose NAME is not ASCII comes too — its header used to kill the transfer',
+    !!pf && fs.existsSync(path.join(pf, 'Türkçe adlı dosya.txt')),
+    pf ? fs.readdirSync(pf).join(', ') : 'yok',
+  );
+  check(
+    'so does a nested subfolder',
+    !!pf && fs.existsSync(path.join(pf, 'alt', 'derindeki.txt')),
+    path.join(pf ?? '', 'alt', 'derindeki.txt'),
   );
 
   // ── 4. a mixed selection = separate real entries, no archive ─────
@@ -171,9 +195,13 @@ async function main() {
   }
 
   const landed = path.join(dropDir, 'buyuk.bin');
+  const deepest = path.join(dropDir, 'klasor', 'alt', 'derindeki.txt');
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    if (fs.existsSync(landed) && fs.statSync(landed).size === bigBody.length) break;
+    // Wait for the DEEPEST thing as well as the first: a transfer that dies
+    // partway (which is exactly what the header bug did) leaves the early
+    // files in place and looks finished if you only look at those.
+    if (fs.existsSync(landed) && fs.statSync(landed).size === bigBody.length && fs.existsSync(deepest)) break;
     await sleep(200);
   }
   check(
@@ -185,6 +213,14 @@ async function main() {
     'the dropped FOLDER was filled in too',
     fs.existsSync(path.join(dropDir, 'klasor', 'ic.txt')),
     path.join(dropDir, 'klasor', 'ic.txt'),
+  );
+  check(
+    'including the file with a non-ASCII name, and the subfolder under it',
+    fs.existsSync(path.join(dropDir, 'klasor', 'Türkçe adlı dosya.txt')) &&
+      fs.existsSync(path.join(dropDir, 'klasor', 'alt', 'derindeki.txt')),
+    fs.existsSync(path.join(dropDir, 'klasor'))
+      ? fs.readdirSync(path.join(dropDir, 'klasor')).join(', ')
+      : 'klasör yok',
   );
   check(
     'no half-written file is left wearing the real name',

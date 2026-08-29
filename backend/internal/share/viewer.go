@@ -14,6 +14,8 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/storage"
+
+	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
 // Viewer renders the public file at /s/{token} (or the metadata at
@@ -88,7 +90,7 @@ func (v *Viewer) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rc.Close()
 
-	w.Header().Set("Content-Disposition", `attachment; filename="`+node.Name+`"`)
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", node.Name))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if node.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(node.Size, 10))

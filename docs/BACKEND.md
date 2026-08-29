@@ -181,6 +181,22 @@ List the contents of a directory.
 
 **Status codes:** `200` ok · `403` forbidden · `404` path missing.
 
+### Filenames in `Content-Disposition`
+
+Every endpoint that serves bytes (`action=download` / `preview`, share
+downloads, the share browser, the viewer) sends RFC 6266:
+
+```
+Content-Disposition: attachment; filename="T_rk_e adl_ dosya.txt"; filename*=UTF-8''T%C3%BCrk%C3%A7e%20adl%C4%B1%20dosya.txt
+```
+
+⚠ The header is **always pure ASCII**. A raw non-ASCII byte in a header value is
+outside the specification, and while browsers cope, strict clients throw while
+parsing the response — Electron's `net.fetch` raises
+`Cannot convert argument to a ByteString …` from inside its response handler,
+which no caller's try/catch can catch. The ASCII `filename` is the fallback;
+`filename*` carries the real name and is what every current browser uses.
+
 ### `GET /api/files/raw?path=…` ![user](https://img.shields.io/badge/-user-blue)
 Stream the raw file bytes. Sends `Content-Type`, `Content-Length`, and
 honours `Range:` for partial GETs (video / audio scrub).

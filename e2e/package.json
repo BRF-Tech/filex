@@ -1,6 +1,6 @@
 {
   "name": "filex-e2e",
-  "version": "0.27.1",
+  "version": "0.27.2",
   "private": true,
   "type": "module",
   "description": "filex end-to-end test suite (Playwright)",

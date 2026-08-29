@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-08-29
+
+### Fixed
+
+- **A file whose name is not ASCII no longer breaks a download — or the client
+  reading it.** `Content-Disposition` carried the filename raw, so a name like
+  `Türkçe adlı dosya.txt` put bytes over 127 in an HTTP header. Browsers guess
+  their way through that, which is why it went unnoticed for years; a strict
+  client does not. Electron's `net.fetch` threw
+  `Cannot convert argument to a ByteString … value of 305` from inside its
+  response handler — where no caller's try/catch can reach it — so the filex
+  desktop app took an uncaught exception and a folder being dragged out stopped
+  filling in halfway, silently. Every download now sends RFC 6266:
+  `filename="ascii-fallback"` plus `filename*=UTF-8''percent-encoded`, from one
+  shared helper used by the manager, share, share-browse and viewer endpoints.
+- **The desktop app survives a badly-formed header from any server.** Its
+  transfers moved from `net.fetch` (which validates response headers as
+  ByteStrings) to `net.request` (which does not), so an older filex — or
+  somebody else's server — can no longer stop a drag-out by naming a file in
+  Turkish.
+- **A failed drag-out no longer freezes the app.** The failure was reported with
+  `dialog.showErrorBox`, which is modal: the box sat in front of a frozen window
+  until it was clicked. It is a toast in the explorer now, plus an OS
+  notification when the window is not in front. An uncaught exception in the
+  main process is likewise logged and notified instead of ending in Electron's
+  raw JavaScript error box.
+- **Drag-outs leave a trail.** The transfer runs after the gesture is over, with
+  no window of its own; when it went wrong the only symptom was a folder that
+  stayed empty. Each step now prints one line (`[drag …]` / `[xfer …]`).
+
 ## [0.27.1] - 2026-08-29
 
 ### Fixed

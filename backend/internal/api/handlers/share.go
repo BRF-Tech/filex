@@ -30,6 +30,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+
+	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
 // Share handles share creation and the public viewer endpoints.
@@ -835,7 +837,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		mime = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", mime)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, sanitizeFilename(node.Name)))
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, node.Name))
 	if node.Size > 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(node.Size, 10))
 	}
@@ -882,7 +884,7 @@ func (h *Share) claimDownloadSlot(r *http.Request, shareID int64) bool {
 // serveFolderZip.
 func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, storageID int64, root, name string) error {
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(name)))
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", name+".zip"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	zw := zip.NewWriter(w)
@@ -1043,7 +1045,7 @@ func serveZipFile(w http.ResponseWriter, cachePath, name string) error {
 		return fmt.Errorf("%w: %v", errZipUnopened, err)
 	}
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(name)))
+	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", name+".zip"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	_, err = io.Copy(w, f)
