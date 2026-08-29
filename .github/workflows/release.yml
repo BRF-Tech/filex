@@ -54,6 +54,16 @@ jobs:
         with:
           node-version: "20"
           cache: pnpm
+
+      # ⚠⚠ The chart ships the image everyone who installs it runs: values.yaml
+      # leaves the tag empty and the helper resolves it to .Chart.appVersion.
+      # Left behind, a release quietly hands Helm users an old filex -- it sat
+      # at v0.4.0 for twenty-three releases before anyone noticed. A release
+      # that forgot the chart fails HERE, before anything is published, rather
+      # than shipping something nobody can see is wrong.
+      - name: Helm chart matches the release
+        run: node scripts/sync-chart-version.mjs --check
+
       - run: pnpm install --frozen-lockfile
       - name: Build frontend + sync into backend/embed
         env:
