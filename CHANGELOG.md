@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Helm chart shipped a 23-release-old image.** `values.yaml` leaves the
+  image tag empty, which the chart resolves to `.Chart.appVersion` — so
+  appVersion is the version a Helm user actually runs, and it had been sitting
+  at `v0.4.0` since it was written. It now tracks the release, moved by
+  `scripts/sync-chart-version.mjs` as part of the release steps, and
+  `web/tests/deploy/chartVersion.test.ts` fails the build if the two ever drift
+  again.
+
 ## [0.27.3] - 2026-08-29
 
 ### Fixed

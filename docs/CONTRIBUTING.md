@@ -337,10 +337,16 @@ Maintainer-only. Reproducible, automated by CI.
    first time it was written.
 
 4. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
-5. Bump `package.json` versions across all packages:
+5. Bump `package.json` versions across all packages, then the Helm chart:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
+   node scripts/sync-chart-version.mjs      # Chart.yaml appVersion + chart version
    ```
+   ⚠ The chart's `appVersion` is not a label: `values.yaml` ships `tag: ""`, and
+   the image helper resolves that to `.Chart.appVersion` — so it IS the image a
+   Helm user runs. It sat at `v0.4.0` for twenty-three releases before anyone
+   noticed (2026-08-29). `web/tests/deploy/chartVersion.test.ts` fails the build
+   if the two drift, and `--check` reports it without writing.
 6. Commit: `chore(release): vX.Y.Z`.
 7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
 8. Push: `git push origin main --tags`.
