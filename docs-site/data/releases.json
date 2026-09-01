@@ -1,7 +1,126 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-08-27",
+  "generatedAt": "2026-09-01",
   "releases": [
+    {
+      "tag": "v0.27.4",
+      "date": "2026-08-29T03:41:02Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.4",
+      "prerelease": false,
+      "headline": "- the Helm chart is part of every release now.",
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "Helm",
+              "text": "The chart shipped a 23-release-old image, and now it cannot again."
+            }
+          ]
+        },
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Release",
+              "text": "Refuse to publish a tag whose Helm chart is behind."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.27.4",
+        "ghcr.io/brf-tech/filex:full-v0.27.4"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.27.3",
+      "date": "2026-08-29T02:20:40Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.3",
+      "prerelease": false,
+      "headline": "- a dragged folder fills in.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.27.3",
+        "ghcr.io/brf-tech/filex:full-v0.27.3"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.27.2",
+      "date": "2026-08-29T01:27:47Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.2",
+      "prerelease": false,
+      "headline": "- a non-ASCII filename no longer breaks a download.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.27.2",
+        "ghcr.io/brf-tech/filex:full-v0.27.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.27.1",
+      "date": "2026-08-29T00:01:56Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.1",
+      "prerelease": false,
+      "headline": "- a drag-out fills in the folder it was dropped on.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.27.1",
+        "ghcr.io/brf-tech/filex:full-v0.27.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.27.0",
+      "date": "2026-08-28T23:35:16Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.0",
+      "prerelease": false,
+      "headline": "- paste into another storage, drag out at any size.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.27.0",
+        "ghcr.io/brf-tech/filex:full-v0.27.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.26.1",
+      "date": "2026-08-27T20:43:22Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.26.1",
+      "prerelease": false,
+      "headline": "- a refused upload says what to do about it.",
+      "groups": [
+        {
+          "title": "Fixed",
+          "items": [
+            {
+              "scope": "AI",
+              "text": "Ticket refusals say what to do next; no curl, no problem."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.26.1",
+        "ghcr.io/brf-tech/filex:full-v0.26.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
     {
       "tag": "v0.26.0",
       "date": "2026-08-27T19:14:52Z",

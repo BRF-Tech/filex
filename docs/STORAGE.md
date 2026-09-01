@@ -393,6 +393,15 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
   source is URL‑encoded).
 - `bucket` missing → the storage won't initialize (`Test connection` shows the
   error). Wrong keys/endpoint → `Test connection` fails with the SDK error.
+- **Uploads are retried, up to 8 MiB.** A request can only be retried if its
+  body can be rewound, and every upload surface hands the driver a plain
+  stream (the handler sniffs the first bytes to detect the type). So an upload
+  that declares a size of at most 8 MiB is held in memory while it is sent and
+  survives a transient `503`; a larger one streams straight through and fails
+  the request if the store wobbles mid-upload. The trade-off is deliberate:
+  buffering every body would turn a rare failed upload into an out-of-memory
+  kill on a large one. Browser uploads of big files go out as multipart parts,
+  which the store can be asked for again independently.
 
 ### SFTP
 

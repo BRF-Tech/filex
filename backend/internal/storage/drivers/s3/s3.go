@@ -366,6 +366,12 @@ func isS3RangeNotSatisfiable(err error) bool {
 // every browser upload while WebDAV and MCP (both of which hand over a
 // seekable body) kept working. So: declare the length we were given, and
 // when the caller genuinely doesn't know it, measure the body first.
+//
+// The body must also be REWINDABLE, or the retry budget newRetryer buys is a
+// no-op for uploads: the SDK cannot resend what it cannot rewind, and a
+// transient 503 becomes a permanent failure reported as "failed to rewind
+// transport stream for retry, request stream is not seekable" — a message
+// about our plumbing rather than the outage that caused it. See rewindable.
 func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) error {
 	body, size, release, err := measuredBody(r, size)
 	if err != nil {
@@ -385,13 +391,18 @@ func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) e
 // measuredBody returns a reader whose length is known, so PutObject can send
 // a Content-Length instead of a chunked body.
 //
-// A caller that already knows the size gets its reader back untouched — the
-// common path, no copying. A caller passing size < 0 ("I don't know") gets
-// the body spooled to a temp file so the length can be measured; this mirrors
-// what the WebDAV surface already does on its own before calling in.
+// A caller that already knows the size gets its reader back — wrapped so a
+// retry can rewind it when it is small enough to hold (see rewindable), and
+// untouched otherwise. A caller passing size < 0 ("I don't know") gets the
+// body spooled to a temp file so the length can be measured; this mirrors
+// what the WebDAV surface already does on its own before calling in. A temp
+// file is seekable, so that path is retryable for free.
 func measuredBody(r io.Reader, size int64) (io.Reader, int64, func(), error) {
 	noop := func() {}
 	if size >= 0 {
+		if _, seekable := r.(io.Seeker); !seekable && size <= maxRewindBytes {
+			return &rewindable{r: r, buf: make([]byte, 0, size)}, size, noop, nil
+		}
 		return r, size, noop, nil
 	}
 
@@ -415,6 +426,59 @@ func measuredBody(r io.Reader, size int64) (io.Reader, int64, func(), error) {
 		return nil, 0, noop, fmt.Errorf("s3: spool rewind: %w", err)
 	}
 	return tmp, n, release, nil
+}
+
+// maxRewindBytes caps how much of a non-seekable body is held in memory so a
+// retry can resend it.
+//
+// ⚠ The trade-off is deliberate and asymmetric. Buffering EVERY body would
+// make every upload retryable but would also mean holding a multi-gigabyte
+// file in RAM — filex streams uploads far larger than the process. Buffering
+// NOTHING is what shipped, and it silently disabled retries for every upload
+// surface. So: bodies that declare a size this small are held (one transient
+// 503 no longer sinks them), and anything larger streams through exactly as
+// before. Large uploads have their own retry story — they go out as multipart
+// parts, each of which the provider can be asked for again.
+const maxRewindBytes = 8 << 20 // 8 MiB
+
+// rewindable makes a plain io.Reader replayable ONCE FROM THE START, which is
+// the only thing the AWS SDK asks of a request body: smithy records the
+// starting offset with Seek(0, io.SeekCurrent) when it sets the stream, and
+// before a retry it rewinds with Seek(start, io.SeekStart) and reads the whole
+// body again.
+//
+// It is NOT a general Seeker, and it refuses to pretend otherwise: an
+// arbitrary offset or io.SeekEnd returns an error rather than quietly serving
+// bytes it never kept, which would corrupt the object instead of failing it.
+type rewindable struct {
+	r   io.Reader
+	buf []byte // every byte handed out so far, kept for the replay
+	off int    // how many bytes the caller has consumed
+}
+
+func (rw *rewindable) Read(p []byte) (int, error) {
+	if rw.off < len(rw.buf) { // replaying after a rewind
+		n := copy(p, rw.buf[rw.off:])
+		rw.off += n
+		return n, nil
+	}
+	n, err := rw.r.Read(p)
+	if n > 0 {
+		rw.buf = append(rw.buf, p[:n]...)
+		rw.off += n
+	}
+	return n, err
+}
+
+func (rw *rewindable) Seek(offset int64, whence int) (int64, error) {
+	switch {
+	case whence == io.SeekCurrent && offset == 0:
+		return int64(rw.off), nil
+	case whence == io.SeekStart && offset == 0:
+		rw.off = 0
+		return 0, nil
+	}
+	return 0, fmt.Errorf("s3: rewindable: only a rewind to the start is supported (offset=%d whence=%d)", offset, whence)
 }
 
 // emptyMarker is the hidden 0-byte object filex writes inside a folder so an

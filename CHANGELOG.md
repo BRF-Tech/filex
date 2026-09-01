@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.5] - 2026-09-01
+
+### Fixed
+
+- **A transient `503` from an object store sank the whole upload.** The retry
+  budget was widened to six attempts a release ago, and a test proves a 503 is
+  classified as retryable — but for an upload none of that could ever fire.
+  The SDK rewinds a request body before retrying it, and every upload surface
+  hands the S3 driver a plain stream (the handler sniffs the first bytes to
+  detect the type and rejoins them), so there was nothing to rewind: the second
+  attempt died before it was made and a brief upstream wobble became a
+  permanent failure, reported as *"failed to rewind transport stream for retry,
+  request stream is not seekable"* — a message about filex's plumbing rather
+  than the outage behind it. The budget was real for listings and reads and a
+  no-op for writes. An upload that declares a size of at most 8 MiB is now held
+  in memory while it is sent, so a retry replays it byte for byte; a larger one
+  streams through as before, because buffering every body would trade a rare
+  failed upload for an out-of-memory kill. See
+  [STORAGE.md](docs/STORAGE.md#s3--s3compatible).
+
+### Changed
+
+- `pnpm run build:packages` / `build:web` / `build` now quote their workspace
+  filters in a way `cmd.exe` also understands. They matched nothing on Windows
+  — the single quotes reached pnpm literally — so `build:all`, a documented
+  release step, could not run on a Windows workstation at all.
+- `CONTRIBUTING.md` says what to do when Go lives in WSL and pnpm does not:
+  `build:all` ends in a plain `go build`, and the screenshots boot that binary.
+
 ## [0.27.4] - 2026-08-29
 
 ### Fixed

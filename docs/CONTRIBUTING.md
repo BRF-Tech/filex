@@ -242,6 +242,17 @@ Maintainer-only. Reproducible, automated by CI.
    node e2e/shots/capture.mjs             # → docs/screenshots/*.png
    ```
 
+   ⚠ `build:all` ends in `build:backend`, which is a plain `go build` — it
+   needs Go on the **same** PATH as pnpm. On a Windows workstation whose
+   toolchain lives in WSL, run the first three steps natively and cross-build
+   the binary the shots boot:
+
+   ```bash
+   wsl -e bash -lc 'cd /mnt/g/filex/backend && \
+     GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
+     -o /tmp/filex.exe ./cmd/filex && cp /tmp/filex.exe /mnt/g/filex/bin/filex.exe'
+   ```
+
    It boots a local instance, seeds a demo tree, pins the UI language to
    English three ways over (browser locale, stored preference, server default)
    and writes the set. `admin-plugins.png` needs the example plugin built for

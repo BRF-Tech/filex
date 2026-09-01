@@ -18,14 +18,74 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.26.0, 27 August 2026
-- agents can upload big local files without a token.
+::: tip Latest — v0.27.4, 29 August 2026
+- the Helm chart is part of every release now.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.26.0
-docker pull ghcr.io/brf-tech/filex:full-v0.26.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.27.4
+docker pull ghcr.io/brf-tech/filex:full-v0.27.4
 ```
+
+## v0.27.4
+
+<span class="filex-release-date">29 August 2026</span>
+
+**- the Helm chart is part of every release now.**
+
+**Fixed**
+
+- **Helm** — The chart shipped a 23-release-old image, and now it cannot again.
+
+**Other changes**
+
+- **Release** — Refuse to publish a tag whose Helm chart is behind.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.4`
+
+## v0.27.3
+
+<span class="filex-release-date">29 August 2026</span>
+
+**- a dragged folder fills in.**
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.3`
+
+## v0.27.2
+
+<span class="filex-release-date">29 August 2026</span>
+
+**- a non-ASCII filename no longer breaks a download.**
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.2`
+
+## v0.27.1
+
+<span class="filex-release-date">29 August 2026</span>
+
+**- a drag-out fills in the folder it was dropped on.**
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.1`
+
+## v0.27.0
+
+<span class="filex-release-date">28 August 2026</span>
+
+**- paste into another storage, drag out at any size.**
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.0`
+
+## v0.26.1
+
+<span class="filex-release-date">27 August 2026</span>
+
+**- a refused upload says what to do about it.**
+
+**Fixed**
+
+- **AI** — Ticket refusals say what to do next; no curl, no problem.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.26.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.26.1`
 
 ## v0.26.0
 
@@ -188,83 +248,18 @@ A plugin now has to PROVE what it claims before filex will use it. Every capabil
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.2`
 
-## v0.21.1
-
-<span class="filex-release-date">19 August 2026</span>
-
-Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". It works now, and it checks permissions on the way in, which the root case had been skipping. The plugin documentation also stopped promising something it does not do: a plugin can serve a change stream, but nothing in filex subscribes to one yet. Plus a second example plugin, written in Python without the Go SDK, and the acceptance run that drives it — including killing it mid-transfer to show that a storage survives its plugin crashing.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.1`
-
-## v0.21.0
-
-<span class="filex-release-date">19 August 2026</span>
-
-filex can now be taught a storage it has never heard of. A plugin is a separate program — in any language — that filex launches (or connects to) and speaks a small HTTP/JSON protocol to; once it is running, its driver appears in the ordinary storage picker with the config form the plugin itself describes, and behaves like any built-in one. Whatever a plugin does not implement is either emulated (ranged reads, move, copy) or honestly absent, so a read-only plugin never shows an upload button that fails at the last moment. Writing one in Go is three methods and a Serve call, and the example plugin in the repository is built and driven by filex's own tests. Install by upload, by URL with a required checksum, or point filex at a service you run yourself.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.0`
-
-## v0.20.3
-
-<span class="filex-release-date">18 August 2026</span>
-
-The desktop app now ships for macOS (Apple Silicon) — unsigned but ad-hoc sealed, so first launch is the ordinary Open Anyway step rather than a refusal; auto-update on the Mac waits for a signed build. Two desktop fixes from the same real-world install: pairing now works from a browser that is already signed in, and the sync engine inside the Mac app is arm64 (no more Rosetta alert on every launch). The Connections page stopped painting its own background over the admin page in dark mode, and the API-tokens box on it got real theme colours.
-
-**Fixed**
-
-- **Core** — The connections panel painted its own page ground; five theme tokens did not exist.
-- **Desktop** — Compile the embedded CLI for the host arch, not amd64.
-- **Release** — The pull command names ghcr.io, not a registry that does not exist.
-- **Web** — Desktop pairing survives an already-signed-in browser.
-- **Docs-site** — The release cron never rebuilt — no PATH under cron, and two guards.
-
-**Other changes**
-
-- **Desktop** — Ship macOS packages — dmg + zip, ad-hoc sealed.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.20.3`
-
-## v0.20.2
-
-<span class="filex-release-date">17 August 2026</span>
-
-**Other changes**
-
-- **Desktop** — The tag is the version, not desktop/package.json.
-- **Desktop** — Wait for the release before uploading to it.
-- Release: v0.20.2 — desktop packaging fixes take effect.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.20.2`
-
-## v0.20.1
-
-<span class="filex-release-date">17 August 2026</span>
-
-**Other changes**
-
-- Release: v0.20.1 — FTPS starts when you give it a host name.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.1) · `ghcr.io/brf-tech/filex:slim-v0.20.1`
-
-## v0.20.0
-
-<span class="filex-release-date">17 August 2026</span>
-
-filex is now reachable without a browser. It could already use S3, SFTP, FTP and WebDAV as storages; now those clients can point at filex itself — as an S3 endpoint, an SFTP server, an FTPS server and an NFSv3 export, alongside the WebDAV it already had. rclone, restic, aws s3, WinSCP, FileZilla, a scanner that only ever learned FTP and a media player that only ever learned NFS all land in the same tree, with the same permissions, the same trash and the same quota as the web UI. Each has a credential you can revoke on its own, and revoking one now cuts the session it already opened rather than only the next login. Off-LAN there is `filex mount`, which attaches a remote server to a folder over ordinary HTTPS — not a sync: it opens one file out of a hundred thousand without downloading the rest. A NAS can also be a storage now, over SMB. And three quieter fixes with teeth: a folder grant was unreachable over the new protocols, /dav enforced no quota at all, and WebDAV locks vanished on every restart while still telling clients they were exclusive.
-
-**Other changes**
-
-- **Desktop** — The package README described an app that no longer exists.
-- Release: v0.20.0 — the protocol gateway.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.20.0) · `ghcr.io/brf-tech/filex:slim-v0.20.0`
-
 ## Earlier releases
 
-The 66 releases before v0.20.0, in brief. Full notes are on GitHub.
+The 72 releases before v0.21.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.21.1](https://github.com/BRF-Tech/filex/releases/tag/v0.21.1) | 19 August 2026 | Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". |
+| [v0.21.0](https://github.com/BRF-Tech/filex/releases/tag/v0.21.0) | 19 August 2026 | filex can now be taught a storage it has never heard of. A plugin is a separate program — in any language — that filex launches (or connects to) and speaks a small HTTP/JSON protocol to; once it is running, its driver appears in… |
+| [v0.20.3](https://github.com/BRF-Tech/filex/releases/tag/v0.20.3) | 18 August 2026 | The desktop app now ships for macOS (Apple Silicon) — unsigned but ad-hoc sealed, so first launch is the ordinary Open Anyway step rather than a refusal; auto-update on the Mac waits for a signed build. |
+| [v0.20.2](https://github.com/BRF-Tech/filex/releases/tag/v0.20.2) | 17 August 2026 | Desktop — The tag is the version, not desktop/package.json. |
+| [v0.20.1](https://github.com/BRF-Tech/filex/releases/tag/v0.20.1) | 17 August 2026 | Release: v0.20.1 — FTPS starts when you give it a host name. |
+| [v0.20.0](https://github.com/BRF-Tech/filex/releases/tag/v0.20.0) | 17 August 2026 | filex is now reachable without a browser. It could already use S3, SFTP, FTP and WebDAV as storages; now those clients can point at filex itself — as an S3 endpoint, an SFTP server, an FTPS server and an NFSv3 export, alongside… |
 | [v0.19.0](https://github.com/BRF-Tech/filex/releases/tag/v0.19.0) | 14 August 2026 | The desktop app gets a language setting — System, English or Türkçe — where before it followed the operating system and offered nothing to choose. |
 | [v0.18.2](https://github.com/BRF-Tech/filex/releases/tag/v0.18.2) | 14 August 2026 | The Windows app installs per-user now, and that is what makes the quiet update in 0.18.1 real: an app under C:Program Files needs administrator rights to replace its own files, so every background update ended in a UAC prompt —… |
 | [v0.18.1](https://github.com/BRF-Tech/filex/releases/tag/v0.18.1) | 14 August 2026 | The desktop app updates itself the way it always should have. Downloading was quiet and quitting installed silently, but the tray entry and the Settings button ran the installer with its wizard — so the one visible path through… |
@@ -334,4 +329,4 @@ The 66 releases before v0.20.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-08-27 from 86 published releases.</small>
+<small>Generated 2026-09-01 from 92 published releases.</small>
