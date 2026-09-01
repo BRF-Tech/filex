@@ -364,7 +364,13 @@ Maintainer-only. Reproducible, automated by CI.
    noticed (2026-08-29). `web/tests/deploy/chartVersion.test.ts` fails the build
    if the two drift, and `--check` reports it without writing.
 6. Commit: `chore(release): vX.Y.Z`.
-7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"`.
+7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` — **signed**, and `git tag -v vX.Y.Z`
+   must answer `Good signature` before you push. Releases up to and including
+   v0.27.5 are plain annotated tags: the instruction said `-s` for months while
+   no signing key existed, so nobody could follow it and nobody noticed. The
+   maintainer key is `EFA3B126 2FD99280 0DBBB5E3 A8FEBA97 FF786513` (ed25519,
+   expires 2028-08-31); its passphrase and a recovery copy live in the team
+   vault, not on disk.
 8. Push: `git push origin main --tags`.
 
 CI does the rest (GitHub Actions `release.yml`, four jobs):

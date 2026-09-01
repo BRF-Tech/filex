@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.6] - 2026-09-01
+
+### Changed
+
+- **Release tags are signed from here on, and there is finally a key to sign
+  them with.** `CONTRIBUTING.md` had said `git tag -s` for months while no
+  signing key existed on the release machine, so every tag through v0.27.5 is a
+  plain annotated one — an instruction nobody can follow is not a policy, it is
+  a lie the document tells. The step now also requires `git tag -v` to answer
+  `Good signature` before the tag is pushed, and says where the key and its
+  passphrase live. Nothing in the shipped software changes in this release.
+
 ## [0.27.5] - 2026-09-01
 
 ### Fixed

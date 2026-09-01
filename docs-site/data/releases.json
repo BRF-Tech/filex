@@ -3,6 +3,21 @@
   "generatedAt": "2026-09-01",
   "releases": [
     {
+      "tag": "v0.27.5",
+      "date": "2026-09-01T11:30:18Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.5",
+      "prerelease": false,
+      "headline": "- a transient 503 no longer sinks an upload.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.27.5",
+        "ghcr.io/brf-tech/filex:full-v0.27.5"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
       "tag": "v0.27.4",
       "date": "2026-08-29T03:41:02Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.27.4",

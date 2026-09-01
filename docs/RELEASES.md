@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.27.4, 29 August 2026
-- the Helm chart is part of every release now.
+::: tip Latest — v0.27.5, 1 September 2026
+- a transient 503 no longer sinks an upload.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.27.4
-docker pull ghcr.io/brf-tech/filex:full-v0.27.4
+docker pull ghcr.io/brf-tech/filex:slim-v0.27.5
+docker pull ghcr.io/brf-tech/filex:full-v0.27.5
 ```
+
+## v0.27.5
+
+<span class="filex-release-date">1 September 2026</span>
+
+**- a transient 503 no longer sinks an upload.**
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.5) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.5`
 
 ## v0.27.4
 
@@ -240,20 +248,13 @@ A security default, found by measuring the project's own public demo. A demo ins
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.3`
 
-## v0.21.2
-
-<span class="filex-release-date">19 August 2026</span>
-
-A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails its own claims is refused rather than registered. That is the difference between a plugin that is broken and an app that looks broken: without it, a plugin declaring `write` with a broken write hands the user an upload button, a trash move and a version snapshot that each fail at the last moment. Plugins can also be upgraded in place now (a failed upgrade rolls back and costs you an error, not a plugin), their change streams are actually consumed instead of polled, and there is a ceiling on what one plugin may cost the server. Three things that were written but unreachable are wired up: signature enforcement (`FILEX_PLUGIN_TRUSTED_KEYS`) could not be switched on at all, the concurrency ceiling had no setting, and a rejected upload was reported as a server error.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.2`
-
 ## Earlier releases
 
-The 72 releases before v0.21.2, in brief. Full notes are on GitHub.
+The 73 releases before v0.21.3, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.21.2](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) | 19 August 2026 | A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails… |
 | [v0.21.1](https://github.com/BRF-Tech/filex/releases/tag/v0.21.1) | 19 August 2026 | Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". |
 | [v0.21.0](https://github.com/BRF-Tech/filex/releases/tag/v0.21.0) | 19 August 2026 | filex can now be taught a storage it has never heard of. A plugin is a separate program — in any language — that filex launches (or connects to) and speaks a small HTTP/JSON protocol to; once it is running, its driver appears in… |
 | [v0.20.3](https://github.com/BRF-Tech/filex/releases/tag/v0.20.3) | 18 August 2026 | The desktop app now ships for macOS (Apple Silicon) — unsigned but ad-hoc sealed, so first launch is the ordinary Open Anyway step rather than a refusal; auto-update on the Mac waits for a signed build. |
@@ -329,4 +330,4 @@ The 72 releases before v0.21.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-09-01 from 92 published releases.</small>
+<small>Generated 2026-09-01 from 93 published releases.</small>
