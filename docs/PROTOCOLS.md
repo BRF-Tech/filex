@@ -52,6 +52,13 @@ Your login is your **username** if you have set one, otherwise your e-mail. Both
 everywhere; an `@` in an SSH or FTP login has to be quoted in most clients' config files,
 which is what usernames are for.
 
+Your **account password** is accepted too, wherever the table says "API token" — a token
+is simply the credential you can revoke without changing your password. On an install with
+[LDAP/AD](LDAP.md) that includes the **directory** password: the directory is asked when
+the local users table cannot judge the password, and a successful check is cached for five
+minutes because these protocols present the credential on every request. Operators can
+switch that off with `auth.ldap.protocol_login: false`.
+
 > ⚠ **An account with 2FA enabled cannot use its password on any of these.** None of
 > these protocols has a channel for a second factor, so accepting the password would make
 > each of them a documented 2FA bypass. Mint a token (or a key, or an access key) —

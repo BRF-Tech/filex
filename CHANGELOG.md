@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-03
+
+### Fixed
+
+- **LDAP was configured, initialised, printed in the boot banner — and
+  unreachable from every login path.** With `FILEX_AUTH_DRIVERS=local,ldap` a
+  directory account was answered `401 invalid credentials` even with the right
+  password, in roughly **350 microseconds**: less than one LDAPS round trip, so
+  the request never reached the network at all. Nothing was logged, and the docs
+  described the behaviour that was missing ("filex tries each enabled driver in
+  order"), which made it read as a directory misconfiguration to everyone who
+  hit it. Three separate gaps produced it, and each would have been enough on
+  its own:
+
+  - the bootstrap assigned the login handler's single `LoginDriver` in the
+    `local` case only, so the directory driver was never the one it held;
+  - `*ldap.Driver` did not satisfy `auth.LoginDriver` at all — no `Logout` — so
+    it could not have been assigned even by hand. The compiler had never been
+    asked the question;
+  - `ldap.Login` ended with `return user, "", nil` under a comment saying the
+    caller would mint the session. No caller did: a *correct* password would
+    have handed back an empty cookie, a successful login presenting as a failed
+    one.
+
+  Password drivers are now chained (`auth.LoginChain`) in the order they appear
+  in `auth.drivers` / `FILEX_AUTH_DRIVERS`. `local` first is deliberate — it is
+  a hash compare against a row filex already holds, so `admin@local` and every
+  break-glass password stay answerable while the directory is unreachable.
+
+- **A directory account could sign in to the web UI and still be refused by
+  WebDAV, SFTP, FTPS, S3 and NFS.** Those protocols check the password against
+  `users.password_hash`, which is **empty by construction** for a directory
+  account — filex never learns the password. The refusal was identical to a
+  wrong one. They now ask the directory when the local table cannot judge
+  (`auth.ldap.protocol_login`, on by default). The local hash is still tried
+  first, TOTP accounts are still refused on every protocol, and a successful
+  check is cached for five minutes exactly as a local one is — without that,
+  each request of a WebDAV `PROPFIND` storm would be a fresh LDAPS bind.
+
+- **A search failure and "no such user" were the same answer.** An unreachable
+  directory, an expired service account and a typo in `base_dn` all came out as
+  `unauthorized` with nothing in the log. Transport and protocol failures are
+  now reported and logged apart from a rejected password.
+
+- **`user_filter` silently broke with more than one placeholder.** It was filled
+  with `fmt.Sprintf`, which consumes one argument per verb, so the standard
+  Active Directory filter that accepts either address form became
+  `(userPrincipalName=%!s(MISSING))` — a filter matching nobody. Every `%s` is
+  now filled with the same escaped identifier.
+
+- **Searches used a size limit of 1.** Active Directory answers a subtree search
+  from the domain root with continuation references alongside the match, and a
+  server counting those against a limit of 1 can answer "size limit exceeded"
+  instead of the entry. The limit is 2, and a filter that genuinely matches two
+  accounts is refused with a warning rather than resolved to whichever came
+  first.
+
+### Added
+
+- **`auth.ldap.ca_file` / `FILEX_LDAP_CA_FILE`** — a PEM bundle for a private or
+  internal CA, **appended** to the system trust store (the public roots keep
+  working) and applied to `ldaps://` and StartTLS alike. Previously the only way
+  to reach a directory behind an internal CA was to rebuild the container's
+  `/etc/ssl/certs/ca-certificates.crt`. The file is read at boot, so a wrong
+  path is a startup error rather than a login failure hours later.
+- **`auth.ldap.protocol_login` / `FILEX_LDAP_PROTOCOL_LOGIN`** — set `false` to
+  keep directory passwords on the login form only and require an API token on
+  the file protocols.
+- **The Helm chart can configure LDAP.** `auth.ldap.*` in `values.yaml` renders
+  the `FILEX_LDAP_*` variables; the chart listed `ldap` as a valid driver while
+  offering no way to configure it, so `drivers: "local,ldap"` produced a driver
+  that failed `Init` and was skipped.
+
 ## [0.27.6] - 2026-09-01
 
 ### Changed

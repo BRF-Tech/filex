@@ -82,6 +82,15 @@ type Deps struct {
 	Embed     embed.FS // web/dist + admin
 	LocalAuth auth.LoginDriver
 	OIDCAuth  auth.OIDCDriver
+	// Directory is the external password authority the FILE PROTOCOLS consult
+	// (the LDAP driver, when configured and not switched off with
+	// auth.ldap.protocol_login). Nil = local passwords only.
+	//
+	// ⚠ It is set on ProtocolAuth below rather than passed to the login
+	// handler: the browser path reaches the same driver through LocalAuth's
+	// login chain, and a directory login there mints a session, which is
+	// precisely what a per-request protocol login must NOT do.
+	Directory protocolauth.Directory
 	// ACL resolves per-user/per-item grants (RBAC feature). Constructed in
 	// BuildRouter from Store when nil.
 	ACL *acl.Resolver
@@ -144,6 +153,7 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	if d.ProtocolAuth == nil {
 		d.ProtocolAuth = protocolauth.New(d.Store, d.ACL, d.Cfg.MultiTenant)
+		d.ProtocolAuth.Directory = d.Directory
 		// The box is what lets an S3 access key be issued at all: SigV4 needs a
 		// recoverable secret, so with no FILEX_SECRET_KEY configured, issuing
 		// fails loudly instead of storing one in the clear.

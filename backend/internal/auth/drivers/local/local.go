@@ -105,24 +105,48 @@ func (d *Driver) Login(ctx context.Context, email, password string) (*model.User
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, "", auth.ErrUnauthorized
 	}
-	tok, err := generateToken()
+	tok, err := IssueSession(ctx, d.store, user.ID)
 	if err != nil {
-		return nil, "", err
-	}
-	expires := time.Now().Add(SessionTTL)
-	if _, err := d.store.CreateSession(ctx, user.ID, tok, expires, "", ""); err != nil {
 		return nil, "", err
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)
 	return user, tok, nil
 }
 
-// Logout revokes the given session.
-func (d *Driver) Logout(ctx context.Context, token string) error {
+// IssueSession mints a `filex_session` token for uid and records it.
+//
+// ⚠ Exported because it is the ONE place a browser session comes into
+// existence, and more than one login driver has to be able to mint one. The
+// LDAP driver used to end its Login with `return user, "", nil` and the comment
+// "caller mints session token via the local driver" — no caller ever did, so a
+// directory login that had already succeeded handed back an EMPTY token: the
+// cookie was set to "", the very next request had no session, and the failure
+// looked like a login failure. A second implementation would have been worse
+// still: the cookie name and the 12h TTL are a contract the middleware and the
+// SPA both depend on, and two copies of a TTL drift.
+func IssueSession(ctx context.Context, store db.Store, userID int64) (string, error) {
+	tok, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if _, err := store.CreateSession(ctx, userID, tok, time.Now().Add(SessionTTL), "", ""); err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
+// RevokeSession deletes a session token. The counterpart to IssueSession, for
+// the same reason: a driver that can mint must be able to revoke.
+func RevokeSession(ctx context.Context, store db.Store, token string) error {
 	if token == "" {
 		return nil
 	}
-	return d.store.DeleteSession(ctx, token)
+	return store.DeleteSession(ctx, token)
+}
+
+// Logout revokes the given session.
+func (d *Driver) Logout(ctx context.Context, token string) error {
+	return RevokeSession(ctx, d.store, token)
 }
 
 // HashPassword returns a bcrypt hash suitable for users.password_hash.

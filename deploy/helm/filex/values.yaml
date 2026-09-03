@@ -117,6 +117,19 @@ auth:
     redirectURL: ""       # blank → <publicURL>/api/auth/oidc/callback
     roleClaim: ""         # e.g. realm_access.roles
     adminGroup: ""        # token group/role that grants filex admin
+  # LDAP / Active Directory. Set drivers "local,ldap" and fill url + baseDN.
+  # Keep `local` FIRST in drivers: it is tried first, so admin@local stays
+  # answerable while the directory is unreachable.
+  ldap:
+    url: ""               # ldaps://ldap.example.com or ldap://ad.example.com
+    bindDN: ""            # service account; blank → anonymous search
+    bindPassword: ""
+    baseDN: ""            # e.g. dc=example,dc=com
+    userFilter: ""        # blank → (mail=%s); EVERY %s is filled
+    emailAttr: ""         # blank → mail
+    startTLS: ""          # "true" to upgrade a plain ldap:// connection
+    caFile: ""            # in-pod path to a PEM bundle for a private CA
+    protocolLogin: ""     # "false" to keep directory passwords off WebDAV/SFTP/S3
 
 # First admin user, created on first boot. Blank password → a random
 # admin@local (printed once in the pod logs).

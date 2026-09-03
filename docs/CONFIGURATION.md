@@ -106,6 +106,13 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_LDAP_USER_FILTER` | User filter, e.g. `(mail=%s)` |
 | `FILEX_LDAP_EMAIL_ATTR` | Attribute holding the email (e.g. `mail`) |
 | `FILEX_LDAP_START_TLS` | `true` to upgrade a plain connection with StartTLS |
+| `FILEX_LDAP_CA_FILE` | PEM bundle holding the CA that signed the directory certificate. Appended to the system trust store, not substituted for it. Needed for an internal/private CA on `ldaps://` **or** StartTLS. |
+| `FILEX_LDAP_PROTOCOL_LOGIN` | `false` to stop directory accounts from signing in over WebDAV/SFTP/FTPS/S3/NFS with their directory password. Default `true`. |
+
+> `FILEX_LDAP_USER_FILTER` may contain the placeholder more than once — every
+> `%s` is filled with the same escaped identifier, so the usual AD filter that
+> accepts either address form works as written:
+> `(&(objectCategory=person)(objectClass=user)(|(mail=%s)(userPrincipalName=%s)))`
 
 **Proxy‑header** — trust an authenticating reverse proxy (enable with
 `FILEX_AUTH_DRIVERS=proxy_header`):
@@ -516,6 +523,8 @@ auth:
     user_filter: "(mail=%s)"
     email_attr: mail
     start_tls: false
+    ca_file: ""                    # PEM bundle for a private CA (optional)
+    protocol_login: true           # directory passwords on WebDAV/SFTP/FTPS/S3/NFS
   header_proxy:                    # trust an auth proxy — also FILEX_HEADER_*
     email_header: X-Auth-Email
     group_header: X-Auth-Roles

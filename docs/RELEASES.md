@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.27.5, 1 September 2026
-- a transient 503 no longer sinks an upload.
+::: tip Latest — v0.27.6, 1 September 2026
+- the first signed tag.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.27.5
-docker pull ghcr.io/brf-tech/filex:full-v0.27.5
+docker pull ghcr.io/brf-tech/filex:slim-v0.27.6
+docker pull ghcr.io/brf-tech/filex:full-v0.27.6
 ```
+
+## v0.27.6
+
+<span class="filex-release-date">1 September 2026</span>
+
+**- the first signed tag.**
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.6) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.6`
 
 ## v0.27.5
 
@@ -240,20 +248,13 @@ The other half of the demo hardening in 0.21.3. A demo instance publishes an adm
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.4`
 
-## v0.21.3
-
-<span class="filex-release-date">19 August 2026</span>
-
-A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and installing a plugin makes filex run an uploaded program on the host. Demo mode now turns the plugin subsystem off unless you explicitly say otherwise. If you run a filex demo on 0.21.0–0.21.2, set FILEX_PLUGINS_DISABLED=1 or upgrade.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.3`
-
 ## Earlier releases
 
-The 73 releases before v0.21.3, in brief. Full notes are on GitHub.
+The 74 releases before v0.21.4, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.21.3](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) | 19 August 2026 | A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and… |
 | [v0.21.2](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) | 19 August 2026 | A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails… |
 | [v0.21.1](https://github.com/BRF-Tech/filex/releases/tag/v0.21.1) | 19 August 2026 | Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". |
 | [v0.21.0](https://github.com/BRF-Tech/filex/releases/tag/v0.21.0) | 19 August 2026 | filex can now be taught a storage it has never heard of. A plugin is a separate program — in any language — that filex launches (or connects to) and speaks a small HTTP/JSON protocol to; once it is running, its driver appears in… |
@@ -330,4 +331,4 @@ The 73 releases before v0.21.3, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-09-01 from 93 published releases.</small>
+<small>Generated 2026-09-03 from 94 published releases.</small>

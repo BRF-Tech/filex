@@ -44,6 +44,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -212,6 +213,19 @@ func (p *Principal) HasScope(scope string) bool {
 	return p.Token.HasScope(scope)
 }
 
+// Directory is an external password authority — today internal/auth/drivers/
+// ldap. It returns the LOCAL account the directory credentials resolve to
+// (upserting it on first sight), and auth.ErrUnauthorized when the directory
+// judged the credentials and said no.
+//
+// ⚠ The distinction matters: any other error means the directory could not
+// judge (unreachable, TLS, bad service bind). A protocol must still answer
+// ErrUnauthorized to the wire, but the operator has to be able to find the
+// difference in the log.
+type Directory interface {
+	VerifyPassword(ctx context.Context, identifier, password string) (*model.User, error)
+}
+
 // Resolver turns credentials into principals.
 type Resolver struct {
 	Store db.Store
@@ -227,6 +241,17 @@ type Resolver struct {
 	// recomputing an HMAC chain. Nil (or keyless) means no key is configured,
 	// and issuing one then FAILS rather than storing plaintext.
 	Secrets *secretbox.Box
+	// Directory verifies a password that the local users table cannot judge —
+	// the LDAP/AD driver, when one is configured. Nil means "local passwords
+	// only", which is exactly what every install had before.
+	//
+	// ⚠ Why the protocols need this at all: a directory account is upserted
+	// into users with an EMPTY password_hash, because filex never learns the
+	// password. So the bcrypt branch below refuses it forever, and it refuses
+	// it identically to a wrong password — an AD user could sign in to the web
+	// UI and still be told 401 by WebDAV, SFTP, FTPS and S3 with nothing in the
+	// log to say why.
+	Directory Directory
 	// CacheTTL is how long a successful PASSWORD verification is remembered.
 	//
 	// ⚠ This number is a security statement: it is how long a revoked password
@@ -248,6 +273,12 @@ type Resolver struct {
 type credEntry struct {
 	userID int64
 	exp    time.Time
+	// directory records that the DIRECTORY judged this password, not the local
+	// password_hash. The re-checks below differ for the two, and conflating
+	// them meant a directory user could never be cached at all: their hash is
+	// empty by construction, so the local re-check threw every entry away and
+	// each WebDAV PROPFIND became a fresh LDAPS round trip.
+	directory bool
 }
 
 // DefaultCacheTTL matches what /dav has used since it shipped.
@@ -283,18 +314,64 @@ func (r *Resolver) Password(ctx context.Context, identifier, password string) (*
 		return r.principal(ctx, u, nil)
 	}
 
+	// The local account, when there is one. A directory user signing in for the
+	// very first time over a protocol has no row yet, and that is not a failure
+	// — the directory is asked below either way.
 	u, err := identity.Resolve(ctx, r.Store, ident)
-	if err != nil || u == nil {
+	if err != nil {
+		u = nil
+	}
+	if u != nil && u.TOTPEnabled {
+		// Refused before any password work, local or remote: see the doc
+		// comment. Asking the directory here would also make an account's
+		// second factor depend on which protocol it was presented to.
 		return nil, ErrUnauthorized
 	}
-	if u.PasswordHash == "" || u.TOTPEnabled {
-		return nil, ErrUnauthorized
+	// Local password first: a bcrypt compare against a row we already hold,
+	// with no network in it. Keeping this ahead of the directory is what makes
+	// admin@local and every break-glass password answerable while the
+	// directory is down.
+	if u != nil && u.PasswordHash != "" &&
+		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil {
+		r.remember(ident, password, u.ID, false)
+		return r.principal(ctx, u, nil)
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) != nil {
-		return nil, ErrUnauthorized
+	if du := r.viaDirectory(ctx, ident, u, password); du != nil {
+		r.remember(ident, password, du.ID, true)
+		return r.principal(ctx, du, nil)
 	}
-	r.remember(ident, password, u.ID)
-	return r.principal(ctx, u, nil)
+	return nil, ErrUnauthorized
+}
+
+// viaDirectory asks the configured directory to judge the password, or returns
+// nil when there is no directory, it refused, or it could not answer.
+func (r *Resolver) viaDirectory(ctx context.Context, ident string, local *model.User, password string) *model.User {
+	if r.Directory == nil {
+		return nil
+	}
+	// ⚠ Which identifier goes to the directory. A protocol login may arrive as
+	// a filex USERNAME (SFTP and FTPS have no other field), while the directory
+	// filter matches an e-mail or a UPN. When the local row already exists —
+	// which it does from the moment the account first signs in anywhere — its
+	// canonical e-mail is what the directory stored in email_attr, so that is
+	// the form to ask with. Without this, "sign in to the web UI, then mount
+	// over SFTP with the same name" fails on the second half.
+	dirIdent := ident
+	if local != nil && local.Email != "" {
+		dirIdent = local.Email
+	}
+	du, err := r.Directory.VerifyPassword(ctx, dirIdent, password)
+	if err != nil {
+		if !errors.Is(err, auth.ErrUnauthorized) {
+			slog.Warn("protocolauth: directory could not judge the credentials",
+				slog.String("identifier", dirIdent), slog.Any("err", err))
+		}
+		return nil
+	}
+	if du == nil || du.TOTPEnabled {
+		return nil
+	}
+	return du
 }
 
 // Token resolves an API token. When identifier is non-empty the token must
@@ -430,8 +507,17 @@ func (r *Resolver) cacheKey(ident, password string) [32]byte {
 
 // cached returns the account a previous successful verification recorded, or
 // nil. It re-reads the account rather than trusting the cached copy, and
-// re-checks the two things that must still hold — that the identifier still
-// names this account, and that TOTP has not been switched on since.
+// re-checks what must still hold: that TOTP has not been switched on since,
+// and — for a locally verified password — that the identifier still names this
+// account and the account still HAS a password.
+//
+// ⚠ A directory-verified entry skips those last two on purpose, and neither is
+// a weakening. The account's password does not live in filex at all, so an
+// empty password_hash is its normal state rather than a revocation; and the
+// identifier was judged by the directory's own filter, which is free to accept
+// a UPN that filex's local naming knows nothing about. What still bounds the
+// entry is CacheTTL — the same statement the local path makes: that is how long
+// a password revoked at the directory keeps working over the protocols.
 func (r *Resolver) cached(ctx context.Context, ident, password string) *model.User {
 	if r.CacheTTL <= 0 {
 		return nil
@@ -447,7 +533,10 @@ func (r *Resolver) cached(ctx context.Context, ident, password string) *model.Us
 	if err != nil || u == nil {
 		return nil
 	}
-	if !identity.Names(u, ident) || u.PasswordHash == "" || u.TOTPEnabled {
+	if u.TOTPEnabled {
+		return nil
+	}
+	if !ent.directory && (!identity.Names(u, ident) || u.PasswordHash == "") {
 		return nil
 	}
 	return u
@@ -456,7 +545,7 @@ func (r *Resolver) cached(ctx context.Context, ident, password string) *model.Us
 // remember records a successful password verification. Only POSITIVE results
 // are cached: caching a failure would let a caller keep a lockout or a
 // rate-limit decision alive past the point where the real check would pass.
-func (r *Resolver) remember(ident, password string, userID int64) {
+func (r *Resolver) remember(ident, password string, userID int64, directory bool) {
 	if r.CacheTTL <= 0 {
 		return
 	}
@@ -469,7 +558,7 @@ func (r *Resolver) remember(ident, password string, userID int64) {
 	if len(r.creds) > 4096 { // crude bound; entries also expire via TTL
 		r.creds = map[[32]byte]credEntry{}
 	}
-	r.creds[key] = credEntry{userID: userID, exp: time.Now().Add(r.CacheTTL)}
+	r.creds[key] = credEntry{userID: userID, exp: time.Now().Add(r.CacheTTL), directory: directory}
 }
 
 // Forget drops every cached password result. Called when a credential is

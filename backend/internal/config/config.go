@@ -462,6 +462,23 @@ type LDAPConfig struct {
 	UserFilter   string `yaml:"user_filter"`
 	EmailAttr    string `yaml:"email_attr"`
 	StartTLS     bool   `yaml:"start_tls"`
+	// CAFile is a PEM bundle holding the CA that signed the directory's
+	// certificate. Empty verifies against the system trust store, which is what
+	// the driver always did — and what forced installs with a private/internal
+	// CA to rebuild the container's /etc/ssl/certs/ca-certificates.crt just to
+	// reach their own AD. Appended to the system pool, not substituted for it.
+	CAFile string `yaml:"ca_file"`
+	// ProtocolLogin lets directory accounts authenticate over the non-HTTP
+	// protocols (WebDAV, SFTP, FTPS, S3, NFS) with their directory password.
+	// ON by default: with it off, an account that can sign in to the web UI is
+	// answered 401 everywhere else, which is indistinguishable from a wrong
+	// password. Turn it off to keep the directory password on the login form
+	// only and require an API token everywhere else.
+	//
+	// ⚠ Accounts with TOTP enabled are refused on those protocols regardless,
+	// exactly as local passwords are — none of them has a second-factor
+	// channel. See internal/protocolauth.
+	ProtocolLogin bool `yaml:"protocol_login"`
 }
 
 // HeaderProxyConfig — accept Cloudflare Access / Authelia headers.
@@ -557,6 +574,9 @@ func Default() Config {
 		},
 		Auth: AuthConfig{
 			Drivers: []string{"local"},
+			LDAP: LDAPConfig{
+				ProtocolLogin: true,
+			},
 		},
 		Sync: SyncConfig{
 			DefaultInterval: 15 * time.Minute,
@@ -1064,6 +1084,12 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_LDAP_START_TLS"); v != "" {
 		c.Auth.LDAP.StartTLS = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_LDAP_CA_FILE"); v != "" {
+		c.Auth.LDAP.CAFile = v
+	}
+	if v := os.Getenv("FILEX_LDAP_PROTOCOL_LOGIN"); v != "" {
+		c.Auth.LDAP.ProtocolLogin = v == "1" || strings.EqualFold(v, "true")
 	}
 
 	// Reverse-proxy header auth (previously YAML-only). Enable with

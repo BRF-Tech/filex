@@ -85,6 +85,11 @@ features:
     details: Roles plus per-file and per-folder permissions with inheritance — enforced in the backend, off by default.
     link: /RBAC
     linkText: RBAC docs
+  - icon: 🏢
+    title: LDAP / Active Directory
+    details: Directory accounts sign in on the same password form as local ones — and on WebDAV, SFTP, FTPS, S3 and NFS too. Private CA supported; local login stays first, so your break-glass account works while the directory is down.
+    link: /LDAP
+    linkText: LDAP docs
   - icon: 🔔
     title: Webhooks
     details: Every event fans out to a persistent in-app bell and an outbound webhook from a single call.

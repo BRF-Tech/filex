@@ -7,11 +7,12 @@ drivers for enterprise directories and gateway‑fronted deployments:
 - **`proxy-header`** — trust identity headers set by an authenticating reverse
   proxy (oauth2‑proxy, Authelia, Cloudflare Access, …).
 
-> **Both are `config.yaml`‑only.** Unlike `local`/`oidc`, these two drivers have
-> **no `FILEX_*` environment variables** for their settings. You still pick which
-> drivers are *enabled* the usual way (env `FILEX_AUTH_DRIVERS` or `auth.drivers`
-> in the file), but everything else lives under `auth.ldap.*` /
-> `auth.header_proxy.*` in `config.yaml`. See
+> **Both can be configured either way.** `auth.ldap.*` / `auth.header_proxy.*`
+> in `config.yaml`, or the `FILEX_LDAP_*` / `FILEX_HEADER_*` environment
+> variables — env wins where both are set, and a container-only deployment never
+> needs a config file. (Older releases were file-only; that restriction is gone.)
+> You pick which drivers are *enabled* the usual way (`FILEX_AUTH_DRIVERS` or
+> `auth.drivers`). See
 > [CONFIGURATION.md → Authentication](CONFIGURATION.md#authentication).
 
 Both drivers **upsert the user into filex's local users table** on success, so
@@ -19,6 +20,7 @@ Both drivers **upsert the user into filex's local users table** on success, so
 account.
 
 - [LDAP / Active Directory](#ldap--active-directory)
+  - [Directory accounts on the file protocols](#directory-accounts-on-the-file-protocols)
 - [Reverse-proxy header auth](#reverse-proxy-header-auth)
 - [See also](#see-also)
 
@@ -29,8 +31,13 @@ account.
 ### How it works
 
 LDAP plugs into the **normal password login form**. When a user submits their
-email + password, filex tries each enabled driver in order; the LDAP driver
-performs a classic *search‑then‑bind*:
+e‑mail (or username) + password, filex tries each enabled login driver **in the
+order they appear in `auth.drivers` / `FILEX_AUTH_DRIVERS`** and the first one
+that accepts wins. Keep `local` first: it is a hash comparison against a row
+filex already holds, so `admin@local` and every break‑glass password stay
+answerable even while the directory is unreachable.
+
+The LDAP driver performs a classic *search‑then‑bind*:
 
 ```
  filex                                     Directory (LDAP/AD)
@@ -65,10 +72,14 @@ performs a classic *search‑then‑bind*:
 > To make an LDAP user an admin, elevate them once in the admin UI
 > (**Users**); the role then sticks in filex's DB.
 
-**TLS note.** `ldaps://` is selected purely by the URL scheme. StartTLS currently
-uses Go's **default** TLS verification (system trust roots) and does **not** pin
-or accept a custom CA certificate — a self‑signed directory cert will fail the
-handshake. Use a cert from a trusted CA (or terminate TLS at a sidecar).
+**TLS note.** `ldaps://` is selected purely by the URL scheme. With no `ca_file`
+both `ldaps://` and StartTLS verify against the **system trust roots**, so a
+certificate signed by an internal CA fails the handshake. Point `ca_file`
+(`FILEX_LDAP_CA_FILE`) at the PEM bundle holding that CA and it is **appended**
+to the system pool — the public roots keep working, and you no longer have to
+rebuild the container's `/etc/ssl/certs/ca-certificates.crt` to reach your own
+directory. The file is read and validated **at boot**: a wrong path is a startup
+error, not a login that fails hours later with a TLS message.
 
 ### Configuration — `auth.ldap.*`
 
@@ -78,12 +89,29 @@ handshake. Use a cert from a trusted CA (or terminate TLS at a sidecar).
 | `base_dn` | **yes** | — | Search base for the user subtree, e.g. `ou=people,dc=example,dc=com`. |
 | `bind_dn` | no | — | Service‑account DN for the search bind. **Omit → anonymous search.** |
 | `bind_password` | no | — | Password for `bind_dn`. |
-| `user_filter` | no | `(mail=%s)` | LDAP filter; `%s` is substituted with the escaped, lower‑cased login email. For AD, `(userPrincipalName=%s)` or `(sAMAccountName=%s)` are common. |
+| `user_filter` | no | `(mail=%s)` | LDAP filter. **Every** `%s` is substituted with the escaped, lower‑cased identifier, so a filter may use it more than once. For AD, `(userPrincipalName=%s)` or `(sAMAccountName=%s)` are common. |
 | `email_attr` | no | `mail` | Attribute read back as the account's canonical email. |
 | `start_tls` | no | `false` | Upgrade a plain `ldap://` connection via StartTLS. Ignored for `ldaps://`. |
+| `ca_file` | no | — | PEM bundle holding a private/internal CA, **appended** to the system trust store. Applies to `ldaps://` and StartTLS alike. Validated at boot. |
+| `protocol_login` | no | `true` | Let directory accounts sign in over WebDAV, SFTP, FTPS, S3 and NFS with their directory password. See [the protocols section](#directory-accounts-on-the-file-protocols). |
 
 `url` and `base_dn` are the only hard requirements; everything else has a working
 default.
+
+#### Matching more than one attribute
+
+A filter may repeat the placeholder, which is how you let people sign in with
+either their mail address or their UPN:
+
+```yaml
+user_filter: "(&(objectCategory=person)(objectClass=user)(|(mail=%s)(userPrincipalName=%s)))"
+```
+
+> Filters are also searched with a size limit of **2** rather than 1, because
+> Active Directory answers a subtree search from the domain root with
+> continuation references (`DomainDnsZones`, `ForestDnsZones`, `Configuration`)
+> alongside the match. If the filter genuinely matches **two accounts**, the
+> login is refused and a warning names the filter — filex will not pick one.
 
 ### Example `config.yaml`
 
@@ -98,6 +126,7 @@ auth:
     user_filter: "(mail=%s)"
     email_attr: mail
     start_tls: false
+    # ca_file: /etc/filex/ldap-ca.pem   # only for a private/internal CA
 ```
 
 Active Directory variant (bind by UPN, upgrade plaintext with StartTLS):
@@ -110,13 +139,56 @@ auth:
     bind_dn: "CN=filex svc,CN=Users,DC=example,DC=com"
     bind_password: "s3cr3t"
     base_dn: "DC=example,DC=com"
-    user_filter: "(userPrincipalName=%s)"
+    user_filter: "(&(objectCategory=person)(objectClass=user)(|(mail=%s)(userPrincipalName=%s)))"
     email_attr: mail
     start_tls: true
+    ca_file: /etc/filex/ad-root-ca.pem   # internal CA — the usual AD case
+```
+
+The same install from environment variables only (no `config.yaml`):
+
+```
+FILEX_AUTH_DRIVERS=local,ldap
+FILEX_LDAP_URL=ldap://ad.example.com
+FILEX_LDAP_BIND_DN=CN=filex svc,CN=Users,DC=example,DC=com
+FILEX_LDAP_BIND_PASSWORD=s3cr3t
+FILEX_LDAP_BASE_DN=DC=example,DC=com
+FILEX_LDAP_USER_FILTER=(&(objectCategory=person)(objectClass=user)(|(mail=%s)(userPrincipalName=%s)))
+FILEX_LDAP_EMAIL_ATTR=mail
+FILEX_LDAP_START_TLS=true
+FILEX_LDAP_CA_FILE=/etc/filex/ad-root-ca.pem
 ```
 
 > Keep `local` in the driver list if you still want the built‑in `admin@local`
 > account (and any other password users) to work alongside LDAP.
+
+### Directory accounts on the file protocols
+
+A directory account is upserted into filex's users table with **no password
+hash** — filex never learns the password, the directory keeps it. So the file
+protocols (WebDAV, SFTP, FTPS, S3, NFS) cannot check it the way they check a
+local one; they ask the directory instead, and `protocol_login` is what allows
+that. It is **on by default**, so an account that can sign in to the web UI can
+also mount `/dav` with the same credentials.
+
+- **Order.** The local hash is compared first (no network), the directory only
+  when that cannot answer. A directory outage therefore never blocks
+  `admin@local`.
+- **Caching.** A successful verification is remembered for 5 minutes, exactly
+  like a local password — Basic‑auth protocols present the credential on every
+  request, and without a cache a PROPFIND storm would be one LDAPS bind per
+  request. ⚠ That TTL is also how long a password revoked **at the directory**
+  keeps working on these protocols.
+- **Usernames.** SFTP and FTPS carry only a username field. Once the account
+  exists in filex, its canonical e‑mail (from `email_attr`) is what gets sent to
+  the directory, so signing in by filex username works too.
+- **2FA.** An account with TOTP enabled is refused on these protocols, whether
+  its password is local or in the directory — none of them can carry a second
+  factor. Such an account must use an API token (**Settings → API tokens**).
+
+Set `protocol_login: false` (or `FILEX_LDAP_PROTOCOL_LOGIN=false`) to keep
+directory passwords on the login form only and require an API token everywhere
+else.
 
 ### Failure modes & troubleshooting
 
@@ -126,7 +198,10 @@ auth:
 | `ldap: dial: …` on login | Can't reach the server — wrong host/port/scheme or a firewall. Confirm the `url` and that filex's network can reach it. |
 | `ldap: starttls: …` on login | StartTLS negotiation failed: the server doesn't offer it, or the cert isn't trusted by system roots (custom/self‑signed CAs are **not** supported yet). Use a trusted cert, or drop `start_tls` and switch to `ldaps://` with a trusted cert. |
 | `ldap: service bind: …` on login | `bind_dn` / `bind_password` are wrong, or the service account is locked. |
-| Login rejected (generic "unauthorized") | Either the user wasn't found by `user_filter` under `base_dn`, or the final re‑bind failed (wrong password). filex deliberately does **not** distinguish the two (no user enumeration). Test your filter with `ldapsearch -b <base_dn> '<filter with a real email>'`. |
+| Login rejected (generic "unauthorized") | Either the user wasn't found by `user_filter` under `base_dn`, or the final re‑bind failed (wrong password). filex deliberately does **not** distinguish the two to the caller (no user enumeration) — but it **does** log the difference: run with `FILEX_LOG_LEVEL=debug` and look for `ldap: no directory entry matched` (filter/base problem) versus `ldap: user bind refused` (password/account problem). Test your filter with `ldapsearch -b <base_dn> '<filter with a real email>'`. |
+| `ldap: search: …` on login | The directory could not be *asked* — connection reset, an expired service account, a base DN the account may not read. This is logged and reported separately from a wrong password on purpose: those two used to be indistinguishable. |
+| `ldap: user_filter matched more than one entry` (warning) | The filter is ambiguous under `base_dn` (a duplicate or a stale account in another OU). filex refuses rather than picking one. Narrow the filter or the base DN. |
+| Web login works, WebDAV/SFTP/S3 answers 401 | `protocol_login` is off (or the account has TOTP enabled — see [above](#directory-accounts-on-the-file-protocols)). With TOTP on, mint an API token and use that as the password. |
 | Login rejected even with a correct password, empty password box | An empty password is rejected up front — this guards against directories that treat an empty‑password bind as a successful *anonymous* bind. |
 | User can log in but has no admin rights | Expected — LDAP users are always `user`. Elevate them in **admin UI → Users**. There is no `admin_group` for LDAP. |
 

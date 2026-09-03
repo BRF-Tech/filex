@@ -173,6 +173,21 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Auth drivers — local always present.
 	var localDrv auth.LoginDriver
 	var oidcDrv auth.OIDCDriver
+	// loginDrvs collects every driver that can judge a password, in the order
+	// the operator listed them. They are chained below.
+	//
+	// ⚠⚠ This slice is the fix for a two-month-old silent hole: `localDrv` was
+	// assigned in the "local" case ONLY, so a configured LDAP driver was
+	// initialised, appended to `enabled`, printed in the boot banner — and
+	// never reachable, because the login handler holds exactly one LoginDriver
+	// and the middleware only ever calls Authenticate (which a login driver
+	// refuses by definition). `FILEX_AUTH_DRIVERS=local,ldap` answered every
+	// directory account 401 in under a millisecond, well under one LDAPS round
+	// trip, with nothing in the log.
+	var loginDrvs []auth.LoginDriver
+	// dirDrv is the password authority the non-HTTP protocols consult when the
+	// local users table cannot judge — see internal/protocolauth.
+	var dirDrv protocolauth.Directory
 	enabled := []auth.Driver{}
 
 	for _, name := range cfg.Auth.Drivers {
@@ -183,7 +198,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				return nil, fmt.Errorf("auth init local: %w", err)
 			}
 			enabled = append(enabled, d)
-			localDrv = d
+			loginDrvs = append(loginDrvs, d)
 		case "oidc":
 			d := authoidc.New(store)
 			oidcCfg := map[string]any{
@@ -223,11 +238,16 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				"user_filter":   cfg.Auth.LDAP.UserFilter,
 				"email_attr":    cfg.Auth.LDAP.EmailAttr,
 				"start_tls":     cfg.Auth.LDAP.StartTLS,
+				"ca_file":       cfg.Auth.LDAP.CAFile,
 			}); err != nil {
 				slog.Warn("ldap driver init failed", slog.String("err", err.Error()))
 				continue
 			}
 			enabled = append(enabled, d)
+			loginDrvs = append(loginDrvs, d)
+			if cfg.Auth.LDAP.ProtocolLogin {
+				dirDrv = d
+			}
 		case "proxy-header", "proxyheader", "header_proxy":
 			d := authproxyheader.New(store)
 			if err := d.Init(ctx, map[string]any{
@@ -258,6 +278,26 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		enabled = append(enabled, atDrv)
 	}
 	auth.SetEnabled(enabled)
+
+	// One LoginDriver reaches the login handler, so several become a chain.
+	// A single driver is passed through unwrapped: the chain would be a
+	// no-op layer, and the boot line below is more useful when it names the
+	// driver rather than a wrapper around it.
+	switch {
+	case len(loginDrvs) == 0:
+		localDrv = nil
+		slog.Warn("auth: no password login driver is enabled; sign-in is SSO/token only")
+	case len(loginDrvs) == 1:
+		localDrv = loginDrvs[0]
+	default:
+		chain := auth.NewLoginChain(loginDrvs...)
+		localDrv = chain
+		slog.Info("auth: password login chain", slog.String("order", chain.Name()))
+	}
+	if dirDrv != nil {
+		slog.Info("auth: directory passwords accepted on the file protocols",
+			slog.String("driver", "ldap"))
+	}
 
 	// Multi-tenant mode: dispatch OIDC per tenant realm — request host →
 	// provider row → that realm's driver (JIT stamps the tenant). Hosts with no
@@ -779,6 +819,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Embed:           embedFS,
 		LocalAuth:       localDrv,
 		OIDCAuth:        oidcDrv,
+		Directory:       dirDrv,
 		Mailer:          srvObj.mailer,
 		ZipCache:        zipCache,
 		FileCache:       fileCache,

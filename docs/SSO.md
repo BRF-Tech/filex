@@ -201,13 +201,15 @@ every login.
 filex ships more than OIDC. Each is enabled by adding it to `FILEX_AUTH_DRIVERS`:
 
 - **`local`** — built-in email/password with optional TOTP 2FA.
-- **`ldap`** — bind against an LDAP/Active Directory server. See
-  [CONFIGURATION.md](CONFIGURATION.md).
+- **`ldap`** — bind against an LDAP/Active Directory server, on the same password
+  form as `local`. See [LDAP.md](LDAP.md).
 - **`proxy-header`** — trust an authenticating reverse proxy (e.g. oauth2-proxy,
   Authelia) that sets a user header. Only enable when the proxy is the **only**
   path to filex.
 
-Drivers can be combined; list them in the order you want them offered.
+Drivers can be combined. For the two that read a password — `local` and `ldap` — the
+order is the order they are **tried**: the first to accept wins, so keep `local` first
+and `admin@local` stays answerable while the directory is unreachable.
 
 ---
 

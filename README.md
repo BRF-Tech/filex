@@ -279,6 +279,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Native multi-tenancy** — provider/tenant mode with per-tenant isolation on one instance ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)).
 - **Driver-pluggable everything** — storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
 - **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).
+- **LDAP / Active Directory** — directory accounts sign in on the same password form as local ones, and on WebDAV/SFTP/FTPS/S3/NFS too; private-CA support, and `local` stays first so `admin@local` works while the directory is down ([docs/LDAP.md](docs/LDAP.md)).
 - **Replica + reconciliation** — primary→replica fan-out (mirror / append-only / skip per path-glob rule), read fallback, scheduled status report, one-click "Fix all".
 - **Persistent op queue** — restart-safe queue (SQLite / Redis / Postgres), worker pool with retries + cancel + admin dashboard.
 - **DB-backed file tree** — listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); periodic ETag-diff sync catches out-of-band changes.

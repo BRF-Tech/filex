@@ -155,7 +155,12 @@ type Provisioner interface {
 ```
 
 Built-ins: `local` (bcrypt), `oidc`, `ldap`, `proxy_header`. Multiple drivers
-can be enabled simultaneously; the login screen renders one button per driver.
+can be enabled simultaneously. A driver that redirects (`oidc`) gets its own
+button; the two that read a **password** (`local`, `ldap`) share the one form and
+are chained — `auth.LoginChain` tries them in the configured order and the first
+to accept wins, so `local` first keeps `admin@local` answerable while the
+directory is down. The same chain feeds the file protocols through
+`protocolauth.Directory`.
 
 ### DB driver
 
