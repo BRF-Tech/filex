@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-09-05
+
+### Fixed
+
+- **The tab strip printed the raw sentinel for the new views** — a tab opened on
+  Recent, Starred or Shared with me read `.recent`, `.starred`, `.shared`.
+  Trash was right, and that is the whole story: the sentinel-to-label map was
+  written twice, and when the three new views arrived only the breadcrumb copy
+  was extended. A second copy of a mapping is a second chance to forget it, and
+  the symptom hides itself — the old view keeps working, so it reads as "only
+  the new one is missing something" rather than as a bug. There is one map now
+  (`lib/listing.ts`), and every surface that renders a path segment reads it.
+
 ## [0.30.0] - 2026-09-04
 
 Everything here came out of two issues opened by the same person, and the most

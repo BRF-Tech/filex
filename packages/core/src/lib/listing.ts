@@ -159,3 +159,27 @@ export async function hydrateTrashRow(
     /* keep the bare row */
   }
 }
+
+/**
+ * Sentinel path segment → locale key, for the virtual views the explorer parks
+ * in `dirname` (trash, recent, starred, shared). None has a real folder behind
+ * it, so anything that renders a path segment has to translate them or it
+ * prints the sentinel.
+ *
+ * ⚠ ONE map, deliberately. `.trash` predates the other three and its
+ * translation was written twice — once in the breadcrumb, once in the tab
+ * label. When recent/starred/shared arrived, only the breadcrumb copy was
+ * extended, so the tab strip read ".shared" in front of users (reported
+ * 2026-09-04). A second copy of a mapping is a second chance to forget it.
+ */
+export const VIRTUAL_SEGMENTS: Record<string, string> = {
+  '.trash': 'node.trash',
+  '.recent': 'node.recent',
+  '.starred': 'node.starred',
+  '.shared': 'node.shared',
+};
+
+/** The locale key for a sentinel segment, or '' when it is a real folder. */
+export function virtualSegmentKey(segment: string): string {
+  return VIRTUAL_SEGMENTS[segment] ?? '';
+}

@@ -104,6 +104,7 @@ import {
    panes or split view shows mismatched rows). */
 import {
   filterListing,
+  virtualSegmentKey,
   showHiddenFiles,
   setShowHiddenFiles,
   injectTrashRow,
@@ -3281,7 +3282,11 @@ const activeSplit = computed(() => tabsApi.activeTab.value?.split ?? null);
 // Sekme adı OTOMATİK = güncel klasör adı (kök = depo adı / kök etiketi).
 function tabLabel(path: string): string {
   const p = (path || '').replace(/^\/+|\/+$/g, '');
-  if (p === '.trash') return t('node.trash');
+  // gezinti:g1 — the virtual views park a sentinel in the path. Translate via
+  // the SHARED map: this special-cased only '.trash' when recent/starred/shared
+  // arrived, so the strip read ".shared" at users (reported 2026-09-04).
+  const virtualKey = virtualSegmentKey(p.split('/').pop() || p);
+  if (virtualKey) return t(virtualKey);
   if (!p) return multiStorageRoot.value ? t('breadcrumb.root') : adapter.value || t('breadcrumb.root');
   return p.split('/').pop() || p;
 }

@@ -21,6 +21,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { hasInternalDrag } from '../lib/dragOut';
+import { VIRTUAL_SEGMENTS } from '../lib/listing';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 
@@ -61,15 +62,6 @@ const floorLabel = computed(() => {
 
 const { t } = useLocale(() => props.locale);
 
-/* gezinti:g1 — sentinel dirname segment → locale key. The explorer parks these
-   in `dirname` while a virtual view (trash, recent, starred, shared) is on
-   screen; each has no real folder behind it. */
-const VIRTUAL_SEGMENTS: Record<string, string> = {
-  '.trash': 'node.trash',
-  '.recent': 'node.recent',
-  '.starred': 'node.starred',
-  '.shared': 'node.shared',
-};
 
 const emit = defineEmits<{
   (e: 'navigate', adapterPath: string): void;
