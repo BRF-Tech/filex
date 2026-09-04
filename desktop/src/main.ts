@@ -47,6 +47,37 @@ import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } f
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { log, logPath } from './log.js';
+import {
+  OFFICE_EXTENSIONS,
+  OFFICE_MIME_TYPES,
+  SessionStore,
+  WriteBackError,
+  classifyArgv,
+  extensionOf,
+  hasChanged,
+  isOfficeDocument,
+  needsRecovery,
+  newSessionId,
+  orphanScratchEntries,
+  recoveryPathFor,
+  resolveSyncTwin,
+  scratchBasename,
+  scratchRemoteDir,
+  scratchRemotePath,
+  staleSessions,
+  writeBackAtomic,
+  type OpenWithSession,
+} from './openwith.js';
+import {
+  deleteRemote,
+  downloadFile,
+  ensureScratchDir,
+  listDir,
+  listStorages,
+  statRemote,
+  uploadFile,
+  type RemoteContext,
+} from './openwith-io.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1050,6 +1081,694 @@ async function ensureSyncRoot(acc: Account): Promise<string | null> {
   return dir;
 }
 
+// ─────────────────────────── open with filex ───────────────────────────
+//
+// A .docx on the desktop opens in filex, which puts it in front of the
+// OnlyOffice editor the server already runs. The reason is not novelty: most
+// Linux desktops have no Microsoft Office, many Macs have none, and plenty of
+// Windows machines have none either — and until now filex could only edit
+// documents that already lived on a filex server.
+//
+// Two routes, chosen per document:
+//
+//   • **The file is already inside a synced folder.** Its remote twin is opened
+//     directly. No copy, no write-back, no cleanup — saving reaches the server
+//     and the sync engine brings the bytes down to that same local file. This
+//     is checked FIRST because the alternative would create a second, diverging
+//     copy of a file the user is watching sync.
+//   • **Anywhere else.** The bytes are uploaded to a scratch folder on the
+//     account, the editor opens against the copy, and every save the server
+//     records is written back over the ORIGINAL local path. A banner in the
+//     editor window names that path the whole time.
+//
+// ⚠⚠ Write-back is where documents get destroyed, so all of it is deliberate:
+// the replace is atomic (openwith.ts), it may only ever touch the path the
+// session was opened with, a failure is shouted rather than logged, and a
+// session that outlives the app is recovered on the next start instead of being
+// silently swept away.
+
+/** A scratch session with a window attached — the in-memory half of the record
+ *  on disk. */
+interface LiveOpenWith {
+  record: OpenWithSession;
+  window: BrowserWindow;
+  timer: ReturnType<typeof setInterval> | null;
+  /** A poll is in flight; the next tick must not overlap it. */
+  busy: boolean;
+  /** The editor window is gone and we are in the grace period. */
+  closing: boolean;
+  /** When to stop waiting for a last save, and the ceiling on that. */
+  until: number;
+  hardUntil: number;
+  /** At least one edit reached the local file. */
+  wroteBack: boolean;
+}
+
+let sessionStore: SessionStore | null = null;
+const liveOpenWith = new Map<string, LiveOpenWith>();
+/** Documents handed over before the app was ready. macOS fires `open-file`
+ *  BEFORE `ready` on a cold start, so without a queue the very first
+ *  double-click of an install is the one that does nothing. */
+let openWithQueue: string[] = [];
+let openWithFlush: ReturnType<typeof setTimeout> | null = null;
+let openWithArmed = false;
+/** The last thing that went wrong, for Settings and for the E2E rig. */
+let openWithError: string | null = null;
+
+/** Batch window. Selecting five documents and hitting Enter delivers them as
+ *  one argv on Windows and as five separate `open-file` events on macOS; both
+ *  land here and are handled as one batch, so the account and the storage are
+ *  resolved once. */
+const OPEN_WITH_BATCH_MS = 150;
+
+function openWithPollMs(): number {
+  return Math.max(250, Number(process.env.FILEX_OPENWITH_POLL_MS ?? 2500));
+}
+/**
+ * How long to keep watching after the editor window closes.
+ *
+ * ⚠ Not optional and not decoration. OnlyOffice does not write on every
+ * keystroke — the document server posts its save callback about ten seconds
+ * AFTER the last editor disconnects. Deleting the scratch copy the moment the
+ * window closed would throw away the last edit of every session, which is the
+ * single most likely way this feature could quietly lose work.
+ */
+function openWithGraceMs(): number {
+  return Math.max(0, Number(process.env.FILEX_OPENWITH_GRACE_MS ?? 120_000));
+}
+/** Once a save HAS landed after the close, this much quiet is enough. */
+function openWithQuietMs(): number {
+  return Math.max(0, Number(process.env.FILEX_OPENWITH_QUIET_MS ?? 20_000));
+}
+
+const OPEN_WITH_STRINGS: Record<string, [en: string, tr: string]> = {
+  ok: ['OK', 'Tamam'],
+  notOfficeTitle: ['filex does not open this kind of file', 'filex bu tür dosyaları açmaz'],
+  notOfficeBody: ['{names}', '{names}'],
+  notOfficeDetail: [
+    'filex opens office documents ({types}) in its own editor. Everything else stays with the app you already use for it.',
+    'filex ofis belgelerini ({types}) kendi düzenleyicisinde açar. Diğer her şey zaten kullandığın uygulamada kalır.',
+  ],
+  signInTitle: ['Sign in to filex first', "Önce filex'e giriş yap"],
+  signInBody: [
+    'There is no filex account on this computer yet, so there is nowhere to open {name}.',
+    'Bu bilgisayarda henüz filex hesabı yok, bu yüzden {name} açılacak bir yer yok.',
+  ],
+  signInDetail: [
+    'Add your server in the window that just opened, then open the document again.',
+    'Az önce açılan pencereden sunucunu ekle, sonra belgeyi yeniden aç.',
+  ],
+  openFailedTitle: ['filex could not open {name}', 'filex {name} dosyasını açamadı'],
+  openFailedDetail: [
+    'The document on this computer has not been touched.',
+    'Bu bilgisayardaki belgeye dokunulmadı.',
+  ],
+  bannerScratch: [
+    'filex is editing a copy — every save is written back to {file}',
+    'filex bir kopya üzerinde çalışıyor — her kayıt {file} dosyasına geri yazılır',
+  ],
+  bannerTwin: [
+    'Synced folder — saving goes to the server, and sync brings it back to {file}',
+    'Eşitlenen klasör — kayıt sunucuya gider, eşitleme {file} dosyasına geri getirir',
+  ],
+  savedBackTitle: ['filex saved your changes', 'filex değişikliklerini kaydetti'],
+  savedBackBody: ['{name} on this computer is up to date.', 'Bu bilgisayardaki {name} güncel.'],
+  writeFailedTitle: ['filex could not save {name}', 'filex {name} dosyasını kaydedemedi'],
+  writeFailedKept: ['Your edit is safe here: {kept}', 'Düzenlemen şurada duruyor: {kept}'],
+  writeFailedLost: [
+    'The edit could not be written anywhere on this computer. Open the document in filex and download it before you quit the app.',
+    'Düzenleme bu bilgisayarda hiçbir yere yazılamadı. Uygulamadan çıkmadan önce belgeyi filex’te açıp indir.',
+  ],
+  recoveredTitle: ['filex recovered an unsaved edit', 'filex kaydedilmemiş bir düzenlemeyi kurtardı'],
+  recoveredBody: [
+    '{name} was still open when filex last closed. The newer version is next to it, as {kept}.',
+    '{name} filex en son kapandığında hâlâ açıktı. Yeni sürümü yanında {kept} olarak duruyor.',
+  ],
+  macDefaultTitle: ['Making filex the default', "filex’i varsayılan yapmak"],
+  macDefaultBody: [
+    'macOS has no way for an app to set itself as the default handler, so this is done in Finder.',
+    "macOS bir uygulamanın kendini varsayılan yapmasına izin vermez, bu yüzden bu iş Finder’dan yapılır.",
+  ],
+  macDefaultDetail: [
+    'Right-click any .docx → Get Info → "Open with" → filex → Change All…',
+    'Herhangi bir .docx dosyasına sağ tıkla → Bilgi Al → “Şununla aç” → filex → Tümünü Değiştir…',
+  ],
+};
+
+function openText(key: string, vars: Record<string, string> = {}): string {
+  const pair = OPEN_WITH_STRINGS[key];
+  const raw: string = effectiveLocale() === 'tr' ? pair[1] : pair[0];
+  return Object.entries(vars).reduce<string>((acc, [k, v]) => acc.replaceAll(`{${k}}`, v), raw);
+}
+
+/**
+ * Something the user has to be told.
+ *
+ * ⚠ Suppressed under the same flag that suppresses the browser: an unattended
+ * run cannot dismiss a native dialog, and one left open blocks the rest of the
+ * flow forever. The message still goes to the log, which is what the E2E rig
+ * reads. Same convention as pickDirectory() and askChoice().
+ */
+async function tellUser(
+  type: 'info' | 'warning' | 'error',
+  title: string,
+  message: string,
+  detail?: string,
+): Promise<void> {
+  log('openwith', `${type}: ${title}`, { message, detail });
+  if (process.env.FILEX_NO_BROWSER === '1') return;
+  await dialog
+    .showMessageBox({ type, title, message, detail, buttons: [openText('ok')] })
+    .catch(() => undefined);
+}
+
+function openWithNotify(title: string, body: string): void {
+  try {
+    if (Notification.isSupported()) new Notification({ title, body }).show();
+  } catch {
+    /* a courtesy, never a failure path */
+  }
+}
+
+function remoteCtx(acc: Account): RemoteContext {
+  return { serverUrl: acc.serverUrl, token: acc.token };
+}
+
+/** Two paths naming the same document. Case-insensitive on Windows, where
+ *  `C:\Docs\a.docx` and `c:\docs\A.DOCX` are one file. */
+function pathsEqual(a: string, b: string): boolean {
+  const norm = (p: string) => {
+    const n = path.resolve(p);
+    return process.platform === 'win32' ? n.toLowerCase() : n;
+  };
+  return norm(a) === norm(b);
+}
+
+/** Where an edit goes when it cannot go home. Under userData, not the OS temp
+ *  dir: a folder the system may empty is not a place to keep the only copy of
+ *  someone's work. */
+function openWithRecoveryDir(): string {
+  return path.join(app.getPath('userData'), 'openwith-recovered');
+}
+
+/** Documents arriving from any of the three OS routes land here. */
+function queueOpenWith(paths: string[]): void {
+  for (const p of paths) {
+    if (p && !openWithQueue.includes(p)) openWithQueue.push(p);
+  }
+  if (!openWithArmed || !openWithQueue.length) return;
+  if (openWithFlush) clearTimeout(openWithFlush);
+  openWithFlush = setTimeout(() => {
+    openWithFlush = null;
+    const batch = openWithQueue;
+    openWithQueue = [];
+    void openDocuments(batch);
+  }, OPEN_WITH_BATCH_MS);
+}
+
+/** Called once the app is ready, to release anything the OS delivered early. */
+function armOpenWith(): void {
+  openWithArmed = true;
+  if (openWithQueue.length) queueOpenWith([]);
+}
+
+async function openDocuments(paths: string[]): Promise<void> {
+  const docs: string[] = [];
+  const refused: string[] = [];
+  for (const raw of paths) {
+    const p = path.resolve(String(raw));
+    const st = await fs.promises.stat(p).catch(() => null);
+    if (!st?.isFile() || !isOfficeDocument(p)) {
+      refused.push(p);
+      continue;
+    }
+    docs.push(p);
+  }
+  if (refused.length) {
+    await tellUser(
+      'warning',
+      openText('notOfficeTitle'),
+      refused.map((p) => path.basename(p)).join('\n'),
+      openText('notOfficeDetail', { types: OFFICE_EXTENSIONS.join(', ') }),
+    );
+  }
+  if (!docs.length) return;
+
+  const acc = activeAccount(state) ?? state.accounts[0] ?? null;
+  if (!acc) {
+    openShell('/connect', 'filex — Connect');
+    await tellUser(
+      'info',
+      openText('signInTitle'),
+      openText('signInBody', { name: path.basename(docs[0]!) }),
+      openText('signInDetail'),
+    );
+    return;
+  }
+
+  for (const doc of docs) {
+    try {
+      await openOneDocument(acc, doc);
+      openWithError = null;
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      openWithError = msg;
+      log('openwith', 'open failed', { doc, error: msg });
+      await tellUser(
+        'error',
+        openText('openFailedTitle', { name: path.basename(doc) }),
+        msg,
+        openText('openFailedDetail'),
+      );
+    }
+  }
+}
+
+async function openOneDocument(acc: Account, localPath: string): Promise<void> {
+  // ⚠ One document, one editor. Double-clicking a file that is already open —
+  // easy to do, since the app does not put itself in front of you — would
+  // otherwise make a SECOND working copy of the same document, with two
+  // sessions writing back to one path: whichever saved last would win, and the
+  // other person's edit would vanish without a word.
+  const already = [...liveOpenWith.values()].find(
+    (l) => !l.closing && pathsEqual(l.record.localPath, localPath),
+  );
+  if (already && !already.window.isDestroyed()) {
+    already.window.show();
+    already.window.focus();
+    log('openwith', 'already open — focusing it', { localPath });
+    return;
+  }
+
+  const twin = resolveSyncTwin(localPath, accountPairs(acc.id));
+  if (twin) {
+    log('openwith', 'synced twin', { localPath, remote: twin.remote, pair: twin.pairId });
+    openEditorWindow(acc, twin.remote, localPath, 'twin');
+    return;
+  }
+  await openViaScratch(acc, localPath);
+}
+
+/**
+ * The account's scratch storage, discovered once and remembered.
+ *
+ * ⚠ Tries every storage rather than trusting the first. A read-only storage
+ * (an archive mount, someone else's share) is a perfectly ordinary first entry
+ * in the list, and picking it would make the feature fail for that account with
+ * a permissions error every single time.
+ */
+async function scratchStorageFor(acc: Account, ctx: RemoteContext): Promise<string> {
+  const all = await listStorages(ctx);
+  if (!all.length) throw new Error('this account has no storage to work in');
+  const ordered = acc.openWithStorage
+    ? [acc.openWithStorage, ...all.filter((s) => s !== acc.openWithStorage)]
+    : all;
+  let last: Error | null = null;
+  for (const storage of ordered) {
+    try {
+      await ensureScratchDir(ctx, storage);
+      if (acc.openWithStorage !== storage) {
+        acc.openWithStorage = storage;
+        saveState(state);
+      }
+      return storage;
+    } catch (err) {
+      last = err as Error;
+    }
+  }
+  throw last ?? new Error('no writable storage on this account');
+}
+
+async function openViaScratch(acc: Account, localPath: string): Promise<void> {
+  const ctx = remoteCtx(acc);
+  const bytes = await fs.promises.readFile(localPath);
+  const storage = await scratchStorageFor(acc, ctx);
+  const dir = scratchRemoteDir(storage);
+  const id = newSessionId();
+  const basename = scratchBasename(localPath, id);
+  await uploadFile(ctx, dir, basename, bytes);
+  const seen = await statRemote(ctx, dir, basename);
+  const now = new Date().toISOString();
+  const record: OpenWithSession = {
+    id,
+    accountId: acc.id,
+    serverUrl: acc.serverUrl,
+    storage,
+    localPath,
+    remote: scratchRemotePath(storage, basename),
+    createdAt: now,
+    updatedAt: now,
+    seen,
+    ownerPid: process.pid,
+  };
+  // ⚠ On disk BEFORE the window opens. A crash between the upload and the first
+  // save must still leave something the next start can find, clean up and — if
+  // the copy moved on — recover an edit from.
+  await sessionStore?.put(record);
+  log('openwith', 'scratch copy', { localPath, remote: record.remote });
+
+  const win = openEditorWindow(acc, record.remote, localPath, 'scratch');
+  const live: LiveOpenWith = {
+    record,
+    window: win,
+    timer: null,
+    busy: false,
+    closing: false,
+    until: 0,
+    hardUntil: 0,
+    wroteBack: false,
+  };
+  liveOpenWith.set(id, live);
+  win.on('closed', () => void beginOpenWithGrace(id));
+  live.timer = setInterval(() => void pollOpenWith(id), openWithPollMs());
+}
+
+/**
+ * The editor window.
+ *
+ * It loads the SERVER's own `/files/edit` route rather than anything of ours:
+ * that page is the product's editor, wired to OnlyOffice, Monaco and the rest
+ * through the same capability probe the web app uses. Re-implementing it here
+ * would be a second editor to keep in step with the first.
+ *
+ * ⚠ NOT the app's preload. The page is remote content; handing it the
+ * `filexApp` bridge would put account tokens and the sync engine one
+ * `window.filexApp` away from whatever that origin serves. The credential it
+ * needs arrives the same way every other request in this app gets one — the
+ * header injector in wireAuthHeaderInjection(). What it does get is a one-line
+ * preload carrying a single boolean; see preload-editor.cts for why that one
+ * cannot be an executeJavaScript after load.
+ */
+function openEditorWindow(
+  acc: Account,
+  remote: string,
+  localPath: string,
+  mode: 'scratch' | 'twin',
+): BrowserWindow {
+  const url = new URL('/files/edit', acc.serverUrl);
+  url.searchParams.set('path', remote);
+  url.searchParams.set('type', extensionOf(remote));
+  url.searchParams.set('mode', 'edit');
+
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 720,
+    minHeight: 520,
+    title: `${path.basename(localPath)} — filex`,
+    icon: ICON_PATH,
+    autoHideMenuBar: true,
+    show: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14181d' : '#ffffff',
+    webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
+  });
+  win.once('ready-to-show', () => win.show());
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    openOutward(target, win);
+    return { action: 'deny' };
+  });
+  // ⚠ The same guard the main window has, for the same reason. The editor page
+  // carries plain `<a href>` links — a download button among them — and a
+  // navigation replaces the editor with whatever that URL returns. There is no
+  // back button here, so the document the user was editing would simply be
+  // gone. Its own routes stay in the window; everything else leaves.
+  win.webContents.on('will-navigate', (e, target) => {
+    if (originOf(target) === originOf(acc.serverUrl)) return;
+    e.preventDefault();
+    openOutward(target, win);
+  });
+  // ⚠ Re-applied on EVERY load, not once. The editor route navigates within
+  // itself (a sign-in bounce, a reload after a save), and a banner that only
+  // survived the first paint would leave the user editing a copy with nothing
+  // on screen saying where it lands.
+  win.webContents.on('did-finish-load', () => {
+    const text = mode === 'twin'
+      ? openText('bannerTwin', { file: localPath })
+      : openText('bannerScratch', { file: localPath });
+    void win.webContents
+      .executeJavaScript(bannerScript(text), true)
+      .catch(() => undefined);
+  });
+  void win.loadURL(url.toString());
+  return win;
+}
+
+/** The persistent strip along the bottom of the editor window. Self-contained
+ *  and idempotent: the page is not ours, so it gets one element with one id and
+ *  no stylesheet of its own. */
+function bannerScript(text: string): string {
+  return `(() => {
+    const id = 'filex-openwith-banner';
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.style.cssText = [
+        'position:fixed','left:0','right:0','bottom:0','z-index:2147483647',
+        'padding:6px 12px','font:12px/1.4 system-ui,-apple-system,Segoe UI,sans-serif',
+        'background:#14181d','color:#e8ecf1','border-top:1px solid #2a313a',
+        'white-space:nowrap','overflow:hidden','text-overflow:ellipsis',
+        'pointer-events:none','opacity:.94',
+      ].join(';');
+      document.body.appendChild(el);
+    }
+    el.textContent = ${JSON.stringify(text)};
+  })();`;
+}
+
+/** One look at the scratch copy: newer than what we hold means an edit to bring
+ *  home. */
+async function pollOpenWith(id: string): Promise<void> {
+  const live = liveOpenWith.get(id);
+  if (!live || live.busy) return;
+  live.busy = true;
+  try {
+    const acc = state.accounts.find((a) => a.id === live.record.accountId);
+    if (!acc) return;
+    const ctx = remoteCtx(acc);
+    const dir = scratchRemoteDir(live.record.storage);
+    const basename = live.record.remote.slice(live.record.remote.lastIndexOf('/') + 1);
+    const current = await statRemote(ctx, dir, basename);
+    if (!hasChanged(live.record.seen, current)) {
+      if (live.closing && Date.now() >= live.until) await finishOpenWith(id);
+      return;
+    }
+    const bytes = await downloadFile(ctx, live.record.remote);
+    try {
+      await writeBackAtomic(live.record.localPath, bytes, { fallbackDir: openWithRecoveryDir() });
+      live.wroteBack = true;
+      log('openwith', 'wrote back', { localPath: live.record.localPath, bytes: bytes.length });
+      // A save that lands after the window is gone shortens the wait: the thing
+      // the grace period exists for has happened.
+      if (live.closing) live.until = Math.min(live.hardUntil, Date.now() + openWithQuietMs());
+    } catch (err) {
+      if (!(err instanceof WriteBackError)) throw err;
+      openWithError = err.message;
+      log('openwith', 'write-back FAILED', { error: err.message, keptAt: err.keptAt });
+      // ⚠ Loud, not logged. The user pressed save, saw no error, and their
+      // document did not change — the one outcome this feature must never
+      // deliver quietly.
+      const title = openText('writeFailedTitle', { name: path.basename(live.record.localPath) });
+      const where = err.keptAt
+        ? openText('writeFailedKept', { kept: err.keptAt })
+        : openText('writeFailedLost');
+      openWithNotify(title, where);
+      await tellUser('error', title, err.message, where);
+    }
+    // Recorded either way. Retrying the same failing write every two seconds
+    // would bury the machine in notifications and never succeed; the next
+    // genuine save produces a new fingerprint and gets its own attempt.
+    live.record.seen = current;
+    live.record.updatedAt = new Date().toISOString();
+    await sessionStore?.put(live.record);
+  } catch (err) {
+    // Network hiccup, server restart, expired token. Keep watching — the
+    // document is still on the server and the next tick may well succeed.
+    log('openwith', 'poll failed', String((err as Error)?.message ?? err));
+  } finally {
+    live.busy = false;
+  }
+}
+
+/** The editor window closed. Keep watching — see openWithGraceMs(). */
+async function beginOpenWithGrace(id: string): Promise<void> {
+  const live = liveOpenWith.get(id);
+  if (!live || live.closing) return;
+  live.closing = true;
+  const grace = openWithGraceMs();
+  live.hardUntil = Date.now() + grace;
+  live.until = live.hardUntil;
+  log('openwith', 'window closed — waiting for a final save', { id, graceMs: grace });
+  if (grace === 0) await finishOpenWith(id);
+}
+
+/** Deletes the scratch copy and forgets the session. */
+async function finishOpenWith(id: string): Promise<void> {
+  const live = liveOpenWith.get(id);
+  if (!live) return;
+  // Off the map FIRST: this can be reached from inside a poll, and a second
+  // entry into the cleanup would delete the copy twice and fire two
+  // notifications.
+  liveOpenWith.delete(id);
+  if (live.timer) clearInterval(live.timer);
+  const acc = state.accounts.find((a) => a.id === live.record.accountId);
+  if (acc) {
+    try {
+      await deleteRemote(remoteCtx(acc), scratchRemoteDir(live.record.storage), [live.record.remote]);
+    } catch (err) {
+      log('openwith', 'could not remove the scratch copy', String((err as Error)?.message ?? err));
+    }
+  }
+  await sessionStore?.remove(id);
+  log('openwith', 'session done', { id, wroteBack: live.wroteBack });
+  if (live.wroteBack) {
+    openWithNotify(
+      openText('savedBackTitle'),
+      openText('savedBackBody', { name: path.basename(live.record.localPath) }),
+    );
+  }
+}
+
+/**
+ * What a previous run left behind.
+ *
+ * Two sweeps, because there are two ways a copy is orphaned. A session record
+ * from another pid means the app died with a document open — its copy may hold
+ * an edit that never came home, so that is recovered BESIDE the original (never
+ * over it: the app was not running, and the local file may have moved on while
+ * it was gone) before the copy is removed. A copy with no record at all comes
+ * from a reinstall or a cleared profile, and is removed once it is old enough
+ * that it cannot be anybody's working copy.
+ */
+async function sweepOpenWith(): Promise<void> {
+  if (!sessionStore) return;
+  const all = await sessionStore.list();
+  const known = new Set(all.map((s) => s.remote.slice(s.remote.lastIndexOf('/') + 1)));
+
+  for (const s of staleSessions(all, { currentPid: process.pid })) {
+    const acc = state.accounts.find((a) => a.id === s.accountId);
+    if (!acc) {
+      await sessionStore.remove(s.id);
+      continue;
+    }
+    const ctx = remoteCtx(acc);
+    const dir = scratchRemoteDir(s.storage);
+    const basename = s.remote.slice(s.remote.lastIndexOf('/') + 1);
+    try {
+      const current = await statRemote(ctx, dir, basename);
+      if (needsRecovery(s, current)) {
+        const bytes = await downloadFile(ctx, s.remote);
+        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
+        const kept = recoveryPathFor(s.localPath, stamp);
+        await fs.promises.writeFile(kept, bytes);
+        log('openwith', 'recovered an edit from a previous run', { localPath: s.localPath, kept });
+        openWithNotify(
+          openText('recoveredTitle'),
+          openText('recoveredBody', { name: path.basename(s.localPath), kept: path.basename(kept) }),
+        );
+      }
+      if (current) await deleteRemote(ctx, dir, [s.remote]);
+    } catch (err) {
+      // Server unreachable at boot is normal. Keep the record — the next start
+      // will try again rather than leaking the copy forever.
+      log('openwith', 'sweep deferred', { id: s.id, error: String((err as Error)?.message ?? err) });
+      continue;
+    }
+    await sessionStore.remove(s.id);
+  }
+
+  for (const acc of state.accounts) {
+    const storage = acc.openWithStorage;
+    if (!storage) continue;
+    try {
+      const dir = scratchRemoteDir(storage);
+      const entries = (await listDir(remoteCtx(acc), dir)).filter((e) => e.type === 'file');
+      const dead = orphanScratchEntries(entries, known);
+      if (!dead.length) continue;
+      await deleteRemote(remoteCtx(acc), dir, dead.map((n) => scratchRemotePath(storage, n)));
+      log('openwith', 'removed orphaned scratch copies', { account: acc.id, count: dead.length });
+    } catch (err) {
+      log('openwith', 'orphan sweep deferred', String((err as Error)?.message ?? err));
+    }
+  }
+}
+
+// ── becoming the default handler ─────────────────────────────────────
+//
+// ⚠⚠ Registration and DEFAULT are two different things, and only one of them is
+// ours to do.
+//
+// The installer makes filex AVAILABLE for these types — a ProgId plus an
+// `OpenWithProgids` entry on Windows (build/installer.nsh), `MimeType=` in the
+// .desktop file on Linux, `CFBundleDocumentTypes` with rank `Alternate` on
+// macOS. None of those take a file type away from whatever handles it today.
+//
+// Becoming the DEFAULT is always the user's explicit act:
+//
+//   Windows — impossible programmatically, by design. Since Windows 10 the
+//     `…\FileExts\.docx\UserChoice` key is protected by a hash over the
+//     extension, the user's SID and a salt; writing it without the hash is
+//     ignored, and forging the hash is exactly the thing Microsoft built the
+//     protection to stop. So the honest move is one click away from the finish:
+//     open the OS's own Default apps page.
+//   Linux — `xdg-mime default` genuinely sets it, so the button does it.
+//   macOS — `LSSetDefaultRoleHandlerForContentType` would do it, but Electron
+//     exposes no binding for it and this app ships no native module. Finder's
+//     "Change All…" is the real answer, so the button says so.
+
+/** The desktop entry name the .deb/AppImage install, and therefore xdg-mime,
+ *  knows this app by. Mirrors `linux.executableName` in electron-builder.yml. */
+const LINUX_DESKTOP_ENTRY = 'filex.desktop';
+
+function defaultHandlerRoute(): 'settings' | 'xdg' | 'manual' {
+  if (process.platform === 'win32') return 'settings';
+  if (process.platform === 'linux') return 'xdg';
+  return 'manual';
+}
+
+async function makeFilexTheDefault(): Promise<{ route: string; ok: boolean; detail?: string }> {
+  const route = defaultHandlerRoute();
+  if (route === 'settings') {
+    // ms-settings: is a real OS handler, so this one does open — unlike the
+    // app:// and blob: URLs openOutward() refuses.
+    await shell.openExternal('ms-settings:defaultapps').catch(() => undefined);
+    return { route, ok: true };
+  }
+  if (route === 'xdg') {
+    const types = OFFICE_EXTENSIONS.map((e) => OFFICE_MIME_TYPES[e]).filter(Boolean) as string[];
+    const detail = await new Promise<string>((resolve) => {
+      execFile('xdg-mime', ['default', LINUX_DESKTOP_ENTRY, ...types], (err, _out, stderr) => {
+        resolve(err ? (stderr || err.message).trim() : '');
+      });
+    });
+    if (detail) return { route, ok: false, detail };
+    return { route, ok: true };
+  }
+  await tellUser('info', openText('macDefaultTitle'), openText('macDefaultBody'), openText('macDefaultDetail'));
+  return { route, ok: false, detail: openText('macDefaultDetail') };
+}
+
+/** What Settings needs to draw the panel honestly. */
+function openWithPublicState() {
+  return {
+    extensions: [...OFFICE_EXTENSIONS],
+    platform: process.platform,
+    defaultRoute: defaultHandlerRoute(),
+    // Associations are written by the INSTALLER. A run from source has none,
+    // and a settings panel that offered to "make it the default" there would be
+    // offering to make the OS point at a copy of Electron.
+    registered: app.isPackaged,
+    sessions: [...liveOpenWith.values()].map((l) => ({
+      id: l.record.id,
+      localPath: l.record.localPath,
+      remote: l.record.remote,
+      closing: l.closing,
+      wroteBack: l.wroteBack,
+    })),
+    lastError: openWithError,
+  };
+}
+
 function wireIpc(): void {
   ipcMain.handle('state:get', () => publicState());
 
@@ -1795,12 +2514,26 @@ function wireIpc(): void {
     };
   });
 
+  // "Open with filex" — what Settings shows, and the one button that can move
+  // the OS's own default.
+  ipcMain.handle('openwith:state', () => openWithPublicState());
+  ipcMain.handle('openwith:setDefault', () => makeFilexTheDefault());
+
   // Test-only: feed a deep link straight in. Guarded by the same env flag that
   // suppresses the browser, so it cannot be reached in a normal run.
   ipcMain.handle('test:deepLink', async (_e, url: string) => {
     if (process.env.FILEX_NO_BROWSER !== '1') throw new Error('not available');
     await handleDeepLink(url);
     return publicState();
+  });
+
+  // Test-only: the same entry point the OS uses, without the OS. Lets a run
+  // measure the document round trip without needing a registered file type on
+  // the machine it runs on.
+  ipcMain.handle('test:openWith', async (_e, paths: string[]) => {
+    if (process.env.FILEX_NO_BROWSER !== '1') throw new Error('not available');
+    await openDocuments(paths);
+    return openWithPublicState();
   });
 
 }
@@ -1813,13 +2546,27 @@ if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 } else {
   app.on('second-instance', (_e, argv) => {
-    const link = argv.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
-    if (link) void handleDeepLink(link);
-    else route();
+    // ⚠ A second launch carries EITHER a sign-in deep link OR documents to
+    // open, and until "Open with filex" existed the else-branch here was
+    // "someone ran the app again, show them the window". Double-clicking a
+    // .docx while filex was already running would have done exactly that:
+    // raise the file manager and forget the document.
+    const { deepLinks, files } = classifyArgv(argv, { defaultApp: process.defaultApp });
+    for (const link of deepLinks) void handleDeepLink(link);
+    if (files.length) queueOpenWith(files);
+    else if (!deepLinks.length) route();
   });
   app.on('open-url', (e, url) => {
     e.preventDefault();
     void handleDeepLink(url);
+  });
+  // macOS hands documents over here, not in argv — and on a COLD start it fires
+  // BEFORE `ready`, which is why queueOpenWith holds them until armOpenWith().
+  // Without the queue the very first double-click after an install is the one
+  // that silently does nothing.
+  app.on('open-file', (e, filePath) => {
+    e.preventDefault();
+    queueOpenWith([filePath]);
   });
 
   // ⚠⚠ A file manager must not die of a background error. Electron's default
@@ -1877,6 +2624,10 @@ if (!app.requestSingleInstanceLock()) {
     // promise that. Entries older than a week are swept here.
     dragCache = new DragOutCache(path.join(app.getPath('userData'), 'drag-cache'));
     void dragCache.sweep();
+    // "Open with filex" session records. Under userData for the same reason the
+    // drag cache is: a folder the OS may empty at any moment is not a place to
+    // keep the only note of where an unfinished edit has to go home to.
+    sessionStore = new SessionStore(path.join(app.getPath('userData'), 'openwith'));
     wireIpc();
     buildTray();
     // The signature check decides WHICH updater to wire, so it runs first.
@@ -1890,12 +2641,38 @@ if (!app.requestSingleInstanceLock()) {
     // A launch the user did not initiate stays in the tray. Opening a window at
     // sign-in — on top of whatever else the desktop is still restoring — is the
     // behaviour that makes people turn the setting off again.
-    if (!process.argv.includes(HIDDEN_FLAG) && !process.argv.includes(UPDATED_FLAG)) route();
-    void refreshPairs();
+    // Windows/Linux deliver BOTH the launch deep link and the documents to open
+    // as argv entries.
+    const launch = classifyArgv(process.argv, { defaultApp: process.defaultApp });
+    // ⚠ A launch that came from double-clicking a document must not also throw
+    // the file manager at the user: they asked for one window, and it is the
+    // editor. Measured against the old unconditional route(): opening a .docx
+    // put the explorer in front of it every time.
+    // ⚠ `openWithQueue` is checked too, not just argv: on macOS the documents
+    // arrived as `open-file` events that fired before this callback ran.
+    if (
+      !launch.files.length &&
+      !openWithQueue.length &&
+      !process.argv.includes(HIDDEN_FLAG) &&
+      !process.argv.includes(UPDATED_FLAG)
+    ) {
+      route();
+    }
 
-    // Windows/Linux deliver the launch deep link as an argv entry.
-    const initial = process.argv.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
-    if (initial) void handleDeepLink(initial);
+    for (const link of launch.deepLinks) void handleDeepLink(link);
+
+    // ⚠ Documents are released only AFTER the pairs are loaded. Whether a file
+    // has a synced twin is the first question openDocuments asks, and
+    // `knownPairs` is empty until refreshPairs() returns — so a cold start on a
+    // document inside a synced folder would have taken the copy-and-write-back
+    // route for a file that needed neither.
+    void refreshPairs().finally(() => {
+      queueOpenWith(launch.files);
+      armOpenWith();
+      // What a previous run left on the server: copies to remove, and edits
+      // that never made it home.
+      void sweepOpenWith();
+    });
 
     app.on('activate', () => route());
   });

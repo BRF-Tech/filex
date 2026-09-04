@@ -33,6 +33,11 @@ export default defineConfig({
       // The Vue `useRegisterSW` composable registers the SW itself; don't also
       // auto-inject a registration script or the SW registers twice.
       injectRegister: false,
+      // Service-worker registration scope. Deliberately narrower than the
+      // manifest scope below: the SW owns the offline shell for the panel and
+      // must not claim clients outside it. /drive/ (the end-user mount, see
+      // routes.go) therefore has no offline shell — it loads from the network
+      // like any other page, which is correct and not an oversight.
       scope: '/admin/',
       includeAssets: ['favicon.svg', 'icons/icon.svg'],
       manifest: {
@@ -41,7 +46,18 @@ export default defineConfig({
         short_name: 'filex',
         description: 'Self-hosted file manager: browse, upload, share and edit your files.',
         start_url: '/admin/',
-        scope: '/admin/',
+        // ⚠ '/' rather than '/admin/', and it is the MANIFEST scope only —
+        // the service-worker registration above stays pinned to '/admin/'.
+        // Manifest scope decides which navigations stay inside the installed
+        // window; since GitHub #14 a non-admin who opens the app is handed
+        // straight on to /drive/, and with a '/admin/' scope that hand-off
+        // ejects them from the installed app into a browser tab on their very
+        // first screen. Widening a scope is the safe direction (it only ever
+        // keeps more URLs in-app); narrowing one orphans installed clients.
+        //
+        // ⚠ `id` must NOT follow it. The id is the app's identity — change it
+        // and every existing install becomes a second, separate app.
+        scope: '/',
         display: 'standalone',
         orientation: 'any',
         theme_color: '#4f46e5',

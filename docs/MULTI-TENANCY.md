@@ -205,7 +205,7 @@ are unchanged.
 
 ## 10. Isolation checklist (the periphery that leaks if forgotten)
 
-- [ ] **Search (bleve)** — filter hits to the requester's accessible
+- [ ] **Search (bleve + `tag:` filters)** — filter hits to the requester's accessible
       `storage_id`s. *The #1 forgotten leak*; unfiltered search leaks content, not
       just names.
 - [ ] **All pickers server-filtered** — user directory, storage-picker,

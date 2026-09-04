@@ -10,11 +10,14 @@ filex is installing.
 
 3. Open the admin UI:
    https://{{ .Values.ingress.host }}/admin
+   The address for everyone else (same app, no admin panel):
+   https://{{ .Values.ingress.host }}/drive
 {{- else }}
 
 3. No Ingress enabled — port-forward to reach it:
    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "filex.fullname" . }} 5212:{{ .Values.service.port }}
-   open http://localhost:5212/admin
+   open http://localhost:5212/admin        # operator
+   open http://localhost:5212/drive        # everyone else
 {{- end }}
 
 Config in use:

@@ -5,7 +5,8 @@
 #
 #   docker compose -f docker-compose.minimal.yml up -d
 #   docker compose -f docker-compose.minimal.yml logs -f   # first-run admin creds
-#   open http://localhost:5212/admin
+#   open http://localhost:5212/admin   # the operator's panel
+#   open http://localhost:5212/drive   # the same file manager, for your users
 #
 # The first run prints (once) the generated admin@local password; it is also
 # saved to the filex-data volume at /data/.first-run.txt (mode 0600).

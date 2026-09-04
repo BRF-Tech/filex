@@ -12,6 +12,14 @@ Two layers combine, then a ceiling is applied:
 1. **Account role** (`users.role`): `admin` (full panel, exempt from all ACL),
    `user` (explorer only; read+write; can hold owner grants), `viewer`
    (explorer only; read-only — view/download, no edit/convert/mutate).
+
+   "Explorer only" is a URL as well as a permission: give a `user` or `viewer`
+   account the address `…/drive` and they land in the file manager — their
+   storages, uploads, sharing, search and the editor — with no admin chrome and
+   nothing extra to deploy. `…/admin` is the same application served under the
+   operator's prefix; a non-admin who follows an old `/admin/...` link is
+   handed on to `/drive/explore` (and the backend re-checks the role on every
+   `/api/admin/*` call regardless of which URL asked).
 2. **Per-storage RBAC toggle** (`storages.rbac_enabled`, default `false`):
    - OFF → storage visible to every authenticated user; capability = account
      role (user→editor, viewer→viewer, admin→owner). No grants needed.

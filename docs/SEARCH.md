@@ -5,6 +5,11 @@ filex ships an embedded **full-text index** so you can find files by name across
 of a filename and matching rows come back in a few milliseconds — the same fast
 path the explorer's toolbar search uses.
 
+Name matching is **forgiving**: `.`, `-`, `_` and a space all count as the same
+separator, every word of a multi-word query has to match, and a typo still finds
+the file. Results come back in a **defined rank order**, exact filename matches
+first. A query can also carry a **[`tag:` filter](#query-syntax)**.
+
 The index covers file **metadata** — name, path, mime type, and node type — and,
 since v0.2, the extracted **contents** of text-like files (see
 [Content search](#content-search)). It is powered by
@@ -12,10 +17,13 @@ since v0.2, the extracted **contents** of text-like files (see
 external to run: the index is a directory on disk next to filex's other data.
 
 - [How it works](#how-it-works)
+- [Query syntax](#query-syntax)
+- [Ranking](#ranking)
 - [Content search](#content-search)
 - [Configuration](#configuration)
 - [Searching — endpoints](#searching--endpoints)
 - [Admin — stats & rebuild](#admin--stats--rebuild)
+- [Upgrading an existing index](#upgrading-an-existing-index)
 - [Failure modes & troubleshooting](#failure-modes--troubleshooting)
 - [See also](#see-also)
 
@@ -31,8 +39,10 @@ Each indexed document is one filesystem node, keyed by the node's database ID:
 | Field | Source | Used for |
 |---|---|---|
 | `storage_id` | mount the node lives on | scoping results to one storage |
-| `name` | filename | the primary match target |
+| `name` | filename, verbatim | the primary match target |
 | `path` | full path within the mount | substring matches on folders |
+| `name_norm` | the filename lower-cased, with every run of non-alphanumeric characters collapsed to one space (`invoice_2026.pdf` becomes `invoice 2026 pdf`) | separator-blind and typo-tolerant matching |
+| `path_norm` | the same treatment applied to the path | separator-blind folder matches |
 | `mime` | detected mime type | stored, available to queries |
 | `type` | `file` / `dir` | stored |
 | `content` | extracted plain text (async, capped at 200 KiB) | content matches + snippets |
@@ -50,30 +60,154 @@ effort** — a failure never blocks the underlying operation:
    **outside** filex (e.g. dropped straight into an S3 bucket) become
    searchable after the next [sync](STORAGE.md#sync).
 
-**How a query runs.** Filenames tokenise awkwardly — Bleve's standard analyzer
-treats `square.jpg` as a single token because the dot isn't a word boundary. So
-a search runs **three sub-queries at once** (a disjunction) and unions the hits:
+**How a query runs.** Filenames tokenise awkwardly. Bleve's standard analyzer
+keeps `square.jpg` as one token, because a dot between two letters is not a word
+boundary — but it splits `invoice_2026.pdf` into `invoice_2026` + `pdf`, and
+`foo-bar.txt` into `foo` + `bar.txt`. Which separator a file happened to use
+therefore decided whether a search found it, and that is not a distinction any
+user can predict. So filex does not leave the decision to the analyzer: it
+indexes a **normalised** copy of the name and normalises the query the same way.
+
+A name search runs a **disjunction** of these:
 
 - a **match** query on `name` — exact-token and word-prefix hits (ranks full
   filenames like `square.jpg` well);
-- a **wildcard** `*term*` on `name` — catches mid-string substrings like `squ`
-  → `square.jpg`;
-- a **wildcard** `*term*` on `path` — matches folder segments.
+- a **wildcard** `*term*` on `name` — mid-string substrings, `squ` →
+  `square.jpg`;
+- a **wildcard** `*term*` on `path` — folder segments;
+- a **match** query on `name_norm` with **operator AND** — every word of the
+  normalised query has to be present. This is what makes `invoice 2026` find
+  `invoice_2026.pdf`;
+- one **`*word*` wildcard per word** on `name_norm` and on `path_norm`, all
+  required. The whole-term wildcards above cannot match a multi-word query at
+  all, because no indexed token contains a space — so before this, the first
+  space you typed switched half the search off. These two only run where they
+  can add something (a multi-word query, or a word normalisation changed), since
+  a leading `*` costs a full term-dictionary walk.
 
 The term is lower-cased for the wildcard sides (Bleve stores tokens lower-cased
 but does **not** analyse wildcard queries, so an upper-case term would otherwise
-miss every row). The default result cap is **50**.
+miss every row).
+
+**Typo tolerance.** If that pass comes back with fewer hits than the requested
+`limit`, a second, **fuzzy** pass runs: one edit-distance query per word, all
+required. Words of 3 characters or fewer must match exactly (one edit on a short
+word matches half a term dictionary and means nothing), 4–7 allow one edit, 8
+and over allow two. A transposition counts as **one** edit, which is why
+`mian.go` finds `main.go`. Fuzzy hits always rank below literal ones — see
+[Ranking](#ranking).
+
+The fuzzy pass is deliberately conditional. It is the cheap half of the query
+(measured on a 20 000-document index: **1.0 ms**, against **7.8 ms** for the
+wildcard scans), but always-on fuzziness pads a perfectly good result list with
+near-misses nobody asked for.
+
+The default result cap is **50**. Internally the index is asked for up to four
+times that, so the ranking has a real candidate pool to order rather than
+re-shuffling a window Bleve's raw scores had already chosen.
 
 **SQL LIKE fallback.** If the Bleve index is disabled or returns **zero** hits
-*and* the request is scoped to a specific storage, filex falls back to a plain
-`LIKE '%term%'` scan of the `nodes.name` column. This fallback is **name-only**
-and slower, but guarantees a result path even when the index is unavailable.
+*and* the request is scoped to a specific storage, filex falls back to the
+`nodes.name` column. The fallback is a different code path, not a different
+product, so it is separator-blind too: the most selective word of the query goes
+to the database as `LIKE '%word%'`, and every row that comes back is re-checked
+in Go against the **whole** normalised query. `invoice 2026` finds
+`invoice_2026.pdf` with the index switched off.
+
+Two things the fallback does not do. **Typo tolerance** — edit distance is not
+something a `LIKE` can express, and faking it with more patterns would turn one
+scan into many. And it matches on the **name** column only, so a query whose
+words appear solely in a folder name will not find it this way.
 
 **RBAC filtering.** Whichever path produced the hits, results are filtered
 through the caller's [RBAC](RBAC.md) grants before they're returned — a user
 never learns that a file exists via search if they couldn't see it by browsing.
 Snippets ride on the hit and are dropped with it, so content search can never
 leak text from a file the caller couldn't open.
+
+---
+
+## Query syntax
+
+A query is free text, optionally carrying tag filters.
+
+| You type | You get |
+|---|---|
+| `main go` | `main.go` — separators do not matter |
+| `invoice 2026` | `invoice_2026.pdf` |
+| `foo bar` | `foo-bar.txt` |
+| `mian.go` | `main.go` — one typo forgiven |
+| `report 2025` | `annual report 2025.docx` — both words must match |
+| `tag:invoice` | every file tagged `invoice` |
+| `main go tag:source` | `main.go`, but only if it carries the `source` tag |
+| `report -tag:archive` | `report…` files that are **not** tagged `archive` |
+
+**Multi-word queries narrow.** Every word has to match somewhere in the name
+(or, at a lower rank, the path). Adding a word never widens the result set.
+
+### Filtering by tag
+
+Tags are the ones you apply from the explorer and browse on the **Tagged files**
+page; the API is `POST /api/files/manager/tags`. In a search they are a
+**filter**, not a search term: `main go tag:source` does not also look for files
+called "source".
+
+| Rule | Behaviour |
+|---|---|
+| Case | Both the `tag:` prefix and the value are case-insensitive. Tags are stored lower-cased, so `TAG:Source` and `tag:source` are the same filter. |
+| Several tags | ANDed. `tag:invoice tag:2026` is the files carrying **both**. A filter narrows. |
+| Exclusion | `-tag:archive` drops any file carrying that tag. Exclusions apply after inclusions. |
+| Spaces | Quote them: `tag:"quarterly report"`. |
+| A tag that does not exist | Returns **nothing**. It is not ignored — a filter that matched nothing has an answer, and it is the empty set. A typo in a tag name shows up immediately as an empty result rather than as the whole storage. |
+| A bare `tag:` with no value | Not a filter. It stays part of the free text, so a file actually named `tag:` is still findable. |
+| Text with no tags | Unchanged behaviour. |
+| `tag:` alone, no free text | A listing of the tagged files, newest first — there is no text to rank by. |
+
+The filter is resolved against the **database**, not the search index, so a tag
+you applied a second ago filters correctly with no reindex. It is then pushed
+into the index as a document-ID set, which means `limit` counts filtered
+results: asking for 10 hits under a tag gives you 10 hits under that tag, not
+10 unfiltered hits of which some happen to qualify.
+
+> **Limit.** One tag contributes at most **10 000** nodes to a filter. Past
+> that the newest 10 000 are used (the order the tag listing returns). No
+> hand-applied tag reaches this; a machine-applied one might.
+
+Tag filtering is applied by `/api/files/search`, the explorer toolbar and the
+MCP `file_search` tool alike. Results are still passed through the caller's
+tenant scope and [RBAC](RBAC.md) grants afterwards, exactly like any other hit —
+a tag cannot be used to learn that a file exists.
+
+---
+
+## Ranking
+
+The issue that prompted the forgiving matching also asked that exact filename
+matches keep ranking first. With fuzziness in the query that stopped being
+something merged relevance scores can be trusted to deliver — a two-edit fuzzy
+hit on a short filename can out-score an exact hit on a long one — so the order
+is decided explicitly and is covered by a test.
+
+Hits are sorted by **tier** first, then by relevance score within the tier, then
+by node id so the same query always answers in the same order.
+
+| # | Tier | Means |
+|---|---|---|
+| 1 | **exact** | The filename equals the query, ignoring case and separators. The extension is compared both ways, so `report` is an exact hit on `report.txt` and `main go` is an exact hit on `main.go`. |
+| 2 | **prefix** | The filename starts with the query (`report` → `report-final.txt`). |
+| 3 | **name** | Every query word appears in the filename, but not at the start (`report` → `q1-report.txt`). |
+| 4 | **path** | Every query word appears in the **path** — a folder match (`report` → `reports/summary.txt`). |
+| 5 | **fuzzy** | Only the typo-tolerant pass produced it (`report` → `reprot.txt`). |
+| 6 | **content** | Matched inside the file, not in its name. |
+
+Tier 6 sorting last is also how the pre-v0.2 contract — **name hits before
+content-only hits** — survives: a document that matched on both keeps its name
+tier, is reported once, and carries `matched: "both"` plus its snippet.
+
+The tier is internal; it is not on the wire. The response shape is unchanged.
+
+The SQL LIKE fallback applies the same tiers in Go, so an index-less deployment
+answers in the same order rather than in `ORDER BY name`.
 
 ---
 
@@ -188,13 +322,21 @@ curl -X POST https://files.example.com/api/files/search \
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `query` | string | — | The search term. |
+| `query` | string | — | The search text. May carry `tag:` / `-tag:` filters — see [Query syntax](#query-syntax). |
 | `storage_id` | int | `0` (all) | Restrict to one storage. **Required to enable the LIKE fallback** (see below). |
 | `limit` | int | `50` | Max results. |
 | `scope` | string | `all` | `name` \| `content` \| `all` — which fields to consult (see [Content search](#content-search)). |
 
 Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ] }`,
-already RBAC-filtered. `snippet` is `""` for name-only hits.
+already RBAC-filtered and in [rank order](#ranking). `snippet` is `""` for
+name-only hits.
+
+```bash
+# free text plus a tag filter
+curl -X POST https://files.example.com/api/files/search \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{ "query": "main go tag:source", "storage_id": 3 }'
+```
 
 ### `GET /api/files/search?q=…` — same handler
 
@@ -232,6 +374,12 @@ argument (default `true`): content hits come back with `snippet` + `matched`
 fields, filtered through the same confinement-root and RBAC checks as the
 name search. `content=false` restores the pre-v0.2 name-only behavior.
 
+`q` on this surface speaks the **same query language** as the HTTP endpoints —
+separator-blind text and `tag:` / `-tag:` filters — so an agent does not have to
+learn a second, smaller syntax. Typo tolerance needs the index: with
+`content=false` or no live index, the tool answers from the same LIKE path the
+HTTP fallback uses, which is separator-blind but not fuzzy.
+
 ---
 
 ## Admin — stats & rebuild
@@ -247,7 +395,8 @@ Reports the index state:
   "enabled": true,
   "document_count": 18423,
   "index_size_bytes": 5242880,
-  "last_updated_at": ""
+  "last_updated_at": "",
+  "needs_rebuild": false
 }
 ```
 
@@ -256,6 +405,9 @@ Reports the index state:
 - `document_count` — number of indexed nodes.
 - `index_size_bytes` — on-disk size of the `search.bleve` directory.
 - `last_updated_at` — best-effort timestamp; may be blank.
+- `needs_rebuild` — `true` when the index on disk was written by an older
+  filex that did not index every field this build queries. Search still works;
+  see [Upgrading an existing index](#upgrading-an-existing-index).
 
 ### `POST /api/admin/search/rebuild`
 
@@ -288,6 +440,45 @@ Both actions are also exposed to admin tokens as the MCP tools
 
 ---
 
+## Upgrading an existing index
+
+The forgiving name matching added two indexed fields, `name_norm` and
+`path_norm`. Documents written by an older filex do not have them.
+
+**An upgrade needs no action, and search does not get worse.** The
+pre-existing sub-queries are still part of every query, precisely so that a
+document without the new fields keeps answering exactly what it answered
+before; the change adds recall, it never removes any. The separator-blind SQL
+fallback covers storage-scoped queries in the meantime, and every document
+filex writes or syncs from then on carries the new fields, so recall improves
+on its own as files change.
+
+What an un-rebuilt index cannot do for its **existing** documents is the
+typo-tolerant pass, and multi-word matching on an unscoped (`storage_id` = 0)
+query, where the fallback does not fire.
+
+filex therefore **does not rebuild by itself**. A rebuild starts from an empty
+index, and the extracted file **content** lives only there — the database holds
+no copy — so an automatic rebuild would trade a recall improvement nobody asked
+for against a content-search outage nobody was warned about. Instead the drift
+is reported:
+
+- one warning line in the log at startup, naming the endpoint to call;
+- `needs_rebuild: true` on `GET /api/admin/search/stats`.
+
+To take the improvement immediately, rebuild — with `?content=1` if you use
+content search, so extraction is re-queued in the same pass:
+
+```bash
+curl -X POST 'https://files.example.com/api/admin/search/rebuild?content=1' -b cookies.txt
+```
+
+`needs_rebuild` returns to `false` when the rebuild has run. Queries keep
+working throughout; they just see a partially populated index until it catches
+up.
+
+---
+
 ## Failure modes & troubleshooting
 
 ### A file I just uploaded doesn't show up in search
@@ -297,12 +488,13 @@ backend only appear after a sync. Normally the lag is sub-second. If a file is
 persistently missing, run a [storage sync](STORAGE.md#sync) or a
 `POST /api/admin/search/rebuild` and it will reappear.
 
-### Search feels slow, or only matches whole filenames
+### Search feels slow, or a typo finds nothing
 You're on the **SQL LIKE fallback**. That happens when `FILEX_SEARCH_ENABLED` is
 off, or the Bleve index failed to open at startup (check the logs for
-`search index open failed; falling back to SQL LIKE`). The fallback scans the
-`name` column only — no path/substring ranking. Fix the index (see next) to get
-the fast, multi-field path back.
+`search index open failed; falling back to SQL LIKE`). The fallback is
+separator-blind and handles multi-word queries, but it scans the `name` column
+only and cannot do typo tolerance. Fix the index (see next) to get the fast,
+multi-field, fuzzy path back.
 
 ### `search index open failed` in the logs
 The Bleve directory is unreadable, corrupt, or **locked** by another process.
@@ -310,10 +502,19 @@ Confirm only one filex instance points at that `index_path`, that filex can
 write it, then either restart, or delete the `search.bleve` directory and run a
 **rebuild** to recreate it cleanly.
 
-### Substring / case searches miss rows
-The multi-field disjunction (match + wildcards, lower-cased) handles most of
-this. If partial matches are silently missing while whole-name matches work,
-the most likely cause is a **stale index** — trigger a rebuild.
+### Substring, separator or typo searches miss rows
+Substring and case are handled by the wildcard sub-queries, separators by the
+normalised fields, typos by the fuzzy pass. If those are silently missing while
+whole-name matches work, check `needs_rebuild` on the stats endpoint: an index
+carried over from an older filex has documents without the normalised fields.
+See [Upgrading an existing index](#upgrading-an-existing-index). Otherwise the
+index is simply **stale** — trigger a rebuild.
+
+### A `tag:` filter returns nothing
+That is what a filter matching nothing looks like, and it is deliberate — the
+alternative is answering a mistyped tag with the entire storage. Check the tag
+exists (`GET /api/files/manager/tags?storage_id=…`, or the **Tagged files**
+page) and remember that several tags in one query are ANDed.
 
 ### After a bulk import, lots of files are unsearchable
 Bulk imports that bypass filex's write path (rsync into a local mount, mass S3

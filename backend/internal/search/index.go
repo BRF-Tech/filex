@@ -13,11 +13,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/blevesearch/bleve/v2"
+	searchpkg "github.com/blevesearch/bleve/v2/search"
 	"github.com/blevesearch/bleve/v2/search/query"
 	index "github.com/blevesearch/bleve_index_api"
 
@@ -34,9 +36,28 @@ type Index struct {
 	// index of a file whose content fingerprint drifted from what the doc
 	// already holds — the server wires it to enqueue a content_index job.
 	contentHook func(ctx context.Context, n *model.Node)
+
+	// staleSchema is set when the index on disk was written by a build
+	// with an older document schema (see indexSchemaVersion). Queries
+	// keep working: the legacy sub-queries stay in every query for
+	// exactly this reason. But documents written before the upgrade have
+	// no name_norm field, so they only answer the legacy half until they
+	// are reindexed. Surfaced as Stats().NeedsRebuild.
+	staleSchema bool
 }
 
 // Open returns an Index ready to use. Pass empty path to disable.
+//
+// Upgrade behaviour (issue #15 added two indexed fields): an index
+// written by an older build is opened AS IS and used. It is never
+// silently rebuilt — a rebuild drops extracted file content, which the
+// database does not hold a copy of, so an automatic one would trade a
+// recall improvement nobody asked for against a content-search outage
+// nobody was warned about. Instead the schema drift is recorded, logged
+// once, and reported by the admin stats endpoint so an operator can
+// choose the moment. Until then search returns everything it returned
+// before the upgrade, because the pre-#15 sub-queries are still part of
+// every query — the change adds recall, it never removes it.
 func Open(path string) (*Index, error) {
 	if path == "" {
 		return &Index{}, nil
@@ -47,13 +68,48 @@ func Open(path string) (*Index, error) {
 		if err != nil {
 			return nil, err
 		}
+		stampSchemaVersion(bx)
 		return &Index{bleve: bx, path: path}, nil
 	}
 	bx, err := bleve.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	return &Index{bleve: bx, path: path}, nil
+	idx := &Index{bleve: bx, path: path}
+	if v, err := bx.GetInternal([]byte(indexVersionKey)); err == nil && string(v) != indexSchemaVersion {
+		idx.staleSchema = true
+		slog.Warn("search index was built by an older filex; rebuild it to get separator-blind and typo-tolerant name matching on existing files",
+			slog.String("found_schema", schemaLabel(v)),
+			slog.String("want_schema", indexSchemaVersion),
+			slog.String("action", "POST /api/admin/search/rebuild?content=1"))
+	}
+	return idx, nil
+}
+
+// stampSchemaVersion records the schema of the documents this build
+// writes. Best effort: a Bleve that cannot hold the marker still serves
+// queries, it just cannot tell the operator a rebuild would help.
+func stampSchemaVersion(bx bleve.Index) {
+	if err := bx.SetInternal([]byte(indexVersionKey), []byte(indexSchemaVersion)); err != nil {
+		slog.Warn("could not stamp search index schema version", slog.String("err", err.Error()))
+	}
+}
+
+// schemaLabel renders the marker read off an index; pre-#15 indexes have
+// no marker at all, which is the common case rather than an error.
+func schemaLabel(v []byte) string {
+	if len(v) == 0 {
+		return "1 (pre-0.29, unstamped)"
+	}
+	return string(v)
+}
+
+// NeedsRebuild reports whether the on-disk index predates the current
+// document schema. See Open.
+func (i *Index) NeedsRebuild() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.staleSchema
 }
 
 // Close releases the index.
@@ -87,8 +143,18 @@ type doc struct {
 	StorageID int64  `json:"storage_id"`
 	Name      string `json:"name"`
 	Path      string `json:"path"`
-	Mime      string `json:"mime,omitempty"`
-	Type      string `json:"type"`
+	// NameNorm and PathNorm are Name/Path run through Normalize: the
+	// separator-blind form that makes `invoice 2026` find
+	// `invoice_2026.pdf` (issue #15). They are indexed with the SAME
+	// default analyzer as every other field — deliberately, because a
+	// custom field mapping is stored inside the index at creation time,
+	// so a fresh install and an upgraded one would end up analysing the
+	// same filename two different ways. Pre-normalising in Go keeps one
+	// behaviour everywhere.
+	NameNorm string `json:"name_norm,omitempty"`
+	PathNorm string `json:"path_norm,omitempty"`
+	Mime     string `json:"mime,omitempty"`
+	Type     string `json:"type"`
 	// Content is the extracted plain text (queue-fed, capped at 200 KiB);
 	// ContentSig fingerprints the source bytes it was extracted from so
 	// re-index passes can skip re-extraction when nothing changed.
@@ -130,6 +196,8 @@ func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) er
 		StorageID: n.StorageID,
 		Name:      n.Name,
 		Path:      n.Path,
+		NameNorm:  Normalize(n.Name),
+		PathNorm:  Normalize(n.Path),
 		Mime:      n.Mime,
 		Type:      string(n.Type),
 	}
@@ -161,6 +229,8 @@ func (i *Index) IndexNodeContent(_ context.Context, n *model.Node, content strin
 		StorageID:  n.StorageID,
 		Name:       n.Name,
 		Path:       n.Path,
+		NameNorm:   Normalize(n.Name),
+		PathNorm:   Normalize(n.Path),
 		Mime:       n.Mime,
 		Type:       string(n.Type),
 		Content:    content,
@@ -236,7 +306,42 @@ type Hit struct {
 	Snippet string
 	// Matched reports which side(s) hit: "name" | "content" | "both".
 	Matched string
+	// Tier is the rank bucket this hit was sorted into (issue #15). It is
+	// deliberately NOT on the wire — the HTTP response shape is frozen —
+	// but it is what makes "exact matches rank first" an assertable
+	// contract instead of a hope about merged Bleve scores.
+	Tier Tier
 }
+
+// Filter narrows a search to a set of node IDs — how the `tag:` filter
+// reaches the index without tags having to be indexed.
+//
+// Tags live in the node_meta table and change without the node itself
+// being re-indexed, so a tag copied into the Bleve document would go
+// stale the moment somebody re-tagged a file. The caller resolves the
+// tag to node IDs against the database (always current) and hands the
+// set down here, where it becomes a conjunction — so the filter runs
+// INSIDE the engine and `limit` still counts filtered results.
+type Filter struct {
+	// Restrict limits results to IncludeIDs. Restrict with an empty
+	// IncludeIDs means "the filter matched nothing", and the search
+	// honours that: a tag that does not exist returns no results rather
+	// than being quietly ignored and returning everything.
+	Restrict   bool
+	IncludeIDs []int64
+	ExcludeIDs []int64
+}
+
+// searchOverFetch is how many extra hits are pulled from Bleve so the
+// Go-side ranking has something to re-order. Without it the ranking
+// could only reshuffle a window Bleve's own scores had already chosen,
+// and an exact match that Bleve scored 60th would never reach tier 1.
+const searchOverFetch = 4
+
+// searchMaxFetch caps that over-fetch. 500 documents is far more than
+// any UI shows and keeps a pathological `limit` from turning into a
+// whole-index scan.
+const searchMaxFetch = 500
 
 // Search returns top-N name/path matches for the query string — the
 // legacy, name-scoped entry point (see SearchScoped for content search).
@@ -244,73 +349,103 @@ type Hit struct {
 // Falls back to nil result + nil error when index is disabled — callers
 // should treat that as "no search engine, do a SQL LIKE instead".
 //
-// Default mapping uses the standard analyzer, which tokenises filenames
-// like "square.jpg" as a single token because the dot isn't a word
-// boundary. To make partial matches like "squ" or "jpg" find rows we
-// run TWO queries together via a disjunction:
-//
-//   - Match (name): exact-token hits, ranks well for full filenames
-//     ("square.jpg") and word-prefix hits when there's a delimiter.
-//   - Wildcard (name): catches mid-string substrings like "squ" → finds
-//     "square.jpg" because the wildcard is anchored on both sides.
-//
-// Either query alone produced gaps in browser smoke (Match misses
-// substrings; Wildcard misses tokenised matches when the user types the
-// full name). Disjunction is fast at the index sizes we care about.
+// See nameQuery for how a query is built and Tier for how its results
+// are ordered.
 func (i *Index) Search(ctx context.Context, query string, limit int) ([]Hit, error) {
 	return i.SearchScoped(ctx, query, limit, ScopeName)
 }
 
-// SearchScoped runs the query against the requested scope. With ScopeAll
-// the name hits come first (frozen contract: geriye uyumlu sıralama), then
-// content-only hits; a doc matching on both is reported once with
-// Matched="both". Content hits carry a plain-text Snippet.
-func (i *Index) SearchScoped(_ context.Context, query string, limit int, scope Scope) ([]Hit, error) {
+// SearchScoped runs the query against the requested scope, unfiltered.
+func (i *Index) SearchScoped(ctx context.Context, query string, limit int, scope Scope) ([]Hit, error) {
+	return i.SearchFiltered(ctx, query, limit, scope, nil)
+}
+
+// SearchFiltered is SearchScoped with an optional node-ID Filter (how the
+// `tag:` filter is applied — see Filter).
+//
+// Ordering is the Tier contract, best tier first, Bleve score descending
+// within a tier, node ID as the final tiebreak so the same query always
+// comes back in the same order. Because TierContent sorts last, the
+// pre-v0.2 frozen contract — name hits before content-only hits — is
+// preserved by construction rather than by luck: a document that matched
+// on both keeps its NAME tier and stays ahead of content-only hits, and
+// is still reported once, with Matched="both" and its snippet.
+//
+// Two passes run against the name fields. The strict pass is the legacy
+// disjunction plus the separator-blind additions; the typo-tolerant pass
+// runs ONLY when the strict pass came back short of `limit`. That is both
+// the cheap and the quiet choice: fuzziness is the expensive part of the
+// query, and always-on fuzziness would pad a perfectly good result list
+// with near-misses nobody asked for.
+func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Scope, f *Filter) ([]Hit, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	i.mu.RLock()
 	bx := i.bleve
 	i.mu.RUnlock()
-	if bx == nil || query == "" {
+	if bx == nil || q == "" {
+		return nil, nil
+	}
+	if f != nil && f.Restrict && len(f.IncludeIDs) == 0 {
 		return nil, nil
 	}
 
-	var nameRes, contentRes *bleve.SearchResult
+	fetch := limit * searchOverFetch
+	if fetch > searchMaxFetch {
+		fetch = searchMaxFetch
+	}
+	if fetch < limit {
+		fetch = limit
+	}
+
+	out := make([]Hit, 0, fetch)
+	seen := map[string]int{} // doc id → position in out
+
 	if scope != ScopeContent {
-		req := bleve.NewSearchRequest(nameQuery(query))
-		req.Size = limit
-		res, err := bx.Search(req)
+		collect := func(res *bleve.SearchResult) {
+			for _, h := range res.Hits {
+				if _, dup := seen[h.ID]; dup {
+					continue
+				}
+				id, _ := strconv.ParseInt(h.ID, 10, 64)
+				seen[h.ID] = len(out)
+				out = append(out, Hit{
+					NodeID:  id,
+					Score:   h.Score,
+					Matched: MatchedName,
+					Tier:    RankName(q, hitField(h, "name"), hitField(h, "path")),
+				})
+			}
+		}
+		res, err := runNameSearch(bx, applyFilter(nameQuery(q), f), fetch)
 		if err != nil {
 			return nil, err
 		}
-		nameRes = res
+		collect(res)
+		if len(out) < limit {
+			if fq := fuzzyNameQuery(q); fq != nil {
+				res, err := runNameSearch(bx, applyFilter(fq, f), fetch)
+				if err != nil {
+					return nil, err
+				}
+				collect(res)
+			}
+		}
 	}
+
 	if scope != ScopeName {
-		cq := bleve.NewMatchQuery(query)
+		cq := bleve.NewMatchQuery(q)
 		cq.SetField("content")
-		req := bleve.NewSearchRequest(cq)
-		req.Size = limit
+		req := bleve.NewSearchRequest(applyFilter(cq, f))
+		req.Size = fetch
 		req.Highlight = bleve.NewHighlight()
 		req.Highlight.AddField("content")
 		res, err := bx.Search(req)
 		if err != nil {
 			return nil, err
 		}
-		contentRes = res
-	}
-
-	out := make([]Hit, 0, limit)
-	seen := map[string]int{} // doc id → position in out
-	if nameRes != nil {
-		for _, h := range nameRes.Hits {
-			id, _ := strconv.ParseInt(h.ID, 10, 64)
-			seen[h.ID] = len(out)
-			out = append(out, Hit{NodeID: id, Score: h.Score, Matched: MatchedName})
-		}
-	}
-	if contentRes != nil {
-		for _, h := range contentRes.Hits {
+		for _, h := range res.Hits {
 			snippet := ""
 			if frags, ok := h.Fragments["content"]; ok && len(frags) > 0 {
 				snippet = plainSnippet(frags[0])
@@ -323,16 +458,67 @@ func (i *Index) SearchScoped(_ context.Context, query string, limit int, scope S
 				continue
 			}
 			id, _ := strconv.ParseInt(h.ID, 10, 64)
-			out = append(out, Hit{NodeID: id, Score: h.Score, Snippet: snippet, Matched: MatchedContent})
+			out = append(out, Hit{NodeID: id, Score: h.Score, Snippet: snippet, Matched: MatchedContent, Tier: TierContent})
 		}
 	}
+
+	sort.SliceStable(out, func(a, b int) bool {
+		if out[a].Tier != out[b].Tier {
+			return out[a].Tier < out[b].Tier
+		}
+		if out[a].Score != out[b].Score {
+			return out[a].Score > out[b].Score
+		}
+		return out[a].NodeID < out[b].NodeID
+	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
 	return out, nil
 }
 
-// nameQuery builds the historical name+path disjunction (see Search docs).
+// runNameSearch executes one name-side pass, asking Bleve for the stored
+// name and path so the ranking can be computed in Go.
+func runNameSearch(bx bleve.Index, q query.Query, size int) (*bleve.SearchResult, error) {
+	req := bleve.NewSearchRequest(q)
+	req.Size = size
+	req.Fields = []string{"name", "path"}
+	return bx.Search(req)
+}
+
+// hitField reads a stored string field off a hit ("" when absent — an
+// index written before that field existed, which is exactly the state an
+// un-rebuilt upgrade is in).
+func hitField(h *searchpkg.DocumentMatch, name string) string {
+	if v, ok := h.Fields[name].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// nameQuery builds the name/path disjunction.
+//
+// The first three sub-queries are the pre-#15 trio, kept verbatim. They
+// are what makes this change safe to ship without a reindex: a document
+// written by an older build has no name_norm field, and would answer
+// none of the separator-blind sub-queries, but it still answers these —
+// so an operator who upgrades and does nothing gets everything they got
+// before, and a rebuild only adds.
+//
+//   - Match (name): exact-token hits; ranks full filenames well.
+//   - Wildcard *term* (name): mid-string substrings, `squ` → square.jpg.
+//   - Wildcard *term* (path): folder segments.
+//
+// The additions:
+//
+//   - Match (name_norm, operator AND): separator-blind token matching.
+//     `invoice 2026` and `invoice_2026.pdf` normalise to the same words,
+//     which is the whole bug from issue #15.
+//   - Per-word wildcards (name_norm, path_norm): the legacy wildcards
+//     above wildcard the WHOLE raw term, so the first space in a query
+//     disabled that half of the search outright — no indexed token can
+//     contain a space, so `*main go*` matched nothing, ever. Splitting
+//     into one `*word*` per word is what un-breaks multi-word queries.
 func nameQuery(term string) query.Query {
 	// Lower-case for the wildcard side: Bleve stores tokens lower-cased
 	// by default but wildcard queries are NOT analysed, so an upper-case
@@ -348,7 +534,108 @@ func nameQuery(term string) query.Query {
 	pathQ := bleve.NewWildcardQuery(wcTerm)
 	pathQ.SetField("path")
 
-	return bleve.NewDisjunctionQuery(matchQ, wildQ, pathQ)
+	parts := []query.Query{matchQ, wildQ, pathQ}
+
+	if words := NormWords(term); len(words) > 0 {
+		normMatch := bleve.NewMatchQuery(Normalize(term))
+		normMatch.SetField("name_norm")
+		normMatch.SetOperator(query.MatchQueryOperatorAnd)
+		normMatch.SetBoost(4)
+		parts = append(parts, normMatch)
+		// The per-word wildcards are the expensive half of the query: a
+		// leading `*` makes Bleve walk the whole term dictionary, and
+		// these add two more such walks on top of the two the legacy
+		// trio already does. Measured on a 20k-document index, adding
+		// them unconditionally doubled a single-word query from 7.8 ms
+		// to 15.7 ms — and bought nothing, because for a single word
+		// `*word*` on name_norm finds exactly what `*word*` on name
+		// already found. So they run only where they can add something:
+		// a multi-word query (the legacy wildcard is dead there, no
+		// indexed token contains a space) or a word the normaliser
+		// changed (`foo!` -> `foo`).
+		if len(words) > 1 || words[0] != strings.ToLower(strings.TrimSpace(term)) {
+			parts = append(parts, wordWildcards(words, "name_norm", 2), wordWildcards(words, "path_norm", 1))
+		}
+	}
+	return bleve.NewDisjunctionQuery(parts...)
+}
+
+// wordWildcards requires a `*word*` wildcard match for EVERY word — a
+// conjunction, so extra words narrow the search instead of widening it.
+// Normalize has already stripped everything that is not a letter or a
+// digit, so no word can smuggle a `*` or `?` into the pattern.
+func wordWildcards(words []string, field string, boost float64) query.Query {
+	subs := make([]query.Query, 0, len(words))
+	for _, w := range words {
+		wq := bleve.NewWildcardQuery("*" + w + "*")
+		wq.SetField(field)
+		subs = append(subs, wq)
+	}
+	c := bleve.NewConjunctionQuery(subs...)
+	c.SetBoost(boost)
+	return c
+}
+
+// fuzzyNameQuery is the typo-tolerant pass: one edit-distance query per
+// word, all required. Returns nil when the query has no alphanumeric
+// content.
+//
+// Prefix length 1 is a cost decision, not a correctness one — it stops
+// Bleve walking the whole term dictionary for every query — and it costs
+// exactly the typos that fall on a word's first character. `mian` still
+// reaches `main` because both start with `m`.
+//
+// ⚠ A word whose fuzziness works out to 0 becomes a plain TermQuery.
+// Bleve builds a Levenshtein automaton only for distance 1 or 2 and
+// rejects 0 outright — with the message "fuzziness exceeds the max
+// limit", which reads like the opposite of the actual problem and made
+// every short word fail the whole conjunction.
+func fuzzyNameQuery(term string) query.Query {
+	words := NormWords(term)
+	if len(words) == 0 {
+		return nil
+	}
+	subs := make([]query.Query, 0, len(words))
+	for _, w := range words {
+		fuzz := fuzzinessFor(w)
+		if fuzz == 0 {
+			tq := bleve.NewTermQuery(w)
+			tq.SetField("name_norm")
+			subs = append(subs, tq)
+			continue
+		}
+		fq := bleve.NewFuzzyQuery(w)
+		fq.SetField("name_norm")
+		fq.SetFuzziness(fuzz)
+		fq.SetPrefix(1)
+		subs = append(subs, fq)
+	}
+	return bleve.NewConjunctionQuery(subs...)
+}
+
+// applyFilter wraps a query in the node-ID Filter, when there is one.
+func applyFilter(q query.Query, f *Filter) query.Query {
+	if f == nil || (!f.Restrict && len(f.ExcludeIDs) == 0) {
+		return q
+	}
+	b := bleve.NewBooleanQuery()
+	b.AddMust(q)
+	if f.Restrict {
+		b.AddMust(bleve.NewDocIDQuery(docIDs(f.IncludeIDs)))
+	}
+	if len(f.ExcludeIDs) > 0 {
+		b.AddMustNot(bleve.NewDocIDQuery(docIDs(f.ExcludeIDs)))
+	}
+	return b
+}
+
+// docIDs renders node IDs as the string document IDs the index is keyed by.
+func docIDs(ids []int64) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, strconv.FormatInt(id, 10))
+	}
+	return out
 }
 
 // plainSnippet converts a Bleve highlight fragment to the wire snippet
@@ -367,7 +654,12 @@ func (i *Index) SafeSearch(ctx context.Context, query string, limit int) []Hit {
 
 // SafeSearchScoped is SearchScoped with errors logged instead of returned.
 func (i *Index) SafeSearchScoped(ctx context.Context, query string, limit int, scope Scope) []Hit {
-	hits, err := i.SearchScoped(ctx, query, limit, scope)
+	return i.SafeSearchFiltered(ctx, query, limit, scope, nil)
+}
+
+// SafeSearchFiltered is SearchFiltered with errors logged instead of returned.
+func (i *Index) SafeSearchFiltered(ctx context.Context, query string, limit int, scope Scope, f *Filter) []Hit {
+	hits, err := i.SearchFiltered(ctx, query, limit, scope, f)
 	if err != nil {
 		slog.Warn("search failed", slog.String("err", err.Error()))
 		return nil
@@ -380,6 +672,11 @@ type IndexStats struct {
 	DocCount    uint64
 	SizeBytes   int64
 	LastUpdated string
+	// NeedsRebuild is true when the index was written by a build with an
+	// older document schema. Search still works — see Open — but the
+	// documents already in it cannot answer the separator-blind or
+	// typo-tolerant half of a query until they are reindexed.
+	NeedsRebuild bool
 }
 
 // Stats returns DocCount + on-disk size for the index.
@@ -388,6 +685,7 @@ func (i *Index) Stats() IndexStats {
 	i.mu.RLock()
 	bx := i.bleve
 	path := i.path
+	out.NeedsRebuild = i.staleSchema
 	i.mu.RUnlock()
 	if bx != nil {
 		if dc, err := bx.DocCount(); err == nil {
@@ -437,8 +735,12 @@ func (i *Index) rebuildAll(ctx context.Context, store NodeLister, withContent bo
 	if err != nil {
 		return err
 	}
+	stampSchemaVersion(fresh)
 	i.mu.Lock()
 	i.bleve = fresh
+	// The rebuild is the thing that clears the drift: every row is about
+	// to be written with the current schema.
+	i.staleSchema = false
 	i.mu.Unlock()
 	// Reindex.
 	nodes, err := store.AllNodesForIndex(ctx)

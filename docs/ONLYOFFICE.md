@@ -11,7 +11,12 @@ an editor (see [What happens if it isn't configured](#what-happens-if-its-not-co
 
 It works in every surface that embeds the explorer — the web app, the
 [desktop app](DESKTOP.md), and any host page using `<filex-explorer>` — because
-they all open the same editor component against the same endpoints. There is
+they all open the same editor component against the same endpoints. The desktop
+app also feeds it documents that are **not** on the server yet: double-click an
+Office file on your own disk and it is opened here and written back to that path
+([Opening documents from your computer](DESKTOP.md#opening-documents-from-your-computer)).
+That is the case where configuring this is worth the most — a machine with no
+Office installed gets an editor for the documents already sitting on it. There is
 one thing to know about token-authenticated hosts: the editor config is fetched
 with the host's credentials, and a host that supplies its token as a *function*
 (the desktop app does, because the token changes when you switch accounts) was

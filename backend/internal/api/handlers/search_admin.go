@@ -47,6 +47,14 @@ func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 		"document_count":   stats.DocCount,
 		"index_size_bytes": stats.SizeBytes,
 		"last_updated_at":  stats.LastUpdated,
+		// needs_rebuild is how an operator finds out that an upgrade
+		// added indexed fields their documents do not have yet. Search
+		// keeps working without it (the pre-upgrade sub-queries are
+		// still part of every query), so this is an invitation, not an
+		// alarm — but an invisible invitation is no invitation, and the
+		// alternative was rebuilding on their behalf and silently
+		// dropping every file's extracted content.
+		"needs_rebuild": stats.NeedsRebuild,
 	})
 }
 

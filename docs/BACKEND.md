@@ -263,6 +263,17 @@ Returns `200 + { deleted: ["..."], failed: [{ path: "...", error: "..." }] }`.
 Bleve full-text + metadata search. Same response shape as `/api/files/manager`
 but with `path` echoing the matching entry's full path.
 
+| Param | Default | Meaning |
+|---|---|---|
+| `q` (or `query`) | — | Search text. May carry `tag:x` / `-tag:x` filters. |
+| `storage_id` | `0` (all) | Restrict to one storage. Also what enables the SQL LIKE fallback. |
+| `limit` | `50` | Max results. |
+| `scope` | `all` | `name` \| `content` \| `all`. |
+
+`POST /api/files/search` takes the same fields as a JSON body. Hits come back in
+a defined rank order — exact filename, prefix, name, path, fuzzy, then
+content-only. Full reference: [SEARCH.md](SEARCH.md).
+
 ---
 
 ## Uploads (multipart)

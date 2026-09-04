@@ -7,6 +7,7 @@ import (
 
 	"github.com/fatih/color"
 
+	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -36,6 +37,10 @@ func PrintBanner(w io.Writer, cfg config.Config, fr FirstRunCredentials, caps ma
 
 	fmt.Fprintf(w, "  %s    %s\n", bold.Sprint("Listening on:"), cfg.PublicURL)
 	fmt.Fprintf(w, "  %s        %s/admin\n", bold.Sprint("Admin UI:"), cfg.PublicURL)
+	// The URL an operator hands to everybody else. Both doors serve the same
+	// app; this is the one that does not tell an ordinary user they are inside
+	// an administrator's tool (GitHub #14).
+	fmt.Fprintf(w, "  %s        %s%s\n", bold.Sprint("Files UI:"), cfg.PublicURL, api.UserUIPrefix)
 	fmt.Fprintf(w, "  %s        %s/embed.js\n", bold.Sprint("Embed JS:"), cfg.PublicURL)
 
 	if fr.AdminEmail != "" {

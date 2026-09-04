@@ -21,6 +21,11 @@ export interface Account {
    *  first keep; every kept folder lands under it as
    *  `<syncRoot>/<storage>/<path…>`. Absent until then. */
   syncRoot?: string;
+  /** The storage "Open with filex" puts its scratch copies on, remembered after
+   *  the first document opens successfully. Without it every open re-discovers
+   *  the storage list and could settle on a different one than last time,
+   *  scattering working copies across the account. */
+  openWithStorage?: string;
 }
 
 export interface DesktopState {

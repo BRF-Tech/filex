@@ -55,7 +55,7 @@
         }
       ],
       "restart_policy": "unless-stopped",
-      "note": "Sign in at <b>/admin</b>. First run creates an admin account and prints the password <b>once</b> in the container logs unless FILEX_ADMIN_EMAIL/FILEX_ADMIN_PASSWORD are set. The /data volume holds the SQLite DB, search index and thumbnails; /srv/files is the managed files folder — edit the volume mappings to bind them to host paths."
+      "note": "Sign in at <b>/admin</b>; hand your users <b>/drive</b>, which is the same file manager without the admin panel. First run creates an admin account and prints the password <b>once</b> in the container logs unless FILEX_ADMIN_EMAIL/FILEX_ADMIN_PASSWORD are set. The /data volume holds the SQLite DB, search index and thumbnails; /srv/files is the managed files folder — edit the volume mappings to bind them to host paths."
     }
   ]
 }

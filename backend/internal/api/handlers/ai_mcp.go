@@ -181,7 +181,7 @@ type mcpMoveIn struct {
 
 type mcpSearchIn struct {
 	Path  string `json:"path,omitempty" jsonschema:"adapter:// scope for the search; empty = first storage"`
-	Query string `json:"query" jsonschema:"term to match against file/dir names (and file contents unless content=false)"`
+	Query string `json:"query" jsonschema:"text to match against file/dir names (and file contents unless content=false); separators and typos are forgiven, and tag:NAME / -tag:NAME filter by tag"`
 	// Content is a *bool so an omitted argument defaults to TRUE (the
 	// frozen v0.2 contract) while an explicit false still turns it off.
 	Content *bool `json:"content,omitempty" jsonschema:"also match inside extracted file contents and return snippets (default true)"`
@@ -372,7 +372,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_search",
-		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
+		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Name matching is forgiving: `.`, `-`, `_` and a space are interchangeable (`invoice 2026` finds `invoice_2026.pdf`), every word must match, and one typo is tolerated. A query may carry `tag:<name>` / `-tag:<name>` filters, which narrow to (or exclude) files carrying that tag; a tag that does not exist returns nothing. Results are ranked: exact filename, prefix, name, path, fuzzy, then content-only. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSearchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 		withContent := in.Content == nil || *in.Content
 		entries, err := mcpSearch(ctx, ops, idx, in.Path, in.Query, withContent)
@@ -433,10 +433,20 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 // the token's confinement root, and the bound user's RBAC grants — so a
 // snippet can never leak text the caller couldn't reach by browsing.
 func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query string, withContent bool) ([]mcpSearchEntry, error) {
-	nameEntries, err := ops.Search(ctx, p, query)
+	s, _, err := ops.resolveStorage(ctx, p)
 	if err != nil {
 		return nil, err
 	}
+	parsed := search.ParseQuery(query)
+	tagFilter, err := aiTagFilter(ctx, ops, s.Name, parsed)
+	if err != nil {
+		return nil, err
+	}
+	nameEntries, err := aiNameSearch(ctx, ops, p, parsed, tagFilter)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]mcpSearchEntry, 0, len(nameEntries))
 	if !withContent || idx == nil || !idx.Enabled() {
 		for _, e := range nameEntries {
@@ -445,10 +455,6 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 		return out, nil
 	}
 
-	s, _, err := ops.resolveStorage(ctx, p)
-	if err != nil {
-		return nil, err
-	}
 	root, confined := confine.RootFromToken(ctx)
 	var set *acl.Set
 	if ops.acl != nil {
@@ -456,7 +462,7 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 	}
 
 	seen := map[string]bool{}
-	for _, hit := range idx.SafeSearchScoped(ctx, query, 200, search.ScopeAll) {
+	for _, hit := range idx.SafeSearchFiltered(ctx, parsed.Text, 200, search.ScopeAll, tagFilter.index) {
 		n, gerr := ops.store.GetNode(ctx, hit.NodeID)
 		if gerr != nil || n == nil || n.DeletedAt != nil || n.StorageID != s.ID {
 			continue
@@ -507,3 +513,64 @@ func toolErr[T any](err error) (*mcp.CallToolResult, T, error) {
 
 // compile-time guard: AIMCP is an http.Handler.
 var _ http.Handler = (*AIMCP)(nil)
+
+// aiTagFilterSet is a resolved `tag:` filter in the two shapes the AI
+// surface needs it: as node IDs for the index, and as adapter paths for
+// aiOps.Search, whose entries carry no node ID.
+type aiTagFilterSet struct {
+	index *search.Filter
+	// allow is nil when no inclusive tag was given.
+	allow map[string]bool
+}
+
+// accepts applies the path-shaped half.
+func (f aiTagFilterSet) accepts(entryPath string) bool {
+	if f.allow == nil {
+		return true
+	}
+	return f.allow[entryPath]
+}
+
+// aiTagFilter resolves the parsed tags against the database.
+func aiTagFilter(ctx context.Context, ops *aiOps, storageName string, parsed search.Parsed) (aiTagFilterSet, error) {
+	f, tagged, err := resolveTagFilter(ctx, ops.store, parsed)
+	if err != nil {
+		return aiTagFilterSet{}, err
+	}
+	out := aiTagFilterSet{index: f}
+	if f != nil && f.Restrict {
+		out.allow = make(map[string]bool, len(tagged))
+		for _, n := range tagged {
+			out.allow[joinAdapterPath(storageName, n.Path)] = true
+		}
+	}
+	return out, nil
+}
+
+// aiNameSearch is the name half of every AI-surface search: GET
+// /api/ai/search and the MCP file_search tool both go through it.
+//
+// It exists so the two cannot drift. They used to call aiOps.Search
+// directly with the raw query, which meant `invoice 2026` found nothing
+// and `tag:source` was read as a filename — the same product answering
+// the same question differently depending on which door an agent came
+// through.
+//
+// aiOps.Search wraps its argument in its own %…%, so it gets the anchor
+// WORD and the remaining words are re-checked here: the same two-step
+// the index-less HTTP path uses.
+func aiNameSearch(ctx context.Context, ops *aiOps, p string, parsed search.Parsed, tags aiTagFilterSet) ([]aiEntry, error) {
+	plan := search.PlanFallback(parsed.Text)
+	entries, err := ops.Search(ctx, p, plan.Anchor)
+	if err != nil {
+		return nil, err
+	}
+	kept := entries[:0]
+	for _, e := range entries {
+		if !plan.Accepts(e.Name, e.Path) || !tags.accepts(e.Path) {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept, nil
+}

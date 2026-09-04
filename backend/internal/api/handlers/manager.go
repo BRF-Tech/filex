@@ -848,15 +848,39 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	crossStorage := rel == "" && len(storageNames) > 1
 	var nodes []*model.Node
 
-	// 1) Bleve.
-	if h.Index != nil {
-		hits := h.Index.SafeSearch(r.Context(), filter, 250)
+	// The toolbar is the box people actually type into, so it speaks the
+	// same query language as /api/files/search: `tag:` is parsed out as a
+	// filter and never reaches the text query. Without this, typing
+	// `tag:invoice` here would search for a FILE named "tag:invoice" and
+	// come back empty — the same feature behaving differently depending
+	// on which box you used.
+	parsed := search.ParseQuery(filter)
+	tagFilter, tagged, terr := resolveTagFilter(r.Context(), h.Store, parsed)
+	if terr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": terr.Error()})
+		return
+	}
+
+	keep := func(n *model.Node) bool {
+		if n == nil || n.DeletedAt != nil {
+			return false
+		}
+		return crossStorage || n.StorageID == s.ID
+	}
+
+	switch {
+	case parsed.HasTagFilter() && parsed.Text == "":
+		// A bare `tag:x` lists the tagged nodes; there is no text to score.
+		for _, n := range tagged {
+			if keep(n) {
+				nodes = append(nodes, n)
+			}
+		}
+	case h.Index != nil:
+		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, 250, search.ScopeName, tagFilter)
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
-			if err != nil || n == nil || n.DeletedAt != nil {
-				continue
-			}
-			if !crossStorage && n.StorageID != s.ID {
+			if err != nil || !keep(n) {
 				continue
 			}
 			nodes = append(nodes, n)
@@ -864,26 +888,34 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	}
 
 	// 2) Fall back to SQL LIKE when the index didn't return anything.
-	if len(nodes) == 0 {
+	if len(nodes) == 0 && parsed.Text != "" {
+		plan := search.PlanFallback(parsed.Text)
+		accept := func(rows []*model.Node) {
+			for _, n := range rows {
+				if plan.Accepts(n.Name, n.Path) && tagFilterAccepts(tagFilter, n.ID) {
+					nodes = append(nodes, n)
+				}
+			}
+		}
 		if crossStorage {
 			// Walk every enabled storage with the LIKE fallback.
 			storages, err := h.Store.ListEnabledStorages(r.Context())
 			if err == nil {
 				for _, st := range storages {
-					rows, err := h.Store.SearchNodes(r.Context(), st.ID, search.SQLLike(filter), 100)
+					rows, err := h.Store.SearchNodes(r.Context(), st.ID, plan.Like, 100*search.FallbackOverFetch)
 					if err != nil {
 						continue
 					}
-					nodes = append(nodes, rows...)
+					accept(rows)
 				}
 			}
 		} else {
-			fallback, err := h.Store.SearchNodes(r.Context(), s.ID, search.SQLLike(filter), 250)
+			fallback, err := h.Store.SearchNodes(r.Context(), s.ID, plan.Like, 250*search.FallbackOverFetch)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			nodes = fallback
+			accept(fallback)
 		}
 	}
 

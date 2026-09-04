@@ -10,7 +10,8 @@ Pick the path that matches how far you want to go:
 | [**App stores**](#app-stores) | Ready-made packages for Umbrel, CasaOS, Runtipi, Unraid, Portainer. | Home servers / NAS |
 | [**Binary**](#binary) | A single static binary. | No Docker, systemd, edge devices |
 
-All paths end at the same place: the admin UI at `…/admin`, with a first‑run
+All paths end at the same place: the admin UI at `…/admin` (and the same app without
+the panel, for the accounts you hand out, at `…/drive`), with a first‑run
 admin account (see [First run](#first-run)).
 
 **Images.** `ghcr.io/brf-tech/filex:latest` is the full‑featured image
@@ -90,7 +91,8 @@ docker compose -f docker-compose.full.yml --env-file .env up -d
 docker compose -f docker-compose.full.yml logs -f filex      # first-run creds
 ```
 
-Caddy fetches HTTPS certs automatically; open `https://<FILEX_DOMAIN>/admin`.
+Caddy fetches HTTPS certs automatically; open `https://<FILEX_DOMAIN>/admin` (your
+users: `https://<FILEX_DOMAIN>/drive`).
 
 **4. Wire the bundled MinIO as a storage.** Create a bucket in the MinIO console
 (`https://<MINIO_CONSOLE_DOMAIN>`), then **Storages → Add** an S3 storage:

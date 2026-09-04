@@ -1060,6 +1060,10 @@ func BuildRouter(d *Deps) http.Handler {
 	return r
 }
 
+// UserUIPrefix is the neutral, end-user mount point for the same SPA the
+// admin panel is served from. See wireStatic and GitHub #14.
+const UserUIPrefix = "/drive"
+
 // wireStatic mounts the embedded /admin SPA and the per-asset Web
 // Component bundle at /embed.js (+ neighbouring assets).
 //
@@ -1097,6 +1101,24 @@ func wireStatic(r chi.Router, fs embed.FS) {
 		filesSPA := spaHandler{root: adminFS, urlPrefix: ""}
 		r.Handle("/files/edit", filesSPA)
 		r.Handle("/files/edit/*", filesSPA)
+
+		// The end-user front door. Same bundle, neutral URL.
+		//
+		// Reported as GitHub #14: filex already has a browser-first client
+		// for ordinary accounts — a non-admin who signs in gets the file
+		// manager, not the panel — but it was reached at /admin/explore, so
+		// every user of a deployment was told by the address bar that they
+		// were inside an administrator's tool. /admin/ is untouched and every
+		// existing bookmark still resolves; vue-router picks its history base
+		// from whichever prefix served the document (web/src/router/index.ts).
+		//
+		// ⚠ /drive, not /files: `files` is already a route INSIDE the SPA
+		// (the admin file-lookup page, and /files/edit above), so a top-level
+		// /files would collide with both.
+		userSPA := spaHandler{root: adminFS, urlPrefix: UserUIPrefix}
+		r.Handle(UserUIPrefix, http.RedirectHandler(UserUIPrefix+"/", http.StatusMovedPermanently))
+		r.Handle(UserUIPrefix+"/", userSPA)
+		r.Handle(UserUIPrefix+"/*", userSPA)
 	}
 
 	webFS, err := stripPrefix(fs, "web")

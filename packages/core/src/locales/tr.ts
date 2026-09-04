@@ -3,7 +3,7 @@ export const tr: Record<string, string> = {
   'toolbar.new_folder': 'Yeni Klasör',
   'toolbar.upload': 'Yükle',
   'toolbar.search': 'Ara',
-  'toolbar.search.placeholder': 'Dosya adı…',
+  'toolbar.search.placeholder': 'Ada ya da tag: ile ara…',
   'toolbar.view.list': 'Liste',
   'toolbar.view.grid': 'Izgara',
   'toolbar.refresh': 'Yenile',
@@ -342,7 +342,7 @@ export const tr: Record<string, string> = {
     'Bu düğmeyle dosya seçebilirsin; dosyaları doğrudan pencereye sürükleyip bırakmak da çalışır.',
   'tour.step.search.title': 'Arama',
   'tour.step.search.desc':
-    'Bu kutu bulunduğun klasörü filtreler. Ctrl+K komut paleti ile tüm depolarda arama yapabilir ve komut çalıştırabilirsin.',
+    'Bu kutu deponun tamamında ada göre arar; ayraçları ve bir harflik yazım hatasını affeder, yani "fatura 2026" yazdığında fatura_2026.pdf gelir. tag:fatura yazarak etikete göre süzebilirsin. Ctrl+K komut paleti ayrıca komut da çalıştırır.',
   'tour.step.view.title': 'Görünümü değiştir',
   'tour.step.view.desc':
     'Liste ve ızgara görünümü arasında geçiş yapabilirsin; seçimin hatırlanır.',

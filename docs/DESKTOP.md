@@ -107,6 +107,79 @@ attached to any other origin.
 
 ---
 
+## Opening documents from your computer
+
+A Word, Excel or PowerPoint file **on your own disk** can be opened with filex.
+Double-click it and it opens in the editor your filex server runs — with no
+Office installed on this computer.
+
+That is the point of it. Most Linux desktops have no Microsoft Office, many Macs
+have none, and plenty of Windows machines have none either; filex already had a
+perfectly good editor, and the documents on your desktop had no way into it.
+
+**Types filex will handle:** `.docx` `.doc` `.xlsx` `.xls` `.pptx` `.ppt`
+`.odt` `.ods` `.odp` `.rtf`. Deliberately nothing else — images, PDFs and code
+already open in something on every OS, and taking a file type away from an app
+that handles it better is not an improvement.
+
+**Your server needs OnlyOffice** for the editing itself
+([OnlyOffice](ONLYOFFICE.md)). Without it the document still opens, in whatever
+viewer your server offers for that type.
+
+### What happens to the file
+
+Two things can happen, and filex picks the right one per document:
+
+| The document is… | What filex does |
+|---|---|
+| inside a folder you **keep on this computer** | Opens its twin on the server directly. Nothing is copied. Saving goes to the server, and sync brings it back down to that same file — the one on your disk. |
+| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. |
+
+In the second case a strip along the bottom of the editor window names the file
+on your disk that saves are landing on, for as long as the window is open. It is
+not decoration: you are editing a copy, and you should be able to see where it
+goes home to.
+
+**The copy is cleaned up** when the editor window closes — after a short wait,
+because OnlyOffice writes its last save about ten seconds *after* the editor
+disconnects, and deleting the copy any earlier would throw that save away.
+Deleted copies land in your account's trash like anything else you delete, and
+age out under the same retention policy.
+
+**If filex is closed or crashes while a document is open**, the copy is dealt
+with the next time the app starts. If it holds an edit that never reached your
+disk, that edit is saved *beside* your document as
+`report.filex-recovered-<time>.docx`, and you are told. It is never written over
+your file — the app was not running, and your local copy may have moved on in
+the meantime.
+
+**If a save cannot be written back** — the document is locked by another
+program, or its folder turned read-only — filex says so with a notification and
+a dialog, and names the file it kept your edit in. A save that silently fails is
+the one outcome this feature must never produce.
+
+### Making filex the app that opens them
+
+Installing filex makes it **available** under "Open with". It never takes a file
+type over by itself — that is your decision, and *Settings → Open documents with
+filex* has the button that gets you to it.
+
+| | What the button does | What it cannot do |
+|---|---|---|
+| **Windows** | Opens the OS's own **Default apps** page, where you pick filex for the type. | Set the default for you. Since Windows 10 the `UserChoice` registry key is protected by a hash over the extension, your account's SID and a Microsoft salt; an application cannot write it, and forging that hash is exactly what the protection exists to stop. An installer that appears to manage it is either overwriting the plain `.docx` ProgId behind your back or tampering. |
+| **Linux** | Runs `xdg-mime default filex.desktop …` for these types — which genuinely sets the default. | — |
+| **macOS** | Explains where: Finder → **Get Info** → *Open with* → filex → **Change All…** | Set it for you. The API exists (`LSSetDefaultRoleHandlerForContentType`) but Electron exposes no binding for it, and filex ships no native code. |
+
+On macOS filex registers with rank *Alternate* on purpose: it appears in the
+"Open with" list and never becomes the handler for a document type merely
+because nothing else has claimed it.
+
+> A run from source (`electron .`) is registered with nothing — only an
+> installed copy is. Settings says so, rather than offering a button that would
+> point your OS at a copy of Electron.
+
+---
+
 ## Language
 
 *Settings → Language* — **System**, **English** or **Türkçe**. System follows
@@ -339,6 +412,8 @@ anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
 | Which folders are paired | `~/.filex/sync/pairs.json` — shared with the CLI |
 | Sync bookkeeping + local trash | `~/.filex/sync/` |
 | Window state, account list | The app's own config directory |
+| Documents open through "Open with" | One small record per document in `openwith/` under the app's config directory — the note of which local file a working copy has to go home to. It is written before the editor opens, which is what makes a crash recoverable, and removed when the copy is cleaned up. |
+| An edit that could not be written back | `openwith-recovered/` under the app's config directory, when even the document's own folder refused the write. The dialog names the exact path. |
 
 Signing out removes the account and its token, and stops syncing its folders.
 **Your files are left exactly where they are** on both sides — unpairing is not
@@ -383,6 +458,29 @@ request was answered `401` because the app's token never reached it. Update.
 
 **"Open in new tab" does nothing** — same story, same fix: on v0.13.4 and older
 the app asked the OS to open an `app://filex` address, which no OS can act on.
+
+**Double-clicking a .docx still opens the old app** — installing filex adds it
+to the "Open with" list; it does not become the default. Pick it once: *Settings
+→ Open documents with filex* takes you to the right place on your OS. On Windows
+that page is the only place the default can be set at all.
+
+**filex says it cannot open the file** — it opens office documents only (the
+list is in *Settings*). Anything else stays with the app you already use.
+
+**"Sign in to filex first"** — the app has no account yet, so there is no server
+to open the document on. Add one and try again.
+
+**The edit did not reach my document** — filex tells you when a write-back
+fails, and names where it kept your edit. If you saw no message, look for
+`[openwith]` lines in the log
+(`%APPDATA%\@brftech\filex-desktop\logs\filex-desktop.log` on Windows): every
+upload, write-back and cleanup leaves one.
+
+**filex recovered an unsaved edit** — the app was closed or crashed while a
+document was open, and the working copy on the server was newer than the file on
+your disk. The newer version is beside your document as
+`<name>.filex-recovered-<time>.<ext>`; compare the two and keep the one you
+want. Your original was not overwritten.
 
 **The window opens on an admin panel** — you are on a build older than v0.13.0.
 Update.

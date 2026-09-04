@@ -4,6 +4,9 @@
     "tagline": "Self-hosted dosya yöneticisi",
     "admin": "Yönetim"
   },
+  "title": {
+    "admin": "{name} Yönetim"
+  },
   "install": {
     "title": "filex'i yükle",
     "subtitle": "Uygulama gibi hızlı erişim için cihazına ekle.",
@@ -117,7 +120,7 @@
   },
   "login": {
     "title": "Oturum aç",
-    "subtitle": "filex yönetim hesabınla giriş yap",
+    "subtitle": "Bu sunucudaki hesabınla giriş yap",
     "identifier": "E-posta ya da kullanıcı adı",
     "remember": "30 gün boyunca beni hatırla",
     "submit": "Giriş yap",
@@ -520,9 +523,9 @@
       "lastBuilt": "Son derleme"
     },
     "rebuild": "İndeksi yeniden oluştur",
-    "rebuildHint": "Tüm depoları gezerek dosya metadata'sını yeniden indeksler. Milyon dosya başına birkaç dakika.",
+    "rebuildHint": "Tüm depoları gezerek dosya metadata'sını yeniden indeksler. Milyon dosya başına birkaç dakika. Yükseltmeden sonra yeniden oluşturma önerildiğinde çalıştırın.",
     "rebuildStarted": "Yeniden oluşturma başladı",
-    "queryPlaceholder": "Dosya ara…",
+    "queryPlaceholder": "Dosya ara… örn. fatura 2026, tag:rapor",
     "noResults": "Eşleşme yok",
     "scope": "Arama kapsamı",
     "scopeAll": "Tümü",
@@ -591,6 +594,7 @@
     "tagline": "dosya yöneticisi",
     "loading": "Yükleniyor…",
     "noStorage": "Henüz depo eklenmedi.",
+    "noAccess": "Seninle henüz hiçbir şey paylaşılmadı. Erişim için sunucuyu yönetene sor.",
     "addStorage": "Depo ekle",
     "gotoAdmin": "Admin paneli",
     "root": "Kök",

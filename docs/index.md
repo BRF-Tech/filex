@@ -25,9 +25,14 @@ hero:
       link: https://github.com/BRF-Tech/filex
 
 features:
+  - icon: 🌐
+    title: A browser client for your users
+    details: Give someone a user or viewer account and the address …/drive, and they get the file manager itself — their storages, uploads, sharing, search and the editor — with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application.
+    link: /RBAC
+    linkText: Roles and access
   - icon: 🖥️
     title: Desktop app
-    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, and sync that keeps running when the window is closed.
+    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, sync that keeps running when the window is closed, and double-click an Office document on your own disk to edit it without Office installed.
     link: /DESKTOP
     linkText: Desktop docs
   - icon: 🪄
@@ -41,8 +46,8 @@ features:
     link: /SYNC
     linkText: Sync docs
   - icon: 🔍
-    title: Content search
-    details: Find files by name or by what is inside them — an embedded full-text index across every mounted storage.
+    title: Search that forgives
+    details: Find files by name or by what is inside them, across every mounted storage. "invoice 2026" finds invoice_2026.pdf, "mian.go" finds main.go, and tag:source narrows to what you tagged — with exact matches always ranked first.
     link: /SEARCH
     linkText: Search docs
   - icon: 🔌

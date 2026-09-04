@@ -7,6 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-04
+
+### Added
+
+- **Open an Office document that lives on your own computer, in the editor your
+  server runs.** Double-click a `.docx`, `.xlsx` or `.pptx` (ten Office types in
+  all) and the desktop app opens it — on a machine with no Office installed.
+  Most Linux desktops have none, many Macs have none, and plenty of Windows
+  machines have none either; filex already had a perfectly good editor and the
+  documents on those disks had no way into it.
+
+  Two routes, picked per document. A document inside a folder you keep on this
+  computer opens as **itself** — no copy, no write-back, saving goes to the
+  server and sync brings it down again. A *paused* pair is deliberately not
+  treated as one: the save would reach the server and never come back, and you
+  would believe you had saved. Anything else is copied to a scratch area on the
+  server, edited there, and written back over the original path on every save,
+  with a strip along the bottom of the window naming the file the whole time.
+
+  The write-back is where an editor destroys work, so: the replace is atomic
+  (temp file in the same directory, then rename — never across devices, never a
+  partial write over the document); a document deleted while it was open is not
+  resurrected, its bytes are kept beside it as `<name>.filex-recovered-<time>`;
+  a refused rename keeps the edit, says so in a dialog *and* a notification, and
+  names where it kept it; the scratch copy survives a grace period after the
+  window closes, because OnlyOffice posts its save roughly ten seconds after the
+  editor disconnects and deleting on close would discard the last edit of every
+  session; and a sweep at next start clears whatever a crash left behind.
+
+  Registration is deliberately conservative. The installer adds filex to the
+  **"Open with"** list and changes nothing that is already set: electron-builder's
+  own `fileAssociations` macro writes the *default* ProgId for each extension —
+  it takes the file type at install time, which on a machine with no Office is
+  precisely how filex would become the handler without anyone being asked — so
+  the Windows registration is hand-written instead, and macOS registers as
+  `Alternate` rather than `Default`. Making filex the default is always an
+  explicit action: `xdg-mime` does it on Linux from Settings, Windows opens the
+  default-apps pane (`UserChoice` is hash-protected and cannot be set by an
+  application, and filex does not pretend otherwise), and macOS explains the
+  Finder route. See [docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer).
+
+- **An end-user front door: `…/drive`.** A non-admin account has always landed
+  in the file manager rather than the admin panel — the router redirected them
+  out of it and every `/api/admin/*` route re-checked the role — but everything
+  around that screen said otherwise. The URL was `/admin/explore`, the browser
+  tab said "filex Admin", and the login form said *"Use your filex admin
+  credentials"*. Deploy filex for a team and each of your users was told three
+  times, before seeing a single file, that this was an administrator's tool.
+
+  The same app is now also served at `/drive`, with a per-route document title
+  and login copy written for everyone. `/admin` is untouched and every existing
+  bookmark still resolves. (Reported as #14.)
+
+- **`tag:` and `-tag:` filters in search.** Tags have been a filex feature for
+  a long time and were not in the search index at all, so `tag:invoice` searched
+  for a *file named* "tag:invoice" and came back empty. They are now a filter
+  rather than a search term, combinable with free text (`invoice 2026
+  tag:paid`), resolved against the database so a re-tag is visible immediately,
+  and applied before the result limit so `limit` counts filtered rows. A tag
+  that does not exist returns nothing — never the whole storage.
+
+- **The filex.sh landing page is in the repository**, at `site/`, deployed with
+  `scripts/sync-site.sh`, and covered by the release documentation audit. It had
+  lived only on the static host, so there was nothing to edit and nobody edited
+  it: it still described roughly v0.14 — no desktop app, no sync, no protocol
+  endpoints, no `filex mount`, no LDAP, no plugins, no search, no
+  multi-tenancy — and claimed five storage drivers when there are six plus a
+  plugin API.
+
+### Fixed
+
+- **Filename search depended on which separator the file's name used.**
+  `invoice 2026` did not find `invoice_2026.pdf`, and `main go` did not find
+  `main.go`, while `foo bar` found `foo-bar.txt` — an inconsistency with a
+  single cause. Name search was a disjunction of an analysed match and an
+  unanalysed `*term*` wildcard: the wildcard half cannot match anything once the
+  query contains a space, leaving only the analysed half, whose tokeniser splits
+  on `-` but joins on `_` and keeps `main.go` whole. So whether search worked
+  was decided by the file's punctuation.
+
+  Names are now indexed a second time in a normalised form (every run of
+  non-alphanumerics collapsed to one space) and the query is normalised the same
+  way, so `.`, `-`, `_` and a space are interchangeable. Multi-word queries
+  require one `*word*` wildcard per word instead of one over the whole string.
+  The normalisation is done in Go rather than as a Bleve field mapping on
+  purpose: a mapping is frozen into the index when it is created, so a fresh
+  install and an upgraded one would have analysed the same filename two
+  different ways. (Reported as #15.)
+
+- **One typo is now forgiven.** `mian.go` finds `main.go`. The fuzzy pass runs
+  only when the strict pass came back short of the limit, and its hits rank
+  below every exact and prefix match. Edit distance scales with word length
+  (none at three characters or fewer, one up to seven, two above).
+
+- **Ranking is now decided, not inherited.** The order is exact filename →
+  prefix → name → path → fuzzy → content, asserted by a test. It had been
+  whatever merging two queries' relevance scores produced: measured before this
+  change, `report-final.txt` ranked *above* `report.txt` for the query `report`.
+  Exact matching compares the name both with and without its extension.
+
+- **The same query meant different things in different boxes.** `GET
+  /api/ai/search` and the MCP `file_search` tool passed the raw string through,
+  so `tag:source` was read there as a filename and `invoice 2026` found nothing
+  — while the toolbar and `/api/files/search` understood both. All four now
+  share one parser and one fallback plan.
+
+- **The explorer's onboarding tour described a search that does not exist.** It
+  said "This box filters the current folder"; the toolbar search covers the
+  whole storage, and every storage when the multi-storage root is open. Its
+  placeholder said "File name". Both were wrong before this release and are
+  fixed in the shared component, so every surface gets the correction.
+
+- **The explorer told a non-admin to configure a storage.** With no visible
+  storage it showed "No storages configured yet" — for a `user` account that
+  almost always means nothing has been *shared* with them, so it sent people to
+  fix something they have no permission to fix.
+
+- **An installed PWA ejected itself into a browser tab.** The manifest scope was
+  `/admin/`, so the first navigation to the new `/drive` front door left the
+  installed app. The manifest scope now covers both; the service worker's scope
+  and the manifest `id` are deliberately unchanged (a changed `id` turns every
+  existing install into a second app).
+
 ## [0.28.0] - 2026-09-03
 
 ### Fixed

@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -244,9 +245,26 @@ func (h *AI) Move(w http.ResponseWriter, r *http.Request) {
 }
 
 // Search → GET /api/ai/search?path=<adapter://>&q=…
+//
+// Goes through aiNameSearch rather than aiOps.Search so this speaks the
+// same query language as the MCP file_search tool and the web endpoints:
+// separator-blind text and `tag:` filters. The response shape is
+// unchanged — entries, no snippets; content search stays on the MCP tool.
 func (h *AI) Search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	entries, err := h.ops.Search(r.Context(), q.Get("path"), q.Get("q"))
+	p := q.Get("path")
+	parsed := search.ParseQuery(q.Get("q"))
+	s, _, err := h.ops.resolveStorage(r.Context(), p)
+	if err != nil {
+		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	tags, err := aiTagFilter(r.Context(), h.ops, s.Name, parsed)
+	if err != nil {
+		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	entries, err := aiNameSearch(r.Context(), h.ops, p, parsed, tags)
 	if err != nil {
 		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
 		return

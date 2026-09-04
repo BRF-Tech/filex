@@ -55,7 +55,15 @@ describe('PWA install surface', () => {
       expect(res.headers['content-type']).to.include('manifest');
       expect(res.body.name).to.contain('filex');
       expect(res.body.start_url).to.eq('/admin/');
-      expect(res.body.scope).to.eq('/admin/');
+      // ⚠ `id`, not `scope`, is what pins the app's identity — assert on it,
+      // because changing it turns every existing install into a second app.
+      expect(res.body.id).to.eq('/admin/');
+      // The MANIFEST scope is deliberately wider than the service worker's
+      // (see vite.config.ts). Since GitHub #14 a non-admin who opens the app
+      // is handed on to /drive/, and a '/admin/' manifest scope would eject
+      // them from the installed window on their very first screen. The SW
+      // registration below stays pinned to /admin/.
+      expect(res.body.scope).to.eq('/');
       expect(res.body.display).to.eq('standalone');
       expect(res.body.icons).to.have.length.greaterThan(0);
       const purposes = res.body.icons.map((i: { purpose: string }) => i.purpose);

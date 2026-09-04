@@ -63,6 +63,32 @@ linux:
   # Defaults to the npm name otherwise, which would be "@brftech/filex-desktop"
   # — not a legal Debian package name.
   executableName: filex
+  # ── "Open with filex" ───────────────────────────────────────────────
+  # The office documents this app can open. desktop/src/openwith.ts
+  # (OFFICE_EXTENSIONS / OFFICE_MIME_TYPES) is the source; a YAML file cannot
+  # import TypeScript, so the two lists are kept in step by hand and the code
+  # says so where it defines them.
+  #
+  # ⚠ `mimeTypes`, NOT `fileAssociations`. These are standard types that
+  # shared-mime-info already defines on every desktop; `fileAssociations` would
+  # additionally ship OUR OWN `<mime-type>` XML redeclaring them with our own
+  # glob — a second opinion about what a `.docx` is, on a system that already
+  # has one. All this app needs to say is that it can open them.
+  #
+  # ⚠ This makes filex APPEAR under "Open with". It does not make it the
+  # default: that lives in the user's `mimeapps.list`, and Settings has a button
+  # that runs `xdg-mime default` for exactly these types when they ask for it.
+  mimeTypes:
+    - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    - application/msword
+    - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    - application/vnd.ms-excel
+    - application/vnd.openxmlformats-officedocument.presentationml.presentation
+    - application/vnd.ms-powerpoint
+    - application/vnd.oasis.opendocument.text
+    - application/vnd.oasis.opendocument.spreadsheet
+    - application/vnd.oasis.opendocument.presentation
+    - application/rtf
 win:
   target:
     - nsis
@@ -77,6 +103,33 @@ mac:
     - dmg
     - zip
   category: public.app-category.productivity
+  # ── "Open with filex" ───────────────────────────────────────────────
+  # CFBundleDocumentTypes: what shows up in Finder's "Open with" menu.
+  #
+  # ⚠⚠ `rank: Alternate`, deliberately — NOT the `Default` electron-builder
+  # would otherwise write. `Owner`/`Default` tells LaunchServices this app is a
+  # or the natural handler for `.docx`, and on a Mac with nothing else claiming
+  # the type that is enough for macOS to hand it over WITHOUT the user ever
+  # choosing. Installing an app must never quietly take a file type; `Alternate`
+  # says "offer me in the list", which is the whole of what is wanted here.
+  # Becoming the default stays a Finder → Get Info → "Change All…" decision, and
+  # Settings says so rather than pretending it can do it (LaunchServices' API
+  # for it has no Electron binding, and this app ships no native module).
+  fileAssociations:
+    - ext:
+        - docx
+        - doc
+        - xlsx
+        - xls
+        - pptx
+        - ppt
+        - odt
+        - ods
+        - odp
+        - rtf
+      name: Office document
+      role: Editor
+      rank: Alternate
 
 # Unsigned macOS builds get a deep ad-hoc re-seal (see the script for why a
 # half-signed bundle reads as MALWARE to macOS 26 while an ad-hoc-sealed one

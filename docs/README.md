@@ -53,14 +53,16 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Features
 
 - [Desktop app](DESKTOP.md) — Windows/Linux/macOS app: multiple accounts, background sync,
-  [dragging files out onto the desktop](DESKTOP.md#dragging-files-out)
+  [dragging files out onto the desktop](DESKTOP.md#dragging-files-out),
+  [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer)
 - [Folder sync](SYNC.md) — how a folder on your PC is kept in step with the server
 - [Uploads](UPLOADS.md) — the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
 - [Sharing & file requests](SHARING.md) — public download links + upload/file‑drop;
   the maximum link life, and how the folder-ZIP cache is bounded
 - [Thumbnails](thumbnails.md) — image / video / pdf / office previews
-- [Search](SEARCH.md) — embedded full‑text index
+- [Search](SEARCH.md) — embedded full‑text index: forgiving filename
+  matching (separators, several words, typos), ranked results, `tag:` filters
 - [Notifications](NOTIFICATIONS.md) — webhook + in‑app bell
 - [Trash & versioning](TRASH-VERSIONING.md) — soft‑delete/restore + file history
 - [Replication](REPLICATION.md) — primary→replica mirroring & reconcile

@@ -32,7 +32,8 @@ docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:latest
 ```
 
 Open http://localhost:5212/admin — the first run prints admin credentials and embed
-instructions to the console.
+instructions to the console. That URL is the operator's; the people you give accounts to
+get **http://localhost:5212/drive**, the same file manager without the panel around it.
 
 Prefer a window over a browser tab? The **desktop app** (Windows / Linux) signs in to
 any filex server and syncs folders in the background:
@@ -44,6 +45,10 @@ any filex server and syncs folders in the background:
 Most self-hosted file managers are either **too small** (a directory listing with uploads)
 or **too big** (a groupware suite you deploy for the file tab). filex aims at the gap:
 
+- **A browser client for your users, not just for you** — hand someone a `user` or
+  `viewer` account and `…/drive` and they get the file manager itself: their storages,
+  uploads, sharing, search, the editor. No admin panel to walk through, no separate
+  frontend to deploy. `…/admin` is the operator's door to the same app.
 - **Embeds anywhere** — the same UI ships as a Vue 3 component, a React component and a
   framework-agnostic `<filex-explorer>` web component. Put a real file manager inside
   *your* product, backed by your own filex server and locked to a per-tenant folder.
@@ -141,6 +146,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 ═══════════════════════════════════════════════════════════════
   Listening on:   http://0.0.0.0:5212
   Admin UI:       http://0.0.0.0:5212/admin
+  Files UI:       http://0.0.0.0:5212/drive
   Embed JS:       http://0.0.0.0:5212/embed.js
 
   First run detected. Initial admin user created:
@@ -223,6 +229,11 @@ UI and the embeds render, not a separate half-copy:
   ways while the app sits in the tray: parallel transfers and listings, a first run that
   resumes where it was interrupted, 30-day local trash, and an engine that refuses to
   turn a missing folder into a mass delete ([docs/SYNC.md](docs/SYNC.md)).
+- **Opens Office documents off your own disk** — double-click a `.docx`/`.xlsx`/`.pptx`
+  (or any of the ten Office types) and it opens in the editor your server runs, on a
+  machine with no Office installed. A document inside a folder you keep on this computer
+  opens as itself; anything else is copied up, edited, and written back over the original
+  ([docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)).
 - **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
 - **Updates itself** — downloads quietly, installs on quit; `FILEX_NO_UPDATE=1` opts out.
 
@@ -272,7 +283,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings.
 - **Sharing** — public links with PIN, expiry and max-downloads, under an admin-set **maximum link life** (default 7 days — the dialog only offers what the server will keep); folder links stream as ZIP (cached, pre-warmed up to a size ceiling, swept after a week); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint ([docs/SHARING.md](docs/SHARING.md)).
-- **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
 - **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
 - **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
@@ -286,7 +297,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Viewers & editors** — image/video/audio, PDF, Markdown (split editor + preview), CSV, code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models.
 - **Universal converter** — optional side-car converts between document/image formats from the UI.
 - **Notifications** — generic JSON webhook (Slack/Discord-agnostic) + in-app bell with read/unread + per-user mute matrix.
-- **Search** — Bleve embedded, full-text + metadata, permission-aware.
+- **Search** — Bleve embedded, full-text + metadata, permission-aware. Separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`), `tag:` filters, exact matches ranked first.
 - **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware.
 - **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there.
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.

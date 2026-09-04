@@ -1,13 +1,47 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
+import { applyDocumentTitle } from '@/lib/documentTitle';
 
 import AdminLayout from '@/components/AdminLayout.vue';
 
+// The SPA is served from TWO prefixes (backend/internal/api/routes.go →
+// wireStatic). Same bundle, same routes; only the address bar differs.
+//
+//   /admin/  the operator's front door — unchanged, every old bookmark works
+//   /drive/  the end-user's front door
+//
+// Reported as GitHub #14: a non-admin who signed in landed on /admin/explore
+// with the whole file manager open and no admin chrome, and was still told
+// three times before reaching a file that this was an administrator's tool —
+// by the URL, by the tab title and by the login form. The product was right;
+// the signposting was not.
+export const ADMIN_BASE = '/admin/';
+export const USER_BASE = '/drive/';
+
+// Which prefix served THIS document. Read once, at module load, because that
+// is exactly what vue-router's history base has to be: the base is baked into
+// every push, so a router booted on /admin/ can never produce a /drive/ URL.
+// The existing /files/edit carve-out proves it — a browser sent to the bare
+// /files/edit has its address rewritten to /admin/files/edit the moment the
+// router hydrates (measured 2026-09-04, before this change).
+const mountBase =
+  typeof window !== 'undefined' &&
+  (window.location.pathname === '/drive' || window.location.pathname.startsWith(USER_BASE))
+    ? USER_BASE
+    : ADMIN_BASE;
+
+/** True when this document was served from the end-user prefix. */
+export function onUserBase(): boolean {
+  return mountBase === USER_BASE;
+}
+
 const routes: RouteRecordRaw[] = [
   {
+    // Two front doors, two answers: /admin/ opens the panel, /drive/ opens
+    // the files. Everything below this is shared between them.
     path: '/',
-    redirect: { name: 'dashboard' },
+    redirect: () => (onUserBase() ? { name: 'explore' } : { name: 'dashboard' }),
   },
   {
     path: '/login',
@@ -250,13 +284,14 @@ const routes: RouteRecordRaw[] = [
   {
     // Catch-all so unknown URLs don't 404 inside the SPA.
     path: '/:pathMatch(.*)*',
-    redirect: { name: 'dashboard' },
+    redirect: () => (onUserBase() ? { name: 'explore' } : { name: 'dashboard' }),
   },
 ];
 
 const router = createRouter({
-  // Vite serves the SPA from /admin/, so the router base mirrors the build base.
-  history: createWebHistory('/admin/'),
+  // Whichever prefix served this document. Vite's build `base` stays '/admin/'
+  // — asset URLs are absolute, so the same index.html works from either mount.
+  history: createWebHistory(mountBase),
   routes,
   scrollBehavior(_to, _from, saved) {
     return saved ?? { top: 0 };
@@ -297,10 +332,26 @@ router.beforeEach(async (to) => {
   // Admin-panel routes are admin-only. Non-admin accounts (user/viewer) get
   // the explorer instead — they never see the panel chrome.
   if (to.meta.requiresAdmin && !auth.isAdmin) {
+    if (!onUserBase()) {
+      // ⚠ A real navigation, not a router redirect. vue-router prefixes every
+      // push with the base it booted on, so `return { name: 'explore' }` from
+      // an /admin/ document lands the user on /admin/explore — the exact URL
+      // GitHub #14 is about. Reloading is safe for the flows that cross this
+      // line: a desktop pairing is stashed in sessionStorage a few lines up
+      // and sessionStorage survives a same-tab navigation (measured), and the
+      // explorer's remembered folder lives in localStorage.
+      window.location.replace(`${USER_BASE}explore`);
+      return false;
+    }
     return { name: 'explore' };
   }
 
   return true;
+});
+
+// The tab used to read "filex Admin" on every route — see lib/documentTitle.
+router.afterEach((to) => {
+  applyDocumentTitle(to);
 });
 
 export default router;

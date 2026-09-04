@@ -36,7 +36,7 @@ await build({
 
 // Preloads must be CommonJS: they run in a sandboxed context that has no ESM
 // loader, which is why they are .cts in the first place.
-for (const name of ['preload-app', 'preload-shell']) {
+for (const name of ['preload-app', 'preload-shell', 'preload-editor']) {
   await build({
     ...common,
     entryPoints: [`src/${name}.cts`],

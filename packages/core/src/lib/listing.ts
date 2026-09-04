@@ -19,14 +19,22 @@ export function stripAdapter(p: string): string {
 
 /**
  * Hide system/internal entries the user must never see as files:
- * thumbnails, version history, the soft-delete store, keepdir markers
- * and the E2E marker. Shared by both panes' listing filters.
+ * thumbnails, version history, the soft-delete store, keepdir markers,
+ * the desktop app's open-with scratch area and the E2E marker. Shared by
+ * both panes' listing filters.
  */
 export function filterInternalEntries(files: FileNode[]): FileNode[] {
   return (files || []).filter((f) => {
     if (f.path.includes('.thumbs')) return false;
     if (f.path.includes('.versions') || f.basename === '.versions') return false;
     if (f.basename === '.trash') return false;
+    // The desktop app's "open this document with filex" scratch area. Real
+    // files live in it for the length of one editing session, but they are the
+    // app's plumbing, not the user's documents -- and a user who has switched
+    // hidden files on is asking to see their OWN dotfiles, not ours. Hidden
+    // absolutely, like .filex-trash and .versions; stale copies are swept by
+    // the desktop app itself, not by hand.
+    if (f.basename === '.filex-open') return false;
     if (f.basename === '.keepdir') return false;
     if (f.basename === E2E_MARKER_NAME) return false;
     return true;

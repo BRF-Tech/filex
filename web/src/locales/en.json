@@ -4,6 +4,9 @@
     "tagline": "Self-hosted file manager",
     "admin": "Admin"
   },
+  "title": {
+    "admin": "{name} Admin"
+  },
   "install": {
     "title": "Install filex",
     "subtitle": "Add it to your device for quick, app-like access.",
@@ -117,7 +120,7 @@
   },
   "login": {
     "title": "Sign in",
-    "subtitle": "Use your filex admin credentials",
+    "subtitle": "Sign in with your account on this server",
     "identifier": "E-mail or username",
     "remember": "Stay signed in for 30 days",
     "submit": "Sign in",
@@ -520,9 +523,9 @@
       "lastBuilt": "Last built"
     },
     "rebuild": "Rebuild index",
-    "rebuildHint": "This walks every storage and re-indexes file metadata. Takes a few minutes per million files.",
+    "rebuildHint": "This walks every storage and re-indexes file metadata. Takes a few minutes per million files. Run it after an upgrade that reports a rebuild is recommended.",
     "rebuildStarted": "Rebuild started",
-    "queryPlaceholder": "Search files…",
+    "queryPlaceholder": "Search files… e.g. invoice 2026, tag:report",
     "noResults": "No matches",
     "scope": "Search scope",
     "scopeAll": "All",
@@ -591,6 +594,7 @@
     "tagline": "file manager",
     "loading": "Loading…",
     "noStorage": "No storages configured yet.",
+    "noAccess": "Nothing has been shared with you yet. Ask whoever runs this server for access.",
     "addStorage": "Add storage",
     "gotoAdmin": "Admin panel",
     "root": "Root",

@@ -464,6 +464,31 @@
         'set.language_sub':     ['Applies to this window, the tray menu and the file list.',
                                  'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
         'set.language_system':  ['System', 'Sistem'],
+        'ow.title':             ['Open documents with filex', 'Belgeleri filex ile aç'],
+        'ow.idea':              ['Double-click a Word, Excel or PowerPoint file and it opens here, in the editor your filex server runs — no Office needed on this computer.',
+                                 'Bir Word, Excel ya da PowerPoint dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın — bu bilgisayarda Office gerekmez.'],
+        'ow.types':             ['Handles: {types}', 'Açtığı türler: {types}'],
+        'ow.registered':        ['filex is listed under "Open with" for these files.',
+                                 'filex bu dosyalar için “Birlikte aç” listesinde görünür.'],
+        'ow.dev':               ['Only the installed app is registered with the system — a run from source is not.',
+                                 'Sisteme yalnızca kurulu uygulama kayıtlıdır — kaynaktan çalıştırma kayıtlı değildir.'],
+        // ⚠ The Windows wording is not hedging. Choosing the default handler is
+        // the user's act, in the OS, and no application can perform it for them
+        // — a button that claimed to would be a button that does nothing.
+        'ow.default_win':       ['Windows only lets you choose the default app yourself. This opens the page where you do it.',
+                                 'Varsayılan uygulamayı yalnızca sen seçebilirsin; Windows bu izni uygulamalara vermez. Bu düğme o sayfayı açar.'],
+        'ow.default_linux':     ['Sets filex as the default for these documents on this desktop.',
+                                 'Bu masaüstünde bu belgeler için varsayılanı filex yapar.'],
+        'ow.default_mac':       ['macOS sets this in Finder — Get Info → Open with → Change All. This explains where.',
+                                 'macOS bunu Finder’dan ayarlar — Bilgi Al → Şununla aç → Tümünü Değiştir. Bu düğme nereden yapılacağını anlatır.'],
+        'ow.default_btn_win':   ['Open Default apps', 'Varsayılan uygulamaları aç'],
+        'ow.default_btn_linux': ['Make filex the default', 'Varsayılanı filex yap'],
+        'ow.default_btn_mac':   ['How to do it', 'Nasıl yapılır'],
+        'ow.default_done':      ['Done — filex is the default for these documents.',
+                                 'Tamam — bu belgeler için varsayılan artık filex.'],
+        'ow.default_failed':    ['That did not work: {err}', 'Bu işe yaramadı: {err}'],
+        'ow.open_now':          ['Being edited right now', 'Şu anda düzenleniyor'],
+        'ow.writes_to':         ['saves go to {file}', 'kayıtlar {file} dosyasına gider'],
         'upd.title':            ['Updates', 'Güncellemeler'],
         'upd.idea':             ['filex updates itself in the background — while you are away, or when you quit. No installer, nothing to click.',
                                  'filex kendini arka planda günceller — bilgisayar başında değilken ya da çıkışta. Kurulum ekranı yok, tıklayacağın bir şey yok.'],
@@ -911,9 +936,62 @@
             <button id="login-item" ${state.launchAtLoginSupported === false ? 'disabled' : ''}>${
               esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
           </div></div>
+          ${openWithCard()}
           <h2>${esc(T('upd.title'))}</h2>
           ${updateCard()}
           <p class="muted">filex ${esc(state.appVersion || '')}</p>`;
+      }
+
+      // ── "Open with filex" ─────────────────────────────────────
+      //
+      // ⚠ Registration and DEFAULT are two different things and the panel says
+      // so, because the app cannot pretend otherwise: the installer makes filex
+      // AVAILABLE under "Open with", and only the person at the keyboard can
+      // make it the default. On Windows that is not a policy this app chose —
+      // the UserChoice key is hash-protected precisely so that no installer can
+      // grab a file type — so the button opens the OS page instead of claiming
+      // to have done something.
+      let owState = null;
+      let owJson = '';
+
+      function refreshOpenWith() {
+        if (!window.filexApp.openWith) return;
+        window.filexApp.openWith().then((s) => {
+          const j = JSON.stringify(s);
+          if (j === owJson) return; // ⚠ no re-render on an identical answer, or
+          owJson = j;               //   renderSettings would call this forever
+          owState = s;
+          if ($('#settings').classList.contains('open')) renderSettings();
+        }).catch(() => {});
+      }
+
+      function openWithCard() {
+        const ow = owState;
+        if (!ow) return '';
+        const route = ow.defaultRoute;
+        const hint = route === 'settings' ? 'ow.default_win'
+          : route === 'xdg' ? 'ow.default_linux' : 'ow.default_mac';
+        const btn = route === 'settings' ? 'ow.default_btn_win'
+          : route === 'xdg' ? 'ow.default_btn_linux' : 'ow.default_btn_mac';
+        const live = (ow.sessions || []).map((s) => `
+          <div class="muted" style="overflow-wrap:anywhere">${esc(s.localPath)}</div>`).join('');
+        return `
+          <h2>${esc(T('ow.title'))}</h2>
+          <div class="card">
+            <div>${esc(T('ow.idea'))}</div>
+            <div class="muted" style="margin-top:6px">${
+              esc(T('ow.types', { types: (ow.extensions || []).map((e) => '.' + e).join('  ') }))}</div>
+            <div class="muted">${esc(T(ow.registered ? 'ow.registered' : 'ow.dev'))}</div>
+          </div>
+          <div class="card"><div class="between">
+            <div style="min-width:0">
+              <div class="muted">${esc(T(hint))}</div>
+              ${ow.lastError ? `<div class="err">${esc(ow.lastError)}</div>` : ''}
+            </div>
+            <button id="ow-default">${esc(T(btn))}</button>
+          </div></div>
+          ${live ? `<div class="card">
+            <div><strong>${esc(T('ow.open_now'))}</strong></div>${live}</div>` : ''}`;
       }
 
       /** The update row: what the app knows, plus the one button that matters. */
@@ -1014,6 +1092,18 @@
           state = await window.filexApp.setSettings({ launchAtLogin: !state.launchAtLogin });
           renderSettings();
         });
+        const owBtn = $('#ow-default', el);
+        if (owBtn) owBtn.addEventListener('click', async () => {
+          const r = await window.filexApp.openWithSetDefault();
+          // Only the Linux route actually performs the change, so it is the
+          // only one with a result worth reporting. The other two hand the user
+          // to the OS and have nothing to claim.
+          if (r && r.route === 'xdg') {
+            alert(r.ok ? T('ow.default_done') : T('ow.default_failed', { err: r.detail || '' }));
+          }
+          refreshOpenWith();
+        });
+        refreshOpenWith();
       }
 
       // ── storage connections ───────────────────────────────────

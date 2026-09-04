@@ -5,7 +5,7 @@ that keeps local folders in step with the server in the background.
 
 What it is **not** is the admin panel in a frame. The window embeds
 `<filex-explorer>` — the same web component every other surface embeds — and the
-app adds the four things a browser tab cannot do:
+app adds the five things a browser tab cannot do:
 
 1. **Several accounts at once.** A rail down the left switches between servers
    (and tenants); each keeps its own token, branding and sync pairs.
@@ -17,6 +17,10 @@ app adds the four things a browser tab cannot do:
    supervised by the app and shipped inside it (`build/bin/filex`), so the app
    and a terminal act on one implementation and one pairing file.
 4. **It keeps itself up to date, quietly.** See *Updates* below.
+5. **It can be the app that opens a document.** Double-click a `.docx` on the
+   disk and it opens in the server's OnlyOffice editor, with the edits written
+   back over the local file — see *Open with filex* below. A browser tab cannot
+   be a file handler at all.
 
 Settings also opens a full-screen **Connections** surface, and that too is the
 shared component (`<filex-connections>`) rather than an app-specific screen: it
@@ -35,8 +39,12 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 | `src/accounts.ts` | Accounts + settings, `safeStorage`-encrypted at `<userData>/desktop-state.bin` |
 | `src/browser-auth.ts` | Browser sign-in (PKCE) + deep-link/manual code exchange |
 | `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
+| `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import — that is what makes it testable |
+| `src/openwith-io.ts` | The six server calls that round trip does (list, stat, mkdir, upload, download, delete) |
 | `src/preload-app.cts` | The window's only bridge: `window.filexApp` (state, settings, sync, updates) |
 | `src/preload-shell.cts` | The narrower bridge for the chrome (rail/settings) |
+| `src/preload-editor.cts` | One line, for the editor window: it gets no `filexApp` bridge, only the SPA's own "you are inside the desktop app" flag |
+| `build/installer.nsh` | Windows file-type registration, written by hand — see *Open with filex* |
 | `ui/app.html` | The app's own chrome — rail, settings, boot screens, string table |
 | `scripts/sync-web.mjs` | Copies the built explorer bundle → `app/` for embedding |
 | `scripts/fetch-cli.mjs` | Puts the `filex` CLI into `build/bin` (fails the build if missing) |
@@ -91,6 +99,46 @@ the app. `FILEX_NO_UPDATE=1` turns the whole thing off.
 resolver in the main process decides what "system" means, because three surfaces
 read it: this window, the tray menu (main process) and the explorer inside it (a
 separate component with its own catalogue). Covered by `scripts/lang-e2e.mjs`.
+
+## Open with filex
+
+Double-clicking a `.docx` opens it in the server's OnlyOffice editor. The user
+story and the OS-by-OS limits are in
+[docs/DESKTOP.md](../docs/DESKTOP.md#opening-documents-from-your-computer); what
+matters when working on this code:
+
+- **Three entry points, one queue.** Cold start (argv), a running app
+  (`second-instance` argv) and macOS (`open-file`, which fires *before* `ready`
+  on a cold start and must be queued or the first double-click after an install
+  does nothing). `classifyArgv` splits documents from `filex://` sign-in links
+  in one place, because two `argv.find(…)` calls drift apart.
+- **Documents are released only after `refreshPairs()`.** Whether a file has a
+  synced twin is the first question asked, and `knownPairs` is empty until that
+  resolves — a cold start would otherwise copy a file that needed no copy.
+- **The write-back is the dangerous part** (`writeBackAtomic`): temp file in the
+  *same* directory then rename, never a write over the document, never a rename
+  across drives (EXDEV), never resurrecting a document the user deleted while it
+  was open, and a failure that is shown rather than logged. `keptAt` on the
+  error is where the edit went instead.
+- **The grace period after the window closes is not optional.** OnlyOffice posts
+  its save callback ~10 s *after* the last editor disconnects, so deleting the
+  scratch copy on close would discard the last edit of every session.
+  `FILEX_OPENWITH_POLL_MS` / `_GRACE_MS` / `_QUIET_MS` shorten it for tests.
+- ⚠⚠ **Windows registration is hand-written (`build/installer.nsh`) and must
+  stay that way.** electron-builder's `fileAssociations` uses an NSIS macro that
+  writes the DEFAULT ProgId of `.docx` — it takes the file type at install time,
+  which on a machine with no Office (the exact machine this feature is for) is
+  enough to make filex the handler without anyone being asked. The hand-written
+  version adds an `OpenWithProgids` entry and a `SupportedTypes` list and
+  changes nothing that already exists. macOS uses `mac.fileAssociations` with
+  **`rank: Alternate`** for the same reason; Linux uses `linux.mimeTypes` (not
+  `fileAssociations`, which would also ship our own `<mime-type>` XML
+  redeclaring types shared-mime-info already defines).
+- **The extension list lives in three places** — `OFFICE_EXTENSIONS` in
+  `src/openwith.ts`, `mac.fileAssociations` + `linux.mimeTypes` in
+  `electron-builder.yml`, and `build/installer.nsh`. A YAML file and an NSIS
+  script cannot import TypeScript; widening one without the others gives an app
+  that offers to open a type it then refuses.
 
 ## Security posture (do not loosen)
 
@@ -156,7 +204,21 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
 | `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
 | `dragout-e2e.mjs` | Dragging files OUT: what lands on this computer before an OS drag can start |
+| `openwith-e2e.mjs` | A document double-clicked from outside every synced folder: second instance → editor window → server-side save → the bytes on the ORIGINAL local path change → the copy is gone after the window closes. Plus the synced-twin route, which makes no copy at all |
 | `plumbing-smoke.mjs` | `app://`, preload injection and `safeStorage`, without a server |
+
+Two more, which need neither a server nor Electron:
+
+| Command | What it proves |
+|---|---|
+| `pnpm test` | The parts of "Open with filex" that can lose a document, measured directly (`test/openwith.test.ts`, Node's own runner via type stripping) |
+| `pnpm test:red` | ⚠ The same cases against a deliberately naive implementation (`test/openwith-naive.ts`), and **fails if any of them passes there**. A case the first draft already satisfies measures nothing while looking like it does — this repo has shipped exactly that kind of test before |
+
+⚠ `openwith-e2e.mjs` performs the editor's save the way OnlyOffice's callback
+does — by writing new bytes over the scratch copy through the API. The document
+server itself is a separate ~2 GB service that has to reach the filex instance
+over the network, and a local run has none; everything on this side of that one
+POST is the real product code.
 
 ⚠ `dragout-e2e.mjs` measures the **preparation** — which bytes reach the disk, a
 folder's subtree, the cache making the second drag free, and that an unprepared

@@ -285,6 +285,7 @@ Maintainer-only. Reproducible, automated by CI.
    | Surface | Why it counts |
    |---|---|
    | `README.md` | step 1 above |
+   | **`site/index.html`** | the **filex.sh landing page** — the first thing anyone reads about the product, and it drifted two months and a dozen features out of date while it lived only on the static host. Deployed with `scripts/sync-site.sh`. Both live in the maintainers checkout only; the page is this project own site, not part of what you install |
    | `docs/*.md` | the new feature has a page — **and the old pages are still true** |
    | `docs/README.md` | every `docs/*.md` is in the index |
    | **`docs/index.md`** | the docs site's **home page** — its hero line and feature cards are the first thing a visitor reads |

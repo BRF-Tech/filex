@@ -277,6 +277,8 @@ These are mounted at:
 | Route            | Source                       | Notes |
 |------------------|------------------------------|-------|
 | `/admin/*`       | `embed/admin/`               | SPA — fallthrough to `index.html` for client routing |
+| `/drive/*`       | `embed/admin/`               | The same SPA, end-user front door. vue-router reads its history base from the prefix that served the document, so a session that starts here stays on `/drive/…` |
+| `/files/edit`    | `embed/admin/`               | The standalone editor, outside both prefixes (`openPageBase`) |
 | `/embed.js`      | `embed/web/filex.js`         | Web Component bundle |
 | `/embed.css`     | `embed/web/filex.css`        | Optional (the WC ships CSS-in-JS too) |
 

@@ -3,7 +3,7 @@ export const en: Record<string, string> = {
   'toolbar.new_folder': 'New Folder',
   'toolbar.upload': 'Upload',
   'toolbar.search': 'Search',
-  'toolbar.search.placeholder': 'File name…',
+  'toolbar.search.placeholder': 'Search by name or tag:…',
   'toolbar.view.list': 'List',
   'toolbar.view.grid': 'Grid',
   'toolbar.refresh': 'Refresh',
@@ -342,7 +342,7 @@ export const en: Record<string, string> = {
     'Pick files with this button — or simply drag & drop them anywhere in the window.',
   'tour.step.search.title': 'Search',
   'tour.step.search.desc':
-    'This box filters the current folder. The Ctrl+K command palette searches across all storages and runs commands.',
+    'This box searches the whole storage by name — separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The Ctrl+K command palette also runs commands.',
   'tour.step.view.title': 'Switch views',
   'tour.step.view.desc':
     'Toggle between the list and grid layout; your choice is remembered.',

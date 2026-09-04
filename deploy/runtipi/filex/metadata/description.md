@@ -13,4 +13,6 @@ Fast, self-hosted file manager — a single Go binary with a modern web UI.
 Runtipi asks for an admin e-mail + password during install (both optional). If
 you leave them empty, filex creates `admin@local` with a random password
 printed **once** in the app logs and saved to `/data/.first-run.txt` inside the
-container. Sign in at `/admin` and change it under Profile.
+container. Sign in at `/admin` and change it under Profile. Accounts you create
+afterwards with the `user` or `viewer` role use `/drive` — the same file manager
+without the admin panel.

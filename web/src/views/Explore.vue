@@ -292,7 +292,14 @@ onMounted(async () => {
         v-else-if="!roots.length"
         class="flex flex-col items-center justify-center gap-3 mt-16 text-sm text-zinc-500"
       >
-        <p>{{ t('explore.noStorage') }}</p>
+        <!-- Two different facts wear the same empty screen. "No storages
+             configured yet" is true for the operator and a guess for everyone
+             else: a non-admin sees no storages when the instance has none AND
+             when it has several that nobody granted them (RBAC on, docs/RBAC).
+             Telling that user the server is empty sends them to configure
+             something they cannot configure — the same admin-tool framing as
+             the URL and the tab title in GitHub #14. -->
+        <p>{{ auth.isAdmin ? t('explore.noStorage') : t('explore.noAccess') }}</p>
         <Button v-if="auth.isAdmin" size="sm" variant="primary" @click="router.push({ name: 'storages.new' })">
           {{ t('explore.addStorage') }}
         </Button>

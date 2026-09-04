@@ -180,6 +180,8 @@ filex client mv docs://inbox/a.pdf docs://reports/b.pdf   # move + rename
 filex client search fatura                      # names + indexed content
 filex client search "toplantı notu" --scope content
 filex client search rapor --scope name --limit 20 --storage-id 2
+filex client search "invoice 2026"              # finds invoice_2026.pdf
+filex client search "rapor tag:muhasebe"        # narrow to a tag
 ```
 
 ```
@@ -190,6 +192,11 @@ PATH                 MATCHED  SNIPPET
 
 `--scope` is `name`, `content` or `all` (default). Content hits require the
 server's search index (see `docs/SEARCH.md`).
+
+The query itself is the same one the web UI uses: separators (`.`, `-`, `_`,
+space) are interchangeable, every word has to match, a single typo is forgiven,
+and `tag:` / `-tag:` filter by tag. Results arrive in rank order, exact filename
+matches first — quote a query that contains spaces.
 
 ### share
 

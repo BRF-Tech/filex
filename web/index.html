@@ -6,7 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#4f46e5" />
     <meta name="robots" content="noindex,nofollow" />
-    <title>filex Admin</title>
+    <!-- Neutral by default: this same document is served to every user of the
+         instance — the login form and the explorer, not only the panel
+         (GitHub #14). src/lib/documentTitle.ts adds "Admin" on panel routes
+         and swaps in the operator's branding name when one is set. -->
+    <title>filex</title>
   </head>
   <body class="antialiased text-zinc-900 bg-zinc-50 dark:text-zinc-100 dark:bg-zinc-950">
     <div id="app"></div>

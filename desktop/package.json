@@ -1,7 +1,7 @@
 {
   "name": "@brftech/filex-desktop",
   "private": true,
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "filex desktop — the filex explorer in a window, with browser sign-in, background folder sync and secure token storage",
   "author": "BRF Tech <security@brf.sh>",
   "license": "MIT",
@@ -23,7 +23,10 @@
     "e2e:ui": "node scripts/ui-login-e2e.mjs",
     "e2e:chrome": "node scripts/chrome-e2e.mjs",
     "icon": "electron scripts/make-icon.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test:red": "node --experimental-strip-types scripts/openwith-red.mjs",
+    "e2e:openwith": "node scripts/openwith-e2e.mjs"
   },
   "devDependencies": {
     "electron": "^31.7.7",

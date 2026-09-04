@@ -71,6 +71,13 @@ contextBridge.exposeInMainWorld('filexApp', {
   dragStart: (accountId: string, items: unknown) => ipcRenderer.invoke('drag:start', accountId, items),
   /** The drag ended inside the window — stop waiting for a drop out there. */
   dragCancel: () => ipcRenderer.invoke('drag:cancel'),
+  // "Open with filex" — which document types this app can be a handler for,
+  // whether the installer registered them, and the one action that can move the
+  // OS's own default. Read-only plus a single button, deliberately: nothing
+  // here can take a file type over on its own.
+  openWith: () => ipcRenderer.invoke('openwith:state'),
+  openWithSetDefault: () => ipcRenderer.invoke('openwith:setDefault'),
+
   /** The log file's path — for a bug report, and for Settings to reveal. */
   logPath: () => ipcRenderer.invoke('app:logPath'),
   onDragProgress: (fn: (p: unknown) => void) =>
