@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -917,6 +918,21 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			}
 			accept(fallback)
 		}
+		// The toolbar is the box people actually type into, so its
+		// index-less answer is ranked by the same tiers as everybody
+		// else's. Without this the rows arrive in `ORDER BY name` and the
+		// exact match can sit below an alphabetically luckier prefix.
+		sort.SliceStable(nodes, func(a, b int) bool {
+			ra := plan.Rank(nodes[a].Name, nodes[a].Path)
+			rb := plan.Rank(nodes[b].Name, nodes[b].Path)
+			if ra != rb {
+				return ra < rb
+			}
+			if len(nodes[a].Path) != len(nodes[b].Path) {
+				return len(nodes[a].Path) < len(nodes[b].Path)
+			}
+			return nodes[a].Name < nodes[b].Name
+		})
 	}
 
 	// RBAC: drop hits the caller isn't allowed to see. Search can be

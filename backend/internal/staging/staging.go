@@ -55,6 +55,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/diskfree"
 )
 
 // ManifestName is the per-upload metadata file inside the staging directory.
@@ -246,7 +248,7 @@ type Area struct {
 // Enabled() reports false and callers must refuse staged uploads rather than
 // silently writing somewhere unexpected.
 func New(dir string) *Area {
-	return &Area{root: dir, locks: map[string]*sync.Mutex{}, FreeBytes: freeBytes}
+	return &Area{root: dir, locks: map[string]*sync.Mutex{}, FreeBytes: diskfree.Free}
 }
 
 // Enabled reports whether a staging root is configured.

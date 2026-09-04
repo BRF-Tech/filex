@@ -33,6 +33,12 @@ export function App() {
         auth: { kind: 'bearer', token: '<jwt>' },
         locale: 'tr',
         theme: 'auto',
+        // The navigation panel (Upload · Recent / Starred / Shared with me /
+        // Trash · storages) and the reduced-chrome preset. Both are ordinary
+        // config keys — there is no React-specific switch for either.
+        sideNav: true,
+        connections: true,
+        uiProfile: 'simple',
       }}
       onError={(e) => console.error(e.detail)}
       onShareCreated={(e) => navigator.clipboard.writeText(e.detail.url)}

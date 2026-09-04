@@ -216,7 +216,10 @@ func (h *Meta) ListStarred(w http.ResponseWriter, r *http.Request) {
 			nodes = filterByStorage(nodes, storageID)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "limit": limit})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
+		"limit": limit,
+	})
 }
 
 // ─────────────────── Recently opened ───────────────────
@@ -262,7 +265,10 @@ func (h *Meta) ListRecent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "limit": limit})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
+		"limit": limit,
+	})
 }
 
 // parseLimit defaults / clamps a string query param.

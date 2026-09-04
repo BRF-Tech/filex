@@ -52,6 +52,12 @@ type Node struct {
 	// Optional joined data — populated by API layer, never persisted.
 	Thumb *Thumbnail        `json:"thumb,omitempty"`
 	Meta  map[string]string `json:"meta,omitempty"`
+	// Storage is the NAME of the storage holding this node, filled by the
+	// handlers that return nodes outside a folder listing (starred, recently
+	// opened). Those rows carry only a numeric storage_id, and a client in
+	// multi-storage mode cannot build the `name://path` it needs to open one —
+	// so the recently-opened tray listed files that did nothing when clicked.
+	Storage string `json:"storage,omitempty"`
 }
 
 // Thumbnail references a generated thumbnail asset.

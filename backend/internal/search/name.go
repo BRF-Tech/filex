@@ -226,16 +226,45 @@ func (t Tier) String() string {
 // for a file called `invoice_2026.pdf` exactly as it would for one
 // literally called `invoice 2026`.
 //
+// Everything BELOW exact and prefix is decided by the subsequence scorer
+// (scorer.go), so a hit's tier means the same thing whichever surface
+// produced it. A candidate the scorer rejects outright lands in
+// TierFuzzy here rather than disappearing, because RankName has to
+// return a tier for every input; the index path calls ScoreName
+// directly, which can also say "not a result at all".
+func RankName(query, name, path string) Tier {
+	return PrepareQuery(query).Rank(name, path)
+}
+
+// Rank is RankName's body once the query has been prepared, so a caller
+// ranking a whole result set prepares the query once instead of once per
+// comparison.
+func (q PreparedQuery) Rank(name, path string) Tier {
+	if sc := q.ScoreName(name, path); sc.OK {
+		return sc.Tier
+	}
+	return TierFuzzy
+}
+
+// classifyExactPrefix reports whether the filename is an exact or prefix
+// match for the query, in normalised form.
+//
 // The extension is compared BOTH ways — against the whole normalised
 // name and against the name with its extension removed. Typing a
 // filename without its extension is the most ordinary thing a person
 // does, and a rule that only compared the whole name would have demoted
 // `report` → `report.txt` below `report-final.txt` purely because of
 // four characters the user did not type.
-func RankName(query, name, path string) Tier {
+//
+// ⚠ This is deliberately NOT the subsequence scorer's idea of a prefix.
+// The scorer works on the raw string, where `invoice 2026` is not a
+// prefix of `invoice_2026.pdf` at all. These rules are separator-blind,
+// which is what issue #15's first round bought, and it has to survive
+// its second round.
+func classifyExactPrefix(query, name string) (Tier, bool) {
 	nq := Normalize(query)
 	if nq == "" {
-		return TierName
+		return 0, false
 	}
 	nn := Normalize(name)
 	stem := nn
@@ -243,26 +272,19 @@ func RankName(query, name, path string) Tier {
 		stem = Normalize(strings.TrimSuffix(name, ext))
 	}
 	if nn == nq || stem == nq {
-		return TierExact
+		return TierExact, true
 	}
 	// Word-boundary prefix: `report` is a prefix of `report-final.txt`,
 	// but `main` must not claim one on `maintenance.md` — that falls
-	// through to TierName below, which is the honest bucket for it.
+	// through to the scorer's tiers, which is the honest bucket for it.
 	if hasWordPrefix(nn, nq) || hasWordPrefix(stem, nq) {
-		return TierPrefix
+		return TierPrefix, true
 	}
-	words := strings.Split(nq, " ")
-	if containsAll(nn, words) {
-		// A mid-word prefix (`rep` → `report.txt`) is still a prefix.
-		if strings.HasPrefix(nn, nq) {
-			return TierPrefix
-		}
-		return TierName
+	// A mid-word prefix (`rep` → `report.txt`) is still a prefix.
+	if strings.HasPrefix(nn, nq) {
+		return TierPrefix, true
 	}
-	if containsAll(Normalize(path), words) {
-		return TierPath
-	}
-	return TierFuzzy
+	return 0, false
 }
 
 // hasWordPrefix reports whether hay starts with prefix at a word boundary.

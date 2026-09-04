@@ -1,6 +1,6 @@
 //go:build unix
 
-package staging
+package diskfree
 
 import "golang.org/x/sys/unix"
 

@@ -16,6 +16,12 @@ since v0.2, the extracted **contents** of text-like files (see
 [Bleve](https://blevesearch.com/), a pure-Go search library, so there is nothing
 external to run: the index is a directory on disk next to filex's other data.
 
+The index also **keeps itself current across upgrades**: when a new filex
+indexes something the documents on disk do not carry, it rebuilds in the
+background and swaps the result in, without a search outage and without losing
+the text it already extracted. See
+[Upgrading an existing index](#upgrading-an-existing-index).
+
 - [How it works](#how-it-works)
 - [Query syntax](#query-syntax)
 - [Ranking](#ranking)
@@ -89,13 +95,18 @@ The term is lower-cased for the wildcard sides (Bleve stores tokens lower-cased
 but does **not** analyse wildcard queries, so an upper-case term would otherwise
 miss every row).
 
-**Typo tolerance.** If that pass comes back with fewer hits than the requested
-`limit`, a second, **fuzzy** pass runs: one edit-distance query per word, all
-required. Words of 3 characters or fewer must match exactly (one edit on a short
-word matches half a term dictionary and means nothing), 4–7 allow one edit, 8
-and over allow two. A transposition counts as **one** edit, which is why
+**Typo tolerance.** If that pass comes back with fewer **surviving** hits than
+the requested `limit`, a second, **fuzzy** pass runs: one edit-distance query per
+word, all required. Words of 3 characters or fewer must match exactly (one edit
+on a short word matches half a term dictionary and means nothing), 4–7 allow one
+edit, 8 and over allow two. A transposition counts as **one** edit, which is why
 `mian.go` finds `main.go`. Fuzzy hits always rank below literal ones — see
 [Ranking](#ranking).
+
+Surviving, not returned: the candidates the first pass produced are put through
+the [scorer](#scoring--how-candidates-are-ordered-and-filtered) before they are
+counted, so a pass that came back with fifty half-matches no longer looks like a
+full result set and no longer keeps this pass switched off.
 
 The fuzzy pass is deliberately conditional. It is the cheap half of the query
 (measured on a 20 000-document index: **1.0 ms**, against **7.8 ms** for the
@@ -103,21 +114,25 @@ wildcard scans), but always-on fuzziness pads a perfectly good result list with
 near-misses nobody asked for.
 
 The default result cap is **50**. Internally the index is asked for up to four
-times that, so the ranking has a real candidate pool to order rather than
-re-shuffling a window Bleve's raw scores had already chosen.
+times that (capped at 500), so the ranking has a real candidate pool to order
+rather than re-shuffling a window Bleve's raw scores had already chosen. Scoring
+that pool costs about **2 µs per candidate** — 0.4 ms for the default 200, 1.0 ms
+at the 500 cap — against the 7.8 ms the wildcard scans cost to produce it.
 
 **SQL LIKE fallback.** If the Bleve index is disabled or returns **zero** hits
 *and* the request is scoped to a specific storage, filex falls back to the
 `nodes.name` column. The fallback is a different code path, not a different
 product, so it is separator-blind too: the most selective word of the query goes
 to the database as `LIKE '%word%'`, and every row that comes back is re-checked
-in Go against the **whole** normalised query. `invoice 2026` finds
-`invoice_2026.pdf` with the index switched off.
+in Go by the **same scorer** the index path uses, and ranked into the same tiers.
+`invoice 2026` finds `invoice_2026.pdf` with the index switched off, and `Code
+main` drops the `Code` folder there exactly as it does with the index on.
 
 Two things the fallback does not do. **Typo tolerance** — edit distance is not
 something a `LIKE` can express, and faking it with more patterns would turn one
-scan into many. And it matches on the **name** column only, so a query whose
-words appear solely in a folder name will not find it this way.
+scan into many. And the LIKE itself runs against the **name** column only, so a
+query whose words appear solely in a folder name will not be *retrieved* this
+way — though once a row is retrieved, its folders are scored like anywhere else.
 
 **RBAC filtering.** Whichever path produced the hits, results are filtered
 through the caller's [RBAC](RBAC.md) grants before they're returned — a user
@@ -188,15 +203,16 @@ something merged relevance scores can be trusted to deliver — a two-edit fuzzy
 hit on a short filename can out-score an exact hit on a long one — so the order
 is decided explicitly and is covered by a test.
 
-Hits are sorted by **tier** first, then by relevance score within the tier, then
-by node id so the same query always answers in the same order.
+Hits are sorted by **tier** first, then by score within the tier, then by the
+**shorter path**, then by node id so the same query always answers in the same
+order.
 
 | # | Tier | Means |
 |---|---|---|
-| 1 | **exact** | The filename equals the query, ignoring case and separators. The extension is compared both ways, so `report` is an exact hit on `report.txt` and `main go` is an exact hit on `main.go`. |
+| 1 | **exact** | The filename equals the query, ignoring case and separators — or the query is the whole path. The extension is compared both ways, so `report` is an exact hit on `report.txt` and `main go` is an exact hit on `main.go`. |
 | 2 | **prefix** | The filename starts with the query (`report` → `report-final.txt`). |
-| 3 | **name** | Every query word appears in the filename, but not at the start (`report` → `q1-report.txt`). |
-| 4 | **path** | Every query word appears in the **path** — a folder match (`report` → `reports/summary.txt`). |
+| 3 | **name** | Every query piece is answered by the **filename** (`report` → `q1-report.txt`). |
+| 4 | **path** | At least one piece needed a **folder** to answer it (`Code main` → `Code/main.go`). |
 | 5 | **fuzzy** | Only the typo-tolerant pass produced it (`report` → `reprot.txt`). |
 | 6 | **content** | Matched inside the file, not in its name. |
 
@@ -208,6 +224,58 @@ The tier is internal; it is not on the wire. The response shape is unchanged.
 
 The SQL LIKE fallback applies the same tiers in Go, so an index-less deployment
 answers in the same order rather than in `ORDER BY name`.
+
+### Scoring — how candidates are ordered and filtered
+
+Bleve decides which documents are worth *looking at*. What makes one of them a
+better answer than another is decided afterwards, in Go, by a **subsequence
+scorer** ported from VS Code's Quick Open
+([`fuzzyScorer.ts`](https://github.com/microsoft/vscode/blob/main/src/vs/base/common/fuzzyScorer.ts),
+MIT). A relevance score cannot express any of this: it does not know *where* in
+the filename the match landed, whether the file or its folder answered, or
+whether every word you typed was answered at all.
+
+Three things follow from it, and all three were asked for in issue #15:
+
+- **Word order does not matter.** The query is split on spaces into pieces, and
+  each piece is matched independently. `main code` and `Code main` both find
+  `Code/main.go`.
+- **The filename outweighs the folder.** The filename and the folders above it
+  are scored *separately*, and a piece answered by the filename is worth an
+  order of magnitude more than one answered by a folder. `Code/main.go` and
+  `example/main.go` are no longer the same thing to the search: naming one
+  folder excludes the other.
+- **Every piece must be answered, or the candidate is dropped.** The scorer is
+  the filter as well as the ranking. A query of `Code main` used to return the
+  `Code` *folder* too, because it answered "code" — and, at the default scope,
+  seven more files that merely contained the word "code". It now returns the
+  file.
+
+Within a match, characters score by *position*, cumulatively: +8 at the start of
+the name, +5 straight after a `/`, +4 after `_ - . space : ' "`, +2 on a
+camelCase hump, plus a bonus for each consecutive character in a run. That is
+why `report` prefers `report-final.txt` over `q1-report.txt` even though both
+contain the word.
+
+**Multi-word content search narrows too.** Extra words used to *widen* the
+content side (it was an OR), which is where most of that noise came from. A
+two-word query now requires both words in the text.
+
+#### What fuzzy does not mean here
+
+Two deliberate limits, both worth knowing before filing a bug:
+
+- **Subsequence scoring is not subsequence recall.** The scorer only ever sees
+  candidates the index produced, and no Bleve query retrieves `main.go` for a
+  query of `mgo`. Making it do so needs a whole-filename keyword field and a
+  full reindex, not a scoring change. What the scorer buys is *ordering and
+  precision* over candidates that were already found.
+- **Edit distance stays, and it is not VS Code's behaviour.** `mian.go` is not a
+  subsequence of `main.go`, so Quick Open would find nothing for it; filex still
+  finds the file, via the typo pass, ranked below every subsequence match. That
+  pass now fires when the *surviving* hits are fewer than the limit, rather than
+  when the raw candidates are — before the scorer, a candidate list full of
+  half-matches counted as a full result set and kept it switched off.
 
 ---
 
@@ -264,11 +332,17 @@ Content extraction also requires the persistent **queue** to be enabled (it is
 by default); with `FILEX_QUEUE_ENABLED=false` there is no worker to run the
 jobs, so search silently stays name-only.
 
-**Rebuild interaction.** `POST /api/admin/search/rebuild` starts from an
-**empty** index, so previously extracted content is gone after a plain rebuild
-(it trickles back as files change). Pass **`?content=1`** to re-enqueue
-extraction for every eligible node as part of the rebuild — expect a burst of
-queue jobs proportional to your text-like file count.
+**Rebuild interaction.** A rebuild **carries extracted text across** — it
+copies the `content` field of every document into the replacement index, so
+content search is not interrupted and nothing has to be re-derived. Pass
+**`?content=1`** to re-extract anyway, for when you have added an extractor or
+raised `FILEX_SEARCH_CONTENT_MAX` and want the text derived again rather than
+copied; expect a burst of queue jobs proportional to your text-like file count.
+
+> Before v0.30 a rebuild started from an **empty** index and extracted content
+> was gone until each file next changed. That is why filex would not rebuild on
+> its own — and why the [upgrade](#upgrading-an-existing-index) it shipped for
+> issue #15 reached nobody who already had an index.
 
 ---
 
@@ -283,6 +357,7 @@ Search is **on by default**:
 | `search.index_path` | `config.yaml` **only** | `<data_dir>/search.bleve` | Where the Bleve directory lives. **No env override** — set it in the file if you want the index somewhere else (e.g. a faster disk). |
 | `FILEX_SEARCH_CONTENT` / `search.content` | env / yaml | `true` | [Content search](#content-search) kill-switch — `0` stops enqueueing extraction jobs (already-indexed content keeps matching). |
 | `FILEX_SEARCH_CONTENT_MAX` / `search.content_max_bytes` | env / yaml | `5242880` (5 MiB) | Source files above this size are never content-extracted. |
+| `FILEX_SEARCH_AUTO_REBUILD` / `search.auto_rebuild` | env / yaml | `true` | Repair an index written by an older document schema, in the background, at startup. `0` leaves it alone — the index keeps reporting `needs_rebuild` and you rebuild when it suits you. See [Upgrading an existing index](#upgrading-an-existing-index). |
 
 ```yaml
 # config.yaml
@@ -396,7 +471,8 @@ Reports the index state:
   "document_count": 18423,
   "index_size_bytes": 5242880,
   "last_updated_at": "",
-  "needs_rebuild": false
+  "needs_rebuild": false,
+  "rebuilding": false
 }
 ```
 
@@ -406,16 +482,26 @@ Reports the index state:
 - `index_size_bytes` — on-disk size of the `search.bleve` directory.
 - `last_updated_at` — best-effort timestamp; may be blank.
 - `needs_rebuild` — `true` when the index on disk was written by an older
-  filex that did not index every field this build queries. Search still works;
-  see [Upgrading an existing index](#upgrading-an-existing-index).
+  filex that did not index every field this build queries. Search still works,
+  and filex normally repairs this by itself at startup, so seeing `true` means
+  either the repair is still running (`rebuilding: true`) or it is switched off
+  (`FILEX_SEARCH_AUTO_REBUILD=0`) or it failed — the log says which. See
+  [Upgrading an existing index](#upgrading-an-existing-index).
+- `rebuilding` — `true` while a replacement index is being built, whether it
+  was started by this endpoint or by the automatic repair. It stays `true`
+  until the new index is live, and it is why an admin UI can say "rebuilding"
+  instead of showing a `needs_rebuild` banner over an index that is already
+  being fixed.
 
 ### `POST /api/admin/search/rebuild`
 
-Drops the index and reindexes **every node row** from the database. Returns
-immediately; the work runs in the background. Add **`?content=1`** to also
-re-enqueue [content extraction](#content-search) for every eligible file
-(a plain rebuild starts empty, so extracted content is otherwise lost until
-files change).
+Reindexes **every node row** from the database into a replacement index and
+swaps it in when it is finished. Returns immediately; the work runs in the
+background, and **search keeps answering from the current index the whole
+time**. Add **`?content=1`** to also re-enqueue
+[content extraction](#content-search) for every eligible file — text already in
+the index is carried across either way, so this is for re-deriving it, not for
+getting it back.
 
 ```bash
 curl -X POST https://files.example.com/api/admin/search/rebuild -b cookies.txt
@@ -426,14 +512,29 @@ curl -X POST 'https://files.example.com/api/admin/search/rebuild?content=1' -b c
 |---|---|
 | **202 Accepted** | `{ "ok": true, "note": "rebuild started in background" }` — rebuild launched. |
 | **400 Bad Request** | `search index disabled` — the index isn't enabled, so there's nothing to rebuild. |
-| **409 Conflict** | `rebuild already in progress` — one rebuild at a time; wait for it to finish. |
+| **409 Conflict** | `rebuild already in progress` — one rebuild at a time, and that includes the automatic repair; wait for it to finish (`rebuilding` on the stats endpoint). |
 
-Internally the rebuild **closes** the current index, **removes** the directory,
-**reopens** a fresh one, then re-indexes all nodes. It runs on a detached
-(background) context so it survives the HTTP request returning — a large tree
-keeps reindexing to completion. Watch `document_count` on the stats endpoint
-climb back up to confirm it finished. During a rebuild queries still work; they
-just see a partially populated index until it catches up.
+Internally the rebuild builds a **second index** in `<index_path>.rebuilding`,
+verifies it, then swaps it into place under the index lock and deletes the old
+directory. Nothing observes a half-built index: a query that arrives during the
+swap waits for two directory renames and an index open, then runs against the
+new one. It runs on a detached (background) context so it survives the HTTP
+request returning — a large tree keeps reindexing to completion.
+
+Two things are worth knowing before you run it on a big instance:
+
+- **Disk.** Two indexes exist at once. Measured on a 20 202-document corpus
+  (11.4 MB index): peak 36.2 MB across both directories, i.e. about 2.2x the
+  old index in *additional* space. filex refuses to start a rebuild when the
+  filesystem cannot hold roughly 4x the current index — it fails loudly, logs
+  what it needed and what was free, and **keeps serving the old index**.
+- **Time.** The same corpus rebuilt in **3.0 s**. Watch for
+  `search: rebuilt index is live` in the log, or `rebuilding` on the stats
+  endpoint.
+
+Writes that arrive during a rebuild (uploads, renames, deletes, content
+extraction) go into **both** indexes, so nothing that happened while it ran is
+lost — or resurrected — at the swap.
 
 Both actions are also exposed to admin tokens as the MCP tools
 `admin_search_stats` and `admin_search_rebuild`.
@@ -457,25 +558,59 @@ What an un-rebuilt index cannot do for its **existing** documents is the
 typo-tolerant pass, and multi-word matching on an unscoped (`storage_id` = 0)
 query, where the fallback does not fire.
 
-filex therefore **does not rebuild by itself**. A rebuild starts from an empty
-index, and the extracted file **content** lives only there — the database holds
-no copy — so an automatic rebuild would trade a recall improvement nobody asked
-for against a content-search outage nobody was warned about. Instead the drift
-is reported:
+**filex repairs this by itself.** At startup it compares the document schema
+stamped inside the index with the one this build writes, and when they differ it
+rebuilds in the background — building the replacement alongside the live index
+and swapping it in when it is complete. You do not have to do anything, and
+search does not go dark while it happens.
 
-- one warning line in the log at startup, naming the endpoint to call;
-- `needs_rebuild: true` on `GET /api/admin/search/stats`.
+What you see in the log:
 
-To take the improvement immediately, rebuild — with `?content=1` if you use
-content search, so extraction is re-queued in the same pass:
+```
+WARN  search: index document schema is out of date; separator-blind and typo-tolerant
+      name matching cannot reach existing files until it is rebuilt
+      found_schema="1 (pre-0.29, unstamped)" want_schema=2
+INFO  search: the index was built by an older filex; rebuilding it in the background.
+      The current index keeps answering every query until the replacement is ready
+INFO  search: building a replacement index alongside the current one
+      current_index_bytes=11437145 free_bytes=842927378432
+INFO  search: rebuilt index is live  reason=schema-upgrade documents=20202
+      index_bytes=14894776 took=2.657245423s
+```
+
+`needs_rebuild` on the stats endpoint stays `true` until the new index is live —
+the index answering queries really is the old one until then — and `rebuilding`
+is `true` in the meantime.
+
+Extracted **content is carried across**, document by document, so content search
+keeps working throughout and nothing is re-extracted that has not changed. This
+is what makes an automatic rebuild safe: before v0.30 a rebuild started from an
+empty index, which is exactly why filex would not run one on its own.
+
+### If it does not finish
+
+- **It fails.** The old index keeps serving, `needs_rebuild` stays `true`, and
+  the log says why (`search: rebuild failed …`). The half-built directory is
+  removed.
+- **The disk cannot take two indexes.** Same outcome, refused before anything is
+  written: `search: not enough free disk space to rebuild the index`, with the
+  bytes it needed and the bytes it found.
+- **The container is killed mid-rebuild.** The half-built index is discarded on
+  the next start (`search: discarded a half-built index left by an interrupted
+  rebuild`) and the repair starts over. It is never swapped in.
+
+### Turning it off
+
+```bash
+FILEX_SEARCH_AUTO_REBUILD=0
+```
+
+The index is then left exactly as it is: still perfectly usable, still reporting
+`needs_rebuild: true`, and you rebuild when it suits you:
 
 ```bash
 curl -X POST 'https://files.example.com/api/admin/search/rebuild?content=1' -b cookies.txt
 ```
-
-`needs_rebuild` returns to `false` when the rebuild has run. Queries keep
-working throughout; they just see a partially populated index until it catches
-up.
 
 ---
 
@@ -507,8 +642,11 @@ Substring and case are handled by the wildcard sub-queries, separators by the
 normalised fields, typos by the fuzzy pass. If those are silently missing while
 whole-name matches work, check `needs_rebuild` on the stats endpoint: an index
 carried over from an older filex has documents without the normalised fields.
-See [Upgrading an existing index](#upgrading-an-existing-index). Otherwise the
-index is simply **stale** — trigger a rebuild.
+filex repairs that on its own at startup, so `needs_rebuild: true` after a
+restart means the repair is still running (`rebuilding: true`), was switched off
+with `FILEX_SEARCH_AUTO_REBUILD=0`, or failed — the log says which. See
+[Upgrading an existing index](#upgrading-an-existing-index). Otherwise the index
+is simply **stale** — trigger a rebuild.
 
 ### A `tag:` filter returns nothing
 That is what a filter matching nothing looks like, and it is deliberate — the

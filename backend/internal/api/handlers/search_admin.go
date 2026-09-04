@@ -7,23 +7,24 @@
 package handlers
 
 import (
-	"context"
-	"log/slog"
+	"errors"
 	"net/http"
 	"strings"
-	"sync/atomic"
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/search"
 )
 
 // SearchAdmin holds the Bleve admin actions.
+//
+// There is deliberately no rebuild lock here. The index owns that guard,
+// because filex also rebuilds on its own when it finds an index written by
+// an older document schema, and a handler-local flag could only ever see
+// the rebuilds this handler started — the two would happily run at once
+// and race to swap their replacement index in.
 type SearchAdmin struct {
 	Index *search.Index
 	Store db.Store
-
-	// rebuildLock prevents concurrent rebuilds.
-	rebuilding atomic.Bool
 }
 
 // NewSearchAdmin constructs the handler.
@@ -51,19 +52,26 @@ func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 		// added indexed fields their documents do not have yet. Search
 		// keeps working without it (the pre-upgrade sub-queries are
 		// still part of every query), so this is an invitation, not an
-		// alarm — but an invisible invitation is no invitation, and the
-		// alternative was rebuilding on their behalf and silently
-		// dropping every file's extracted content.
+		// alarm — the repair usually runs on its own (see
+		// FILEX_SEARCH_AUTO_REBUILD) and this is what says whether it
+		// has finished.
 		"needs_rebuild": stats.NeedsRebuild,
+		// rebuilding lets the admin UI say "rebuilding" instead of
+		// showing a needs_rebuild banner over an index that is already
+		// being repaired, and looking broken while it happens.
+		"rebuilding": stats.Rebuilding,
 	})
 }
 
-// Rebuild drops the existing index and reindexes every node row.
+// Rebuild reindexes every node row into a replacement index and swaps it
+// in when it is complete. Search keeps answering from the existing index
+// for the whole rebuild, and extracted text is carried across, so this is
+// no longer the destructive operation it was before v0.30.
 //
-// ?content=1 additionally re-enqueues content extraction for every eligible
-// node once its metadata lands — a rebuild starts from an EMPTY index, so
-// without the flag previously extracted content stays gone until each file
-// next drifts.
+// ?content=1 additionally re-enqueues content extraction for every
+// eligible node once the new index is live — for an operator who has just
+// added an extractor or raised FILEX_SEARCH_CONTENT_MAX and wants the text
+// derived again rather than copied.
 func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
 	if h.Index == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search index disabled"})
@@ -73,29 +81,19 @@ func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("content"); v == "1" || strings.EqualFold(v, "true") {
 		withContent = true
 	}
-	if !h.rebuilding.CompareAndSwap(false, true) {
+	// StartRebuild detaches from r.Context — chi cancels it the moment we
+	// return from this handler, which would kill the background reindex
+	// before it processed a single row — and refuses if a rebuild (this
+	// endpoint's, or the automatic schema repair) is already running.
+	err := h.Index.StartRebuild(h.Store, search.RebuildOptions{ReExtract: withContent, Reason: "admin"})
+	switch {
+	case errors.Is(err, search.ErrRebuildInProgress):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "rebuild already in progress"})
 		return
+	case err != nil:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
-	// Detach from r.Context — chi cancels it the moment we return from
-	// this handler, which would kill the background reindex before it
-	// processes a single row. Use context.Background so the goroutine
-	// runs to completion (or until container shutdown).
-	go func() {
-		defer h.rebuilding.Store(false)
-		ctx := context.Background()
-		var err error
-		if withContent {
-			err = h.Index.RebuildAllWithContent(ctx, h.Store)
-		} else {
-			err = h.Index.RebuildAll(ctx, h.Store)
-		}
-		if err != nil {
-			slog.Warn("search: rebuild failed", slog.String("err", err.Error()))
-			return
-		}
-		slog.Info("search: rebuild done", slog.Bool("content", withContent))
-	}()
 	note := "rebuild started in background"
 	if withContent {
 		note = "rebuild started in background (content extraction re-enqueued)"

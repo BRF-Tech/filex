@@ -48,6 +48,9 @@ const config = {
   locale: 'tr',
   theme: 'auto',
   trashVisible: true,
+  sideNav: true,          // the navigation panel (default on)
+  connections: true,      // its "How to connect" + "API keys" entries
+  uiProfile: 'standard',  // or 'simple' — one pane, list/grid, no tabs
 };
 </script>
 
@@ -90,6 +93,38 @@ import {
 
 The composables are stable — feel free to compose your own UI without
 touching the SFC.
+
+### Navigation panel
+
+The explorer ships a left navigation panel — a prominent **Upload**, the views
+**Recent · Starred · Shared with me · Trash**, and the storages the caller can
+see (a storage reached through a grant is marked *Shared*). It is on by default
+on every surface; the viewer collapses it to an icon rail and that choice is
+remembered per browser. Under 560px it becomes a drawer over the listing instead
+of a column.
+
+```ts
+const config = {
+  apiBase: 'https://files.example.com',
+  auth: { kind: 'bearer', token },
+  sideNav: true,          // default; `rootPath` flips it off
+  uiProfile: 'simple',    // 'standard' (default) | 'simple'
+};
+```
+
+The panel's last section is how **How to connect** (the per-protocol guides,
+built from your deployment) and **API keys** (mint and revoke the tokens
+WebDAV, FTPS and `filex mount` sign in with) become reachable from inside the
+explorer at all — `ConnectionsPanel` and `TokensPanel` were exported from this
+package long before anything opened them, so an embedded explorer's users had
+to be told to ask an administrator. Set `connections: false` to leave them out.
+⚠ Never gated on role in the UI: `/api/tokens` caps every scope against the
+caller's own account, and the panel renders what the API returns.
+
+`uiProfile: 'simple'` is a preset, not a feature switch — nothing is removed
+from the build. It turns off the tab strip and the split pane, reduces the view
+switcher to list + grid, and starts the navigation panel expanded, for the
+people who want a file drive rather than a file manager.
 
 ### Connections
 

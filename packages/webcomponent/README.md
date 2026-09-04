@@ -102,6 +102,9 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 | `locale` | `config.locale` (`tr` / `en`) |
 | `theme` | `config.theme` (`light` / `dark` / `auto`) |
 | `trash-visible` | `config.trashVisible` |
+| `sidenav` | `config.sideNav` — the navigation panel (Upload · Recent / Starred / Shared with me / Trash · storages). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |
+| `connections` | `config.connections` — the panel's "How to connect" and "API keys" entries. Default on, except under `ui-profile="simple"` where it is off. |
+| `ui-profile` | `config.uiProfile` — `"standard"` (default) or `"simple"`: one pane, list/grid only, no tab strip, no split pane. |
 
 For anything richer (auth, custom endpoints, share base, …) set the
 `config` JS property after element creation. Properties merge on top

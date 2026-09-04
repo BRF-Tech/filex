@@ -276,7 +276,12 @@ Three things hold real state; back up **all three**:
 **Rebuildable, so backing them up is optional:**
 
 - `search.bleve/` — regenerate with `POST /api/admin/search/rebuild` (admin) or
-  by deleting it and restarting.
+  by deleting it and restarting. ⚠ A rebuild needs room for a **second copy**
+  of the index while it runs (roughly 2x the current size in additional space);
+  filex refuses and keeps serving the old one when the disk cannot take it.
+  Sibling directories named `search.bleve.rebuilding` / `search.bleve.old` are
+  a rebuild in flight or an interrupted one — they are cleaned up on the next
+  start, and neither is worth backing up.
 - `thumbs/` — regenerate with `filex thumb backfill` (add `--retry-failed` to
   re‑run failed rows, `--storage <name|id>` to scope it).
 

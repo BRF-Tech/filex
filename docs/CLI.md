@@ -194,9 +194,10 @@ PATH                 MATCHED  SNIPPET
 server's search index (see `docs/SEARCH.md`).
 
 The query itself is the same one the web UI uses: separators (`.`, `-`, `_`,
-space) are interchangeable, every word has to match, a single typo is forgiven,
-and `tag:` / `-tag:` filter by tag. Results arrive in rank order, exact filename
-matches first — quote a query that contains spaces.
+space) are interchangeable, every word has to match — in any order, and a word
+may be answered by a folder (`main code` finds `Code/main.go`) — a single typo
+is forgiven, and `tag:` / `-tag:` filter by tag. Results arrive in rank order,
+exact filename matches first — quote a query that contains spaces.
 
 ### share
 

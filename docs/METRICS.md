@@ -21,7 +21,8 @@ scrape_configs:
       credentials_file: /etc/prometheus/filex-token   # an admin API token
 ```
 
-Mint the token in the admin UI (Settings → API tokens) with an account that has
+Mint the token in the admin UI (API / MCP), or from the file explorer's
+navigation panel under **Connections → API keys**, with an account that has
 the `admin` role. A token carrying a `root:` confinement scope will not do —
 those are subtree-limited credentials and the admin gate refuses them.
 

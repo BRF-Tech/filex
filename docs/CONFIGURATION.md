@@ -386,6 +386,9 @@ only (`thumbs.cache_dir`, `thumbs.formats`). See [thumbnails.md](thumbnails.md).
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_SEARCH_ENABLED` | `true` | Embedded Bleve full‑text index. |
+| `FILEX_SEARCH_CONTENT` | `true` | Extract text from files into the index (content search). `0` stops enqueueing extraction; text already indexed keeps matching. |
+| `FILEX_SEARCH_CONTENT_MAX` | `5242880` | Source files larger than this are never content‑extracted. |
+| `FILEX_SEARCH_AUTO_REBUILD` | `true` | Rebuild the index in the background at startup when it was written by an older document schema. The replacement is built alongside the live index and swapped in, so search never goes dark. `0` leaves the index alone and reports `needs_rebuild` instead. |
 
 Index path is `config.yaml` only (`search.index_path`, default
 `<data_dir>/search.bleve`). See [SEARCH.md](SEARCH.md).

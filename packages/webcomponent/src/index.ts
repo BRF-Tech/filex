@@ -8,20 +8,31 @@
  *   <filex-explorer api-base="https://files.example.com" locale="tr"></filex-explorer>
  *
  *   <script type="module">
- *     // Side-effect import registers the element.
- *     import '@brftech/filex';
- *
- *     // Pass complex props as JS properties (auth, theme overrides, …).
+ *     // ⚠ Set `config` BEFORE the import that registers the element, not
+ *     // after. Registering upgrades and MOUNTS it, and the explorer loads its
+ *     // first folder on mount — a config assigned afterwards misses that one
+ *     // request, which then goes out unauthenticated against the default
+ *     // adapter. The element renders fine and the file list says "Could not
+ *     // load this folder", which sends everybody looking at the backend.
  *     document.querySelector('filex-explorer').config = {
  *       apiBase: 'https://files.example.com',
  *       auth: { kind: 'bearer', token: '<jwt>' },
  *       locale: 'tr',
  *     };
+ *     await import('@brftech/filex');   // side effect: registers the element
  *   </script>
  *
  * Attributes that map to top-level config keys are auto-parsed: `api-base`,
- * `endpoint`, `locale`, `theme`, `trash-visible`. Anything else (auth,
- * shareBase, custom endpoints…) is set via the `config` JS property.
+ * `endpoint`, `locale`, `theme`, `trash-visible`, `sidenav`, `connections`,
+ * `ui-profile`.
+ * Anything else (auth, shareBase, custom endpoints…) is set via the `config`
+ * JS property.
+ *
+ *   <filex-explorer api-base="https://files.example.com" sidenav ui-profile="simple">
+ *   </filex-explorer>
+ *
+ * Boolean attributes follow the DOM convention: present (or `="true"`) is true,
+ * `="false"` is false, absent leaves the core default alone.
  *
  * `shadowRoot: false` — Tailwind / global CSS / OS dark mode propagate
  * naturally into the explorer; `<style>` from the core stylesheet is
@@ -58,7 +69,16 @@ function injectStylesOnce() {
  * merges anything the consumer set via the `config` JS property.
  */
 function buildConfig(
-  attrs: { apiBase?: string; endpoint?: string; locale?: string; theme?: string; trashVisible?: boolean | string },
+  attrs: {
+    apiBase?: string;
+    endpoint?: string;
+    locale?: string;
+    theme?: string;
+    trashVisible?: boolean | string;
+    sidenav?: boolean | string;
+    connections?: boolean | string;
+    uiProfile?: string;
+  },
   override: ExplorerConfig | null,
 ): ExplorerConfig {
   const base: ExplorerConfig = {};
@@ -71,6 +91,24 @@ function buildConfig(
   if (attrs.trashVisible !== undefined) {
     base.trashVisible =
       attrs.trashVisible === true || attrs.trashVisible === 'true' || attrs.trashVisible === '';
+  }
+  // gezinti:g1 — the navigation panel, for host pages that never touch JS.
+  // ⚠ `undefined` is left ALONE rather than coerced to false: the core default
+  // is on, and an element that never mentions `sidenav` must keep it. Writing
+  // `base.sideNav = attrs.sidenav === true || …` would have every plain
+  // `<filex-explorer>` silently opt out of the panel.
+  if (attrs.sidenav !== undefined) {
+    base.sideNav = attrs.sidenav === true || attrs.sidenav === 'true' || attrs.sidenav === '';
+  }
+  // The panel's "How to connect" + "API keys" entries. Same `undefined` rule:
+  // the core default depends on `uiProfile`, and an element that never mentions
+  // the attribute must not overrule it.
+  if (attrs.connections !== undefined) {
+    base.connections =
+      attrs.connections === true || attrs.connections === 'true' || attrs.connections === '';
+  }
+  if (attrs.uiProfile === 'simple' || attrs.uiProfile === 'standard') {
+    base.uiProfile = attrs.uiProfile;
   }
   // `config` JS-property overrides win over individual attributes —
   // letting power users feed the whole shape at once.
@@ -107,6 +145,12 @@ const FilexExplorerWrapper = defineCustomElement({
     locale: { type: String, default: '' },
     theme: { type: String, default: '' },
     trashVisible: { type: [Boolean, String], default: undefined },
+    /** Shortcut attribute → config.sideNav (the navigation panel). */
+    sidenav: { type: [Boolean, String], default: undefined },
+    /** Shortcut attribute → config.connections (How to connect + API keys). */
+    connections: { type: [Boolean, String], default: undefined },
+    /** Shortcut attribute → config.uiProfile ('standard' | 'simple'). */
+    uiProfile: { type: String, default: '' },
   },
   emits: [
     'share-created',
@@ -128,6 +172,9 @@ const FilexExplorerWrapper = defineCustomElement({
           locale: props.locale,
           theme: props.theme,
           trashVisible: props.trashVisible,
+          sidenav: props.sidenav,
+          connections: props.connections,
+          uiProfile: props.uiProfile,
         },
         props.config,
       ),
@@ -141,6 +188,9 @@ const FilexExplorerWrapper = defineCustomElement({
         props.locale,
         props.theme,
         props.trashVisible,
+        props.sidenav,
+        props.connections,
+        props.uiProfile,
       ],
       () => {
         merged.value = buildConfig(
@@ -150,6 +200,9 @@ const FilexExplorerWrapper = defineCustomElement({
             locale: props.locale,
             theme: props.theme,
             trashVisible: props.trashVisible,
+            sidenav: props.sidenav,
+            connections: props.connections,
+            uiProfile: props.uiProfile,
           },
           props.config,
         );

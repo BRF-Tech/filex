@@ -47,7 +47,15 @@ async function load() {
     });
     if (res.ok) {
       const body = await res.json();
-      items.value = Array.isArray(body.entries) ? body.entries : (Array.isArray(body) ? body : []);
+      // ⚠ `nodes` is what the endpoint actually answers with; this read `entries`
+      // only, so the tray was empty on every server that ever served it.
+      items.value = Array.isArray(body.nodes)
+        ? body.nodes
+        : Array.isArray(body.entries)
+          ? body.entries
+          : Array.isArray(body)
+            ? body
+            : [];
     }
   } catch (err) {
     emit('error', err instanceof Error ? err.message : String(err));

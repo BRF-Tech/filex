@@ -13,6 +13,17 @@
  *
  * One component, every surface (see S3KeysPanel for the rule at length): the
  * admin panel, the web explorer and the desktop app render THIS.
+ *
+ * Two shapes, one implementation. `full` adds what a person managing their own
+ * API keys needs — which scopes, confined to which folder, expiring when — and
+ * without it the panel is the compact minter that sits inside a protocol guide,
+ * byte for byte as before.
+ *
+ * ⚠ `full` exists because the rich version had been written a second time, in
+ * `web/src/components/SelfTokensModal.vue`, against the same `/api/tokens`
+ * route. That copy was reachable only from our own web app: an embedder
+ * mounting the explorer got users with no way to mint the credential WebDAV,
+ * FTPS and `filex mount` ask for. The copy is gone; this is the surface.
  */
 import { computed, onMounted, ref } from 'vue';
 import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
@@ -22,6 +33,11 @@ import { useTokens } from '../composables/useTokens';
 
 const props = defineProps<{
   config: ExplorerConfig;
+  /**
+   * Render the full self-service key manager (scopes, folder confinement,
+   * expiry) instead of the one-field minter the guides embed.
+   */
+  full?: boolean;
   /**
    * Which protocol the surrounding guide is showing. It only changes the
    * default label — a token minted here works on all of them, and pretending
@@ -45,6 +61,31 @@ const label = ref('');
 const busy = ref(false);
 const copied = ref(false);
 const confirming = ref<number | null>(null);
+
+/* ── full mode ──────────────────────────────────────────────────────────
+ * ⚠ All four verbs are offered to everyone on purpose. The old copy of this
+ * screen hid `write`/`delete` from viewer accounts by reading a store that
+ * only the web app has — which is precisely the coupling that kept this
+ * surface out of every embed. The server caps each scope against the caller's
+ * own role and grants and answers in words worth showing ("scope 'write' is
+ * not available here"), so asking is never granting and the refusal explains
+ * itself. `admin` is not offered at all: the server rejects it outright. */
+const FULL_SCOPES = ['read', 'write', 'delete', 'mcp'] as const;
+const scopeState = ref<Record<string, boolean>>({
+  read: true,
+  write: false,
+  delete: false,
+  mcp: false,
+});
+const rootPath = ref('');
+const expiresInDays = ref<number | null>(null);
+
+function buildScopes(): string {
+  const parts = FULL_SCOPES.filter((s) => scopeState.value[s]) as string[];
+  const root = rootPath.value.trim();
+  if (root) parts.push('root:' + root);
+  return parts.join(',');
+}
 
 onMounted(async () => {
   await load();
@@ -70,6 +111,23 @@ async function mint(): Promise<void> {
   busy.value = true;
   copied.value = false;
   try {
+    if (props.full) {
+      // At least one verb, or the token can do nothing and the server's
+      // refusal would be about the wrong thing.
+      const scopes = buildScopes() || 'read';
+      await create({
+        label: label.value.trim() || defaultLabel(),
+        scopes,
+        expires_in_days: expiresInDays.value && expiresInDays.value > 0
+          ? expiresInDays.value
+          : undefined,
+      });
+      await load();
+      emit('active', { hasToken: tokens.value.length > 0 });
+      label.value = '';
+      rootPath.value = '';
+      return;
+    }
     // ⚠ `read,write,delete` and nothing more. `share` is a web-surface verb
     // and `admin` is refused by the server anyway; a token for mounting a
     // drive should not be able to publish public links. The server caps this
@@ -131,7 +189,7 @@ function usedLabel(row: ApiToken): string {
     <p v-if="canMint === false" class="fe-s3keys__muted">{{ t('conn.tokens.cannotMint') }}</p>
     <p v-if="error" class="fe-s3keys__warn">{{ error }}</p>
 
-    <div v-if="canMint" class="fe-s3keys__form">
+    <div v-if="canMint && !full" class="fe-s3keys__form">
       <input
         v-model="label"
         class="fe-cfield__input"
@@ -141,6 +199,56 @@ function usedLabel(row: ApiToken): string {
       <button class="fe-s3keys__btn" :disabled="busy" data-testid="token-mint" @click="mint">
         {{ t('conn.tokens.mint') }}
       </button>
+    </div>
+
+    <!-- full — the self-service key manager. Same route, same composable, same
+         list below; only the mint form is richer. -->
+    <div v-else-if="canMint" class="fe-tokform" data-testid="token-form-full">
+      <input
+        v-model="label"
+        class="fe-cfield__input"
+        :placeholder="defaultLabel()"
+        data-testid="token-label"
+      />
+
+      <fieldset class="fe-tokform__scopes">
+        <legend class="fe-tokform__legend">{{ t('conn.tokens.scopes') }}</legend>
+        <label v-for="s in FULL_SCOPES" :key="s" class="fe-tokform__scope">
+          <input v-model="scopeState[s]" type="checkbox" :data-testid="`token-scope-${s}`" />
+          <span>{{ s }}</span>
+        </label>
+      </fieldset>
+
+      <label class="fe-tokform__field">
+        <span class="fe-tokform__label">{{ t('conn.tokens.root') }}</span>
+        <input
+          v-model="rootPath"
+          class="fe-cfield__input"
+          :placeholder="t('conn.tokens.rootPlaceholder')"
+          data-testid="token-root"
+        />
+      </label>
+
+      <div class="fe-tokform__row">
+        <label class="fe-tokform__field fe-tokform__field--narrow">
+          <span class="fe-tokform__label">{{ t('conn.tokens.expiry') }}</span>
+          <input
+            v-model.number="expiresInDays"
+            type="number"
+            min="0"
+            class="fe-cfield__input"
+            :placeholder="t('conn.tokens.expiryNever')"
+            data-testid="token-expiry"
+          />
+        </label>
+        <button class="fe-s3keys__btn" :disabled="busy" data-testid="token-mint" @click="mint">
+          {{ t('conn.tokens.mint') }}
+        </button>
+      </div>
+
+      <!-- Said before the refusal rather than after it: the server caps every
+           scope against the account's own role and grants. -->
+      <p class="fe-s3keys__hint">{{ t('conn.tokens.capNote') }}</p>
     </div>
 
     <!-- The secret, once. -->

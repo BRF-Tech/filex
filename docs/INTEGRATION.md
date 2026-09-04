@@ -45,8 +45,80 @@ const config = {
   multiStorageRoot: true,
   storages: [{ name: 'docs' }, { name: 'media', label: 'Media', readOnly: true }],
   trashVisible: true,      // show the Trash entry (list + restore)
+
+  // Navigation panel: Upload · Recent / Starred / Shared with me / Trash · the
+  // storage list. ON by default on every surface. The viewer collapses it to an
+  // icon rail with the toggle in the panel head (or the one in the toolbar) and
+  // that choice is remembered per browser. Below 560px it is a drawer over the
+  // listing rather than a column.
+  // ⚠ `rootPath` flips the default to off — a confined embed has no storage
+  // list, and its views would name files outside the folder you confined it to.
+  sideNav: true,
+
+  // The panel's "How to connect" (WebDAV · SFTP · FTPS · S3 · NFS · filex
+  // mount guides, built from THIS deployment) and "API keys" (mint/revoke the
+  // token three of those protocols sign in with). Default on, except under
+  // `uiProfile: 'simple'` where it is off.
+  // ⚠ Never gated on role: the backend already decides what a caller sees, and
+  // /api/tokens caps every scope against the caller's own role and grants.
+  connections: true,
+
+  // 'standard' (default) — tab strip, split pane, list/grid/gallery.
+  // 'simple'             — one pane, one folder, list/grid, no tab strip, no
+  //                        split. Nothing is removed from the build; this is a
+  //                        preset for people who do not want a power tool.
+  uiProfile: 'simple',
 };
 ```
+
+### Connections, from inside the explorer
+
+`ConnectionsPanel` and `TokensPanel` have always been in this package, and
+`<filex-connections>` has always been a registerable element — but nothing in
+the explorer opened either, so an embedder's users had no path to a protocol
+guide or to the API token those guides tell them to use. The navigation panel's
+last section is that path: **How to connect** opens the guides in an overlay
+inside the explorer, **API keys** opens the full self-service key manager
+(scopes, folder confinement, expiry). Both are `config.connections`.
+
+`<filex-connections>` still earns its own registration: a host that wants the
+connections surface on a page of its own — a settings tab, an onboarding step —
+mounts the element (or the `ConnectionsPanel` SFC) without an explorer around
+it. What changed is that it is no longer the *only* way in.
+
+### The navigation panel and the simple profile
+
+Both are ordinary `config` keys, so all three wrappers set them the same way —
+and the web component additionally exposes them as attributes for host pages
+that never touch JavaScript:
+
+```vue
+<!-- Vue -->
+<FileExplorer :config="{ ...config, sideNav: true, connections: true, uiProfile: 'simple' }" />
+```
+
+```tsx
+// React
+<FileManager config={{ ...config, sideNav: true, connections: true, uiProfile: 'simple' }} />
+```
+
+```html
+<!-- Web component: attributes, or the same keys on the config property -->
+<filex-explorer sidenav connections ui-profile="simple"></filex-explorer>
+```
+
+Boolean attributes follow the DOM convention: `sidenav` (present) and
+`sidenav="true"` are true, `sidenav="false"` is false, and leaving the attribute
+off keeps the default rather than forcing `false`. `connections` behaves the
+same way — and because its default is derived from `uiProfile`, leaving it off a
+`ui-profile="simple"` element means no Connections entries, while adding it is
+the whole opt-in.
+
+⚠ The `config` **property wins over an attribute**, key by key. `<filex-explorer
+sidenav>` plus `el.config = { sideNav: false }` gives you no panel; the same
+element with a `config` that never mentions `sideNav` keeps the attribute's
+answer. Do not set the same thing in both places and expect the attribute to
+have the last word.
 
 `auth.token` may also be a function returning a fresh token (sync or async) —
 use that when the token rotates.
@@ -63,9 +135,29 @@ use that when the token rotates.
     apiBase: 'https://files.example.com',
     auth: { kind: 'bearer', token: TOKEN },
     multiStorageRoot: true, trashVisible: true, locale: 'tr',
+    sideNav: true, connections: true, uiProfile: 'simple',
   };
   el.addEventListener('error', (e) => console.error(e.detail));
   el.addEventListener('file-opened', (e) => console.log(e.detail));
+</script>
+```
+
+⚠ **Assign `config` before the module that registers the element loads** — that
+is why the `<script src>` above is a plain tag and the assignment happens after
+it, and why the npm form below awaits the import *after* setting the property.
+Registering the element upgrades and mounts it, and the explorer loads its first
+folder on mount. A `config` assigned after that arrives too late for that one
+request, which then goes out with no credentials against the default adapter:
+the panel and the toolbar render perfectly and the file list says "Could not
+load this folder".
+
+```html
+<filex-explorer id="fx" api-base="https://files.example.com" sidenav ui-profile="simple">
+</filex-explorer>
+<script type="module">
+  const el = document.getElementById('fx');
+  el.config = { auth: { kind: 'bearer', token: TOKEN }, apiBase: 'https://files.example.com' };
+  await import('@brftech/filex');   // registers <filex-explorer>
 </script>
 ```
 (For npm builds: `import '@brftech/filex';` once registers `<filex-explorer>`.)
@@ -76,7 +168,8 @@ import { FileManager } from '@brftech/filex-react';
 
 <FileManager
   config={{ apiBase: 'https://files.example.com',
-            auth: { kind: 'bearer', token } }}
+            auth: { kind: 'bearer', token },
+            sideNav: true, connections: true, uiProfile: 'simple' }}
   onError={(e) => console.error(e.detail)}
   onFileOpened={(e) => console.log(e.detail)}
 />
@@ -88,7 +181,8 @@ import { FileManager } from '@brftech/filex-react';
 import { FileExplorer } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 const config = { apiBase: 'https://files.example.com',
-                 auth: { kind: 'bearer', token } };
+                 auth: { kind: 'bearer', token },
+                 sideNav: true, connections: true, uiProfile: 'simple' };
 </script>
 <template>
   <FileExplorer :config="config" @error="onError" @file-opened="onOpen" />

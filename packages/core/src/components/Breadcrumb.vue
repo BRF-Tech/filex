@@ -61,6 +61,16 @@ const floorLabel = computed(() => {
 
 const { t } = useLocale(() => props.locale);
 
+/* gezinti:g1 — sentinel dirname segment → locale key. The explorer parks these
+   in `dirname` while a virtual view (trash, recent, starred, shared) is on
+   screen; each has no real folder behind it. */
+const VIRTUAL_SEGMENTS: Record<string, string> = {
+  '.trash': 'node.trash',
+  '.recent': 'node.recent',
+  '.starred': 'node.starred',
+  '.shared': 'node.shared',
+};
+
 const emit = defineEmits<{
   (e: 'navigate', adapterPath: string): void;
   (e: 'copy-path', adapterPath: string): void;
@@ -120,7 +130,10 @@ const crumbs = computed<Crumb[]>(() => {
   let acc = '';
   for (const part of parts) {
     acc = acc ? `${acc}/${part}` : part;
-    const label = part === '.trash' ? t('node.trash') : part;
+    // gezinti:g1 — the sentinel segments the virtual views park in `dirname`
+    // (`.trash` predates them). Without a mapping the crumb reads ".starred",
+    // which is a filename the user never typed and cannot navigate to.
+    const label = VIRTUAL_SEGMENTS[part] ? t(VIRTUAL_SEGMENTS[part]) : part;
     out.push({ label, adapterPath: `${adapterPrefix}${acc}` });
   }
   return out;

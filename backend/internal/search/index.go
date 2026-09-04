@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/blevesearch/bleve/v2"
 	searchpkg "github.com/blevesearch/bleve/v2/search"
@@ -44,24 +45,62 @@ type Index struct {
 	// no name_norm field, so they only answer the legacy half until they
 	// are reindexed. Surfaced as Stats().NeedsRebuild.
 	staleSchema bool
+	// foundSchema is the marker actually read off disk, kept for the log
+	// line that tells an operator WHICH schema they are upgrading from.
+	foundSchema string
+
+	// pending is the replacement index a rebuild is filling. While it is
+	// set, every write lands in both it and the live index — otherwise a
+	// file uploaded during a rebuild would disappear from search the
+	// moment the replacement was swapped in. See rebuild.go.
+	pending bleve.Index
+
+	// rebuilding is the single guard shared by the manual admin endpoint
+	// and the automatic schema repair. It lives here, not on the HTTP
+	// handler, because a handler-local flag can only see the rebuilds the
+	// handler started.
+	rebuilding atomic.Bool
+
+	// dirty remembers the documents the write path touched during a
+	// rebuild, so the reindex loop does not overwrite them with the older
+	// rows it snapshotted. Non-nil only while a rebuild runs.
+	dirtyMu sync.Mutex
+	dirty   map[string]struct{}
+
+	// FreeBytes probes free disk space on the filesystem holding the
+	// index. Swapped in tests to exercise the guard without filling a
+	// disk (same shape as staging.Area.FreeBytes).
+	FreeBytes func(dir string) (uint64, error)
 }
 
 // Open returns an Index ready to use. Pass empty path to disable.
 //
 // Upgrade behaviour (issue #15 added two indexed fields): an index
-// written by an older build is opened AS IS and used. It is never
-// silently rebuilt — a rebuild drops extracted file content, which the
-// database does not hold a copy of, so an automatic one would trade a
-// recall improvement nobody asked for against a content-search outage
-// nobody was warned about. Instead the schema drift is recorded, logged
-// once, and reported by the admin stats endpoint so an operator can
-// choose the moment. Until then search returns everything it returned
-// before the upgrade, because the pre-#15 sub-queries are still part of
-// every query — the change adds recall, it never removes it.
+// written by an older build is opened AS IS and keeps serving. The
+// document schema stamped inside it is compared with the one this build
+// writes, and a mismatch is recorded, logged, and reported through the
+// admin stats endpoint — but the repair itself is started later, from the
+// server bootstrap (Index.AutoRebuildIfStale), because it needs the node
+// store and the content queue and neither exists at this point.
+//
+// Until the replacement is live, search returns everything it returned
+// before the upgrade: the pre-#15 sub-queries are still part of every
+// query, so the change adds recall and never removes any.
+//
+// ⚠ v0.29.0 stopped here, and that was the bug. It shipped better
+// filename matching that could not reach a single document any existing
+// installation already had, said so only in an admin endpoint, and the
+// reporter of issue #15 upgraded and correctly reported that nothing had
+// changed. What made an automatic rebuild unacceptable then — a rebuild
+// started from an empty index and extracted content lives only there —
+// is fixed in rebuild.go, not worked around.
 func Open(path string) (*Index, error) {
 	if path == "" {
 		return &Index{}, nil
 	}
+	// Before anything else: clean up after a container that died in the
+	// middle of a rebuild or a swap. See recoverInterrupted.
+	recoverInterrupted(path)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		mapping := bleve.NewIndexMapping()
 		bx, err := bleve.New(path, mapping)
@@ -78,10 +117,14 @@ func Open(path string) (*Index, error) {
 	idx := &Index{bleve: bx, path: path}
 	if v, err := bx.GetInternal([]byte(indexVersionKey)); err == nil && string(v) != indexSchemaVersion {
 		idx.staleSchema = true
-		slog.Warn("search index was built by an older filex; rebuild it to get separator-blind and typo-tolerant name matching on existing files",
-			slog.String("found_schema", schemaLabel(v)),
-			slog.String("want_schema", indexSchemaVersion),
-			slog.String("action", "POST /api/admin/search/rebuild?content=1"))
+		idx.foundSchema = schemaLabel(v)
+		// One line, naming both schemas, on every start until it is
+		// fixed. The repair itself is started by the server bootstrap:
+		// it needs the node store and the content queue, neither of
+		// which exists yet here. See Index.AutoRebuildIfStale.
+		slog.Warn("search: index document schema is out of date; separator-blind and typo-tolerant name matching cannot reach existing files until it is rebuilt",
+			slog.String("found_schema", idx.foundSchema),
+			slog.String("want_schema", indexSchemaVersion))
 	}
 	return idx, nil
 }
@@ -184,27 +227,28 @@ func (i *Index) IndexNode(ctx context.Context, n *model.Node) error {
 }
 
 func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) error {
-	i.mu.RLock()
-	bx := i.bleve
-	hook := i.contentHook
-	i.mu.RUnlock()
-	if bx == nil {
-		return nil
-	}
 	id := strconv.FormatInt(n.ID, 10)
-	d := doc{
-		StorageID: n.StorageID,
-		Name:      n.Name,
-		Path:      n.Path,
-		NameNorm:  Normalize(n.Name),
-		PathNorm:  Normalize(n.Path),
-		Mime:      n.Mime,
-		Type:      string(n.Type),
+	d := docFor(n)
+
+	// The read lock is held across the write, not just across reading the
+	// handles: a rebuild's swap takes the write lock and closes both
+	// indexes, and a writer that had already grabbed a handle would then
+	// be writing into a closed index.
+	i.mu.RLock()
+	bx, pending, hook := i.bleve, i.pending, i.contentHook
+	if bx == nil {
+		i.mu.RUnlock()
+		return nil
 	}
 	// Preserve content across metadata reindexes: Bleve replaces the whole
 	// document on Index(), so re-supply what the doc already holds.
 	d.Content, d.ContentSig = storedContent(bx, id)
-	if err := bx.Index(id, d); err != nil {
+	err := bx.Index(id, d)
+	if err == nil {
+		i.dualWrite(id, pending, func() error { return pending.Index(id, d) })
+	}
+	i.mu.RUnlock()
+	if err != nil {
 		return err
 	}
 	if allowHook && hook != nil && n.Type == model.NodeTypeFile && d.ContentSig != ContentFingerprint(n) {
@@ -213,30 +257,61 @@ func (i *Index) indexNode(ctx context.Context, n *model.Node, allowHook bool) er
 	return nil
 }
 
+// docFor renders the indexable document for a node.
+func docFor(n *model.Node) doc {
+	return doc{
+		StorageID: n.StorageID,
+		Name:      n.Name,
+		Path:      n.Path,
+		NameNorm:  Normalize(n.Name),
+		PathNorm:  Normalize(n.Path),
+		Mime:      n.Mime,
+		Type:      string(n.Type),
+	}
+}
+
+// dualWrite applies a write to the replacement index a rebuild is
+// building, and records the document as one the rebuild loop must not
+// overwrite with its older snapshot row. A nil pending index (the normal
+// case: no rebuild running) makes it a no-op.
+//
+// A failure here is logged, not returned. The live index already took the
+// write, and failing a user's upload because a background rebuild hiccuped
+// would be the tail wagging the dog; the rebuild's own verification is
+// what decides whether the replacement is fit to swap in.
+func (i *Index) dualWrite(id string, pending bleve.Index, apply func() error) {
+	if pending == nil {
+		return
+	}
+	i.markDirty(id)
+	if err := apply(); err != nil {
+		slog.Warn("search: write to the index being rebuilt failed",
+			slog.String("doc", id), slog.String("err", err.Error()))
+	}
+}
+
 // IndexNodeContent updates the node's document with extracted content. The
 // metadata fields are re-supplied from n (the authoritative row) so the
 // content update never clobbers them — Bleve has no partial update, the
 // whole doc is replaced. Metadata indexing stays synchronous elsewhere;
 // this lands later, from the content_index queue job.
 func (i *Index) IndexNodeContent(_ context.Context, n *model.Node, content string) error {
+	d := docFor(n)
+	d.Content = content
+	d.ContentSig = ContentFingerprint(n)
+	id := strconv.FormatInt(n.ID, 10)
+
 	i.mu.RLock()
-	bx := i.bleve
-	i.mu.RUnlock()
-	if bx == nil {
+	defer i.mu.RUnlock()
+	if i.bleve == nil {
 		return nil
 	}
-	d := doc{
-		StorageID:  n.StorageID,
-		Name:       n.Name,
-		Path:       n.Path,
-		NameNorm:   Normalize(n.Name),
-		PathNorm:   Normalize(n.Path),
-		Mime:       n.Mime,
-		Type:       string(n.Type),
-		Content:    content,
-		ContentSig: ContentFingerprint(n),
+	if err := i.bleve.Index(id, d); err != nil {
+		return err
 	}
-	return bx.Index(strconv.FormatInt(n.ID, 10), d)
+	pending := i.pending
+	i.dualWrite(id, pending, func() error { return pending.Index(id, d) })
+	return nil
 }
 
 // storedContent reads the content + fingerprint currently stored on a doc
@@ -259,13 +334,21 @@ func storedContent(bx bleve.Index, id string) (content, sig string) {
 
 // DeleteNode removes a node from the index.
 func (i *Index) DeleteNode(_ context.Context, id int64) error {
+	docID := strconv.FormatInt(id, 10)
 	i.mu.RLock()
-	bx := i.bleve
-	i.mu.RUnlock()
-	if bx == nil {
+	defer i.mu.RUnlock()
+	if i.bleve == nil {
 		return nil
 	}
-	return bx.Delete(strconv.FormatInt(id, 10))
+	if err := i.bleve.Delete(docID); err != nil {
+		return err
+	}
+	// A delete during a rebuild matters more than a write: without this
+	// the file would come back from the dead at the swap, because the
+	// rebuild works from a node snapshot that still contains it.
+	pending := i.pending
+	i.dualWrite(docID, pending, func() error { return pending.Delete(docID) })
+	return nil
 }
 
 // Scope selects which fields a search consults.
@@ -381,9 +464,16 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 	if limit <= 0 {
 		limit = 50
 	}
+	// The read lock is held for the whole search, not just long enough to
+	// read the handle. A rebuild's swap closes the live index under the
+	// write lock, and a query that had already taken the handle and let go
+	// of the lock would run against a closed index and fail — measured:
+	// 1 error in 269 queries hammered across a swap. Holding it costs
+	// nothing (searches share it) and turns that window into a wait of a
+	// few milliseconds.
 	i.mu.RLock()
+	defer i.mu.RUnlock()
 	bx := i.bleve
-	i.mu.RUnlock()
 	if bx == nil || q == "" {
 		return nil, nil
 	}
@@ -399,22 +489,46 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 		fetch = limit
 	}
 
-	out := make([]Hit, 0, fetch)
+	out := make([]ranked, 0, fetch)
 	seen := map[string]int{} // doc id → position in out
+	pq := PrepareQuery(q)
 
 	if scope != ScopeContent {
-		collect := func(res *bleve.SearchResult) {
+		// collect turns one Bleve pass into ranked hits. Bleve decided
+		// only that these documents are worth LOOKING at; the scorer
+		// decides whether each is a result and where it belongs.
+		collect := func(res *bleve.SearchResult, fromTypoPass bool) {
 			for _, h := range res.Hits {
 				if _, dup := seen[h.ID]; dup {
 					continue
 				}
+				name, path := hitField(h, "name"), hitField(h, "path")
+				sc := pq.ScoreName(name, path)
+				if !sc.OK {
+					// Some query piece is answered by neither the
+					// filename nor any folder above it. From the strict
+					// pass that is a half-match and it is dropped —
+					// dropping `/Code` from `Code main` is the whole
+					// reason that query stopped feeling broken.
+					if !fromTypoPass {
+						continue
+					}
+					// From the typo pass it is the expected shape:
+					// `mian.go` is not a subsequence of `main.go`, so the
+					// scorer cannot see it and edit distance is the only
+					// thing that found it. Keep it, ranked last.
+					sc = NameScore{OK: true, Tier: TierFuzzy}
+				}
 				id, _ := strconv.ParseInt(h.ID, 10, 64)
 				seen[h.ID] = len(out)
-				out = append(out, Hit{
-					NodeID:  id,
-					Score:   h.Score,
-					Matched: MatchedName,
-					Tier:    RankName(q, hitField(h, "name"), hitField(h, "path")),
+				out = append(out, ranked{
+					Hit: Hit{
+						NodeID:  id,
+						Score:   float64(sc.Score),
+						Matched: MatchedName,
+						Tier:    sc.Tier,
+					},
+					pathLen: len(path),
 				})
 			}
 		}
@@ -422,14 +536,20 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 		if err != nil {
 			return nil, err
 		}
-		collect(res)
+		collect(res, false)
+		// ⚠ The gate counts SURVIVORS, not candidates, and that is a
+		// deliberate change: the reporter of issue #15 pointed out that
+		// edit distance "is gated behind a strict-pass shortfall so it
+		// almost never fires". He was right — before the scorer, a
+		// strict pass full of half-matches counted as a full result set
+		// and closed this gate. Now only real matches do.
 		if len(out) < limit {
 			if fq := fuzzyNameQuery(q); fq != nil {
 				res, err := runNameSearch(bx, applyFilter(fq, f), fetch)
 				if err != nil {
 					return nil, err
 				}
-				collect(res)
+				collect(res, true)
 			}
 		}
 	}
@@ -437,6 +557,13 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 	if scope != ScopeName {
 		cq := bleve.NewMatchQuery(q)
 		cq.SetField("content")
+		// Every word, not any word. The name side has narrowed on extra
+		// words since v0.29.0 but the content side was still a default-OR
+		// match, so on demo.filex.sh `Code main` returned nine results,
+		// seven of them files that merely contained the word "code". A
+		// query where extra words WIDEN the result set is the opposite of
+		// what anybody types them for.
+		cq.SetOperator(query.MatchQueryOperatorAnd)
 		req := bleve.NewSearchRequest(applyFilter(cq, f))
 		req.Size = fetch
 		req.Highlight = bleve.NewHighlight()
@@ -458,7 +585,10 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 				continue
 			}
 			id, _ := strconv.ParseInt(h.ID, 10, 64)
-			out = append(out, Hit{NodeID: id, Score: h.Score, Snippet: snippet, Matched: MatchedContent, Tier: TierContent})
+			out = append(out, ranked{
+				Hit:     Hit{NodeID: id, Score: h.Score, Snippet: snippet, Matched: MatchedContent, Tier: TierContent},
+				pathLen: len(hitField(h, "path")),
+			})
 		}
 	}
 
@@ -469,12 +599,31 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 		if out[a].Score != out[b].Score {
 			return out[a].Score > out[b].Score
 		}
+		// Two files really can be called main.go. VS Code breaks that tie
+		// by preferring the shorter path (fallbackCompare) and so do we —
+		// the previous tiebreak was the database id, which is not a
+		// ranking, it is insert order.
+		if out[a].pathLen != out[b].pathLen {
+			return out[a].pathLen < out[b].pathLen
+		}
 		return out[a].NodeID < out[b].NodeID
 	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out, nil
+	hits := make([]Hit, len(out))
+	for i, r := range out {
+		hits[i] = r.Hit
+	}
+	return hits, nil
+}
+
+// ranked is a Hit plus the sort keys that are not part of the wire
+// shape. The HTTP response is frozen, so the path length that breaks a
+// score tie lives here rather than on Hit.
+type ranked struct {
+	Hit
+	pathLen int
 }
 
 // runNameSearch executes one name-side pass, asking Bleve for the stored
@@ -675,13 +824,19 @@ type IndexStats struct {
 	// NeedsRebuild is true when the index was written by a build with an
 	// older document schema. Search still works — see Open — but the
 	// documents already in it cannot answer the separator-blind or
-	// typo-tolerant half of a query until they are reindexed.
+	// typo-tolerant half of a query until they are reindexed. It stays
+	// true for the whole of a rebuild: until the swap, the index
+	// answering queries really is the old one.
 	NeedsRebuild bool
+	// Rebuilding is true while a replacement index is being built, by
+	// either the admin endpoint or the automatic schema repair.
+	Rebuilding bool
 }
 
 // Stats returns DocCount + on-disk size for the index.
 func (i *Index) Stats() IndexStats {
 	out := IndexStats{}
+	out.Rebuilding = i.rebuilding.Load()
 	i.mu.RLock()
 	bx := i.bleve
 	path := i.path
@@ -700,57 +855,20 @@ func (i *Index) Stats() IndexStats {
 	return out
 }
 
-// RebuildAll drops every document and reindexes metadata from the DB. The
-// Store interface is referenced via an opaque interface to avoid an import
-// cycle. Content is NOT re-extracted (the fresh index starts without it) —
-// use RebuildAllWithContent to also re-queue extraction.
+// RebuildAll reindexes every node row into a replacement index and swaps
+// it in. The Store interface is referenced via an opaque interface to
+// avoid an import cycle. Text already extracted is carried over from the
+// live index; nothing is re-extracted (use RebuildAllWithContent for
+// that). See rebuild.go for the swap.
 func (i *Index) RebuildAll(ctx context.Context, store NodeLister) error {
-	return i.rebuildAll(ctx, store, false)
+	return i.Rebuild(ctx, store, RebuildOptions{Reason: "admin"})
 }
 
-// RebuildAllWithContent is RebuildAll plus content re-extraction: after
-// each row lands, the content hook fires for eligible files (the rebuilt
-// index holds no content, so every extractable file re-enqueues).
+// RebuildAllWithContent is RebuildAll plus content re-extraction: every
+// eligible file is re-enqueued for extraction once the replacement index
+// is live.
 func (i *Index) RebuildAllWithContent(ctx context.Context, store NodeLister) error {
-	return i.rebuildAll(ctx, store, true)
-}
-
-func (i *Index) rebuildAll(ctx context.Context, store NodeLister, withContent bool) error {
-	i.mu.Lock()
-	bx := i.bleve
-	path := i.path
-	i.mu.Unlock()
-	if bx == nil {
-		return errors.New("index disabled")
-	}
-	// Close + delete + reopen is the simplest "drop everything" approach.
-	if err := bx.Close(); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(path); err != nil {
-		return err
-	}
-	mapping := bleve.NewIndexMapping()
-	fresh, err := bleve.New(path, mapping)
-	if err != nil {
-		return err
-	}
-	stampSchemaVersion(fresh)
-	i.mu.Lock()
-	i.bleve = fresh
-	// The rebuild is the thing that clears the drift: every row is about
-	// to be written with the current schema.
-	i.staleSchema = false
-	i.mu.Unlock()
-	// Reindex.
-	nodes, err := store.AllNodesForIndex(ctx)
-	if err != nil {
-		return err
-	}
-	for _, n := range nodes {
-		_ = i.indexNode(ctx, n, withContent)
-	}
-	return nil
+	return i.Rebuild(ctx, store, RebuildOptions{ReExtract: true, Reason: "admin"})
 }
 
 // NodeLister is the slim Store contract RebuildAll needs.

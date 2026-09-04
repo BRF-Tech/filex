@@ -548,6 +548,16 @@ type SearchConfig struct {
 	// (FILEX_SEARCH_CONTENT_MAX). <=0 falls back to 5 MiB. The extracted
 	// text itself is always capped at 200 KiB.
 	ContentMaxBytes int64 `yaml:"content_max_bytes"`
+	// AutoRebuild lets filex repair an index written by an older document
+	// schema, in the background, at startup. ON by default;
+	// FILEX_SEARCH_AUTO_REBUILD=0 is the kill-switch.
+	//
+	// It is on by default because the alternative shipped once and did not
+	// work: v0.29.0 improved filename matching for everyone EXCEPT the
+	// installations that already had an index, told them so in an admin
+	// endpoint nobody reads, and the issue reporter upgraded and correctly
+	// said nothing had changed.
+	AutoRebuild bool `yaml:"auto_rebuild"`
 }
 
 // CORSConfig — origin allowlist.
@@ -589,6 +599,7 @@ func Default() Config {
 			Enabled:         true,
 			Content:         true,
 			ContentMaxBytes: 5 << 20,
+			AutoRebuild:     true,
 		},
 		Queue: QueueConfig{
 			Driver:  "sqlite",
@@ -917,6 +928,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_SEARCH_CONTENT"); v != "" {
 		c.Search.Content = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_SEARCH_AUTO_REBUILD"); v != "" {
+		c.Search.AutoRebuild = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_SEARCH_CONTENT_MAX"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {

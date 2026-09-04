@@ -7,6 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-04
+
+Everything here came out of two issues opened by the same person, and the most
+useful thing in the release is the one we got wrong: v0.29.0 fixed filename
+search and **nobody could see it**, because the index only gains new fields for
+documents that are re-indexed and nothing ever rebuilt it. He measured our own
+demo, correctly concluded that nothing had changed, and reported that content
+search "doesn't work at all" — it was the same cause. A fix an existing install
+cannot reach is not shipped.
+
+### Added
+
+- **A collapsible navigation panel in the explorer.** Upload as the primary
+  action, then Recent, Starred, Shared with me and Trash, then the storages the
+  caller can see, with the ones reached through a grant marked as shared. It
+  collapses to a 56px icon rail rather than disappearing — a panel that vanishes
+  takes its own way back with it — and below 560px it is a drawer instead of a
+  column, so the listing keeps its width (measured: 388px with the drawer open
+  and closed). The collapsed choice is remembered per viewer.
+
+  It lives in `@brftech/filex-core`, so the web app, the desktop app and every
+  embed get the same panel from one implementation. `sideNav` turns it on or
+  off; the web component also takes a `sidenav` attribute for hosts that never
+  touch JavaScript.
+
+- **`uiProfile: 'standard' | 'simple'`.** The reporter's argument was that most
+  of his users are not in IT and will not relearn a file manager: tabs, a split
+  pane, four view modes and mount instructions are a power-user tool. `simple`
+  turns those off and expands the panel; nothing is removed from the build, and
+  an embedder can set either profile. The admin panel keeps today's defaults.
+
+- **Connections and API keys from inside the explorer.** Both surfaces existed
+  and neither was reachable: our own web app wired the buttons itself, so an
+  embedder mounting `<filex-explorer>` gave their users no way to see how to
+  mount a drive or to mint a token. `SelfTokensModal` has moved out of the web
+  app into the shared component and the web copy is gone.
+
+  Why it had never moved: the web version hid the write and delete scopes from
+  viewer accounts by reading a store only the web app has. The shared component
+  does not reproduce that. It offers every scope and lets the server refuse —
+  which it already does, in words worth reading (`scope 'write' is not
+  available here`). Asking is not granting, and a UI-side role check hides the
+  surface from exactly the accounts that need it. For a year the only place to
+  mint the token the FTPS guide names was the admin panel.
+
+- **`GET /api/files/manager/shared-with-me`** — the nodes a caller holds a grant
+  on. The data existed in `file_grants`; the only listing over it was
+  path-scoped and owner-only, so "what has been shared with me" had no answer.
+  Tenant-scoped explicitly, like search.
+
+### Fixed
+
+- **The search index now repairs itself after an upgrade.** On start it compares
+  the document schema it was built with; if it is behind, it builds a
+  replacement **alongside** the live index and swaps it in atomically. The old
+  index answers every query until the swap, and extracted text is carried across
+  document by document rather than re-derived — which is what makes this safe to
+  do automatically. The blackout that argument was made against in v0.29.0 does
+  not happen: measured on 20 202 documents, the rebuild took 2.96 s and 601
+  searches issued during it returned 0 errors and 0 missing hits.
+
+  An interrupted rebuild is discarded and retried; a crash during the swap
+  restores the known-good index; it refuses and keeps serving the old index if
+  the disk cannot hold both. `FILEX_SEARCH_AUTO_REBUILD=0` turns it off — but
+  off by default would reproduce exactly the failure it exists to fix.
+
+- **Filename ranking is now a port of VS Code's Quick Open scorer.** The
+  reporter's words were "VS Code does this fine, I can't do it here", and he was
+  pointing at a specific method, so we ported it: a subsequence match scored
+  with position bonuses (start of name, after a path separator, after `_ - .`,
+  camelCase humps, runs of consecutive characters), the query split into pieces
+  matched independently so **word order does not matter**, and the filename
+  scored separately from its folders and weighted above them. Bleve still
+  retrieves the candidates; the scorer re-ranks them and, crucially, **drops
+  candidates that do not answer every piece**.
+
+  Measured against the corpus he tested on: `Code main` went from nine results
+  to one. `main code` finds `Code/main.go` too. `Code/main.go` and
+  `example/main.go` stopped being the same thing to the search. Exact filename
+  still outranks prefix, which outranks everything fuzzy — now asserted by a
+  test rather than emergent from merged relevance scores.
+
+  Edit distance stays, ranked below the subsequence pass: `mian.go` finds
+  `main.go`, which Quick Open itself would not.
+
+- **Multi-word content search was an OR**, so adding a word *widened* it. That,
+  not the filename side, was where most of the noise came from — seven of the
+  nine results for `Code main` were files that merely contain the word "code".
+  Every word is now required.
+
+- **The typo pass almost never fired.** It was gated on the number of candidates
+  the index returned rather than the number that survived filtering, so a query
+  that retrieved plenty and kept none still counted as "enough".
+
+- **The recently-opened tray read the wrong field** (`entries` from an endpoint
+  that answers `nodes`), so it was empty on every server that ever served it.
+  It was also unreachable — the toolbar declared the event that opens it and
+  never emitted it. The panel is now the working surface.
+
+- **Starred and Recent rows were unopenable in multi-storage mode**: the rows
+  carried no storage name, so no `storage://path` could be built for them.
+
+- **`docs/WEBDAV.md`, `docs/LDAP.md` and `docs/METRICS.md` sent people to
+  "Settings → API tokens"** — a screen that has never existed in the product.
+
+- **The web-component embedding example authenticated nothing.** It assigned
+  `config` after the import that registers and mounts the element, so the first
+  folder request went out without credentials: the explorer rendered and the
+  listing said "could not load this folder".
+
+- A query could arrive while the search index handle was being swapped, because
+  the read lock was released before the query ran rather than after. One error
+  in 269 hammered queries; now impossible by construction.
+
 ## [0.29.0] - 2026-09-04
 
 ### Added

@@ -11,7 +11,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ChevronLeft, RefreshCcw, LayoutDashboard, KeyRound, LogOut, Cable } from 'lucide-vue-next';
+import { ChevronLeft, RefreshCcw, LayoutDashboard, LogOut, Cable } from 'lucide-vue-next';
 
 import { FileExplorer, ConnectionsPanel, type ExplorerConfig } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
@@ -22,7 +22,6 @@ import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue';
 import DarkModeToggle from '@/components/DarkModeToggle.vue';
-import SelfTokensModal from '@/components/SelfTokensModal.vue';
 import { effectiveTheme } from '@/lib/theme';
 import { explorerAuth, readBearerToken, readCsrfCookie } from '@/lib/explorerConfig';
 // Live collaboration (WebSocket + presence) now lives INSIDE @brftech/filex-core's
@@ -35,7 +34,11 @@ const route = useRoute();
 const auth = useAuthStore();
 const storages = useStoragesStore();
 
-const showTokens = ref(false);
+// gezinti:g1 — the API-key surface moved into the shared package and is opened
+// from the explorer's navigation panel. This page no longer owns a copy of it;
+// `web/src/components/SelfTokensModal.vue` and `web/src/api/self-tokens.ts` are
+// gone, because two implementations of one credential screen is how one of them
+// mints tokens the other cannot see.
 // "How to connect" — the outward half of the connections surface. This is
 // where a NON-admin lands (the admin panel redirects them here), so it is
 // the only place they can be told how to mount a drive.
@@ -122,6 +125,26 @@ const initialPathFromQuery = computed(() => {
   return '';
 });
 
+/**
+ * gezinti:g1 — which chrome this visitor gets.
+ *
+ * GitHub #14: an operator's tool and an end user's file drive are two jobs, and
+ * until now both were served the same screen. `simple` turns the power-user
+ * chrome off (tabs, split pane, the gallery view mode, "How to connect") for
+ * accounts that never asked for it; administrators keep today's explorer.
+ *
+ * ⚠ The NAVIGATION PANEL is not part of this decision — it ships in both
+ * profiles, collapsed or expanded as each person chooses. Gating a panel on
+ * role is how one product becomes two.
+ *
+ * ⚠ Reads `auth.isAdmin`, which is false until `auth.fetchMe()` resolves. The
+ * explorer only mounts once `roots` is populated, and that happens after
+ * fetchMe in onMounted, so an admin never sees a frame of the simple profile.
+ */
+const uiProfile = computed<'standard' | 'simple'>(() =>
+  auth.isAdmin ? 'standard' : 'simple',
+);
+
 const explorerConfig = computed<ExplorerConfig | null>(() => {
   if (!roots.value.length) return null;
   const authConf: ExplorerConfig['auth'] = explorerAuth();
@@ -139,6 +162,15 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     trashVisible: true,
     showInfoPanel: true,
     multiStorageRoot: true,
+    uiProfile: uiProfile.value,
+    // ⚠ Explicit, and NOT the simple profile's default. In this deployment a
+    // non-admin is a real account that mounts drives, and the only screen that
+    // can mint the token WebDAV / FTPS / `filex mount` ask for is this one —
+    // leaving it to the profile default would re-open the exact gap
+    // e2e/tests/25-connections.spec.ts guards ("a non-admin has to be able to
+    // mint the credential the guide tells them to use"). An embedder whose
+    // users should never see mount instructions sets `connections: false`.
+    connections: true,
     storages: roots.value,
     initialPath: initialPathFromQuery.value || '',
     // "Aç" / double-click → open the standalone editor in a new tab.
@@ -227,6 +259,11 @@ onMounted(async () => {
           <LayoutDashboard class="h-4 w-4" />
           {{ t('explore.gotoAdmin') }}
         </Button>
+        <!-- gezinti:g1 — "How to connect" is WebDAV/SFTP/S3 mount instructions.
+             It is the definition of the power-user surface #14 asked us to stop
+             putting in front of people who are not in IT, so the simple profile
+             hides it. The route and the component are untouched: /admin/connections
+             still serves it, and an operator reaches it from the panel. -->
         <Button
           v-if="auth.isAuthenticated"
           size="xs"
@@ -237,9 +274,6 @@ onMounted(async () => {
         >
           <Cable class="h-4 w-4" />
         </Button>
-        <Button v-if="auth.isAuthenticated && !auth.isAdmin" size="xs" variant="ghost" @click="showTokens = true" :title="t('explore.apiKeys')">
-          <KeyRound class="h-4 w-4" />
-        </Button>
         <Button v-if="auth.isAuthenticated" size="xs" variant="ghost" @click="doLogout" :title="t('explore.logout')">
           <LogOut class="h-4 w-4" />
         </Button>
@@ -247,7 +281,6 @@ onMounted(async () => {
         <LocaleSwitcher />
       </div>
     </header>
-    <SelfTokensModal v-if="showTokens" @close="showTokens = false" />
 
     <!-- The connections surface, on the page a non-admin actually lands on.
          Same component as the admin route and as the desktop app — and it

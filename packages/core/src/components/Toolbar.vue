@@ -73,6 +73,23 @@ const props = defineProps<{
   theme?: ThemeMode;
   /* koru:k1 — inspector (details panel) toggle state, for the pressed style. */
   inspectorOpen?: boolean;
+  /**
+   * gezinti:g1 — navigation panel state, for the pressed style on the toggle.
+   * The panel has its own collapse control, but a narrow explorer renders it
+   * as a drawer that is off screen when closed, so the only way back to it is
+   * from here.
+   */
+  navOpen?: boolean;
+  /** gezinti:g1 — false when the deployment has no navigation panel; the
+   *  toggle then has nothing to toggle and is not rendered. */
+  navEnabled?: boolean;
+  /**
+   * gezinti:g1 — view modes to offer. Absent = all three (the historical
+   * behaviour). `ExplorerConfig.uiProfile: 'simple'` narrows it to list+grid:
+   * a four-way switcher is one of the things the reporter in #14 named as
+   * "power user tool", and gallery is the one nobody outside photos asks for.
+   */
+  viewModes?: ViewMode[];
 }>();
 
 const emit = defineEmits<{
@@ -86,6 +103,7 @@ const emit = defineEmits<{
   (e: 'open-recents'): void;
   (e: 'update:density', v: Density): void;
   (e: 'toggle-inspector'): void /* koru:k1 */;
+  (e: 'toggle-nav'): void /* gezinti:g1 */;
   (e: 'open-theme'): void /* wiring:c1 — tema galerisi */;
   (e: 'open-shortcut-settings'): void /* wiring:c2 */;
 }>();
@@ -270,6 +288,12 @@ const moreRef = ref<InstanceType<typeof ContextMenu> | null>(null);
 // Everything the wide toolbar renders as standalone buttons, folded into one
 // action list: folder-level writes (New Folder / Paste), the shared
 // selection actions, then the view utilities (Refresh / density / view mode).
+/* gezinti:g1 — is this view mode on offer? No prop = all of them, so every
+   embedder that predates uiProfile keeps the switcher it had. */
+function offersView(v: ViewMode): boolean {
+  return !props.viewModes || props.viewModes.includes(v);
+}
+
 const moreActions = computed<ContextAction[]>(() => {
   const list: ContextAction[] = [];
   const writable =
@@ -291,10 +315,15 @@ const moreActions = computed<ContextAction[]>(() => {
   });
   /* wiring:d2 — dar mod ⋯ menüsü: aktif olmayan İKİ görünüm de listelenir
      (list/grid/gallery); eski tekli toggle üç modda eksik kalıyordu. */
-  if (props.viewMode !== 'list') list.push({ key: 'view-list', label: t('toolbar.view.list'), icon: '☰' });
-  if (props.viewMode !== 'grid') list.push({ key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' });
-  if (props.viewMode !== 'gallery') list.push({ key: 'view-gallery', label: t('toolbar.view.gallery'), icon: '▣' });
+  if (props.viewMode !== 'list' && offersView('list')) list.push({ key: 'view-list', label: t('toolbar.view.list'), icon: '☰' });
+  if (props.viewMode !== 'grid' && offersView('grid')) list.push({ key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' });
+  if (props.viewMode !== 'gallery' && offersView('gallery')) list.push({ key: 'view-gallery', label: t('toolbar.view.gallery'), icon: '▣' });
   /* /wiring:d2 */
+  /* gezinti:g1 — reachable from the overflow menu too, because the toolbar's
+     own toggle is hidden while the narrow search field is expanded. */
+  if (props.navEnabled !== false) {
+    list.push({ key: 'nav', label: t('toolbar.nav'), icon: '☰' });
+  }
   /* koru:k1 — inspector toggle also reachable from the narrow overflow menu */
   list.push({ key: 'inspector', label: t('toolbar.inspector'), icon: 'ℹ' });
   /* wiring:c1 — tema galerisi de dar modda ⋯ menüsünden açılır */
@@ -332,6 +361,9 @@ function onMoreSelect(a: ContextAction) {
     case 'inspector' /* koru:k1 */:
       emit('toggle-inspector');
       break;
+    case 'nav' /* gezinti:g1 */:
+      emit('toggle-nav');
+      break;
     case 'theme' /* wiring:c1 */:
       emit('open-theme');
       break;
@@ -360,6 +392,36 @@ function onMoreSelect(a: ContextAction) {
     <!-- bag:b4 — wide layout, untouched; renders exactly as before when not narrow -->
     <template v-if="!narrow">
     <div ref="primaryEl" class="fe-toolbar__primary">
+      <!-- gezinti:g1 — navigation panel toggle. Leftmost, the position every
+           Drive-shaped UI puts it in; the panel's own header carries the same
+           action, and in narrow mode where the panel is an off-screen drawer
+           this is the ONLY way back to it. -->
+      <button
+        v-if="navEnabled !== false"
+        type="button"
+        class="fe-btn fe-btn--icon-only fe-toolbar__nav"
+        :class="{ 'is-active': navOpen }"
+        :aria-pressed="!!navOpen"
+        :title="t('toolbar.nav')"
+        :aria-label="t('toolbar.nav')"
+        data-testid="toolbar-nav"
+        @click="emit('toggle-nav')"
+      >
+        <svg
+          class="fe-ficon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+          <path d="M9.5 4.5v15" />
+        </svg>
+      </button>
+
       <button
         v-if="canGoUp"
         type="button"
@@ -567,6 +629,7 @@ function onMoreSelect(a: ContextAction) {
     <div class="fe-toolbar__view" role="tablist" :aria-label="t('toolbar.view_label') /* wiring:c4 — was hardcoded EN */">
       <button
         type="button"
+        v-if="offersView('list')"
         class="fe-btn fe-btn--icon-only"
         :class="{ 'is-active': viewMode === 'list' }"
         role="tab"
@@ -579,6 +642,7 @@ function onMoreSelect(a: ContextAction) {
       </button>
       <button
         type="button"
+        v-if="offersView('grid')"
         class="fe-btn fe-btn--icon-only"
         :class="{ 'is-active': viewMode === 'grid' }"
         role="tab"
@@ -592,6 +656,7 @@ function onMoreSelect(a: ContextAction) {
       <!-- wiring:d2 — üçüncü görünüm: galeri -->
       <button
         type="button"
+        v-if="offersView('gallery')"
         class="fe-btn fe-btn--icon-only"
         :class="{ 'is-active': viewMode === 'gallery' }"
         role="tab"
@@ -632,6 +697,36 @@ function onMoreSelect(a: ContextAction) {
         </button>
       </template>
       <template v-else>
+        <!-- gezinti:g1 — navigation panel toggle. Leftmost, the position every
+             Drive-shaped UI puts it in; the panel's own header carries the same
+             action, and in narrow mode where the panel is an off-screen drawer
+             this is the ONLY way back to it. -->
+        <button
+          v-if="navEnabled !== false"
+          type="button"
+          class="fe-btn fe-btn--icon-only fe-toolbar__nav"
+          :class="{ 'is-active': navOpen }"
+          :aria-pressed="!!navOpen"
+          :title="t('toolbar.nav')"
+          :aria-label="t('toolbar.nav')"
+          data-testid="toolbar-nav"
+          @click="emit('toggle-nav')"
+        >
+          <svg
+            class="fe-ficon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+          <path d="M9.5 4.5v15" />
+          </svg>
+        </button>
+
         <button
           v-if="canGoUp"
           type="button"

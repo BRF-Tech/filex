@@ -75,6 +75,11 @@ features:
     details: The same binary doubles as a remote client — script uploads, downloads and syncs over the public REST API.
     link: /CLI
     linkText: CLI docs
+  - icon: 🧭
+    title: Navigation people already know
+    details: A left panel with a prominent Upload and the views Recent, Starred, Shared with me and Trash, plus the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for. Collapse it to an icon rail when you want the width back, and switch the simple profile on for people who want a file drive rather than a file manager.
+    link: /INTEGRATION
+    linkText: Turning it on
   - icon: 🧩
     title: Embeddable UI
     details: Drop the explorer into any app as a Vue 3 or React component, or a framework-free web component.

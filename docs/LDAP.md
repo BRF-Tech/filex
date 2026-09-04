@@ -184,7 +184,8 @@ also mount `/dav` with the same credentials.
   the directory, so signing in by filex username works too.
 - **2FA.** An account with TOTP enabled is refused on these protocols, whether
   its password is local or in the directory — none of them can carry a second
-  factor. Such an account must use an API token (**Settings → API tokens**).
+  factor. Such an account must use an API token (file explorer → navigation panel →
+  **Connections → API keys**).
 
 Set `protocol_login: false` (or `FILEX_LDAP_PROTOCOL_LOGIN=false`) to keep
 directory passwords on the login form only and require an API token everywhere

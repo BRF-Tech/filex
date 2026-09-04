@@ -49,9 +49,18 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   `viewer` account and `…/drive` and they get the file manager itself: their storages,
   uploads, sharing, search, the editor. No admin panel to walk through, no separate
   frontend to deploy. `…/admin` is the operator's door to the same app.
+- **Navigation people already know** — a left panel with a prominent **Upload** and
+  **Recent · Starred · Shared with me · Trash**, plus the storages you can reach; a
+  storage someone shared with you simply appears there, one click, no mount
+  instructions. Anyone can collapse it to an icon rail, and `uiProfile: 'simple'`
+  presets the rest of the chrome off — one pane, one folder, list or grid — for people
+  who want a file drive rather than a file manager. One explorer either way: there is
+  no second UI to keep in step.
 - **Embeds anywhere** — the same UI ships as a Vue 3 component, a React component and a
   framework-agnostic `<filex-explorer>` web component. Put a real file manager inside
   *your* product, backed by your own filex server and locked to a per-tenant folder.
+  The navigation panel comes with it — `<filex-explorer sidenav ui-profile="simple">`
+  is the whole opt-in for a host page that never touches JavaScript.
 - **AI-agent-native** — a token-scoped REST surface (`/api/ai`) plus a native
   **MCP server** (`/api/ai/mcp`). Hand an agent a token confined to one folder and it can
   list, read, write, share and zip — nothing else.
@@ -124,6 +133,18 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 | Admin panel | Demo landing |
 |---|---|
 | ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Demo landing](docs/screenshots/demo-landing.png) |
+
+| Navigation panel — Upload, Recent / Starred / Shared with me / Trash, and your storages | Collapsed to the icon rail |
+|---|---|
+| ![Navigation panel](docs/screenshots/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/sidenav/sidenav-rail-1440.png) |
+
+| Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
+|---|---|
+| ![Shared with me](docs/screenshots/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/sidenav/embed-webcomponent-1440.png) |
+
+| How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed |
+|---|---|
+| ![How to connect](docs/screenshots/sidenav/connect-1440.png) | ![API keys](docs/screenshots/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
@@ -203,8 +224,15 @@ import { FileManager } from '@brftech/filex-react';
 ### Vanilla JS / any framework
 ```html
 <script type="module" src="https://cdn.jsdelivr.net/npm/@brftech/filex/dist/filex.js"></script>
-<filex-explorer api-base="http://localhost:5212"></filex-explorer>
+<filex-explorer api-base="http://localhost:5212" sidenav connections ui-profile="simple"></filex-explorer>
 ```
+
+`sidenav` turns the navigation panel on (it is on by default; the attribute is
+there so a host page can state it either way), `connections` adds its "How to
+connect" and "API keys" entries, and `ui-profile="simple"` presets the
+power-user chrome off. All three are ordinary `config` keys, so the Vue and
+React wrappers set them the same way — see
+[docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 Multi-tenant hosts typically proxy the API server-side, inject a **confined token**
 (`root: tenant-folder`) per request, and strip client headers — the sandbox is enforced by
@@ -281,7 +309,8 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate — it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
 - **`filex mount`** — attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
-- **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings.
+- **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings. **Shared with me** answers the reverse question from the recipient's side — what other people granted you, and which storages you reach only through a grant.
+- **Navigation panel** — Upload as the primary action, the views Recent / Starred / Shared with me / Trash, the storages you can see, and **How to connect** + **API keys**: the per-protocol guides and the self-service token manager, opened from inside the explorer so an embedded copy's users can mint the credential WebDAV/FTPS/`filex mount` ask for instead of asking an administrator. Collapsible to an icon rail (remembered per browser), a drawer instead of a column under 560px. On by default in the web app, the desktop app and every embed; `uiProfile: 'simple'` additionally turns off the tab strip, the split pane, the gallery view mode and the "How to connect" surface without removing any of them from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Sharing** — public links with PIN, expiry and max-downloads, under an admin-set **maximum link life** (default 7 days — the dialog only offers what the server will keep); folder links stream as ZIP (cached, pre-warmed up to a size ceiling, swept after a week); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint ([docs/SHARING.md](docs/SHARING.md)).
 - **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
@@ -297,7 +326,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Viewers & editors** — image/video/audio, PDF, Markdown (split editor + preview), CSV, code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models.
 - **Universal converter** — optional side-car converts between document/image formats from the UI.
 - **Notifications** — generic JSON webhook (Slack/Discord-agnostic) + in-app bell with read/unread + per-user mute matrix.
-- **Search** — Bleve embedded, full-text + metadata, permission-aware. Separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`), `tag:` filters, exact matches ranked first.
+- **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`), `tag:` filters, exact matches ranked first.
 - **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware.
 - **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there.
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.

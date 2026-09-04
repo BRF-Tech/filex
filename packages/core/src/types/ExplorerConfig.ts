@@ -257,6 +257,74 @@ export interface ExplorerConfig {
   /** Whether the info panel toggle is visible. */
   showInfoPanel?: boolean;
 
+  /**
+   * Which set of chrome the explorer presents. A PRESET, not a feature switch:
+   * nothing is removed from the code, and every capability stays reachable —
+   * `'simple'` only changes what is on screen by default.
+   *
+   *   'standard' (default) — everything: tab strip, split pane, all three view
+   *                          modes. The tool the explorer has always been.
+   *   'simple'             — one pane, one folder, list/grid only. The
+   *                          navigation panel starts expanded, the tab strip
+   *                          and split pane are off, the gallery view mode and
+   *                          the host's "How to connect" surface are hidden.
+   *
+   * Why it exists (GitHub #14): the reporter's users are not in IT and read
+   * split panes, tabs and mount instructions as a file manager they would have
+   * to relearn. The answer was NOT a second UI — one explorer, configured, so
+   * a fix lands in one place for every surface that mounts this package.
+   *
+   * ⚠ It does not gate the navigation panel. The panel ships in both profiles,
+   * for administrators too; only its default expanded/collapsed state and the
+   * rest of the chrome differ. A viewer's own collapse choice, once made,
+   * outranks the profile — it is a per-viewer preference, not a policy.
+   */
+  uiProfile?: 'standard' | 'simple';
+
+  /**
+   * Render the navigation panel (Upload · Recent / Starred / Shared with me /
+   * Trash · the storage list). Collapsible to an icon rail by the viewer, whose
+   * choice is remembered per browser.
+   *
+   * Default: ON — everywhere, including the desktop app and every embed. This
+   * package is the reason those are one product; a panel that appeared in the
+   * web app and nowhere else would turn it back into three (0.16.0 did exactly
+   * that with `tabStrip` and it had to be undone).
+   *
+   * ⚠ ONE exception, and it is about `rootPath`, not about who is embedding: a
+   * confined embed has no storage list to show, and its views would list files
+   * from OUTSIDE the folder the embed was confined to. So `rootPath` flips the
+   * default to off. Setting `sideNav: true` alongside `rootPath` still wins —
+   * the panel is then yours, along with what its views will show.
+   */
+  sideNav?: boolean;
+
+  /**
+   * Show the navigation panel's **Connections** entries — "How to connect"
+   * (the storage list and the per-protocol guides: WebDAV · SFTP · FTPS · S3 ·
+   * NFS · `filex mount`) and **API keys** (mint and revoke the tokens three of
+   * those protocols sign in with).
+   *
+   * Default: on, EXCEPT under `uiProfile: 'simple'`, where it is off. Those two
+   * defaults answer two different people: #14's reporter called mount
+   * instructions power-user noise in front of users who are not in IT, and an
+   * embedder's own tenant may still legitimately need an S3 key. Whichever one
+   * you are, say so explicitly and the default stops mattering.
+   *
+   * ⚠ Not gated on role, ever. The backend decides what a caller may see —
+   * ConnectionsPanel renders what the API returns, and `/api/tokens` caps every
+   * scope against the caller's own role and grants. A UI-side role check here
+   * would only hide the surface from the accounts that need it most; that is
+   * the bug this became: for a year the sole place to mint the token the FTPS
+   * guide told you to use was the admin panel.
+   *
+   * ⚠ The entries live in the panel, so `sideNav: false` takes them with it.
+   * Hosts that want the surface without the panel mount `<filex-connections>`
+   * (or `ConnectionsPanel`) on a page of their own.
+   */
+  connections?: boolean;
+
+
   /** Default view. */
   viewMode?: 'list' | 'grid';
 

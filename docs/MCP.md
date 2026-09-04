@@ -272,7 +272,7 @@ user's role + grants + confinement):
 | `file_delete` | Soft-delete to filex trash (recoverable from the UI). |
 | `file_move` | Move/rename within the same storage. |
 | `file_mkdir` | Create a directory. |
-| `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; supports `tag:` / `-tag:` filters; `content=false` restores name-only. |
+| `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and may be answered by a folder (`main code` finds `Code/main.go`); supports `tag:` / `-tag:` filters; `content=false` restores name-only. |
 | `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Use this to hand a file to someone instead of streaming it back. |
 | `file_unshare` | Revoke a share by its token. |
 | `file_zip` | Pack files/folders into a `.zip` **on the server** (dest lands in storage; share it to download). |

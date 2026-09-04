@@ -48,8 +48,8 @@ Every request needs **HTTP Basic** credentials:
 
 Both secrets are accepted in the same password field — filex first tries the
 account password, then falls back to interpreting the value as an API token
-(mint one under **API / MCP** in the admin UI, or **Settings → API tokens**
-for non-admin accounts). Failures return `401` with
+(mint one under **API / MCP** in the admin UI, or — for any account — from the
+file explorer's navigation panel under **Connections → API keys**). Failures return `401` with
 `WWW-Authenticate: Basic realm="filex"`.
 
 Notes:

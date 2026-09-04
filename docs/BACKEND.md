@@ -259,6 +259,29 @@ The unified form behind the three per-verb endpoints:
 ```
 Returns `200 + { deleted: ["..."], failed: [{ path: "...", error: "..." }] }`.
 
+### `GET /api/files/manager/shared-with-me` ![user](https://img.shields.io/badge/-user-blue)
+
+What other people have shared with the caller — the items they reach through a
+per-item grant rather than their own role. Newest grant first.
+
+| Param | Default | Meaning |
+|---|---|---|
+| `limit` | `100` | Page size, max 500. |
+| `offset` | `0` | Page offset. |
+
+```json
+{ "files": [ /* listing entries, same shape as /api/files/manager */ ],
+  "storages": ["marketing"], "total": 2, "limit": 100, "offset": 0 }
+```
+
+Each entry carries `perm` (the grant's level), `shared: true` and `shared_at`.
+A grant on a folder lists **the folder**, not its contents — the row is a `dir`
+whose `path` is adapter-qualified, so opening it navigates in the ordinary way.
+`storages` names the storages the caller reaches only through a grant: those are
+the "shared drives", and a storage-wide grant is reported there rather than as a
+row with an empty name. Results are filtered by tenant scope and by the caller's
+root confinement. See [RBAC.md](RBAC.md).
+
 ### `GET /api/files/search?q=…` ![user](https://img.shields.io/badge/-user-blue)
 Bleve full-text + metadata search. Same response shape as `/api/files/manager`
 but with `path` echoing the matching entry's full path.

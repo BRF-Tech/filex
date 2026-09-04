@@ -214,3 +214,29 @@ func TestPluginsOnByDefaultWithoutDemo(t *testing.T) {
 		t.Fatal("plugins are on by default on an ordinary instance")
 	}
 }
+
+// TestSearchAutoRebuildKillSwitch — the index repairs itself on startup
+// when it was written by an older document schema, and this is the way to
+// stop it. Default on: v0.29.0 shipped the opposite default and its
+// improvement never reached a single existing installation.
+func TestSearchAutoRebuildKillSwitch(t *testing.T) {
+	if !Default().Search.AutoRebuild {
+		t.Fatal("search.auto_rebuild must default to on")
+	}
+	t.Setenv("FILEX_SEARCH_AUTO_REBUILD", "0")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Search.AutoRebuild {
+		t.Fatal("FILEX_SEARCH_AUTO_REBUILD=0 must switch the automatic rebuild off")
+	}
+	t.Setenv("FILEX_SEARCH_AUTO_REBUILD", "true")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Search.AutoRebuild {
+		t.Fatal("FILEX_SEARCH_AUTO_REBUILD=true must switch it back on")
+	}
+}

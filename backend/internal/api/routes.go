@@ -374,6 +374,7 @@ func BuildRouter(d *Deps) http.Handler {
 	trashH := handlers.NewTrash(d.Trash, d.Store)
 	trashH.AttachACL(d.ACL)
 	metaH := handlers.NewMeta(d.Store)
+	sharedH := handlers.NewShared(d.Store)
 	quotaH := handlers.NewQuota(d.Quota)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 	saveTextH.AttachACL(d.ACL)
@@ -597,6 +598,10 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Get("/manager", mh.List)
 			r.Post("/manager", mh.Mutate)
 			r.Get("/manager/trash", trashH.List)
+			// What OTHER people shared with me. Sits beside the trash listing
+			// because it is the same kind of surface: a virtual folder the
+			// navigation panel opens, not a path under a storage.
+			r.Get("/manager/shared-with-me", sharedH.SharedWithMe)
 			r.Post("/manager/restore", trashH.Restore)
 			r.Get("/stat", mh.Stat)
 			r.Get("/read", mh.Read)

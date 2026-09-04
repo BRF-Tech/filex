@@ -44,6 +44,13 @@ type Fallback struct {
 	Anchor string
 	// Words is every normalised query word; a row must contain them all.
 	Words []string
+	// query is the same PreparedQuery the index path scores with. Step 2
+	// runs the SAME scorer as the index, so a row that survives here
+	// would have survived there and is ranked into the same tier. A
+	// fallback that ranked differently from the index would be a support
+	// burden: two installs of the same version, one with the index
+	// switched off, disagreeing about which file is the best match.
+	query PreparedQuery
 }
 
 // PlanFallback builds the two-step plan described on Fallback.
@@ -60,20 +67,28 @@ func PlanFallback(query string) Fallback {
 			anchor = w
 		}
 	}
-	return Fallback{Like: SQLLike(anchor), Anchor: anchor, Words: words}
+	return Fallback{Like: SQLLike(anchor), Anchor: anchor, Words: words, query: PrepareQuery(query)}
 }
 
 // Accepts reports whether a row the database returned really satisfies
-// the whole query. Name first, then name+path, mirroring the index side
-// where a folder match is a (lower-ranked) hit too.
+// the whole query — the subsequence scorer's verdict, so the filename
+// and the folders above it are weighed exactly as they are on the index
+// path and a row every piece cannot answer is dropped.
 func (f Fallback) Accepts(name, path string) bool {
 	if len(f.Words) == 0 {
 		return true
 	}
-	if containsAll(Normalize(name), f.Words) {
-		return true
+	return f.query.ScoreName(name, path).OK
+}
+
+// Rank is the tier a fallback row belongs in, for callers that sort. It
+// is RankName by another name; it exists so a caller does not have to
+// re-prepare the query per row.
+func (f Fallback) Rank(name, path string) Tier {
+	if len(f.Words) == 0 {
+		return TierName
 	}
-	return containsAll(Normalize(name)+" "+Normalize(path), f.Words)
+	return f.query.Rank(name, path)
 }
 
 // FallbackOverFetch is how many times `limit` rows a caller should ask

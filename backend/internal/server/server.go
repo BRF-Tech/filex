@@ -576,6 +576,23 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		})
 	}
 
+	// Self-repairing search index. An index written by an older document
+	// schema is rebuilt in the background, alongside the live one, and
+	// swapped in when it is complete — search never goes dark and the text
+	// already extracted is carried across (internal/search/rebuild.go).
+	//
+	// This runs HERE, after the content hook above, so files whose bytes
+	// drifted while the old index was in place are re-enqueued for
+	// extraction as part of the rebuild. Wiring it any earlier would
+	// silently skip that.
+	//
+	// FILEX_SEARCH_AUTO_REBUILD=0 turns it off; the index then keeps
+	// reporting needs_rebuild and an operator can POST
+	// /api/admin/search/rebuild?content=1 when it suits them.
+	if idx != nil {
+		idx.AutoRebuildIfStale(store, cfg.Search.AutoRebuild)
+	}
+
 	// Notifications subsystem.
 	if cfg.Notify.Enabled {
 		srvObj.notify = notify.New(store, notify.Config{

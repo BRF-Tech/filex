@@ -1,6 +1,6 @@
 //go:build windows
 
-package staging
+package diskfree
 
 import "golang.org/x/sys/windows"
 

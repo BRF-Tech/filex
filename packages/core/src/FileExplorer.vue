@@ -14,7 +14,7 @@
  * (PWA / OIDC) / CSRF (panel) / basic / none — `useFileApi` swallows
  * the difference.
  */
-import { computed, customRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, customRef, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue';
 import type { ExplorerConfig, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
@@ -51,6 +51,9 @@ import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
 import PendingOpsTray from './components/PendingOpsTray.vue';
 import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
+import SideNav from './components/SideNav.vue'; /* gezinti:g1 */
+import ConnectionsPanel from './components/ConnectionsPanel.vue'; /* gezinti:g1 */
+import TokensPanel from './components/TokensPanel.vue'; /* gezinti:g1 */
 /* cila:c wiring */
 import CommandPalette from './components/CommandPalette.vue';
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
@@ -299,6 +302,24 @@ const trashMode = ref(false);
 const trashOrigin = ref<string>('');
 const trashActive = computed(() => trashMode.value);
 
+/* === gezinti:g1 — the navigation panel's virtual views ===================
+ * Recent / Starred / Shared with me / Trash are listings with no folder behind
+ * them: the rows come from a per-user endpoint and each carries its own
+ * adapter-qualified path, so opening one navigates the ordinary way. The
+ * pattern is trashMode's, generalised — including the part that matters most,
+ * that load() clears the mode, or the view sticks and every later navigation
+ * renders under the wrong heading. */
+type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash';
+const navView = ref<NavView>('');
+/** Where the view was entered from, so "up" goes back there. */
+const navViewOrigin = ref<string>('');
+/** Sentinel parked in `dirname` so the breadcrumb can label the view. */
+const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash'>, string> = {
+  recent: '.recent',
+  starred: '.starred',
+  shared: '.shared',
+};
+
 // When the caller can see exactly ONE storage, the multi-storage root is a
 // one-row list that carries no information — the user clicks through it every
 // single time. Treat that storage as the floor instead: open it directly and
@@ -326,6 +347,10 @@ const canGoUp = computed(() => {
 // there's no real backend folder to mutate. New Folder / Upload /
 // Paste are hidden in this state.
 const atVirtualRoot = computed(() => {
+  // gezinti:g1 — a virtual view (Recent / Starred / Shared with me) has no
+  // backend folder behind it either. "New folder" there would have to invent a
+  // destination, and "upload" would have to guess one.
+  if (navView.value && navView.value !== 'trash') return true;
   if (!multiStorageRoot.value) return false;
   return !((currentPath.value ?? '').replace(/^\/+|\/+$/g, ''));
 });
@@ -335,6 +360,11 @@ function goUp() {
   // global storage-list root.
   if (trashMode.value) {
     void load(trashOrigin.value);
+    return;
+  }
+  /* gezinti:g1 — the other virtual views behave the same way. */
+  if (navView.value) {
+    void load(navViewOrigin.value);
     return;
   }
   const cur = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
@@ -545,6 +575,265 @@ function closeInspector() {
     persistInspector(false);
   }
 }
+
+/* === gezinti:g1 — navigation panel (SideNav) =============================
+ * One explorer with the navigation everybody already knows, collapsible so the
+ * existing UI keeps its width when somebody does not want it (GitHub #14).
+ *
+ * The panel is NOT gated on role or profile: administrators get it too, and
+ * `uiProfile` only changes the rest of the chrome. Gating it would be exactly
+ * the "one behaviour on one surface" split this shared package exists to
+ * prevent. */
+const uiProfile = computed(() => props.config.uiProfile ?? 'standard');
+const simpleUi = computed(() => uiProfile.value === 'simple');
+
+const SIDENAV_LS_KEY = 'filex.sidenav';
+const sideNavExpanded = ref<boolean>(
+  (() => {
+    try {
+      const v = localStorage.getItem(SIDENAV_LS_KEY);
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch {
+      /* private mode / embed with site data blocked */
+    }
+    // No stored choice: expanded. A collapsed default would ship a navigation
+    // panel most people never discover, which is the problem it was built for.
+    return true;
+  })(),
+);
+function persistSideNav(v: boolean) {
+  try {
+    localStorage.setItem(SIDENAV_LS_KEY, v ? '1' : '0');
+  } catch {
+    /* quota / private mode — the choice just will not survive the session */
+  }
+}
+/**
+ * Narrow mode: the panel is a drawer over the listing, and this is its open
+ * state. Deliberately NOT persisted and NOT the same ref as the desktop
+ * collapse: at 390px a remembered "expanded" would reopen the drawer on top of
+ * the files every single time the explorer mounts.
+ */
+const navDrawerOpen = ref(false);
+/**
+ * Is the panel part of this deployment at all? On by default everywhere —
+ * except under `rootPath`, where there is no storage list to show and the views
+ * would list files from outside the folder the embed was confined to.
+ */
+const sideNavEnabled = computed(() => props.config.sideNav ?? !rootPathProp);
+const navVisible = computed(
+  () => sideNavEnabled.value && (isNarrow.value ? navDrawerOpen.value : true),
+);
+/** What the toolbar toggle reports as pressed. */
+const navToggleOn = computed(() =>
+  isNarrow.value ? navDrawerOpen.value : sideNavExpanded.value,
+);
+function toggleSideNav() {
+  if (!sideNavEnabled.value) return;
+  if (isNarrow.value) {
+    navDrawerOpen.value = !navDrawerOpen.value;
+    return;
+  }
+  sideNavExpanded.value = !sideNavExpanded.value;
+  persistSideNav(sideNavExpanded.value);
+}
+function closeNavDrawer() {
+  navDrawerOpen.value = false;
+}
+
+/** Storages the caller reaches only through a grant — marked in the panel. */
+const sharedStorageNames = ref<string[]>([]);
+
+/**
+ * The Connections entries — "How to connect" and "API keys" — and the two
+ * overlays they open. Both surfaces already lived in this package
+ * (ConnectionsPanel, TokensPanel) and neither was reachable from inside the
+ * explorer: our own web app wired the buttons in its page shell, so an
+ * embedder's users had no path to a protocol guide or to the API token those
+ * guides tell them to use.
+ *
+ * ⚠ Not gated on role. The backend decides — ConnectionsPanel renders what the
+ * API returns (a non-admin gets the guides and a "why not" card instead of the
+ * storage form), and /api/tokens caps every scope against the caller's own role.
+ */
+const connectionsEnabled = computed(() => props.config.connections ?? !simpleUi.value);
+const showConnections = ref(false);
+const showTokens = ref(false);
+function openConnections() {
+  showTokens.value = false;
+  showConnections.value = true;
+}
+function openTokens() {
+  showConnections.value = false;
+  showTokens.value = true;
+}
+function closeOverlays() {
+  showConnections.value = false;
+  showTokens.value = false;
+}
+const anyOverlayOpen = computed(() => showConnections.value || showTokens.value);
+/** ConnectionsPanel reports its own failures; surface them the way the
+ *  explorer surfaces everything else rather than swallowing them. */
+function onConnectionsError(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  emit('error', { message: msg, context: { op: 'connections' } });
+  flashToast(msg);
+}
+
+/**
+ * View modes the toolbar offers. `simple` drops gallery: a four-way switcher
+ * is one of the things #14 named as power-user chrome, and gallery is the one
+ * nobody outside a photo folder reaches for.
+ */
+const allowedViewModes = computed<ViewMode[] | undefined>(() =>
+  simpleUi.value ? ['list', 'grid'] : undefined,
+);
+// A stored 'gallery' outlives a switch to the simple profile, and the button
+// that would take the user back out of it is the one the profile hides.
+watchEffect(() => {
+  if (simpleUi.value && viewMode.value === 'gallery') viewMode.value = 'grid';
+});
+
+/**
+ * nodeRowToFileNode — the starred / recently-opened endpoints answer with raw
+ * node rows (relative `path`, numeric `storage_id`), not the listing shape.
+ *
+ * The storage NAME is what a qualified path needs, and a node row does not
+ * carry the id-to-name mapping. The backend fills `storage` for exactly this
+ * (handlers/shared.go, attachStorageNames); against an older server the only
+ * safe fallback is the single-storage case — guessing in a multi-storage
+ * install sends the user to a path in somebody else's drive.
+ */
+function nodeRowToFileNode(row: Record<string, unknown>): FileNode | null {
+  const rel = String(row?.path ?? '').replace(/^\/+/, '');
+  if (!rel) return null;
+  const configured = props.config.storages ?? [];
+  const storageName =
+    typeof row.storage === 'string' && row.storage
+      ? row.storage
+      : configured.length === 1
+        ? configured[0].name
+        : '';
+  if (multiStorageRoot.value && !storageName) return null;
+  const name = String(row.name ?? rel.split('/').pop() ?? '');
+  const isDir = row.type === 'dir';
+  const size = typeof row.size === 'number' ? row.size : 0;
+  const id = typeof row.id === 'number' ? row.id : undefined;
+  return {
+    type: isDir ? 'dir' : 'file',
+    id,
+    path: storageName ? `${storageName}://${rel}` : rel,
+    basename: name,
+    extension: isDir
+      ? ''
+      : name.includes('.')
+        ? (name.split('.').pop() || '').toLowerCase()
+        : '',
+    storage: storageName,
+    visibility: 'private',
+    size,
+    file_size: size,
+    mime_type: typeof row.mime === 'string' ? row.mime : '',
+    // Keyed by node id. A file with no rendered thumbnail 404s here and the
+    // view falls back to its icon — the contract the ordinary listing has too.
+    thumb_url: !isDir && id !== undefined ? `/api/files/thumb/${id}` : undefined,
+    extra_metadata: {},
+  } as unknown as FileNode;
+}
+
+/** GET one of the view endpoints. Returns rows already in listing shape. */
+async function fetchNavRows(kind: 'recent' | 'starred' | 'shared'): Promise<FileNode[]> {
+  const base = props.config.apiBase ?? '';
+  const url =
+    kind === 'shared'
+      ? `${base}/api/files/manager/shared-with-me?limit=200`
+      : kind === 'starred'
+        ? `${base}/api/files/manager/star/list?limit=200`
+        : `${base}/api/files/manager/recent?limit=50`;
+  // ⚠ await. `buildAuthHeaders` is async because a token may be a function the
+  // desktop shell resolves per call; spreading the un-awaited promise sends the
+  // request with no Authorization header and it fails silently with a 401.
+  const res = await fetch(url, {
+    headers: await buildAuthHeaders(),
+    // ⚠ NOT 'include' — same reason as loadStarred: a credentialed
+    // cross-origin request cannot be answered with `ACAO: *`.
+    credentials: api.credentialsMode(),
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const body = await res.json();
+  if (kind === 'shared') {
+    // The shared endpoint already answers in the listing shape, and reports
+    // which storages are grant-only in the same call.
+    sharedStorageNames.value = Array.isArray(body?.storages) ? body.storages : [];
+    return (Array.isArray(body?.files) ? body.files : []) as FileNode[];
+  }
+  const rows: Record<string, unknown>[] = Array.isArray(body?.nodes) ? body.nodes : [];
+  return rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null);
+}
+
+/** Open one of the panel views in the main pane. */
+async function loadNavView(kind: Exclude<NavView, ''>) {
+  closeNavDrawer();
+  if (kind === 'trash') {
+    await loadTrash();
+    // ⚠ After loadTrash, not before: loadTrash goes through load()-adjacent
+    // state and the mode has to be the last word, or the panel row for Trash
+    // never lights up.
+    navView.value = 'trash';
+    return;
+  }
+  loading.value = true;
+  navViewOrigin.value = currentPath.value ?? '';
+  navView.value = kind;
+  trashMode.value = false;
+  e2eRoot.value = '';
+  selection.clear();
+  try {
+    files.value = await fetchNavRows(kind);
+    dirname.value = NAV_VIEW_DIRNAME[kind];
+    currentPath.value = NAV_VIEW_DIRNAME[kind];
+    // These three span every storage, so the crumb reads "/ > Starred", not
+    // "/ > My files > Starred", which would name a storage half the rows are
+    // not in. Trash keeps its storage crumb: trash IS per-storage.
+    adapter.value = '';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    files.value = [];
+    emit('error', { message: msg, context: { op: `nav-view:${kind}` } });
+    flashToast(msg);
+  } finally {
+    loading.value = false;
+  }
+}
+
+/** Panel to a storage root. */
+function openNavStorage(name: string) {
+  closeNavDrawer();
+  void load(multiStorageRoot.value ? name : '');
+}
+
+/**
+ * Which storages are grant-only, asked once at mount so the panel can mark them
+ * before anybody opens the shared view. `limit=1` on purpose: the storage list
+ * is built from every grant, the page size only bounds the item rows.
+ */
+async function loadSharedStorages() {
+  try {
+    const base = props.config.apiBase ?? '';
+    const res = await fetch(`${base}/api/files/manager/shared-with-me?limit=1`, {
+      headers: await buildAuthHeaders(),
+      credentials: api.credentialsMode(),
+    });
+    if (!res.ok) return;
+    const body = await res.json();
+    sharedStorageNames.value = Array.isArray(body?.storages) ? body.storages : [];
+  } catch {
+    // Silent — an older backend has no such endpoint, and the panel is still
+    // useful without the shared markers.
+  }
+}
+/* === /gezinti:g1 === */
 // Folder summary label for the no-selection state.
 const inspectorDirLabel = computed(() => {
   if (trashMode.value) return t('node.trash');
@@ -739,6 +1028,10 @@ async function load(path?: string) {
   // Any normal navigation exits trash mode (the trash view is entered only
   // by opening the virtual `.trash` row, which calls loadTrash()).
   trashMode.value = false;
+  /* gezinti:g1 — and every other virtual view, for the same reason: without
+     this the mode sticks and the breadcrumb keeps saying "Starred" over a
+     folder listing. */
+  navView.value = '';
   let requested = path ?? currentPath.value ?? '';
   try {
     notFoundPath.value = '';
@@ -1079,6 +1372,9 @@ onMounted(async () => {
   // expose /api/files/manager/starred. Without this stars never light
   // up on first render even when the row IS starred server-side.
   void loadStarred();
+  /* gezinti:g1 — which storages are grant-only, so the panel can mark them
+     before anybody opens the shared view. */
+  void loadSharedStorages();
   if (hashPersistEnabled()) {
     window.addEventListener('hashchange', onHashChange);
   }
@@ -1193,6 +1489,19 @@ useKeyboardShortcuts(rootEl, {
     showPreview.value = false;
     ctxRef.value?.hide();
     dismissToast();
+    /* gezinti:g1 — an open Connections / API-keys overlay is the topmost thing
+       on screen, so Esc dismisses that before anything under it. */
+    if (anyOverlayOpen.value) {
+      closeOverlays();
+      return;
+    }
+    /* gezinti:g1 — Esc closes the navigation drawer first. It is the topmost
+       thing on a narrow screen, so dismissing something underneath it while it
+       covers the listing reads as Esc doing nothing. */
+    if (navDrawerOpen.value) {
+      closeNavDrawer();
+      return;
+    }
     /* koru:k1 — Esc closes the narrow-mode inspector overlay only; the wide
        side panel is a persistent surface toggled by `i` / the toolbar. */
     if (isNarrow.value) closeInspector();
@@ -2988,8 +3297,13 @@ const tabItems = computed(() =>
 // `+` floating above the toolbar.
 const tabsVisible = computed(
   () =>
-    tabsApi.hasMultiple.value ||
-    (props.config.tabStrip !== 'auto' && tabItems.value.length > 0),
+    /* gezinti:g1 — the simple profile has no tab strip at all, not even once a
+       second tab exists: tabs were the first thing #14 named as power-user
+       chrome. The tab STATE is untouched, so switching the profile back brings
+       the strip and its tabs straight back. */
+    !simpleUi.value &&
+    (tabsApi.hasMultiple.value ||
+      (props.config.tabStrip !== 'auto' && tabItems.value.length > 0)),
 );
 
 // Aktif tab kullanıcıyı izler: gezinme + görünüm değişimi snapshot'a yazılır.
@@ -3075,7 +3389,9 @@ onBeforeUnmount(() => {
 
 const splitPaneRef = ref<InstanceType<typeof SecondaryPane> | null>(null);
 // Dar modda split devre dışı (state korunur, genişleyince geri gelir).
-const splitVisible = computed(() => !!activeSplit.value && !isNarrow.value);
+const splitVisible = computed(
+  () => !!activeSplit.value && !isNarrow.value && !simpleUi.value /* gezinti:g1 */,
+);
 
 function toggleSplit() {
   if (activeSplit.value) {
@@ -3490,7 +3806,11 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :narrow="isNarrow /* bag:b4 */"
       :theme="themeMode /* bag:b4 */"
       :inspector-open="showInspector /* koru:k1 */"
+      :nav-open="navToggleOn /* gezinti:g1 */"
+      :nav-enabled="sideNavEnabled /* gezinti:g1 */"
+      :view-modes="allowedViewModes /* gezinti:g1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
+      @toggle-nav="toggleSideNav /* gezinti:g1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
       @update:view-mode="setDisplayedViewMode($event) /* ui-fix — aktif panele */"
       @update:search-query="searchQuery = $event"
@@ -3508,6 +3828,43 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
          as flex siblings (row). Without the inspector open it is visually
          identical to the previous direct-child fe__body. -->
     <div class="fe__main" :class="{ 'fe__main--split': splitVisible } /* wiring:d1 */">
+    <!-- gezinti:g1 — navigation panel. First child of fe__main, the mirror of
+         InspectorPanel on the right; .fe__primary already carries
+         `flex: 1 1 auto; min-width: 0` so it absorbs the width with no rule of
+         its own. Wide: a docked column (or a 56px icon rail when collapsed).
+         Narrow: a drawer over the listing, because a column at 390px leaves
+         the files 158px. -->
+    <SideNav
+      v-if="navVisible"
+      :expanded="sideNavExpanded"
+      :narrow="isNarrow"
+      :active-view="navView"
+      :active-storage="adapter"
+      :storages="config.storages ?? []"
+      :shared-storages="sharedStorageNames"
+      :trash-visible="config.trashVisible !== false"
+      :show-connections="connectionsEnabled"
+      :can-write="canWriteHere && !atVirtualRoot && !trashActive"
+      :locale="locale"
+      @toggle="toggleSideNav"
+      @close="closeNavDrawer"
+      @open-view="loadNavView"
+      @open-storage="openNavStorage"
+      @upload="triggerUpload"
+      @new-folder="showNewFolder = true"
+      @open-connections="openConnections"
+      @open-tokens="openTokens"
+    />
+    <!-- The drawer's scrim. A button, not a div: dismissing an overlay by
+         clicking beside it has to be reachable from the keyboard too. -->
+    <button
+      v-if="isNarrow && navDrawerOpen"
+      type="button"
+      class="fe-sidenav__scrim"
+      :title="t('sidenav.close')"
+      :aria-label="t('sidenav.close')"
+      @click="closeNavDrawer"
+    ></button>
     <!-- ui-fix — sol panelin başlığı (breadcrumb + durum şeritleri + body)
          tek bir sarmalda: split modunda bu sarmal sol yarıya sığar, böylece
          breadcrumb tüm sayfayı değil kendi panelini kaplar (SecondaryPane'in
@@ -3709,6 +4066,43 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         <p class="fe-state__title">{{ t('empty.search.title') }}</p>
         <p class="fe-state__hint">{{ t('empty.search.hint') }}</p>
       </div>
+      <!-- gezinti:g1 — empty panel views. Each says which list is empty and
+           how it fills up; "This folder is empty" would be wrong twice over,
+           because there is no folder and nothing to drop into it. -->
+      <div
+        v-else-if="!loading && files.length === 0 && navView && navView !== 'trash'"
+        class="fe-state"
+        :data-testid="`empty-${navView}`"
+      >
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <template v-if="navView === 'recent'">
+            <circle cx="60" cy="50" r="28" />
+            <path d="M60 32v18l12 8" />
+          </template>
+          <template v-else-if="navView === 'starred'">
+            <path d="M60 26l9 18.6 20.4 3-14.8 14.4 3.5 20.4L60 72.8 41.9 82.4l3.5-20.4L30.6 47.6l20.4-3z" />
+          </template>
+          <template v-else>
+            <circle cx="84" cy="34" r="9" />
+            <circle cx="36" cy="52" r="9" />
+            <circle cx="84" cy="70" r="9" />
+            <path d="M44.5 47.5l31-9M44.5 56.5l31 9" />
+          </template>
+        </svg>
+        <p class="fe-state__title">{{ t(`empty.${navView}.title`) }}</p>
+        <p class="fe-state__hint">{{ t(`empty.${navView}.hint`) }}</p>
+      </div>
       <!-- Empty trash view. -->
       <div v-else-if="!loading && files.length === 0 && trashMode" class="fe-state">
         <svg
@@ -3867,6 +4261,48 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     />
     </div>
     <!-- /koru:k1 fe__main -->
+
+    <!-- gezinti:g1 — the Connections / API-keys overlays, opened from the
+         navigation panel. ⚠ z-index 130, measured, not guessed: the explorer's
+         onboarding tour and its context menus are appended to <body> at 96 and
+         90 and are `fixed`, so anything in the normal stacking order is painted
+         over by them — the tour card landed on top of the same panel in the web
+         app and swallowed its clicks, which is why that page uses z-[120]. This
+         one has to clear the host's wrapper too, so it goes above it. -->
+    <div
+      v-if="showConnections || showTokens"
+      class="fe-overlay"
+      data-testid="explorer-overlay"
+      @click.self="closeOverlays"
+    >
+      <div class="fe-overlay__card" @click.stop>
+        <ConnectionsPanel
+          v-if="showConnections"
+          :config="config"
+          initial-tab="connect"
+          closable
+          @close="closeOverlays"
+          @changed="() => load()"
+          @error="onConnectionsError"
+        />
+        <template v-else>
+          <header class="fe-overlay__head">
+            <h2 class="fe-overlay__title">{{ t('sidenav.apikeys') }}</h2>
+            <button
+              type="button"
+              class="fe-overlay__close"
+              :title="t('overlay.close')"
+              :aria-label="t('overlay.close')"
+              @click="closeOverlays"
+            >
+              ×
+            </button>
+          </header>
+          <TokensPanel :config="config" full />
+        </template>
+      </div>
+    </div>
+
 
     <div v-if="dragOver" class="fe__dragover">
       <div class="fe__dragover-card">

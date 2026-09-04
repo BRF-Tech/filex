@@ -120,12 +120,19 @@ func tagFilterAccepts(f *search.Filter, id int64) bool {
 // uses. Without it an index-less install would answer the same query in
 // a different order — `ORDER BY name` — and "exact matches rank first"
 // would be true on one deployment and false on the next.
-func sortByRank(results []searchResult, query string) {
+//
+// The plan carries the prepared query, so the subsequence scorer runs
+// once per row rather than once per comparison, and the shorter path
+// wins a tie exactly as it does on the index path.
+func sortByRank(results []searchResult, plan search.Fallback) {
 	sort.SliceStable(results, func(a, b int) bool {
-		ra := search.RankName(query, results[a].Name, results[a].Path)
-		rb := search.RankName(query, results[b].Name, results[b].Path)
+		ra := plan.Rank(results[a].Name, results[a].Path)
+		rb := plan.Rank(results[b].Name, results[b].Path)
 		if ra != rb {
 			return ra < rb
+		}
+		if len(results[a].Path) != len(results[b].Path) {
+			return len(results[a].Path) < len(results[b].Path)
 		}
 		return results[a].Name < results[b].Name
 	})
@@ -259,7 +266,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			sortByRank(results, parsed.Text)
+			sortByRank(results, plan)
 		}
 	}
 	// Multi-tenant: drop hits in storages outside the caller's tenant. This is

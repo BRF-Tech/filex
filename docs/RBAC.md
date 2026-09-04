@@ -51,6 +51,31 @@ Mounted in the authenticated group. Every write requires the caller to be admin
 | GET | `/api/files/permissions/users?q=` | — | `{users[]}` autocomplete of existing accounts. |
 | POST | `/api/files/permissions/invite` | `{path, email, level, create_user?, role?}` | Existing user → grant; admin+`create_user` → new account+grant (temp password); else public share link. `{mode, url?, temp_password?, emailed}`. Mail sent only when SMTP is verified, else the link/password is returned for on-screen display. |
 
+## Endpoint — "shared with me" (`/api/files/manager/shared-with-me`)
+
+The permissions panel answers "who can see *this* folder". The reverse question
+— "what has been shared with *me*" — has its own endpoint, and it is what the
+explorer's navigation panel lists under **Shared with me**.
+
+| Method | Path | Query | Notes |
+|--------|------|-------|-------|
+| GET | `/api/files/manager/shared-with-me` | `limit` (100, max 500), `offset` | `{files[], storages[], total, limit, offset}`. Any authenticated caller; no admin or owner requirement — you are asking about your own grants. |
+
+Three rules decide what is in it:
+
+- **Grants only.** A storage with RBAC **off** is reached by every authenticated
+  account through their role, so a grant row there is inert and its files are
+  the caller's own, not "shared with them". Only RBAC-enabled storages are
+  consulted.
+- **The item, not its contents.** A grant on a folder lists the folder.
+- **A whole-storage grant is a drive, not an item.** It has no name to render,
+  so it is reported in `storages[]` — the shared drives the UI marks in its
+  storage list — instead of as a file row.
+
+Tenant scope is applied explicitly here, not inherited: `tenantstore` wraps only
+the storage/user *listing* methods, so a per-grant read like this one has to gate
+itself or it hands one tenant the paths of another's shared folders.
+
 ## Endpoints — self-service tokens (`/api/tokens`)
 
 Any authenticated user (incl. non-admin) mints tokens **bound to themselves**,

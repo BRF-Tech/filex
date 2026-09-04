@@ -62,7 +62,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   the maximum link life, and how the folder-ZIP cache is bounded
 - [Thumbnails](thumbnails.md) — image / video / pdf / office previews
 - [Search](SEARCH.md) — embedded full‑text index: forgiving filename
-  matching (separators, several words, typos), ranked results, `tag:` filters
+  matching (separators, several words in any order, folders, typos), VS
+  Code-style subsequence scoring, ranked results, `tag:` filters, and an index
+  that rebuilds itself after an upgrade without going dark
 - [Notifications](NOTIFICATIONS.md) — webhook + in‑app bell
 - [Trash & versioning](TRASH-VERSIONING.md) — soft‑delete/restore + file history
 - [Replication](REPLICATION.md) — primary→replica mirroring & reconcile
@@ -90,7 +92,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Architecture](ARCHITECTURE.md) — how the pieces fit
 - [Backend](BACKEND.md) — internals
 - [HTTP / component API](API.md)
-- [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component
+- [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component, and the
+  two options every wrapper shares: the **navigation panel** (`sideNav`) and the
+  reduced-chrome **simple profile** (`uiProfile`)
 - [AI & MCP](MCP.md) — API tokens, scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
 - [Migration](MIGRATION.md) — moving off `@brftech/file-explorer`
 

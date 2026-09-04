@@ -4010,3 +4010,363 @@ filex-explorer {
   background: var(--fe-primary);
   transition: width 0.3s ease;
 }
+
+/* === gezinti:g1 — SideNav (navigation panel) ==========================
+   A left column inside .fe__main, the mirror of .fe-inspector on the right:
+   same flex slot, same overlay trick when the explorer is narrow. .fe__primary
+   already carries `flex: 1 1 auto; min-width: 0`, so it absorbs the width
+   change with no rule of its own. */
+.fe-sidenav {
+  flex: 0 0 232px;
+  width: 232px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--fe-border);
+  /* No `background: var(--fe-bg)` here on purpose — see .fe-conn. This one IS
+     inside the full-screen explorer, whose root already paints --fe-bg, so a
+     second identical fill would only be a second chance to disagree with it. */
+  color: var(--fe-text);
+  transition: flex-basis 0.14s ease, width 0.14s ease;
+}
+/* Collapsed: an icon rail, not nothing. A panel that disappears takes its own
+   re-open affordance with it. Width is one 32px control plus its padding. */
+.fe-sidenav--rail {
+  flex: 0 0 56px;
+  width: 56px;
+}
+.fe-sidenav__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  /* Same height as .fe-breadcrumb (37px) so the panel head and the crumb bar
+     sit on one line across the top of .fe__main. */
+  min-height: 37px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-sidenav--rail .fe-sidenav__head {
+  justify-content: center;
+  padding: 4px;
+}
+.fe-sidenav__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: 17px;
+  cursor: pointer;
+}
+.fe-sidenav__toggle:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-sidenav__toggle:focus-visible,
+.fe-sidenav__item:focus-visible,
+.fe-sidenav__upload:focus-visible,
+.fe-sidenav__secondary:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+
+/* Primary action block. */
+.fe-sidenav__primary {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 6px;
+}
+.fe-sidenav--rail .fe-sidenav__primary {
+  padding: 10px 8px 6px;
+  align-items: center;
+}
+.fe-sidenav__upload,
+.fe-sidenav__secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fe-sidenav__upload {
+  background: var(--fe-primary);
+  border-color: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-weight: 600;
+  box-shadow: var(--fe-shadow-sm);
+}
+.fe-sidenav__upload:hover:not(:disabled) {
+  background: var(--fe-primary-hover);
+  border-color: var(--fe-primary-hover);
+}
+.fe-sidenav__secondary {
+  background: transparent;
+  border-color: var(--fe-border);
+  color: var(--fe-text);
+}
+.fe-sidenav__secondary:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-sidenav__upload:disabled,
+.fe-sidenav__secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fe-sidenav__upload .fe-ficon,
+.fe-sidenav__secondary .fe-ficon,
+.fe-sidenav__item .fe-ficon {
+  font-size: 17px;
+}
+/* On the rail the two buttons become squares — a pill with no label reads as
+   a stretched blob. */
+.fe-sidenav--rail .fe-sidenav__upload,
+.fe-sidenav--rail .fe-sidenav__secondary {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--fe-radius-md);
+}
+
+.fe-sidenav__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+}
+.fe-sidenav__group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fe-sidenav__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  margin: 1px 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fe-sidenav__item:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-sidenav__item.is-active {
+  background: var(--fe-bg-selected);
+  font-weight: 600;
+}
+.fe-sidenav--rail .fe-sidenav__item {
+  justify-content: center;
+  padding: 8px 0;
+  border-radius: var(--fe-radius-md);
+}
+.fe-sidenav__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fe-sidenav__section {
+  margin-top: 10px;
+}
+.fe-sidenav__heading {
+  margin: 4px 0 2px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-sidenav__rule {
+  margin: 8px 6px;
+  border: 0;
+  border-top: 1px solid var(--fe-border);
+}
+/* "Shared" marker on a storage the caller only reaches through a grant. */
+.fe-sidenav__tag {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fe-primary) 16%, transparent);
+  color: var(--fe-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Narrow (<560px): a drawer over the listing, never a column. At 390px a
+   232px column leaves 158px for the files, and a 56px rail still takes an
+   eighth of the screen from a listing that is already tight. */
+.fe-sidenav--drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(280px, 84%);
+  flex: none;
+  /* Same layer as .fe-inspector--overlay: above the listing and the FAB (45),
+     below the context menus (90) and the onboarding tour (96), which are
+     appended to <body> and would paint over anything lower anyway. */
+  z-index: 60;
+  background: var(--fe-bg);
+  border-right: 1px solid var(--fe-border);
+  box-shadow: var(--fe-shadow);
+}
+.fe-sidenav__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 59;
+  border: 0;
+  padding: 0;
+  background: rgba(13, 19, 27, 0.42);
+  cursor: pointer;
+}
+/* === /gezinti:g1 === */
+
+/* --- gezinti:g1 — the panel's Connections / API-keys overlay --- */
+/* ⚠ z-index 130. The explorer's onboarding tour (96) and its teleported menus
+   (90) are appended to <body> and are `fixed`, so they paint over anything in
+   the normal stacking order — measured in the web app, where the tour card
+   landed on top of this very surface and swallowed its clicks; that page went
+   to z-[120] for the same reason and this has to clear it. */
+.fe-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  overflow: auto;
+  background: rgba(13, 19, 27, 0.45);
+}
+.fe-overlay__card {
+  width: min(880px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 18px;
+  border-radius: var(--fe-radius-lg);
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  box-shadow: var(--fe-shadow);
+}
+.fe-overlay__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.fe-overlay__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.fe-overlay__close {
+  border: 0;
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+}
+.fe-overlay__close:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-overlay__close:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+@media (max-width: 560px) {
+  .fe-overlay {
+    padding: 12px 8px;
+  }
+  .fe-overlay__card {
+    padding: 12px;
+    max-height: calc(100vh - 24px);
+  }
+}
+
+/* The full API-key form (TokensPanel `full`). */
+.fe-tokform {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.fe-tokform__scopes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+}
+.fe-tokform__legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
+.fe-tokform__scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-family: var(--fe-font-mono);
+  cursor: pointer;
+}
+.fe-tokform__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fe-tokform__field--narrow {
+  flex: 0 0 180px;
+}
+.fe-tokform__label {
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
+.fe-tokform__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fe-tokform__row .fe-s3keys__btn {
+  margin-left: auto;
+}
+/* --- /gezinti:g1 --- */
