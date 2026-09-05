@@ -2,7 +2,7 @@
 /**
  * GridView — card grid. Thumbnails preferred, fall back to icon.
  */
-import { ref } from 'vue'; /* wiring:c4 */
+import { computed, ref } from 'vue'; /* wiring:c4 */
 import type { FileNode } from '../types/FileNode';
 import { hasInternalDrag } from '../lib/dragOut';
 import type { LocaleCode } from '../types/ExplorerConfig';
@@ -36,9 +36,30 @@ const props = defineProps<{
    * own screenshots show — had a view they could not fill.
    */
   starredIds?: Set<number>;
+  /**
+   * Offer the star affordance at all. Follows the Starred view: when the panel
+   * leaves that view out — a shared app token has no single person behind it,
+   * so "your starred files" is one list shown to strangers — offering to star
+   * something is offering to write into that same shared list. Owner's call,
+   * 2026-09-05: "yıldızlı yeri gözükmüyorsa o zaman yıldızla/yıldızı kaldır da
+   * gözükmemeli".
+   */
+  starEnabled?: boolean;
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
+  /**
+   * surucu:d1 — draw "Folders" and "Files" as labelled sections
+   * (`uiProfile: 'drive'`). Absent/false renders the flat grid unchanged, down
+   * to the DOM: the two headings are the only extra nodes, and without this
+   * prop none are emitted.
+   *
+   * The rows are re-ordered HERE (directories first, stable within each group)
+   * rather than trusted to arrive that way — the listing endpoint promises no
+   * grouping, and a "Folders" heading with a spreadsheet under it is worse
+   * than no heading at all.
+   */
+  sections?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -49,6 +70,23 @@ const emit = defineEmits<{
   (e: 'item-drop-into', target: FileNode, ev: DragEvent): void;
   (e: 'star-change', node: FileNode, value: boolean): void;
 }>();
+
+/* surucu:d1 — grouped order + the two headings. `sort` is stable, so within
+ * folders and within files the listing's own order survives untouched. */
+const ordered = computed<FileNode[]>(() =>
+  props.sections
+    ? [...props.files].sort((a, b) => (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1))
+    : props.files,
+);
+const firstDirPath = computed(() => ordered.value.find((f) => f.type === 'dir')?.path ?? null);
+const firstFilePath = computed(() => ordered.value.find((f) => f.type !== 'dir')?.path ?? null);
+
+function headingBefore(n: FileNode): string | null {
+  if (!props.sections) return null;
+  if (n.path === firstDirPath.value) return t('drive.section.folders');
+  if (n.path === firstFilePath.value) return t('drive.section.files');
+  return null;
+}
 
 const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
 
@@ -61,6 +99,7 @@ function thumbOf(n: FileNode): string | null {
 /** A card carries a star when the host wired the API and the node is a file
  *  with a server id — the same rule the list row uses. */
 function canStar(n: FileNode): boolean {
+  if (props.starEnabled === false) return false;
   return props.apiBase !== undefined && typeof n.id === 'number' && n.type === 'file';
 }
 
@@ -189,9 +228,12 @@ function snippetTitle(snippet: string): string {
     :aria-label="t('grid.aria')"
     :aria-busy="loading ? 'true' : undefined"
   >
+    <template v-for="n in ordered" :key="n.path">
+    <!-- surucu:d1 — the section label: a grid item spanning every column. The
+         cards keep `role="option"`; the heading is aria-hidden, and the group
+         it names is already in each card's own label. -->
+    <p v-if="headingBefore(n)" class="fe-grid__heading" aria-hidden="true">{{ headingBefore(n) }}</p>
     <div
-      v-for="n in files"
-      :key="n.path"
       class="fe-grid__card"
       :class="{
         'is-selected': isSelected(n),
@@ -279,6 +321,7 @@ function snippetTitle(snippet: string): string {
         </template>
       </div>
     </div>
+    </template>
     <div v-if="!loading && files.length === 0" class="fe-grid__empty">
       {{ t('empty.folder') }}
     </div>

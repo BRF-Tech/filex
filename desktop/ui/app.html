@@ -504,9 +504,19 @@
                                  '{v} sürümü çıktı — indirerek kurun'],
         'upd.manual_idea':      ['This macOS build is not signed for self-update; new versions install as a fresh download.',
                                  'Bu macOS paketi kendini güncellemek için imzalı değil; yeni sürümler indirilerek kurulur.'],
+        'upd.portable_manual':  ['Version {v} is out — download it and replace this .exe',
+                                 '{v} sürümü çıktı — indirip bu .exe dosyasının yerine koyun'],
+        'upd.portable_idea':    ['This portable copy does not update itself — there is nothing installed for an update to replace. Download a new .exe and put it over this one; the folder beside it keeps your accounts and settings.',
+                                 'Bu taşınabilir kopya kendini güncellemez — güncellemenin değiştireceği kurulu bir şey yok. Yeni bir .exe indirip bunun üzerine koyun; yanındaki klasör hesaplarınızı ve ayarlarınızı korur.'],
         'upd.download':         ['Download', 'İndir'],
         'upd.dev':              ['Only the installed app updates itself.',
                                  'Yalnızca kurulu uygulama kendini günceller.'],
+        'set.portable':         ['Portable copy', 'Taşınabilir kopya'],
+        'set.portable_sub':     ['Everything this copy keeps — accounts, settings, sync state, logs — is in the folder beside the .exe. Delete that folder and nothing of yours is left on this machine.',
+                                 'Bu kopyanın tuttuğu her şey — hesaplar, ayarlar, senkron durumu, günlükler — .exe dosyasının yanındaki klasörde. O klasörü silin, bu makinede size ait hiçbir şey kalmaz.'],
+        'set.portable_stuck':   ['This .exe cannot write next to itself (a read-only disk, or a folder that needs administrator rights), so its files are here instead. Deleting the .exe will NOT remove them.',
+                                 'Bu .exe kendi yanına yazamıyor (salt okunur disk ya da yönetici hakkı isteyen bir klasör), bu yüzden dosyaları burada duruyor. .exe dosyasını silmek onları KALDIRMAZ.'],
+        'set.portable_show':    ['Show folder', 'Klasörü aç'],
         'set.on':               ['On', 'Açık'],
         'set.off':              ['Off', 'Kapalı'],
         'set.unknown_account':  ['unknown account', 'bilinmeyen hesap'],
@@ -936,6 +946,7 @@
             <button id="login-item" ${state.launchAtLoginSupported === false ? 'disabled' : ''}>${
               esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
           </div></div>
+          ${portableCard()}
           ${openWithCard()}
           <h2>${esc(T('upd.title'))}</h2>
           ${updateCard()}
@@ -994,6 +1005,27 @@
             <div><strong>${esc(T('ow.open_now'))}</strong></div>${live}</div>` : ''}`;
       }
 
+      /**
+       * Where a portable copy keeps its files — shown only on a portable copy.
+       *
+       * The whole promise of the portable build is "delete one folder and
+       * nothing of mine is left here", and a promise the user cannot verify is
+       * just a claim. So the path is on screen, with the button that opens it.
+       * When the .exe turned out to sit somewhere unwritable the card says THAT
+       * instead: falling back to %APPDATA% silently would break the promise
+       * without anybody finding out.
+       */
+      function portableCard() {
+        const p = state.portable;
+        if (!p) return '';
+        return `<div class="card"><div class="between">
+            <div style="min-width:0"><strong>${esc(T('set.portable'))}</strong>
+              <div class="muted">${esc(T(p.besideExe ? 'set.portable_sub' : 'set.portable_stuck'))}</div>
+              <div class="muted"><code>${esc(p.dataDir || '')}</code></div></div>
+            <button id="portable-show">${esc(T('set.portable_show'))}</button>
+          </div></div>`;
+      }
+
       /** The update row: what the app knows, plus the one button that matters. */
       function updateCard() {
         const u = state.update || { status: 'idle' };
@@ -1001,10 +1033,14 @@
         // An ad-hoc sealed mac build cannot swap itself; its story is a
         // download, and pretending otherwise is what this card used to do.
         const manual = state.updateManualOnly === true;
+        // Two builds cannot swap themselves and they cannot say the same thing:
+        // the mac one is about a missing signature, the portable one about
+        // there being no installation to replace. See src/main.ts.
+        const portable = state.updateManualReason === 'windows-portable';
         let line = T('upd.current');
         if (!supported) line = T('upd.dev');
         else if (u.status === 'checking') line = T('upd.checking');
-        else if (u.status === 'manual') line = T('upd.manual', { v: u.version || '' });
+        else if (u.status === 'manual') line = T(portable ? 'upd.portable_manual' : 'upd.manual', { v: u.version || '' });
         else if (u.status === 'available') line = T('upd.available', { v: u.version || '' });
         else if (u.status === 'downloading') line = T('upd.downloading', { p: u.percent ?? 0 });
         else if (u.status === 'ready') line = T('upd.ready', { v: u.version || '' });
@@ -1016,7 +1052,9 @@
             : `<button id="upd-check" ${supported ? '' : 'disabled'}>${esc(T('upd.check'))}</button>`;
         return `<div class="card"><div class="between">
             <div><strong>${esc(line)}</strong>
-              <div class="muted">${esc(T(manual && supported ? 'upd.manual_idea' : 'upd.idea'))}</div></div>
+              <div class="muted">${esc(T(
+                !(manual && supported) ? 'upd.idea'
+                : portable ? 'upd.portable_idea' : 'upd.manual_idea'))}</div></div>
             ${btn}
           </div></div>`;
       }
@@ -1079,6 +1117,10 @@
           render();
           renderSettings();
         }));
+        const portableShow = $('#portable-show', el);
+        if (portableShow) portableShow.addEventListener('click', () => {
+          if (state.portable?.dataDir) window.filexApp.openLocal(state.portable.dataDir);
+        });
         const updCheck = $('#upd-check', el);
         if (updCheck) updCheck.addEventListener('click', async () => {
           state = await window.filexApp.checkUpdate();

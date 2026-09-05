@@ -57,7 +57,7 @@ check('the shell is in Turkish', /Ayarlar/.test(shell) && /Dil/.test(shell),
 // property set at mount time won. A property is not a screen.
 const listText = await win.evaluate(() => document.querySelector('filex-explorer')?.innerText ?? '');
 check('the file list itself is in Turkish, not just its locale property',
-  /Yeni Klasör|Dosya adı|AD/.test(listText),
+  /Yeni Klasör|Dosya adı|AD\b/.test(listText),
   listText.split(/\n/).filter(Boolean).slice(0, 4).join(' · ') || 'boş');
 // …and it changed in place: a language switch that throws you back to the root
 // folder is its own bug.

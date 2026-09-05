@@ -17,7 +17,7 @@ folder, and the ways you can still end up with plaintext on the server.
 
 - [Threat model](#threat-model) — [what it protects](#what-it-protects) · [what it does not hide](#what-it-does-not-hide)
 - [Key management](#key-management) — [folder marker](#folder-marker--filex-e2ejson) · [file format](#file-format--filexe2e-magic)
-- [Recovery](#recovery) — [user recovery key](#the-user-recovery-key) · [key escrow](#key-escrow-optional-operator-recovery) · [what escrow cannot do](#what-escrow-can-and-cannot-do) · [before v0.31](#folders-created-before-v031)
+- [Recovery](#recovery) — [user recovery key](#the-user-recovery-key) · [key escrow](#key-escrow-optional-operator-recovery) · [adopting escrow later](#adopting-escrow-on-an-installation-that-already-exists) · [offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot) · [what escrow cannot do](#what-escrow-can-and-cannot-do) · [before v0.31](#folders-created-before-v031)
 - [Feature trade-offs](#feature-trade-offs)
 - [Ways plaintext still reaches the server](#ways-plaintext-still-reaches-the-server)
 - [Using it](#using-it)
@@ -38,9 +38,22 @@ the browser; the server sees a blob that starts with the `filexe2e` magic and
 nothing else.
 
 ⚠ **The server operator is in that list only while [key escrow](#key-escrow-optional-operator-recovery)
-is off** — which is the default, and cannot be changed after installation. When
-escrow *is* on, the operator holds a key to every folder created since, and a
-stolen server still yields nothing because the escrow private key is not on it.
+is off** — which is the default. When escrow *is* on, the operator holds a key
+to every folder created since, and a stolen server still yields nothing because
+the escrow private key is not on it.
+
+⚠ Escrow can be turned on **later**, on an installation that already has
+folders — see [adopting escrow](#adopting-escrow-on-an-installation-that-already-exists).
+It takes a deliberate act by the operator, it is recorded with a timestamp, and
+it reaches **only folders created after it**. A folder you created while escrow
+was off stays outside the operator's reach; no configuration change, admin
+action or future version of filex takes it.
+
+⚠ **You can hand it over, and only you can.** The next time you unlock such a
+folder, filex offers to seal it to the escrow key and says in plain words what
+that means. Doing nothing leaves the folder as it is; saying no is recorded so
+you are not asked again. See
+[offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot).
 
 ### What it does not hide
 
@@ -113,7 +126,8 @@ and from search results**, but is readable by path through the preview endpoint
   "fmk": "wrapped",
   "fmk_pw": "<base64: 12B IV || AES-GCM(KEK, FMK)>",
   "rk":  { "salt": "<base64 16B>", "blob": "<base64: 12B IV || AES-GCM(RKEK, FMK)>" },
-  "esc": { "kid": "<hex>", "alg": "RSA-OAEP-256", "blob": "<base64: RSA-OAEP(escrow public key, FMK)>" }
+  "esc": { "kid": "<hex>", "alg": "RSA-OAEP-256", "blob": "<base64: RSA-OAEP(escrow public key, FMK)>" },
+  "esc_declined": "<ISO 8601 — the owner was offered a slot and said no>"
 }
 ```
 
@@ -124,7 +138,8 @@ and from search results**, but is readable by path through the preview endpoint
 | `fmk` | `"wrapped"` — the FMK is random and lives in `fmk_pw`. `"kek"` — the FMK *is* the password-derived KEK, which is how a v1 folder is upgraded in place without rewriting files. |
 | `fmk_pw` | Present only when `fmk` is `"wrapped"`. |
 | `rk` | The user recovery key slot. Absent means the folder has no recovery key. |
-| `esc` | The escrow slot. **Absent means no escrow key can ever open this folder**, and no later configuration change adds one. |
+| `esc` | The escrow slot, and the only authority on which escrow key opens this folder. **Absent means no escrow key opens it**, and no configuration change adds one — including [adopting escrow](#adopting-escrow-on-an-installation-that-already-exists) afterwards. The folder's **owner** can add one with the password ([offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot)); nobody else can. `kid` names *which* escrow key: a folder restored from another installation carries that installation's `kid` and does not open with yours. |
+| `esc_declined` | The owner was offered an escrow slot and declined, at this timestamp. Purely a record of an answer: it holds no key material, changes nothing about the folder, and its only effect is that filex stops asking. Cleared if they later accept. |
 
 Nothing in the marker is secret: every slot is the same 32 bytes sealed under a
 key filex does not have. The salt and the verify blob are public by design, and
@@ -175,7 +190,7 @@ make — which needs a key the server never has.
 |---|---|---|---|
 | Folder password | The user | — | Always |
 | User recovery key | The user | — | The folder was created (or upgraded) from v0.31 on |
-| Escrow key | The operator | The folder's owner is notified | Escrow was enabled at install **and** the folder was created (or upgraded) after that |
+| Escrow key | The operator | The folder's owner is notified | Escrow is enabled (at install, or [adopted](#adopting-escrow-on-an-installation-that-already-exists) later) **and** the folder was created after that, **or** its owner [granted it a slot](#offering-an-existing-folder-an-escrow-slot) |
 
 ### The user recovery key
 
@@ -199,8 +214,10 @@ opens the folder without the password.
 ### Key escrow (optional operator recovery)
 
 Escrow gives the operator of an installation a second way into the encrypted
-folders created on it. It is **off by default** and can only be turned on
-**before the first boot**.
+folders created on it. It is **off by default**, and turning it on is a
+decision the operator makes once — either before the first boot, or later by
+[adopting](#adopting-escrow-on-an-installation-that-already-exists) it. Either
+way it applies only to folders created from that moment on.
 
 The shape is deliberately lopsided:
 
@@ -245,9 +262,19 @@ that anyone could POST would be worth nothing. A wrong answer is refused with
 **Cannot:**
 
 - Open a folder created while escrow was **off**, or under a **different**
-  escrow key. Those markers have no `esc` slot, and one cannot be added without
-  the folder password. This is arithmetic, not policy — no configuration
-  change, no admin flag and no future filex version can undo it.
+  escrow key, **on the operator's own initiative**. Those markers have no
+  usable `esc` slot, and one cannot be added without the folder password. This
+  is arithmetic, not policy — no configuration change, no admin flag and no
+  future filex version can undo it, and in particular
+  **[adopting escrow](#adopting-escrow-on-an-installation-that-already-exists)
+  does not reach backwards**: it seals folders created after it and nothing
+  else.
+
+  ⚠ The door that *does* exist opens from the inside only: the folder's
+  **owner** can grant a slot, with the folder password, from their browser
+  ([offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot)).
+  That is a decision by the person who holds the key, not a capability of the
+  operator — the operator can ask, and cannot take.
 - Be recovered if the operator loses the private key. filex has no copy.
 
 ⚠⚠ **The honest limits, stated plainly:**
@@ -269,6 +296,157 @@ that anyone could POST would be worth nothing. A wrong answer is refused with
 - **A user cannot remove the escrow slot from their folder.** That is the point
   of escrow, and it is why it belongs to the installation rather than to a
   user preference.
+
+### Adopting escrow on an installation that already exists
+
+Escrow used to be choosable only in the first second of an installation's life:
+any later change to `FILEX_INSTALLATION_E2E_ESCROW_KEY`, including *unset →
+set*, stopped the server. That was safe and useless. Nobody decides key-escrow
+policy before they have a single file, so in practice the switch was one nobody
+could ever throw — the only way to act on the decision was to throw the data
+directory away.
+
+An existing installation can now adopt escrow. It takes two variables, not
+one:
+
+```bash
+FILEX_INSTALLATION_E2E_ESCROW_KEY=MIIBoj...      # the public half
+FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1            # "yes, I mean it"
+```
+
+filex starts, logs the adoption at **WARN** with the sentence below in it, and
+records it. `_ADOPT` is read only while the pinned record has no escrow key, so
+you can leave it or drop it; it does nothing afterwards.
+
+⚠⚠ **Adoption is not retroactive. It cannot be, and no future version will
+change that.**
+
+A folder's master key is wrapped to the escrow identity **when the folder is
+created**. A folder that already exists has no such wrapped copy, and writing
+one needs the folder's master key — which needs the folder password, which the
+server has never had and cannot obtain. So the day you adopt escrow, your
+encrypted folders split into two groups:
+
+| Created | Escrow private key opens it? |
+|---|---|
+| **Before** the adoption | **No**, and nothing you do as operator changes that. Its owner can grant it — see below. |
+| **After** the adoption | Yes, and the owner is notified when it is used. |
+
+⚠ "Not retroactive" is a statement about the **operator**, and it is absolute.
+It is not a statement about the folder: the person who can open it can hand
+over a key, which is
+[what filex offers them at unlock](#offering-an-existing-folder-an-escrow-slot).
+Read `e2e_escrow_adopted_at` below as the boundary of **automatic** coverage.
+A folder whose owner granted a slot is simply no longer described by that
+boundary — the marker's `esc` slot is, and always was, the only authority on
+which key opens which folder.
+
+**The record.** After an adoption, `<data-dir>/installation.json` (and the
+`installation.pinned` settings row) separates the installation's birthday from
+the day it gained a second key holder:
+
+```json
+{
+  "e2e_escrow_kid": "9f2c1a55b4e07d38",
+  "e2e_escrow_alg": "RSA-OAEP-256",
+  "pinned_at": "2026-09-05T12:02:24Z",
+  "pinned_by": "first-boot",
+  "e2e_escrow_adopted_at": "2026-11-20T08:30:00Z",
+  "e2e_escrow_adopted_by": "env:FILEX_INSTALLATION_E2E_ESCROW_ADOPT",
+  "e2e_escrow_adoption_note": "escrow was turned on after this installation already existed; folders created BEFORE e2e_escrow_adopted_at have no escrow-wrapped key, so the escrow key does not open them and no operator action can change that. Each folder's OWNER can grant it from the browser with the folder password"
+}
+```
+
+`e2e_escrow_adopted_at` is the boundary date, and it is the reason the field
+exists: six months later, "which folders can I open with this key?" has an
+answer in the data rather than in somebody's memory. No such fields means
+escrow was there from the first boot, or is off.
+
+**What is still refused.** `_ADOPT` is consent to *add* a key to an
+installation that has none. It is not an override:
+
+- pointing `..._ESCROW_KEY` at a **different** key still stops the server —
+  old folders would open only with the old private key, new ones only with the
+  new, and nothing on either says which;
+- **removing** the key still stops the server — it un-escrows nothing, it only
+  hides the door in the UI while the old private key keeps working.
+
+**What a user sees.** On a folder created before the adoption, the
+unlock-without-the-password dialog does **not** show an Escrow tab, and says
+why: *"This installation has an escrow key, but this folder does not… The
+escrow key will not open it. Nothing the operator can do changes that… The
+folder's owner can grant it."* A missing tab on its own is not enough: an admin
+who knows escrow is enabled here reads the absence as a bug, tries the key
+anyway, and learns the real answer from a failure. The same dialog also names
+the case where a folder was restored from a **different** installation and
+carries that installation's `kid`.
+
+### Offering an existing folder an escrow slot
+
+Adoption covers folders created after it. On an installation that has been
+running for a while that is nobody's folders — the ones that matter already
+exist. An escrow key that reaches none of them is a key to an empty room.
+
+So when the installation has escrow and a folder does not, filex **asks the
+folder's owner**, at the one moment the folder password exists in a browser:
+immediately after a successful unlock.
+
+```
+┌─ Give the operator a key to this folder? ──────────────────────────┐
+│ This folder was created before key escrow was turned on here, so   │
+│ the operator of this installation cannot open it. Right now — while│
+│ your password is in memory — filex can seal this folder to the     │
+│ escrow key. Your files are not re-encrypted or moved; only the key │
+│ file changes.                                                      │
+│                                                                    │
+│ What this means: the operator gains a second, permanent way into   │
+│ this folder, without your password. You are notified when that key │
+│ is used, but that notification is an announcement rather than a    │
+│ control.  [What escrow can and cannot do]                          │
+│                                                                    │
+│ Escrow key: a1b2c3d4e5f60718                                       │
+│                      [ No, keep it to myself ] [ Give a key ]      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Nothing happens unless you choose it.** Closing the page, navigating away or
+locking the folder all leave it exactly as it was.
+
+**Accepting** unwraps the folder master key with the password you just typed
+and wraps one more copy of it to the escrow public key, in the browser. Only
+`.filex-e2e.json` is written; **no file is re-encrypted, moved or rewritten**,
+and the password and recovery key keep working unchanged. The key id written
+into the slot is the installation's current escrow key, read from
+`/api/capabilities` — a slot never carries a `kid` that does not open it.
+
+**Declining** is a decision, not a delay. It is recorded in the folder's marker
+as `esc_declined` and filex stops asking. That record lives in the marker
+rather than in browser storage on purpose: the unit of the decision is the
+*folder*, so the same person opening it from their phone is not asked again,
+and an answer that vanished when somebody cleared their site data would be no
+answer at all. It travels with the folder through a move, a backup and a
+restore, exactly as the key slots do. It holds no key material and hides
+nothing — its only effect is that filex stops asking.
+
+**The way back.** Somebody who declines today and changes their mind next month
+finds **Escrow key…** in the strip above an unlocked folder. It asks for the
+folder password again, because by then it is long gone from memory — and
+because handing the operator a key deserves the same proof of ownership the
+offer at unlock had.
+
+**Where the offer does not appear**, ever:
+
+| Situation | Why |
+|---|---|
+| The installation has no escrow key | There is nothing to offer. |
+| The folder already has an `esc` slot | It is already covered. |
+| The unlock failed | Accepting needs the password, and somebody who cannot open the folder is the wrong person to ask about its keys. |
+| A **v1** (pre-v0.31) marker | Those have no slots at all. Their path is the [recovery upgrade](#folders-created-before-v031), which seals an escrow slot in the same step and discloses it in the same prompt. Two offers on one unlock would be two chances to get the disclosure wrong. |
+| The owner already declined | Recorded per folder. The **Escrow key…** button is the way back. |
+
+⚠ This is the *only* way a `v: 2` folder gains an escrow slot after creation,
+and it requires the folder password, so only its owner can do it. An operator
+can enable escrow, adopt escrow, and ask — and cannot take.
 
 ### Folders created before v0.31
 

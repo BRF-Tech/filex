@@ -13,6 +13,13 @@ It is available two ways, and they are the same engine:
 Both read and write `~/.filex/sync/pairs.json`, so a folder paired in the app is
 visible to the CLI and the other way round.
 
+**`FILEX_SYNC_DIR` moves that whole directory** — pairs, the per-pair baselines
+and the local trash — somewhere else. The
+[portable Windows app](DESKTOP.md#portable-windows) sets it so its state lands
+beside the `.exe` rather than in the home directory of a machine the user is
+only borrowing; set it yourself when you want a self-contained checkout or a
+test run that cannot disturb your real pairings. An empty value is ignored.
+
 ---
 
 ## Quick start

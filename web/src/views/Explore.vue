@@ -129,9 +129,15 @@ const initialPathFromQuery = computed(() => {
  * gezinti:g1 — which chrome this visitor gets.
  *
  * GitHub #14: an operator's tool and an end user's file drive are two jobs, and
- * until now both were served the same screen. `simple` turns the power-user
- * chrome off (tabs, split pane, the gallery view mode, "How to connect") for
- * accounts that never asked for it; administrators keep today's explorer.
+ * until now both were served the same screen. `drive` turns the power-user
+ * chrome off (tabs, split pane, the gallery view mode, "How to connect") the
+ * way `simple` did, and puts the shell those accounts already know in its place
+ * — one "+ New" menu, one search field with its ⌘K escalation, a filter row,
+ * Folders/Files sections, Details/Activity, a storage line. Administrators keep
+ * today's explorer.
+ *
+ * ⚠ `drive` is a superset of `simple`, so this is one word, not a rewrite: an
+ * embedder that asked for `simple` still gets exactly `simple`.
  *
  * ⚠ The NAVIGATION PANEL is not part of this decision — it ships in both
  * profiles, collapsed or expanded as each person chooses. Gating a panel on
@@ -141,8 +147,8 @@ const initialPathFromQuery = computed(() => {
  * explorer only mounts once `roots` is populated, and that happens after
  * fetchMe in onMounted, so an admin never sees a frame of the simple profile.
  */
-const uiProfile = computed<'standard' | 'simple'>(() =>
-  auth.isAdmin ? 'standard' : 'simple',
+const uiProfile = computed<'standard' | 'simple' | 'drive'>(() =>
+  auth.isAdmin ? 'standard' : 'drive',
 );
 
 const explorerConfig = computed<ExplorerConfig | null>(() => {
@@ -251,13 +257,29 @@ onMounted(async () => {
       <span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">filex</span>
       <span class="text-xs text-zinc-500 hidden sm:inline">{{ t('explore.tagline') }}</span>
 
+      <!-- ⚠ This toolbar must never widen the page. Measured at 390px (the
+           iPhone 12/13/14 width): documentElement scrollWidth was 398 against a
+           clientWidth of 390, so a phone scrolled sideways on the screen every
+           non-admin lands on. The 8px was the "Admin panel" LABEL — a text
+           button in a row of icon buttons — so the label, not the button, is
+           what goes below `sm`. Hiding it by width is the only fix that
+           survives translation: the same string is "Admin paneli" in Turkish
+           and longer again in other locales, so trimming it once would only
+           move the overflow to the next language. The `:title` keeps the
+           button named for a screen reader and on hover. -->
       <div class="ml-auto flex items-center gap-1.5">
         <Button size="xs" variant="ghost" @click="refresh()" :title="t('common.refresh')">
           <RefreshCcw class="h-4 w-4" />
         </Button>
-        <Button v-if="auth.isAdmin" size="xs" variant="outline" @click="router.push({ name: 'dashboard' })">
+        <Button
+          v-if="auth.isAdmin"
+          size="xs"
+          variant="outline"
+          :title="t('explore.gotoAdmin')"
+          @click="router.push({ name: 'dashboard' })"
+        >
           <LayoutDashboard class="h-4 w-4" />
-          {{ t('explore.gotoAdmin') }}
+          <span class="hidden sm:inline">{{ t('explore.gotoAdmin') }}</span>
         </Button>
         <!-- gezinti:g1 — "How to connect" is WebDAV/SFTP/S3 mount instructions.
              It is the definition of the power-user surface #14 asked us to stop

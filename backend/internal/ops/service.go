@@ -48,26 +48,26 @@ const (
 
 // Op is a queued file operation row.
 type Op struct {
-	ID         int64      `json:"id"`
-	Kind       string     `json:"kind"`
-	StorageID  int64      `json:"storage_id"`
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
+	StorageID int64  `json:"storage_id"`
 	// DestStorageID is the storage the destination lives in. It equals
 	// StorageID for the ordinary same-storage copy/move; a different value is
 	// what makes an op CROSS-STORAGE (paste from one depo into another),
 	// which the worker serves by streaming bytes between the two drivers.
 	// Zero means "same as StorageID" — the shape every row written before
 	// this column existed has.
-	DestStorageID int64    `json:"dest_storage_id,omitempty"`
-	Sources    []string   `json:"sources"`
-	Dest       string     `json:"dest,omitempty"`
-	Total      int        `json:"total"`
-	Done       int        `json:"done"`
-	Failed     int        `json:"failed"`
-	Status     string     `json:"status"`
-	Error      string     `json:"error,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	DestStorageID int64      `json:"dest_storage_id,omitempty"`
+	Sources       []string   `json:"sources"`
+	Dest          string     `json:"dest,omitempty"`
+	Total         int        `json:"total"`
+	Done          int        `json:"done"`
+	Failed        int        `json:"failed"`
+	Status        string     `json:"status"`
+	Error         string     `json:"error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 }
 
 // Service is the queue + worker bundle.

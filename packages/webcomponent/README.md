@@ -104,7 +104,7 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 | `trash-visible` | `config.trashVisible` |
 | `sidenav` | `config.sideNav` — the navigation panel (Upload · Recent / Starred / Shared with me / Trash · storages). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |
 | `connections` | `config.connections` — the panel's "How to connect" and "API keys" entries. Default on, except under `ui-profile="simple"` where it is off. ⚠ "API keys" is additionally dropped when the caller is an **app** token — see `config.callerKind` below. |
-| `ui-profile` | `config.uiProfile` — `"standard"` (default) or `"simple"`: one pane, list/grid only, no tab strip, no split pane. |
+| `ui-profile` | `config.uiProfile` — `"standard"` (default), `"simple"` (one pane, list/grid only, no tab strip, no split pane) or `"drive"` (that, plus the Drive-shaped shell: a "+ New" menu, one header search field with its ⌘K palette hint, a Type/Modified/Size filter row, Folders/Files sections in grid, Details/Activity in the info panel, and a storage line). |
 
 For anything richer (auth, custom endpoints, share base, …) set the
 `config` JS property after element creation. Properties merge on top

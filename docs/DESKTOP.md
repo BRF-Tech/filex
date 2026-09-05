@@ -1,7 +1,8 @@
 # filex desktop app
 
 The filex explorer in its own window, with folder sync that keeps running in the
-background. Windows, Linux and macOS (Apple Silicon).
+background. Windows, Linux and macOS (Apple Silicon) — and on every one of
+them there is a copy that runs without being installed.
 
 It is the same explorer the web app and embedders use — not a separate,
 half-finished copy. What it adds on top: **several accounts at once**, **folders
@@ -18,6 +19,7 @@ panel, and the app links out to it in your browser.
 | Platform | File | What it does |
 |---|---|---|
 | Windows 10/11 (64-bit) | [`filex-desktop-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x64.exe) | Installer. Installs for **your user only** (`%LOCALAPPDATA%\Programs\filex`) — no administrator rights, and the app can replace its own files, which is what lets it update itself quietly. Adds a Start-menu entry. |
+| Windows 10/11 (64-bit) | [`filex-desktop-portable-x64.exe`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-portable-x64.exe) | **Portable** — nothing is installed. Double-click it wherever it is: a USB stick, `Downloads`, a work machine you may not install software on. It keeps its files in a `filex-data` folder beside itself. See [Portable](#portable-windows) below. |
 | Linux (any, 64-bit) | [`filex-desktop-x86_64.AppImage`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-x86_64.AppImage) | **Portable** — no installation. `chmod +x` and run. |
 | Debian / Ubuntu | [`filex-desktop-amd64.deb`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-amd64.deb) | System-wide install, appears in your applications menu. |
 | macOS 12+ (Apple Silicon) | [`filex-desktop-arm64.dmg`](https://github.com/BRF-Tech/filex/releases/latest/download/filex-desktop-arm64.dmg) | Drag to *Applications*. **Unsigned** — see the first-launch note below. Intel Macs: no build; the web app works there. |
@@ -29,6 +31,12 @@ sudo apt install ./filex-desktop-amd64.deb
 # Anything else
 chmod +x filex-desktop-x86_64.AppImage
 ./filex-desktop-x86_64.AppImage
+```
+
+```powershell
+# Windows, nothing installed: put the .exe where you want it and run it.
+# The folder it makes beside itself is the whole of what it leaves behind.
+.\filex-desktop-portable-x64.exe
 ```
 
 > ⚠ **The packages are not code-signed yet.** Windows SmartScreen will show
@@ -315,7 +323,7 @@ once complete, so nothing ever wears the real name half-written.
 ⚠ Route 2 cannot fill in a drop onto an **application**: nothing is written to
 disk, so there is no landing place to find, and the program is left holding the
 empty stand-in. The app tells you when it could not find where you dropped
-(*"Bırakılan yer bulunamadı"*) rather than pretending it worked. Dropping into a
+(*"Could not find where it was dropped"*) rather than pretending it worked. Dropping into a
 folder — Explorer, Finder, the desktop — is the case that always works. If you
 want a specific large file to be droppable into a program, keep it on this
 computer first: then route 1 applies.
@@ -394,6 +402,16 @@ anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
 > so every update would stop at a UAC prompt — which is no longer possible: the
 > installer does not offer a machine-wide install.
 >
+> ⚠ **The portable Windows copy does not update itself either**, and for a
+> different reason: there is no installation for an update to replace. It is
+> one self-extracting `.exe`, so there is no install directory to patch and no
+> installer to hand the running copy over to. It is treated exactly like the
+> macOS case below — nothing is ever downloaded that could not be applied, and
+> *Settings → Updates* says plainly that this copy does not update itself and
+> offers a **Download** button. Updating is: fetch the new `.exe`, put it over
+> the old one. The `filex-data` folder beside it is untouched, so your accounts
+> and settings survive.
+>
 > ⚠ **On macOS the app does not update itself yet.** The updater refuses to
 > swap an unsigned app (Squirrel.Mac checks the signature of what it installs),
 > so until the build is signed a new version means downloading the new `.dmg`
@@ -415,9 +433,60 @@ anyone who would rather not wait. `FILEX_NO_UPDATE=1` turns the whole thing off.
 | Documents open through "Open with" | One small record per document in `openwith/` under the app's config directory — the note of which local file a working copy has to go home to. It is written before the editor opens, which is what makes a crash recoverable, and removed when the copy is cleaned up. |
 | An edit that could not be written back | `openwith-recovered/` under the app's config directory, when even the document's own folder refused the write. The dialog names the exact path. |
 
+**The portable copy moves every one of those rows into one folder beside the
+`.exe`** — including `~/.filex/sync`, which is otherwise shared with the CLI.
+See below.
+
 Signing out removes the account and its token, and stops syncing its folders.
 **Your files are left exactly where they are** on both sides — unpairing is not
 deleting.
+
+---
+
+## Portable (Windows)
+
+`filex-desktop-portable-x64.exe` is one file. Nothing is installed, nothing is
+written to the registry, and there is no Start-menu entry. Put it on a USB
+stick, in `Downloads`, on a machine where you are not allowed to install
+software, and double-click it.
+
+**Everything it keeps goes in a `filex-data` folder next to the `.exe`** — the
+account list, your settings, the log, the drag-out cache, the working copies of
+documents opened with *Open with filex*, and the sync engine's own bookkeeping.
+That is the point of the build rather than a detail of it: delete the folder
+and nothing of yours is left on a machine that is not yours. *Settings* shows
+the exact path with a button that opens it, so you never have to take that on
+trust.
+
+```
+D:\
+├── filex-desktop-portable-x64.exe
+└── filex-data\          ← everything. Delete this and you are gone.
+```
+
+Move both to another folder — or another disk — and the app carries on with the
+same accounts. Copy only the `.exe` and it starts fresh beside its new home.
+
+Two things it does **not** do, and both are deliberate:
+
+- **It does not update itself.** See [Updates](#updates).
+- **Your accounts do not travel between machines.** Tokens are encrypted with
+  the machine's own keychain (Windows DPAPI), so a `filex-data` folder carried
+  to a different computer — or to a different Windows account — cannot be
+  decrypted there and you sign in again. That is the right way round: a stick
+  you leave behind on a train does not hand anyone your server.
+
+> ⚠ **If the `.exe` sits somewhere it cannot write** — `C:\Program Files`, a
+> read-only stick, a share mounted without write access — it cannot keep its
+> promise. Rather than refuse to start, it falls back to
+> `%APPDATA%\@brftech\filex-desktop-portable` and **says so in Settings, with
+> the path**. That directory is deliberately not the installed app's own
+> profile: a copy carried in from outside must never read or write the accounts
+> of whoever owns the machine.
+
+While it runs, the app unpacks itself into a temporary directory (that is what
+a single-file `.exe` is), and removes that directory again when you quit. The
+only thing left where you put it is the `.exe` and its `filex-data`.
 
 ---
 
@@ -433,7 +502,7 @@ name was not ASCII (`Türkçe adlı dosya.txt`) made the transfer throw while
 reading the response, and everything after it stopped. Update the app; the
 server no longer sends such a header either.
 
-**"Bırakılan yer bulunamadı" after dragging out** — the drop went to an
+**"Could not find where it was dropped" after dragging out** — the drop went to an
 application rather than a folder, so there was nowhere on disk to put the file.
 Drop into a folder (or the desktop), or keep the file on this computer first and
 drag it from there.

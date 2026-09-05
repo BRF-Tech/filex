@@ -1,0 +1,12 @@
+{
+  "v": 2,
+  "salt": "K+PhsZaFsxmB2MJtxI8qEw==",
+  "iter": 600000,
+  "verify": "qmixI1d9pMwOAA7dAfAHDUK3q79qAHEn/bspRzt9onIYEhS/SbiZxO9/fVnOQd8=",
+  "fmk": "wrapped",
+  "fmk_pw": "HC2XPp3ADi2ZBVlsjHCTXMsOB7by9fCxpdPQq3um97RB6NSc3xrHn0q3h47pTGc/FYMYh/dWBo0hcLC1",
+  "rk": {
+    "salt": "622h2Mn5CdEOzj3IqJ4GSg==",
+    "blob": "D2lK1cNUUxnv6mfrU6vGhJ9zuKQDhwqwUCkCZWd0nkAP0T5KUf9/4wWYwaI7Ll6E6HSfxT4UffYCcjpF"
+  }
+}

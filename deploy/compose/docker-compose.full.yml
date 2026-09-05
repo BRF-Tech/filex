@@ -42,6 +42,19 @@ services:
       # plaintext — and losing it stops every existing access key verifying, so
       # back it up with the database.
       FILEX_SECRET_KEY: ${FILEX_SECRET_KEY:-}
+      # Optional operator key escrow for end-to-end encrypted folders, and
+      # the one decision on this list that a fresh deployment cannot defer
+      # cheaply: a folder wraps its master key to the escrow identity when
+      # it is CREATED. Set here, every folder this installation ever has is
+      # covered. Decided later, adoption is possible
+      # (FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1, once) but is NOT
+      # retroactive -- everything created before it stays outside the key,
+      # permanently. ⚠ It is a second way into every such folder: read
+      # docs/E2E-ENCRYPTION.md on what its use-notification can and cannot
+      # promise before turning it on. Leave blank for no escrow.
+      # Mint with: filex e2e-escrow keygen  (prints the private half ONCE
+      # and stores it nowhere -- keep it where you keep a root password).
+      FILEX_INSTALLATION_E2E_ESCROW_KEY: ${FILEX_INSTALLATION_E2E_ESCROW_KEY:-}
       # SFTP / FTPS / NFS each open a LISTENER, so they stay off until asked
       # for — and each needs its port published below and opened on the
       # firewall. ⚠ FTPS also needs the whole passive range, or transfers hang

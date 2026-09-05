@@ -107,7 +107,14 @@ function buildConfig(
     base.connections =
       attrs.connections === true || attrs.connections === 'true' || attrs.connections === '';
   }
-  if (attrs.uiProfile === 'simple' || attrs.uiProfile === 'standard') {
+  // surucu:d1 — 'drive' joins the two. Matched against the union rather than
+  // passed through, so a typo ("drve") leaves the core default alone instead of
+  // reaching the SFC as an unknown profile.
+  if (
+    attrs.uiProfile === 'simple' ||
+    attrs.uiProfile === 'standard' ||
+    attrs.uiProfile === 'drive'
+  ) {
     base.uiProfile = attrs.uiProfile;
   }
   // `config` JS-property overrides win over individual attributes —
@@ -149,7 +156,7 @@ const FilexExplorerWrapper = defineCustomElement({
     sidenav: { type: [Boolean, String], default: undefined },
     /** Shortcut attribute → config.connections (How to connect + API keys). */
     connections: { type: [Boolean, String], default: undefined },
-    /** Shortcut attribute → config.uiProfile ('standard' | 'simple'). */
+    /** Shortcut attribute → config.uiProfile ('standard' | 'simple' | 'drive'). */
     uiProfile: { type: String, default: '' },
   },
   emits: [

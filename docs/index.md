@@ -6,7 +6,7 @@ titleTemplate: false
 hero:
   name: filex
   text: Self-hosted file manager
-  tagline: One Go binary. Connect it to local disks, S3, SFTP, WebDAV, FTP or a NAS — and reach it back as S3, SFTP, FTPS, NFS or a mounted drive.
+  tagline: One Go binary. Connect it to local disks, S3, SFTP, WebDAV, FTP or SMB — and reach it back as S3, SFTP, FTPS, NFS, WebDAV or a mounted drive.
   image:
     src: /logo.png
     alt: filex
@@ -32,7 +32,7 @@ features:
     linkText: Roles and access
   - icon: 🖥️
     title: Desktop app
-    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, sync that keeps running when the window is closed, and double-click an Office document on your own disk to edit it without Office installed.
+    details: The same explorer in its own window on Windows, Linux and macOS — several accounts at once, right-click a folder or file to keep it on the computer, sync that keeps running when the window is closed, and double-click an Office document on your own disk to edit it without Office installed. Not allowed to install software? Every platform also has a copy that runs from wherever you put it, and the Windows portable one keeps all its files in one folder beside the .exe.
     link: /DESKTOP
     linkText: Desktop docs
   - icon: 🪄
@@ -77,7 +77,7 @@ features:
     linkText: CLI docs
   - icon: 🧭
     title: Navigation people already know
-    details: A left panel with a prominent Upload; the views Recent, Starred, Shared with me and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail when you want the width back, and switch the simple profile on for people who want a file drive rather than a file manager.
+    details: 'A left panel with a prominent Upload; the views Recent, Starred, Shared with me and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail when you want the width back, and switch the drive profile on for people who want a file drive rather than a file manager: one "+ New" menu, one search field in the header with its palette shortcut, a Type/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel.'
     link: /INTEGRATION
     linkText: Turning it on
   - icon: 🧩
@@ -95,6 +95,11 @@ features:
     details: Roles plus per-file and per-folder permissions with inheritance — enforced in the backend, off by default.
     link: /RBAC
     linkText: RBAC docs
+  - icon: 🔐
+    title: End-to-end encrypted folders
+    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. Each folder gets a recovery key, shown once, so a forgotten password is not automatically lost data — and an operator can optionally hold an escrow key, with the limits stated rather than implied."
+    link: /E2E-ENCRYPTION
+    linkText: How it works
   - icon: 🏢
     title: LDAP / Active Directory
     details: Directory accounts sign in on the same password form as local ones — and on WebDAV, SFTP, FTPS, S3 and NFS too. Private CA supported; local login stays first, so your break-glass account works while the directory is down.

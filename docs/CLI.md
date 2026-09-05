@@ -37,6 +37,19 @@ The token may be a **session token** (minted by `login`) or a durable
 **API token** created in the admin panel / self-service token page — the
 server accepts both as `Authorization: Bearer`.
 
+Two variables move where the CLI keeps its own files, for a checkout or a run
+that must not touch your real state — both ignored when empty:
+
+| Variable | Default | What it moves |
+|---|---|---|
+| `FILEX_CLI_CONFIG` | `~/.filex/cli.yaml` | The saved URL + token |
+| `FILEX_SYNC_DIR` | `~/.filex/sync` | The [sync](SYNC.md) pairs, per-pair baselines and local trash |
+
+The [portable desktop app](DESKTOP.md#portable-windows) sets `FILEX_SYNC_DIR`
+for exactly this reason: its whole promise is that everything it keeps sits in
+one folder beside the `.exe`, and the sync trash holds real copies of deleted
+files.
+
 ### Interactive login
 
 ```bash
@@ -177,17 +190,17 @@ filex client mv docs://inbox/a.pdf docs://reports/b.pdf   # move + rename
 ### search
 
 ```bash
-filex client search fatura                      # names + indexed content
-filex client search "toplantı notu" --scope content
-filex client search rapor --scope name --limit 20 --storage-id 2
+filex client search invoice                     # names + indexed content
+filex client search "meeting notes" --scope content
+filex client search report --scope name --limit 20 --storage-id 2
 filex client search "invoice 2026"              # finds invoice_2026.pdf
-filex client search "rapor tag:muhasebe"        # narrow to a tag
+filex client search "report tag:accounting"     # narrow to a tag
 ```
 
 ```
 PATH                 MATCHED  SNIPPET
-/inbox/rapor.pdf     name
-/notlar/temmuz.md    content  …ekteki «rapor» taslağı üzerinden…
+/inbox/report.pdf    name
+/notes/july.md       content  …figures in the attached «report» are…
 ```
 
 `--scope` is `name`, `content` or `all` (default). Content hits require the

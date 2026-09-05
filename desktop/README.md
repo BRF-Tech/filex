@@ -61,9 +61,9 @@ pnpm run build      # sync the web bundle + bundle the main process
 pnpm run dev        # build, then run it
 
 # installers (unsigned)
-pnpm run dist:win
-pnpm run dist:linux     # .deb + AppImage
-pnpm run dist:mac       # .dmg + .zip — host arch (arm64 on Apple Silicon), ad-hoc sealed
+pnpm run dist:win        # installer + PORTABLE single .exe
+pnpm run dist:linux      # .deb + AppImage
+pnpm run dist:mac        # .dmg + .zip — host arch (arm64 on Apple Silicon), ad-hoc sealed
 ```
 
 `FILEX_CLI_BIN=<path>` points `fetch-cli.mjs` at an already-built CLI instead of
@@ -92,6 +92,72 @@ Two things make that possible, and both are easy to undo by accident:
 The feed is a plain static directory on filex.sh, not the GitHub provider: this
 repo's mirror is private, and that provider would need a token shipped inside
 the app. `FILEX_NO_UPDATE=1` turns the whole thing off.
+
+**Two builds can never apply an update in place** — the ad-hoc sealed macOS app
+(see *Signing*) and the Windows portable `.exe` (see below). They take the same
+route, which is worth understanding before adding a third: the updater is never
+wired at all, so nothing is downloaded that could not be applied, and the same
+cadence reads the static feed directly and reports an honest
+`status: 'manual'` with a **Download** button. The failure this replaces is a
+Settings card stuck at "Checking…" forever, waiting on an updater nobody wired.
+
+## Portable (Windows)
+
+`pnpm run dist:win` produces two artifacts: the installer, and
+`filex-desktop-portable-x64.exe` — one self-extracting file that runs from
+wherever it is put. Linux and macOS already had this (the AppImage runs
+unextracted, the mac `.zip` is unzip-and-run); Windows was the only platform
+with no way to run filex without an installer.
+
+**Its data lives beside the `.exe`, not in `%APPDATA%`.** For an installed app
+the roaming profile is right — nobody wants a program scattering folders across
+their desktop. A run-and-delete copy is the opposite case: it is carried in on
+a stick, run on a machine that is not the user's, and the promise is that
+deleting one folder leaves nothing of theirs behind.
+
+How, in `src/portable.ts`:
+
+- The signal is **`PORTABLE_EXECUTABLE_DIR`**, which the portable stub sets
+  before launching the app (`templates/nsis/portable.nsi` in app-builder-lib).
+  ⚠ It is the *only* signal. `process.execPath` under this target is the
+  extraction temp directory, which the stub deletes on exit — guessing from it
+  would give an account store that empties itself between launches. No
+  variable means not portable, and nothing is overridden.
+- One `app.setPath('userData', …)` (plus `sessionData`), made at the **top of
+  `main.ts`**, before `requestSingleInstanceLock()` and before anything has
+  resolved a path. Everything else in the app already routes through
+  `app.getPath('userData')`, so there is deliberately no second notion of
+  "where our files go". `log.ts` in particular caches its path on the first
+  line written, which is why `portable-e2e.mjs` asserts the log location: it is
+  the one thing that catches a `setPath` that ran a moment too late.
+- ⚠ The sync engine is the exception that had to be handled separately. It
+  keeps its pairs, baselines and **local trash — real copies of files it
+  deleted** — in `~/.filex/sync`, which on a borrowed machine is somebody
+  else's home directory. `sync.ts` therefore passes **`FILEX_SYNC_DIR`** (new
+  in the Go CLI, mirroring the existing `FILEX_CLI_CONFIG`) so that store lands
+  inside `filex-data` too.
+- ⚠⚠ **When the `.exe` sits somewhere unwritable** — `C:\Program Files`, a
+  read-only stick, a share — the fallback is a **sibling** directory,
+  `%APPDATA%\@brftech\filex-desktop-portable`, and Settings shows the path.
+  Measured before it was fixed: falling back to the plain default put the
+  portable copy straight into the *installed* app's profile — reading and
+  writing the accounts of whoever owns the machine, and, because the
+  single-instance lock is keyed on that directory, exiting silently and raising
+  the installed app's window whenever it was already running.
+
+Honest limits, both documented in `docs/DESKTOP.md`:
+
+- **It does not update itself** (see *Updates* above).
+- **Accounts do not travel between machines.** Tokens are sealed with
+  `safeStorage`, i.e. Windows DPAPI, so a `filex-data` folder opened on another
+  computer or under another Windows account fails to decrypt and the user signs
+  in again. That is the right way round for a stick somebody leaves on a train.
+
+⚠ Release step: the portable `.exe` has to be uploaded to
+`https://filex.sh/desktop/` alongside the installer, or the **Download** button
+in a portable copy's Settings points at a file that is not there. These
+packages are uploaded by hand (goreleaser owns the CLI release), so nothing
+does it for you.
 
 ## Language
 
@@ -186,6 +252,16 @@ macOS specifics, because the failure mode there is not a warning but a wall:
 - **Artifact names carry no version** (`filex-desktop-x64.exe`): the download
   links point at `releases/latest/download/<name>`, which only resolves for a
   fixed filename.
+- **nsis and portable both emit `.exe`.** Under the shared `artifactName`
+  template they are the same filename written twice, and whichever target ran
+  last wins — so `portable.artifactName` is an override, not a nicety. It obeys
+  the no-version rule too: `filex-desktop-portable-x64.exe`.
+- **The Windows feed does not list the portable build.** Measured:
+  electron-builder writes only the installer into `latest.yml`, because that is
+  the artifact its updater would apply. So the app builds that filename itself
+  (`PORTABLE_ARTIFACT` in `main.ts`) to link a manual download, and
+  `portable-e2e.mjs` asserts the two agree — a rename breaks a test rather than
+  somebody's browser.
 
 ## End-to-end suites
 
@@ -201,6 +277,7 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | `share-limit-e2e.mjs` | A capped link hands out exactly that many downloads |
 | `sync-e2e.mjs` | A paired folder actually syncs, both directions |
 | `update-e2e.mjs` | The updater downloads and stages a newer version — and installs silently |
+| `portable-e2e.mjs` | The portable `.exe` is named so it neither overwrites the installer nor carries a version; the real self-extracting `.exe` starts and loads a page; its data lands in one folder beside it; and Settings says this copy does not update itself instead of sitting at “Checking…” |
 | `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
 | `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
 | `dragout-e2e.mjs` | Dragging files OUT: what lands on this computer before an OS drag can start |

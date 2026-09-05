@@ -11,13 +11,17 @@
 //     to the same state file, so they can never disagree about what is paired.
 //
 // The app therefore shells out for everything and keeps no pairing state of its
-// own — ~/.filex/sync/pairs.json is the single source of truth.
+// own — ~/.filex/sync/pairs.json is the single source of truth. (A portable
+// build moves that one directory next to its .exe with FILEX_SYNC_DIR; see
+// engineEnv below. It is still one store, just not in the home directory of a
+// machine the user is only borrowing.)
 
 import { spawn, execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { Account } from './accounts.js';
+import { portableMode } from './portable.js';
 
 export interface Pair {
   id: string;
@@ -79,6 +83,24 @@ export function cliPath(): string | null {
   return candidates.find((p) => existsSync(p)) ?? null;
 }
 
+/**
+ * The environment every engine invocation gets.
+ *
+ * ⚠ FILEX_SYNC_DIR is what keeps a PORTABLE copy portable. The engine's store
+ * — the pairs, the per-pair baselines, and the local trash holding real copies
+ * of files it deleted — defaults to `~/.filex/sync`, which on a borrowed
+ * machine is somebody else's home directory. There is one home for this app's
+ * files and it is the folder next to the .exe. See src/portable.ts.
+ */
+function engineEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const p = portableMode();
+  return {
+    ...process.env,
+    ...(p.portable && p.dataDir ? { FILEX_SYNC_DIR: p.syncDir } : {}),
+    ...extra,
+  };
+}
+
 function run(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
   const bin = cliPath();
   if (!bin) {
@@ -90,7 +112,7 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
     execFile(
       bin,
       args,
-      { env: { ...process.env, ...env }, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      { env: engineEnv(env), windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
           reject(new Error((stderr || stdout || err.message).trim().split('\n').slice(-1)[0]));
@@ -203,7 +225,7 @@ export class SyncSupervisor {
       bin,
       ['sync', 'run', '--account', acc.id, '--watch', WATCH_INTERVAL, '--quiet'],
       {
-        env: { ...process.env, FILEX_URL: acc.serverUrl, FILEX_TOKEN: token },
+        env: engineEnv({ FILEX_URL: acc.serverUrl, FILEX_TOKEN: token }),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       },

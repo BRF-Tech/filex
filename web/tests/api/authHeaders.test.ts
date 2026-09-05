@@ -75,7 +75,7 @@ describe('auth headers reach the wire', () => {
     // made it dangerous; remembering the last resolved value makes a stale
     // token the worst case instead of an anonymous request.
     const api = readFileSync(path.join(CORE_SRC, 'composables/useFileApi.ts'), 'utf8');
-    const sync = api.match(/function authHeadersSync[\s\S]*?\n  \}/)?.[0] ?? '';
+    const sync = api.match(/function authHeadersSync[\s\S]*?\n {2}\}/)?.[0] ?? '';
     expect(sync, 'authHeadersSync was not found').not.toBe('');
     expect(
       /lastBearer/.test(sync),

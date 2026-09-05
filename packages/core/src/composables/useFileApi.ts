@@ -77,6 +77,14 @@ export interface Grant {
   inherited?: boolean;
 }
 
+/** surucu:d1 — `GET /api/files/quota/me` (quota.Snapshot). */
+export interface QuotaSnapshot {
+  used_bytes: number;
+  quota_bytes: number;
+  percent_used: number;
+  unlimited: boolean;
+}
+
 export interface PermissionsResponse {
   path: string;
   storage_rbac: boolean;
@@ -457,6 +465,31 @@ export function useFileApi(config: ExplorerConfig) {
     return Array.isArray(data?.results) ? data.results : [];
   }
 
+  /* === surucu:d1 — the signed-in person's storage line ==================
+   * `GET /api/files/quota/me` → `{used_bytes, quota_bytes, percent_used,
+   * unlimited}` (internal/quota/service.go `Snapshot`). Derived from the
+   * manager endpoint the same way permissions and search are, so a proxy that
+   * forwards /api/files/* keeps working.
+   *
+   * ⚠ PER-USER, never per-storage: usage is `SUM(nodes.size) WHERE owner_id=me`
+   * and there is no per-provider quota. Anything labelling this figure with a
+   * drive's name is describing a number the server did not send.
+   *
+   * ⚠ Returns null rather than throwing on ANY failure — a server without the
+   * route (404), an app token with no person behind it (403) or an older build
+   * must leave the panel exactly as it was, not put an error where a status
+   * line goes.
+   */
+  async function quotaMe(): Promise<QuotaSnapshot | null> {
+    const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/quota/me');
+    try {
+      const q = await jsonFetch<QuotaSnapshot>(base);
+      return q && typeof q.used_bytes === 'number' ? q : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function subfolders(path: string): Promise<{ folders: FileNode[] }> {
     return jsonFetch<{ folders: FileNode[] }>(managerUrl('subfolders', { path }));
   }
@@ -627,11 +660,22 @@ export function useFileApi(config: ExplorerConfig) {
    */
   async function fetchBlob(
     path: string,
+    opts: { fresh?: boolean } = {},
   ): Promise<{ url: string; blob: Blob; mime: string }> {
     const headers = await authHeaders();
     const res = await fetch(previewUrl(path), {
       headers,
       credentials: credentialsMode(),
+      // ⚠ The preview endpoint answers `Cache-Control: private, max-age=60`,
+      // which is right for the thing it was built for — a viewer re-opening
+      // an image — and wrong for anything the client treats as CONTROL data.
+      // `.filex-e2e.json` is control data: after the client rewrites it
+      // (recovery upgrade, escrow slot, escrow refusal) the next read inside
+      // that minute came back PRE-write, so the folder looked un-upgraded
+      // and the question filex had just been answered was asked again.
+      // Measured 2026-09-05 in a real browser: decline the escrow offer,
+      // reopen the folder, and the offer was back.
+      cache: opts.fresh ? 'no-store' : 'default',
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -885,6 +929,7 @@ export function useFileApi(config: ExplorerConfig) {
     index,
     search,
     globalSearch /* bul:s3 */,
+    quotaMe /* surucu:d1 */,
     subfolders,
     newFolder,
     rename,

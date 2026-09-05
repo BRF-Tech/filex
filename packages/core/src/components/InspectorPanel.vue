@@ -24,7 +24,7 @@
  * The panel is mounted with v-if by the host — closed state leaves zero DOM.
  */
 import { computed, ref, watch } from 'vue';
-import type { FileApi, NodeVersion } from '../composables/useFileApi';
+import type { FileApi, Grant, NodeVersion } from '../composables/useFileApi';
 import type { FileNode, ShareInfo } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
@@ -45,10 +45,28 @@ const props = defineProps<{
   narrow?: boolean;
   /** Authenticated thumbnail resolver (useThumbs.src). Optional. */
   thumbSrc?: (n: FileNode) => string | null;
+  /* === surucu:d1 — the Drive shell's details panel ===================== */
+  /**
+   * Split the panel into **Details** and **Activity** tabs, and draw the two
+   * sections the mockups add: who has access, and the share link with a
+   * "Create link" button. `uiProfile: 'drive'` turns it on; absent/false is
+   * the flat scroll of sections this panel has always been, with no extra
+   * request made.
+   *
+   * ⚠ "Activity" is version history + comments, and nothing else, because
+   * nothing else exists: there is no per-file activity endpoint. The audit log
+   * is admin-only, has no path filter, and stores an EMPTY `target_id` for
+   * every file action (auth/audit_middleware.go) — so "Ayşe renamed this on
+   * Tuesday" cannot be answered by this server, and a timeline that made it up
+   * would be worse than the two real feeds.
+   */
+  tabs?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  /** surucu:d1 — a share link was minted from the panel. */
+  (e: 'share-created', payload: { path: string; url: string }): void;
   (e: 'manage-permissions', node: FileNode): void;
   (e: 'toast', message: string): void;
   /** Fired after a successful restore/snapshot so the host can reload. */
@@ -239,6 +257,107 @@ async function takeSnapshot(): Promise<void> {
   }
 }
 
+/* === surucu:d1 — tabs, people with access, the share-link row ==========
+ *
+ * The tab strip is presentation only: every section below is the same section,
+ * rendered under Details or under Activity. Nothing is fetched twice, and
+ * nothing new is fetched at all unless `tabs` is on.
+ */
+type InspectorTab = 'details' | 'activity';
+const tab = ref<InspectorTab>('details');
+
+/** People with access — `GET /api/files/permissions?path=…`.
+ *
+ * ⚠ Owner-gated on the server (handlers/grants.go `requireOwner`), so an
+ * editor or a viewer gets a 403 for a file they can perfectly well see. That
+ * is the server's call, not something to route around: the section hides,
+ * exactly the way the shares list already hides for the same class of caller.
+ * What it must NOT do is render an empty "People with access" and let the
+ * reader conclude that nobody has any.
+ */
+const peopleState = ref<SectionState>('hidden');
+const people = ref<Grant[]>([]);
+let peopleSeq = 0;
+
+async function loadPeople(): Promise<void> {
+  const seq = ++peopleSeq;
+  const node = single.value;
+  if (!props.tabs || !node) {
+    peopleState.value = 'hidden';
+    people.value = [];
+    return;
+  }
+  peopleState.value = 'loading';
+  try {
+    const r = await props.api.listPermissions(node.path);
+    if (seq !== peopleSeq) return;
+    // RBAC off on this storage → there are no grants, and a section reading
+    // "nobody" would misdescribe a drive where everyone can already read it.
+    if (!r.storage_rbac) {
+      peopleState.value = 'hidden';
+      people.value = [];
+      return;
+    }
+    people.value = [...(r.direct ?? []), ...(r.inherited ?? [])];
+    peopleState.value = 'ok';
+  } catch {
+    if (seq !== peopleSeq) return;
+    people.value = [];
+    peopleState.value = 'hidden';
+  }
+}
+
+function personName(g: Grant): string {
+  return g.user_display_name || g.user_email || `#${g.user_id}`;
+}
+
+function personInitial(g: Grant): string {
+  const n = personName(g).trim();
+  return n ? n[0].toUpperCase() : '?';
+}
+
+/** The share-link row: the first live link, or the Create button. */
+const primaryShare = computed(() => (shares.value.length ? shares.value[0] : null));
+const shareBusy = ref(false);
+
+async function createLink(): Promise<void> {
+  const node = single.value;
+  if (!node || shareBusy.value) return;
+  shareBusy.value = true;
+  try {
+    const r = await props.api.createShare({ path: node.path });
+    const url = r.share?.url ?? '';
+    // Re-read the list rather than push the response into it: the LIST
+    // endpoint is what a later copy or revoke acts on, and its `uuid` is the
+    // numeric id the DELETE route wants — not the token the create response
+    // carries under that name.
+    const { shares: list } = await props.api.listShares(node.path);
+    shares.value = Array.isArray(list) ? list : [];
+    sharesState.value = 'ok';
+    if (url) {
+      emit('share-created', { path: node.path, url });
+      await copyText(url);
+    }
+  } catch (err) {
+    emit('toast', (err as Error).message);
+  } finally {
+    shareBusy.value = false;
+  }
+}
+
+watch(
+  () => [props.nodes.map((n) => n.path).join('|'), props.tabs] as const,
+  () => void loadPeople(),
+  { immediate: true },
+);
+
+/* Versions and comments are the two real feeds; when a selection has neither,
+ * the Activity tab says so instead of showing two empty headings. */
+const activityUsable = computed(
+  () => versionsState.value !== 'hidden' || commentsState.value !== 'hidden',
+);
+/* === /surucu:d1 === */
+
 watch(
   () => props.nodes.map((n) => n.path).join(' '),
   () => void refresh(),
@@ -372,9 +491,32 @@ watch(
       >×</button>
     </header>
 
+    <!-- surucu:d1 — Details / Activity. Rendered only in the drive shell; the
+         classic panel keeps its single flat scroll of sections. -->
+    <div v-if="tabs" class="fe-inspector__tabs" role="tablist" :aria-label="t('inspector.title')">
+      <button
+        type="button"
+        class="fe-inspector__tab"
+        :class="{ 'is-active': tab === 'details' }"
+        role="tab"
+        :aria-selected="tab === 'details'"
+        data-testid="inspector-tab-details"
+        @click="tab = 'details'"
+      >{{ t('inspector.tab.details') }}</button>
+      <button
+        type="button"
+        class="fe-inspector__tab"
+        :class="{ 'is-active': tab === 'activity' }"
+        role="tab"
+        :aria-selected="tab === 'activity'"
+        data-testid="inspector-tab-activity"
+        @click="tab = 'activity'"
+      >{{ t('inspector.tab.activity') }}</button>
+    </div>
+
     <div class="fe-inspector__scroll">
       <!-- ══ Genel ══ -->
-      <section class="fe-inspector__section">
+      <section v-if="!tabs || tab === 'details'" class="fe-inspector__section">
         <h3 class="fe-inspector__heading">{{ t('inspector.section.general') }}</h3>
 
         <!-- Multi selection → summary -->
@@ -457,7 +599,7 @@ watch(
 
       <!-- ══ Sürümler ══ -->
       <section
-        v-if="versionsState === 'ok' || versionsState === 'error'"
+        v-if="(versionsState === 'ok' || versionsState === 'error') && (!tabs || tab === 'activity')"
         class="fe-inspector__section"
       >
         <h3 class="fe-inspector__heading">{{ t('inspector.section.versions') }}</h3>
@@ -519,7 +661,21 @@ watch(
       </section>
 
       <!-- ══ İzinler ══ -->
-      <section v-if="single && effectivePerm" class="fe-inspector__section">
+      <!-- ⚠ surucu:d1 — stands down when "People with access" is on screen. The
+           two say the same thing there (your own row is in the roster, with the
+           same level) and each carries its own button into the SAME modal —
+           two doors into one room, six lines apart. It stays for every other
+           case, which is exactly the case where People is hidden: RBAC off on
+           the storage, or the server refusing the grant list to a non-owner. -->
+      <section
+        v-if="
+          single &&
+          effectivePerm &&
+          (!tabs || tab === 'details') &&
+          !(tabs && peopleState === 'ok')
+        "
+        class="fe-inspector__section"
+      >
         <h3 class="fe-inspector__heading">{{ t('inspector.section.permissions') }}</h3>
         <div class="fe-inspector__permrow">
           <span
@@ -535,10 +691,62 @@ watch(
         </div>
       </section>
 
+      <!-- ══ surucu:d1 — People with access ══
+           Real grants from `GET /api/files/permissions`; hidden entirely when
+           the caller is not an owner (403) or the storage has RBAC off, rather
+           than drawn empty. -->
+      <section
+        v-if="tabs && tab === 'details' && peopleState === 'ok'"
+        class="fe-inspector__section"
+        data-testid="inspector-people"
+      >
+        <h3 class="fe-inspector__heading">{{ t('inspector.people') }}</h3>
+        <p v-if="people.length === 0" class="fe-inspector__empty">
+          {{ t('inspector.people.empty') }}
+        </p>
+        <ul v-else class="fe-inspector__people">
+          <li v-for="g in people" :key="`${g.id}-${g.user_id}`" class="fe-inspector__person">
+            <span class="fe-inspector__avatar" aria-hidden="true">{{ personInitial(g) }}</span>
+            <span class="fe-inspector__person-main">
+              <span class="fe-inspector__person-name" :title="g.user_email">{{ personName(g) }}</span>
+              <span class="fe-inspector__person-sub">
+                {{ permLabel(g.level) }}<template v-if="g.inherited"> · {{ t('inspector.people.inherited') }}</template>
+              </span>
+            </span>
+          </li>
+        </ul>
+        <button
+          v-if="canManagePerms && single"
+          type="button"
+          class="fe-btn fe-btn--sm"
+          @click="emit('manage-permissions', single)"
+        >{{ t('inspector.people.manage') }}</button>
+      </section>
+
       <!-- ══ Paylaşımlar ══ -->
-      <section v-if="sharesState === 'ok'" class="fe-inspector__section">
-        <h3 class="fe-inspector__heading">{{ t('inspector.section.shares') }}</h3>
-        <p v-if="shares.length === 0" class="fe-inspector__empty">
+      <section
+        v-if="sharesState === 'ok' && (!tabs || tab === 'details')"
+        class="fe-inspector__section"
+        data-testid="inspector-shares"
+      >
+        <h3 class="fe-inspector__heading">
+          {{ tabs ? t('inspector.link') : t('inspector.section.shares') }}
+        </h3>
+        <!-- surucu:d1 — the mockup's link row: what the state IS, and the one
+             button that changes it. Only when there is no link yet; the list
+             below is what an item that HAS links has always shown. -->
+        <div v-if="tabs && shares.length === 0" class="fe-inspector__linkrow">
+          <span class="fe-inspector__linkicon" aria-hidden="true">🔗</span>
+          <span class="fe-inspector__linknone">{{ t('inspector.link.none') }}</span>
+          <button
+            type="button"
+            class="fe-btn fe-btn--sm"
+            :disabled="shareBusy || !single"
+            data-testid="inspector-create-link"
+            @click="createLink"
+          >{{ t('inspector.link.create') }}</button>
+        </div>
+        <p v-else-if="shares.length === 0" class="fe-inspector__empty">
           {{ t('inspector.shares.empty') }}
         </p>
         <ul v-else class="fe-inspector__shares">
@@ -561,7 +769,7 @@ watch(
 
       <!-- ══ calisma:d3 — Yorumlar ══ -->
       <section
-        v-if="commentsState === 'ok' || commentsState === 'error'"
+        v-if="(commentsState === 'ok' || commentsState === 'error') && (!tabs || tab === 'activity')"
         class="fe-inspector__section"
       >
         <h3 class="fe-inspector__heading">
@@ -620,6 +828,21 @@ watch(
         </template>
       </section>
       <!-- ══ /calisma:d3 ══ -->
+
+      <!-- surucu:d1 — the Activity tab with nothing behind it. It says which
+           two feeds fill it, because there is no third one to wait for: this
+           server keeps no per-file audit trail (target_id is empty for every
+           file action, and the log is admin-only). -->
+      <section
+        v-if="tabs && tab === 'activity' && !activityUsable"
+        class="fe-inspector__section"
+        data-testid="inspector-activity-empty"
+      >
+        <p class="fe-inspector__empty">
+          {{ single ? t('inspector.activity.empty') : t('inspector.activity.select') }}
+        </p>
+        <p v-if="single" class="fe-inspector__hint">{{ t('inspector.activity.hint') }}</p>
+      </section>
     </div>
   </aside>
 </template>

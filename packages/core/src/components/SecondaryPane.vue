@@ -64,6 +64,13 @@ const props = defineProps<{
   /** ui-fix — mirror the main panel's virtual `.trash` row at storage root
    *  so both split panes list identical rows (no row-offset). Defaults on. */
   trashVisible?: boolean;
+  /**
+   * The navigation panel is already offering Trash, so neither pane draws the
+   * virtual row. Passed down rather than worked out here: the panel belongs to
+   * the host explorer, and a pane that guessed at it is how the two halves of a
+   * split end up listing different rows.
+   */
+  navOffersTrash?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -114,7 +121,14 @@ async function loadPane(target?: string): Promise<void> {
     // Same internal-entry filter + virtual `.trash` row as the main panel
     // (shared helpers → both split panes list identical rows, no offset).
     files.value = filterListing(resp.files);
-    if (injectTrashRow(files.value, resp.adapter, resp.dirname, props.trashVisible !== false)) {
+    if (
+      injectTrashRow(files.value, resp.adapter, resp.dirname, props.trashVisible !== false, {
+        // ⚠ The panel is a sibling of BOTH panes. If it is offering Trash, this
+        // pane must drop the row too — otherwise the duplication is not removed,
+        // it just moves to the right-hand half of a split.
+        navOffersTrash: props.navOffersTrash,
+      })
+    ) {
       void hydrateTrashRow(files.value, resp.adapter, props.api);
     }
     path.value = props.toUser(resp.dirname);

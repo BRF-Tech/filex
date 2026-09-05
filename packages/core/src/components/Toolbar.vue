@@ -15,6 +15,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ViewMode } from '../types/FileNode';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import ContextMenu, { type ContextAction } from './ContextMenu.vue';
+import ViewSwitcher from './ViewSwitcher.vue';
 import { useLocale } from '../composables/useLocale';
 
 export type SelectionMode = 'none' | 'single-file' | 'single-dir' | 'multi';
@@ -90,6 +91,26 @@ const props = defineProps<{
    * "power user tool", and gallery is the one nobody outside photos asks for.
    */
   viewModes?: ViewMode[];
+  /* === surucu:d1 — the Drive shell ==================================== */
+  /**
+   * Which header this is.
+   *
+   *   'classic' (default) — the row this toolbar has always been.
+   *   'drive'             — `uiProfile: 'drive'`: one search field across the
+   *                         width with its ⌘K/Ctrl+K hint, and the controls
+   *                         that belong to a *listing* rather than to the app
+   *                         (view switcher, details toggle) moved down onto the
+   *                         breadcrumb row, where the mockups put them.
+   *
+   * ⚠ Nothing is DELETED by 'drive'. Density, theme, the shortcut editor, the
+   * tour and both other view modes are all in the "⋯" menu this variant
+   * renders — the same list the narrow layout has used since bag:b4. A control
+   * that is on screen in one profile and unreachable in another is a capability
+   * split, not a preset.
+   */
+  shell?: 'classic' | 'drive';
+  /** Folder name for the drive field's placeholder ("Search in Photos"). */
+  scopeLabel?: string;
 }>();
 
 const emit = defineEmits<{
@@ -106,6 +127,8 @@ const emit = defineEmits<{
   (e: 'toggle-nav'): void /* gezinti:g1 */;
   (e: 'open-theme'): void /* wiring:c1 — tema galerisi */;
   (e: 'open-shortcut-settings'): void /* wiring:c2 */;
+  /* surucu:d1 — escalate this query into the command palette (⌘K/Ctrl+K). */
+  (e: 'open-palette', query: string): void;
 }>();
 
 // Density toggle — the toolbar owns the persisted preference; the parent
@@ -294,16 +317,14 @@ function offersView(v: ViewMode): boolean {
   return !props.viewModes || props.viewModes.includes(v);
 }
 
-const moreActions = computed<ContextAction[]>(() => {
+/* surucu:d1 — the tail of the "⋯" menu on its own: everything that is a
+ * SETTING of the explorer rather than an action on a file. The narrow layout
+ * shows it after the write/selection actions (unchanged); the drive header
+ * shows only this half, because in that layout the selection actions are
+ * already on screen as buttons and a menu that repeats them is a second door
+ * to the same room. */
+const utilityActions = computed<ContextAction[]>(() => {
   const list: ContextAction[] = [];
-  const writable =
-    !props.trashActive && !props.atVirtualRoot && props.canWrite !== false;
-  if (mode.value === 'none' && writable) {
-    list.push({ key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' });
-    if (props.pasteEnabled) list.push({ key: 'paste', label: t('ctx.paste'), icon: '📋' });
-  }
-  list.push(...toolbarItems.value);
-  if (list.length) list.push({ divider: true, key: 'bag-sep', label: '' });
   list.push({ key: 'refresh', label: t('toolbar.refresh'), icon: '↻' });
   list.push({
     key: 'density',
@@ -332,6 +353,62 @@ const moreActions = computed<ContextAction[]>(() => {
   list.push({ key: 'tour', label: t('tour.restart'), icon: '🎓' }); /* wiring:c4 */
   return list;
 });
+
+const moreActions = computed<ContextAction[]>(() => {
+  const list: ContextAction[] = [];
+  const writable =
+    !props.trashActive && !props.atVirtualRoot && props.canWrite !== false;
+  if (mode.value === 'none' && writable) {
+    list.push({ key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' });
+    if (props.pasteEnabled) list.push({ key: 'paste', label: t('ctx.paste'), icon: '📋' });
+  }
+  list.push(...toolbarItems.value);
+  if (list.length) list.push({ divider: true, key: 'bag-sep', label: '' });
+  list.push(...utilityActions.value);
+  return list;
+});
+
+/* === surucu:d1 — the drive header's search field ======================
+ * ONE field, and it is the one the toolbar already had: typing here sets
+ * `searchQuery`, which the explorer answers with
+ * `?action=search&filter=…` — a real search of the folder you are standing in,
+ * exactly as before.
+ *
+ * The ⌘K chip beside it is the ESCALATION, not a second box: it opens the
+ * command palette carrying whatever has been typed, and the palette is where
+ * "everywhere" lives (the global endpoint, saved searches, and the commands).
+ * That is why the hint can sit on this field honestly — Ctrl+K from here does
+ * what the hint says, and Ctrl+K from anywhere else still opens the palette
+ * as it has since cila:c.
+ */
+const macLike =
+  typeof navigator !== 'undefined' &&
+  /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
+const paletteCombo = computed(() => (macLike ? '⌘ K' : 'Ctrl K'));
+
+const drivePlaceholder = computed(() =>
+  props.scopeLabel
+    ? t('drive.search.placeholder', { scope: props.scopeLabel })
+    : t('drive.search.placeholder_all'),
+);
+
+/** ⌘/Ctrl+K typed INSIDE the field. The global shortcut handler ignores
+ *  keystrokes aimed at an input — which is correct, and it would otherwise
+ *  make the hint on this very field a lie. */
+function onSearchKeydown(ev: KeyboardEvent) {
+  if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    emit('open-palette', localSearch.value);
+  }
+}
+
+/* surucu:d1 — the drive header renders the selection actions as buttons, so
+ * its "⋯" carries only the settings half; the narrow layout renders no action
+ * buttons at all and still needs the whole list. */
+const menuActions = computed<ContextAction[]>(() =>
+  props.shell === 'drive' && !props.narrow ? utilityActions.value : moreActions.value,
+);
 
 function openMore() {
   const r = moreBtnEl.value?.getBoundingClientRect();
@@ -387,6 +464,7 @@ function onMoreSelect(a: ContextAction) {
     :class="{
       'fe-toolbar--narrow': narrow /* bag:b4 */,
       'fe-toolbar--searching': narrow && searchOpen /* bag:b4 */,
+      'fe-toolbar--drive': shell === 'drive' /* surucu:d1 */,
     }"
   >
     <!-- bag:b4 — wide layout, untouched; renders exactly as before when not narrow -->
@@ -433,8 +511,11 @@ function onMoreSelect(a: ContextAction) {
         <span class="fe-icon">↑</span>
       </button>
 
+      <!-- surucu:d1 — in the drive shell the panel's "+ New" menu is the one
+           primary action; a second New Folder button here would be a second
+           front door to the same modal. -->
       <button
-        v-if="mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
+        v-if="shell !== 'drive' && mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn fe-btn--primary"
         :title="t('toolbar.new_folder')"
@@ -502,8 +583,45 @@ function onMoreSelect(a: ContextAction) {
 
     <div class="fe-toolbar__spacer" />
 
-    <div class="fe-toolbar__search-group">
-      <div class="fe-search">
+    <div class="fe-toolbar__search-group" :class="{ 'fe-toolbar__search-group--drive': shell === 'drive' }">
+      <!-- surucu:d1 — the drive shell's one search field: wide, in the header,
+           with the ⌘K chip that opens the palette carrying this query. -->
+      <div v-if="shell === 'drive'" class="fe-drivesearch" data-testid="drive-search">
+        <svg
+          class="fe-ficon fe-drivesearch__glass"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4.5 4.5" />
+        </svg>
+        <input
+          ref="searchEl"
+          type="search"
+          class="fe-drivesearch__input"
+          :placeholder="drivePlaceholder"
+          :value="localSearch"
+          :aria-label="t('toolbar.search')"
+          @input="onSearchInput"
+          @keydown="onSearchKeydown"
+        />
+        <button
+          type="button"
+          class="fe-drivesearch__kbd"
+          :title="t('drive.search.hint_title', { combo: paletteCombo })"
+          :aria-label="t('drive.search.hint_title', { combo: paletteCombo })"
+          data-testid="drive-search-palette"
+          @click="emit('open-palette', localSearch)"
+        >
+          {{ paletteCombo }}
+        </button>
+      </div>
+      <div v-else class="fe-search">
         <input
           ref="searchEl"
           type="search"
@@ -515,7 +633,7 @@ function onMoreSelect(a: ContextAction) {
         />
       </div>
       <button
-        v-if="!atVirtualRoot && canWrite !== false"
+        v-if="shell !== 'drive' && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn fe-btn--icon-only"
         :title="t('toolbar.upload')"
@@ -533,9 +651,26 @@ function onMoreSelect(a: ContextAction) {
       >
         <span class="fe-icon" aria-hidden="true">↻</span>
       </button>
+      <!-- surucu:d1 — density, theme, the shortcut editor, the tour and the
+           other view modes. Everything the drive header does not draw is one
+           click away here; nothing is removed from the build. -->
+      <button
+        v-if="shell === 'drive'"
+        ref="moreBtnEl"
+        type="button"
+        class="fe-btn fe-btn--icon-only"
+        :title="t('toolbar.more')"
+        :aria-label="t('toolbar.more')"
+        aria-haspopup="menu"
+        data-testid="drive-more"
+        @click="openMore"
+      >
+        <span class="fe-icon" aria-hidden="true">⋯</span>
+      </button>
     </div>
 
     <button
+      v-if="shell !== 'drive'"
       type="button"
       class="fe-btn fe-btn--icon-only fe-toolbar__density"
       :class="{ 'is-active': density === 'compact' }"
@@ -573,8 +708,11 @@ function onMoreSelect(a: ContextAction) {
       </svg>
     </button>
 
-    <!-- koru:k1 — inspector (details panel) toggle -->
+    <!-- koru:k1 — inspector (details panel) toggle.
+         surucu:d1 — the drive shell renders it on the breadcrumb row instead,
+         beside the view switcher, where both belong to the listing. -->
     <button
+      v-if="shell !== 'drive'"
       type="button"
       class="fe-btn fe-btn--icon-only fe-toolbar__inspector"
       :class="{ 'is-active': inspectorOpen }"
@@ -601,6 +739,7 @@ function onMoreSelect(a: ContextAction) {
 
     <!-- wiring:c1 — tema galerisi (palet ikonu) -->
     <button
+      v-if="shell !== 'drive'"
       type="button"
       class="fe-btn fe-btn--icon-only fe-toolbar__theme"
       :title="t('theme.menu')"
@@ -626,49 +765,96 @@ function onMoreSelect(a: ContextAction) {
     </button>
     <!-- /wiring:c1 -->
 
-    <div class="fe-toolbar__view" role="tablist" :aria-label="t('toolbar.view_label') /* wiring:c4 — was hardcoded EN */">
+    <ViewSwitcher
+      v-if="shell !== 'drive'"
+      :view-mode="viewMode"
+      :locale="locale"
+      :modes="viewModes"
+      @update:view-mode="emit('update:viewMode', $event)"
+    />
+    </template>
+
+    <!-- surucu:d1 — narrow DRIVE layout: [☰] [ search ] [⋯].
+         The classic narrow row hides search behind a magnifier, which is the
+         right trade when the row also carries Up / Upload / actions. This shell
+         does not: "+ New" lives in the drawer, upload has the floating button
+         at this width already, and the whole point of the profile is that the
+         search field is the thing you see. So the field keeps the row, and only
+         the ⌘K chip goes (CSS) — a phone cannot press it, and the palette stays
+         in the "⋯" menu. -->
+    <template v-else-if="shell === 'drive'">
       <button
+        v-if="navEnabled !== false"
         type="button"
-        v-if="offersView('list')"
-        class="fe-btn fe-btn--icon-only"
-        :class="{ 'is-active': viewMode === 'list' }"
-        role="tab"
-        :aria-selected="viewMode === 'list'"
-        :title="t('toolbar.view.list')"
-        :aria-label="t('toolbar.view.list') /* wiring:c4 */"
-        @click="emit('update:viewMode', 'list')"
+        class="fe-btn fe-btn--icon-only fe-toolbar__nav"
+        :class="{ 'is-active': navOpen }"
+        :aria-pressed="!!navOpen"
+        :title="t('toolbar.nav')"
+        :aria-label="t('toolbar.nav')"
+        data-testid="toolbar-nav"
+        @click="emit('toggle-nav')"
       >
-        <span class="fe-icon" aria-hidden="true">☰</span>
+        <svg
+          class="fe-ficon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+          <path d="M9.5 4.5v15" />
+        </svg>
       </button>
+      <div class="fe-drivesearch" data-testid="drive-search">
+        <svg
+          class="fe-ficon fe-drivesearch__glass"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4.5 4.5" />
+        </svg>
+        <input
+          ref="searchEl"
+          type="search"
+          class="fe-drivesearch__input"
+          :placeholder="drivePlaceholder"
+          :value="localSearch"
+          :aria-label="t('toolbar.search')"
+          @input="onSearchInput"
+          @keydown="onSearchKeydown"
+        />
+        <button
+          type="button"
+          class="fe-drivesearch__kbd"
+          :title="t('drive.search.hint_title', { combo: paletteCombo })"
+          :aria-label="t('drive.search.hint_title', { combo: paletteCombo })"
+          data-testid="drive-search-palette"
+          @click="emit('open-palette', localSearch)"
+        >
+          {{ paletteCombo }}
+        </button>
+      </div>
       <button
+        ref="moreBtnEl"
         type="button"
-        v-if="offersView('grid')"
         class="fe-btn fe-btn--icon-only"
-        :class="{ 'is-active': viewMode === 'grid' }"
-        role="tab"
-        :aria-selected="viewMode === 'grid'"
-        :title="t('toolbar.view.grid')"
-        :aria-label="t('toolbar.view.grid') /* wiring:c4 */"
-        @click="emit('update:viewMode', 'grid')"
+        :title="t('toolbar.more')"
+        :aria-label="t('toolbar.more')"
+        aria-haspopup="menu"
+        data-testid="drive-more"
+        @click="openMore"
       >
-        <span class="fe-icon" aria-hidden="true">▦</span>
+        <span class="fe-icon">⋯</span>
       </button>
-      <!-- wiring:d2 — üçüncü görünüm: galeri -->
-      <button
-        type="button"
-        v-if="offersView('gallery')"
-        class="fe-btn fe-btn--icon-only"
-        :class="{ 'is-active': viewMode === 'gallery' }"
-        role="tab"
-        :aria-selected="viewMode === 'gallery'"
-        :title="t('toolbar.view.gallery')"
-        :aria-label="t('toolbar.view.gallery')"
-        @click="emit('update:viewMode', 'gallery')"
-      >
-        <span class="fe-icon" aria-hidden="true">▣</span>
-      </button>
-      <!-- /wiring:d2 -->
-    </div>
     </template>
 
     <!-- bag:b4 — narrow layout: [↑?] ... [🔍] [⬆] [⋯], search expands full-width -->
@@ -778,7 +964,7 @@ function onMoreSelect(a: ContextAction) {
         :locale="locale"
         :theme="theme || 'auto'"
         :sheet="coarse"
-        :actions="moreActions"
+        :actions="menuActions"
         @select="onMoreSelect"
       />
     </template>

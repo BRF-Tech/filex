@@ -20,9 +20,11 @@ description: >-
 
   Highlights: public share links with PIN and expiry, file-drop upload links,
   resumable uploads, full-text search, image/video/PDF thumbnails, trash and
-  file versioning, role-based access control, TOTP 2FA, optional SSO
-  (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
-  component, and an AI/MCP API for agents. OnlyOffice and draw.io can be
+  file versioning, end-to-end encrypted folders (encrypted in your browser, so
+  the server only ever holds ciphertext) each with a recovery key shown once,
+  role-based access control, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app
+  with two-way folder sync, an embeddable web component, and an AI/MCP API for
+  agents. OnlyOffice and draw.io can be
   connected for in-browser document and diagram editing.
 
 

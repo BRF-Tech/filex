@@ -1,7 +1,92 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-09-03",
+  "generatedAt": "2026-09-05",
   "releases": [
+    {
+      "tag": "v0.31.0",
+      "date": "2026-09-05T11:55:45Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.31.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.31.0",
+        "ghcr.io/brf-tech/filex:full-v0.31.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.30.1",
+      "date": "2026-09-04T22:06:33Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.30.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.30.1",
+        "ghcr.io/brf-tech/filex:full-v0.30.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.30.0",
+      "date": "2026-09-04T18:37:57Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.30.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.30.0",
+        "ghcr.io/brf-tech/filex:full-v0.30.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.29.0",
+      "date": "2026-09-04T13:36:40Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.29.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [
+        {
+          "title": "Other changes",
+          "items": [
+            {
+              "scope": "Site",
+              "text": "Hand-written summary for v0.28.0."
+            }
+          ]
+        }
+      ],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.29.0",
+        "ghcr.io/brf-tech/filex:full-v0.29.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
+    {
+      "tag": "v0.28.0",
+      "date": "2026-09-03T15:58:23Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.28.0",
+      "prerelease": false,
+      "headline": "- LDAP logins actually reach the directory.",
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.28.0",
+        "ghcr.io/brf-tech/filex:full-v0.28.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 24
+    },
     {
       "tag": "v0.27.6",
       "date": "2026-09-01T13:55:02Z",
@@ -590,7 +675,7 @@
       "date": "2026-08-17T13:43:08Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.2",
       "prerelease": false,
-      "headline": null,
+      "headline": "Desktop packaging fixes take effect.",
       "groups": [
         {
           "title": "Other changes",
@@ -602,10 +687,6 @@
             {
               "scope": "Desktop",
               "text": "Wait for the release before uploading to it."
-            },
-            {
-              "scope": null,
-              "text": "Release: v0.20.2 — desktop packaging fixes take effect."
             }
           ]
         }
@@ -623,18 +704,8 @@
       "date": "2026-08-17T13:16:43Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.1",
       "prerelease": false,
-      "headline": null,
-      "groups": [
-        {
-          "title": "Other changes",
-          "items": [
-            {
-              "scope": null,
-              "text": "Release: v0.20.1 — FTPS starts when you give it a host name."
-            }
-          ]
-        }
-      ],
+      "headline": "FTPS starts when you give it a host name.",
+      "groups": [],
       "prose": "",
       "images": [
         "ghcr.io/brf-tech/filex:slim-v0.20.1",
@@ -648,7 +719,7 @@
       "date": "2026-08-17T12:19:56Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.20.0",
       "prerelease": false,
-      "headline": null,
+      "headline": "The protocol gateway.",
       "groups": [
         {
           "title": "Other changes",
@@ -656,10 +727,6 @@
             {
               "scope": "Desktop",
               "text": "The package README described an app that no longer exists."
-            },
-            {
-              "scope": null,
-              "text": "Release: v0.20.0 — the protocol gateway."
             }
           ]
         }

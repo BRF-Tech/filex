@@ -1,0 +1,80 @@
+# Line endings are settled HERE, not by each contributor's `core.autocrlf`.
+#
+# Why this file exists
+# --------------------
+# .editorconfig has said `end_of_line = lf` for `[*]` since the beginning, but
+# .editorconfig only binds editors — git never read it. What git read instead
+# was whatever `core.autocrlf` the contributor happened to have, and on Windows
+# that is `true` by default. The blobs in this repository are all LF (measured:
+# zero tracked text files contain a CR), so nothing was broken yet — but two
+# things were true and neither was safe:
+#
+#   1. The WORKING TREE on Windows is CRLF, and a shell script with a CRLF
+#      shebang does not run on Linux. Measured from this checkout:
+#        $ wsl bash -lc './scripts/sync-site.sh'
+#        /usr/bin/env: 'bash\r': No such file or directory
+#      WSL reads the same files as Windows does, so anyone developing that way
+#      hits it on the first script they run.
+#   2. Nothing stopped a CRLF blob from being COMMITTED. `core.autocrlf=false`
+#      on Windows — a common setting, and the one people are told to use when
+#      autocrlf mangles something — commits exactly what is on disk. The repo
+#      stayed clean by luck, not by rule.
+#
+# `text=auto eol=lf` makes both answers the repository's, not the machine's:
+# every text file is stored LF and checked out LF everywhere.
+#
+# One limit worth knowing before you trust this to fix an existing file:
+# `text=auto` converts on check-IN, and git documents that it does nothing to a
+# path that was already committed with CRLF. `git add --renormalize` will report
+# no change for such a file. Those have to be converted by hand, once.
+#
+# Verify rather than trust the attribute — an attribute that does not match is
+# silent. Check the bytes git would hand out:
+#   git checkout-index -f --prefix=/tmp/eolcheck/ scripts/sync-site.sh
+#   xxd /tmp/eolcheck/scripts/sync-site.sh | head -2
+
+* text=auto eol=lf
+
+# ── The genuine exceptions ────────────────────────────────────────────────
+# Windows script hosts are the one place CRLF is not cosmetic: cmd.exe and
+# older PowerShell hosts can mis-parse an LF-only batch file. None of these
+# exist in the tree today; the rule is written down so the next one added does
+# not have to rediscover it.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# ── Fixtures are data, not source ─────────────────────────────────────────
+# e2e/fixtures/ is the corpus the file-type, viewer and upload suites run
+# against. Their bytes are the thing under test, so git must have no opinion
+# about them at all — `-text` means never convert, in either direction, however
+# text-like a .csv or .xml fixture looks to the heuristic.
+e2e/fixtures/**  -text -eol
+
+# ── Binaries ──────────────────────────────────────────────────────────────
+# `text=auto` already guesses these correctly, but a guess is a thing that can
+# be wrong once and corrupt a file silently. Say it.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.tiff  binary
+*.ico   binary
+*.psd   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.mp3   binary
+*.mp4   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.docx  binary
+*.xlsx  binary
+*.pptx  binary
+*.odt   binary
+*.ods   binary
+*.epub  binary
+*.glb   binary
+*.stl   binary

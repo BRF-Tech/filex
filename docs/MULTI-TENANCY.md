@@ -1,8 +1,21 @@
 # Multi-tenancy (native)
 
-> Status: **in progress** — Phase 1 (schema foundation) landed on `feat/multi-tenant`.
-> This document is the design + build plan. It is the source of truth for the
-> feature; keep it in sync as phases land.
+> Status: **shipped and in production use.** Native multi-tenancy landed in
+> **v0.1.61** (5 July 2026) and has been maintained since — per-tenant OIDC
+> redirect and cookie domain in v0.1.66, and a round of cross-tenant isolation
+> fixes in **v0.9.0** filed by a live ten-provider deployment. Every phase below
+> has its core artefacts on `main`; `feat/multi-tenant` is long gone.
+>
+> Four gaps remain, all narrow and all named in the roadmap at the end: no admin
+> SPA page for tenant lifecycle (the API is the surface), **one e-mail address
+> still cannot exist in two tenants** (§4), no per-tenant SMTP identity, and no
+> postgres/mysql migration CI job or live multi-realm OIDC end-to-end run.
+>
+> This document is both the design rationale and the record of what was built.
+> It stayed on "Phase 1 landed" for two months after the feature shipped, which
+> is the failure mode worth naming: a status line that lies in the modest
+> direction reads as caution, so nobody corrects it, and a reader concludes the
+> feature is not ready when it is carrying real tenants.
 
 ## 1. Goal & shape
 
@@ -111,9 +124,22 @@ later). `api_tokens` need **no** column — a token's tenant is its user's tenan
 - **users email uniqueness** → swap global `UNIQUE(email)` to
   `UNIQUE(provider_id, email)`. Needs a sqlite table-rebuild and a mysql index
   swap; lands with the JIT/login code that actually needs per-provider emails.
+  ⚠ **Still not done, and it is the one deferral a reader can trip over.**
+  `users.email` is globally unique today, so an address that exists in tenant A
+  cannot be created in tenant B — the account creation simply fails. Isolation
+  does not depend on this (it is a convenience, not a boundary), which is why it
+  was deferred; but the migration number this document once claimed for it
+  (`00015`) went to `provider_cookie_domain` instead, so there is no gated file
+  waiting anywhere. It has to be written.
 - **`oidc_client_secret`** should be encrypted at rest, reusing the
   `external_services.secret_enc` pattern.
-- **`settings.provider_id`** (nullable = global) for per-tenant branding.
+- ~~**`settings.provider_id`** (nullable = global) for per-tenant branding.~~
+  Superseded: per-tenant branding shipped **without a schema change**.
+  `handlers/branding.go` stores a tenant's values under prefixed keys
+  (`tenant.<providerID>.branding.<leaf>`) in the existing global `settings`
+  table and overlays them on the instance defaults, and `handlers/settings.go`
+  rewrites reads and writes for a non-supertenant admin transparently. Covered:
+  `name`, `logo_url`, `accent`, `footer_text`, `hide_powered_by`.
 
 ## 5. Tenant resolution
 
@@ -147,8 +173,11 @@ context through workers.
 - **First OIDC login → JIT-create** the user with `provider_id` = resolving
   provider, `oidc_subject` from the token. The tag is **immutable** (a user can't
   hop tenants).
-- Uniqueness is **`(provider_id, email)`** and **`(provider_id, oidc_subject)`**,
-  not global — two tenants may both have `admin@`.
+- Uniqueness is **`(provider_id, oidc_subject)`** — the JIT lookup is
+  provider-scoped, so a subject from tenant A cannot resolve tenant B's user.
+  ⚠ E-mail is the exception: `users.email` is **still globally unique** (§4), so
+  two tenants may NOT both have `admin@` yet. The scoped lookup is in place and
+  the schema change is not.
 - Role/scope: reuse the existing OIDC claim→role logic (roles read from *both*
   id_token and access_token, dotted-path `admin_group`). `scope = platform if
   provider.is_supertenant else tenant`.
@@ -268,6 +297,10 @@ tenant's branding. Ties into `FILEX_DEFAULT_LOCALE` (already shipped).
 
 ## Phased roadmap
 
+Kept as the build record — it says how the feature was assembled and, at the
+bottom, exactly what is still open. `[x]` means shipped and on `main`; `[~]`
+means the phase's core landed and a named piece did not.
+
 - [x] **Phase 1 — schema foundation.** `providers` + `provider_storages` tables,
       `users.provider_id`/`oidc_subject`, default-provider backfill (00014 ×3),
       `model.Provider`, `config.MultiTenant` flag. Additive, inert, mode-off
@@ -290,8 +323,11 @@ tenant's branding. Ties into `FILEX_DEFAULT_LOCALE` (already shipped).
       is immutable (cross-tenant email cannot hop realms), unknown hosts fall
       back to the config-file realm. *(verified: `user_provider_test.go`;
       ⚠ live multi-realm Keycloak E2E still to be exercised on a real deploy.)*
-      `(provider_id,email)` unique swap (00015) stays a review-gated migration
-      (not required for isolation; only for same-email across tenants).
+      ⚠ The `(provider_id,email)` unique swap was described here as "a
+      review-gated migration (00015)". It is not: **no such migration exists**,
+      and `00015` went to `provider_cookie_domain`. E-mail is still globally
+      unique (§4). Not required for isolation — only for the same address in two
+      tenants — but a reader should not be told a file is waiting when none is.
 - [x] **Phase 5 — supertenant + admin scoping.** Confine-exempt platform scope;
       at-most-one flag enforced by TRANSFER semantics (setting it on another
       provider un-flags the old holder; direct un-flag/disable/delete of the
@@ -308,11 +344,18 @@ tenant's branding. Ties into `FILEX_DEFAULT_LOCALE` (already shipped).
       supertenant-only management gate in multi-tenant mode. *(Admin SPA page
       for it: pending — API-first.)*
 - [~] **Phase 8 — settings/branding.** Host-resolved `/api/capabilities` carries
-      `tenant {slug,name}` and never reveals other tenants. Full per-tenant
-      branding (`settings.provider_id`, logo/site_name/mail identity) = v2.
+      `tenant {slug,name}` and never reveals other tenants. Per-tenant branding
+      shipped after this line was written — `name`, `logo_url`, `accent`,
+      `footer_text`, `hide_powered_by`, overlaid from prefixed `settings` keys
+      rather than the `settings.provider_id` column this predicted (§4).
+      PENDING: per-tenant **mail identity** (sender/SMTP is still instance-wide,
+      §15).
 - [x] **Phase 9 — deploy + docs.** `docker-compose.multi-tenant.yml`, Helm
       `ingress.extraHosts` (per-host TLS), trusted-host note (§13).
-- [~] **Phase 10 — test matrix & CI.** Negative isolation green (users,
-      storages, lifecycle guards, suspend, maintenance mode); mode-off = full
-      pre-existing suite green (25 pkgs). PENDING: postgres/mysql migration CI
-      job, live multi-realm E2E, PR/review.
+- [~] **Phase 10 — test matrix & CI.** Negative isolation green across nine test
+      files — provider CRUD/host resolution, scoped storage + user directory,
+      lifecycle guards, suspend, maintenance mode, tenant-admin user gate,
+      tenant-host OIDC redirect and cookie domain, WebDAV scoping, branding
+      overlay; mode-off = the full pre-existing suite green. PENDING:
+      postgres/mysql migration CI job (`.gitlab-ci.yml` has no database service),
+      and a live multi-realm Keycloak E2E — `e2e/` has no tenant spec.

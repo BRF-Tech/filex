@@ -188,14 +188,38 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	if err != nil {
 		return nil, err
 	}
-	inst, err := e2e.PinInstallation(ctx, store, cfg.DataDir, escrowKey, time.Now().UTC().Format(time.RFC3339))
+	bootedAt := time.Now().UTC().Format(time.RFC3339)
+	inst, err := e2e.PinInstallation(ctx, store, cfg.DataDir, escrowKey, bootedAt, e2e.ResolveAdoption())
 	if err != nil {
 		return nil, err
 	}
 	if inst.E2EEscrowKID != "" {
-		slog.Info("e2e: key escrow enabled",
+		attrs := []any{
 			slog.String("kid", inst.E2EEscrowKID),
-			slog.String("alg", e2e.EscrowAlg))
+			slog.String("alg", e2e.EscrowAlg),
+		}
+		if inst.EscrowAdopted() {
+			// Repeated on EVERY boot after an adoption, not just the one
+			// that performed it. An operator reading today's log to answer
+			// "can I open that folder with the escrow key?" needs the
+			// boundary date in front of them, and the boot that printed it
+			// once may have scrolled out of the retention window months ago.
+			attrs = append(attrs, slog.String("adopted_at", inst.E2EEscrowAdoptedAt))
+		}
+		slog.Info("e2e: key escrow enabled", attrs...)
+	}
+	if inst.JustAdopted {
+		// The adoption boot itself. WARN, not INFO: this installation just
+		// gained a second key holder, and the sentence that follows is the
+		// one thing an operator must not discover later by experiment.
+		slog.Warn("e2e: key escrow ADOPTED on an existing installation — this is not retroactive: "+
+			"folders created before now carry no escrow-wrapped key and can never be opened "+
+			"with the escrow key, because adding one needs the folder password and the server "+
+			"has never had it. Only folders created from now on are escrow-openable.",
+			slog.String("kid", inst.E2EEscrowKID),
+			slog.String("adopted_at", inst.E2EEscrowAdoptedAt),
+			slog.String("adopted_by", inst.E2EEscrowAdoptedBy),
+			slog.String("installed_at", inst.PinnedAt))
 	}
 	/* /wiring:e2 */
 

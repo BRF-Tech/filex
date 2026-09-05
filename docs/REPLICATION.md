@@ -73,7 +73,7 @@ Both a storage and a target use the **same adapters** (`local` · `s3` · `sftp`
 > another bucket on the same account, or a disk to a folder on the same disk,
 > defeats the point — a provider/hardware failure would take out both copies.
 
-### Per‑path modes
+### Per-path modes
 
 Not every path has to be mirrored the same way. A **rule engine** maps a
 **path pattern → mode**, so you can (for example) fully mirror `documents/**`
@@ -169,7 +169,7 @@ unlinks every storage that pointed at it.
 > for backwards compatibility with old (v0.1.16) deployments. The current model
 > is the single `replica_target_id` foreign key — ignore the legacy fields.
 
-### 3. Rules — per‑path modes
+### 3. Rules — per-path modes
 
 With no rules, everything replicates in the storage's default mode (`mirror`).
 Add rules only where you want different behavior. `POST /api/admin/replica/rules`:

@@ -63,6 +63,9 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	user, token, err := h.LocalAuth.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
+		// ⚠ One answer for every failure, on purpose — see the comment on
+		// local.Driver.Login. The driver has already logged WHICH failure it
+		// was; what an anonymous caller learns must not depend on that.
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
@@ -88,8 +91,18 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user.TOTPEnabled {
+		// These two refusals are the third case a 401 can mean: the password
+		// was RIGHT and the second factor was not. The body says so (the SPA
+		// needs `totp_required` to show the code field), but an operator
+		// reading the log for a login that "just fails" needs the same fact —
+		// a client that never learned to send `totp` is otherwise
+		// indistinguishable from a wrong password. Debug: still a caller
+		// getting it wrong, on an unauthenticated endpoint.
 		if strings.TrimSpace(req.TOTP) == "" {
 			_ = h.Store.DeleteSession(r.Context(), token)
+			slog.Debug("login refused",
+				slog.String("reason", "two-factor code required"),
+				slog.String("identifier", req.Email))
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
 				"error":         "two-factor code required",
 				"totp_required": true,
@@ -98,6 +111,9 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		if !verifyTOTP(user.TOTPSecret, req.TOTP) {
 			_ = h.Store.DeleteSession(r.Context(), token)
+			slog.Debug("login refused",
+				slog.String("reason", "invalid two-factor code"),
+				slog.String("identifier", req.Email))
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
 				"error":         "invalid two-factor code",
 				"totp_required": true,

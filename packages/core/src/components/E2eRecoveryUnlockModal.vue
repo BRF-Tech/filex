@@ -19,6 +19,7 @@ import { computed, ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { parseRecoveryKey } from '../lib/e2ecrypto';
+import type { EscrowAvailability } from '../lib/e2ecrypto';
 import Modal from '../modals/Modal.vue';
 
 const props = defineProps<{
@@ -26,9 +27,15 @@ const props = defineProps<{
   locale: LocaleCode;
   /** The folder has a user recovery key slot (v2 markers created since 0.31). */
   hasRecovery: boolean;
-  /** The folder has an escrow slot AND this installation has escrow enabled. */
-  hasEscrow: boolean;
-  /** Short id of the escrow key the folder was sealed to. */
+  /**
+   * Whether the escrow door applies to THIS folder — see escrowAvailability.
+   * 'predates' and 'other-key' are not "no escrow tab"; they are two
+   * different facts the dialog has to state, because an admin who knows the
+   * installation has escrow reads a missing tab as a bug and tries the key
+   * anyway.
+   */
+  escrowState: EscrowAvailability;
+  /** Short id of the escrow key THIS FOLDER was sealed to, when it has one. */
   escrowKid?: string | null;
   busy?: boolean;
   /** Set by the parent after a failed attempt. */
@@ -41,6 +48,16 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useLocale(() => props.locale);
+/** The escrow tab is offered only when the key can actually open this
+ *  folder. Every other state is explained in words instead. */
+const hasEscrow = computed(() => props.escrowState === 'available');
+/** The installation has an escrow key that does NOT apply here. Saying so
+ *  is the whole point: silence reads as "not enabled". */
+const escrowUnavailableReason = computed(() => {
+  if (props.escrowState === 'predates') return t('e2e.recover.escrow_predates');
+  if (props.escrowState === 'other-key') return t('e2e.recover.escrow_other_key');
+  return null;
+});
 const mode = ref<'recovery' | 'escrow'>('recovery');
 const recoveryValue = ref('');
 const escrowValue = ref('');
@@ -60,7 +77,7 @@ watch(
 
 /** A folder with neither slot is a pre-0.31 folder: the password is the
  *  only way in, and saying so is more useful than an empty dialog. */
-const nothingAvailable = computed(() => !props.hasRecovery && !props.hasEscrow);
+const nothingAvailable = computed(() => !props.hasRecovery && !hasEscrow.value);
 
 const shownError = computed(() => localErr.value || props.error || null);
 
@@ -148,6 +165,14 @@ function submit() {
           ></textarea>
         </form>
       </template>
+
+      <!-- ⚠ Shown whenever the installation has an escrow key that cannot
+           open THIS folder. A folder created before escrow was adopted must
+           not merely lack a tab; it must say why, or the absence reads as a
+           bug and the operator burns an afternoon on it. -->
+      <p v-if="escrowUnavailableReason" class="fe-e2e-recover__note">
+        {{ escrowUnavailableReason }}
+      </p>
 
       <p v-if="shownError" class="fe-form__error">{{ shownError }}</p>
     </div>

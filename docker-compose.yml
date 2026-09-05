@@ -31,10 +31,15 @@ services:
       # --- Auth ---
       FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
 
-      # --- E2E key escrow (install-time only; see docs/CONFIGURATION.md) ---
-      # Unset = off. Frozen after the first boot: filex refuses to start if it
-      # changes, because folders created without it can never be opened by it.
+      # --- E2E key escrow (install-time; see docs/CONFIGURATION.md) ---
+      # Unset = off. Pinned at the first boot: filex refuses to start if the
+      # key later changes or is removed, because folders created without it can
+      # never be opened by it.
       FILEX_INSTALLATION_E2E_ESCROW_KEY: ${FILEX_INSTALLATION_E2E_ESCROW_KEY:-}
+      # Turning escrow ON later needs this as well, once. NOT retroactive:
+      # no operator action reaches a folder that already exists; its owner is
+      # offered a slot at unlock and can grant it with the folder password.
+      FILEX_INSTALLATION_E2E_ESCROW_ADOPT: ${FILEX_INSTALLATION_E2E_ESCROW_ADOPT:-}
       FILEX_OIDC_ISSUER: ${FILEX_OIDC_ISSUER:-}
       FILEX_OIDC_CLIENT_ID: ${FILEX_OIDC_CLIENT_ID:-}
       FILEX_OIDC_CLIENT_SECRET: ${FILEX_OIDC_CLIENT_SECRET:-}
@@ -85,10 +90,15 @@ services:
       FILEX_LISTEN: 0.0.0.0:5212
       FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
 
-      # --- E2E key escrow (install-time only; see docs/CONFIGURATION.md) ---
-      # Unset = off. Frozen after the first boot: filex refuses to start if it
-      # changes, because folders created without it can never be opened by it.
+      # --- E2E key escrow (install-time; see docs/CONFIGURATION.md) ---
+      # Unset = off. Pinned at the first boot: filex refuses to start if the
+      # key later changes or is removed, because folders created without it can
+      # never be opened by it.
       FILEX_INSTALLATION_E2E_ESCROW_KEY: ${FILEX_INSTALLATION_E2E_ESCROW_KEY:-}
+      # Turning escrow ON later needs this as well, once. NOT retroactive:
+      # no operator action reaches a folder that already exists; its owner is
+      # offered a slot at unlock and can grant it with the folder password.
+      FILEX_INSTALLATION_E2E_ESCROW_ADOPT: ${FILEX_INSTALLATION_E2E_ESCROW_ADOPT:-}
       FILEX_DB_DRIVER: ${FILEX_DB_DRIVER:-sqlite}
       FILEX_DB_DSN: ${FILEX_DB_DSN:-/data/filex.db}
       FILEX_THUMBS_ENABLED: "true"

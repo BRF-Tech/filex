@@ -1,0 +1,10 @@
+{
+  "password": "correct horse battery staple",
+  "plaintext": "the quick brown fox jumps over the lazy dog\n",
+  "generated_by": "packages/core/src/lib/e2ecrypto.ts via gen.mjs",
+  "before_has_escrow_slot": false,
+  "after_has_escrow_slot": true,
+  "upgraded_has_escrow_slot": true,
+  "declined_has_escrow_slot": false,
+  "declined_at": "2026-09-05T12:00:00Z"
+}

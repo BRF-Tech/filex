@@ -1343,6 +1343,16 @@ func contentTypeForName(name string) string {
 		return "application/javascript; charset=utf-8"
 	case "json":
 		return "application/json"
+	case "webmanifest":
+		// ⚠ Named explicitly rather than left to the sniffer. With no
+		// Content-Type set, net/http falls back to http.DetectContentType,
+		// which sees JSON text and answers `text/plain; charset=utf-8` —
+		// measured on the built binary. Chrome installs the PWA anyway, but
+		// the header is wrong, a strict client is entitled to refuse it, and
+		// 90-pwa-install.cy.ts had to weaken its assertion to a "not HTML"
+		// check because the answer looked host-dependent. It is not, now: it
+		// is this line.
+		return "application/manifest+json"
 	case "svg":
 		return "image/svg+xml"
 	case "woff":
@@ -1369,7 +1379,11 @@ func contentTypeForName(name string) string {
 // reference (so the SPA handler does NOT fall through to index.html
 // for missing ones).
 func hasAssetExt(name string) bool {
-	for _, ext := range []string{".js", ".css", ".map", ".json", ".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".woff", ".woff2", ".ttf"} {
+	// ⚠ `.webmanifest` belongs here for the same reason as `.json`: without it
+	// a missing manifest falls through to index.html and the browser is handed
+	// HTML with a 200, which reads as a corrupt manifest rather than a missing
+	// file. That is the break 90-pwa-install.cy.ts guards against.
+	for _, ext := range []string{".js", ".css", ".map", ".json", ".webmanifest", ".png", ".jpg", ".jpeg", ".svg", ".webp", ".ico", ".woff", ".woff2", ".ttf"} {
 		if strings.HasSuffix(strings.ToLower(name), ext) {
 			return true
 		}

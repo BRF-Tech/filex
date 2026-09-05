@@ -46,6 +46,14 @@ import RecentlyOpened from './components/RecentlyOpened.vue';
 import Breadcrumb from './components/Breadcrumb.vue';
 import ListView from './components/ListView.vue';
 import GridView from './components/GridView.vue';
+import FilterBar from './components/FilterBar.vue' /* surucu:d1 */;
+import ViewSwitcher from './components/ViewSwitcher.vue' /* surucu:d1 */;
+import {
+  EMPTY_FILTERS,
+  applyFilters,
+  filtersActive,
+  type DriveFilters,
+} from './lib/fileFilters' /* surucu:d1 */;
 import GalleryView from './components/GalleryView.vue'; /* wiring:d2 */
 import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
@@ -92,13 +100,16 @@ import {
   createKeyRing,
   createEncryptedFolder,
   upgradeMarkerV1,
+  addEscrowSlot,
+  declineEscrowSlot,
+  escrowOfferState,
   parseMarker,
   unlockWithPassword,
   unlockWithRecoveryKey,
   unlockWithEscrowKey,
   importEscrowPrivateKey,
   markerHasRecovery,
-  markerHasEscrow,
+  escrowAvailability,
   bytesToB64,
   b64ToBytes,
   encryptFile,
@@ -496,8 +507,16 @@ function onStarChange(n: FileNode, value: boolean) {
  * this calls it. A menu cannot render a component, but it must not grow its
  * own fetch either — that is the second path that drifts.
  */
-/** Which of `targets` can carry a star: files the server knows by id. */
+/** Which of `targets` can carry a star: files the server knows by id.
+ *
+ * Empty when the identity surfaces are suppressed, which is the one
+ * chokepoint the context menu, the toolbar and the keyboard action all go
+ * through — so the affordance disappears everywhere at once rather than in
+ * the two places somebody remembered. Offering to star a file while the
+ * Starred view is hidden would write into a list the person cannot open,
+ * and under a shared app token that list belongs to everyone at once. */
 function starableNodes(targets: FileNode[]): FileNode[] {
+  if (!identitySurfaces.value) return [];
   return targets.filter((n) => typeof n.id === 'number' && n.type === 'file');
 }
 
@@ -700,7 +719,17 @@ function closeInspector() {
  * the "one behaviour on one surface" split this shared package exists to
  * prevent. */
 const uiProfile = computed(() => props.config.uiProfile ?? 'standard');
-const simpleUi = computed(() => uiProfile.value === 'simple');
+/**
+ * ⚠ `drive` answers TRUE here. It is a superset of `simple`, so every question
+ * `simple` already answers ("one pane?", "no tab strip?", "list and grid
+ * only?") must keep the same answer under it — asking `=== 'simple'` in those
+ * places is how the drive profile would silently grow a split pane the day
+ * somebody adds a fourth condition. `driveShell` is only for what `drive` adds
+ * on TOP.
+ */
+const simpleUi = computed(() => uiProfile.value === 'simple' || uiProfile.value === 'drive');
+/* === surucu:d1 — the Drive shell (GitHub #14, the reporter's mockups) ===== */
+const driveShell = computed(() => uiProfile.value === 'drive');
 
 const SIDENAV_LS_KEY = 'filex.sidenav';
 const sideNavExpanded = ref<boolean>(
@@ -740,6 +769,31 @@ const sideNavEnabled = computed(() => props.config.sideNav ?? !rootPathProp);
 const navVisible = computed(
   () => sideNavEnabled.value && (isNarrow.value ? navDrawerOpen.value : true),
 );
+/**
+ * Is the navigation panel already offering Trash as a destination?
+ *
+ * ⚠ Keyed to `sideNavEnabled`, NOT to `navVisible`. Three cases decided here,
+ * and each one is a judgement about whether the person has a way to the bin
+ * that is not this row:
+ *
+ *   - collapsed to the icon rail → OFFERING. The entry is still rendered, still
+ *     one click, still labelled for a screen reader; only its text is gone.
+ *   - the drawer under 560px, closed → OFFERING. The toolbar's panel toggle is
+ *     on screen at every width, so the destination is one tap away. Keying this
+ *     to `navVisible` instead would add and remove a row from the LISTING every
+ *     time somebody opened or closed the drawer — the folder changing under
+ *     them for a reason that has nothing to do with the folder.
+ *   - no panel at all (`sideNav: false`, or the default under `rootPath`) → NOT
+ *     offering, and the row stays. That is the case it was invented for: a
+ *     listing with no other door to the bin.
+ *
+ * `trashVisible: false` is handled inside the helper and outranks all of it —
+ * it means no Trash anywhere, panel entry included.
+ */
+const navOffersTrash = computed(
+  () => sideNavEnabled.value && props.config.trashVisible !== false,
+);
+
 /** What the toolbar toggle reports as pressed. */
 const navToggleOn = computed(() =>
   isNarrow.value ? navDrawerOpen.value : sideNavExpanded.value,
@@ -839,6 +893,130 @@ const allowedViewModes = computed<ViewMode[] | undefined>(() =>
 watchEffect(() => {
   if (simpleUi.value && viewMode.value === 'gallery') viewMode.value = 'grid';
 });
+
+/* === surucu:d1 — the filter row =========================================
+ * Three chips over the listing in hand: Type · Modified · Size.
+ *
+ * ⚠ CLIENT-SIDE, and that is the honest place for them, not a shortcut. The
+ * listing endpoint reads exactly six parameters (`action`, `path`, `filter`,
+ * `storage`, `parent`, `cache`) and has no `limit`/`offset` either — so the
+ * rows in hand ARE the folder, and filtering them here answers the whole
+ * question rather than "the first page of it". Wiring a chip to a `min_size`
+ * the server never reads would look identical and change nothing.
+ *
+ * ⚠ Reset on navigation. A filter that survives a folder change makes the next
+ * folder look empty, and the reason is off-screen the moment you scroll.
+ */
+const driveFilters = ref<DriveFilters>({ ...EMPTY_FILTERS });
+const filtersOn = computed(() => driveShell.value && filtersActive(driveFilters.value));
+/** What the views render. Identical reference to `files` when nothing is set. */
+const displayFiles = computed<FileNode[]>(() =>
+  driveShell.value ? applyFilters(files.value, driveFilters.value) : files.value,
+);
+function clearDriveFilters() {
+  setDriveFilters({ ...EMPTY_FILTERS });
+}
+function setDriveFilters(v: DriveFilters) {
+  driveFilters.value = v;
+  // A selection the filter just hid would still be what Delete acts on, with
+  // nothing on screen to say so.
+  selection.clear();
+}
+watch(
+  () => `${currentPath.value}|${navView.value}`,
+  () => {
+    if (filtersActive(driveFilters.value)) driveFilters.value = { ...EMPTY_FILTERS };
+  },
+);
+
+/**
+ * surucu:d1 — what the header field says it will search: the folder you are
+ * standing in, by name. At a storage root that is the storage; in a panel view
+ * ("Recent", a tag) it is that view's own name, because searching from there
+ * searches what is on screen.
+ */
+const driveScopeLabel = computed(() => {
+  if (navView.value === 'tag') return navTag.value;
+  if (navView.value) return t(`sidenav.${navView.value}`);
+  const rel = currentPath.value.replace(/\/+$/, '');
+  const last = rel.split('/').filter(Boolean).pop();
+  return last || adapter.value || '';
+});
+
+/**
+ * surucu:d1 — the ⌘K escalation. The header field searches THIS folder (it
+ * sets `searchQuery`, which the loader answers with `action=search`); this
+ * hands the same words to the command palette, which is where "everywhere",
+ * the saved searches and the commands live. One box, one shortcut, and the
+ * hint printed on the box does what it says.
+ */
+const paletteSeed = ref('');
+function openPaletteWith(q: string) {
+  paletteSeed.value = q;
+  showPalette.value = true;
+}
+
+/**
+ * surucu:d1 — "Request files" from the New menu: the access modal on the
+ * CURRENT folder, opened on its file-drop tab. The modal already owns that
+ * surface; this only gives it a target, since the folder you are standing in
+ * is not a selected row and has no FileNode of its own.
+ */
+const permInitialTab = ref<'perms' | 'share' | 'drop' | undefined>(undefined);
+function openFileRequest() {
+  const path = qualify(currentPath.value);
+  if (!path) return;
+  const segs = currentPath.value.split('/').filter(Boolean);
+  permTarget.value = {
+    path,
+    basename: segs.length ? segs[segs.length - 1] : adapter.value,
+    type: 'dir',
+  };
+  permInitialTab.value = 'drop';
+  showPerm.value = true;
+}
+
+/** surucu:d1 — a link minted from the details panel; same event the share
+ *  dialog emits, so a host listening for `share-created` hears both. */
+function onInspectorShareCreated(payload: { path: string; url: string }) {
+  emit('share-created', { path: payload.path, url: payload.url, pin: null });
+  flashToast(t('inspector.copied'));
+}
+
+/* === surucu:d1 — the storage line under the navigation ==================
+ * Fetched once per mount, and ONLY in the drive shell: no other profile draws
+ * it, and an explorer that has drawn this panel for a year should not start
+ * making a request it has no use for. `quotaMe()` answers null for a server
+ * without the route or a caller without a person behind it, and null renders
+ * nothing at all.
+ */
+const quotaSnapshot = ref<{ used: number; total: number; unlimited: boolean } | null>(null);
+async function loadQuota() {
+  if (!driveShell.value || !identitySurfaces.value) {
+    quotaSnapshot.value = null;
+    return;
+  }
+  const q = await api.quotaMe();
+  if (!q) {
+    quotaSnapshot.value = null;
+    return;
+  }
+  const unlimited = !!q.unlimited || q.quota_bytes <= 0;
+  // ⚠ No ceiling AND nothing counted = nothing to say, so say nothing.
+  //
+  // Measured, not guessed: `used_bytes` is `SUM(nodes.size) WHERE owner_id = me`
+  // and `nodes.owner_id` is set by the UPLOAD path only — it is nil for every
+  // file a storage sync discovered (handlers/shared.go). On an install whose
+  // drives were mounted rather than uploaded into, the honest figure is
+  // therefore "0 B", and a line reading "0 B used" under a drive visibly full
+  // of files reads as a broken widget, not as a fact about quota. With a quota
+  // set the line still earns its place — the ceiling is real and uploads count
+  // against it — so only the no-quota-no-usage case is dropped.
+  quotaSnapshot.value =
+    unlimited && q.used_bytes <= 0
+      ? null
+      : { used: q.used_bytes, total: q.quota_bytes, unlimited };
+}
 
 /**
  * nodeRowToFileNode — the starred / recently-opened endpoints answer with raw
@@ -1350,7 +1528,16 @@ async function load(path?: string) {
     files.value = filterListing(resp.files);
     // Inject virtual `.trash` entry at root only — shared helper so the
     // split-view secondary pane shows the exact same row (no row-offset).
-    if (injectTrashRow(files.value, resp.adapter, resp.dirname, props.config.trashVisible !== false)) {
+    // ⚠ …and NOT into a search result. The search response's `dirname` is the
+    // scope it searched, so it is the storage root exactly as an `index` of
+    // that folder would be; only this call site knows which of the two it just
+    // asked for.
+    if (
+      injectTrashRow(files.value, resp.adapter, resp.dirname, props.config.trashVisible !== false, {
+        isSearchResult: !!searchQuery.value,
+        navOffersTrash: navOffersTrash.value,
+      })
+    ) {
       void hydrateTrashRowShared(files.value, resp.adapter, api);
     }
     // currentPath is the user-facing form: `s3-test/example` in
@@ -1655,6 +1842,9 @@ onMounted(async () => {
      module-level cache in lib/tags.ts means several explorers on one page
      still cost a single query. */
   void loadNavTags();
+  /* surucu:d1 — the storage line. After the listing, like the tag list: it is
+     a status, and the folder somebody asked for is the critical path. */
+  void loadQuota();
   /* ⚠ The panel is not always on screen at mount. Below 560px it is a DRAWER
      that starts closed, so `navVisible` is false and the call above returns
      without asking for anything — measured at 390px: the drawer opened with
@@ -1806,6 +1996,11 @@ useKeyboardShortcuts(rootEl, {
   onGoUp: () => (paneIsActive.value ? splitPaneRef.value?.goUp() : goUp()) /* wiring:d1 pane-route */,
   /* cila:c wiring */
   onPathJump: () => {
+    /* surucu:d1 — the shortcut from anywhere else opens a BLANK palette. The
+       seed belongs to the drive header's field; leaving the last one in place
+       would reopen the palette pre-filled with a query the user has since
+       moved on from. */
+    paletteSeed.value = '';
     showPalette.value = true;
   },
   onShowHelp: () => {
@@ -3906,11 +4101,42 @@ const e2eUpgradeOffer = ref(false);
 const e2eUpgradePw = ref('');
 const e2eUpgradeBusy = ref(false);
 
+/* wiring:e2 escrow-offer — offering an EXISTING folder an escrow slot.
+ *
+ * Adoption covers folders created after it, which on an installation that
+ * has been running for a while is nobody's folders: the ones that matter
+ * already exist. The server cannot reach them — adding a slot needs the
+ * folder master key. Its owner can, from inside, with the password, and the
+ * one moment that password exists in the browser is an unlock. So this
+ * lives exactly where the v1 recovery offer lives, in the same strip, with
+ * the same shape.
+ *
+ * mode distinguishes the two ways in:
+ *   'unlock'  right after a successful password unlock — we still hold the
+ *             password, so Accept needs no typing, and Not now RECORDS a
+ *             refusal so the question is not asked again.
+ *   'manual'  the way back, from the unlocked strip, for somebody who said
+ *             no earlier. The password is gone by then, so it is typed, and
+ *             Cancel records nothing — they already answered once. */
+const e2eEscrowOffer = ref(false);
+const e2eEscrowOfferMode = ref<'unlock' | 'manual'>('unlock');
+const e2eEscrowPw = ref('');
+const e2eEscrowBusy = ref(false);
+const e2eEscrowErr = ref('');
+
 /** The installation's escrow public key, or null when escrow is off.
  *  Published in /api/capabilities on purpose — see docs/E2E-ENCRYPTION.md. */
 const e2eEscrowPub = computed<string | null>(
   () => capabilitiesData.value?.e2e_escrow?.public_key || null,
 );
+/** Where the honest version of "what escrow can and cannot do" lives.
+ *  ⚠ Linked from the offer on purpose: the notice says what accepting means,
+ *  and the page says what the use-notification can and cannot promise — that
+ *  an operator holding the private key can decrypt offline with no request,
+ *  no notification and no audit row. Somebody being asked to hand over a key
+ *  is entitled to read that before answering, not after. */
+const e2eEscrowDocsUrl = 'https://docs.filex.sh/E2E-ENCRYPTION#what-escrow-can-and-cannot-do';
+
 const e2eEscrowKid = computed<string | null>(
   () => capabilitiesData.value?.e2e_escrow?.kid || null,
 );
@@ -3933,7 +4159,7 @@ async function e2eUnlock() {
   try {
     let markerText = '';
     try {
-      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME));
+      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME), { fresh: true });
       URL.revokeObjectURL(url);
       markerText = await blob.text();
     } catch {
@@ -3962,6 +4188,18 @@ async function e2eUnlock() {
     if (marker.v === 1) {
       e2eUpgradePw.value = e2ePw.value;
       e2eUpgradeOffer.value = true;
+    } else if (escrowOfferState(marker, e2eEscrowKid.value) === 'offer') {
+      /* wiring:e2 escrow-offer — a v2 folder that predates escrow here.
+       * ⚠ Only after the unlock SUCCEEDED, and only by password: accepting
+       * gives the operator a key to this folder, so the person asked has to
+       * be the person who can already open it. A v1 folder is handled by the
+       * branch above, which seals an escrow slot as part of the upgrade and
+       * already discloses that — two offers on one unlock would be two
+       * chances to get the disclosure wrong. */
+      e2eEscrowPw.value = e2ePw.value;
+      e2eEscrowOfferMode.value = 'unlock';
+      e2eEscrowErr.value = '';
+      e2eEscrowOffer.value = true;
     }
     e2ePw.value = '';
   } finally {
@@ -4204,7 +4442,7 @@ async function e2eRecoverUnlock(payload: { mode: 'recovery' | 'escrow'; value: s
 async function openRecoveryUnlock() {
   if (!e2eMarker.value && e2eRoot.value) {
     try {
-      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME));
+      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME), { fresh: true });
       URL.revokeObjectURL(url);
       e2eMarker.value = parseMarker(await blob.text());
     } catch {
@@ -4241,6 +4479,101 @@ async function e2eDoUpgrade() {
   } finally {
     e2eUpgradeBusy.value = false;
   }
+}
+
+/* wiring:e2 escrow-offer ------------------------------------------- */
+
+/** Whether this folder could be given an escrow slot, and whether its owner
+ *  has already answered. Drives the way-back button in the unlocked strip. */
+const e2eEscrowOfferState = computed(() => escrowOfferState(e2eMarker.value, e2eEscrowKid.value));
+
+/** The way back. Somebody who said no last month can say yes today without
+ *  deleting and re-creating the folder — but the password is long gone from
+ *  memory, so they type it. That is not friction to be smoothed away: it is
+ *  the same proof of ownership the offer at unlock had, and handing the
+ *  operator a key deserves it. */
+function e2eOpenEscrowOffer() {
+  e2eEscrowOfferMode.value = 'manual';
+  e2eEscrowPw.value = '';
+  e2eEscrowErr.value = '';
+  e2eEscrowOffer.value = true;
+}
+
+/** Write a marker back to the folder and adopt it as the one we are holding.
+ *  Both escrow-offer answers change only `.filex-e2e.json`. */
+async function e2eWriteMarker(next: E2eMarker) {
+  const file = new File([JSON.stringify(next)], E2E_MARKER_NAME, { type: 'application/json' });
+  await api.uploadMultipart(e2eRoot.value, [file]);
+  e2eMarker.value = next;
+}
+
+/** Accept: seal this folder's master key to the installation's escrow key.
+ *  No file is re-encrypted or moved — only the marker gains a slot. */
+async function e2eAcceptEscrow() {
+  const marker = e2eMarker.value;
+  const pub = e2eEscrowPub.value;
+  if (!marker || !pub || !e2eRoot.value || e2eEscrowBusy.value) return;
+  if (!e2eEscrowPw.value) {
+    e2eEscrowErr.value = t('e2e.escrowoffer.password_required');
+    return;
+  }
+  e2eEscrowBusy.value = true;
+  e2eEscrowErr.value = '';
+  try {
+    // ⚠ The kid comes from the installation's CURRENT key, via the marker
+    // addEscrowSlot writes — never from anything the UI is displaying. The
+    // sibling bug went the other way (the dialog labelled a folder's slot
+    // with the installation's kid); writing the installation's kid into a
+    // slot sealed to some other key would be the same lie in reverse.
+    const next = await addEscrowSlot(marker, e2eEscrowPw.value, pub);
+    await e2eWriteMarker(next);
+    e2eEscrowOffer.value = false;
+    e2eEscrowPw.value = '';
+    flashToast(t('e2e.escrowoffer.done'));
+  } catch (err) {
+    // A wrong password is the ordinary case here and reads as a typo, not
+    // as a broken folder; anything else is worth reporting.
+    if ((err as Error)?.name === 'E2eDecryptError') {
+      e2eEscrowErr.value = t('e2e.escrowoffer.wrong_password');
+    } else {
+      e2eEscrowErr.value = t('e2e.escrowoffer.failed');
+      emit('error', { message: (err as Error).message, context: { op: 'e2e-escrow-offer' } });
+    }
+  } finally {
+    e2eEscrowBusy.value = false;
+  }
+}
+
+/** Not now. Recorded IN THE FOLDER, so the same person on another device is
+ *  not asked again and the answer survives a cleared browser. A question
+ *  that returns every single unlock is how people learn to click past
+ *  security dialogs without reading them. */
+async function e2eDeclineEscrow() {
+  const marker = e2eMarker.value;
+  if (!marker || !e2eRoot.value || e2eEscrowBusy.value) return;
+  e2eEscrowBusy.value = true;
+  try {
+    await e2eWriteMarker(declineEscrowSlot(marker, new Date().toISOString()));
+    e2eEscrowOffer.value = false;
+    e2eEscrowPw.value = '';
+    flashToast(t('e2e.escrowoffer.declined_toast'));
+  } catch (err) {
+    // ⚠ Fail towards asking again rather than towards silence: if the
+    // refusal could not be written, the honest state is "not answered yet".
+    e2eEscrowErr.value = t('e2e.escrowoffer.decline_failed');
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-escrow-decline' } });
+  } finally {
+    e2eEscrowBusy.value = false;
+  }
+}
+
+/** Close the way-back panel without answering anything. Distinct from
+ *  declining: they answered once already, and re-recording the same refusal
+ *  would overwrite the date it was actually made. */
+function e2eCloseEscrowOffer() {
+  e2eEscrowOffer.value = false;
+  e2eEscrowPw.value = '';
+  e2eEscrowErr.value = '';
 }
 
 /** Decline the offer. The folder keeps working exactly as it did, and the
@@ -4311,6 +4644,9 @@ function closeRecoveryKey() {
       :nav-open="navToggleOn /* gezinti:g1 */"
       :nav-enabled="sideNavEnabled /* gezinti:g1 */"
       :view-modes="allowedViewModes /* gezinti:g1 */"
+      :shell="driveShell ? 'drive' : 'classic' /* surucu:d1 */"
+      :scope-label="driveScopeLabel /* surucu:d1 */"
+      @open-palette="openPaletteWith /* surucu:d1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
       @toggle-nav="toggleSideNav /* gezinti:g1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
@@ -4352,6 +4688,11 @@ function closeRecoveryKey() {
       :show-identity-surfaces="identitySurfaces"
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :locale="locale"
+      :new-menu="driveShell /* surucu:d1 */"
+      :can-request-files="canWriteHere && !atVirtualRoot && !trashActive && !navView /* surucu:d1 */"
+      :quota="quotaSnapshot /* surucu:d1 */"
+      :theme="themeMode /* surucu:d1 — the teleported New menu leaves .fe */"
+      @request-files="openFileRequest /* surucu:d1 */"
       @toggle="toggleSideNav"
       @close="closeNavDrawer"
       @open-view="loadNavView"
@@ -4380,6 +4721,14 @@ function closeRecoveryKey() {
       class="fe__primary"
       :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — aktif panel vurgusu */"
     >
+    <!-- surucu:d1 — the breadcrumb row. In the drive shell it also carries the
+         two controls that belong to a LISTING rather than to the app (the view
+         switcher and the details toggle), which is where the mockups put them
+         and where the header then has room for one wide search field.
+         Everywhere else the wrapper is `display: contents`, so the breadcrumb
+         is the same flex child of `.fe__primary` it has always been — one
+         Breadcrumb, not a second copy that can drift. -->
+    <div :class="driveShell ? 'fe-subhead' : 'fe-subhead--plain'">
     <Breadcrumb
       :dirname="dirname"
       :adapter="adapter"
@@ -4391,6 +4740,49 @@ function closeRecoveryKey() {
       @copy-path="onCopyPath"
       @crumb-context="onCrumbContext"
       @crumb-drop="onCrumbDropInto"
+    />
+    <div v-if="driveShell" class="fe-subhead__actions">
+      <ViewSwitcher
+        :view-mode="displayedViewMode"
+        :locale="locale"
+        :modes="allowedViewModes"
+        @update:view-mode="setDisplayedViewMode($event)"
+      />
+      <button
+        type="button"
+        class="fe-btn fe-btn--icon-only fe-toolbar__inspector"
+        :class="{ 'is-active': showInspector }"
+        :aria-pressed="showInspector"
+        :title="t('toolbar.inspector')"
+        :aria-label="t('toolbar.inspector')"
+        data-testid="subhead-inspector"
+        @click="toggleInspector"
+      >
+        <svg
+          class="fe-ficon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5" />
+          <circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
+    </div>
+    </div>
+    <FilterBar
+      v-if="driveShell && !atVirtualRoot"
+      :value="driveFilters"
+      :locale="locale"
+      :theme="themeMode"
+      :shown="displayFiles.length"
+      :total="files.length"
+      @update:value="setDriveFilters"
     />
 
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
@@ -4438,9 +4830,76 @@ function closeRecoveryKey() {
         </button>
       </div>
     </div>
+<!-- wiring:e2 escrow-offer — an existing folder that predates escrow on
+         this installation. Shown only after an unlock SUCCEEDED, because
+         accepting hands the operator a permanent second key to this folder
+         and the only person entitled to do that is the one who can already
+         open it. Doing nothing leaves the folder exactly as it is. -->
+    <div v-if="e2eEscrowOffer" class="fe-e2e-upgrade fe-e2e-upgrade--escrow" role="alert">
+      <div class="fe-e2e-upgrade__text">
+        <strong>{{ t('e2e.escrowoffer.title') }}</strong>
+        <p>{{ t('e2e.escrowoffer.body') }}</p>
+        <p class="fe-e2e-upgrade__escrow">
+          {{ t('e2e.escrowoffer.consequence') }}
+          <a :href="e2eEscrowDocsUrl" target="_blank" rel="noopener noreferrer">
+            {{ t('e2e.escrowoffer.learn_more') }}
+          </a>
+        </p>
+        <p v-if="e2eEscrowKid" class="fe-e2e-upgrade__escrow">
+          {{ t('e2e.recover.escrow_kid') }}: <code>{{ e2eEscrowKid }}</code>
+        </p>
+        <!-- The way-back path has no password in memory any more, so it is
+             typed. The same proof of ownership the unlock path already had. -->
+        <label v-if="e2eEscrowOfferMode === 'manual'" class="fe-e2e-upgrade__pw">
+          <span>{{ t('e2e.escrowoffer.password_label') }}</span>
+          <input
+            v-model="e2eEscrowPw"
+            type="password"
+            class="fe-input"
+            autocomplete="current-password"
+            :disabled="e2eEscrowBusy"
+            @keyup.enter="e2eAcceptEscrow"
+          />
+        </label>
+        <p v-if="e2eEscrowErr" class="fe-form__error" role="alert">{{ e2eEscrowErr }}</p>
+      </div>
+      <div class="fe-e2e-upgrade__actions">
+        <button
+          type="button"
+          class="fe-btn"
+          :disabled="e2eEscrowBusy"
+          @click="e2eEscrowOfferMode === 'manual' ? e2eCloseEscrowOffer() : e2eDeclineEscrow()"
+        >
+          {{
+            e2eEscrowOfferMode === 'manual'
+              ? t('e2e.escrowoffer.cancel')
+              : t('e2e.escrowoffer.decline')
+          }}
+        </button>
+        <button
+          type="button"
+          class="fe-btn fe-btn--primary"
+          :disabled="e2eEscrowBusy"
+          @click="e2eAcceptEscrow"
+        >
+          {{ e2eEscrowBusy ? t('e2e.escrowoffer.busy') : t('e2e.escrowoffer.accept') }}
+        </button>
+      </div>
+    </div>
     <div v-if="e2eUnlocked" class="fe-e2e-strip" role="status">
       <span class="fe-e2e-strip__icon" aria-hidden="true">🔒</span>
       <span class="fe-e2e-strip__label">{{ t('e2e.strip.label') }}</span>
+      <!-- The way back for somebody who declined. Quiet, but present: a
+           refusal that could not be reversed without deleting the folder
+           would not be a decision, it would be a trap. -->
+      <button
+        v-if="e2eEscrowOfferState !== 'n/a' && !e2eEscrowOffer"
+        type="button"
+        class="fe-btn fe-e2e-strip__btn"
+        @click="e2eOpenEscrowOffer"
+      >
+        {{ t('e2e.escrowoffer.strip_action') }}
+      </button>
       <button type="button" class="fe-btn fe-e2e-strip__btn" @click="e2eLock">
         {{ t('e2e.strip.lock') }}
       </button>
@@ -4675,6 +5134,36 @@ function closeRecoveryKey() {
         </svg>
         <p class="fe-state__title">{{ t('empty.trash.title') }}</p>
       </div>
+      <!-- surucu:d1 — the folder HAS rows and the filters hid all of them.
+           "This folder is empty" would be false, and the way back is the chip
+           row just above, so the message names it and offers the button. -->
+      <div
+        v-else-if="!loading && filtersOn && displayFiles.length === 0 && files.length > 0"
+        class="fe-state"
+        data-testid="empty-filtered"
+      >
+        <svg
+          class="fe-state__art"
+          viewBox="0 0 120 100"
+          width="110"
+          height="92"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M26 28h68L68 58v24l-16 8V58z" />
+        </svg>
+        <p class="fe-state__title">{{ t('filter.empty.title') }}</p>
+        <p class="fe-state__hint">{{ t('filter.empty.hint') }}</p>
+        <div class="fe-state__actions">
+          <button type="button" class="fe-btn" @click="clearDriveFilters">
+            {{ t('filter.clear') }}
+          </button>
+        </div>
+      </div>
       <!-- Loaded, zero files, no search: the real empty-folder state. The
            upload affordances follow write permission (RBAC viewers only get
            the title). -->
@@ -4707,7 +5196,7 @@ function closeRecoveryKey() {
       </div>
       <ListView
         v-else-if="viewMode === 'list'"
-        :files="files"
+        :files="displayFiles /* surucu:d1 */"
         :selected="selection.selected.value"
         :clipped="clippedPaths"
         :show-parent-path="!!searchQuery"
@@ -4715,6 +5204,7 @@ function closeRecoveryKey() {
         :loading="loading"
         :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
         :starred-ids="starredIds"
+        :star-enabled="identitySurfaces"
         :api-base="props.config.apiBase ?? ''"
         :auth-headers="() => buildAuthHeaders()"
         :auth-credentials="api.credentialsMode()"
@@ -4727,7 +5217,8 @@ function closeRecoveryKey() {
       />
       <GridView
         v-else-if="viewMode === 'grid' /* wiring:d2 — v-else → v-else-if (3. mod eklendi) */"
-        :files="files"
+        :files="displayFiles /* surucu:d1 */"
+        :sections="driveShell /* surucu:d1 */"
         :selected="selection.selected.value"
         :clipped="clippedPaths"
         :show-parent-path="!!searchQuery"
@@ -4736,6 +5227,7 @@ function closeRecoveryKey() {
         :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
         :thumb-src="thumbs.src"
         :starred-ids="starredIds"
+        :star-enabled="identitySurfaces"
         :api-base="props.config.apiBase ?? ''"
         :auth-headers="() => buildAuthHeaders()"
         :auth-credentials="api.credentialsMode()"
@@ -4749,7 +5241,7 @@ function closeRecoveryKey() {
       <!-- wiring:d2 — galeri görünümü (GridView ile aynı event sözleşmesi) -->
       <GalleryView
         v-else
-        :files="files"
+        :files="displayFiles /* surucu:d1 */"
         :selected="selection.selected.value"
         :clipped="clippedPaths"
         :show-parent-path="!!searchQuery"
@@ -4757,6 +5249,7 @@ function closeRecoveryKey() {
         :loading="loading"
         :thumb-src="thumbs.src"
         :starred-ids="starredIds"
+        :star-enabled="identitySurfaces"
         :api-base="props.config.apiBase ?? ''"
         :auth-headers="() => buildAuthHeaders()"
         :auth-credentials="api.credentialsMode()"
@@ -4793,6 +5286,7 @@ function closeRecoveryKey() {
       :view-mode="paneViewMode /* ui-fix */"
       :thumb-src="thumbs.src /* ui-fix */"
       :trash-visible="config.trashVisible !== false /* ui-fix — çöp satırı simetrisi */"
+      :nav-offers-trash="navOffersTrash /* surucu:d1 — aynı kapı iki kez açılmaz */"
       @navigate="onPaneNavigate"
       @activate="activePane = 'split'"
       @close="closeSplit"
@@ -4815,7 +5309,9 @@ function closeRecoveryKey() {
       :locale="locale"
       :narrow="isNarrow"
       :thumb-src="thumbs.src"
+      :tabs="driveShell /* surucu:d1 */"
       @close="closeInspector"
+      @share-created="onInspectorShareCreated /* surucu:d1 */"
       @manage-permissions="onInspectorManage"
       @toast="flashToast"
       @changed="() => load()"
@@ -4974,8 +5470,8 @@ function closeRecoveryKey() {
       :open="showRecoveryUnlock"
       :locale="locale"
       :has-recovery="markerHasRecovery(e2eMarker)"
-      :has-escrow="markerHasEscrow(e2eMarker) && !!e2eEscrowKid"
-      :escrow-kid="e2eEscrowKid"
+      :escrow-state="escrowAvailability(e2eMarker, e2eEscrowKid)"
+      :escrow-kid="e2eMarker?.esc?.kid || e2eEscrowKid"
       :busy="e2eRecoverBusy"
       :error="e2eRecoverErr"
       @close="showRecoveryUnlock = false"
@@ -5042,7 +5538,8 @@ function closeRecoveryKey() {
       :size="typeof permTarget.size === 'number' ? permTarget.size : undefined"
       :locale="locale === 'en' ? 'en' : 'tr'"
       :share-max-ttl-days="shareMaxTtlDays"
-      @close="showPerm = false"
+      :initial-tab="permInitialTab /* surucu:d1 */"
+      @close="showPerm = false; permInitialTab = undefined"
     />
 
     <!-- Recently-opened tray. Anchored to the toolbar trigger via fixed
@@ -5108,6 +5605,7 @@ function closeRecoveryKey() {
 
     <!-- cila:c wiring — command palette (Ctrl/Cmd+K) + shortcuts help (?) -->
     <CommandPalette
+      :initial-query="paletteSeed /* surucu:d1 */"
       :open="showPalette"
       :locale="locale"
       :files="files"

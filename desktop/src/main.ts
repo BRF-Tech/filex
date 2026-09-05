@@ -79,6 +79,47 @@ import {
   type RemoteContext,
 } from './openwith-io.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
+import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
+
+// ─────────────────────────── portable build ───────────────────────────
+//
+// ⚠⚠ FIRST, before anything else in this file runs. Every path the app uses is
+// derived from `app.getPath('userData')` — the account store, the log, the
+// drag-out cache, the open-with session records — and each of them resolves it
+// the first time it is asked. Moving it after any of that has happened would
+// leave half the app writing to one place and half to another; moving it after
+// `requestSingleInstanceLock()` would key the lock on the wrong directory, so
+// a portable copy and an installed one could not tell each other apart.
+//
+// Off a portable build this is a no-op: portableMode() returns
+// `portable: false` unless the portable stub's PORTABLE_EXECUTABLE_DIR is
+// there, and then nothing is overridden at all.
+const portable = portableMode();
+if (portable.portable) {
+  // ⚠⚠ When the .exe sits somewhere unwritable the fallback is NOT the ordinary
+  // userData directory. Measured on this machine: running the portable copy
+  // from a folder with write access denied put it straight into
+  // `%APPDATA%\@brftech\filex-desktop` — the INSTALLED app's profile, the one
+  // holding its accounts. Two consequences, both bad. A copy carried in on a
+  // stick would have been reading and writing the accounts of whoever owns the
+  // machine; and because the single-instance lock is keyed on this directory,
+  // launching it while the installed app was running would have exited
+  // silently and raised the installed app's window instead — an .exe that
+  // "does nothing".
+  //
+  // So the fallback is a sibling directory of its own. The promise ("delete
+  // one folder and nothing of mine is left") is already broken in this branch
+  // and Settings says so with the path on screen — but the portable copy stays
+  // a separate app with a separate lock, and there is still exactly one folder
+  // to delete.
+  const dir = portable.dataDir ?? `${app.getPath('userData')}-portable`;
+  app.setPath('userData', dir);
+  // sessionData defaults to userData, but only when nobody has overridden
+  // either — writing it out keeps the Chromium profile (cookies, cache, the
+  // service worker registry) inside the same folder instead of leaving it in
+  // %APPDATA% for the user to find later.
+  app.setPath('sessionData', dir);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.join(__dirname, '..', 'app');
@@ -499,27 +540,60 @@ function pushUpdateState(next: typeof updateState): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
 }
 
-// ─── macOS without a Developer ID: honesty instead of a broken swap ───
+// ─── builds that cannot swap themselves: honesty instead of a broken swap ───
 //
-// Squirrel.Mac refuses to replace an app that is not Developer-ID signed, and
-// electron-updater only finds that out AFTER the download: the check announced
-// "version X installs itself shortly", the download completed, the swap was
-// refused — and the user was left with a generic "could not check for
-// updates". A permanent, known limitation of the ad-hoc sealed build was being
-// dressed up as a transient error, on every check, forever.
+// Two builds can never apply an update in place, for unrelated reasons:
 //
-// So the build's own signature is read once at startup. When it turns out to
-// be ad-hoc, electron-updater is never wired at all — nothing is downloaded
-// that can never be applied — and the same check cadence (and the Settings
-// button) instead reads the static feed's latest-mac.yml directly and says the
-// honest thing: a newer version exists, here is the download.
+//   • macOS without a Developer ID. Squirrel.Mac refuses to replace an app
+//     that is not Developer-ID signed, and electron-updater only finds that
+//     out AFTER the download: the check announced "version X installs itself
+//     shortly", the download completed, the swap was refused — and the user
+//     was left with a generic "could not check for updates". A permanent,
+//     known limitation of the ad-hoc sealed build was being dressed up as a
+//     transient error, on every check, forever.
+//   • The Windows PORTABLE build. It is one self-extracting .exe, not an
+//     installation: there is no NSIS install directory to differential-patch
+//     and no Squirrel to hand the running copy over to. electron-updater would
+//     download a whole installer and then have nowhere to put it — and running
+//     that installer is precisely what somebody who chose the portable copy
+//     said no to.
+//
+// Both take the same route, and it is the one the mac case established: the
+// updater is never wired at all — nothing is downloaded that can never be
+// applied — and the same check cadence (and the Settings button) instead reads
+// the static feed directly and says the honest thing: a newer version exists,
+// here is the download. Settings swaps its copy for the matching explanation
+// rather than sitting in `status: 'checking'` forever.
 
-const MAC_FEED_URL = 'https://filex.sh/desktop/latest-mac.yml';
+const FEED_DIR_URL = 'https://filex.sh/desktop/';
+// Per platform, because the feeds are separate files. Only the macOS and
+// Windows names are reachable today (they are the two builds that cannot swap
+// themselves); latest-linux.yml is named anyway rather than letting a future
+// third case silently inherit the wrong filename.
+const FEED_FILE =
+  process.platform === 'darwin'
+    ? 'latest-mac.yml'
+    : process.platform === 'linux'
+      ? 'latest-linux.yml'
+      : 'latest.yml';
+const FEED_URL = FEED_DIR_URL + FEED_FILE;
 
-let macManualUpdates = false;
+/** Why this build cannot update itself, or null when it can. Drives both the
+ *  updater wiring and the words Settings uses. */
+type ManualUpdateReason = 'macos-unsigned' | 'windows-portable';
+let manualUpdates: ManualUpdateReason | null = null;
 
-async function detectMacManualUpdates(): Promise<void> {
-  if (process.platform !== 'darwin' || !app.isPackaged) return;
+async function detectManualUpdates(): Promise<void> {
+  if (!app.isPackaged) return;
+  // ⚠ Checked before the mac branch and without touching the disk: a portable
+  // copy is portable whether or not the folder beside it turned out to be
+  // writable. Falling back to %APPDATA% for storage does not turn a
+  // self-extracting .exe into something an installer can replace.
+  if (portable.portable) {
+    manualUpdates = 'windows-portable';
+    return;
+  }
+  if (process.platform !== 'darwin') return;
   const out = await new Promise<string>((resolve) => {
     execFile('/usr/bin/codesign', ['-dv', app.getPath('exe')], (err, stdout, stderr) => {
       // codesign prints the signature details on stderr; an error still
@@ -527,7 +601,7 @@ async function detectMacManualUpdates(): Promise<void> {
       resolve(String(stderr || stdout || err?.message || ''));
     });
   });
-  macManualUpdates = !/Developer ID Application/.test(out);
+  if (!/Developer ID Application/.test(out)) manualUpdates = 'macos-unsigned';
 }
 
 /** Numeric, segment-wise. Good for x.y.z; anything odd compares equal. */
@@ -540,10 +614,34 @@ function isNewerVersion(candidate: string, current: string): boolean {
   return false;
 }
 
+/** The artifact THIS build's user should be handed: the disk image on macOS,
+ *  the portable executable for a portable copy. Matched against the feed's own
+ *  file list so a rename in electron-builder.yml cannot leave a dead link. */
+function manualDownloadPattern(): RegExp {
+  return manualUpdates === 'windows-portable'
+    ? /^\s*-?\s*(?:url|path):\s*(\S*portable\S*\.exe)\s*$/im
+    : /^\s*-?\s*(?:url|path):\s*(\S+\.dmg)\s*$/im;
+}
+
+/**
+ * The portable artifact's filename, rebuilt from the same pieces
+ * electron-builder.yml assembles it from (`${productName}-desktop-portable-
+ * ${arch}.${ext}`).
+ *
+ * ⚠ Needed because the Windows feed does NOT list this file — measured:
+ * electron-builder writes only the nsis installer into latest.yml, since that
+ * is the artifact the updater would apply. Sending a portable user to the
+ * installer is the one thing this build exists to avoid, so when the feed
+ * names nothing usable the link is built here instead. scripts/portable-e2e
+ * .mjs asserts this string against what the build actually produced, so a
+ * rename breaks a test rather than somebody's download.
+ */
+const PORTABLE_ARTIFACT = `filex-desktop-portable-${process.arch}.exe`;
+
 async function checkFeedForManualUpdate(): Promise<void> {
   pushUpdateState({ status: 'checking' });
   try {
-    const res = await net.fetch(MAC_FEED_URL, { signal: AbortSignal.timeout(15_000) });
+    const res = await net.fetch(FEED_URL, { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`feed answered ${res.status}`);
     const yml = await res.text();
     const version = /^version:\s*(\S+)/m.exec(yml)?.[1];
@@ -552,12 +650,14 @@ async function checkFeedForManualUpdate(): Promise<void> {
       pushUpdateState({ status: 'idle' });
       return;
     }
-    // Hand the browser the dmg itself when the feed names one; the plain
+    // Hand the browser the artifact itself when the feed names one; the plain
     // downloads directory otherwise.
-    const dmg = /^\s*-\s*url:\s*(\S+\.dmg)\s*$/m.exec(yml)?.[1];
-    const url = dmg
-      ? new URL(dmg, 'https://filex.sh/desktop/').toString()
-      : 'https://filex.sh/desktop/';
+    // ⚠ The Windows feed lists the INSTALLER, and a portable user must not be
+    // sent one — so a name that does not match is not used at all, and the
+    // directory listing is the honest fallback.
+    const named = manualDownloadPattern().exec(yml)?.[1]
+      ?? (manualUpdates === 'windows-portable' ? PORTABLE_ARTIFACT : null);
+    const url = named ? new URL(named, FEED_DIR_URL).toString() : FEED_DIR_URL;
     pushUpdateState({ status: 'manual', version, url });
   } catch (e) {
     pushUpdateState({ status: 'error', error: String((e as Error)?.message ?? e).slice(0, 200) });
@@ -569,7 +669,7 @@ function wireAutoUpdate(): void {
   // check; a machine told not to update must not phone home at all.
   if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return;
 
-  if (macManualUpdates) {
+  if (manualUpdates) {
     // Same cadence as the real updater — but only ever LOOKING. No download
     // starts on a machine that cannot apply it.
     setTimeout(() => void checkFeedForManualUpdate(), 30_000);
@@ -770,10 +870,19 @@ function publicState() {
     launchAtLoginSupported: app.isPackaged || process.platform === 'linux',
     appVersion: app.getVersion(),
     update: updateState,
-    // True on a macOS build whose signature cannot carry a self-update
-    // (ad-hoc sealed). Settings swaps its "updates itself" copy for the
-    // honest download story when this is set.
-    updateManualOnly: macManualUpdates,
+    // Set on a build that can never apply an update in place — an ad-hoc
+    // sealed macOS app, or the Windows portable .exe. Settings swaps its
+    // "updates itself" copy for the honest download story when this is set,
+    // and `updateManualReason` picks WHICH honest story.
+    updateManualOnly: manualUpdates !== null,
+    updateManualReason: manualUpdates,
+    // Where this copy keeps its files, and whether it managed to keep them
+    // next to itself. Only a portable build has anything to say here.
+    portable: portable.portable
+      // ⚠ Asked of Electron, not of our own intent: this is where files are
+      // ACTUALLY going, which is the only version of it worth showing.
+      ? { dataDir: app.getPath('userData'), besideExe: portable.dataDir !== null }
+      : null,
   };
 }
 
@@ -2007,7 +2116,7 @@ function wireIpc(): void {
   // "Check now" from Settings — the same check the timer runs.
   ipcMain.handle('update:check', () => {
     if (!app.isPackaged || process.env.FILEX_NO_UPDATE === '1') return publicState();
-    if (macManualUpdates) {
+    if (manualUpdates) {
       void checkFeedForManualUpdate();
       return publicState();
     }
@@ -2016,8 +2125,8 @@ function wireIpc(): void {
     return publicState();
   });
 
-  // Opens the manual download in the browser. Only meaningful on a mac build
-  // that cannot swap itself; the URL comes from the feed, never the renderer.
+  // Opens the manual download in the browser. Only meaningful on a build that
+  // cannot swap itself; the URL comes from the feed, never the renderer.
   ipcMain.handle('update:download', () => {
     if (updateState.status === 'manual' && updateState.url) void shell.openExternal(updateState.url);
     return publicState();
@@ -2630,8 +2739,9 @@ if (!app.requestSingleInstanceLock()) {
     sessionStore = new SessionStore(path.join(app.getPath('userData'), 'openwith'));
     wireIpc();
     buildTray();
-    // The signature check decides WHICH updater to wire, so it runs first.
-    void detectMacManualUpdates().then(wireAutoUpdate);
+    // Whether this build can swap itself decides WHICH updater to wire, so it
+    // runs first.
+    void detectManualUpdates().then(wireAutoUpdate);
     // Re-assert the login item on every packaged start. The command stored in
     // the registry is a full path, and an install that MOVES leaves it pointing
     // at nothing — which is what an upgrade from a per-machine install to a

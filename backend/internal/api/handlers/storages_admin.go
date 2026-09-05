@@ -10,9 +10,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -39,6 +42,26 @@ type storageTestReq struct {
 	Config map[string]interface{} `json:"config"`
 }
 
+// ProbeTimeout bounds one "Test connection" attempt.
+//
+// ⚠ This is NOT a driver setting, and lowering the drivers' own retry budgets
+// would be the wrong fix. The S3 driver retries six times with a backoff capped
+// at ten seconds (see s3.newRetryer) precisely so a *sync run* rides out an
+// object store's transient 503 instead of dying on one listing page — measured
+// against Hetzner Object Storage, twelve times in a month. That budget is right
+// for a background worker and wrong for a person waiting on a button: with an
+// endpoint that refuses the connection outright, the six attempts ran to
+// completion and this endpoint answered in 23.6s and 29.7s on two consecutive
+// measured calls. Cypress spec 43-storages-crud spends its whole duration here.
+//
+// So the retry budget stays and the PROBE gets a deadline. Every driver honours
+// the context — the AWS SDK abandons its remaining attempts, and a hung SFTP or
+// WebDAV dial is bounded by the same line — and a local-path probe, which
+// answered in 6ms, never comes near it. Ten seconds is far more than a healthy
+// remote store needs to list one prefix and short enough that the answer arrives
+// while the operator is still looking at the form.
+const ProbeTimeout = 10 * time.Second
+
 // Test connects to the given driver+config without saving and lists the root.
 func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 	var req storageTestReq
@@ -51,12 +74,12 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown driver"})
 		return
 	}
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), ProbeTimeout)
 	defer cancel()
 	if err := drv.Init(ctx, req.Config); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":    false,
-			"error": err.Error(),
+			"error": probeError(ctx, err),
 		})
 		return
 	}
@@ -64,7 +87,7 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":    false,
-			"error": err.Error(),
+			"error": probeError(ctx, err),
 		})
 		return
 	}
@@ -95,6 +118,20 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// probeError names a probe that ran out of time as such.
+//
+// Without it the caller is shown the driver's own last error, which for the S3
+// SDK is a paragraph about attempt counts and a dial failure — technically the
+// truth, and no help at all in deciding whether the endpoint is wrong or merely
+// slow. The driver's message is kept either way; the deadline just gets said out
+// loud in front of it.
+func probeError(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Sprintf("timed out after %s — the endpoint did not answer: %v", ProbeTimeout, err)
+	}
+	return err.Error()
 }
 
 // SyncRuns returns the recent sync_runs for a single storage.

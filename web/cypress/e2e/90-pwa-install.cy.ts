@@ -84,24 +84,29 @@ describe('PWA install surface', () => {
     cy.get('link[rel="manifest"]').should('have.attr', 'href').and('include', 'manifest');
 
     cy.request('/admin/manifest.webmanifest').then((res) => {
-      // ⚠ NOT `to.include('manifest')`. `filex serve` does not set a
-      // Content-Type for `.webmanifest` itself — it leaves it to Go's mime
-      // table, which reads /etc/mime.types on Linux (where the answer is
-      // `application/manifest+json`) and knows nothing about the extension on
-      // Windows (where the answer is `text/plain`). Asserting the ideal header
-      // makes this case pass or fail on the developer's operating system, which
-      // is the definition of a flaky gate. Reported as a backend nit instead.
-      //
-      // What IS worth guarding: the manifest must not come back as HTML. That
-      // is the realistic break — the SPA fallback swallowing the request and
-      // serving index.html, which leaves the app un-installable with a 200.
+      // ⚠ This used to be a weak "not text/html", under a comment claiming the
+      // header was host-dependent — Go's mime table reading /etc/mime.types on
+      // Linux and knowing nothing about the extension on Windows. That was
+      // WRONG, so the weakening was unearned. `routes.contentTypeForName`
+      // returned "" for `.webmanifest`, so net/http fell back to
+      // `http.DetectContentType` — pure Go, a compiled-in sniff table, no
+      // /etc/mime.types anywhere in it — which answered
+      // `text/plain; charset=utf-8` on EVERY host, measured under GOOS=linux on
+      // the same bytes. The bug was everywhere, not on one developer's machine.
+      // One line in routes.go now names the type, so the real header is
+      // assertable, and asserted.
+      expect(res.headers['content-type'], 'manifest is served as a manifest').to.match(
+        /application\/manifest\+json/,
+      );
+      // The other realistic break: the SPA fallback swallowing the request and
+      // serving index.html with a 200, which leaves the app un-installable
+      // while looking fine. `.webmanifest` is in `hasAssetExt` for that reason,
+      // so a MISSING manifest 404s instead of being handed the SPA.
       expect(res.headers['content-type'], 'manifest is not swallowed by the SPA fallback')
         .to.not.match(/text\/html/);
-      // ⚠ Parse defensively. Cypress only auto-parses a body it was told is
-      // JSON, and the header above is exactly the thing that varies by host —
-      // so `res.body.name` was `undefined.name` on Windows and the case died
-      // with "object tested must be an array…", which reads like a broken
-      // manifest rather than a missing Content-Type.
+      // ⚠ Still parsed defensively: cy.request only auto-parses a body whose
+      // Content-Type says JSON, and `application/manifest+json` is not
+      // `application/json`.
       const manifest = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
       expect(manifest.name).to.contain('filex');
       expect(manifest.start_url).to.eq('/admin/');
@@ -119,6 +124,22 @@ describe('PWA install surface', () => {
       const purposes = manifest.icons.map((i: { purpose: string }) => i.purpose);
       expect(purposes).to.include('maskable');
     });
+  });
+
+  it('a MISSING .webmanifest 404s instead of being handed the SPA', () => {
+    // The second half of the same fix: `.webmanifest` joined `hasAssetExt`, so
+    // a manifest that is not there falls through to a 404 rather than to
+    // index.html. Without it a broken build serves HTML with a 200 and the
+    // browser reports "corrupt manifest" — a report that points at the file
+    // instead of at the routing.
+    cy.request({ url: '/admin/no-such-file.webmanifest', failOnStatusCode: false }).then(
+      (res) => {
+        expect(res.status, 'a missing manifest is a 404').to.eq(404);
+        expect(res.headers['content-type'] ?? '', 'and not the SPA document').to.not.match(
+          /text\/html/,
+        );
+      },
+    );
   });
 
   it('a PC visitor is offered the DESKTOP APP, not a browser install', () => {

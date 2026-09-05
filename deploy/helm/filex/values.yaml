@@ -196,8 +196,15 @@ extraEnv: {}
   # FILEX_LOG_LEVEL: debug
   # E2E key escrow — the PUBLIC half only, from `filex e2e-escrow keygen`.
   # Keep the private half OUT of the cluster; that is what makes a stolen
-  # database worthless. Unset = escrow off (the default), permanently.
+  # database worthless. Unset = escrow off, which is the default.
   # FILEX_INSTALLATION_E2E_ESCROW_KEY: "MIIBoj..."
+  # Turning escrow on for a release that is already running needs this too,
+  # for exactly one boot. It is NOT retroactive: no operator action gives an
+  # existing encrypted folder an escrow slot. Their OWNERS are offered one at
+  # unlock and can grant it with the folder password. Changing or removing
+  # the key is still refused, flag or no flag.
+  # docs/CONFIGURATION.md#adopting-escrow-later
+  # FILEX_INSTALLATION_E2E_ESCROW_ADOPT: "1"
 
 resources:
   requests:

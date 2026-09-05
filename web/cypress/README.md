@@ -72,10 +72,20 @@ cypress/
     13-navigation-ui         admin sidebar → route
     14-explorer-sidenav      the explorer nav panel: rail, drawer, views
     16-explorer-connections  "How to connect" + "API keys" from the panel
-    17…57                    theme, dashboard, storages, users, shares,
+    17…45                    theme, dashboard, storages, users, shares,
                              replication, sync
-    60…99                    explorer, manager API, trash, versions, search,
-                             PWA, webhooks, OnlyOffice, capabilities, public
+    46-star-action           star as an ACTION (menu / toolbar / S / cards)
+                             and the gate that hides it for an app token
+    48-tags-panel            tags listed in the panel, and browsable
+    49-virtual-segments      .trash/.recent/.starred/.shared read as names in
+                             the tab strip, the breadcrumb AND the inspector
+    50…62                    shares, sync, explorer
+    64-token-kinds           app token vs user token on the four self-service
+                             credential routes, BOTH directions
+    65…86                    manager API, trash, versions, search, uploads
+    87-search-fuzzy          filename search ORDER and FILTERING, not "returns
+                             an array"
+    88…99                    PWA, webhooks, OnlyOffice, capabilities, public
   support/
     e2e.ts                   global setup — read the two exception filters
     commands.ts              cy.apiLogin / cy.uiLogin / cy.adminGet
@@ -124,6 +134,22 @@ cypress/
   hostname.** `92-onlyoffice` reads `external.onlyoffice` and expects 503 when
   the integration is off and a 4xx when it is on — on a host with a Document
   Server it becomes a stronger assertion with no code change.
+
+- **A `--port` you did not check can be somebody else's instance.** `filex serve`
+  fails to bind when a port is taken and exits — but `/healthz` answers anyway,
+  from the stranger, so the harness seeds and measures the wrong tree and
+  reports a confident number about a build nobody asked about. It happened
+  twice in one afternoon. `e2e/run.mjs` now refuses to continue unless the
+  child it started reached its own listener without a bind error AND the
+  instance reports zero storages (`assertOurOwnInstance`) — read the comment
+  there before weakening it: two earlier versions of that check sampled the
+  race instead of waiting for its verdict, and both let a stranger through.
+- **A control character in a regex is invisible and always passes.**
+  `14-explorer-sidenav` carried a literal 0x08 BACKSPACE where `\b` was meant,
+  so its `not.match` could never fail — the regression guard for the reported
+  `.shared` tab-strip defect was decoration for as long as it existed. eslint's
+  `no-control-regex` had been reporting it. Scan for bytes < 0x09 and 0x0B–0x1F
+  rather than reading the line.
 
 ## Credentials
 

@@ -19,7 +19,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Storage](STORAGE.md) — how mounts work, adding one, and the adapters:
   local · S3 / S3‑compatible · SFTP · WebDAV · FTP · SMB/CIFS
 - [Moving files between storages](STORAGE.md#moving-files-between-storages) — what
-  copy, cut and drag mean when the two ends are different depolar
+  copy, cut and drag mean when the two ends are different storages
 - [NAS over NFS / SMB](STORAGE.md#nas-nfs-smb-and-friends) — mount it with the
   OS, serve it with `local`, and the three traps that come with it
 - [Slow storage](STORAGE.md#slow-storage) — what is already cached, and what is
@@ -54,7 +54,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 - [Desktop app](DESKTOP.md) — Windows/Linux/macOS app: multiple accounts, background sync,
   [dragging files out onto the desktop](DESKTOP.md#dragging-files-out),
-  [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer)
+  [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer),
+  [a portable Windows copy that installs nothing](DESKTOP.md#portable-windows)
 - [Folder sync](SYNC.md) — how a folder on your PC is kept in step with the server
 - [Uploads](UPLOADS.md) — the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
@@ -95,9 +96,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [HTTP / component API](API.md)
 - [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component, and the
   two options every wrapper shares: the **navigation panel** (`sideNav`) and the
-  reduced-chrome **simple profile** (`uiProfile`)
+  chrome **profiles** (`uiProfile`: `standard` · `simple` · `drive`)
 - [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
-- [Migration](MIGRATION.md) — moving off `@brftech/file-explorer`
 
 ## Repo only — not published to docs.filex.sh
 
@@ -114,11 +114,17 @@ list was written the first time.
   — scaffolding for a hosted offering that has **not** launched; publishing it
   would announce a service that does not exist
 
-⚠ Two more are excluded from the site **and** from this repository, so they are
-deliberately listed without links — a deployment runbook carrying one
-installation's real host names and paths, and a migration guide written for a
-single downstream application. They would be dead links here, which is exactly
-the failure the note above describes.
+⚠ Three more are excluded from the site **and** from this repository, so they
+are deliberately listed without links — a deployment runbook carrying one
+installation's real host names and paths, and two migration guides written for
+downstream applications that were never public (`MIGRATION.md`, off the in-tree
+`@brftech/file-explorer`, and `MIGRATION_FISHAPP.md`). They would be dead links
+here, which is exactly the failure the note above describes.
+
+> `MIGRATION.md` was the third case and did not look like one: it was stripped
+> from the public repository like the other two, but nothing removed the links
+> to it, and it was not in `srcExclude` — so the published site carried it
+> while the published README pointed at a file that is not there.
 
 Handover notes under `docs/handovers/` are excluded by glob for the same
 reason: they are working notes between maintainers, and the next one must be

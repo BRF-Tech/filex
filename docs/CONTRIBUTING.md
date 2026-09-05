@@ -117,7 +117,7 @@ Breaking changes:
 ```
 feat(api)!: rename @file-explorer-share to @share-created
 
-BREAKING CHANGE: the Vue event name changed. See docs/MIGRATION.md.
+BREAKING CHANGE: the Vue event name changed. See docs/API.md.
 ```
 
 ---
@@ -210,6 +210,14 @@ journey in Playwright.
 
 ### General
 
+- **Line endings are LF, and `.gitattributes` enforces it** — you do not need to
+  set `core.autocrlf`, and setting it will not override the repository. Every
+  text file is stored and checked out LF on every platform; `*.bat`, `*.cmd` and
+  `*.ps1` are the deliberate CRLF exceptions and `e2e/fixtures/**` is never
+  converted in either direction, because those bytes are what the file-type
+  suite is testing. This is not cosmetic: a `.sh` file checked out with CRLF
+  fails on Linux and under WSL with `/usr/bin/env: 'bash\r': No such file or
+  directory`, which is what the repository shipped until 2026-09-05.
 - ASCII characters by default. Add comments in English even if the codebase
   is bilingual.
 - No `console.log` left over — use `import.meta.env.DEV` guards in dev-only
@@ -315,6 +323,7 @@ Maintainer-only. Reproducible, automated by CI.
    |---|---|
    | `README.md` | step 1 above |
    | **`site/index.html`** | the **filex.sh landing page** — the first thing anyone reads about the product, and it drifted two months and a dozen features out of date while it lived only on the static host. Deployed with `scripts/sync-site.sh`. Both live in the maintainers checkout only; the page is this project own site, not part of what you install |
+   | **`web/src/views/Login.vue`** (`demo.*` in `web/src/locales/*.json`) | the **demo.filex.sh landing page** — rendered by the app when `FILEX_DEMO_MODE=true`, so it looks like code and gets audited like nothing. It went untouched from 2026-05-07 to 2026-09-05 still selling *"5 Storage drivers"*. Ships in the release image; see `docs/DEPLOY_BRF.md` §4b |
    | `docs/*.md` | the new feature has a page — **and the old pages are still true** |
    | `docs/README.md` | every `docs/*.md` is in the index |
    | **`docs/index.md`** | the docs site's **home page** — its hero line and feature cards are the first thing a visitor reads |
@@ -332,6 +341,12 @@ Maintainer-only. Reproducible, automated by CI.
    > and there doesn't need to be"* — the `smb` driver had shipped in that very
    > release.
 
+   > ⚠ A surface does not have to be a `.md` file. The demo landing page is
+   > markup and translation strings, so it reads as code and slipped every
+   > documentation pass for four months — while being, for anyone who clicks
+   > *Try the live demo*, the **first** description of the product they meet.
+   > Ask what a text *does*, not what extension it has.
+
    > ⚠⚠ A page missing from the sidebar is **not** unpublished. VitePress builds
    > every file under `srcDir`, so it is reachable by URL and indexable whether
    > or not anything links to it. To actually keep a page off the site, add it to
@@ -339,33 +354,33 @@ Maintainer-only. Reproducible, automated by CI.
    > nav, and `CLOUD.md` — whose own first line says *"NOT a live service"* — was
    > being published.
 
-   Three commands finish the step, all required:
+   Five commands finish the step, all required:
 
    ```bash
    # every relative markdown link resolves to a real file
-   python3 - <<'PY'
-   import os, re
-   roots = ['README.md', 'CHANGELOG.md', 'docs', 'packages/core/README.md',
-            'packages/webcomponent/README.md', 'packages/react/README.md',
-            'desktop/README.md', 'e2e/README.md']
-   files = []
-   for r in roots:
-       files += ([os.path.join(r, f) for f in os.listdir(r) if f.endswith('.md')]
-                 if os.path.isdir(r) else [r] if os.path.exists(r) else [])
-   bad = 0
-   for f in files:
-       base = os.path.dirname(f) or '.'
-       for m in re.finditer(r'\]\(([^)\s]+?)(#[^)]*)?\)', open(f, encoding='utf-8').read()):
-           t = m.group(1)
-           if t.startswith(('http', 'mailto:', '#', '/')):
-               continue
-           if not os.path.exists(os.path.normpath(os.path.join(base, t))):
-               print('MISSING', f, '->', t); bad += 1
-   print('broken links =', bad)
-   PY
+   node scripts/check-links.mjs
+
+   # ⚠ and again on the tree that actually ships. The published repo is NOT
+   # this one: scripts/export-public.sh withholds a list of files, so a link
+   # to one of them resolves here and 404s there. On 2026-09-05 the public
+   # README and docs/README.md both pointed at docs/MIGRATION.md, which the
+   # export strips -- two dead links in the shop window, and green here every
+   # time. export-public.sh now runs this itself and refuses the export, but
+   # run it by hand if you are looking at a tree it did not just build.
+   node scripts/check-links.mjs /path/to/filex-export
 
    # the site must BUILD — VitePress fails the build on a dead link
-   cd docs-site && npm run build
+   # ⚠ a subshell: the two commands after this one are repo-root-relative,
+   # and for a while this line was a bare `cd docs-site` that left them inside
+   # docs-site. The YAML command below then globbed `deploy/**` from there,
+   # matched nothing, and printed `yaml ok` without opening a single file.
+   (cd docs-site && npm run build)
+
+   # …and every in-page ANCHOR must land, which the build says nothing about.
+   # VitePress fails on a dead PAGE link and ignores the `#section` half
+   # entirely: 98 of 366 in-page links were dead on a green build (2026-09-05).
+   # It reads the ids out of the HTML the build just produced, so run it after.
+   node scripts/check-doc-anchors.mjs
 
    # every YAML you touched still parses — breaking a store listing is silent
    python3 -c "import yaml,glob; [yaml.safe_load(open(f,encoding='utf-8')) \
@@ -401,19 +416,77 @@ Maintainer-only. Reproducible, automated by CI.
    maintainer key is `EFA3B126 2FD99280 0DBBB5E3 A8FEBA97 FF786513` (ed25519,
    expires 2028-08-31); its passphrase and a recovery copy live in the team
    vault, not on disk.
-8. Push: `git push origin main --tags`.
+8. Push: `git push origin main` and then the one tag you just made
+   (`git push origin refs/tags/vX.Y.Z`). Push the tag by name rather than
+   `--tags`: this checkout accumulates local tags, and `--tags` publishes
+   every one of them, including any you were not ready to release.
 
-CI does the rest (GitHub Actions `release.yml`, four jobs):
+   > ⚠ Steps 6-8 happen in the checkout whose `origin` is **GitHub** — that is
+   > what `release.yml` watches. Development happens on GitLab; the public tree
+   > is produced by `scripts/export-public.sh`, and the signed tag is made
+   > there, on the commit that is actually published.
+
+CI does the rest (GitHub Actions `release.yml`, five jobs):
 - `binaries` — goreleaser: multi-arch binaries → the GitHub Release. It is
-  what *creates* the Release, so the two uploaders below depend on it and on
-  nothing else.
-- `docker` (needs `binaries`) — pushes `:vX.Y.Z`, `:slim-vX.Y.Z`,
-  `:full-vX.Y.Z`, `:latest`, `:slim`, `:full` to ghcr.io. The slow one
-  (arm64 under QEMU, 20-30 min).
-- `desktop` (needs `binaries`, **not** `docker`) — three installers, attached
-  to the Release while the images are still building. Before v0.25.0 it
-  waited for the docker builds it never needed — ~25 idle minutes a release.
+  what *creates* the Release, so `desktop` below depends on it.
+- `docker` — a **matrix**, one native runner per architecture (amd64 on
+  `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), each pushing by digest.
+  ⚠ It has **no `needs:`** — it builds its own binary and never wanted the
+  release. arm64 used to run under QEMU behind `needs: binaries` and took
+  20-30 minutes; on a native runner the whole critical path is about seven.
+- `docker-manifest` (needs `docker`) — joins the two digests into the tags
+  people pull: `:vX.Y.Z`, `:slim-vX.Y.Z`, `:full-vX.Y.Z`, `:latest`, `:slim`,
+  `:full`.
+- `desktop` (needs `binaries`, **not** `docker`) — one matrix job per OS,
+  attached to the Release while the images are still building. Before v0.25.0
+  it waited for the docker builds it never needed — ~25 idle minutes a release.
+  ⚠ The upload step globs `desktop/release/*.exe` (and `*.AppImage`, `*.deb`,
+  `*.dmg`, `*.zip`, `latest*.yml`) rather than naming files, which is why the
+  Windows portable `.exe` needed no workflow change — but it also means a
+  target that silently stops producing an artifact shows up as a shorter
+  release, not as a failure. The `What was produced` step exists to make that
+  readable in the log.
+  ⚠ The **filex.sh/desktop/ feed is uploaded by hand**, and a portable copy's
+  *Settings → Updates* **Download** button points into it. Put
+  `filex-desktop-portable-x64.exe` there with the installer, or that button
+  leads to a file that is not on the server.
 - `npm` (independent) — publishes `@brftech/filex-core`, `@brftech/filex`,
   `@brftech/filex-react`.
+
+9. **Publish the two update feeds, then prove they moved.** CI attaches every
+   artifact to the GitHub Release; it publishes **neither feed**, and a feed is
+   the only place an installed copy ever looks. Both live on the static host and
+   are deliberately excluded from `scripts/sync-site.sh` (so a website deploy
+   cannot delete them) — which also means nothing refreshes them but you.
+
+   - `filex.sh/updates/stable.json` — **the server and CLI**. Prepend a record
+     for the new version: `version`, `date`, `auto_ok`, `migrations`, `notes`,
+     `notes_url`, `image`, `assets`. Every install with `AUTO_UPGRADE` reads
+     this and nothing else.
+   - `filex.sh/desktop/` — the desktop app. Upload the installers, the
+     AppImage/deb, the dmg/zip, the portable `.exe`, and all three
+     `latest*.yml`.
+
+   ```bash
+   curl -s https://filex.sh/updates/stable.json | head -5
+   for f in latest.yml latest-mac.yml latest-linux.yml; do
+     printf '%-18s %s
+' "$f" "$(curl -s https://filex.sh/desktop/$f | head -1)"
+   done   # every one must name the version you just tagged
+   ```
+
+   > Why this is a numbered step and not a footnote: it *was* a footnote, inside
+   > a bullet describing a CI job, and it was skipped release after release.
+   > Measured 2026-09-05, with v0.31.0 out: all three desktop feeds read
+   > `version: 0.27.4` and `stable.json` read `v0.28.0`. Every installed desktop
+   > app on every platform had been told it was up to date since v0.27.4, and
+   > every server with `AUTO_UPGRADE` on saw v0.28.0 as the newest release there
+   > is. The artifacts were built and attached to each Release the whole time;
+   > only this step was missing, and nothing anywhere said so.
+   >
+   > ⚠ This is the same failure as v0.29.0's, one layer out: there, a fix
+   > shipped that no existing install could see. Here, releases shipped that no
+   > existing install was told about. A release that reaches nobody is not a
+   > release, and neither gate is automatic — check the feeds, do not assume.
 
 If something fails, fix forward — never delete a published tag.

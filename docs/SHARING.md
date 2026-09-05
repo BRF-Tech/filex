@@ -5,7 +5,7 @@ recipient:
 
 - **Share links** (`/s/{token}`) — let someone **download** a file or folder.
 - **File requests** (`/d/{token}`) — let someone **upload** files *into* a
-  folder without ever seeing its contents ("file‑drop" / "Dosya İste").
+  folder without ever seeing its contents ("file‑drop" / "Request files").
 
 Both are created from the explorer's **Share / Permissions** dialog on any item
 (a share link needs ≥editor on the item).

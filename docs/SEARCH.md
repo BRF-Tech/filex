@@ -103,6 +103,27 @@ edit, 8 and over allow two. A transposition counts as **one** edit, which is why
 `mian.go` finds `main.go`. Fuzzy hits always rank below literal ones — see
 [Ranking](#ranking).
 
+⚠ **A word that is all digits is never fuzzy**, whatever its length. `2026` does
+not match `2025`, and an invoice number does not match its neighbour. Edit
+distance models a finger landing on the wrong key in a *word*, where the reader
+still recognises what was meant; in a number there is nothing left to recognise
+— a near-miss digit is a different year, a different invoice, a different order,
+and returning it is a wrong answer wearing the clothes of a helpful one.
+Measured before the exemption: `2026` returned `annual report 2025.docx` as its
+**second** hit.
+
+This turns off only the *fuzzy* pass for such a word. Exact, prefix, substring
+and separator-blind matching are untouched, so `2026` still finds
+`invoice_2026.pdf` and `Budget-2026.csv`, and `invoice 2026` still ranks the
+file matching both words first.
+
+**Mixed words stay fuzzy.** `v2024x` or `report2024` are names with a number
+inside them; their letters carry the same typo risk any word does, and the
+normaliser has already split the numbers that stand on their own into their own
+words (`invoice_2026.pdf` becomes `invoice`, `2026`, `pdf`). Exempting mixed
+tokens would take typo tolerance away from a whole class of real filenames to
+protect a number the normaliser never isolated.
+
 Surviving, not returned: the candidates the first pass produced are put through
 the [scorer](#scoring--how-candidates-are-ordered-and-filtered) before they are
 counted, so a pass that came back with fifty half-matches no longer looks like a
@@ -152,6 +173,7 @@ A query is free text, optionally carrying tag filters.
 | `invoice 2026` | `invoice_2026.pdf` |
 | `foo bar` | `foo-bar.txt` |
 | `mian.go` | `main.go` — one typo forgiven |
+| `2026` | `invoice_2026.pdf`, `Budget-2026.csv` — **not** `annual report 2025.docx`: numbers are matched literally |
 | `report 2025` | `annual report 2025.docx` — both words must match |
 | `tag:invoice` | every file tagged `invoice` |
 | `main go tag:source` | `main.go`, but only if it carries the `source` tag |
@@ -213,7 +235,7 @@ order.
 | 2 | **prefix** | The filename starts with the query (`report` → `report-final.txt`). |
 | 3 | **name** | Every query piece is answered by the **filename** (`report` → `q1-report.txt`). |
 | 4 | **path** | At least one piece needed a **folder** to answer it (`Code main` → `Code/main.go`). |
-| 5 | **fuzzy** | Only the typo-tolerant pass produced it (`report` → `reprot.txt`). |
+| 5 | **fuzzy** | Only the typo-tolerant pass produced it (`report` → `reprot.txt`). An all-digit query word never lands anything here. |
 | 6 | **content** | Matched inside the file, not in its name. |
 
 Tier 6 sorting last is also how the pre-v0.2 contract — **name hits before
@@ -639,7 +661,8 @@ write it, then either restart, or delete the `search.bleve` directory and run a
 
 ### Substring, separator or typo searches miss rows
 Substring and case are handled by the wildcard sub-queries, separators by the
-normalised fields, typos by the fuzzy pass. If those are silently missing while
+normalised fields, typos by the fuzzy pass (numbers excepted — see
+[How it works](#how-it-works)). If those are silently missing while
 whole-name matches work, check `needs_rebuild` on the stats endpoint: an index
 carried over from an older filex has documents without the normalised fields.
 filex repairs that on its own at startup, so `needs_rebuild: true` after a

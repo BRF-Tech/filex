@@ -5,7 +5,399 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.32.0] - 2026-09-05
+
+### Added
+
+- **`uiProfile: 'drive'` — the explorer's shell, laid out the way an end user
+  expects (GitHub #14).** The reporter of #14 came back to v0.30.1 with four
+  annotated mockups: the navigation panel was right, and here is what the rest
+  could look like. This is that, as a third **profile** of the same explorer —
+  not a second UI. It is a strict superset of `simple`, so everything `simple`
+  turns off stays off, and a non-admin signing in at `/drive` now lands on it.
+
+  - **One primary "+ New" menu** in the panel, in place of the Upload / New
+    folder pair: upload files · new folder · request files (the file-drop link,
+    which opens the access modal straight on its own tab).
+  - **One search field across the header**, with a ⌘K / Ctrl+K chip. The field
+    searches the folder you are standing in — it sets the same `searchQuery`
+    the toolbar box always did — and the chip (or the shortcut, pressed from
+    inside the field) hands that query to the **command palette**, which is
+    where "everywhere", saved searches and the commands live. One box, one
+    shortcut, no third search surface.
+  - **A filter row** under the breadcrumb: **Type · Modified · Size**.
+  - **Folders and Files as labelled sections** in grid view, with the rows
+    grouped rather than trusted to arrive grouped.
+  - **The details panel split into Details and Activity**, with **People with
+    access** (real grants from `GET /api/files/permissions`, hidden rather than
+    faked when the server refuses them) and a **share-link row with a Create
+    link button**. Activity is version history + comments.
+  - **A storage line** under the navigation, from `GET /api/files/quota/me`.
+
+  Nothing is deleted: density, theme, the shortcut editor, the tour and the
+  other view modes moved into the header's "⋯" menu, and the view switcher and
+  details toggle onto the breadcrumb row. Both locales, light and dark, a rail
+  at 56px and a drawer under 560px.
+
+  ⚠ **No People filter and no Owner column**, though the mockups draw both. A
+  listing row carries no owner — `nodes.owner_id` is quota bookkeeping, nil for
+  anything a sync discovered, and serialized by nothing — and the listing
+  endpoint reads no owner parameter. The three chips that shipped are answered
+  from fields every row already has; a fourth would have opened, offered names
+  and changed nothing.
+
+- **A Windows copy that runs without being installed.** Linux and macOS already
+  had one — the AppImage runs unextracted, the mac `.zip` is unzip-and-run —
+  and Windows shipped only an NSIS installer, so a locked-down work machine, a
+  USB stick, or "I just want to look at my files on this laptop for ten
+  minutes" had no answer at all. `filex-desktop-portable-x64.exe` is one file:
+  put it anywhere and double-click it.
+
+  **It keeps its data beside itself, not in `%APPDATA%`.** For an installed app
+  the roaming profile is right; nobody wants a program scattering folders
+  across their desktop. A run-and-delete copy is the opposite case, and what it
+  promises is that deleting one `filex-data` folder leaves nothing of yours on
+  a machine that is not yours. That covers the account store, settings, the
+  log, the drag-out cache, open-with working copies — and the sync engine's
+  bookkeeping, which needed the new **`FILEX_SYNC_DIR`** in the CLI: its store
+  defaults to `~/.filex/sync` and holds the local trash, i.e. real copies of
+  files it deleted, in somebody else's home directory. *Settings* shows the
+  exact path with a button that opens it, because a promise the user cannot
+  verify is only a claim.
+
+  ⚠ **It does not update itself, and says so.** A portable `.exe` is not an
+  installation: there is no install directory to patch and no installer to hand
+  the running copy over to. So it takes the route the unsigned macOS build
+  already established — the updater is never wired at all, nothing is
+  downloaded that could not be applied, and *Settings* reports a new version
+  with a **Download** button instead of sitting at "Checking…" forever. Its
+  own words, not the macOS ones: updating means putting a new `.exe` over the
+  old one, and the folder beside it keeps your accounts.
+
+  ⚠⚠ **If the `.exe` sits somewhere it cannot write** — `C:\Program Files`, a
+  read-only stick, a share — it falls back to
+  `%APPDATA%\@brftech\filex-desktop-portable` and says so, with the path. The
+  fallback is deliberately *not* the ordinary user-data directory: measured
+  before it was fixed, that put the portable copy straight into the **installed
+  app's own profile** — a copy carried in from outside reading and writing the
+  accounts of whoever owns the machine, and, because the single-instance lock
+  is keyed on that directory, exiting silently and raising the installed app's
+  window whenever it was already running.
+
+  ⚠ **Your accounts do not travel between machines.** Tokens are sealed with
+  the machine's own keychain (Windows DPAPI), so a `filex-data` folder opened
+  on another computer, or under another Windows account, fails to decrypt and
+  you sign in again. That is the right way round for a stick left on a train.
+
+  `scripts/portable-e2e.mjs` covers it, because a package that *opens* is not a
+  package that *works* and "portable" is a claim about where files go that no
+  packaging step checks: it launches the real self-extracting `.exe` and waits
+  for a renderer to actually load a page, checks that the only things left in
+  the folder are the `.exe` and `filex-data`, and asserts the artifact is named
+  so it neither overwrites the installer (both targets emit `.exe`) nor carries
+  a version (the download links resolve one fixed filename).
+
+- **An existing installation can adopt key escrow.** v0.31.0 pinned
+  `FILEX_INSTALLATION_E2E_ESCROW_KEY` at the first boot and refused *every*
+  later change — including "no escrow" → "escrow". That read well and measured
+  badly: both of our own deployments came out of the rollout with
+  `"e2e_escrow_kid": ""`, so acting on the decision to turn escrow on meant
+  discarding the data directory. And the general case is worse than ours: a
+  product where escrow can only be chosen in the first second of an
+  installation's life is a product where nobody chooses it, because nobody
+  decides key-escrow policy before they have any files.
+
+  Setting `FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1` alongside the key adopts it,
+  once. The flag is read only while the pinned record has no escrow key, so it
+  is inert afterwards and can be dropped on the next deploy.
+
+  ⚠⚠ **Adoption is not retroactive and cannot be made so.** A folder wraps its
+  master key to the escrow identity when it is created; a folder that already
+  exists carries no such copy, and writing one needs the folder password, which
+  the server has never had. Folders older than the adoption are outside the
+  escrow key permanently. filex says this in the refusal you get without the
+  flag, in a WARN line on the boot that adopts, in the record, and in the
+  unlock dialog of every affected folder — which now explains the missing
+  Escrow tab instead of just not having one.
+
+  The record keeps the two dates apart, because "when was this installed?" and
+  "when did it gain a second key?" are different questions:
+  `pinned_at` / `pinned_by` still describe the first boot, and
+  `e2e_escrow_adopted_at` / `e2e_escrow_adopted_by` /
+  `e2e_escrow_adoption_note` describe the adoption. `e2e_escrow_adopted_at` is
+  the boundary an operator compares a folder's age against.
+
+  ⚠ Still refused, flag or no flag: pointing the key at a **different** value,
+  and **removing** it. Those two leave folders behind that the running
+  configuration can no longer describe; adoption leaves nothing behind.
+
+- **`scripts/check-doc-anchors.mjs` — a dead `#section` now fails the build.**
+  `vitepress build` fails on a dead *page* link and says nothing whatsoever
+  about the anchor half, so the green docs build the release process leans on
+  was evidence that every page exists and evidence of nothing else. The new
+  check resolves every in-page link in `README.md`, `CHANGELOG.md`, `docs/`,
+  `desktop/README.md` and the npm package READMEs, and exits non-zero listing
+  the ones that land nowhere.
+
+  ⚠ It reads the heading ids out of the **built HTML** — and, for the pages the
+  site does not build, out of VitePress's own `createMarkdownRenderer` loaded
+  with this site's markdown options. It does not re-derive the slug rule. A
+  second implementation drifts from the real one and starts reporting links
+  that work, and a check that cries wolf gets deleted. The two paths are
+  cross-checked against each other on every page that has both, so if they ever
+  disagree the check exits 2 instead of answering confidently.
+
+  Wired into the `lint` stage as `lint:docs`, which builds the site once and
+  runs both gates against that build — the docs site had not been built in CI
+  at all until now — and into `docs/CONTRIBUTING.md` → *Release process* step 3
+  as a fourth mandatory closing command.
+
+- **An existing encrypted folder can be given an escrow slot — by its owner.**
+  Adopting escrow covers folders created after the adoption, which on an
+  installation that has been running for a while is nobody's folders: the ones
+  that matter already exist. An escrow key that reaches none of them is a key
+  to an empty room.
+
+  So when the installation has an escrow key and a folder does not, filex asks
+  the folder's **owner**, at the one moment the folder password exists in a
+  browser — immediately after a successful unlock. The notice says what
+  accepting actually means rather than "enable escrow?": the operator gains a
+  second, permanent way in, without the password, and the use-notification is
+  an announcement rather than a control. It links to
+  `docs/E2E-ENCRYPTION.md`, which says the same thing at length.
+
+  Accepting rewrites only `.filex-e2e.json`. **No file is re-encrypted, moved
+  or rewritten**, and the password and recovery key keep working unchanged.
+  Doing nothing leaves the folder exactly as it was.
+
+  Declining is a decision, not a delay: it is recorded in the folder's marker
+  (`esc_declined`) and filex stops asking — a question that returns on every
+  unlock is how people learn to click past security dialogs. The record lives
+  in the marker rather than in browser storage because the unit of the decision
+  is the folder: the same person on their phone is not asked again, and an
+  answer that vanished with a cleared cache would be no answer. It travels with
+  the folder through a move, a backup and a restore, exactly as the key slots
+  do, and holds no key material.
+
+  The way back for somebody who changes their mind is **Escrow key…** in the
+  strip above an unlocked folder. It asks for the password again — the same
+  proof of ownership the offer at unlock had.
+
+  ⚠ This changes nothing about what the **operator** can do, and the threat
+  model is unchanged: adding a slot needs the folder master key, which needs a
+  credential the server has never held. No configuration change, admin action
+  or future version reaches an existing folder. The door opens from the inside
+  only. `e2e_escrow_adopted_at` keeps its meaning — the boundary of
+  *automatic* coverage — and a folder whose owner granted a slot is simply no
+  longer described by it.
+
+  ⚠ The offer never appears where it could not be honoured: no installation
+  key, an existing slot, a failed unlock, or a v1 marker (whose path is the
+  recovery upgrade, which seals an escrow slot in the same step and discloses
+  it in the same prompt).
+
+### Fixed
+
+- Three surfaces said an escrow key could **never** open a folder created
+  before escrow — the locked-folder dialog ("today or ever"), the
+  `e2e_escrow_adoption_note` the server writes into `installation.json`, and
+  `docs/CONFIGURATION.md`. That was true of the operator and false of the
+  folder, and it is exactly the shape of wrong information that reads as
+  authoritative. All three now separate the two: no operator action reaches an
+  existing folder, and its owner can grant one.
+
+- **The backend spoke Turkish to every user, once.** The `file.infected`
+  notification carried a Turkish title while all eleven of its siblings were
+  English — the one message a person reads at the worst possible moment, when
+  something on their server has been flagged as malware. `docs/PROTECTION.md`
+  documented the Turkish string faithfully, so the page was honest and the
+  product was the defect.
+
+- **A page withheld from the public repository was published to the world, and
+  the public README pointed at a file that is not there.** `docs/MIGRATION.md`
+  is a migration guide for an in-tree package that was never public; the export
+  script strips it. It was not in `srcExclude`, so the docs site built it, the
+  sidebar linked it and search indexed it — while the *published* README and
+  docs index linked a file the published tree does not contain. Neither half was
+  catchable: the release process checks links in the source tree, where every
+  file exists by definition, and the tree that actually ships had never been
+  checked at all. `scripts/check-links.mjs` now checks it, the export script
+  runs it on what it just built and refuses to call the export good if it fails.
+
+- **A search stopped answering with a folder called Trash.** The explorer draws
+  a virtual `.trash` row at a storage root, and it decided where to draw it from
+  the listing's `dirname`. A search answers with the *scope* it searched, so
+  `?action=search&path=main://&filter=notes` comes back carrying
+  `dirname: "main://"` — byte-identical to the folder listing of that same path.
+  The rule could not tell the two apart, so searching a storage root answered
+  with the hits **plus** a 0-byte folder named Trash that is not a folder, is
+  not a hit, and cannot be searched for.
+
+  Measured rather than guessed: the server sends no `.trash` row for either
+  action, and `isStorageRootDir` is true for both responses — the row was always
+  the client's, and only the call site knows which of the two it just asked for.
+  `injectTrashRow` now takes that answer explicitly. Same family as the
+  `.trash` / `.shared` sentinel bugs fixed earlier in this cycle: a virtual row
+  rendered somewhere it has no meaning.
+
+  Found in a screenshot, which is the other half of the story — the picture the
+  README was going to ship for `uiProfile: 'drive'` had been taken mid-search,
+  so it showed the phantom next to the one real hit.
+
+- **Search no longer typo-matches numbers.** v0.30.0's fuzzy pass applied to
+  every query word, so `2026` returned `annual report 2025.docx` — ranked
+  second — because one digit is one edit. All-digit words are now matched
+  literally: a near-miss digit is a different year, invoice or order id, not a
+  misspelling of the same one. Exact, prefix, substring and separator-blind
+  matching on numbers are unchanged (`2026` still finds `invoice_2026.pdf` and
+  `Budget-2026.csv`), mixed words like `v2024x` stay typo-tolerant, and a real
+  word typo (`mian.go` → `main.go`) still resolves.
+
+- The unlock-without-the-password dialog labelled the escrow field with the
+  **installation's** key id whatever the folder's own escrow slot said, so a
+  folder restored from another installation looked openable with a key that
+  cannot open it. It now reads the folder's `kid` and names the case.
+
+- **A phone scrolled sideways on the file explorer.** `/admin/explore` and
+  `/drive/explore` measured 398 CSS pixels wide inside a 390-pixel viewport —
+  the width of an iPhone 12/13/14, and the screen every non-admin lands on. The
+  8 pixels were the "Admin panel" *label* in a row that is otherwise icon
+  buttons; below `sm` the button keeps its icon and its accessible name and
+  drops the text. The label, not the button, is what goes, because the same
+  string is longer in every other language filex speaks.
+
+- **The desktop app's pairing never finished for an admin who signed in with a
+  password.** The browser half of the hand-off only ran when the app booted, so
+  it caught the routes that reload the document — the OIDC callback, and the
+  navigation to `/drive/explore` that a non-admin gets — and missed the one that
+  does not: an admin's password login stays inside the SPA, nothing remounts,
+  and the desktop app sat on its waiting screen until it timed out. The
+  hand-off now runs when a session appears, whichever way it appeared. The
+  pairing is still minted exactly once.
+
+- **`filex serve` sent no `Content-Type` for `.webmanifest`.** It fell through
+  to `http.DetectContentType`, which sees JSON text and answers
+  `text/plain; charset=utf-8` — on every platform, not just Windows. It is now
+  `application/manifest+json`, said explicitly. A *missing* manifest also 404s
+  instead of being served `index.html` by the SPA fallback, which is the break
+  that leaves an app un-installable while every status code says fine.
+
+- **"Test connection" took half a minute on an unreachable endpoint.** The S3
+  driver retries six times with a backoff capped at ten seconds so that a
+  *sync run* rides out an object store's transient 503; run from a button, those
+  attempts took a measured 23.6s and 29.7s before answering. The retry budget is
+  right where it lives, so the probe got a deadline instead
+  (`handlers.ProbeTimeout`, 10s) — which bounds a hung SFTP or WebDAV dial too —
+  and a probe that runs out of time now says so rather than showing the SDK's
+  paragraph about attempt counts. A local-path probe was and remains ~6ms.
+
+- **A failed login told the server as little as it told the caller.**
+  `local.Driver.Login` folded a wrong password, an unknown account, an account
+  with no local password and *any error from the user lookup* into one
+  `401 invalid credentials`. The answer is unchanged — a single unhelpful 401 is
+  what stops an attacker enumerating accounts — but each case now names itself
+  in the server's log, and a store failure is no longer reported as
+  `ErrUnauthorized`, so `auth.LoginChain` can tell "wrong password" from "the
+  directory is down". The two-factor refusals log their reason too.
+
+- **98 of 366 in-page documentation links pointed at nothing on docs.filex.sh.**
+  Every table of contents at the top of a `docs/*.md` page, the README's link
+  into `MCP.md`, both npm package READMEs — anything whose target heading held
+  an `&`, a `/`, an em dash, a dot, an apostrophe or a leading number.
+
+  The links were not sloppy. They were **correct GitHub anchors**: these pages
+  are read on two surfaces, and GitHub's slug rule is not VitePress's.
+  `## Backup & restore` is `#backup--restore` on GitHub and was
+  `#backup-restore` here; a heading reading *Token kinds — `user` vs `app`* is
+  `#token-kinds--user-vs-app` there and was `#token-kinds-—-user-vs-app` here,
+  em dash and all. Rewriting the 98 links to VitePress's ids would only have
+  moved the breakage onto GitHub, so the site's slug rule was changed to
+  GitHub's instead (`docs-site/.vitepress/github-slug.mjs`, measured against
+  `api.github.com/markdown` and pinned by `web/tests/docs/anchorSlug.test.ts`).
+  One rule, both surfaces — which is also what lets a single check guard both.
+
+  ⚠ Anchors on docs.filex.sh that contained one of those characters have
+  changed. An external deep link into a section whose heading holds an `&` or
+  an em dash now needs the GitHub spelling, which is the one the docs
+  themselves use.
+
+- **Five headings carried a non-breaking hyphen, and the anchors into them were
+  dead on both surfaces.** `## Read‑only mounts` in `STORAGE.md`, `Per‑path
+  modes` and `3. Rules — per‑path modes` in `REPLICATION.md`, `S3 / S3‑compatible`
+  in `STORAGE.md`, `Boot‑time backfill` in `thumbnails.md`. U+2011 is not a
+  hyphen to either slugger: GitHub deletes it (`#readonly-mounts`) and VitePress
+  kept it verbatim, so `#read-only-mounts` — the only spelling anyone would type,
+  and the one three links used — matched neither. Invisible in every editor;
+  found by comparing bytes, not appearances.
+
+### Changed
+
+- **The explorer no longer draws a Trash folder in listings when the navigation
+  panel is already offering one.** The virtual `.trash` row exists for one
+  reason: a listing with no other way into the bin. Once the panel carries a
+  Trash entry that reason is gone, and what is left is a second door to the same
+  place — a 0-byte row that is not a folder, sitting among real ones, while the
+  panel's own Trash entry is a few inches to its left.
+
+  The rule is about the panel, not the profile: the duplication is exactly as
+  wrong in `standard` with the panel on as it is in `drive`. `trashVisible:
+  false` still means no Trash anywhere, and where there is **no** panel —
+  `sideNav: false`, or the default under `rootPath` — the row is unchanged,
+  because that is the case it was invented for.
+
+  Decided per panel *availability*, not per panel *visibility*: collapsed to the
+  icon rail still counts (the entry is still there, one click, still labelled),
+  and so does a closed drawer under 560px (the panel toggle is on screen at
+  every width). Keying it to what is painted right now would add and remove a
+  row from the listing every time somebody opened the drawer.
+
+  ⚠ **Behaviour change for existing embeds.** An embed that mounts the panel —
+  the default — will stop seeing the Trash row in its listings. That is the
+  intent, and the destination is unchanged: the panel's Trash entry goes to the
+  same place. An embed that wants the row back turns the panel off, and one that
+  wants no Trash at all still sets `trashVisible: false`.
+
+- **Two CI gates had been failing without anybody seeing them.** `gofmt -l` has
+  been red on `main` since 2026-08-17: four files were genuinely unformatted,
+  invisible because on a Windows checkout the same command flagged all 553 `.go`
+  files for line endings, and the real signal sat under the noise. `pnpm -r lint`
+  was red too — locally it printed 32 errors, 27 of them from a generated
+  directory that no CI clone even has, which is how the five real ones went
+  unread. Both gates are green and, more to the point, legible: the first thing
+  the formatting gate did once the noise was gone was catch a file this release
+  brought in unformatted.
+
+- **The docs site is now checked, twice, by things that can fail.** Its build was
+  in no pipeline at all, and a dead in-page anchor never failed anything —
+  VitePress fails a build on a dead *page* link and says nothing about an anchor,
+  so a green build was not evidence. It also could not build at all: an unquoted
+  value containing a colon in the home page's front matter broke the YAML
+  outright. The site now uses **GitHub's own heading-id rule** rather than its
+  own, because these pages are read on both surfaces and the 98 in-page links
+  that resolved nowhere on the site were all correct GitHub anchors — rewriting
+  them would have moved the breakage rather than removed it. `lint:docs` builds
+  the site and runs `scripts/check-doc-anchors.mjs` against what it emitted.
+  ⚠ Deep links into docs.filex.sh headings containing `&`, `/`, an em dash, a
+  dot, an apostrophe or a leading digit have changed spelling.
+
+- **Line endings are the repository's decision, not the contributor's.** A new
+  `.gitattributes` pins every text file to LF (`.editorconfig` has said so since
+  the beginning; git never read it) and marks the binary fixtures explicitly.
+  Nothing committed changes — every tracked blob was already LF — but a Windows
+  *working tree* was CRLF, so a shell script from this checkout failed under WSL
+  or Linux with `/usr/bin/env: 'bash\r': No such file or directory`, and nothing
+  had ever stopped a CRLF blob from being committed by someone with
+  `core.autocrlf=false`.
+
+- **`docs/MULTI-TENANCY.md` said it was unfinished.** Its status line still read
+  "in progress — Phase 1 landed on `feat/multi-tenant`" while nine of its ten
+  phases were shipped, the branch was gone, and a ten-provider deployment had
+  been running on the feature since v0.1.61. Three further claims in it were
+  wrong in the same direction: it promised a `(provider_id, email)` unique
+  migration "00015" that does not exist (00015 is `provider_cookie_domain`, and
+  e-mail is still globally unique), it stated per-tenant e-mail uniqueness as
+  fact, and it listed per-tenant branding as v2 when branding had shipped
+  through prefixed `settings` keys.
 
 ## [0.31.0] - 2026-09-05
 
@@ -559,7 +951,7 @@ cannot reach is not shipped.
   in memory while it is sent, so a retry replays it byte for byte; a larger one
   streams through as before, because buffering every body would trade a rare
   failed upload for an out-of-memory kill. See
-  [STORAGE.md](docs/STORAGE.md#s3--s3compatible).
+  [STORAGE.md](docs/STORAGE.md#s3--s3-compatible).
 
 ### Changed
 

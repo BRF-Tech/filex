@@ -38,6 +38,15 @@ const props = defineProps<{
    * own screenshots show — had a view they could not fill.
    */
   starredIds?: Set<number>;
+  /**
+   * Offer the star affordance at all. Follows the Starred view: when the panel
+   * leaves that view out — a shared app token has no single person behind it,
+   * so "your starred files" is one list shown to strangers — offering to star
+   * something is offering to write into that same shared list. Owner's call,
+   * 2026-09-05: "yıldızlı yeri gözükmüyorsa o zaman yıldızla/yıldızı kaldır da
+   * gözükmemeli".
+   */
+  starEnabled?: boolean;
   apiBase?: string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
@@ -61,6 +70,7 @@ function thumbOf(n: FileNode): string | null {
 /** A card carries a star when the host wired the API and the node is a file
  *  with a server id — the same rule the list row uses. */
 function canStar(n: FileNode): boolean {
+  if (props.starEnabled === false) return false;
   return props.apiBase !== undefined && typeof n.id === 'number' && n.type === 'file';
 }
 
@@ -191,6 +201,7 @@ function metaFor(n: FileNode): string {
       role="option"
       :aria-selected="isSelected(n) ? 'true' : 'false'"
       :aria-label="nodeDisplayName(n)"
+      :data-fe-path="n.path /* wiring:d1 - middle-click new-tab delegation */"
       draggable="true"
       @click="onClick(n, $event)"
       @dblclick="onDbl(n)"

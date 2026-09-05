@@ -30,7 +30,8 @@
  */
 import { computed, ref } from 'vue';
 import { useLocale } from '../composables/useLocale';
-import type { LocaleCode } from '../types/ExplorerConfig';
+import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
+import ContextMenu, { type ContextAction } from './ContextMenu.vue';
 
 /** The virtual listings the panel can open. '' = an ordinary folder. */
 export type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
@@ -98,6 +99,37 @@ const props = defineProps<{
   /** RBAC/root state — false hides the write affordances. */
   canWrite?: boolean;
   locale: LocaleCode;
+  /* === surucu:d1 — the Drive shell ==================================== */
+  /**
+   * Fold the primary actions into ONE "+ New" menu (`uiProfile: 'drive'`).
+   *
+   * Absent/false keeps the two-button block every other profile has had since
+   * v0.30.1 — Upload as the primary, New folder one step quieter — so this is
+   * additive and nothing that mounts the package today moves.
+   *
+   * ⚠ The menu holds what the explorer can ALREADY do: upload files, make a
+   * folder (the modal offers the encrypted variant from inside itself), and
+   * ask somebody else for files. There is deliberately no "Upload folder": the
+   * upload path takes a flat `File[]` and would have to create the intermediate
+   * directories itself, and an entry that quietly flattens someone's folder into
+   * one heap is worse than an entry that is not there.
+   */
+  newMenu?: boolean;
+  /** Offer "Request files" in that menu — a folder we may write to and share. */
+  canRequestFiles?: boolean;
+  /**
+   * The signed-in person's storage line, from `GET /api/files/quota/me`. Null
+   * (the default) renders nothing at all.
+   *
+   * ⚠ It is a PER-USER figure, not this storage's — `quota.Snapshot` sums
+   * `nodes.size WHERE owner_id = me`, and there is no per-provider quota
+   * (internal/quota/service.go). The mockup labels it with the drive's name;
+   * that would be a lie about which number this is, so the label says
+   * "Storage" and the drive name stays out of it.
+   */
+  quota?: { used: number; total: number; unlimited: boolean } | null;
+  /** Resolved theme — the teleported New menu leaves the `.fe` variable scope. */
+  theme?: ThemeMode;
 }>();
 
 const emit = defineEmits<{
@@ -110,6 +142,8 @@ const emit = defineEmits<{
   (e: 'new-folder'): void;
   (e: 'open-connections'): void;
   (e: 'open-tokens'): void;
+  /* surucu:d1 — "Request files": the access modal on THIS folder, drop tab. */
+  (e: 'request-files'): void;
   /** Drawer scrim / Esc — narrow mode only. */
   (e: 'close'): void;
 }>();
@@ -167,6 +201,74 @@ const hiddenTagCount = computed(() => Math.max(0, allTags.value.length - visible
  * user learns the feature exists at all. It stays hidden only while the first
  * answer is still in flight. */
 const showTags = computed(() => !!props.tagsLoaded || allTags.value.length > 0);
+
+/* === surucu:d1 — the "+ New" menu ====================================
+ * One primary action instead of two buttons, the shape the reporter drew and
+ * the shape Drive/FileRun/Nextcloud share. It is the SAME ContextMenu the
+ * right-click menu uses — teleported to <body>, so the panel's own scroll
+ * container cannot clip it, and one keyboard/focus behaviour for both. */
+const newBtnEl = ref<HTMLElement | null>(null);
+const newMenuRef = ref<InstanceType<typeof ContextMenu> | null>(null);
+
+const newActions = computed<ContextAction[]>(() => {
+  const list: ContextAction[] = [
+    { key: 'upload', label: t('drive.new.upload'), icon: '⬆', disabled: !writable.value },
+    { key: 'new-folder', label: t('drive.new.folder'), icon: '📁', disabled: !writable.value },
+  ];
+  // Only when there is a real folder to hang a drop link on. Rendered as a
+  // disabled row rather than dropped, so the menu does not change height
+  // between folders — a menu whose items move is a menu people misclick.
+  list.push({ divider: true, key: 'new-sep', label: '' });
+  list.push({
+    key: 'request-files',
+    label: t('drive.new.request'),
+    icon: '🔗',
+    disabled: !props.canRequestFiles,
+  });
+  return list;
+});
+
+function openNewMenu() {
+  const r = newBtnEl.value?.getBoundingClientRect();
+  newMenuRef.value?.show(
+    { clientX: r ? r.left : 0, clientY: r ? r.bottom + 6 : 0 } as MouseEvent,
+    [],
+  );
+}
+
+function onNewSelect(a: ContextAction) {
+  if (a.key === 'upload') emit('upload');
+  else if (a.key === 'new-folder') emit('new-folder');
+  else if (a.key === 'request-files') emit('request-files');
+}
+
+/* === surucu:d1 — the storage line =================================== */
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  const digits = v < 10 && i > 0 ? 1 : 0;
+  return `${v.toFixed(digits)} ${units[i]}`;
+}
+
+const quotaPercent = computed(() => {
+  const q = props.quota;
+  if (!q || q.unlimited || q.total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((q.used / q.total) * 100)));
+});
+
+const quotaText = computed(() => {
+  const q = props.quota;
+  if (!q) return '';
+  return q.unlimited || q.total <= 0
+    ? t('drive.storage.used_unlimited', { used: formatBytes(q.used) })
+    : t('drive.storage.used', { used: formatBytes(q.used), total: formatBytes(q.total) });
+});
 
 const toggleLabel = computed(() =>
   props.narrow
@@ -238,7 +340,35 @@ const toggleLabel = computed(() =>
          that appears and disappears makes every row below it jump by 90px each
          time the user opens a view, which reads as the panel reloading. -->
     <div class="fe-sidenav__primary">
+      <!-- surucu:d1 — one primary action, the shape #14's mockups draw. The
+           two-button block below is what every other profile still renders. -->
       <button
+        v-if="newMenu"
+        ref="newBtnEl"
+        type="button"
+        class="fe-sidenav__new"
+        aria-haspopup="menu"
+        :title="t('drive.new')"
+        :aria-label="t('drive.new')"
+        data-testid="sidenav-new"
+        @click="openNewMenu"
+      >
+        <svg
+          class="fe-ficon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span v-if="showLabels" class="fe-sidenav__text">{{ t('drive.new') }}</span>
+      </button>
+      <button
+        v-if="!newMenu"
         type="button"
         class="fe-sidenav__upload"
         :disabled="!writable"
@@ -265,6 +395,7 @@ const toggleLabel = computed(() =>
         <span v-if="showLabels" class="fe-sidenav__text">{{ t('toolbar.upload') }}</span>
       </button>
       <button
+        v-if="!newMenu"
         type="button"
         class="fe-sidenav__secondary"
         :disabled="!writable"
@@ -568,5 +699,34 @@ const toggleLabel = computed(() =>
         </ul>
       </div>
     </div>
+
+    <!-- surucu:d1 — the storage line. Under the navigation, above nothing:
+         it is the last thing in the panel because it is a status, not a
+         destination. Hidden entirely when the server did not answer (an app
+         token has no person to have a quota) rather than drawn empty. -->
+    <div v-if="quota" class="fe-sidenav__quota" data-testid="sidenav-quota">
+      <p v-if="showLabels" class="fe-sidenav__quota-label">{{ t('drive.storage.label') }}</p>
+      <div
+        class="fe-sidenav__quota-bar"
+        role="progressbar"
+        :aria-valuenow="quotaPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :aria-label="quotaText"
+        :title="quotaText"
+      >
+        <span class="fe-sidenav__quota-fill" :style="{ width: quotaPercent + '%' }"></span>
+      </div>
+      <p v-if="showLabels" class="fe-sidenav__quota-text">{{ quotaText }}</p>
+    </div>
+
+    <ContextMenu
+      v-if="newMenu"
+      ref="newMenuRef"
+      :locale="locale"
+      :theme="theme"
+      :actions="newActions"
+      @select="onNewSelect"
+    />
   </nav>
 </template>

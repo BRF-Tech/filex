@@ -35,10 +35,18 @@ Cypress.on('uncaught:exception', (err) => {
 /**
  * The desktop-app / PWA install banner is dismissed before every page load.
  *
- * ⚠ Not cosmetic. The banner's wrapper is `fixed inset-x-0 bottom-0 z-40` with
- * NO `pointer-events-none` (its neighbour PendingOpsTray has one), so the full
- * width of the bottom strip is a hit target — including the 256px the admin
- * sidebar occupies. Measured 2026-09-05 at the configured 1440x900 viewport:
+ * ⚠ Not cosmetic — though the reason has changed since this was written, so
+ * read the current one. The wrapper NOW carries `pointer-events-none` with
+ * `pointer-events-auto` on the card inside it, so the bottom strip is no
+ * longer a hit target across its whole width. What remains is the card itself:
+ * it is centred at the bottom, it grew a row when the Windows portable
+ * download was added, and at phone widths it covers the sign-in button
+ * outright (measured, and guarded by `91-install-banner-login.cy.ts`, which
+ * opts out of this dismissal to measure it). The banner is no longer rendered
+ * before sign-in at all.
+ *
+ * The original measurement, kept because it is why this hook exists: with no
+ * `pointer-events-none` at all, at the configured 1440x900 viewport,
  * `document.elementFromPoint()` over each sidebar link returns the banner's
  * wrapper for every destination below "API / MCP", i.e. Settings, Branding,
  * Protection, External, Replication, Queue, Notifications, Webhooks, Plugins,
@@ -56,9 +64,12 @@ Cypress.on('uncaught:exception', (err) => {
  * itself is measured by 90-pwa-install, which opts out with
  * `Cypress.env('KEEP_INSTALL_BANNER', true)`.
  *
- * ⚠ The overlap is a real UI bug and it is NOT fixed here — see the report /
- * `web/cypress/README.md`. Suppressing it in the suite keeps every other spec
- * measuring its own subject instead of measuring this one.
+ * Suppressing it in the suite keeps every other spec measuring its own subject
+ * instead of measuring this one. ⚠ But a spec that suppresses a component
+ * cannot also test it: `91-install-banner-login.cy.ts` passed against a build
+ * that rendered the banner over the sign-in button until it opted out of this
+ * hook. If you write a spec about the banner, opt out first, or you are
+ * measuring the hook.
  */
 const INSTALL_DISMISS_KEY = 'filex.installPrompt.dismissed';
 

@@ -370,8 +370,120 @@ async function startServer(binary) {
     const tail = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').slice(-2000) : '';
     throw new Error(`${err.message}${exited ? ` (process exited: ${exited})` : ''}\n${tail}`);
   }
+  await assertOurOwnInstance(baseURL, () => exited, logFile);
   log('server is up');
   return { baseURL, dataDir };
+}
+
+/**
+ * Refuse to run against an instance this process did not start.
+ *
+ * ⚠ Measured 2026-09-05, twice in one afternoon and by two different agents.
+ * When a port is already taken, `filex serve` fails to bind and exits — but
+ * `/healthz` answers anyway, from the STRANGER, and `waitFor` cannot tell the
+ * difference. Everything downstream then talks to somebody else's tree: the
+ * seeder creates its storage there, the suite measures it, and the run reports
+ * a confident number about a build nobody asked about. One probe came back
+ * carrying storages ("My files", "Marketing") and tags ("design", "invoices")
+ * it had never created, which is the only reason it was noticed at all.
+ * Nothing errored, and nothing would have.
+ *
+ * Two independent checks, because either alone can be fooled:
+ *
+ *   1. the child process this run started is still alive. A bind failure is an
+ *      exit — but the exit can arrive after `/healthz` has already answered,
+ *      so it is checked here rather than at spawn time.
+ *   2. the instance reports ZERO storages. A first-boot filex has none, so a
+ *      non-empty list means the data directory behind this port is not the
+ *      throwaway one we just made. This also catches a leftover instance of
+ *      our own from an earlier unclean run.
+ *
+ * ⚠ Ordering matters: this runs BEFORE any seeding, so a refusal cannot leave
+ * a storage row behind in somebody else's instance.
+ */
+async function assertOurOwnInstance(baseURL, exitedRef, logFile) {
+  const readLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '');
+  const why = (msg) =>
+    new Error(
+      `${msg}
+${baseURL} is answering, but it is not the server this run started — most ` +
+        `likely another agent or a leftover process already holds that port. Pick a ` +
+        `different --port, or omit it and let a free one be chosen.
+${readLog().slice(-1500)}`,
+    );
+
+  // 1. Did OUR child fail to bind?
+  //
+  // ⚠ Two earlier versions of this check let a foreign instance straight
+  // through, and both failures are worth keeping written down because they are
+  // the same mistake in two disguises: sampling a race instead of waiting for
+  // its verdict.
+  //
+  //  a) "is `exited` set?", asked once, right after `waitFor`. `waitFor`
+  //     returns on the FIRST 200 from /healthz, and when a stranger already
+  //     holds the port that 200 arrives in milliseconds — while our own child
+  //     is still running migrations. Nothing had exited yet, so the check
+  //     passed and the seeder wrote a storage into the other agent's instance.
+  //  b) the same, plus a fixed 1.5s settle. Measured: our child spends ~1.3s on
+  //     migrations, cache setup and generating SFTP/FTPS keys BEFORE it ever
+  //     touches the port, so the settle expired before the bind was attempted.
+  //
+  // So the wait has to be anchored to the child's own progress, not to a
+  // stopwatch. `server.Run` logs `filex listening addr=…` on the line directly
+  // above `ListenAndServe`, which makes it the marker for "the bind is about to
+  // happen". Measured on a child whose port was taken: that line, then
+  // `Error: listen tcp … bind: Only one usage of each socket address…`, then
+  // exit 1 — all within ~2ms. So: wait for the marker, then settle briefly.
+  //
+  // ⚠ The marker alone proves nothing (the FAILING child logs it too). It is
+  // only the starting gun for the settle window.
+  const BIND_FAILURE = /bind:|address already in use|Only one usage of each socket address/i;
+  const AT_BIND = /filex listening/;
+  const deadline = Date.now() + 90_000;
+  let settleUntil = null;
+  for (;;) {
+    const exited = exitedRef();
+    if (exited) throw why(`the filex process this run started has exited (${exited}).`);
+    const out = readLog();
+    if (BIND_FAILURE.test(out)) {
+      throw why('the filex process this run started could not bind the port.');
+    }
+    if (settleUntil === null && AT_BIND.test(out)) settleUntil = Date.now() + 750;
+    if (settleUntil !== null && Date.now() >= settleUntil) break;
+    if (Date.now() >= deadline) {
+      throw why('the filex process this run started never reached its listener.');
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  // 2. Is the instance FRESH?
+  //
+  // A first-boot filex has no storages, so a non-empty list means the data
+  // directory behind this port is not the throwaway one we just made. This
+  // catches the case the liveness check cannot: a leftover instance of our own,
+  // or a stranger that has already been seeded — including by an earlier run
+  // of this harness that went to the wrong place.
+  //
+  // ⚠ Ordering matters: both checks run BEFORE any seeding, so a refusal
+  // cannot leave a storage row behind in somebody else's instance.
+  let rows;
+  try {
+    const cookie = await adminCookie(baseURL);
+    const res = await fetch(`${baseURL}/api/admin/storages`, { headers: { cookie } });
+    if (!res.ok) throw new Error(`GET /api/admin/storages answered ${res.status}`);
+    rows = await res.json();
+  } catch (err) {
+    // ⚠ Not swallowed into a pass. Being unable to ask the question is not the
+    // same as the answer being "fresh", and this guard exists precisely for the
+    // case where the thing on the other end is not what we think it is.
+    throw why(`could not verify the instance is fresh: ${err.message}`);
+  }
+  const names = Array.isArray(rows) ? rows.map((s) => s?.name) : [];
+  if (names.length > 0) {
+    throw why(
+      `a freshly started filex has no storages, and this one lists ${names.length}: ${names.join(', ')}.`,
+    );
+  }
 }
 
 /** Session cookie for the deterministic admin, the way a browser gets one. */

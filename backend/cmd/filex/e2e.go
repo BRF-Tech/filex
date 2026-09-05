@@ -40,9 +40,14 @@ func e2eEscrowKeygenCmd() *cobra.Command {
 			"The PUBLIC half goes in " + e2e.EnvEscrowKey + " on the server.\n" +
 			"The PRIVATE half is yours to keep and is never sent to, stored by, or\n" +
 			"recoverable from filex. Put it somewhere you would put a root password.\n\n" +
-			"Run this BEFORE the first boot of a new installation: escrow cannot be\n" +
-			"turned on afterwards, because folders created without it carry no\n" +
-			"escrow-wrapped key material and nothing can add it later.",
+			"Best run BEFORE the first boot, so every folder is covered. An\n" +
+			"installation that already exists can still adopt escrow by setting\n" +
+			e2e.EnvEscrowAdopt + "=1 alongside the key for one boot — but that is\n" +
+			"NOT retroactive: folders created before the adoption carry no\n" +
+			"escrow-wrapped key material, and no operator action adds one, because\n" +
+			"that needs the folder password and filex has never had it. Each such\n" +
+			"folder's OWNER is offered a slot the next time they unlock it, and can\n" +
+			"grant it with the password. You can ask; you cannot take.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pub, priv, err := e2e.GenerateEscrowKeyPair(bits)
 			if err != nil {
@@ -67,8 +72,12 @@ func e2eEscrowKeygenCmd() *cobra.Command {
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "What the private key does: opens any E2E-encrypted folder created")
 			fmt.Fprintln(out, "while this escrow key was configured, without the folder password.")
-			fmt.Fprintln(out, "What it does not do: open folders created before escrow was enabled,")
-			fmt.Fprintln(out, "or on an installation configured with a different escrow key.")
+			fmt.Fprintln(out, "What it does not do: open folders created before escrow was enabled")
+			fmt.Fprintln(out, "(including everything older than an adoption — see")
+			fmt.Fprintln(out, e2e.EnvEscrowAdopt+"), or folders from an installation")
+			fmt.Fprintln(out, "configured with a different escrow key. Those folders' owners can")
+			fmt.Fprintln(out, "each grant this key a slot from the web UI, with the folder password;")
+			fmt.Fprintln(out, "nothing you do on the server can.")
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Lose it and you lose the escrow path. filex has no copy — that is the")
 			fmt.Fprintln(out, "point: a stolen filex database decrypts nothing.")

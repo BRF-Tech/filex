@@ -50,7 +50,8 @@ const config = {
   trashVisible: true,
   sideNav: true,          // the navigation panel (default on)
   connections: true,      // its "How to connect" + "API keys" entries
-  uiProfile: 'standard',  // or 'simple' — one pane, list/grid, no tabs
+  uiProfile: 'standard',  // 'simple' — one pane, list/grid, no tabs
+                          // 'drive'  — that, plus the Drive-shaped shell
 };
 </script>
 
@@ -108,7 +109,7 @@ const config = {
   apiBase: 'https://files.example.com',
   auth: { kind: 'bearer', token },
   sideNav: true,          // default; `rootPath` flips it off
-  uiProfile: 'simple',    // 'standard' (default) | 'simple'
+  uiProfile: 'simple',    // 'standard' (default) | 'simple' | 'drive'
 };
 ```
 
@@ -136,6 +137,29 @@ connect", Upload, the storages and Trash stay. See
 from the build. It turns off the tab strip and the split pane, reduces the view
 switcher to list + grid, and starts the navigation panel expanded, for the
 people who want a file drive rather than a file manager.
+
+`uiProfile: 'drive'` is `simple` plus the shell those people already know:
+
+- one primary **+ New** menu in the panel (upload files · new folder · request
+  files) instead of the Upload / New folder pair,
+- one **search field across the header** with a ⌘K / Ctrl+K chip that hands the
+  query to the command palette — the field searches the folder you are in, the
+  palette is where "everywhere", saved searches and commands live,
+- a **filter row** under the breadcrumb: Type · Modified · Size,
+- **Folders** and **Files** as labelled sections in grid view,
+- the details panel split into **Details** and **Activity**, with "People with
+  access" and a share-link row,
+- a **storage line** under the navigation (`GET /api/files/quota/me`).
+
+Nothing is removed here either: density, theme, the shortcut editor, the tour
+and the other view modes all live in the header's "⋯" menu, and the view
+switcher and details toggle move to the breadcrumb row rather than disappearing.
+
+⚠ There is deliberately **no People filter** and no Owner column, though the
+mockups this profile came from draw both: a listing row carries no owner
+(`nodes.owner_id` is quota bookkeeping, serialized by nothing) and the listing
+endpoint reads no owner parameter. A chip that opens, offers names and changes
+nothing is worse than no chip.
 
 ### Connections
 

@@ -19,6 +19,20 @@ const props = defineProps<{
   /** Server ceiling on a new link's life in days (capabilities.share_max_ttl_days).
    *  undefined/0 = no ceiling. The expiry choices are derived from it. */
   shareMaxTtlDays?: number;
+  /**
+   * surucu:d1 — which tab this modal opens on. Absent = 'perms', the behaviour
+   * every existing caller has.
+   *
+   * The drive shell's "Request files" needs 'drop': the file-drop link already
+   * lives in this modal, and a menu entry that opens it on the permissions tab
+   * and leaves the user to find the third tab is a menu entry that lied about
+   * what it does.
+   *
+   * ⚠ A hint, not a lock: `load()` still falls back to 'share' when the caller
+   * turns out not to be an owner, because the permissions tab is not theirs to
+   * see.
+   */
+  initialTab?: 'perms' | 'share' | 'drop';
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -37,7 +51,7 @@ const pathParts = computed(() => {
 });
 
 type Tab = 'perms' | 'share' | 'drop';
-const tab = ref<Tab>('perms');
+const tab = ref<Tab>(props.initialTab ?? 'perms');
 const canManage = ref(false); // owner/admin → can see the permissions tab
 
 // ── permissions state ──
@@ -185,7 +199,9 @@ async function reload() {
     if (st === 403) {
       canManage.value = false;
       // Editor (not owner): no permissions tab → fall back to the link tab.
-      tab.value = 'share';
+      // ⚠ Unless the caller asked for a specific one: "Request files" opens
+      // 'drop', which an editor may perfectly well use.
+      if (!props.initialTab || props.initialTab === 'perms') tab.value = 'share';
     } else {
       err.value = e instanceof Error ? e.message : String(e);
     }

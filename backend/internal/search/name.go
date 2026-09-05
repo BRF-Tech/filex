@@ -316,7 +316,31 @@ func containsAll(hay string, words []string) bool {
 // distance of 1 on a three-letter word matches a large slice of any term
 // dictionary and buys nothing, so short words stay exact; two edits wait
 // until a word is long enough that two edits still leave it recognisable.
+//
+// ⚠ A word that is ALL DIGITS is never fuzzy, whatever its length.
+// Measured on the demo corpus after v0.30.0 shipped typo tolerance:
+// searching `2026` returned `annual report 2025.docx` as its second hit,
+// because one digit is one edit. But a near-miss digit is not a
+// misspelling of the same number — it is a different year, a different
+// invoice, a different order id. Edit distance models a finger landing on
+// the wrong key in a WORD, where the reader still recognises the intent;
+// in a number there is no intent left to recover, only a wrong answer that
+// looks like a right one.
+//
+// Mixed words (`v2024x`, `report2024`) deliberately stay fuzzy. Their
+// letters carry the same typo risk any word does, and the normaliser has
+// already split off the numbers that stand on their own — `invoice_2026.pdf`
+// reaches this function as three words, one of which is `2026`. Exempting
+// mixed tokens would take typo tolerance away from a whole class of real
+// filenames to protect a number the normaliser never isolated.
+//
+// This only turns the FUZZY pass off for such a word. The exact, prefix,
+// substring and separator-blind paths are untouched, so `2026` still finds
+// `invoice_2026.pdf` and `Budget-2026.csv`.
 func fuzzinessFor(word string) int {
+	if isAllDigits(word) {
+		return 0
+	}
 	switch n := len([]rune(word)); {
 	case n <= 3:
 		return 0
@@ -325,4 +349,19 @@ func fuzzinessFor(word string) int {
 	default:
 		return 2
 	}
+}
+
+// isAllDigits reports whether word is non-empty and made only of digits.
+// Unicode digits, not ASCII 0-9, for the same reason Normalize keeps
+// letters by class: a query is whatever the user's keyboard produced.
+func isAllDigits(word string) bool {
+	if word == "" {
+		return false
+	}
+	for _, r := range word {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }

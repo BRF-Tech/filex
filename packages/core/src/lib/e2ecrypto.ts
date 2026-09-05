@@ -40,10 +40,19 @@
  *   - No key, password or recovery key is ever stored, logged or sent to a
  *     server. The FMK lives in an in-memory key ring and dies with the tab.
  *   - `deriveKek` imports non-extractable. Raw KEK bytes are produced ONLY
- *     by `deriveKekBits`, only while upgrading a v1 marker, and only long
- *     enough to wrap them into the new slots.
+ *     by `deriveKekBits`, only for a marker whose FMK *is* the KEK
+ *     (`upgradeMarkerV1`, and `addEscrowSlot` on a folder it produced), and
+ *     only long enough to wrap them into a slot.
  *   - A folder created while escrow was off carries no escrow slot, so the
- *     escrow key cannot open it. That is arithmetic, not policy.
+ *     escrow key cannot open it, and nothing the OPERATOR does changes
+ *     that — not enabling escrow, not adopting it, not any admin action or
+ *     future version. That is arithmetic, not policy: adding a slot needs
+ *     the folder master key, and the server has never held a credential
+ *     that produces one.
+ *   - The folder's OWNER can, from inside, with the password:
+ *     `addEscrowSlot`. That is the only door, it opens from one side only,
+ *     and it is the reason `escrowAvailability` says "not as things stand"
+ *     rather than "never".
  *
  * File layout ('filexe2e' magic, fixed 97-byte header) — UNCHANGED in v2:
  *   [0..8)   magic  "filexe2e"
@@ -114,6 +123,23 @@ export interface E2eMarker {
   rk?: E2eRecoverySlot;
   /** v2 only, optional: the operator escrow slot. */
   esc?: E2eEscrowSlot;
+  /**
+   * v2 only, optional: an ISO timestamp recording that this folder's owner
+   * was OFFERED an escrow slot and said no.
+   *
+   * It lives in the marker rather than in browser storage because the unit
+   * of the decision is the FOLDER, not the device: the same person opening
+   * the folder from their phone must not be asked again, and a decision
+   * that vanished when someone cleared their site data would be no decision
+   * at all. It travels with the folder through a move, a backup and a
+   * restore, for the same reason the key slots do.
+   *
+   * It holds no key material and hides nothing from the operator — it is a
+   * record of an answer, and its only effect is that filex stops asking.
+   * `addEscrowSlot` clears it, so a decline is reversible by the one person
+   * who can reverse it.
+   */
+  esc_declined?: string;
 }
 
 /** Thrown on wrong password / corrupted ciphertext (GCM tag mismatch). */
@@ -500,6 +526,126 @@ export async function upgradeMarkerV1(
   return { marker: next, fmk: kek, recoveryKey };
 }
 
+/**
+ * Give an EXISTING v2 folder an escrow slot, in place, using the folder
+ * password its owner has just typed.
+ *
+ * ── Why this exists ─────────────────────────────────────────────────
+ *
+ * Escrow used to be all-or-nothing at install time, and then adoptable but
+ * never retroactive: on any installation that had been running for a while,
+ * escrow covered only folders nobody had created yet. On a real deployment
+ * the folders that matter already exist, so "new folders only" means escrow
+ * covers nothing anyone cares about.
+ *
+ * The server still cannot do this, and that has not changed: adding a slot
+ * needs the folder master key, which needs a credential the server has never
+ * held. What CAN do it is the browser, at the one moment the password is in
+ * memory — exactly where `upgradeMarkerV1` already lives. Same moment, same
+ * shape, different slot.
+ *
+ * ⚠⚠ Accepting hands the operator of this installation a second, permanent
+ * way into this folder. It is the folder's owner who decides, from inside,
+ * with the password; no configuration change and no admin action can do it
+ * for them. The caller MUST say that in those words before calling this —
+ * see `e2e.escrowoffer.*` in the locales.
+ *
+ * ⚠ v2 only. A v1 marker has no slots at all; the path for those is
+ * `upgradeMarkerV1`, which already seals an escrow slot when the
+ * installation has a key and already discloses it. Two doors into the same
+ * room would be two chances to get the disclosure wrong.
+ *
+ * ⚠ No file is re-encrypted, moved or rewritten. Only `.filex-e2e.json`
+ * changes, and only by gaining `esc` (and losing `esc_declined`).
+ */
+export async function addEscrowSlot(
+  marker: E2eMarker,
+  password: string,
+  escrowPublicKey: string,
+): Promise<E2eMarker> {
+  if (marker.v !== 2) throw new Error('e2e: not a v2 marker');
+  if (marker.esc) throw new Error('e2e: this folder already has an escrow slot');
+  if (!escrowPublicKey) throw new Error('e2e: no escrow public key');
+
+  const salt = b64ToBytes(marker.salt);
+  const kek = await deriveKek(password, salt, marker.iter);
+  // Prove the password before touching anything, exactly as the v1 upgrade
+  // does. A wrong password here must not produce a marker at all — half a
+  // marker is a folder nobody can open.
+  const proof = await gcmOpen(kek, marker.verify);
+  if (!proof || new TextDecoder().decode(proof) !== VERIFY_PLAINTEXT) {
+    throw new E2eDecryptError('e2e: wrong password');
+  }
+
+  // The raw FMK, by mode. `wrapped` keeps a random FMK in `fmk_pw`, so the
+  // bytes come back from a GCM open and no extractable KEK is ever derived.
+  // `kek` (a v1 folder upgraded in place) defines the FMK AS the password
+  // key, so those very bytes are what the slot has to wrap — the one case
+  // that needs `deriveKekBits`, for the same reason `upgradeMarkerV1` does.
+  let rawFmk: Uint8Array;
+  if (marker.fmk === 'wrapped') {
+    const opened = marker.fmk_pw ? await gcmOpen(kek, marker.fmk_pw) : null;
+    if (!opened || opened.length !== FMK_LEN) {
+      throw new E2eDecryptError('e2e: could not unwrap the folder master key');
+    }
+    rawFmk = opened;
+  } else {
+    rawFmk = await deriveKekBits(password, salt, marker.iter);
+  }
+
+  const esc = await sealEscrowSlot(rawFmk, escrowPublicKey);
+  rawFmk.fill(0);
+
+  const next: E2eMarker = { ...marker, esc };
+  // A decline that is now moot. Leaving it would make the record say two
+  // contradictory things about the same folder.
+  delete next.esc_declined;
+  return next;
+}
+
+/**
+ * Record that this folder's owner was offered an escrow slot and declined.
+ *
+ * A refusal is a decision, not a delay: without this the offer would come
+ * back on every single unlock, which is how people learn to click past
+ * security dialogs without reading them. Nothing about the folder's keys
+ * changes — the only effect is that filex stops asking.
+ *
+ * Reversible by `addEscrowSlot`, which is the way back for somebody who
+ * says no today and changes their mind next month.
+ */
+export function declineEscrowSlot(marker: E2eMarker, when: string): E2eMarker {
+  return { ...marker, esc_declined: when };
+}
+
+/**
+ * Whether this folder's owner should be offered an escrow slot, and whether
+ * they have already answered.
+ *
+ *   'n/a'       nothing to offer: the installation has no escrow key, the
+ *               folder already has a slot, or the marker is v1 (whose path
+ *               is `upgradeMarkerV1`).
+ *   'offer'     the offer applies and no answer has been recorded.
+ *   'declined'  the offer applies and the owner said no. Do not ask again;
+ *               leave a way back.
+ *
+ * ⚠ This deliberately does NOT look at whether the folder is unlocked. That
+ * is the caller's business, and it matters: the offer may only be shown
+ * after an unlock actually succeeded, because accepting needs the password
+ * and because asking someone who cannot open the folder to give away a key
+ * to it is asking the wrong person.
+ */
+export type EscrowOfferState = 'n/a' | 'offer' | 'declined';
+
+export function escrowOfferState(
+  m: E2eMarker | null,
+  installationKid: string | null | undefined,
+): EscrowOfferState {
+  if (!installationKid) return 'n/a';
+  if (!m || m.v !== 2 || m.esc) return 'n/a';
+  return m.esc_declined ? 'declined' : 'offer';
+}
+
 /** Parse marker JSON text; returns null when the shape is not a marker we read. */
 export function parseMarker(text: string): E2eMarker | null {
   try {
@@ -525,6 +671,48 @@ export function markerHasRecovery(m: E2eMarker | null): boolean {
 /** True when the folder has an operator escrow slot. */
 export function markerHasEscrow(m: E2eMarker | null): boolean {
   return !!m && m.v === 2 && !!m.esc;
+}
+
+/**
+ * Why the escrow door is, or is not, on offer for this folder.
+ *
+ *   'off'        this installation has no escrow key at all.
+ *   'available'  the folder is sealed to THIS installation's escrow key.
+ *   'predates'   the installation has an escrow key, and this folder has no
+ *                escrow slot: it was created before escrow existed here.
+ *   'other-key'  the folder carries an escrow slot sealed to a DIFFERENT
+ *                key id — it came from another installation, via a restore
+ *                or a copied data directory.
+ *
+ * ⚠ 'predates' exists because escrow can be ADOPTED by an installation
+ * that already has folders (FILEX_INSTALLATION_E2E_ESCROW_ADOPT), and
+ * adoption is not retroactive: the folder's master key was wrapped to its
+ * recovery paths when the folder was created. Before this distinction
+ * existed the dialog simply showed no Escrow tab, which is true but says
+ * nothing — an admin who knows escrow is on reads a missing tab as a bug,
+ * tries the key anyway, and learns the real answer from a failure. The UI
+ * has to say it instead.
+ *
+ * ⚠⚠ 'predates' means "not as things stand", NOT "never". The folder's
+ * owner can add a slot from inside with the password (`addEscrowSlot`,
+ * offered at unlock). Any wording built on this state has to leave that
+ * door visible, or it tells an operator their escrow key can never reach a
+ * folder whose owner could hand it over this afternoon.
+ *
+ * ⚠ 'other-key' was a quieter lie: the dialog labelled the escrow field
+ * with the INSTALLATION's key id whatever the folder's slot said, so a
+ * folder restored from another install looked openable by the key the
+ * operator has, and was not.
+ */
+export type EscrowAvailability = 'off' | 'available' | 'predates' | 'other-key';
+
+export function escrowAvailability(
+  m: E2eMarker | null,
+  installationKid: string | null | undefined,
+): EscrowAvailability {
+  if (!installationKid) return 'off';
+  if (!markerHasEscrow(m)) return 'predates';
+  return m!.esc!.kid === installationKid ? 'available' : 'other-key';
 }
 
 /**

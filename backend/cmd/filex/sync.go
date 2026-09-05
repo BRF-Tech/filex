@@ -12,9 +12,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/brf-tech/filex/backend/internal/cliclient"
 	"github.com/brf-tech/filex/backend/internal/filesync"
-	"github.com/spf13/cobra"
 )
 
 // apiAdapter bridges the REST client to the narrow interface the sync engine

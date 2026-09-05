@@ -65,7 +65,7 @@ func TestPinInstallation_FirstBootRecordsWhatItWasGiven(t *testing.T) {
 	dir := t.TempDir()
 	key := testKey(t)
 
-	got, err := PinInstallation(context.Background(), st, dir, key, "2026-09-05T00:00:00Z")
+	got, err := PinInstallation(context.Background(), st, dir, key, "2026-09-05T00:00:00Z", Adoption{})
 	if err != nil {
 		t.Fatalf("first boot should pin, got %v", err)
 	}
@@ -94,28 +94,34 @@ func TestPinInstallation_SameKeyStartsQuietly(t *testing.T) {
 	dir := t.TempDir()
 	key := testKey(t)
 
-	if _, err := PinInstallation(context.Background(), st, dir, key, "t0"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, key, "t0", Adoption{}); err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
 	for i := 0; i < 3; i++ {
-		if _, err := PinInstallation(context.Background(), st, dir, key, "t1"); err != nil {
+		if _, err := PinInstallation(context.Background(), st, dir, key, "t1", Adoption{}); err != nil {
 			t.Fatalf("restart %d should be a no-op, got %v", i, err)
 		}
 	}
 }
 
 func TestPinInstallation_TurningEscrowOnLaterRefusesToStart(t *testing.T) {
-	// The case the whole mechanism exists for. An installation that ran
-	// without escrow has folders with no escrow-wrapped key; enabling escrow
-	// now would give the operator a key that opens the new half of the data
-	// and silently fails on the old half.
+	// The case the whole mechanism exists for, and the one that later grew
+	// a supervised exception. An installation that ran without escrow has
+	// folders with no escrow-wrapped key; enabling escrow silently would
+	// give the operator a key that opens the new half of the data and fails
+	// on the old half with nothing to say which is which.
+	//
+	// This transition CAN now be performed — see
+	// installation_adopt_test.go — but only when the operator says so in a
+	// second, separate variable. Setting the key alone still stops the
+	// server, and the message below is what they read when it does.
 	st := newFakeSettings()
 	dir := t.TempDir()
-	if _, err := PinInstallation(context.Background(), st, dir, nil, "t0"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, nil, "t0", Adoption{}); err != nil {
 		t.Fatalf("first boot without escrow: %v", err)
 	}
 
-	_, err := PinInstallation(context.Background(), st, dir, testKey(t), "t1")
+	_, err := PinInstallation(context.Background(), st, dir, testKey(t), "t1", Adoption{})
 	var mismatch *InstallationMismatchError
 	if err == nil {
 		t.Fatal("enabling escrow after install must refuse to start")
@@ -143,10 +149,10 @@ func TestPinInstallation_TurningEscrowOnLaterRefusesToStart(t *testing.T) {
 func TestPinInstallation_TurningEscrowOffLaterRefusesToStart(t *testing.T) {
 	st := newFakeSettings()
 	dir := t.TempDir()
-	if _, err := PinInstallation(context.Background(), st, dir, testKey(t), "t0"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, testKey(t), "t0", Adoption{}); err != nil {
 		t.Fatalf("first boot with escrow: %v", err)
 	}
-	if _, err := PinInstallation(context.Background(), st, dir, nil, "t1"); err == nil {
+	if _, err := PinInstallation(context.Background(), st, dir, nil, "t1", Adoption{}); err == nil {
 		t.Fatal("removing the escrow key after install must refuse to start")
 	}
 }
@@ -154,10 +160,10 @@ func TestPinInstallation_TurningEscrowOffLaterRefusesToStart(t *testing.T) {
 func TestPinInstallation_SwappingTheKeyRefusesToStart(t *testing.T) {
 	st := newFakeSettings()
 	dir := t.TempDir()
-	if _, err := PinInstallation(context.Background(), st, dir, testKey(t), "t0"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, testKey(t), "t0", Adoption{}); err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
-	if _, err := PinInstallation(context.Background(), st, dir, testKey(t), "t1"); err == nil {
+	if _, err := PinInstallation(context.Background(), st, dir, testKey(t), "t1", Adoption{}); err == nil {
 		t.Fatal("a different escrow key after install must refuse to start")
 	}
 }
@@ -168,15 +174,15 @@ func TestPinInstallation_SurvivesAWipedDatabaseViaTheMirror(t *testing.T) {
 	dir := t.TempDir()
 	key := testKey(t)
 	st := newFakeSettings()
-	if _, err := PinInstallation(context.Background(), st, dir, key, "t0"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, key, "t0", Adoption{}); err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
 
 	fresh := newFakeSettings() // database wiped, data dir intact
-	if _, err := PinInstallation(context.Background(), fresh, dir, key, "t1"); err != nil {
+	if _, err := PinInstallation(context.Background(), fresh, dir, key, "t1", Adoption{}); err != nil {
 		t.Fatalf("same key after a DB wipe should be fine: %v", err)
 	}
-	if _, err := PinInstallation(context.Background(), newFakeSettings(), dir, nil, "t2"); err == nil {
+	if _, err := PinInstallation(context.Background(), newFakeSettings(), dir, nil, "t2", Adoption{}); err == nil {
 		t.Fatal("the mirror must still refuse a changed value after a DB wipe")
 	}
 }
@@ -185,12 +191,12 @@ func TestPinInstallation_RestoresTheMirrorWhenTheDataDirWasEphemeral(t *testing.
 	dir := t.TempDir()
 	key := testKey(t)
 	st := newFakeSettings()
-	if _, err := PinInstallation(context.Background(), st, dir, key, "t0"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, key, "t0", Adoption{}); err != nil {
 		t.Fatalf("first boot: %v", err)
 	}
 	_ = os.Remove(filepath.Join(dir, InstallationFile)) // container restart, new volume
 
-	if _, err := PinInstallation(context.Background(), st, dir, key, "t1"); err != nil {
+	if _, err := PinInstallation(context.Background(), st, dir, key, "t1", Adoption{}); err != nil {
 		t.Fatalf("settings row should carry the pin: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, InstallationFile)); err != nil {
@@ -201,7 +207,7 @@ func TestPinInstallation_RestoresTheMirrorWhenTheDataDirWasEphemeral(t *testing.
 func TestPinInstallation_CorruptRecordIsAnErrorNotADefault(t *testing.T) {
 	st := newFakeSettings()
 	st.m[SettingInstallation] = "{not json"
-	if _, err := PinInstallation(context.Background(), st, t.TempDir(), nil, "t0"); err == nil {
+	if _, err := PinInstallation(context.Background(), st, t.TempDir(), nil, "t0", Adoption{}); err == nil {
 		t.Fatal("a corrupt pin must not be treated as 'no pin' — that re-pins silently")
 	}
 }

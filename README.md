@@ -35,8 +35,9 @@ Open http://localhost:5212/admin — the first run prints admin credentials and 
 instructions to the console. That URL is the operator's; the people you give accounts to
 get **http://localhost:5212/drive**, the same file manager without the panel around it.
 
-Prefer a window over a browser tab? The **desktop app** (Windows / Linux) signs in to
-any filex server and syncs folders in the background:
+Prefer a window over a browser tab? The **desktop app** (Windows / Linux / macOS) signs in
+to any filex server and syncs folders in the background — and on every platform there is a
+copy that runs **without being installed** (a portable `.exe`, an AppImage, a `.zip`):
 [latest release](https://github.com/BRF-Tech/filex/releases/latest) ·
 [docs/DESKTOP.md](docs/DESKTOP.md).
 
@@ -54,8 +55,12 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   storage someone shared with you simply appears there, one click, no mount
   instructions. Anyone can collapse it to an icon rail, and `uiProfile: 'simple'`
   presets the rest of the chrome off — one pane, one folder, list or grid — for people
-  who want a file drive rather than a file manager. One explorer either way: there is
-  no second UI to keep in step.
+  who want a file drive rather than a file manager. **`uiProfile: 'drive'`** goes one
+  step further and gives them the shell they already know: a single **+ New** menu,
+  one search field across the header with its ⌘K palette hint, a Type / Modified /
+  Size filter row, Folders and Files as labelled sections, Details and Activity in
+  the info panel, and a storage line. One explorer in every case: there is no second
+  UI to keep in step.
 - **Embeds anywhere** — the same UI ships as a Vue 3 component, a React component and a
   framework-agnostic `<filex-explorer>` web component. Put a real file manager inside
   *your* product, backed by your own filex server and locked to a per-tenant folder.
@@ -88,7 +93,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary, ~40 MB slim / 250 MB w/ thumbnails)      │
+│  filex (Go binary; 43 MB slim / 511 MB w/ thumbnails)       │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -134,6 +139,10 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 | Admin panel | Demo landing |
 |---|---|
 | ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Demo landing](docs/screenshots/demo-landing.png) |
+
+| The drive shell (`uiProfile: 'drive'`) — what a non-admin lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
+|---|---|
+| ![The drive shell](docs/screenshots/driveshell/driveshell-hero-1440.png) | ![Searching in the drive shell](docs/screenshots/driveshell/driveshell-search-1440.png) |
 
 | Navigation panel — Upload, Recent / Starred / Shared with me / Trash, and your storages | Collapsed to the icon rail |
 |---|---|
@@ -245,8 +254,8 @@ while Upload, the storages, Trash and "How to connect" stay. See
 
 ## Desktop app & CLI
 
-The explorer also ships as a **Windows / Linux desktop app** — the same component the web
-UI and the embeds render, not a separate half-copy:
+The explorer also ships as a **Windows / Linux / macOS desktop app** — the same component
+the web UI and the embeds render, not a separate half-copy:
 
 - **Several accounts at once** — a rail of servers/tenants, each showing its own branding.
 - **Drag files out** — drag a selection onto the desktop or into another app: folders and
@@ -269,8 +278,13 @@ UI and the embeds render, not a separate half-copy:
   ([docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)).
 - **Signs in through your browser**, so SSO and MFA behave exactly as they do on the web.
 - **Updates itself** — downloads quietly, installs on quit; `FILEX_NO_UPDATE=1` opts out.
+- **Runs without being installed**, if that is what you need: the Windows **portable**
+  `.exe`, the Linux AppImage and the macOS `.zip` all run from wherever you put them. The
+  portable Windows copy keeps everything it has in one `filex-data` folder beside itself,
+  so deleting that folder leaves nothing of yours on a machine that is not yours — the
+  trade is that it does not update itself.
 
-Installer, AppImage and `.deb` are attached to the
+Installer, portable `.exe`, AppImage, `.deb` and `.dmg` are attached to the
 [latest release](https://github.com/BRF-Tech/filex/releases/latest) — not code-signed yet,
 so expect a SmartScreen prompt on Windows. Details: [docs/DESKTOP.md](docs/DESKTOP.md).
 
@@ -315,12 +329,13 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **`filex mount`** — attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings. **Shared with me** answers the reverse question from the recipient's side — what other people granted you, and which storages you reach only through a grant.
+- **Drive shell (`uiProfile: 'drive'`)** — the end-user layout, and a preset of the same explorer rather than a second one: a primary **+ New** menu (upload files · new folder · request files), one **search field in the header** whose ⌘K / Ctrl+K chip hands the query to the command palette (the field searches this folder; the palette is where "everywhere", saved searches and commands live), a **Type · Modified · Size** filter row under the breadcrumb, **Folders** and **Files** as labelled sections in grid view, an info panel split into **Details** (with "People with access" and a share-link row) and **Activity** (version history and comments), and a **storage line** under the navigation. Density, theme, the shortcut editor and the other view modes stay one click away in the header's "⋯" menu — nothing is removed from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Navigation panel** — Upload as the primary action, the views Recent / Starred / Shared with me / Trash, the storages you can see, and **How to connect** + **API keys**: the per-protocol guides and the self-service token manager, opened from inside the explorer so an embedded copy's users can mint the credential WebDAV/FTPS/`filex mount` ask for instead of asking an administrator. Collapsible to an icon rail (remembered per browser), a drawer instead of a column under 560px. On by default in the web app, the desktop app and every embed; `uiProfile: 'simple'` additionally turns off the tab strip, the split pane, the gallery view mode and the "How to connect" surface without removing any of them from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Sharing** — public links with PIN, expiry and max-downloads, under an admin-set **maximum link life** (default 7 days — the dialog only offers what the server will keep); folder links stream as ZIP (cached, pre-warmed up to a size ceiling, swept after a week); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint ([docs/SHARING.md](docs/SHARING.md)).
 - **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
 - **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
-- **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key. Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** at install time, and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
+- **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key. Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** — at install, or adopted later on a running installation; it never reaches existing folders on its own, but their owners are offered the choice at unlock — and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
 - **Native multi-tenancy** — provider/tenant mode with per-tenant isolation on one instance ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)).
 - **Driver-pluggable everything** — storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
 - **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).
@@ -331,7 +346,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Viewers & editors** — image/video/audio, PDF, Markdown (split editor + preview), CSV, code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models.
 - **Universal converter** — optional side-car converts between document/image formats from the UI.
 - **Notifications** — generic JSON webhook (Slack/Discord-agnostic) + in-app bell with read/unread + per-user mute matrix.
-- **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`), `tag:` filters, exact matches ranked first.
+- **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`) while numbers are matched literally (`2026` never means `2025`), `tag:` filters, exact matches ranked first.
 - **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware.
 - **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there.
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.
@@ -374,7 +389,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 **Operate & extend** — [Deployment](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) ·
 [Metrics](docs/METRICS.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Backend API spec](docs/BACKEND.md) · [Component API](docs/API.md) ·
-[Migration](docs/MIGRATION.md) · [OnlyOffice](docs/ONLYOFFICE.md) ·
+[OnlyOffice](docs/ONLYOFFICE.md) ·
 [Converter](docs/CONVERT-INTEGRATION.md)
 
 [Full documentation index](docs/README.md)

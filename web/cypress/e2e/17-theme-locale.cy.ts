@@ -7,6 +7,24 @@ describe('theme + locale persistence', () => {
     cy.apiLogin();
   });
 
+  // ⚠ This spec is the only one that writes to the shared admin account: it
+  // PATCHes the profile locale to `tr` to prove the label switch works. Cypress
+  // runs specs in one browser against one server, so without this the account
+  // stayed Turkish for every spec that ran afterwards -- and a later spec
+  // asserting an English product string would fail for a reason that has
+  // nothing to do with what it tests. Put it back, whatever happened above.
+  afterEach(() => {
+    cy.apiLogin().then((tok) => {
+      cy.request({
+        method: 'PATCH',
+        url: '/api/auth/profile',
+        headers: { Authorization: `Bearer ${tok}` },
+        body: { locale: 'en' },
+        failOnStatusCode: false,
+      });
+    });
+  });
+
   it('localStorage filex theme key survives across navigation', () => {
     cy.visit('/admin/dashboard');
     // Force-set the theme via localStorage (matches what the toggle

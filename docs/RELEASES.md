@@ -18,14 +18,58 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.27.6, 1 September 2026
-- the first signed tag.
+::: tip Latest — v0.31.0, 5 September 2026
+Forgetting the password on an encrypted folder no longer means losing the files. Creating one now shows a recovery key once — filex never stores it, and it opens the folder without the password. The file format did not change: existing encrypted files are byte-identical and open unchanged, verified by a round-trip test against a frozen copy of the previous release's crypto module. A folder made before this release cannot be given a recovery key by the server, because the server has no password to re-wrap with, so filex offers the upgrade at the one moment it holds one — the next successful unlock. Operators who need a second way in can set an escrow key at install time; it is RSA-OAEP, filex keeps only the public half, and the documentation says plainly that this is a backdoor and what its notification can and cannot promise. Also here: starring is a real action rather than a badge that only existed in list view, tags are browsable from the navigation panel, opening a virtual view like Trash from its own URL no longer says "Folder not found", and API tokens are split into user and app kinds so a shared embed credential can no longer manage its owner's keys.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.27.6
-docker pull ghcr.io/brf-tech/filex:full-v0.27.6
+docker pull ghcr.io/brf-tech/filex:slim-v0.31.0
+docker pull ghcr.io/brf-tech/filex:full-v0.31.0
 ```
+
+## v0.31.0
+
+<span class="filex-release-date">5 September 2026</span>
+
+Forgetting the password on an encrypted folder no longer means losing the files. Creating one now shows a recovery key once — filex never stores it, and it opens the folder without the password. The file format did not change: existing encrypted files are byte-identical and open unchanged, verified by a round-trip test against a frozen copy of the previous release's crypto module. A folder made before this release cannot be given a recovery key by the server, because the server has no password to re-wrap with, so filex offers the upgrade at the one moment it holds one — the next successful unlock. Operators who need a second way in can set an escrow key at install time; it is RSA-OAEP, filex keeps only the public half, and the documentation says plainly that this is a backdoor and what its notification can and cannot promise. Also here: starring is a real action rather than a badge that only existed in list view, tags are browsable from the navigation panel, opening a virtual view like Trash from its own URL no longer says "Folder not found", and API tokens are split into user and app kinds so a shared embed credential can no longer manage its owner's keys.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.31.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.31.0`
+
+## v0.30.1
+
+<span class="filex-release-date">4 September 2026</span>
+
+A one-line patch. Opening Recent, Starred, Shared or Trash put the raw internal name of the view in the tab — `.shared` instead of Shared.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.30.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.30.1`
+
+## v0.30.0
+
+<span class="filex-release-date">4 September 2026</span>
+
+The explorer grew a collapsible navigation panel: Recent, Starred, Shared with me, tags and Trash on the left, with Upload as the primary action. It is part of the shared component, so it reaches the npm packages and every embed, not just the admin app — and `uiProfile: 'simple'` turns the admin-facing parts off for an end user. Connecting a client and minting an API key moved into the explorer too; both surfaces existed but lived only in the admin app. On the search side, the index now repairs itself after an upgrade instead of waiting for someone to rebuild it by hand, filename ranking is a port of VS Code's Quick Open scorer, and multi-word content search was an OR — so adding a word made the result set larger rather than smaller.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.30.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.30.0`
+
+## v0.29.0
+
+<span class="filex-release-date">4 September 2026</span>
+
+Open an Office document that lives on your own computer in the editor your filex server already runs: the desktop app registers for the usual extensions, so a machine with no Word or Excel installed can still edit one. Non-admin accounts get a front door of their own at `/drive` rather than landing in the admin shell. Search stopped depending on which separator a filename happened to use, forgives one typo, and has a stated ranking order instead of an inherited one — and `tag:` and `-tag:` filters put a feature that had existed for a long time within reach of the search box.
+
+**Other changes**
+
+- **Site** — Hand-written summary for v0.28.0.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.29.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.29.0`
+
+## v0.28.0
+
+<span class="filex-release-date">3 September 2026</span>
+
+If you run filex against LDAP or Active Directory, this is the release where that actually works. The directory driver could be configured, initialised and printed in the boot banner while being unreachable from every login path: a directory account with the correct password was refused in under a millisecond — less than one LDAPS round trip, so the request never left the machine. Directory users can now sign in on the normal password form, and on WebDAV, SFTP, FTPS, S3 and NFS as well; their accounts hold no password hash in filex, which is why those protocols used to refuse them forever. Local login is still tried first, so your break-glass admin keeps working while the directory is down. Also here: a `ca_file` option for a private CA (no more rebuilding the container's trust store), a filter that fills every placeholder rather than the first one, and search failures that are finally distinguishable from a wrong password in the log.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.28.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.28.0`
 
 ## v0.27.6
 
@@ -183,84 +227,24 @@ A night of syncing a real 10,000-file tree, and what it taught the engine. Trans
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.24.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.24.0`
 
-## v0.23.0
-
-<span class="filex-release-date">20 August 2026</span>
-
-The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window shows what the engine is doing while it does it. Single files can be kept, not just folders. The filex folder itself is now visible in Settings and can be moved, kept folders and all: a move to another drive is copied across rather than failing, a folder inside the current one is refused rather than half-applied, and if anything goes wrong the pair goes back where its files are instead of quietly unpairing. Unkeeping also stops leaving an empty folder skeleton behind — including one holding nothing but the .DS_Store the Finder dropped in it.
-
-**New**
-
-- **Core** — A folder holding kept items says so — the partial badge.
-- **Core** — Availability badges on every row, and a live progress strip for the folder being synced.
-- **Core** — Folder menus offer keeping a folder on this computer when a desktop shell mounts the explorer.
-- **Desktop** — Settings shows the mirror root and can move it.
-- **Desktop** — Files can be kept too, and online-only sweeps the empty skeleton.
-- **Desktop** — Selective sync — one root folder, keep and unkeep from the explorer menu.
-- **Desktop** — The supervisor parses engine progress into typed per-account state.
-- **Sync** — Single-file pairs — keep one file, not its whole folder.
-
-**Fixed**
-
-- **Desktop** — Mirror-root containment goes through isInsideDir everywhere.
-- **Desktop** — The skeleton sweep is not defeated by .DS_Store, and a migrated file pair stays a file pair.
-- **Desktop** — Unpairing cannot leave a ghost watcher, and the ad-hoc mac build stops promising self-updates.
-- **Sync** — A first sync you can see, cancel safely, and add pairs to while it runs.
-
-**Other changes**
-
-- Merge origin/main (v0.22.0) — keep the maintainer's security guard, dialog helpers and reveal climb under the polish work.
-- **Changelog** — Availability badges and the progress strip.
-- **Changelog** — Keep on this computer.
-- **Changelog** — The desktop sync findings, under Unreleased.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.23.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.23.0`
-
-## v0.22.0
-
-<span class="filex-release-date">20 August 2026</span>
-
-Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays online-only in the window; kept folders offer the way back, and unkeeping asks whether the local copy goes to the Trash or stays. Sync also stopped looking dead on a big first run: it reports what it is doing even in quiet mode, a folder paired while the app runs is picked up without a restart, and unpairing one mid-first-sync no longer fails or leaves a background process syncing a folder you removed. The macOS build stopped promising a self-update it cannot perform and offers the download instead. Security: a server can no longer name a local folder outside the one you chose — a remote path containing “..” is refused rather than resolved.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.22.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.22.0`
-
-## v0.21.6
-
-<span class="filex-release-date">19 August 2026</span>
-
-Two decisions about noise and blast radius. A demo instance no longer accepts any new storage backend — 0.21.4 stopped it reaching the server's own filesystem, and now the remote drivers go too, because "attach your own bucket" asks the server to connect wherever a stranger points it. And a single failed sync run is no longer reported as an error: an object store answering 504 under load costs one skipped refresh, not an incident. Three failures in a row still is one.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.6) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.6`
-
-## v0.21.5
-
-<span class="filex-release-date">19 August 2026</span>
-
-Plugins no longer outlive filex on Windows. If filex was stopped without a chance to clean up — a crash, a hard kill, a service restart — every plugin it had launched kept running; and since a running plugin holds its own .exe open, the next install or upgrade of that plugin failed with a sharing violation. Plugins now live in a job object, so the kernel reaps them with filex.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.5) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.5`
-
-## v0.21.4
-
-<span class="filex-release-date">19 August 2026</span>
-
-The other half of the demo hardening in 0.21.3. A demo instance publishes an admin login, and the `local` storage driver means "a path on this host" — so on a demo it was possible to add a storage rooted at /data, /etc or /proc/1 and read the machine's database, configuration and process environment. Measured, then closed: demo mode refuses the local driver. Backends a visitor brings (S3, SFTP, WebDAV, SMB, plugins) still work, because a demo where nothing connects is not a demo.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.21.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.21.4`
-
 ## Earlier releases
 
-The 74 releases before v0.21.4, in brief. Full notes are on GitHub.
+The 79 releases before v0.24.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.23.0](https://github.com/BRF-Tech/filex/releases/tag/v0.23.0) | 20 August 2026 | The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window… |
+| [v0.22.0](https://github.com/BRF-Tech/filex/releases/tag/v0.22.0) | 20 August 2026 | Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays… |
+| [v0.21.6](https://github.com/BRF-Tech/filex/releases/tag/v0.21.6) | 19 August 2026 | Two decisions about noise and blast radius. A demo instance no longer accepts any new storage backend — 0.21.4 stopped it reaching the server's own filesystem, and now the remote drivers go too, because "attach your own bucket"… |
+| [v0.21.5](https://github.com/BRF-Tech/filex/releases/tag/v0.21.5) | 19 August 2026 | Plugins no longer outlive filex on Windows. If filex was stopped without a chance to clean up — a crash, a hard kill, a service restart — every plugin it had launched kept running; and since a running plugin holds its own .exe… |
+| [v0.21.4](https://github.com/BRF-Tech/filex/releases/tag/v0.21.4) | 19 August 2026 | The other half of the demo hardening in 0.21.3. A demo instance publishes an admin login, and the `local` storage driver means "a path on this host" — so on a demo it was possible to add a storage rooted at /data, /etc or /proc/1… |
 | [v0.21.3](https://github.com/BRF-Tech/filex/releases/tag/v0.21.3) | 19 August 2026 | A security default, found by measuring the project's own public demo. A demo instance publishes an admin login — that is what a demo is for — and the plugin API is admin-only, so on a demo "admin-only" means anybody, and… |
 | [v0.21.2](https://github.com/BRF-Tech/filex/releases/tag/v0.21.2) | 19 August 2026 | A plugin now has to PROVE what it claims before filex will use it. Every capability a plugin declares is probed — at install against the plugin's own throwaway area, and again when you save a storage on it — and one that fails… |
 | [v0.21.1](https://github.com/BRF-Tech/filex/releases/tag/v0.21.1) | 19 August 2026 | Pasting a file into the top level of a storage failed — on every driver, not just the new plugins: the explorer asks for the storage root, and the operations queue read that as "no destination given". |
 | [v0.21.0](https://github.com/BRF-Tech/filex/releases/tag/v0.21.0) | 19 August 2026 | filex can now be taught a storage it has never heard of. A plugin is a separate program — in any language — that filex launches (or connects to) and speaks a small HTTP/JSON protocol to; once it is running, its driver appears in… |
 | [v0.20.3](https://github.com/BRF-Tech/filex/releases/tag/v0.20.3) | 18 August 2026 | The desktop app now ships for macOS (Apple Silicon) — unsigned but ad-hoc sealed, so first launch is the ordinary Open Anyway step rather than a refusal; auto-update on the Mac waits for a signed build. |
-| [v0.20.2](https://github.com/BRF-Tech/filex/releases/tag/v0.20.2) | 17 August 2026 | Desktop — The tag is the version, not desktop/package.json. |
-| [v0.20.1](https://github.com/BRF-Tech/filex/releases/tag/v0.20.1) | 17 August 2026 | Release: v0.20.1 — FTPS starts when you give it a host name. |
+| [v0.20.2](https://github.com/BRF-Tech/filex/releases/tag/v0.20.2) | 17 August 2026 | Desktop packaging fixes take effect. |
+| [v0.20.1](https://github.com/BRF-Tech/filex/releases/tag/v0.20.1) | 17 August 2026 | FTPS starts when you give it a host name. |
 | [v0.20.0](https://github.com/BRF-Tech/filex/releases/tag/v0.20.0) | 17 August 2026 | filex is now reachable without a browser. It could already use S3, SFTP, FTP and WebDAV as storages; now those clients can point at filex itself — as an S3 endpoint, an SFTP server, an FTPS server and an NFSv3 export, alongside… |
 | [v0.19.0](https://github.com/BRF-Tech/filex/releases/tag/v0.19.0) | 14 August 2026 | The desktop app gets a language setting — System, English or Türkçe — where before it followed the operating system and offered nothing to choose. |
 | [v0.18.2](https://github.com/BRF-Tech/filex/releases/tag/v0.18.2) | 14 August 2026 | The Windows app installs per-user now, and that is what makes the quiet update in 0.18.1 real: an app under C:Program Files needs administrator rights to replace its own files, so every background update ended in a UAC prompt —… |
@@ -331,4 +315,4 @@ The 74 releases before v0.21.4, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-09-03 from 94 published releases.</small>
+<small>Generated 2026-09-05 from 99 published releases.</small>

@@ -120,14 +120,61 @@ export function makeTrashRow(adapter: string): FileNode {
  * Inject the virtual `.trash` row at the front of a root listing when
  * enabled. Returns true if a row was added (so the caller can hydrate
  * it). Mutates `files` in place. Single source for both panes.
+ *
+ * ⚠ `isSearchResult` is not optional politeness — it is the one thing
+ * `dirname` cannot tell you. A search answers with the SCOPE it searched, so
+ * `?action=search&path=main://&filter=brief` comes back with
+ * `dirname: "main://"`, identical to the folder listing of the same path
+ * (measured). Without this flag the sentinel is unshifted into the search
+ * results, and a search for "brief" answers with `brief.md` and a folder
+ * called Trash that is not a folder, is not a hit, and cannot be searched for.
+ * Same family as the `.trash` / `.shared` sentinel bugs fixed in v0.31.0: a
+ * virtual row rendered somewhere it has no meaning.
+ *
+ * Both flags default to `false`, i.e. to the historical behaviour: a caller
+ * that never searches and has no panel — which is what an embed with
+ * `sideNav: false` is — keeps the row it has always had by saying nothing.
  */
+export interface TrashRowContext {
+  /**
+   * This listing is the answer to a SEARCH, not the contents of a folder.
+   *
+   * ⚠ The one thing `dirname` cannot tell you: a search answers with the scope
+   * it searched, so `?action=search&path=main://&filter=notes` comes back
+   * carrying `dirname: "main://"`, byte-identical to that folder's listing
+   * (measured). Without this the sentinel lands among the hits.
+   */
+  isSearchResult?: boolean;
+  /**
+   * The navigation panel is already offering Trash as a destination.
+   *
+   * ⚠ This row only ever existed because a listing had no other way into the
+   * bin. Once the panel carries a Trash entry that reason is gone and the row
+   * is a second door to the same place — drawn as a 0-byte folder that is not
+   * a folder, sitting among real ones, while the panel's own Trash entry is
+   * three inches to its left. Owner's decision, this release: do not offer the
+   * same door twice.
+   *
+   * ⚠ It is a question about the PANEL, not about the profile. The duplication
+   * is exactly as wrong in `standard` with the panel on as it is in `drive`;
+   * keying it to `uiProfile` would be a rule about the wrong thing.
+   */
+  navOffersTrash?: boolean;
+}
+
 export function injectTrashRow(
   files: FileNode[],
   adapter: string,
   dirname: string,
   trashVisible: boolean,
+  ctx: TrashRowContext = {},
 ): boolean {
+  // The host's own switch, and still the outer gate: `trashVisible: false`
+  // means no Trash anywhere — no row here, and no entry in the panel either,
+  // so this must be answered before anything about the panel is considered.
   if (!trashVisible) return false;
+  if (ctx.navOffersTrash) return false;
+  if (ctx.isSearchResult) return false;
   if (isTrashListing(dirname)) return false;
   if (!isStorageRootDir(dirname)) return false;
   files.unshift(makeTrashRow(adapter));

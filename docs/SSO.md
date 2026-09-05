@@ -211,6 +211,23 @@ Drivers can be combined. For the two that read a password — `local` and `ldap`
 order is the order they are **tried**: the first to accept wins, so keep `local` first
 and `admin@local` stays answerable while the directory is unreachable.
 
+### Why did a `local` login fail?
+
+The caller is told one thing and only one thing: `401 {"error":"invalid
+credentials"}`. That is deliberate — anything more specific lets a stranger
+enumerate accounts by watching which addresses answer differently. The **server
+log** is where the difference lives. Run with `FILEX_LOG_LEVEL=debug` and match
+the `reason=`:
+
+| Log line | What happened |
+|---|---|
+| `local: login refused` `reason="password mismatch"` (debug) | The account exists, the password is wrong. |
+| `local: login refused` `reason="no such account"` (debug) | No account with that e-mail or username — including an identifier that is not a well-formed username, which is reported the same way on purpose. |
+| `local: login refused` `reason="account has no local password"` (info) | The account exists but carries no local hash — a directory or OIDC account. No password will ever work on the `local` driver; it has to sign in the way it was created, or be given a password. |
+| `local: could not judge the credentials` `reason="user lookup failed"` (**error**) | The *server* failed, not the caller — a locked sqlite file, a dropped connection. The caller still sees a plain 401, so without this line "the database is down" is indistinguishable from a typo. It is also returned as a real error rather than `unauthorized`, which is what lets a multi-driver chain report it. |
+| `local: stored password hash is unusable` `reason="bad password hash"` (**error**) | `users.password_hash` is not a bcrypt hash — truncated, or written by something else. That account can never sign in until its password is reset. |
+| `login refused` `reason="two-factor code required"` / `"invalid two-factor code"` (debug) | The password was **right**; the second factor was missing or wrong. This one the caller is also told (`totp_required: true`), because the form has to know to ask. |
+
 ---
 
 ## See also

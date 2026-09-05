@@ -316,7 +316,7 @@ func (w *winFS) Statfs(_ string, stat *fuse.Statfs_t) int {
 	stat.Bsize, stat.Frsize = block, block
 	stat.Blocks = 1 << 30
 	stat.Bfree, stat.Bavail = 1<<29, 1<<29
-	stat.Files, stat.Ffree = 1 << 20, 1 << 19
+	stat.Files, stat.Ffree = 1<<20, 1<<19
 	stat.Namemax = 255
 	return 0
 }
@@ -516,8 +516,8 @@ func (w *winFS) Rename(oldpath, newpath string) int {
 // timestamps and attributes on almost every file it writes — a refusal here
 // makes Explorer report "the file could not be copied" for a copy that fully
 // succeeded.
-func (w *winFS) Chmod(string, uint32) int          { return 0 }
-func (w *winFS) Chown(string, uint32, uint32) int  { return 0 }
+func (w *winFS) Chmod(string, uint32) int            { return 0 }
+func (w *winFS) Chown(string, uint32, uint32) int    { return 0 }
 func (w *winFS) Utimens(string, []fuse.Timespec) int { return 0 }
 
 // ─────────────────────────── handle table ───────────────────────────

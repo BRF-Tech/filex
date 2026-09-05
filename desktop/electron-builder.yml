@@ -91,7 +91,20 @@ linux:
     - application/rtf
 win:
   target:
+    # The installed app: Start menu entry, per-user, updates itself silently.
     - nsis
+    # ⚠ And ONE .exe that runs from wherever it is put — a USB stick, a
+    # Downloads folder, a locked-down work machine where nothing may be
+    # installed. Linux and macOS already had this (the AppImage runs
+    # unextracted, the mac .zip is unzip-and-run); Windows was the only
+    # platform with no way to run filex without an installer.
+    #
+    # The portable stub unpacks the app into a temp directory and runs it from
+    # there, so `process.execPath` points at something that is deleted on exit.
+    # It hands the app the real location in PORTABLE_EXECUTABLE_DIR, and
+    # desktop/src/portable.ts moves userData next to the .exe on the strength
+    # of that variable alone — never a guess.
+    - portable
 mac:
   target:
     # dmg is the human download; zip is what electron-updater's mac feed
@@ -135,6 +148,27 @@ mac:
 # half-signed bundle reads as MALWARE to macOS 26 while an ad-hoc-sealed one
 # gets the "Open Anyway" path). No-op off macOS and when a real cert is set.
 afterPack: scripts/adhoc-sign.cjs
+
+# ⚠⚠ nsis and portable BOTH emit `.exe`, so under the shared artifactName
+# template above they would both be `filex-desktop-x64.exe` — the same file,
+# written twice, with whichever target ran last winning. The override is
+# mandatory, and it obeys the same rule as the template it replaces: NO
+# ${version}, because the download links point at
+# `releases/latest/download/<name>` and GitHub only resolves that for a fixed
+# filename.
+portable:
+  artifactName: ${productName}-desktop-portable-${arch}.${ext}
+  # Never ask for administrator rights. This is the build somebody runs BECAUSE
+  # they do not have them; a UAC prompt would be the one thing that makes it
+  # useless. (`user` is already the default — written out because the
+  # alternative is a single word in this file and the failure is total.)
+  requestExecutionLevel: user
+  # ⚠ `unpackDirName` is deliberately NOT set. Read templates/nsis/portable.nsi
+  # before adding it: the stub does `RMDir /r $INSTDIR` BEFORE extracting, so a
+  # fixed name means launching one portable copy wipes the extraction directory
+  # of another one that is still running. The default is a per-build id, and
+  # the same script removes the directory again once the app exits — so nothing
+  # is left in %TEMP% either way.
 
 nsis:
   oneClick: false

@@ -277,6 +277,22 @@ export interface ExplorerConfig {
    *                          navigation panel starts expanded, the tab strip
    *                          and split pane are off, the gallery view mode and
    *                          the host's "How to connect" surface are hidden.
+   *   'drive'              — everything `simple` does, plus the shell an end
+   *                          user already knows: one primary "New" menu, one
+   *                          search field in the header (with its ⌘K/Ctrl+K
+   *                          escalation into the command palette), a filter row
+   *                          under the breadcrumb, Folders and Files as
+   *                          labelled sections in grid view, the details panel
+   *                          split into Details / Activity, and a storage line
+   *                          under the navigation.
+   *
+   * ⚠ `drive` is a SUPERSET of `simple`, not a sibling: everything `simple`
+   * turns off stays off, and the code asks `simpleUi` for those questions so a
+   * later change to `simple` cannot silently miss `drive`. It is a third value
+   * rather than a second boolean because "which chrome" is ONE question with
+   * three answers — a `driveShell: true` next to `uiProfile: 'standard'` would
+   * be a combination nobody can describe, and keeping that question single is
+   * why `uiProfile` was a preset to begin with.
    *
    * Why it exists (GitHub #14): the reporter's users are not in IT and read
    * split panes, tabs and mount instructions as a file manager they would have
@@ -288,7 +304,7 @@ export interface ExplorerConfig {
    * rest of the chrome differ. A viewer's own collapse choice, once made,
    * outranks the profile — it is a per-viewer preference, not a policy.
    */
-  uiProfile?: 'standard' | 'simple';
+  uiProfile?: 'standard' | 'simple' | 'drive';
 
   /**
    * Render the navigation panel (Upload · Recent / Starred / Shared with me /

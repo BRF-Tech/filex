@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { RouterView } from 'vue-router';
 import ToastContainer from '@/components/ToastContainer.vue';
 import InstallPrompt from '@/components/InstallPrompt.vue';
@@ -26,29 +26,54 @@ async function copyCode() {
   }
 }
 
+// Desktop authorization: if the browser got here to authorize the desktop app,
+// finish that instead of dropping the user into a file manager they did not come
+// for. Lives here rather than in the login view because the OIDC path never
+// returns to that view — the backend callback lands the browser on /admin/.
+//
+// ⚠ Driven by a WATCH on the session, not by onMounted alone. onMounted fires
+// once, before any password is typed, so it only ever caught a hand-off that was
+// already signed in when the tab opened: OIDC (the backend callback reloads the
+// document) and non-admins signing in with a password (the router sends them to
+// /drive/explore with `window.location.replace`, which is a real navigation —
+// see router/index.ts, and note the pairing survives it because it is stashed in
+// sessionStorage). An ADMIN signing in with a password stays inside the SPA:
+// `router.push` from Login.vue re-renders the view and nothing remounts App.vue,
+// so the hand-off never ran and the desktop app sat on its waiting screen.
+// Watching `auth.user` covers every one of those routes, because all of them end
+// with a session appearing in this store.
+let handoffStarted = false;
+
+async function runHandoffIfPending() {
+  // completeDesktopHandoff() clears the stash before it awaits, but the guard is
+  // still needed: two ticks can enter before the first one gets there, and the
+  // second would overwrite a shown code with a null one.
+  if (handoffStarted) return;
+  if (!auth.user || !hasPendingHandoff()) return;
+  handoffStarted = true;
+  handingOff.value = true;
+  try {
+    handoffCode.value = await completeDesktopHandoff();
+  } catch {
+    // Leave the flag up and SAY it failed. This branch used to drop the
+    // overlay (`handingOff.value = false`) — the exact "looks like nothing
+    // happened at all" its own comment warned about: the user came from the
+    // desktop app, the mint failed, and the browser showed a file manager
+    // with no code and no error. The desktop app still shows its own
+    // timeout; this screen owns telling the user the browser half failed.
+    handoffError.value = true;
+  }
+}
+
+watch(() => auth.user, runHandoffIfPending);
+
 onMounted(async () => {
   // Hydrate session + capabilities up-front so route guards have data.
   // Errors are swallowed: an unauthenticated user just lands on /admin/login.
   await Promise.allSettled([auth.fetchMe(), caps.fetch()]);
-
-  // Desktop authorization: if the browser got here to authorize the desktop
-  // app, finish that instead of dropping the user into a file manager they did
-  // not come for. Runs here rather than in the login view because the OIDC path
-  // never returns to that view — the backend callback lands on /admin/.
-  if (auth.user && hasPendingHandoff()) {
-    handingOff.value = true;
-    try {
-      handoffCode.value = await completeDesktopHandoff();
-    } catch {
-      // Leave the flag up and SAY it failed. This branch used to drop the
-      // overlay (`handingOff.value = false`) — the exact "looks like nothing
-      // happened at all" its own comment warned about: the user came from the
-      // desktop app, the mint failed, and the browser showed a file manager
-      // with no code and no error. The desktop app still shows its own
-      // timeout; this screen owns telling the user the browser half failed.
-      handoffError.value = true;
-    }
-  }
+  // The router guard hydrates the session before this component mounts on a
+  // cold load, in which case the watcher above never fired — so ask once here.
+  await runHandoffIfPending();
 });
 </script>
 
@@ -97,7 +122,17 @@ onMounted(async () => {
     </transition>
   </RouterView>
   <ToastContainer />
-  <!-- PWA install + update banner. Standalone SPA only (see component note). -->
+  <!-- PWA install + update banner. Standalone SPA only (see component note).
+
+       ⚠ Not before sign-in. The banner is fixed to the bottom centre of the
+       viewport, and the sign-in form's primary button is in that same place —
+       so on the login screen it sits on top of the one control the page exists
+       for. It also has nothing to say to somebody who does not yet have an
+       account on this server. This is the second time this component has
+       covered something: the first was fixed by making the wrapper
+       pointer-events-none, which lets clicks through everywhere EXCEPT the
+       card itself, and the card grew a row taller when the Windows portable
+       download was added. Guarded by 91-install-banner-login.cy.ts. -->
   <InstallPrompt />
 </template>
 

@@ -41,6 +41,15 @@ const props = defineProps<{
   globalSearch?: (q: string) => Promise<GlobalSearchHit[]>;
   /* wiring:d1 — false hides the split command (narrow embeds). */
   splitEnabled?: boolean;
+  /**
+   * surucu:d1 — the query this palette opens WITH.
+   *
+   * The drive shell's header field searches the folder you are in; ⌘K from
+   * inside it opens this palette carrying the same words, so "not in this
+   * folder — try everywhere" costs no retyping. Empty (the default) is the
+   * behaviour every other caller has had: a blank palette.
+   */
+  initialQuery?: string;
 }>();
 
 const emit = defineEmits<{
@@ -367,14 +376,21 @@ watch(
   () => props.open,
   (v) => {
     if (v) {
-      query.value = '';
+      // ⚠ Read at OPEN, not watched: a seed that kept overwriting the field
+      // would undo every keystroke of whoever is typing here now.
+      query.value = props.initialQuery ?? '';
       active.value = 0;
       /* bul:s3 — fresh session state for the new groups. */
       everywhere.value = [];
       everywhereLoading.value = false;
       savedSearches.value = readSavedSearches();
       document.addEventListener('keydown', onDocKeydown, true);
-      void nextTick(() => inputEl.value?.focus());
+      void nextTick(() => {
+        inputEl.value?.focus();
+        // Selected, not appended to: the seed is a starting point, and the
+        // next keystroke should be able to replace it outright.
+        inputEl.value?.select();
+      });
     } else {
       if (everywhereTimer) clearTimeout(everywhereTimer); /* bul:s3 */
       document.removeEventListener('keydown', onDocKeydown, true);

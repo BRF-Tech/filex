@@ -1,0 +1,17 @@
+{
+  "v": 2,
+  "salt": "tY//pEQe5cSPVZ1Y4GgInw==",
+  "iter": 600000,
+  "verify": "PD0mEsHo0/ksBeYm21+sSD1ZVD8n+OyLq1GqPh3kiyr6Xxq1vGV662uHRe/O8kQ=",
+  "fmk": "wrapped",
+  "fmk_pw": "14CDFqxAtCvL16mgNd1G14QD7gqMNRDRI42IVTwYsnUNMy5PIGn4SwnxaXr7Or5xV8AUY55STL/3ZN69",
+  "rk": {
+    "salt": "K27tQXTlJPK8Aj6TqU2gWA==",
+    "blob": "m55/ozRaAJfo/vEUu8lz9hawaZE0xzobUobXEacCOdQyrYnQ0bXk+YpOcX/3Auf8TPJU9GFXOtIIEEfD"
+  },
+  "esc": {
+    "kid": "4966cc8450204137",
+    "alg": "RSA-OAEP-256",
+    "blob": "wfm/ed4+NkJygJw1SfTUqX0jUVAtlypsHdR+I+p+AJtR/zcQdhb8g4g39g7+Byh8MF8VD9RLOmRagMKA1j3CsKRQNyf9E3L0ESGrDdibo1luS/3/VPG5gPUnayHFYaqqo3aua77XfBTRt1kaXZ4p2LrNNcvXILqZP3Qs/MreUgzxqo2gzWDGzSHhodszDrwWt7JqPSBILr0fy5Ko23zQldbi9p6UvVBe7le6MiDXIJrjbSpoD7De7m/2uc+mx9j7E/Ke6JDHX5JybAnyNaebW4pA73itga3FwbKW6aNG/lMPwazEY8K8k2pcg5piMORMs2sRRO1+kEXOkPP3JCUSJQ=="
+  }
+}

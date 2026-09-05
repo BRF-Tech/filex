@@ -86,6 +86,13 @@ Test credentials **without saving** first:
 `POST /api/admin/storages/test` with the same body → `{ok, sample_listing, object_count}`
 or `{ok:false, error:"…"}` (the driver's error, verbatim).
 
+The probe is bounded at **10 seconds**. That is a limit on the *button*, not on
+the driver: the S3 driver keeps its wide retry budget because a background sync
+run needs it, but an unreachable endpoint made this endpoint take 20-30 seconds
+to say so. A probe that runs out of time answers
+`timed out after 10s — the endpoint did not answer: …` with the driver's own
+error after it, so a slow endpoint reads differently from a wrong one.
+
 ### CLI
 Good for automation / first boot:
 
@@ -348,7 +355,7 @@ and thumbnails come from filex's own index and caches, so the explorer stays
 quick over a slow mount; uploads and downloads move real bytes and run at the
 speed of the network path. See [Slow storage](#slow-storage).
 
-### S3 / S3‑compatible
+### S3 / S3-compatible
 
 Works with **AWS S3, MinIO, Cloudflare R2, Backblaze B2 (S3), Hetzner Object
 Storage / Ceph RGW**, and other S3‑compatible stores.
@@ -636,7 +643,7 @@ Refusals happen at submit time, with a reason: an unknown target storage is a
 have no editor rights on a `403` — the permission is checked in the
 *destination's* storage, which is the one being written to.
 
-## Read‑only mounts
+## Read-only mounts
 
 Set `read_only: true` to expose a storage for browsing/download but block every
 write (upload, rename, move, delete, share‑drop). Writes return **403
@@ -659,7 +666,8 @@ Always mount a sub‑folder (S3 `prefix`, or `root`/`path` for the others).
 **Driver errors → HTTP:** `not found → 404`, `read-only → 403`,
 `unsupported → 501`, `already exists → 409`, anything else `→ 500`. The
 **Test connection** endpoint surfaces the raw driver error so you can debug
-credentials/endpoints before saving.
+credentials/endpoints before saving — prefixed with a timeout notice if the
+probe hit its 10-second bound rather than getting an answer.
 
 ---
 

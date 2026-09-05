@@ -205,8 +205,17 @@ function parseChangelog(body) {
     // `chore(release): v0.9.0 — olivov multi-tenant isolation, strict-S3 …`
     // is the release's own one-line summary. Promote it to the headline and
     // drop the bullet: the version is already the heading.
-    if (type === 'chore' && scope === 'release') {
-      const tail = text.replace(/^v?\d+\.\d+\.\d+\s*[—–-]?\s*/, '').trim()
+    // The release's OWN commit, in either shape this project has used:
+    // `chore(release): v0.9.0 - ...` in the source repo, and a bare
+    // `release: v0.31.0` in the public export. Neither is a change somebody
+    // made in the release; the version is already the heading it would sit
+    // under. The bare form is not a conventional type, so it fell through to
+    // "Other changes" and every release since v0.27.6 published a section
+    // whose single item was its own version number.
+    const bare = subject.match(/^release:\s*(v?\d+\.\d+\.\d+.*)$/i)
+    if (bare || (type === 'chore' && scope === 'release')) {
+      const raw2 = bare ? bare[1] : text
+      const tail = raw2.replace(/^v?\d+\.\d+\.\d+\s*[—–-]?\s*/, '').trim()
       if (tail && !/^v?\d+\.\d+\.\d+$/.test(tail)) headline = sentence(tail)
       continue
     }

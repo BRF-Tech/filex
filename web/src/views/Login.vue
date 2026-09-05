@@ -8,11 +8,11 @@ import {
   Mail,
   Github,
   Sparkles,
-  ShieldCheck,
-  GitBranch,
-  Bell,
-  ListChecks,
-  FolderTree,
+  HardDrive,
+  Search,
+  Share2,
+  MonitorSmartphone,
+  Blocks,
   ArrowRight,
   KeyRound,
 } from 'lucide-vue-next';
@@ -183,34 +183,42 @@ function startOidc() {
         <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-500">
           {{ t('demo.creds', { email: demoUser, password: 'demo' }) }}
         </p>
+        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
+          {{ t('demo.sandbox') }}
+        </p>
       </div>
 
-      <!-- Feature highlight grid -->
+      <!-- Feature highlight grid. Six cards is a shop window, not an inventory:
+           the areas that do not fit are named in the "and also" line under the
+           grid rather than dropped, because a visitor who cannot see a feature
+           listed assumes it does not exist. Keep both in step with the root
+           README - this page is one of the surfaces the release documentation
+           audit covers (docs/CONTRIBUTING.md, Release process step 3). -->
       <div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <FolderTree class="h-6 w-6 text-brand-600 dark:text-brand-400" />
+          <HardDrive class="h-6 w-6 text-brand-600 dark:text-brand-400" />
           <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.storageTitle') }}</h3>
           <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.storageBody') }}</p>
         </div>
         <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <GitBranch class="h-6 w-6 text-brand-600 dark:text-brand-400" />
-          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.replicaTitle') }}</h3>
-          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.replicaBody') }}</p>
+          <Search class="h-6 w-6 text-brand-600 dark:text-brand-400" />
+          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.searchTitle') }}</h3>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.searchBody') }}</p>
         </div>
         <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <ListChecks class="h-6 w-6 text-brand-600 dark:text-brand-400" />
-          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.queueTitle') }}</h3>
-          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.queueBody') }}</p>
+          <Share2 class="h-6 w-6 text-brand-600 dark:text-brand-400" />
+          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.shareTitle') }}</h3>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.shareBody') }}</p>
         </div>
         <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <Bell class="h-6 w-6 text-brand-600 dark:text-brand-400" />
-          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.notifyTitle') }}</h3>
-          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.notifyBody') }}</p>
+          <MonitorSmartphone class="h-6 w-6 text-brand-600 dark:text-brand-400" />
+          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.desktopTitle') }}</h3>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.desktopBody') }}</p>
         </div>
         <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <ShieldCheck class="h-6 w-6 text-brand-600 dark:text-brand-400" />
-          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.authTitle') }}</h3>
-          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.authBody') }}</p>
+          <Blocks class="h-6 w-6 text-brand-600 dark:text-brand-400" />
+          <h3 class="mt-2 font-semibold text-zinc-900 dark:text-zinc-100">{{ t('demo.features.embedTitle') }}</h3>
+          <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ t('demo.features.embedBody') }}</p>
         </div>
         <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
           <Github class="h-6 w-6 text-brand-600 dark:text-brand-400" />
@@ -221,6 +229,10 @@ function startOidc() {
           </p>
         </div>
       </div>
+
+      <p class="mt-6 text-center text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
+        {{ t('demo.alsoIncluded') }}
+      </p>
 
       <!-- Optional sign-in form (hidden behind toggle) -->
       <div v-if="showSignIn" class="mx-auto mt-10 w-full max-w-md card p-6">
@@ -252,7 +264,18 @@ function startOidc() {
     </div>
 
     <!-- ─────────── Standard sign-in (non-demo) ─────────── -->
-    <div v-else class="min-h-screen flex flex-col items-center justify-center px-4 py-10">
+    <!-- ⚠ pb-44 below `sm`, not py-10 all the way down. The PWA / desktop
+         banner is fixed to the bottom centre of the viewport and this card's
+         submit button is the only thing in that same place: measured at
+         390x844 with a desktop user agent, `document.elementFromPoint` over
+         the button returned the banner's hint text, so the click never
+         reached the button. The card is `justify-center`, so the extra
+         padding lifts it clear rather than adding visible whitespace.
+         Guarded by web/cypress/e2e/91-install-banner-login.cy.ts. -->
+    <div
+      v-else
+      class="min-h-screen flex flex-col items-center justify-center px-4 pt-10 pb-56"
+    >
       <div class="card w-full max-w-md p-8">
         <div class="flex flex-col items-center gap-1.5 mb-6 text-center">
           <!-- wiring:e1 — branded logo/name (custom logo replaces the mark) -->

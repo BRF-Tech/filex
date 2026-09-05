@@ -537,3 +537,91 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+// TestSearch_AllDigitWordsAreNotFuzzy is the measurement behind the
+// digits exemption.
+//
+// Reported on the demo corpus: searching `2026` returned `annual report
+// 2025.docx` as its SECOND hit, because 2025 is one edit from 2026 and
+// the typo pass applies to every word. A near-miss digit is not a
+// misspelling of the same number — it is a different year, a different
+// invoice, a different order. The words a person mistypes and the numbers
+// they look up are different kinds of token, and only one of them wants
+// forgiving.
+//
+// The three assertions are one change and its two fences: the wrong
+// neighbour goes away, every literal path onto a number stays, and the
+// typo tolerance a real word gets is untouched.
+func TestSearch_AllDigitWordsAreNotFuzzy(t *testing.T) {
+	ctx := context.Background()
+	idx, names := issueFixture(t)
+
+	// The bug itself. `2026` must not drag in the 2025 file.
+	hits, err := idx.SearchScoped(ctx, "2026", 20, ScopeName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := hitNames(hits, names)
+	if contains(got, "annual report 2025.docx") {
+		t.Errorf("`2026` returned a 2025 file — a different number is not a typo; got %v", got)
+	}
+	// ...and the same in the other direction, so the fix is a rule rather
+	// than a special case for one fixture row.
+	hits, err = idx.SearchScoped(ctx, "2025", 20, ScopeName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got = hitNames(hits, names); contains(got, "invoice_2026.pdf") {
+		t.Errorf("`2025` returned a 2026 file; got %v", got)
+	}
+
+	// Prefix / exact / substring on digits must not change. These are the
+	// rows the exemption could plausibly have broken, so they are asserted
+	// here as well as in the issue table.
+	for _, c := range []struct{ query, want string }{
+		{"2026", "invoice_2026.pdf"},
+		{"2025", "annual report 2025.docx"},
+		{"invoice 2026", "invoice_2026.pdf"},
+		{"invoice-2026", "invoice_2026.pdf"},
+	} {
+		hits, err := idx.SearchScoped(ctx, c.query, 20, ScopeName)
+		if err != nil {
+			t.Fatalf("%q: %v", c.query, err)
+		}
+		if got := hitNames(hits, names); !contains(got, c.want) {
+			t.Errorf("query %q must still find %q, got %v", c.query, c.want, got)
+		}
+	}
+
+	// And a genuine word typo still resolves — the exemption is about
+	// digits, not about switching typo tolerance off.
+	hits, err = idx.SearchScoped(ctx, "mian.go", 20, ScopeName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got = hitNames(hits, names); !contains(got, "main.go") {
+		t.Errorf("`mian.go` must still find main.go, got %v", got)
+	}
+}
+
+// TestFuzzinessFor_Digits pins the rule at the unit that decides it, so a
+// future change to the length bands cannot quietly re-enable it for
+// numbers.
+func TestFuzzinessFor_Digits(t *testing.T) {
+	for _, c := range []struct {
+		word string
+		want int
+	}{
+		{"2026", 0},       // a year: 2025 is a different year
+		{"1000123456", 0}, // an invoice number, long enough for two edits
+		{"12", 0},         // short words were already exact
+		{"main", 1},       // a word of the same length still forgives one
+		{"readme", 1},     //
+		{"attachment", 2}, // long words still forgive two
+		{"v2024x", 1},     // MIXED: still fuzzy, see fuzzinessFor's comment
+	} {
+		if got := fuzzinessFor(c.word); got != c.want {
+			t.Errorf("fuzzinessFor(%q) = %d, want %d", c.word, got, c.want)
+		}
+	}
+}

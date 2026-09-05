@@ -75,6 +75,14 @@ const config = {
   // 'simple'             — one pane, one folder, list/grid, no tab strip, no
   //                        split. Nothing is removed from the build; this is a
   //                        preset for people who do not want a power tool.
+  // 'drive'              — everything 'simple' does, plus the shell an end
+  //                        user already knows: one "+ New" menu, one search
+  //                        field in the header with a ⌘K/Ctrl+K chip that hands
+  //                        the query to the command palette, a Type/Modified/
+  //                        Size filter row, Folders and Files as sections in
+  //                        grid view, Details/Activity in the info panel, and a
+  //                        storage line under the navigation.
+  //                        ⚠ A superset of 'simple', not a sibling.
   uiProfile: 'simple',
 };
 ```

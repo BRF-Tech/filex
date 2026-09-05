@@ -131,7 +131,7 @@ describe('explorer navigation panel', () => {
       // The breadcrumb is the other call site of the same map.
       cy.get('.fe').should(($fe) => {
         expect($fe.text(), 'no raw sentinel anywhere in the explorer').to.not.match(
-          /\.(recent|starred|shared|trash)/,
+          /\.(recent|starred|shared|trash)\b/,
         );
       });
     }

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import fs from 'node:fs'
+import { githubSlug } from './github-slug.mjs'
 
 // docs.filex.sh — VitePress site over the existing `docs/` folder.
 // Markdown sources are NOT copied: `srcDir` points at ../docs so the
@@ -44,7 +45,7 @@ export default defineConfig({
   //     a list, because the next handover must be excluded by default rather
   //     than by somebody remembering to add it. Measured: the v0.20.0 build
   //     was serving one at /handovers/2026-08-14-write-path-and-slow-storage.
-  srcExclude: ['DEPLOY_BRF.md', 'MIGRATION_FISHAPP.md', 'CLOUD.md', 'handovers/**'],
+  srcExclude: ['DEPLOY_BRF.md', 'MIGRATION.md', 'MIGRATION_FISHAPP.md', 'CLOUD.md', 'handovers/**'],
   // Example URLs in the docs (dev-server addresses). Real links stay checked.
   ignoreDeadLinks: [/^https?:\/\/localhost/],
 
@@ -141,7 +142,6 @@ export default defineConfig({
           { text: 'Metrics (Prometheus)', link: '/METRICS' },
           { text: 'Architecture', link: '/ARCHITECTURE' },
           { text: 'Backend internals', link: '/BACKEND' },
-          { text: 'Migration', link: '/MIGRATION' },
           { text: 'Contributing', link: '/CONTRIBUTING' }
         ]
       }
@@ -160,6 +160,12 @@ export default defineConfig({
   },
 
   markdown: {
+    // ⚠⚠ Heading anchors are slugged GitHub's way, not VitePress's, because
+    // every `docs/*.md` page is read on both surfaces and the in-page tables
+    // of contents were written against GitHub. The rule, the measurement and
+    // the reason are in `./github-slug.mjs`; `scripts/check-doc-anchors.mjs`
+    // fails the build if any in-page link stops landing.
+    anchor: { slugify: githubSlug },
     config(md) {
       // Repo-relative links in the docs (../deploy/…, ../demo, sharex/*.sxcu)
       // point at repository files that are not part of the site. Rewrite them

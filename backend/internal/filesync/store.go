@@ -31,8 +31,20 @@ const TrashRetentionDays = 30
 //	trash/<pair-id>/<stamp>/...    files this engine deleted locally
 type Store struct{ Dir string }
 
-// DefaultStoreDir is ~/.filex/sync (beside the CLI's own config).
+// DefaultStoreDir is $FILEX_SYNC_DIR when set, otherwise ~/.filex/sync (beside
+// the CLI's own config, which honours $FILEX_CLI_CONFIG the same way).
+//
+// ⚠ The override is not a convenience. This directory holds the pairs, the
+// per-pair baselines and the local trash — which contains real copies of files
+// the engine deleted. The desktop app's PORTABLE build runs from a USB stick on
+// a machine that is not the user's, and everything it keeps has to live in its
+// own folder so that deleting that folder leaves nothing behind. Without this,
+// a portable copy would seed somebody else's home directory with another
+// person's deleted files.
 func DefaultStoreDir() (string, error) {
+	if dir := os.Getenv("FILEX_SYNC_DIR"); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

@@ -3914,6 +3914,20 @@ filex-explorer {
   font-size: 12.5px;
   color: var(--fe-text-muted);
 }
+/* Why the escrow key does not apply to THIS folder. Deliberately not muted
+   to the point of invisibility: it is the answer to a question the reader
+   is already asking, and the pre-adoption case has no other surface. */
+.fe-e2e-recover__note {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fe-text);
+  border: 1px solid var(--fe-border);
+  border-left: 3px solid var(--fe-warning, #f59e0b);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
 .fe-e2e-recover__tabs {
   display: flex;
   gap: 4px;
@@ -3987,6 +4001,36 @@ filex-explorer {
   display: flex;
   gap: 8px;
   flex: none;
+}
+/* wiring:e2 escrow-offer — the same strip, asking a heavier question:
+   accepting hands the operator a permanent second key. Amber rather than
+   the recovery offer's primary tint, so it does not read as routine. */
+.fe-e2e-upgrade--escrow {
+  border-left-color: var(--fe-warning, #f59e0b);
+  background: color-mix(in srgb, var(--fe-warning, #f59e0b) 7%, transparent);
+}
+/* The link to the honest long version has to LOOK like a link: it inherits
+   the warning colour, and without this it read as ordinary sentence text —
+   somebody being asked to hand over a key should be able to see the way to
+   the page that explains what they are handing over. */
+.fe-e2e-upgrade__escrow a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+.fe-e2e-upgrade__escrow a:hover,
+.fe-e2e-upgrade__escrow a:focus-visible {
+  text-decoration-thickness: 2px;
+}
+.fe-e2e-upgrade__pw {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  max-width: 320px;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
 }
 /* === /wiring:e2 === */
 
@@ -4622,3 +4666,450 @@ filex-explorer {
   margin-left: auto;
 }
 /* --- /gezinti:g1 --- */
+
+/* === surucu:d1 — the Drive shell (uiProfile: 'drive', GitHub #14) ======
+   Everything here is additive and gated on a class the other two profiles
+   never carry, so `standard` and `simple` render exactly what they rendered
+   before this block existed.
+
+   ⚠ Unscoped and prefixed, like the rest of this file. A `<style scoped>` in
+   an SFC compiles to `.cls[data-v-HASH]`, and the hash does not match in the
+   web-component build — the rules silently stop applying in every embed, which
+   is how the share dialog once shipped as raw unstyled HTML.
+   ---------------------------------------------------------------------- */
+
+/* ── the header ───────────────────────────────────────────────────────── */
+.fe-toolbar--drive {
+  gap: 10px;
+  padding: 8px 12px;
+}
+/* The field takes the row. `min-width: 0` because a flex item's default `auto`
+   minimum is its content width and an <input> reports a wide one — without it
+   the header refuses to shrink and the whole explorer grows a horizontal
+   scrollbar at 390px. */
+.fe-toolbar__search-group--drive {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 8px;
+}
+.fe-drivesearch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 720px;
+  padding: 0 10px 0 12px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+}
+.fe-drivesearch:focus-within {
+  background: var(--fe-bg);
+  border-color: var(--fe-border-strong);
+  box-shadow: var(--fe-shadow-sm);
+}
+.fe-drivesearch__glass {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: var(--fe-text-muted);
+}
+.fe-drivesearch__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.fe-drivesearch__input::placeholder {
+  color: var(--fe-text-muted);
+}
+/* The ⌘K chip. A real button, not decoration: it is the one visible door to
+   the palette in this shell, so it has to be clickable and tab-reachable —
+   printing a shortcut nobody can press with a mouse is a hint, not a control. */
+.fe-drivesearch__kbd {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fe-drivesearch__kbd:hover {
+  color: var(--fe-text);
+  border-color: var(--fe-border-strong);
+}
+.fe-drivesearch__kbd:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+
+/* ── the "+ New" button ───────────────────────────────────────────────── */
+.fe-sidenav__new {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--fe-primary);
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: var(--fe-shadow-sm);
+}
+.fe-sidenav__new:hover {
+  background: var(--fe-primary-hover);
+  border-color: var(--fe-primary-hover);
+}
+.fe-sidenav__new:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+.fe-sidenav__new .fe-ficon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+/* On the rail it becomes a circle: a pill with no label is a stretched blob. */
+.fe-sidenav--rail .fe-sidenav__new {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+/* ── the storage line ─────────────────────────────────────────────────── */
+.fe-sidenav__quota {
+  flex: 0 0 auto;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--fe-border);
+}
+.fe-sidenav--rail .fe-sidenav__quota {
+  padding: 10px 8px;
+}
+.fe-sidenav__quota-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-sidenav__quota-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--fe-bg-hover);
+  overflow: hidden;
+}
+.fe-sidenav__quota-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--fe-primary);
+  transition: width 0.2s ease;
+}
+.fe-sidenav__quota-text {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
+
+/* ── the breadcrumb row ───────────────────────────────────────────────── */
+/* Not a drive shell: the wrapper leaves layout entirely, so the breadcrumb is
+   the same flex child of .fe__primary it has always been. */
+.fe-subhead--plain {
+  display: contents;
+}
+.fe-subhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fe-subhead > .fe-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-subhead__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+}
+
+/* ── the filter row ───────────────────────────────────────────────────── */
+.fe-filterbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  /* Scrolls sideways ON ITSELF at 390px rather than widening the explorer:
+     three chips and a clear button do not fit a phone, and the alternative is
+     a horizontal scrollbar on everything. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.fe-filterbar::-webkit-scrollbar {
+  display: none;
+}
+.fe-filterbar__chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--fe-border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fe-filterbar__chip:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-filterbar__chip.is-set {
+  background: var(--fe-bg-selected);
+  border-color: var(--fe-primary);
+  font-weight: 600;
+}
+.fe-filterbar__chip.is-open {
+  border-color: var(--fe-primary);
+}
+.fe-filterbar__chip:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-filterbar__caret {
+  width: 15px;
+  height: 15px;
+}
+.fe-filterbar__clear {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--fe-primary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--fe-radius-sm);
+  white-space: nowrap;
+}
+.fe-filterbar__clear:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-filterbar__count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+  white-space: nowrap;
+}
+/* Teleported to <body>: z-index 90, the layer the context menus already use.
+   The onboarding tour sits above at 96 on purpose — a tour step must never end
+   up behind a filter popover. */
+.fe-filterpop {
+  position: fixed;
+  z-index: 90;
+  min-width: 190px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  box-shadow: var(--fe-shadow);
+  font-family: var(--fe-font);
+}
+.fe-filterpop__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.fe-filterpop__item:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-filterpop__item:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-filterpop__tick {
+  flex: 0 0 14px;
+  color: var(--fe-primary);
+  font-size: 12px;
+}
+
+/* ── Folders / Files sections in the grid ─────────────────────────────── */
+/* A grid item spanning every column, so the cards keep flowing under it. */
+.fe-grid__heading {
+  grid-column: 1 / -1;
+  margin: 6px 2px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fe-text);
+}
+.fe-grid__heading:first-child {
+  margin-top: 0;
+}
+
+/* ── the details panel: tabs, people, link row ────────────────────────── */
+.fe-inspector__tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-inspector__tab {
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.fe-inspector__tab:hover {
+  color: var(--fe-text);
+}
+.fe-inspector__tab.is-active {
+  color: var(--fe-primary);
+  border-bottom-color: var(--fe-primary);
+  font-weight: 600;
+}
+.fe-inspector__tab:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-inspector__people {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fe-inspector__person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fe-inspector__avatar {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fe-inspector__person-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fe-inspector__person-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-inspector__person-sub {
+  font-size: 11.5px;
+  color: var(--fe-text-muted);
+}
+.fe-inspector__linkrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fe-inspector__linkicon {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+.fe-inspector__linknone {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+.fe-inspector__hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
+
+/* ── narrow ───────────────────────────────────────────────────────────── */
+/* At 390px the chip is the only thing that has to go: the shortcut it prints
+   cannot be typed on a phone anyway, and the palette stays reachable from the
+   "⋯" menu. The field keeps the whole row. */
+.fe--narrow .fe-drivesearch__kbd {
+  display: none;
+}
+.fe--narrow .fe-drivesearch {
+  height: 36px;
+  max-width: none;
+}
+.fe--narrow .fe-subhead__actions {
+  padding-right: 4px;
+}
+.fe--narrow .fe-filterbar {
+  padding: 6px 8px;
+}
+/* The narrow DRIVE header is three items: toggle · field · "⋯". The field is
+   the only one that grows, and `min-width: 0` is what lets it shrink past its
+   own content width — without it the row is wider than the phone. */
+.fe-toolbar--narrow.fe-toolbar--drive {
+  gap: 6px;
+  padding: 6px 8px;
+}
+.fe-toolbar--narrow .fe-drivesearch {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* === /surucu:d1 === */

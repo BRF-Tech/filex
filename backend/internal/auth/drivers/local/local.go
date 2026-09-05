@@ -8,6 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -94,19 +96,76 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 // The parameter keeps its old name because every caller passes what the user
 // typed into a field labelled "e-mail or username", and renaming it would touch
 // the whole auth.LoginDriver interface for no behaviour change.
+// ⚠ The four ways this can fail all answer the caller with the SAME
+// auth.ErrUnauthorized, which the handler turns into one unhelpful
+// `401 invalid credentials`. That is deliberate and must stay: telling an
+// anonymous caller "no such account" apart from "wrong password" is account
+// enumeration, and it is the whole reason identity.Resolve reports a malformed
+// username as ErrNotFound too.
+//
+// What was NOT deliberate is that the SERVER could not tell either. A Cypress
+// run once saw every login answer 401 with nothing in the log to say why, and
+// it could not be reproduced — because a store failure (a locked sqlite file, a
+// dropped postgres connection) came back through exactly the same return
+// statement as a typo in a password. So each case now names itself in the log,
+// at a level that matches who is at fault:
+//
+//	debug  the caller got it wrong — a typo is not an operator's problem, and
+//	       an unauthenticated endpoint must not let a stranger fill the log
+//	info   a real account exists but has no local password (directory/OIDC
+//	       account) — worth seeing while an operator debugs a rollout
+//	error  the server could not judge at all — a store failure or an unusable
+//	       stored hash, which is nobody's login attempt going wrong
+//
+// The store failure is ALSO returned as itself rather than as ErrUnauthorized:
+// auth.LoginChain treats "not ErrUnauthorized" as "this driver could not judge"
+// and reports it, so an operator reading the log can tell a wrong password from
+// a database that is down. The client still gets its single 401 either way —
+// handlers.Auth.Login answers 401 for any error.
 func (d *Driver) Login(ctx context.Context, email, password string) (*model.User, string, error) {
 	user, err := identity.Resolve(ctx, d.store, email)
 	if err != nil {
-		return nil, "", auth.ErrUnauthorized
+		if errors.Is(err, identity.ErrNotFound) {
+			slog.Debug("local: login refused",
+				slog.String("reason", "no such account"),
+				slog.String("identifier", email))
+			return nil, "", auth.ErrUnauthorized
+		}
+		slog.Error("local: could not judge the credentials",
+			slog.String("reason", "user lookup failed"),
+			slog.String("identifier", email),
+			slog.String("err", err.Error()))
+		return nil, "", fmt.Errorf("local: user lookup: %w", err)
 	}
 	if user.PasswordHash == "" {
+		slog.Info("local: login refused",
+			slog.String("reason", "account has no local password"),
+			slog.String("identifier", email))
 		return nil, "", auth.ErrUnauthorized
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			slog.Debug("local: login refused",
+				slog.String("reason", "password mismatch"),
+				slog.String("identifier", email))
+		} else {
+			// Not a wrong password: the stored hash itself is unusable
+			// (truncated column, a hash written by something that is not
+			// bcrypt). The account can never log in until it is reset, and
+			// silence here is what makes that look like a forgotten password.
+			slog.Error("local: stored password hash is unusable",
+				slog.String("reason", "bad password hash"),
+				slog.String("identifier", email),
+				slog.String("err", err.Error()))
+		}
 		return nil, "", auth.ErrUnauthorized
 	}
 	tok, err := IssueSession(ctx, d.store, user.ID)
 	if err != nil {
+		slog.Error("local: could not issue a session",
+			slog.String("reason", "session insert failed"),
+			slog.String("identifier", email),
+			slog.String("err", err.Error()))
 		return nil, "", err
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)

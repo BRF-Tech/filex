@@ -182,7 +182,6 @@ func (f *fs) aclSet(st *model.Storage) (*acl.Set, error) {
 	return f.principal.ACL(f.ctx, st)
 }
 
-
 // canTraverse is the LISTING and STAT door, and it is deliberately not
 // canRead.
 //

@@ -193,7 +193,7 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 		ev := notify.Event{
 			Event:    notify.EventFileInfected,
 			Severity: notify.SeverityWarning,
-			Title:    "Virüs tespit edildi",
+			Title:    "Infected file detected",
 			Body:     fmt.Sprintf("%s: %s", n.Path, sig),
 			Meta: map[string]any{
 				"signature":   sig,

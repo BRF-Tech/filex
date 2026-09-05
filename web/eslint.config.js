@@ -22,6 +22,14 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
+      // vite-plugin-pwa's DEV output: a generated service worker plus a
+      // vendored workbox bundle. Gitignored, so CI never sees it -- but a
+      // local `pnpm lint` reported 27 errors from it, which is how the five
+      // REAL errors in this workspace went unread and the job stayed red.
+      // The comment at the top of this file already states the intent
+      // ("a stale build doesn't red the lint job"); this directory was
+      // simply missed when the PWA plugin was added.
+      'dev-dist/**',
       'node_modules/**',
       'public/**',
       '*.config.{js,ts}',
@@ -57,6 +65,20 @@ export default tseslint.config(
       // `error` once the existing call sites are migrated.
       'vue/no-deprecated-filter': 'warn',          // Vue 2 `{{ x | f }}` filters
       '@typescript-eslint/no-explicit-any': 'warn', // some api/* surfaces
+    },
+  },
+  {
+    // Node scripts, not browser code. They are linted (they have bugs like
+    // anything else) but the default browser globals do not include Node's,
+    // so every `process.env` read was a `no-undef` error. Declared by hand
+    // rather than pulling in the `globals` package for one identifier.
+    files: ['scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+      },
     },
   },
   {

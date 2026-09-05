@@ -34,11 +34,16 @@ export function App() {
         locale: 'tr',
         theme: 'auto',
         // The navigation panel (Upload · Recent / Starred / Shared with me /
-        // Trash · storages) and the reduced-chrome preset. Both are ordinary
-        // config keys — there is no React-specific switch for either.
+        // Trash · storages) and the chrome preset. Both are ordinary config
+        // keys — there is no React-specific switch for either.
         sideNav: true,
         connections: true,
-        uiProfile: 'simple',
+        // 'standard' (default) · 'simple' (one pane, list/grid only, no tab
+        // strip) · 'drive' (that, plus the Drive-shaped shell: a "+ New" menu,
+        // one header search field with its ⌘K palette hint, a
+        // Type/Modified/Size filter row, Folders/Files sections in grid, and
+        // Details/Activity in the info panel).
+        uiProfile: 'drive',
       }}
       onError={(e) => console.error(e.detail)}
       onShareCreated={(e) => navigator.clipboard.writeText(e.detail.url)}

@@ -12,6 +12,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 — they're database records; see [STORAGE.md](STORAGE.md).
 
 - [Install-time settings (`FILEX_INSTALLATION_*`)](#install-time-settings-filex_installation_)
+  - [Adopting escrow later](#adopting-escrow-later)
 - [Server & networking](#server--networking)
 - [Logging](#logging)
 - [Database](#database)
@@ -36,12 +37,12 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 
 ## Install-time settings (`FILEX_INSTALLATION_*`)
 
-Settings with the **`FILEX_INSTALLATION_`** prefix are decided once, at the
-first boot of an installation, and **cannot be changed afterwards**. filex
-records what it was given in the `settings` table (key `installation.pinned`)
-and mirrors it to `<data-dir>/installation.json`; on every later boot it
-compares the two and **refuses to start** if they disagree, printing what
-changed and what your options are.
+Settings with the **`FILEX_INSTALLATION_`** prefix are decided at the first
+boot of an installation and **cannot be edited afterwards**. filex records what
+it was given in the `settings` table (key `installation.pinned`) and mirrors it
+to `<data-dir>/installation.json`; on every later boot it compares the two and
+**refuses to start** if they disagree, printing what changed and what your
+options are.
 
 That is not caution for its own sake. These settings change the *shape of data
 already written*, so flipping one later does not reconfigure anything — it
@@ -49,23 +50,97 @@ produces an installation whose guarantees are true for some of its data and
 false for the rest, with nothing on either half to say which. Refusing to start
 is the only honest response.
 
+There is exactly one supervised exception, [adoption](#adopting-escrow-later),
+and it exists because the alternative was worse: escrow could only ever be
+chosen in the first second of an installation's life, and nobody decides
+key-escrow policy before they have a single file.
+
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_INSTALLATION_E2E_ESCROW_KEY` | *(unset — escrow off)* | Base64 SPKI **public** key (RSA ≥ 2048, PEM armour and whitespace tolerated) enabling [E2E key escrow](E2E-ENCRYPTION.md#key-escrow-optional-operator-recovery). Generate the pair with `filex e2e-escrow keygen`; put the public half here and keep the private half yourself. |
+| `FILEX_INSTALLATION_E2E_ESCROW_ADOPT` | `false` | One-time consent to turn escrow **on** for an installation that already exists. Read only when the pinned record has no escrow key and the environment supplies one; ignored on a first boot, and it does **not** authorise changing or removing a key. See [Adopting escrow later](#adopting-escrow-later). |
 
-**Why escrow in particular cannot move.** An encrypted folder wraps its master
+**Why escrow cannot simply be edited.** An encrypted folder wraps its master
 key once per recovery path *when the folder is created*. A folder made while
 escrow was off carries no escrow-wrapped key, and nothing can add one without
 the folder password — which the server never has. So:
 
-- turning escrow **on** later gives you access to nothing that already exists;
+- turning escrow **on** later gives you access to nothing that already exists
+  (this is the one you can still choose to do — see below — as long as you
+  understand that sentence);
 - **changing** the key leaves old folders openable only by the old private key
   and new ones only by the new;
 - turning it **off** does not un-escrow anything already created.
 
-**If you meant to change it**, the supported paths are: restore the original
-value, or start a new installation with a fresh data directory — keeping the
-old escrow private key for as long as the folders created under it exist.
+**If you did not mean to change it**, the supported paths are: restore the
+original value, or start a new installation with a fresh data directory —
+keeping the old escrow private key for as long as the folders created under it
+exist.
+
+### Adopting escrow later
+
+Turning escrow on for a running installation is allowed, once, and only when
+you say so in a second variable:
+
+```bash
+FILEX_INSTALLATION_E2E_ESCROW_KEY=MIIBoj...      # the public half
+FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1            # "yes, I mean it"
+```
+
+Start the server. It logs the adoption at **WARN**, writes it to the record,
+and from that moment new encrypted folders carry an escrow slot. You can drop
+`_ADOPT` again on the next deploy; it is read only while the pinned record has
+no escrow key, so leaving it set does nothing.
+
+⚠⚠ **Adoption is not retroactive, and no future version can make it so — for
+you.** Every encrypted folder that existed before the adoption has no
+escrow-wrapped key, and nothing you do as operator gives it one: adding a slot
+needs the folder password, which the server has never had. Your escrow private
+key opens folders created *after* the adoption, and nothing else.
+
+⚠ Each folder's **owner** can grant a slot, from their browser, with the folder
+password. filex offers it to them the next time they unlock, states in plain
+words that it hands you a permanent second way in, and records a refusal so
+they are not asked again — see
+[offering an existing folder a slot](E2E-ENCRYPTION.md#offering-an-existing-folder-an-escrow-slot).
+You can ask; you cannot take. In the explorer, the unlock dialog says all of
+this on the older folders rather than showing an escrow tab that cannot work.
+
+Why a separate variable rather than "the key appeared, so they must have meant
+it": an escrow key arrives by being pasted into a compose file, a Helm values
+file or a `.env`, usually copied from another deployment. That is the shape of
+an accident, and the accident is silent — the installation gains a second key
+holder, only new folders get it, and nothing looks wrong until somebody needs
+the key on an old folder. One extra line, in the file you are already editing,
+is the smallest thing that is still a decision.
+
+After an adoption the record separates the two dates, because "when was this
+installed?" and "when did it gain a second key?" are different questions:
+
+```json
+{
+  "e2e_escrow_kid": "9f2c1a55b4e07d38",
+  "e2e_escrow_alg": "RSA-OAEP-256",
+  "pinned_at": "2026-09-05T12:02:24Z",
+  "pinned_by": "first-boot",
+  "e2e_escrow_adopted_at": "2026-11-20T08:30:00Z",
+  "e2e_escrow_adopted_by": "env:FILEX_INSTALLATION_E2E_ESCROW_ADOPT",
+  "e2e_escrow_adoption_note": "escrow was turned on after this installation already existed; folders created BEFORE e2e_escrow_adopted_at have no escrow-wrapped key, so the escrow key does not open them and no operator action can change that. Each folder's OWNER can grant it from the browser with the folder password"
+}
+```
+
+`e2e_escrow_adopted_at` is the boundary of **automatic** coverage: folders
+older than it get no escrow slot at creation, and no operator action gives them
+one. It is not a claim about every folder forever — one whose owner
+[granted a slot](E2E-ENCRYPTION.md#offering-an-existing-folder-an-escrow-slot)
+is simply no longer described by it, and the marker's `esc` slot is the only
+authority on which key opens which folder. A record without these fields means
+escrow was present from the first boot (or is off).
+
+⚠ `_ADOPT` is **not** a general override. Pointing the key at a different value,
+or removing it, is still a start-time failure with the flag set — those two
+really do leave folders behind that the running configuration can no longer
+describe.
 
 ⚠ An unparseable value is **fatal**, not ignored. Running without escrow while
 the operator believes they configured it is the one failure mode worth crashing
@@ -626,5 +701,8 @@ Some settings (branding, default thumbnail policy) live in the database
 - LDAP and proxy‑header now have env vars (`FILEX_LDAP_*` / `FILEX_HEADER_*`); the
   env value overrides the matching `config.yaml` field.
 - `FILEX_INSTALLATION_*` settings are frozen after the first boot and make filex
-  refuse to start if they change — that is deliberate, not a bug. See
+  refuse to start if they change — that is deliberate, not a bug. The single
+  exception is turning escrow **on**, which can be
+  [adopted](#adopting-escrow-later) with `FILEX_INSTALLATION_E2E_ESCROW_ADOPT=1`
+  and is not retroactive. See
   [Install-time settings](#install-time-settings-filex_installation_).

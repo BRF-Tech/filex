@@ -122,7 +122,7 @@ list empty for all events):
 {
   "event": "file.infected",
   "severity": "warning",
-  "title": "Virüs tespit edildi",
+  "title": "Infected file detected",
   "body": "/inbox/malware.exe: Eicar-Test-Signature",
   "node": { "storage_id": 1, "path": "/inbox/malware.exe", "name": "malware.exe", "size": 68 },
   "meta": { "signature": "Eicar-Test-Signature", "quarantined": true, "trash_path": "/.filex-trash/…" }

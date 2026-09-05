@@ -25,7 +25,11 @@ import {
   createEncryptedFolder,
   decryptFile,
   encryptFile,
+  addEscrowSlot,
+  declineEscrowSlot,
+  escrowAvailability,
   escrowKeyId,
+  escrowOfferState,
   formatRecoveryKey,
   generateRecoveryKey,
   importEscrowPrivateKey,
@@ -279,6 +283,227 @@ describe('a new encrypted folder with escrow on', () => {
   it('still opens with the password and with the user recovery key', async () => {
     expect(await unlockWithPassword(marker, PW)).not.toBeNull();
     expect(await unlockWithRecoveryKey(marker, recoveryKey)).not.toBeNull();
+  }, SLOW);
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 4b. Which escrow door applies to THIS folder
+// ─────────────────────────────────────────────────────────────────────
+//
+// Escrow can now be ADOPTED by an installation that already has folders,
+// and adoption is not retroactive: a folder created before it carries no
+// escrow slot and never will. The UI has to be able to tell the operator
+// that, in words — "no Escrow tab" on its own reads as a bug to an admin
+// who knows escrow is enabled here, so they try the key and learn the
+// truth from a failure.
+//
+// escrowAvailability is the single place that decision is made. Its
+// 'other-key' branch also closes an older, quieter lie: the dialog used to
+// label the escrow field with the INSTALLATION's key id whatever the
+// folder's own slot said, so a folder restored from another install looked
+// openable with a key that cannot open it.
+
+describe('escrowAvailability', () => {
+  let withEscrow: E2eMarker;
+  let withoutEscrow: E2eMarker;
+  let ourKid: string;
+
+  beforeAll(async () => {
+    ourKid = await escrowKeyId(escrowTestKey.public_spki_b64);
+    withEscrow = wire(
+      (await createEncryptedFolder(PW, { escrowPublicKey: escrowTestKey.public_spki_b64 })).marker,
+    );
+    withoutEscrow = wire((await createEncryptedFolder(PW, {})).marker);
+  }, SLOW);
+
+  it('says "off" when the installation has no escrow key at all', () => {
+    expect(escrowAvailability(withoutEscrow, null)).toBe('off');
+    expect(escrowAvailability(withEscrow, null)).toBe('off');
+    expect(escrowAvailability(withEscrow, '')).toBe('off');
+  });
+
+  it('says "available" only when the folder is sealed to THIS key', () => {
+    expect(escrowAvailability(withEscrow, ourKid)).toBe('available');
+  });
+
+  it('says "predates" for a folder made before escrow was adopted', () => {
+    // The whole point. The installation has a key; this folder does not.
+    expect(escrowAvailability(withoutEscrow, ourKid)).toBe('predates');
+  });
+
+  it('says "other-key" for a folder restored from another installation', () => {
+    const foreign = wire({ ...withEscrow, esc: { ...withEscrow.esc!, kid: 'ffffffffffffffff' } });
+    expect(escrowAvailability(foreign, ourKid)).toBe('other-key');
+  });
+
+  it('treats a v1 marker as predating escrow, not as escrowed', async () => {
+    const v1 = wire((await createMarker(PW)).marker);
+    expect(escrowAvailability(v1, ourKid)).toBe('predates');
+  }, SLOW);
+
+  it('never claims a door for a missing marker', () => {
+    expect(escrowAvailability(null, ourKid)).toBe('predates');
+    expect(escrowAvailability(null, null)).toBe('off');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// 4c. Offering an existing folder an escrow slot
+// ─────────────────────────────────────────────────────────────────────
+//
+// Adoption covers folders created after it and nothing else, which on a
+// real installation means it covers nothing anybody cares about — the
+// folders that matter already exist. The server still cannot reach them:
+// adding a slot needs the folder master key. The OWNER can, from inside,
+// with the password, at the moment of an unlock.
+//
+// These tests hold the two edges of that. Accepting really does hand the
+// escrow key a working door (measured to plaintext, not to a truthy
+// object). Declining really does close it and keep it closed.
+
+describe('offering an existing folder an escrow slot', () => {
+  const secret = 'ledger.xlsx';
+  let ourKid: string;
+  let priv: CryptoKey;
+
+  beforeAll(async () => {
+    ourKid = await escrowKeyId(escrowTestKey.public_spki_b64);
+    priv = await importEscrowPrivateKey(escrowTestKey.private_pkcs8_b64);
+  }, SLOW);
+
+  /** A v2 folder created while escrow was off, plus one encrypted file. */
+  async function folderWithoutEscrow() {
+    const made = await createEncryptedFolder(PW, {});
+    return {
+      marker: wire(made.marker),
+      file: await encryptFile(made.fmk, enc.encode(secret).buffer as ArrayBuffer),
+      recoveryKey: made.recoveryKey,
+    };
+  }
+
+  it('is offered exactly when it can be honoured', async () => {
+    const { marker } = await folderWithoutEscrow();
+    // The installation has no key: there is nothing to offer.
+    expect(escrowOfferState(marker, null)).toBe('n/a');
+    expect(escrowOfferState(marker, '')).toBe('n/a');
+    // It has one, and this folder has no slot.
+    expect(escrowOfferState(marker, ourKid)).toBe('offer');
+    // A folder that already has a slot is not asked again.
+    const sealed = wire(
+      (await createEncryptedFolder(PW, { escrowPublicKey: escrowTestKey.public_spki_b64 })).marker,
+    );
+    expect(escrowOfferState(sealed, ourKid)).toBe('n/a');
+    // A v1 marker belongs to upgradeMarkerV1, which discloses escrow itself.
+    // Two doors into the same room would be two chances to get it wrong.
+    const v1 = wire((await createMarker(PW)).marker);
+    expect(escrowOfferState(v1, ourKid)).toBe('n/a');
+    expect(escrowOfferState(null, ourKid)).toBe('n/a');
+  }, SLOW);
+
+  it('accepting gives the escrow key a door, all the way to plaintext', async () => {
+    const { marker, file } = await folderWithoutEscrow();
+    expect(await unlockWithEscrowKey(marker, priv)).toBeNull();
+
+    const next = wire(await addEscrowSlot(marker, PW, escrowTestKey.public_spki_b64));
+    expect(markerHasEscrow(next)).toBe(true);
+    expect(next.esc!.kid).toBe(ourKid);
+    expect(next.esc!.alg).toBe('RSA-OAEP-256');
+
+    const fmk = await unlockWithEscrowKey(next, priv);
+    expect(fmk).not.toBeNull();
+    // The file was encrypted BEFORE the slot existed and is not rewritten.
+    expect(dec.decode(await decryptFile(fmk!, file))).toBe(secret);
+  }, SLOW);
+
+  it('leaves the password and the recovery key working, and the files untouched', async () => {
+    const { marker, file, recoveryKey } = await folderWithoutEscrow();
+    const next = wire(await addEscrowSlot(marker, PW, escrowTestKey.public_spki_b64));
+
+    // Same salt, same iterations, same verify blob, same wrapped FMK: the
+    // only difference is the new slot.
+    expect(next.salt).toBe(marker.salt);
+    expect(next.iter).toBe(marker.iter);
+    expect(next.verify).toBe(marker.verify);
+    expect(next.fmk_pw).toBe(marker.fmk_pw);
+    expect(next.rk).toEqual(marker.rk);
+
+    const byPw = await unlockWithPassword(next, PW);
+    expect(byPw).not.toBeNull();
+    expect(dec.decode(await decryptFile(byPw!, file))).toBe(secret);
+    expect(await unlockWithRecoveryKey(next, recoveryKey)).not.toBeNull();
+  }, SLOW);
+
+  it('refuses a wrong password instead of writing a slot nobody can use', async () => {
+    const { marker } = await folderWithoutEscrow();
+    await expect(
+      addEscrowSlot(marker, PW + 'x', escrowTestKey.public_spki_b64),
+    ).rejects.toThrow();
+  }, SLOW);
+
+  it('refuses to add a second slot, or to touch a v1 marker', async () => {
+    const sealed = wire(
+      (await createEncryptedFolder(PW, { escrowPublicKey: escrowTestKey.public_spki_b64 })).marker,
+    );
+    await expect(addEscrowSlot(sealed, PW, escrowTestKey.public_spki_b64)).rejects.toThrow();
+    const v1 = wire((await createMarker(PW)).marker);
+    await expect(addEscrowSlot(v1, PW, escrowTestKey.public_spki_b64)).rejects.toThrow();
+  }, SLOW);
+
+  it('works on a v1 folder that was upgraded in place (fmk: kek)', async () => {
+    // The awkward mode: the FMK *is* the password key, so the slot has to
+    // wrap those very bytes. Upgraded with escrow OFF, so there is no slot
+    // to inherit.
+    const v1 = wire((await createMarker(PW)).marker);
+    const up = await upgradeMarkerV1(v1, PW, {});
+    const upgraded = wire(up.marker);
+    expect(upgraded.fmk).toBe('kek');
+    expect(markerHasEscrow(upgraded)).toBe(false);
+    const file = await encryptFile(up.fmk, enc.encode(secret).buffer as ArrayBuffer);
+
+    const next = wire(await addEscrowSlot(upgraded, PW, escrowTestKey.public_spki_b64));
+    const fmk = await unlockWithEscrowKey(next, priv);
+    expect(fmk).not.toBeNull();
+    expect(dec.decode(await decryptFile(fmk!, file))).toBe(secret);
+  }, SLOW);
+
+  it('a decline is a decision: recorded, not re-asked, and reversible', async () => {
+    const { marker } = await folderWithoutEscrow();
+    const declined = wire(declineEscrowSlot(marker, '2026-09-05T12:00:00Z'));
+    expect(declined.esc_declined).toBe('2026-09-05T12:00:00Z');
+    expect(escrowOfferState(declined, ourKid)).toBe('declined');
+    // Declining changes no key material whatsoever.
+    expect(markerHasEscrow(declined)).toBe(false);
+    expect(declined.fmk_pw).toBe(marker.fmk_pw);
+    expect(declined.rk).toEqual(marker.rk);
+    expect(await unlockWithPassword(declined, PW)).not.toBeNull();
+
+    // ...and the way back exists, without deleting and re-creating anything.
+    const later = wire(await addEscrowSlot(declined, PW, escrowTestKey.public_spki_b64));
+    expect(later.esc_declined).toBeUndefined();
+    expect(escrowOfferState(later, ourKid)).toBe('n/a');
+    expect(await unlockWithEscrowKey(later, priv)).not.toBeNull();
+  }, SLOW);
+
+  it('the escrow key still does not open a declined folder', async () => {
+    const { marker, file } = await folderWithoutEscrow();
+    const declined = wire(declineEscrowSlot(marker, '2026-09-05T12:00:00Z'));
+    expect(await unlockWithEscrowKey(declined, priv)).toBeNull();
+    // And not by borrowing another folder's key either — the FMK the escrow
+    // key CAN produce on this installation is a different folder's.
+    const other = wire(
+      (await createEncryptedFolder(PW, { escrowPublicKey: escrowTestKey.public_spki_b64 })).marker,
+    );
+    const otherFmk = await unlockWithEscrowKey(other, priv);
+    expect(otherFmk).not.toBeNull();
+    await expect(decryptFile(otherFmk!, file)).rejects.toThrow();
+  }, SLOW);
+
+  it('survives the wire: esc_declined is a real marker field, not memory', async () => {
+    const { marker } = await folderWithoutEscrow();
+    const declined = declineEscrowSlot(marker, '2026-09-05T12:00:00Z');
+    const roundTripped = parseMarker(JSON.stringify(declined));
+    expect(roundTripped).not.toBeNull();
+    expect(escrowOfferState(roundTripped, ourKid)).toBe('declined');
   }, SLOW);
 });
 

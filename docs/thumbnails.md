@@ -197,7 +197,7 @@ failures are counted into `failed` but don't abort the run.
 > Only override `FILEX_SEARCH_ENABLED=true` when running backfill on a stopped
 > node.
 
-### Boot‑time backfill
+### Boot-time backfill
 
 For containers where you want each restart to make sure the grid is painted:
 

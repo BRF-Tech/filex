@@ -30,8 +30,18 @@ const desktopDownloads = computed<{ label: string; hint: string; href: string }[
     return [
       {
         label: 'Windows installer (.exe)',
-        hint: 'Installs filex and adds it to the Start menu · ~105 MB',
+        hint: 'Installs filex and adds it to the Start menu, and updates itself · ~92 MB',
         href: `${DL}/filex-desktop-x64.exe`,
+      },
+      // ⚠ A machine you may not install software on is a real case, not an
+      // edge one — and it was the only platform with no answer for it: the
+      // AppImage and the mac .zip already run unextracted. The hint has to say
+      // what it costs, because "portable" reads as strictly better until you
+      // find out it never updates.
+      {
+        label: 'Windows portable (.exe)',
+        hint: 'Runs from anywhere — a USB stick, Downloads — and keeps its files beside itself. Does not update itself · ~92 MB',
+        href: `${DL}/filex-desktop-portable-x64.exe`,
       },
     ];
   }

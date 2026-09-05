@@ -15,7 +15,11 @@ that lets you assemble the stack you actually need.
 
 ## Images
 
-Sizes are what you download (the compressed layers), measured on v0.30.x.
+Sizes are what you download (the compressed layers), measured on v0.31.0.
+On disk after `docker pull` they unpack to roughly four times that — **164 MB**
+for `slim` and **1.26 GB** for `full` (`docker images`, same tags, same day).
+Both numbers are real; the compressed one is what a registry page shows you and
+the other is what your disk loses, so neither belongs in a sentence alone.
 
 | Tag | Size | Includes |
 |---|---|---|

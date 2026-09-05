@@ -33,6 +33,15 @@ const props = defineProps<{
   /** Set of node IDs flagged starred by the user — render an inline
    *  filled star indicator and let the user toggle it from the row. */
   starredIds?: Set<number>;
+  /**
+   * Offer the star affordance at all. Follows the Starred view: when the panel
+   * leaves that view out — a shared app token has no single person behind it,
+   * so "your starred files" is one list shown to strangers — offering to star
+   * something is offering to write into that same shared list. Owner's call,
+   * 2026-09-05: "yıldızlı yeri gözükmüyorsa o zaman yıldızla/yıldızı kaldır da
+   * gözükmemeli".
+   */
+  starEnabled?: boolean;
   /** Backend base URL + auth header builder forwarded to StarButton
    *  so it can POST /api/files/manager/star on click. Optional —
    *  embedders without auth wire-up pass nothing and the star column
@@ -390,7 +399,7 @@ const segments = computed<Segment[]>(() => {
       >
         <div class="fe-list__col fe-list__col--star" role="gridcell" @click.stop>
           <StarButton
-            v-if="typeof n.id === 'number' && n.type === 'file'"
+            v-if="starEnabled !== false && typeof n.id === 'number' && n.type === 'file'"
             :starred="!!starredIds?.has(n.id)"
             :node-id="n.id"
             :api-base="apiBase"

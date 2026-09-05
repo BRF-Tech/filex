@@ -72,8 +72,9 @@ x-casaos:
       a media player can point straight at it, and `filex mount` attaches it as
       a drive. Public share links with PIN and expiry, file-drop upload links,
       resumable uploads, full-text search, thumbnails, trash and versioning,
-      RBAC, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app with folder sync
-      and an AI/MCP API for agents. On first start it
+      end-to-end encrypted folders with a recovery key, RBAC, TOTP 2FA,
+      optional SSO (OIDC/LDAP), a desktop app with folder sync and an AI/MCP
+      API for agents. On first start it
       creates an admin account and prints the password once in the container
       logs (also saved to /data/.first-run.txt), unless FILEX_ADMIN_EMAIL /
       FILEX_ADMIN_PASSWORD are set.
