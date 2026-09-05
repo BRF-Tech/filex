@@ -15,29 +15,45 @@ that lets you assemble the stack you actually need.
 
 ## Images
 
-| Tag                       | Size    | Includes                                                       |
-|---------------------------|---------|----------------------------------------------------------------|
-| `brftech/filex:latest`    | ~40 MB  | Alias for `slim`. Pure Go binary. Image thumbs only.           |
-| `brftech/filex:slim`      | ~40 MB  | Same as `latest`.                                              |
-| `brftech/filex:full`      | ~250 MB | + ffmpeg, vips-tools, ghostscript, poppler-utils, libreoffice. |
-| `brftech/filex:vX.Y.Z`    | varies  | Pinned-version slim.                                           |
-| `brftech/filex:slim-vX.Y.Z` / `full-vX.Y.Z` | varies | Pinned-version explicit variants. |
+Sizes are what you download (the compressed layers), measured on v0.30.x.
 
-The Go binary inside both is identical — `full` only adds runtime tools to
-unlock PDF / office / video thumbnails.
+| Tag | Size | Includes |
+|---|---|---|
+| `ghcr.io/brf-tech/filex:latest` | ~510 MB | The full toolchain. Alias for `full`. |
+| `ghcr.io/brf-tech/filex:full` | ~510 MB | + ffmpeg, ghostscript, poppler-utils, libreoffice, a headless JRE, rsvg-convert, fonts. |
+| `ghcr.io/brf-tech/filex:slim` | **~43 MB** | The Go binary and the embedded admin UI. Nothing else. |
+| `:vX.Y.Z` / `:full-vX.Y.Z` | ~510 MB | Pinned full. |
+| `:slim-vX.Y.Z` | ~43 MB | Pinned slim. |
+
+The Go binary is identical in both — `slim` simply has none of the programs the
+thumbnailer shells out to.
+
+**Which one do you want?** `latest` if you want previews of PDFs, office
+documents and video, which is most people. `slim` if filex is a file manager
+for you and not a preview generator: it pulls in seconds and carries a fraction
+of the attack surface. Image thumbnails work in both, because those are
+produced in pure Go.
+
+filex probes for each external tool at start and reports what it found on
+`/api/files/capabilities`, so on `slim` a video thumbnail is a disabled feature
+with a stated reason — not a crash and not a silent failure.
+
+> ⚠ **`slim` was not slim before v0.30.x.** The tag was built from the full
+> recipe, so this table promised ~40 MB while the registry served 511 MB. The
+> number above is measured, not aspirational: `docker save … | gzip | wc -c`.
 
 ### Build locally
 
 ```bash
-docker build -t brftech/filex:slim -f docker/Dockerfile .
-docker build -t brftech/filex:full -f docker/Dockerfile.full .
+docker build -t brftech/filex:full -f docker/Dockerfile .
+docker build -t brftech/filex:slim -f docker/Dockerfile.slim .
 ```
 
 Both Dockerfiles are multi-stage:
 1. `frontend-build` — node 20 + pnpm, builds packages + admin UI
 2. `embed-prep` — stages the dist files
 3. `backend-build` — golang 1.23, builds with `//go:embed` consuming the staged dist
-4. runtime — `alpine:3.20`, slim/full diverge here
+4. runtime — `alpine:3.20`; this is the only stage where slim and full differ
 
 Pass build-args to embed version metadata into the binary:
 ```bash
@@ -45,7 +61,7 @@ docker build \
   --build-arg VERSION=v0.1.0 \
   --build-arg COMMIT=$(git rev-parse --short HEAD) \
   --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  -t brftech/filex:slim -f docker/Dockerfile .
+  -t brftech/filex:full -f docker/Dockerfile .
 ```
 
 ---

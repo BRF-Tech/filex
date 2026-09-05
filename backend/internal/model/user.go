@@ -130,10 +130,53 @@ type APIToken struct {
 	// durable token often serves several consumers (work panel, PWA, a PC MCP
 	// client) — the chosen username is what audit, shares and presence show.
 	// Empty == only the token's label is usable (legacy behavior).
-	Usernames  string     `json:"usernames"`
+	Usernames string `json:"usernames"`
+	// Kind is what this credential IS — TokenKindUser (a person's own: CLI,
+	// WebDAV, SFTP, S3, `filex mount`) or TokenKindApp (an integration: a host
+	// app's proxy, a bot, an MCP client). Every token acts as its owner either
+	// way; kind only decides whether the identity-bearing surfaces are drawn
+	// for it. See NormalizeTokenKind for why "" reads as app.
+	Kind       string     `json:"kind"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// Token kinds. A token declares what it is, because "who is calling" and
+// "is there a person behind this call" are different questions and filex only
+// ever answered the first one.
+const (
+	// TokenKindUser — a person's own credential. Acts as that person and hides
+	// nothing: they may list and revoke their own tokens, and the explorer
+	// draws Recent / Starred / Shared with me / API keys as usual.
+	TokenKindUser = "user"
+	// TokenKindApp — an integration. Identity-bearing surfaces are suppressed
+	// because there is no single person behind the call: in the embeds we run,
+	// ONE shared token injected by the host's proxy serves every visitor, so
+	// "your API keys" would mean the proxy's own credential and "your Recent"
+	// would mean the token owner's history shown to a stranger.
+	TokenKindApp = "app"
+)
+
+// NormalizeTokenKind maps a stored/incoming value to a canonical kind.
+//
+// ⚠ Anything that is not exactly "user" is app — including the empty string.
+// Rows written before migration 00030, and any caller that forgets the field,
+// must land on the restricting side: the failure mode of guessing "user" is an
+// embed visitor listing and revoking the token the embed itself runs on, while
+// the failure mode of guessing "app" is one admin edit.
+func NormalizeTokenKind(s string) string {
+	if strings.TrimSpace(s) == TokenKindUser {
+		return TokenKindUser
+	}
+	return TokenKindApp
+}
+
+// IsApp reports whether this token is an integration rather than a person.
+// A nil token is NOT an app: no token at all means a cookie/OIDC session,
+// which is always a person.
+func (t *APIToken) IsApp() bool {
+	return t != nil && NormalizeTokenKind(t.Kind) == TokenKindApp
 }
 
 // UsernameList returns the parsed, trimmed username allow-list (may be empty).

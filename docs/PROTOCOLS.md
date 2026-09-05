@@ -48,6 +48,14 @@ password and without disturbing the others.
 | WebDAV | your login + an **API token** as the password | any token |
 | `filex mount` | `FILEX_URL` + an **API token** | Tokens |
 
+Every credential in that table is a **person's** — mint them while signed in as
+yourself, or from a `user` API token. An *app* token (a host app's proxy, a bot)
+is refused by all four self-service credential surfaces (API tokens, S3 access
+keys, SSH keys, NFS exports); its explorer does not show the **API keys** entry,
+and "How to connect" keeps the guides but replaces the mint forms with a line
+saying this session cannot create credentials. See
+[MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app).
+
 Your login is your **username** if you have set one, otherwise your e-mail. Both work
 everywhere; an `@` in an SSH or FTP login has to be quoted in most clients' config files,
 which is what usernames are for.

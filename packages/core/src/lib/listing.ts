@@ -179,7 +179,62 @@ export const VIRTUAL_SEGMENTS: Record<string, string> = {
   '.shared': 'node.shared',
 };
 
-/** The locale key for a sentinel segment, or '' when it is a real folder. */
+/**
+ * The tag view's sentinel: `.tag~<name>`, ONE segment, e.g. `.tag~invoices`.
+ *
+ * Every other virtual view has a fixed label, so a segment→locale-key map is
+ * enough for them. A tag's label is the tag itself, so it cannot live in that
+ * map — but it must not become a SECOND place that knows about sentinels
+ * either, which is exactly how the tab strip came to print `.shared`. Hence
+ * `virtualSegmentLabel()` below: the map keeps the static views, this prefix
+ * keeps the dynamic one, and every surface that renders a path segment calls
+ * the one function that knows both.
+ *
+ * ⚠ `~` rather than `:` or `/`. `writePersistedPath` runs each segment through
+ * `encodeURIComponent`, which leaves `~ - _ . ! * ' ( )` alone and escapes `:`
+ * — so `#.tag~invoices` stays readable in the address bar while `.tag:` would
+ * show as `#.tag%3Ainvoices`. And one segment rather than two (`.tag/name`)
+ * because a two-segment path gives the breadcrumb a clickable `.tag` parent
+ * crumb that leads nowhere.
+ */
+export const TAG_SEGMENT_PREFIX = '.tag~';
+
+/** `invoices` → `.tag~invoices`. */
+export function makeTagSegment(tag: string): string {
+  return `${TAG_SEGMENT_PREFIX}${tag}`;
+}
+
+/** `.tag~invoices` → `invoices`; '' for anything else (incl. a bare `.tag~`). */
+export function tagOfSegment(segment: string): string {
+  return segment.startsWith(TAG_SEGMENT_PREFIX)
+    ? segment.slice(TAG_SEGMENT_PREFIX.length)
+    : '';
+}
+
+/** True when `path` (user-facing form) IS a tag listing. */
+export function tagOfPath(path: string): string {
+  const clean = (path || '').replace(/^\/+|\/+$/g, '');
+  return tagOfSegment(clean.split('/').pop() || clean);
+}
+
+/** The locale key for a STATIC sentinel segment, or '' otherwise. Prefer
+ *  `virtualSegmentLabel` — a tag segment has no locale key to return. */
 export function virtualSegmentKey(segment: string): string {
   return VIRTUAL_SEGMENTS[segment] ?? '';
+}
+
+/**
+ * What a path segment READS AS: the translated view name for a static
+ * sentinel, `#<tag>` for a tag view, '' when it is an ordinary folder (the
+ * caller then shows the segment itself).
+ *
+ * `#` and not the bare name: a lone `invoices` crumb between `/` and nothing
+ * is indistinguishable from a folder called invoices. The glyph needs no
+ * translation and carries the tag's own name verbatim, which is the point.
+ */
+export function virtualSegmentLabel(segment: string, t: (key: string) => string): string {
+  const key = VIRTUAL_SEGMENTS[segment];
+  if (key) return t(key);
+  const tag = tagOfSegment(segment);
+  return tag ? `#${tag}` : '';
 }

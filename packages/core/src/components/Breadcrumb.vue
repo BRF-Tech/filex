@@ -21,7 +21,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { hasInternalDrag } from '../lib/dragOut';
-import { VIRTUAL_SEGMENTS } from '../lib/listing';
+import { virtualSegmentLabel } from '../lib/listing';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 
@@ -125,7 +125,9 @@ const crumbs = computed<Crumb[]>(() => {
     // gezinti:g1 — the sentinel segments the virtual views park in `dirname`
     // (`.trash` predates them). Without a mapping the crumb reads ".starred",
     // which is a filename the user never typed and cannot navigate to.
-    const label = VIRTUAL_SEGMENTS[part] ? t(VIRTUAL_SEGMENTS[part]) : part;
+    // etiket:t1 — via the shared resolver, which also knows the tag view's
+    // `.tag~<name>` segment; the raw map only covers the fixed-label views.
+    const label = virtualSegmentLabel(part, t) || part;
     out.push({ label, adapterPath: `${adapterPrefix}${acc}` });
   }
   return out;

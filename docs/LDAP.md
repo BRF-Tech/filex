@@ -185,7 +185,8 @@ also mount `/dav` with the same credentials.
 - **2FA.** An account with TOTP enabled is refused on these protocols, whether
   its password is local or in the directory — none of them can carry a second
   factor. Such an account must use an API token (file explorer → navigation panel →
-  **Connections → API keys**).
+  **Connections → API keys**; an embed proxied with a shared *app* token does
+  not show that entry — see [MCP.md](MCP.md#token-kinds--user-vs-app)).
 
 Set `protocol_login: false` (or `FILEX_LDAP_PROTOCOL_LOGIN=false`) to keep
 directory passwords on the login form only and require an API token everywhere

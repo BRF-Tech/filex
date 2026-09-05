@@ -36,9 +36,21 @@ Cypress.Commands.add('apiLogin', (email, password) => {
       method: 'POST',
       url: '/api/auth/login',
       body: { email: e, password: p },
+      // ⚠ Not `failOnStatusCode: false` as a way of ignoring a refusal — the
+      // assertion below still demands 200. It is here so a refusal reports the
+      // server's OWN reason instead of Cypress's generic "the response was
+      // 401". `backend/internal/auth/drivers/local` folds several very
+      // different situations into one 401 ("invalid credentials"): a wrong
+      // password, an account that has since had TOTP turned on, and any error
+      // from the user lookup — and SQLite here runs on a single connection
+      // (`SetMaxOpenConns(1)`), so a busy database is one of them. When a run
+      // suddenly starts refusing the admin it has been using for two hundred
+      // tests, the body is the only thing that tells them apart.
+      failOnStatusCode: false,
     })
     .then((res) => {
-      expect(res.status, 'login status').to.eq(200);
+      const why = typeof res.body === 'string' ? res.body : JSON.stringify(res.body ?? {});
+      expect(res.status, `login as ${e} (server said: ${why})`).to.eq(200);
       // cy.request occasionally hands back raw text for application/
       // json responses depending on edge-cdn caching — parse defensively.
       const body = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;

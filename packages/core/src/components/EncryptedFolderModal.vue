@@ -20,6 +20,10 @@ const props = defineProps<{
   locale: LocaleCode;
   /** True while the parent is creating the folder + uploading the marker. */
   busy?: boolean;
+  /** Short id of this installation's E2E escrow key, when one is configured.
+   *  Shown BEFORE the folder is created: escrow means the operator can open
+   *  it without the password, and that is not a detail to discover later. */
+  escrowKid?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -106,6 +110,12 @@ function submit() {
       <div class="fe-e2e-warn" role="alert">
         <strong>{{ t('e2e.create.warn_title') }}</strong>
         <p>{{ t('e2e.create.warn_body') }}</p>
+      </div>
+      <!-- wiring:e2 recovery — disclosure, not a setting. The user cannot
+           turn escrow off for their folder; they can only know about it. -->
+      <div v-if="escrowKid" class="fe-e2e-rk__escrow" role="note">
+        <strong>{{ t('e2e.create.escrow_title') }}</strong>
+        <p>{{ t('e2e.create.escrow_body') }}</p>
       </div>
       <label class="fe-e2e-ack">
         <input v-model="ack" type="checkbox" :disabled="busy" />

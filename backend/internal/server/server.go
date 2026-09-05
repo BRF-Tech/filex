@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/ftpsrv"
@@ -169,6 +170,34 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	} else if named > 0 {
 		slog.Info("identity: named existing accounts", slog.Int("count", named))
 	}
+
+	/* wiring:e2 — install-time settings, pinned for the life of the install.
+	 *
+	 * E2E key escrow is decided once, here, and never again: an encrypted
+	 * folder wraps its master key to the escrow identity WHEN IT IS CREATED,
+	 * so a folder made while escrow was off has no escrow-wrapped key and
+	 * cannot be given one without the folder password. Letting the operator
+	 * flip the switch later would produce a server that claims a capability
+	 * it does not have over half its data.
+	 *
+	 * So: an unparseable key is fatal (running without escrow while the
+	 * operator believes they configured it is the worst failure mode), and a
+	 * key that disagrees with what this data directory was initialised with
+	 * is fatal too. Both errors explain themselves — see e2e.PinInstallation. */
+	escrowKey, err := e2e.ResolveEscrow()
+	if err != nil {
+		return nil, err
+	}
+	inst, err := e2e.PinInstallation(ctx, store, cfg.DataDir, escrowKey, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	if inst.E2EEscrowKID != "" {
+		slog.Info("e2e: key escrow enabled",
+			slog.String("kid", inst.E2EEscrowKID),
+			slog.String("alg", e2e.EscrowAlg))
+	}
+	/* /wiring:e2 */
 
 	// Auth drivers — local always present.
 	var localDrv auth.LoginDriver
@@ -841,6 +870,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		ZipCache:        zipCache,
 		FileCache:       fileCache,
 		AVScan:          avEnqueue, /* koru:k2 av */
+		E2EEscrow:       escrowKey, /* wiring:e2 — nil when escrow is off */
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see

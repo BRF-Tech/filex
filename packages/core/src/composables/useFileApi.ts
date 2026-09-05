@@ -226,6 +226,9 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     // filex trash: list soft-deleted nodes + restore one by node id.
     trashList: derive(config.trashList, '/api/files/manager/trash'),
     trashRestore: derive(config.trashRestore, '/api/files/manager/restore'),
+    /* wiring:e2 — escrow proof-of-possession, then the owner is told. */
+    e2eEscrowChallenge: derive(config.e2eEscrowChallenge, '/api/files/e2e/escrow/challenge'),
+    e2eEscrowUsed: derive(config.e2eEscrowUsed, '/api/files/e2e/escrow/used'),
   };
 }
 
@@ -687,6 +690,38 @@ export function useFileApi(config: ExplorerConfig) {
     return jsonFetch<Capabilities>(endpoints.capabilities);
   }
 
+  /* wiring:e2 — escrow use is announced, not merely performed.
+   *
+   * Ask the server for a nonce sealed to the escrow public key; only the
+   * holder of the private half can read it back. Returning it is what earns
+   * the notification to the folder's owner — a bare "I used escrow" POST
+   * would be a string anyone could send.
+   *
+   * ⚠ This is an announcement, not a gate. An operator holding the private
+   * key can decrypt the folder offline with a script and never come here.
+   * docs/E2E-ENCRYPTION.md says so plainly and must keep saying so. */
+  async function e2eEscrowChallenge(
+    path: string,
+  ): Promise<{ id: string; challenge: string; kid: string }> {
+    if (!endpoints.e2eEscrowChallenge) throw new Error('e2e escrow endpoint not configured');
+    return jsonFetch(endpoints.e2eEscrowChallenge, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async function e2eEscrowUsed(payload: {
+    path: string;
+    id: string;
+    nonce: string;
+  }): Promise<{ ok: boolean; notified: boolean }> {
+    if (!endpoints.e2eEscrowUsed) throw new Error('e2e escrow endpoint not configured');
+    return jsonFetch(endpoints.e2eEscrowUsed, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async function createShare(payload: {
     path: string;
     password?: boolean;
@@ -869,6 +904,9 @@ export function useFileApi(config: ExplorerConfig) {
     // Peripheral
     limits,
     capabilities,
+    /* wiring:e2 */
+    e2eEscrowChallenge,
+    e2eEscrowUsed,
     createShare,
     listShares,
     revokeShare,

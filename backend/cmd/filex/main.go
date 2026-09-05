@@ -10,6 +10,7 @@
 //	filex storage list | add | remove
 //	filex thumb backfill [--storage <id|name>] [--limit N] [--retry-failed]
 //	filex client login | ls | upload | download | mkdir | rm | mv | search | share
+//	filex e2e-escrow keygen                      # install-time E2E key escrow
 //	filex --version
 package main
 
@@ -64,6 +65,7 @@ func main() {
 		syncCmd(),
 		mountCmd(),
 		selfUpdateCmd(),
+		e2eEscrowCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

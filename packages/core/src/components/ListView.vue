@@ -396,6 +396,7 @@ const segments = computed<Segment[]>(() => {
             :api-base="apiBase"
             :auth-headers="authHeaders"
             :auth-credentials="authCredentials"
+            :locale="locale"
             compact
             @change="(val: boolean) => emit('star-change', n, val)"
           />

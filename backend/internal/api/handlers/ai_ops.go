@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -614,6 +615,19 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if !a.allow(ctx, sSrc, relSrc, acl.LevelEditor) || !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
 		return nil, errAIForbidden
 	}
+	/* wiring:e2 — the AI/MCP surface obeys the same encryption boundary as
+	 * the web UI. `dst` here is a full path (move is also rename), so the
+	 * destination DIRECTORY is what the guard is asked about. */
+	if lk, ok := a.store.(e2e.NodeByPathLookup); ok {
+		dstDir := path.Dir(relDst)
+		if dstDir == "." {
+			dstDir = ""
+		}
+		if err := e2e.GuardTransfer(ctx, lk, sSrc.ID, []string{relSrc}, sDst.ID, dstDir); err != nil {
+			return nil, err
+		}
+	}
+
 	if sSrc.ID != sDst.ID {
 		// Two storages have no rename between them, so the bytes travel — the
 		// same engine the queue uses for a cross-depo paste, deliberately not a

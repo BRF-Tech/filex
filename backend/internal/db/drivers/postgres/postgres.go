@@ -944,12 +944,14 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context) error {
 func (s *Store) CreateAPIToken(ctx context.Context, t *model.APIToken) (*model.APIToken, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, expires_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, t.ExpiresAt).Scan(&id)
+		`INSERT INTO api_tokens (user_id, label, token_hash, scopes, usernames, kind, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+		t.UserID, t.Label, t.TokenHash, t.Scopes, t.Usernames, model.NormalizeTokenKind(t.Kind), t.ExpiresAt).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
 	t.ID = id
+	// See the sqlite driver: echo back what was stored, not what was asked for.
+	t.Kind = model.NormalizeTokenKind(t.Kind)
 	t.CreatedAt = time.Now()
 	return t, nil
 }
@@ -1187,19 +1189,19 @@ func (s *Store) DeleteNFSExport(ctx context.Context, id, userID int64) error {
 
 func (s *Store) GetAPITokenByHash(ctx context.Context, tokenHash string) (*model.APIToken, error) {
 	return scanAPIToken(s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE token_hash=$1`,
 		tokenHash))
 }
 
 // GetAPITokenByID fetches a token by primary key — see the sqlite driver.
 func (s *Store) GetAPITokenByID(ctx context.Context, id int64) (*model.APIToken, error) {
 	return scanAPIToken(s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE id=$1`, id))
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE id=$1`, id))
 }
 
 func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1217,7 +1219,7 @@ func (s *Store) ListAPITokens(ctx context.Context) ([]*model.APIToken, error) {
 
 func (s *Store) ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
+		`SELECT id, user_id, label, token_hash, scopes, COALESCE(usernames,''), COALESCE(kind,'app'), last_used_at, expires_at, created_at FROM api_tokens WHERE user_id=$1 ORDER BY created_at DESC`,
 		userID)
 	if err != nil {
 		return nil, err
@@ -1239,8 +1241,9 @@ func (s *Store) TouchAPIToken(ctx context.Context, id int64) error {
 	return err
 }
 
-// UpdateAPITokenMeta edits label and/or the username allow-list. nil = keep.
-func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames *string) error {
+// UpdateAPITokenMeta edits label, the username allow-list and/or the token
+// kind. nil = keep.
+func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames, kind *string) error {
 	if label != nil {
 		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET label=$1 WHERE id=$2`, *label, id); err != nil {
 			return err
@@ -1248,6 +1251,11 @@ func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernam
 	}
 	if usernames != nil {
 		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET usernames=$1 WHERE id=$2`, *usernames, id); err != nil {
+			return err
+		}
+	}
+	if kind != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET kind=$1 WHERE id=$2`, model.NormalizeTokenKind(*kind), id); err != nil {
 			return err
 		}
 	}
@@ -1262,9 +1270,10 @@ func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
 func scanAPIToken(r rowScanner) (*model.APIToken, error) {
 	t := &model.APIToken{}
 	var lastUsed, expires sql.NullTime
-	if err := r.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &lastUsed, &expires, &t.CreatedAt); err != nil {
+	if err := r.Scan(&t.ID, &t.UserID, &t.Label, &t.TokenHash, &t.Scopes, &t.Usernames, &t.Kind, &lastUsed, &expires, &t.CreatedAt); err != nil {
 		return nil, err
 	}
+	t.Kind = model.NormalizeTokenKind(t.Kind)
 	if lastUsed.Valid {
 		t.LastUsedAt = &lastUsed.Time
 	}

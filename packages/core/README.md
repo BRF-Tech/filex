@@ -121,6 +121,17 @@ to be told to ask an administrator. Set `connections: false` to leave them out.
 ⚠ Never gated on role in the UI: `/api/tokens` caps every scope against the
 caller's own account, and the panel renders what the API returns.
 
+⚠ **API keys is dropped for an app token** — along with Recent, Starred and
+Shared with me — because those surfaces belong to one person and an app token
+belongs to none. `ConnectionsPanel` degrades with it: the guides stay, and
+`S3KeysPanel` / `SSHKeysPanel` / `NFSExportsPanel` / `TokensPanel` show their
+existing "cannot mint" note instead of a form, driven by the server's 403
+through the `canMint` / `canAdd` flag each composable already reports. That is `callerKind`, read from
+`GET /api/files/capabilities` (`caller_kind`) and overridable per embed; it is a
+credential-kind check, not the role check the paragraph above forbids. "How to
+connect", Upload, the storages and Trash stay. See
+[docs/MCP.md → Token kinds](https://github.com/BRF-Tech/filex/blob/main/docs/MCP.md#token-kinds--user-vs-app).
+
 `uiProfile: 'simple'` is a preset, not a feature switch — nothing is removed
 from the build. It turns off the tab strip and the split pane, reduces the view
 switcher to list + grid, and starts the navigation panel expanded, for the

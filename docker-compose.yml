@@ -30,6 +30,11 @@ services:
 
       # --- Auth ---
       FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
+
+      # --- E2E key escrow (install-time only; see docs/CONFIGURATION.md) ---
+      # Unset = off. Frozen after the first boot: filex refuses to start if it
+      # changes, because folders created without it can never be opened by it.
+      FILEX_INSTALLATION_E2E_ESCROW_KEY: ${FILEX_INSTALLATION_E2E_ESCROW_KEY:-}
       FILEX_OIDC_ISSUER: ${FILEX_OIDC_ISSUER:-}
       FILEX_OIDC_CLIENT_ID: ${FILEX_OIDC_CLIENT_ID:-}
       FILEX_OIDC_CLIENT_SECRET: ${FILEX_OIDC_CLIENT_SECRET:-}
@@ -59,7 +64,9 @@ services:
       - filex-net
 
   # ---------------------------------------------------------------------
-  # filex (full) — alternative with thumbnail tools (~250 MB image)
+  # filex (full) — the default image; thumbnail toolchain included (~510 MB
+  # compressed). The lean alternative is brftech/filex:slim (~43 MB), which has
+  # the same binary and none of the programs the thumbnailer shells out to.
   # Activate with `--profile full` and stop the `filex` service first
   # (or change the published port via FILEX_PORT in .env).
   # ---------------------------------------------------------------------
@@ -77,6 +84,11 @@ services:
       FILEX_PUBLIC_URL: ${FILEX_PUBLIC_URL:-http://localhost:5212}
       FILEX_LISTEN: 0.0.0.0:5212
       FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
+
+      # --- E2E key escrow (install-time only; see docs/CONFIGURATION.md) ---
+      # Unset = off. Frozen after the first boot: filex refuses to start if it
+      # changes, because folders created without it can never be opened by it.
+      FILEX_INSTALLATION_E2E_ESCROW_KEY: ${FILEX_INSTALLATION_E2E_ESCROW_KEY:-}
       FILEX_DB_DRIVER: ${FILEX_DB_DRIVER:-sqlite}
       FILEX_DB_DSN: ${FILEX_DB_DSN:-/data/filex.db}
       FILEX_THUMBS_ENABLED: "true"

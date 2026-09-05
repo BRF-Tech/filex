@@ -56,11 +56,16 @@ func (h *AITokens) List(w http.ResponseWriter, r *http.Request) {
 // when > 0, sets an expiry. usernames is the identity allow-list the caller
 // may act under per request (first = default; empty → the label).
 type createTokenBody struct {
-	Label         string   `json:"label"`
-	UserID        int64    `json:"user_id,omitempty"`
-	Scopes        string   `json:"scopes,omitempty"`
-	Usernames     []string `json:"usernames,omitempty"`
-	ExpiresInDays int      `json:"expires_in_days,omitempty"`
+	Label     string   `json:"label"`
+	UserID    int64    `json:"user_id,omitempty"`
+	Scopes    string   `json:"scopes,omitempty"`
+	Usernames []string `json:"usernames,omitempty"`
+	// Kind defaults to "app" on this surface — this is where a host app's
+	// proxy, a bot or an MCP client gets its credential, and none of those is
+	// a person. An admin minting a personal token for somebody passes "user"
+	// explicitly (or the person mints it themselves at /api/tokens).
+	Kind          string `json:"kind,omitempty"`
+	ExpiresInDays int    `json:"expires_in_days,omitempty"`
 }
 
 // Create issues a new token. The plaintext value is returned ONCE — only its
@@ -104,12 +109,19 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kind, kerr := normalizeTokenKind(body.Kind, model.TokenKindApp)
+	if kerr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": kerr.Error()})
+		return
+	}
+
 	row := &model.APIToken{
 		UserID:    userID,
 		Label:     strings.TrimSpace(body.Label),
 		TokenHash: apitoken.HashToken(plain),
 		Scopes:    scopes,
 		Usernames: usernames,
+		Kind:      kind,
 	}
 	if body.ExpiresInDays > 0 {
 		exp := time.Now().AddDate(0, 0, body.ExpiresInDays)
@@ -133,6 +145,11 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 type updateTokenBody struct {
 	Label     *string   `json:"label,omitempty"`
 	Usernames *[]string `json:"usernames,omitempty"`
+	// Kind — "user" or "app". The escape hatch for migration 00030, which
+	// defaulted every token that existed before the split to "app": a personal
+	// token that predates it becomes a person's again with one PATCH.
+	// Admin-only on purpose; see SelfTokens.Update.
+	Kind *string `json:"kind,omitempty"`
 }
 
 // Update edits a token's label / username allow-list.
@@ -149,7 +166,7 @@ func (h *AITokens) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	var label, usernames *string
+	var label, usernames, kind *string
 	if body.Label != nil {
 		l := strings.TrimSpace(*body.Label)
 		label = &l
@@ -162,7 +179,15 @@ func (h *AITokens) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		usernames = &u
 	}
-	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames); err != nil {
+	if body.Kind != nil {
+		k, kerr := normalizeTokenKind(*body.Kind, "")
+		if kerr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": kerr.Error()})
+			return
+		}
+		kind = &k
+	}
+	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames, kind); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -221,6 +246,29 @@ func normalizeUsernames(raw []string) (string, error) {
 		out = append(out, u)
 	}
 	return strings.Join(out, ","), nil
+}
+
+// normalizeTokenKind validates the requested token kind, falling back to
+// `def` when the caller said nothing (pass "" for def to require a value).
+//
+// ⚠ An unknown value is REJECTED rather than folded into "app". Silently
+// downgrading a typo'd "users" to an app token would mint a credential whose
+// owner cannot manage their own keys and give them no error to read; the model
+// normalizes unknown values to "app" only where it is reading rows nobody can
+// fix any more (pre-00030 data).
+func normalizeTokenKind(raw, def string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if def == "" {
+			return "", fmt.Errorf("kind is required (%q or %q)", model.TokenKindUser, model.TokenKindApp)
+		}
+		return def, nil
+	}
+	switch raw {
+	case model.TokenKindUser, model.TokenKindApp:
+		return raw, nil
+	}
+	return "", fmt.Errorf("unknown token kind %q (valid: %s, %s)", raw, model.TokenKindUser, model.TokenKindApp)
 }
 
 // normalizeScopes trims whitespace around each comma-separated scope, drops

@@ -5,10 +5,26 @@ describe('notifications', () => {
     cy.apiLogin();
   });
 
-  it('GET /api/notifications has items array', () => {
-    cy.adminGet<{ items?: Array<{ id: number; event: string }> }>('/api/notifications').then((d) => {
-      expect(d.items, 'items').to.be.an('array');
-    });
+  it('GET /api/notifications has the list envelope', () => {
+    cy.adminGet<{ items?: Array<{ id: number; event: string }> | null }>('/api/notifications').then(
+      (d) => {
+        // ⚠ Go serializes an empty slice as JSON `null`, so an instance that
+        // has never raised a notification answers `{"items": null}`. The old
+        // unconditional `to.be.an('array')` therefore depended on whether some
+        // earlier spec happened to generate one — it passed in one full run and
+        // failed in the next with no code change between them. Assert the
+        // envelope, and assert the ROW shape whenever there is a row, which is
+        // the part that can actually catch a serialization change.
+        expect(d, 'notifications envelope').to.have.property('items');
+        if (d.items !== null && d.items !== undefined) {
+          expect(d.items, 'items').to.be.an('array');
+          for (const n of d.items) {
+            expect(n, 'notification row').to.have.property('id');
+            expect(n, 'notification row').to.have.property('event');
+          }
+        }
+      },
+    );
   });
 
   it('unread-count returns {count:n}', () => {

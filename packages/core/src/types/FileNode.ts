@@ -88,10 +88,33 @@ export interface Capabilities {
   /** Longest life a new share link may be given, in days (0 = no ceiling).
    *  Read by the share dialogs so they offer only expiries the server keeps. */
   share_max_ttl_days?: number;
+  /** Is the caller a person (`'user'` — a session OR their own API token) or an
+   *  integration (`'app'` — a host proxy, a bot, an MCP client)? The explorer
+   *  reads it to decide whether to draw the identity-bearing surfaces; see
+   *  ExplorerConfig.callerKind. Absent on a server older than the app/user
+   *  token split, which is why every reader treats "missing" as a person. */
+  caller_kind?: 'user' | 'app';
   external?: {
     onlyoffice?: ExternalServiceStatus;
     drawio?: ExternalServiceStatus;
     mermaid?: ExternalServiceStatus;
+  };
+  /* wiring:e2 */
+  /** Whether this installation holds an escrow key for E2E-encrypted folders,
+   *  and the public half the browser wraps new folders' master keys to.
+   *
+   *  Published on purpose. Escrow means the operator can open the folders you
+   *  create here without your password, and someone about to create one is
+   *  entitled to know that BEFORE they create it. Fixed at install time
+   *  (FILEX_INSTALLATION_E2E_ESCROW_KEY), so this answer never changes for a
+   *  running installation. */
+  e2e_escrow?: {
+    enabled: boolean;
+    /** Short id of the escrow key (SHA-256(SPKI)[:8], hex). */
+    kid?: string;
+    alg?: string;
+    /** Base64 SPKI. Public material — it can only seal, never open. */
+    public_key?: string;
   };
 }
 

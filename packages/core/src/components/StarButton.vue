@@ -6,7 +6,10 @@
  * `POST /api/files/manager/star`). Optimistic update — flips the local
  * state immediately and rolls back on API error.
  */
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
+import { setNodeStarred } from '../lib/star';
+import { useLocale } from '../composables/useLocale';
+import type { LocaleCode } from '../types/ExplorerConfig';
 
 const props = defineProps<{
   starred: boolean;
@@ -21,6 +24,17 @@ const props = defineProps<{
   authCredentials?: RequestCredentials;
   /** Compact mode for grid view (no label, just the icon). */
   compact?: boolean;
+  /**
+   * Card mode — the same button sitting ON a grid/gallery tile instead of in
+   * a list cell: a round translucent chip in the tile's corner. It is the SAME
+   * component, deliberately: a card star written separately is a second
+   * starring path, and the two drift the first time one of them is fixed.
+   */
+  card?: boolean;
+  /** Locale for the title/label. ⚠ The strings used to be hardcoded English
+   *  ("Star"/"Unstar"), which is a Turkish user's only untranslated control in
+   *  the row. */
+  locale?: LocaleCode;
 }>();
 
 const emit = defineEmits<{
@@ -31,22 +45,18 @@ const emit = defineEmits<{
 const local = ref(props.starred);
 watch(() => props.starred, (v) => { local.value = v; });
 
+const { t } = useLocale(() => props.locale ?? 'tr');
+const label = computed(() => t(local.value ? 'ctx.unstar' : 'ctx.star'));
+
 async function toggle() {
   const next = !local.value;
   local.value = next; // optimistic
   try {
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(await (props.authHeaders ?? (() => ({})))()),
-    };
-    const base = props.apiBase ?? '';
-    const res = await fetch(`${base}/api/files/manager/star`, {
-      method: 'POST',
-      headers,
-      credentials: props.authCredentials ?? 'same-origin',
-      body: JSON.stringify({ node_id: props.nodeId, starred: next }),
+    await setNodeStarred(props.nodeId, next, {
+      apiBase: props.apiBase,
+      authHeaders: props.authHeaders,
+      authCredentials: props.authCredentials,
     });
-    if (!res.ok) throw new Error(`star toggle failed: ${res.status}`);
     emit('change', next);
   } catch (err) {
     local.value = !next; // rollback
@@ -59,9 +69,11 @@ async function toggle() {
   <button
     type="button"
     class="filex-star-btn"
-    :class="{ 'is-starred': local, 'is-compact': compact }"
+    :class="{ 'is-starred': local, 'is-compact': compact, 'is-card': card }"
     :aria-pressed="local"
-    :title="local ? 'Unstar' : 'Star'"
+    :title="label"
+    :aria-label="label"
+    data-testid="star-toggle"
     @click.stop="toggle"
   >
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -73,7 +85,7 @@ async function toggle() {
         d="M12 2.5l3.09 6.26 6.91 1-5 4.87 1.18 6.87L12 18.27l-6.18 3.23L7 14.63 2 9.76l6.91-1z"
       />
     </svg>
-    <span v-if="!compact" class="filex-star-label">{{ local ? 'Starred' : 'Star' }}</span>
+    <span v-if="!compact" class="filex-star-label">{{ label }}</span>
   </button>
 </template>
 

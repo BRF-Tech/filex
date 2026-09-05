@@ -2,25 +2,34 @@
 /**
  * e2e/run.mjs — the one entry point for filex's end-to-end suite.
  *
- * Two profiles, deliberately kept apart:
+ * Three profiles, deliberately kept apart:
  *
- *   local        Hermetic. Starts a filex binary on a free port against a
- *                throwaway data dir with a deterministic admin, waits for
- *                /healthz, runs every spec except the deployment smoke, and
+ *   local        Hermetic Playwright run. Starts a filex binary on a free port
+ *                against a throwaway data dir with a deterministic admin, waits
+ *                for /healthz, runs every spec except the deployment smoke, and
  *                tears the whole thing down again. This is the release gate.
+ *
+ *   cypress      The SAME hermetic instance, driving web/cypress instead of
+ *                Playwright. The two suites are not duplicates: Playwright
+ *                walks user journeys through the UI, Cypress pins the HTTP
+ *                contracts the UI is built on plus the admin screens that read
+ *                them (web/cypress/README.md has the split). Both have to run
+ *                with no secrets and against no live host.
  *
  *   deployment   Read-only smoke against a URL that is already live. Never
  *                run as part of a build check.
  *
- * Mixing the two is what made the old setup unable to answer the only
- * question that matters before a release — "is this build good?" — because a
- * local run could go red merely because production was slow. Keeping them
- * separate is the point of this file.
+ * Mixing the live one into the others is what made the old setup unable to
+ * answer the only question that matters before a release — "is this build
+ * good?" — because a local run could go red merely because production was
+ * slow. Keeping them separate is the point of this file.
  *
  * Usage:
  *   node e2e/run.mjs local
  *   node e2e/run.mjs local --s3                 # + a MinIO container and an s3 storage
  *   node e2e/run.mjs local --binary ../bin/filex.exe --keep
+ *   node e2e/run.mjs cypress
+ *   node e2e/run.mjs cypress --spec "cypress/e2e/13-navigation-ui.cy.ts"
  *   node e2e/run.mjs deployment --url https://fm.example.com
  *
  * Exit code is the suite's. A profile that cannot set up what it promised
@@ -50,15 +59,22 @@ const value = (name, fallback = undefined) => {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : fallback;
 };
 
-if (profile !== 'local' && profile !== 'deployment') {
-  console.error('usage: node e2e/run.mjs <local|deployment> [options]\n');
-  console.error('  local       hermetic run against a binary this script starts');
+const PROFILES = ['local', 'cypress', 'deployment'];
+if (!PROFILES.includes(profile)) {
+  console.error(`usage: node e2e/run.mjs <${PROFILES.join('|')}> [options]\n`);
+  console.error('  local       hermetic Playwright run against a binary this script starts');
   console.error('    --binary <path>   filex binary (default: bin/filex[.exe], or --build)');
   console.error('    --build           build the frontend + binary first');
   console.error('    --s3              also start MinIO and register an s3 storage');
   console.error('    --port <n>        server port (default: a free one)');
   console.error('    --keep            leave the server (and data dir) running afterwards');
   console.error('    --grep <pattern>  pass through to playwright');
+  console.error('');
+  console.error('  cypress     hermetic Cypress run against the same kind of instance');
+  console.error('    --binary / --build / --port / --keep as above');
+  console.error('    --spec <pattern>  pass through to cypress (default: every spec)');
+  console.error('    --browser <name>  cypress browser (default: electron, always present)');
+  console.error('    --headed          show the browser');
   console.error('');
   console.error('  deployment  read-only smoke against a live URL');
   console.error('    --url <url>       required, e.g. https://fm.example.com');
@@ -176,6 +192,51 @@ function playwright(specs, env) {
   const shellSafe = (a) => (/^[\w.:/\\=-]+$/.test(a) ? a : `"${a.replace(/(["\\])/g, '\\$1')}"`);
   const res = spawnSync(bin, useShell ? args.map(shellSafe) : args, {
     cwd: E2E_DIR,
+    stdio: 'inherit',
+    shell: useShell,
+    env: { ...process.env, ...env },
+  });
+  return res.status ?? 1;
+}
+
+/**
+ * Run Cypress from THIS repo's install (web/node_modules), never `npx` — the
+ * same reason the Playwright launcher above refuses to: a runner that silently
+ * fetches its own version is a suite you cannot reason about.
+ *
+ * The browser defaults to `electron`, which ships inside the Cypress binary.
+ * Chrome is a fine choice on a workstation but it is not guaranteed on a CI
+ * runner, and "the browser is missing" and "the app is broken" produce the
+ * same red run.
+ */
+function cypress(env) {
+  const webDir = path.join(REPO, 'web');
+  const bin = path.join(
+    webDir,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'cypress.cmd' : 'cypress',
+  );
+  if (!fs.existsSync(bin)) {
+    throw new Error(
+      `Cypress is not installed in ${webDir}.\n` +
+        `Run:  cd ${REPO} && pnpm install --force\n` +
+        `(a plain \`pnpm install\` reports "Already up to date" when the store ` +
+        `entry is missing — it validates the lockfile, not the files on disk).`,
+    );
+  }
+  const args = ['run', '--browser', value('browser', 'electron')];
+  if (flag('headed')) args.push('--headed');
+  const spec = value('spec');
+  if (spec) args.push('--spec', spec);
+
+  // Windows needs a shell to run cypress.cmd, and a shell re-parses the
+  // argument list — a glob like `cypress/e2e/1*.cy.ts` would be mangled. Same
+  // quoting rule as the Playwright launcher.
+  const useShell = process.platform === 'win32';
+  const shellSafe = (a) => (/^[\w.:/\\=-]+$/.test(a) ? a : `"${a.replace(/(["\\])/g, '\\$1')}"`);
+  const res = spawnSync(bin, useShell ? args.map(shellSafe) : args, {
+    cwd: webDir,
     stdio: 'inherit',
     shell: useShell,
     env: { ...process.env, ...env },
@@ -313,6 +374,61 @@ async function startServer(binary) {
   return { baseURL, dataDir };
 }
 
+/** Session cookie for the deterministic admin, the way a browser gets one. */
+async function adminCookie(baseURL) {
+  const login = await fetch(`${baseURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+  });
+  if (!login.ok) throw new Error(`admin login failed: ${login.status} ${await login.text()}`);
+  return (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+}
+
+/**
+ * One local-driver storage, so the Cypress suite measures a populated instance.
+ *
+ * ⚠ A bare instance has ZERO storages, and most of these specs discover "the
+ * first storage" and then quietly do nothing when there is none. That run
+ * reports green while asserting almost nothing — the failure mode this whole
+ * exercise exists to remove. Seeding one deterministic storage is what makes
+ * the pass/fail number mean something.
+ *
+ * ⚠ The root of a local storage is `config.path`, not `mount_path` and not
+ * `config.root` — `local.Driver.Init` reads `path` first (e2e/helpers/seed.ts
+ * carries the full story and the bug it caused). It lives under the throwaway
+ * data dir so a run cannot inherit the previous one's files.
+ */
+async function seedCypressStorage(baseURL, dataDir) {
+  const root = path.join(dataDir, 'storages', 'cypress-local');
+  fs.mkdirSync(root, { recursive: true });
+  const cookie = await adminCookie(baseURL);
+  const name = 'cypress-local';
+  const res = await fetch(`${baseURL}/api/admin/storages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      name,
+      driver: 'local',
+      mount_path: root,
+      enabled: true,
+      config: { path: root },
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`seeding the cypress storage failed: ${res.status} ${await res.text()}`);
+  }
+  // Assert the server kept the root we asked for. A storage that silently
+  // resolved somewhere else is how every spec ends up sharing one directory.
+  const made = await res.json();
+  const stored = made?.config?.path ?? made?.storage?.config?.path;
+  if (stored && path.resolve(stored) !== path.resolve(root)) {
+    throw new Error(`storage root drifted: asked ${root}, server stored ${stored}`);
+  }
+  log(`seeded local storage "${name}" at ${root}`);
+  return name;
+}
+
 /**
  * MinIO in Docker, plus an s3 storage registered through the admin API.
  * The bucket is made by creating a directory inside the container — MinIO
@@ -404,6 +520,21 @@ async function main() {
   const { baseURL, dataDir } = await startServer(binary);
   const storageRootDir = path.join(dataDir, 'storages');
   fs.mkdirSync(storageRootDir, { recursive: true });
+
+  if (profile === 'cypress') {
+    const storageName = await seedCypressStorage(baseURL, dataDir);
+    log('running the Cypress suite');
+    return cypress({
+      // ⚠ CYPRESS_BASE_URL, not a --config flag: cypress.config.ts reads this
+      // and it is also the ONLY way a human points the suite somewhere else.
+      // Keeping one knob means the hermetic run and the opt-in live run differ
+      // by a value, not by a code path.
+      CYPRESS_BASE_URL: baseURL,
+      CYPRESS_ADMIN_EMAIL: ADMIN_EMAIL,
+      CYPRESS_ADMIN_PASSWORD: ADMIN_PASSWORD,
+      CYPRESS_SEEDED_STORAGE: storageName,
+    });
+  }
 
   const env = {
     E2E_BASE_URL: baseURL,

@@ -77,6 +77,9 @@ export interface EndpointMap {
   restore: string | null;
   trashList: string | null;
   trashRestore: string | null;
+  /* wiring:e2 */
+  e2eEscrowChallenge: string | null;
+  e2eEscrowUsed: string | null;
 }
 
 export interface ExplorerConfig {
@@ -156,6 +159,12 @@ export interface ExplorerConfig {
   trashList?: string;
   /** filex trash restore endpoint — `POST { node_id }`. */
   trashRestore?: string;
+
+  /* wiring:e2 */
+  /** E2E escrow proof-of-possession — `POST { path } → { id, challenge }`. */
+  e2eEscrowChallenge?: string;
+  /** E2E escrow use report — `POST { path, id, nonce }`. */
+  e2eEscrowUsed?: string;
 
   /** Public share base URL — `${shareBase}/${uuid}` */
   shareBase?: string;
@@ -318,11 +327,38 @@ export interface ExplorerConfig {
    * the bug this became: for a year the sole place to mint the token the FTPS
    * guide told you to use was the admin panel.
    *
+   * ⚠ Role is not the same question as `callerKind`. "API keys" IS hidden for
+   * an app token — not because of what that caller may do, but because there is
+   * no single person behind it whose keys they would be. See `callerKind`.
+   *
    * ⚠ The entries live in the panel, so `sideNav: false` takes them with it.
    * Hosts that want the surface without the panel mount `<filex-connections>`
    * (or `ConnectionsPanel`) on a page of their own.
    */
   connections?: boolean;
+
+  /**
+   * Who is behind this explorer — a person, or an integration?
+   *
+   * `'user'` (a signed-in human, or their own API token) draws everything.
+   * `'app'` suppresses the surfaces that only mean something for ONE person:
+   * **API keys**, **Recent**, **Starred** and **Shared with me**. Upload, the
+   * storage list, Trash and "How to connect" stay — an embed's users still
+   * upload files and still need mount instructions.
+   *
+   * Why it exists: a filex API token authenticates AS its owner, and the embeds
+   * we run authenticate every visitor with ONE shared token injected by the
+   * host's proxy. v0.30.0 put "API keys" in the panel, so under that token an
+   * embed visitor could list and revoke the credential the embed itself runs
+   * on — and "your Recent" meant the token owner's history shown to a stranger.
+   *
+   * Default: read from `GET /api/files/capabilities` (`caller_kind`), which is
+   * authoritative because only the server knows the token's kind (migration
+   * 00030). Set this only to answer BEFORE that request lands — a host that
+   * already knows it proxies with an app token spares its users the flash of a
+   * Starred row that then disappears. A value here wins over the server's.
+   */
+  callerKind?: 'user' | 'app';
 
 
   /** Default view. */

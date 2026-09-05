@@ -22,7 +22,9 @@ scrape_configs:
 ```
 
 Mint the token in the admin UI (API / MCP), or from the file explorer's
-navigation panel under **Connections → API keys**, with an account that has
+navigation panel under **Connections → API keys** — which an embed proxied with
+a shared *app* token does not show
+([MCP.md](MCP.md#token-kinds--user-vs-app)) — with an account that has
 the `admin` role. A token carrying a `root:` confinement scope will not do —
 those are subtree-limited credentials and the admin gate refuses them.
 

@@ -8,6 +8,7 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
+import StarButton from './StarButton.vue';
 import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 
@@ -25,6 +26,19 @@ const props = defineProps<{
   /** Desktop selective sync: availability badge per tile. Absent on the
    *  web — no badge renders at all. */
   keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
+  /**
+   * Starring on a card. Same contract as ListView: the id set the explorer
+   * keeps, plus the API wiring StarButton needs. Absent apiBase → no star is
+   * rendered at all, exactly as in the list.
+   *
+   * ⚠ Not list-only. The Starred VIEW shipped before starring was reachable
+   * from anywhere but the list, so a user in grid view — the mode the panel's
+   * own screenshots show — had a view they could not fill.
+   */
+  starredIds?: Set<number>;
+  apiBase?: string;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  authCredentials?: RequestCredentials;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +47,7 @@ const emit = defineEmits<{
   (e: 'context-card', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
   (e: 'item-drop-into', target: FileNode, ev: DragEvent): void;
+  (e: 'star-change', node: FileNode, value: boolean): void;
 }>();
 
 const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
@@ -41,6 +56,12 @@ const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
 // back to the raw URL (legacy same-origin behavior).
 function thumbOf(n: FileNode): string | null {
   return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
+}
+
+/** A card carries a star when the host wired the API and the node is a file
+ *  with a server id — the same rule the list row uses. */
+function canStar(n: FileNode): boolean {
+  return props.apiBase !== undefined && typeof n.id === 'number' && n.type === 'file';
 }
 
 function isSelected(n: FileNode): boolean {
@@ -213,6 +234,24 @@ function snippetTitle(snippet: string): string {
         <span v-else-if="specialEmojiFor(n)" class="fe-grid__icon">{{ specialEmojiFor(n) }}</span>
         <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
         <span v-else class="fe-grid__icon fe-grid__icon--svg" v-html="fileIconSvg(n)"></span>
+        <!-- Star, ON the tile. A hover-only affordance would be invisible to
+             the person looking for what they starred, so the chip is always
+             painted once the file IS starred and only appears on hover/focus
+             otherwise (see .fe-grid__star in styles/base.css). @click.stop so
+             starring never doubles as a card selection. -->
+        <div v-if="canStar(n)" class="fe-grid__star" @click.stop @dblclick.stop>
+          <StarButton
+            :starred="!!starredIds?.has(n.id!)"
+            :node-id="n.id!"
+            :api-base="apiBase"
+            :auth-headers="authHeaders"
+            :auth-credentials="authCredentials"
+            :locale="locale"
+            compact
+            card
+            @change="(val: boolean) => emit('star-change', n, val)"
+          />
+        </div>
       </div>
       <div class="fe-grid__label" :title="n.basename">
         {{ nodeDisplayName(n) }}

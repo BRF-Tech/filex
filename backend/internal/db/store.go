@@ -139,8 +139,13 @@ type Store interface {
 	ListAPITokensByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	TouchAPIToken(ctx context.Context, id int64) error
 	// UpdateAPITokenMeta edits a token's display metadata (label / username
-	// allow-list); nil leaves a field unchanged. The credential is immutable.
-	UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames *string) error
+	// allow-list) and its kind ("user" / "app", migration 00030); nil leaves a
+	// field unchanged. The credential itself is immutable.
+	//
+	// Kind is editable because migration 00030 defaults every pre-existing row
+	// to "app": a personal token minted before the split needs one admin edit
+	// to become a "user" token again.
+	UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames, kind *string) error
 	DeleteAPIToken(ctx context.Context, id int64) error
 
 	// S3 access keys (migration 00026) — the credential an S3 client signs

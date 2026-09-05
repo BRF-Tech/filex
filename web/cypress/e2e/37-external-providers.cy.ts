@@ -6,16 +6,31 @@ describe('external services', () => {
     cy.apiLogin();
   });
 
-  it('GET /api/admin/external returns entries[]', () => {
-    cy.adminGet<{ entries?: Array<{ Name: string; Enabled: boolean; URL: string; LastState: string }> }>(
-      '/api/admin/external',
-    ).then((d) => {
-      expect(d.entries, 'entries').to.be.an('array');
-      const names = (d.entries ?? []).map((e) => e.Name);
-      // The three baseline slots Capability advertises.
-      for (const slot of ['drawio', 'mermaid', 'onlyoffice']) {
-        expect(names, `entries has ${slot}`).to.include(slot);
-      }
+  it('every slot capabilities advertises has a row in the admin list', () => {
+    // ⚠ The slot names are READ from the capability probe, never spelled out
+    // here. This case used to assert a literal ['drawio', 'mermaid',
+    // 'onlyoffice'] and there has been no `mermaid` slot for a long time: the
+    // baseline is convert / drawio / onlyoffice. It passed anyway, because the
+    // suite only ever ran against production — whose `external` table still
+    // holds a leftover `mermaid` ROW from an older build. Against a fresh
+    // instance it failed on the first try. A literal list turns a rename into a
+    // test that lies in one direction and breaks in the other.
+    //
+    // What this measures now is the thing that actually matters: the two
+    // endpoints agree. A slot advertised by /api/files/capabilities with no row
+    // behind it renders an External page the operator cannot configure.
+    cy.adminGet<{ external?: Record<string, unknown> }>('/api/files/capabilities').then((caps) => {
+      const slots = Object.keys(caps.external ?? {});
+      expect(slots, 'capabilities advertises external slots').to.have.length.greaterThan(0);
+      cy.adminGet<{
+        entries?: Array<{ Name: string; Enabled: boolean; URL: string; LastState: string }>;
+      }>('/api/admin/external').then((d) => {
+        expect(d.entries, 'entries').to.be.an('array');
+        const names = (d.entries ?? []).map((e) => e.Name);
+        for (const slot of slots) {
+          expect(names, `admin list has a row for the advertised slot ${slot}`).to.include(slot);
+        }
+      });
     });
   });
 

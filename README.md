@@ -81,7 +81,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   server over ordinary HTTPS — a folder on Linux, a drive letter on Windows
   ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
 - **Multi-tenant by design** — storage-per-tenant with native tenancy mode, RBAC roles +
-  per-item grants, confined API tokens, per-token identities for audit trails.
+  per-item grants, confined API tokens, per-token identities for audit trails, and
+  app-vs-user token kinds so a shared embed credential cannot manage anybody's keys.
 - **Boringly deployable** — one binary or one container; SQLite by default, Postgres/MySQL
   when you want them; every driver switched by env vars.
 
@@ -142,7 +143,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 |---|---|
 | ![Shared with me](docs/screenshots/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/sidenav/embed-webcomponent-1440.png) |
 
-| How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed |
+| How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
 | ![How to connect](docs/screenshots/sidenav/connect-1440.png) | ![API keys](docs/screenshots/sidenav/apikeys-minted-1440.png) |
 
@@ -236,7 +237,11 @@ React wrappers set them the same way — see
 
 Multi-tenant hosts typically proxy the API server-side, inject a **confined token**
 (`root: tenant-folder`) per request, and strip client headers — the sandbox is enforced by
-the backend, not the widget. See [docs/INTEGRATION.md](docs/INTEGRATION.md).
+the backend, not the widget. Such a token is `kind: "app"`, so the panel hides the
+surfaces that belong to one person — API keys, Recent, Starred, Shared with me —
+while Upload, the storages, Trash and "How to connect" stay. See
+[docs/INTEGRATION.md](docs/INTEGRATION.md) and
+[docs/MCP.md](docs/MCP.md#token-kinds--user-vs-app).
 
 ## Desktop app & CLI
 
@@ -315,7 +320,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
 - **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
-- **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
+- **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key. Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** at install time, and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
 - **Native multi-tenancy** — provider/tenant mode with per-tenant isolation on one instance ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)).
 - **Driver-pluggable everything** — storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
 - **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).

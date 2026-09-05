@@ -73,7 +73,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Protection & antivirus](PROTECTION.md) — ClamAV scanning plus the trash and
   version retention windows and the share-link life ceiling, behind one admin screen
 - [End‑to‑end encryption](E2E-ENCRYPTION.md) — client‑side WebCrypto folders;
-  the server stores ciphertext and never receives a key
+  the server stores ciphertext and never receives a key. Recovery keys, optional
+  operator key escrow, and exactly what each one can and cannot open
 - [Multi‑tenancy](MULTI-TENANCY.md) — provider/tenant mode, per‑tenant isolation
   on one instance
 - [ShareX](SHAREX.md) — the screenshot‑upload endpoint and its custom uploader
@@ -95,7 +96,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component, and the
   two options every wrapper shares: the **navigation panel** (`sideNav`) and the
   reduced-chrome **simple profile** (`uiProfile`)
-- [AI & MCP](MCP.md) — API tokens, scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
+- [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
 - [Migration](MIGRATION.md) — moving off `@brftech/file-explorer`
 
 ## Repo only — not published to docs.filex.sh

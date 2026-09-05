@@ -12,6 +12,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/ops"
 )
 
@@ -50,13 +51,13 @@ func (e errsString) Error() string { return string(e) }
 
 // opsRequest is the body of POST /api/files/ops.
 type opsRequest struct {
-	Kind      string   `json:"kind"` // copy, move, delete
-	StorageID int64    `json:"storage_id"`
+	Kind      string `json:"kind"` // copy, move, delete
+	StorageID int64  `json:"storage_id"`
 	// DestStorageID targets another storage for copy/move (cross-depo paste).
 	// Omitted or 0 means "same storage as the sources".
-	DestStorageID int64  `json:"dest_storage_id,omitempty"`
-	Sources   []string `json:"sources"`
-	Dest      string   `json:"dest,omitempty"`
+	DestStorageID int64    `json:"dest_storage_id,omitempty"`
+	Sources       []string `json:"sources"`
+	Dest          string   `json:"dest,omitempty"`
 }
 
 // Submit queues a new op and returns the opID.
@@ -93,6 +94,32 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 		if !aclAllowID(r.Context(), o.ACL, o.Store, destID, drel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
 			return
+		}
+	}
+
+	/* wiring:e2 — same boundary rule for the unified endpoint. */
+	if req.Kind != "delete" {
+		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
+			destID := req.DestStorageID
+			if destID == 0 {
+				destID = req.StorageID
+			}
+			rels := make([]string, 0, len(req.Sources))
+			for _, s := range req.Sources {
+				_, rel := splitAdapterPath(s)
+				if rel == "" {
+					rel = strings.Trim(s, "/")
+				}
+				rels = append(rels, rel)
+			}
+			_, drel := splitAdapterPath(req.Dest)
+			if drel == "" {
+				drel = strings.Trim(req.Dest, "/")
+			}
+			if err := e2e.GuardTransfer(r.Context(), lk, req.StorageID, rels, destID, drel); err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 	}
 
@@ -223,6 +250,19 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		if !aclAllowID(r.Context(), o.ACL, o.Store, destStorageID, strings.Trim(dest, "/"), acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission (dest)"})
 			return
+		}
+	}
+
+	/* wiring:e2 — refuse transfers that cross an encryption boundary.
+	 * Copy and move are server-side byte operations and the server holds no
+	 * key, so it can neither encrypt on the way in nor decrypt on the way
+	 * out. The only honest answer is no. See internal/e2e/guard.go. */
+	if kind != "delete" {
+		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
+			if err := e2e.GuardTransfer(r.Context(), lk, storageID, sources, destStorageID, strings.Trim(dest, "/")); err != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 	}
 

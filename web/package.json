@@ -1,7 +1,7 @@
 {
   "name": "@brftech/filex-admin",
   "private": true,
-  "version": "0.30.1",
+  "version": "0.31.0",
   "type": "module",
   "description": "filex admin UI — Vue 3 SPA embedded into the Go binary via go:embed",
   "scripts": {
@@ -16,6 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "cy:open": "cypress open",
     "cy:run": "cypress run",
+    "cy:local": "node ../e2e/run.mjs cypress",
     "cy:run:headed": "cypress run --headed --no-exit"
   },
   "dependencies": {

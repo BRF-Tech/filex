@@ -30,6 +30,22 @@ Drop `--build` once you have a binary in `bin/`, or point at one with
 | `--port <n>` | fixed port instead of a free one |
 | `--grep <pattern>` | passed through to Playwright |
 
+The **cypress** profile starts the same kind of instance and drives
+`web/cypress` instead. The two suites are not duplicates — Playwright walks
+journeys, Cypress pins the HTTP contracts and the admin screens that read them
+(`web/cypress/README.md` has the split, and `docs/CONTRIBUTING.md` has the "which
+one do I add a test to" table):
+
+```bash
+node e2e/run.mjs cypress                # every spec
+node e2e/run.mjs cypress --spec "cypress/e2e/14-explorer-sidenav.cy.ts"
+```
+
+It seeds one deterministic local storage before running. ⚠ That seed is not a
+nicety: a bare instance has zero storages, and most Cypress specs discover "the
+first storage" and then quietly assert nothing when there is none — a green run
+that measured almost nothing.
+
 The **deployment** profile is a separate, read-only smoke against something
 already live, and is deliberately not part of a build check:
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -281,6 +282,22 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "driver does not support move"})
 		return
+	}
+
+	/* wiring:e2 — the synchronous move goes through the same boundary rule
+	 * as the queued one. Checked up front over the WHOLE batch: this loop
+	 * moves files one at a time, so a mid-loop refusal would leave the first
+	 * half moved and the second half not. */
+	if lk, ok := h.Store.(e2e.NodeByPathLookup); ok {
+		rels := make([]string, 0, len(body.Items))
+		for _, it := range body.Items {
+			_, srcRel := splitAdapterPath(it.Path)
+			rels = append(rels, srcRel)
+		}
+		if err := e2e.GuardTransfer(r.Context(), lk, current.ID, rels, current.ID, destRel); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	srcDirs := make(map[string]struct{})

@@ -95,11 +95,11 @@ async function onInstall() {
        install banner; both are fixed to the bottom of the viewport. -->
   <div
     v-if="needRefresh"
-    class="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-4"
+    class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-4"
     data-testid="pwa-update-banner"
   >
     <div
-      class="flex w-full max-w-md items-center gap-3 rounded-xl border border-indigo-500/30 bg-white p-3 shadow-lg dark:bg-zinc-900"
+      class="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-xl border border-indigo-500/30 bg-white p-3 shadow-lg dark:bg-zinc-900"
     >
       <span class="flex-1 text-sm text-zinc-700 dark:text-zinc-200">
         {{ $t('install.updateAvailable') }}
@@ -118,11 +118,11 @@ async function onInstall() {
   <!-- Install offer: native prompt (Chrome/Edge/Android) or iOS instructions. -->
   <div
     v-if="shouldOfferInstall"
-    class="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4"
+    class="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4"
     data-testid="pwa-install-banner"
   >
     <div
-      class="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+      class="pointer-events-auto w-full max-w-md rounded-xl border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
     >
       <div class="flex items-start gap-3">
         <!-- Bound, not a static src: Vue's SFC compiler turns a literal `src`

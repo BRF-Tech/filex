@@ -344,15 +344,23 @@ func TestPool_RoundTrip(t *testing.T) {
 	pool.Start(ctx)
 	defer pool.Stop()
 
+	// Wait on the DATABASE, not on the counter. The handler bumps `processed`
+	// and only then does the pool mark the op done, so a test that waits for
+	// the counter and reads Stats on the next line is racing that write. It
+	// passed alone and failed under `go test ./...`, where the other packages
+	// competing for cores widen the gap: 4 of 5 done, every time.
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && processed.Load() < N {
+	var stats queue.Stats
+	var err error
+	for time.Now().Before(deadline) {
+		stats, err = drv.Stats(ctx)
+		require.NoError(t, err)
+		if stats.Done24h == N && stats.Pending == 0 {
+			break
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	assert.Equal(t, int64(N), processed.Load(), "pool should have drained all ops")
-
-	// All ops should be in done.
-	stats, err := drv.Stats(ctx)
-	require.NoError(t, err)
 	assert.Equal(t, int64(N), stats.Done24h)
 	assert.Equal(t, int64(0), stats.Pending)
 }

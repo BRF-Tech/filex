@@ -14,6 +14,7 @@ import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconSvg } from '../lib/fileIcons';
+import StarButton from './StarButton.vue';
 import { applyDragGhost } from '../lib/dragGhost';
 
 const props = defineProps<{
@@ -27,6 +28,19 @@ const props = defineProps<{
    *  GridView: raw `thumb_url` is root-relative and unauthenticated, so
    *  embedded hosts NEED this. null = icon fallback. */
   thumbSrc?: (n: FileNode) => string | null;
+  /**
+   * Starring on a card. Same contract as ListView: the id set the explorer
+   * keeps, plus the API wiring StarButton needs. Absent apiBase → no star is
+   * rendered at all, exactly as in the list.
+   *
+   * ⚠ Not list-only. The Starred VIEW shipped before starring was reachable
+   * from anywhere but the list, so a user in grid view — the mode the panel's
+   * own screenshots show — had a view they could not fill.
+   */
+  starredIds?: Set<number>;
+  apiBase?: string;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  authCredentials?: RequestCredentials;
 }>();
 
 const emit = defineEmits<{
@@ -35,12 +49,19 @@ const emit = defineEmits<{
   (e: 'context-card', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
   (e: 'item-drop-into', target: FileNode, ev: DragEvent): void;
+  (e: 'star-change', node: FileNode, value: boolean): void;
 }>();
 
 const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
 
 function thumbOf(n: FileNode): string | null {
   return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
+}
+
+/** A card carries a star when the host wired the API and the node is a file
+ *  with a server id — the same rule the list row uses. */
+function canStar(n: FileNode): boolean {
+  return props.apiBase !== undefined && typeof n.id === 'number' && n.type === 'file';
 }
 
 function isSelected(n: FileNode): boolean {
@@ -196,6 +217,22 @@ function metaFor(n: FileNode): string {
         <span v-else-if="specialEmojiFor(n)" class="fe-gal__icon">{{ specialEmojiFor(n) }}</span>
         <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
         <span v-else class="fe-gal__icon fe-gal__icon--svg" v-html="fileIconSvg(n)"></span>
+        <!-- Same star chip as the grid, same component, same rule: painted
+             when starred, on hover/focus otherwise. It sits above .fe-gal__meta
+             (which is aria-hidden and covers the tile's foot on hover). -->
+        <div v-if="canStar(n)" class="fe-gal__star" @click.stop @dblclick.stop>
+          <StarButton
+            :starred="!!starredIds?.has(n.id!)"
+            :node-id="n.id!"
+            :api-base="apiBase"
+            :auth-headers="authHeaders"
+            :auth-credentials="authCredentials"
+            :locale="locale"
+            compact
+            card
+            @change="(val: boolean) => emit('star-change', n, val)"
+          />
+        </div>
         <div class="fe-gal__meta" aria-hidden="true">
           <span v-if="metaFor(n)" class="fe-gal__meta-line">{{ metaFor(n) }}</span>
           <span

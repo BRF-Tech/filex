@@ -7,6 +7,205 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-05
+
+### Added
+
+- **Encrypted folders can be recovered.** Until now, forgetting the password
+  meant the files were gone — that was the documented behaviour and it was a
+  bad one. Creating an encrypted folder now shows a recovery key **once**;
+  filex never stores it and it opens the folder without the password.
+
+  The file format did not change. Each file's key is still wrapped by exactly
+  one key in its 97-byte header — that key is now the folder's master key
+  rather than the password key, and the marker holds the master key wrapped
+  once per way in. For a folder created before this release the two are the
+  same thing, so **existing encrypted files are byte-identical and open
+  unchanged**; there is a round-trip test against a frozen copy of the v0.30.1
+  crypto module, in both directions, because that is the promise that matters
+  most here. Such a folder cannot be given a recovery key by the server — it
+  has no password to re-wrap with — so filex offers the upgrade at the one
+  moment it holds one: the next successful unlock, behind a visible notice.
+
+- **Optional operator escrow, fixed at install.** `FILEX_INSTALLATION_E2E_ESCROW_KEY`
+  adds a second way into every folder created while it is set. It is RSA-OAEP:
+  filex holds only the public half, `filex e2e-escrow keygen` prints the private
+  half once and writes it nowhere, and the operator supplies it back when they
+  need it. A stolen database therefore decrypts nothing.
+
+  ⚠ **This is a backdoor, deliberately, and the documentation says so.** When
+  the escrow key is used through filex the folder's owner is notified, and a
+  forged "escrow was used" report is refused — the client must first decrypt a
+  server-issued nonce sealed to the escrow key. But the notification is an
+  announcement, not a control: an operator holding the private key can copy the
+  marker and the ciphertext off disk and decrypt offline, with no request, no
+  notification and no audit row, and filex cannot detect it. If that is not
+  acceptable for your deployment, leave escrow off.
+
+  `FILEX_INSTALLATION_` is a new prefix for settings that are fixed when the
+  data directory is initialised. filex refuses to start if one of them changed,
+  because for escrow the immutability is arithmetic rather than policy: a folder
+  created while escrow was off has no escrow-wrapped key, and switching it on
+  later cannot open it.
+
+- **Star is a real action.** It was rendered in the list view and nowhere else,
+  so v0.30.0 shipped a Starred view that a user in grid view had no way to fill.
+  It is now in the context menu ("Star" / "Unstar", multi-selection aware), on
+  grid and gallery cards (on hover or focus, and painted permanently once
+  starred, so the Starred view is legible without hovering every tile), and on
+  the keyboard as a remappable `S`.
+
+- **Tags in the navigation panel.** Tagging has existed for a long time and
+  there was no way to browse by tag inside the explorer — only an admin page.
+  The panel now lists the tags that exist and opens the files carrying one.
+
+### Fixed
+
+- **A virtual view opened from its own URL said "Folder not found".** The
+  explorer writes the current location into the address bar, so opening Trash
+  put `#.trash` there — and on reload that sentinel was handed to the ordinary
+  folder loader, which 404'd. Reported for Trash; Recent, Starred and Shared
+  behaved the same way. Sentinels are now routed to their view before the
+  request is made, so a reload lands back in the view with its own empty state,
+  and an unknown dot-path is left alone because a user may own `.config`.
+
+- **The details panel printed `.starred`.** Third surface of the same bug that
+  put `.shared` in the tab strip in v0.30.0: the sentinel-to-label map had been
+  written more than once. Every surface that renders a path segment now reads
+  one map.
+
+- **An app token could manage its owner's credentials.** An API token
+  authenticates *as* its owner, and the embeds we run authenticate every visitor
+  with one shared token injected by the host's proxy — so v0.30.0's "API keys"
+  panel entry meant an embed visitor could list and revoke the credential the
+  embed itself runs on, and mint S3, SSH and NFS credentials as the owner.
+
+  A token now declares what it is. `user` is a person's own credential and
+  nothing changes for it; `app` is an integration, and the four credential
+  surfaces (`/api/tokens`, `/api/auth/s3-keys`, `/api/auth/ssh-keys`,
+  `/api/auth/nfs-exports`) refuse it with a 403 that names the token and both
+  ways out. The explorer leaves out the surfaces that belong to a single person
+  — Recent, Starred, Shared with me, API keys — while Upload, the storages,
+  Trash, Tags and "How to connect" stay. Existing tokens migrate to `app`,
+  because the restricting direction is the safe default and these surfaces only
+  matter when a browser UI is drawn.
+
+- **`/api/files/capabilities` could refuse a caller.** Gating it on the token
+  chain meant a revoked token, an unknown token username or a disabled account's
+  cookie got a 403 from a public route — the login screen failing closed. It now
+  annotates the caller when it can and answers everyone.
+
+- **Moving a plaintext file into an encrypted folder is refused.** Uploads were
+  encrypted client-side; move, copy and paste were plain server-side byte
+  operations, so filex's own UI would put plaintext inside an encrypted folder
+  with no warning. The guard is server-side and covers the ops queue, sync moves
+  and the AI/MCP surface.
+
+- **The install banner ate clicks.** Both banners are full-width fixed strips
+  that paint a centred card, and without `pointer-events-none` the empty half
+  sat on top of the sidebar behind it: measured, five destinations unreachable
+  at 1440×900 and eleven on a taller menu. `PendingOpsTray`, the same shape in
+  the same corner, already did this correctly.
+
+- **`slim` was not slim.** The tag was built from the full recipe, so
+  `docs/DOCKER.md` promised ~40 MB while the registry served **511 MB**
+  compressed — `latest`, `slim` and `full` were the same image, and the two
+  Dockerfiles differed by one package that nothing calls. There is now a real
+  slim image: **43 MB compressed**, the binary and the embedded UI, with image
+  thumbnails (pure Go) still working and everything that shells out to ffmpeg,
+  ghostscript or libreoffice reported as unavailable rather than failing.
+
+- **`docs/E2E-ENCRYPTION.md` was 183 lines of Turkish** in an English repo,
+  linked from the README and published on the docs site. Translated, and
+  corrected against the code while translating: it under-counted the places that
+  filter the marker, missed two disabled surfaces and the refusal to nest
+  encrypted folders, and its "v2 roadmap" listed six things none of which had
+  shipped — those are now stated as limitations rather than promises.
+
+### Changed
+
+- **Docker images build natively per architecture.** arm64 was emulated, and the
+  emulated part was `apk add libreoffice` plus a JRE — the worst possible thing
+  to run under QEMU. Each architecture now builds on its own runner and the tags
+  are joined from the digests, so no tag exists until both have landed. The
+  docker job also no longer waits for goreleaser: it builds its own binary from
+  source and took nothing from the Release, so the dependency only lengthened
+  the critical path.
+
+- **The browser suite is a gate.** Cypress defaulted to `https://fm.example.com` —
+  the live deployment — and ran in no pipeline. It now boots its own instance
+  and runs in CI. Getting there meant fixing 19 red specs, several of which had
+  been passing for the wrong reason: one matched the sidebar link instead of the
+  dashboard it was meant to assert on, and two asserted a capability slot that
+  only existed because production still carried a row from an older version.
+  227 of 227 pass, and the run went from 9m58s to 1m25s once the service worker
+  stopped re-precaching the bundle between tests.
+
+### Added
+
+- **Encrypted folders can be recovered.** Until now, forgetting the password to
+  an E2E-encrypted folder destroyed it — the documentation said so, and it was
+  true. Every folder created from this release on gets a **user recovery key**:
+  160 bits, shown exactly once when the folder is created, never stored by
+  filex, and enough to open the folder without the password. It is a password
+  equivalent, so keep it somewhere other than the password.
+
+  The file format did not change. A per-file key was already wrapped by one
+  folder key; that key is now a **folder master key** held in the marker,
+  wrapped once per way of reaching it. Adding a recovery path costs one more
+  wrapped copy of 32 bytes, not a re-encrypt of anything — which is why not a
+  byte of anyone's existing data was touched.
+
+- **Optional key escrow for operators**, fixed at install time via
+  `FILEX_INSTALLATION_E2E_ESCROW_KEY`. `filex e2e-escrow keygen` mints the pair;
+  the server gets the **public** half only, so it can seal new folders to the
+  escrow identity and open nothing. The private half is the operator's, and a
+  stolen filex database still decrypts nothing. Using the escrow key notifies
+  the folder's owner, and the notification is *evidence*: the client must
+  decrypt a server-issued challenge sealed to the escrow key before the event
+  is recorded, so it cannot be forged — and, stated plainly in the docs, cannot
+  be relied on either, because an operator holding the private key can decrypt
+  offline without ever asking filex.
+
+- **Install-time settings, as a convention.** Anything prefixed
+  `FILEX_INSTALLATION_` is recorded on the first boot and frozen; filex refuses
+  to start if it later disagrees with the environment, and says what changed and
+  what the operator can and cannot do about it. Escrow is the first of these,
+  and the reason is arithmetic rather than policy: a folder created while escrow
+  was off carries no escrow-wrapped key, so switching it on later cannot open
+  it, and a server that started anyway would be claiming a capability it has
+  over only half its data.
+
+### Fixed
+
+- **filex's own UI would put a plaintext file inside an encrypted folder.**
+  Uploads are intercepted and encrypted in the browser, but paste,
+  drag-and-drop and duplicate are server-side byte copies that never touch the
+  crypto — so a file dragged into an encrypted folder was stored exactly as it
+  arrived, looked like its encrypted neighbours in the listing, and nothing
+  warned anyone. The reverse was as bad: a file moved *out* stayed encrypted
+  somewhere no password prompt would ever appear.
+
+  The server cannot fix either by encrypting or decrypting, because it has no
+  key, so it refuses: a copy or move may not cross an encryption boundary
+  (HTTP 409, naming the file). The rule lives in one place and every transfer
+  surface calls it — the ops queue, the synchronous move and the AI/MCP move —
+  rather than in the one client that happened to notice.
+
+### Changed
+
+- **Folders created before this release keep working, untouched.** Their format
+  is read as a first-class path, not a migration shim, and the test suite proves
+  it against a frozen copy of the v0.30.1 module rather than a re-creation of
+  it. They cannot be given a recovery key by the server, because that needs the
+  folder password and filex does not have it — so filex asks at the one moment
+  it does: the next successful unlock. The offer is a visible strip with the
+  consequences spelled out, including that accepting on an escrow-enabled
+  installation also gives the operator a key. Declining changes nothing.
+
+- The create-folder warning no longer says recovery is impossible, because for
+  new folders it is not.
+
 ## [0.30.1] - 2026-09-05
 
 ### Fixed

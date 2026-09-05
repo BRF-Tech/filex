@@ -35,6 +35,59 @@ exactly like that user signing in — minus the cookie. An optional
 `expires_in_days` sets a hard expiry; an expired token authenticates as nobody
 (401). filex stamps each token's last-used time on every request.
 
+### Token kinds — `user` vs `app`
+
+Because a token acts AS its owner, "who is calling" and "is there a **person**
+behind this call" are two different questions. A token answers the second one
+with its `kind`:
+
+| Kind | What it is | Minted by | Identity surfaces |
+|---|---|---|---|
+| `user` | one person's own credential — their CLI, WebDAV/SFTP/FTPS/S3 client, `filex mount` | `POST /api/tokens` (self-service) | all of them |
+| `app` | an integration — a host app's proxy, a bot, an MCP client | `POST /api/admin/ai-tokens` | suppressed |
+
+For an `app` token filex refuses every **self-service credential surface** with
+403 — `/api/tokens`, `/api/auth/s3-keys`, `/api/auth/ssh-keys`,
+`/api/auth/nfs-exports` — and the explorer's navigation panel drops **API
+keys**, **Recent**, **Starred** and **Shared with me**. Nothing else changes:
+same scopes, same RBAC, same confinement, and the panel keeps Upload, the
+storage list, Trash and "How to connect". Inside "How to connect" the guides
+stay and the mint forms are replaced by a line saying this session cannot
+create credentials.
+
+All four refuse from one implementation (`handlers.RequirePersonalCaller`),
+because they answer one question: *show me, and let me mint, the credentials of
+the person calling.* Gating only the first of them still let an embed visitor
+mint an S3 access key bound to the token's owner — the same hole, a different
+button.
+
+Why: an embedded explorer is usually proxied with **one shared token** injected
+by the host, so every visitor authenticates as the token's owner. Under a
+`user` token that would mean any visitor could list — and revoke — the
+credential the embed itself runs on, and "your Recent" would be somebody else's
+history.
+
+⚠ **Kind is not confinement and not role.** A `root:`-scoped token may perfectly
+well be a person's, and a `viewer` is still a person.
+
+⚠ **Every token that existed before this split reads as `app`** (migration
+`00030`, which defaults both the column and the existing rows). That is the
+restricting direction on purpose. If one of them is really a person's, an admin
+hands it back with one call:
+
+```bash
+curl -X PATCH https://files.example.com/api/admin/ai-tokens/42   -H 'Content-Type: application/json' -b cookies.txt -d '{"kind":"user"}'
+```
+
+Clients that need to know which kind is calling read `caller_kind` from
+`GET /api/files/capabilities` — `"user"` for a cookie/OIDC session as well as
+for a `user` token, `"app"` only for an app token.
+
+⚠ That route **never refuses**. It is fetched by the login screen and by the
+public share/drop pages, so an unknown, revoked, expired or malformed token, a
+disabled owner and an unknown `X-Filex-Token-User` all simply answer `200` with
+`caller_kind: "user"` rather than describing a caller filex will not serve.
+
 Send the token on **either** header:
 
 ```
@@ -67,6 +120,10 @@ curl -X POST https://files.example.com/api/admin/ai-tokens \
 ```
 
 - `user_id` — omit to bind the token to the calling admin.
+- `kind` — `"app"` (default here) or `"user"`. This surface issues
+  integrations' credentials, so it defaults to `app`; pass `"user"` when an
+  admin is minting a personal token on somebody's behalf. An unknown value is
+  rejected (400) rather than folded into `app`.
 - `scopes` — comma-separated allow-list (see [Scopes](#scopes)). **Empty ==
   every scope** (full access for the bound user's role). Any scope outside the
   canonical set is rejected up front (so a typo can't silently grant nothing).
@@ -77,7 +134,8 @@ curl -X POST https://files.example.com/api/admin/ai-tokens \
 
 **2. Self-service — `POST /api/tokens`** (any authenticated user, including
 `viewer`). The token is **force-bound to the caller** (a client-supplied
-`user_id` is ignored) and scopes are **capped to the caller's ceiling**:
+`user_id` is ignored), always minted as `kind: "user"` (not client-settable),
+and scopes are **capped to the caller's ceiling**:
 
 ```bash
 curl -X POST https://files.example.com/api/tokens \
@@ -95,8 +153,14 @@ Ceiling rules (privilege-escalation guards):
 - A `root:` scope must be **⊆ the caller's own grants** at that path (≥ viewer,
   or ≥ editor when the token also carries write/delete).
 
-`GET /api/tokens` lists the caller's own tokens; `DELETE /api/tokens/{id}`
-revokes one (ownership-checked).
+`GET /api/tokens` lists the caller's own tokens; `PATCH /api/tokens/{id}` edits
+its label / usernames; `DELETE /api/tokens/{id}` revokes one
+(ownership-checked). `kind` is **not** editable here — only an admin changes it,
+or an app token could promote itself out of the restriction.
+
+⚠ The whole `/api/tokens` surface answers **403** to an app token (see
+[Token kinds](#token-kinds--user-vs-app)). A cookie/OIDC session and a `user`
+token both work exactly as before.
 
 ### Scopes
 
@@ -308,6 +372,12 @@ call is written to the audit log** (action prefixed `ai.`). Examples:
 - **No secret exfiltration via bulk transfer.** `zip`/`unzip` run server-side and
   `file_read` caps at 8 MiB, so large data leaves through auditable share links,
   not the tool channel.
+- **App tokens cannot manage credentials.** A shared token proxied in front of
+  many visitors is `kind: "app"`, and every self-service credential surface
+  refuses it — API tokens, S3 access keys, SSH keys and NFS exports alike. So
+  nobody reaching filex through that embed can enumerate or revoke the token
+  the embed runs on, nor mint a fresh credential bound to its owner. Keep
+  integration tokens `app`; give people their own `user` tokens.
 
 ---
 
@@ -323,6 +393,15 @@ client must send the header on every request.
 The token lacks the scope for that verb (e.g. calling `upload` with a read-only
 token, or an `admin_*` tool without the `admin` scope). Mint a token with the
 needed scope — remember `write` also covers share/zip, `delete` is separate.
+
+### 403 Forbidden (`… is authenticated by an app token …`, `reason: "app_token"`)
+A self-service credential call — `/api/tokens`, `/api/auth/s3-keys`,
+`/api/auth/ssh-keys`, `/api/auth/nfs-exports` — arrived on a token whose `kind`
+is `app`. Either the caller
+should be a person (sign in, or use that person's own `user` token), or this
+really is one person's token that migration `00030` defaulted to `app` — flip it
+with `PATCH /api/admin/ai-tokens/{id}` `{"kind":"user"}`. The message names the
+token's label and id so it can be found from a proxy log.
 
 ### 403 Forbidden (path outside confined root / `access denied: no permission`)
 The path is outside the token's `root:` ceiling, outside an `X-Filex-Root`

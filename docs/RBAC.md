@@ -84,8 +84,24 @@ capped server-side:
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/api/tokens` | The caller's own tokens (no secrets). |
-| POST | `/api/tokens` | `{label, scopes, expires_in_days?}`. Verb-scope ceiling: viewer→`read`/`mcp` only; user→`read,write,delete,mcp`; **never `admin`**. Empty scopes are never stored (would be "all"→escalation). A `root:<adapter>://<rel>` scope must be ⊆ the caller's own grants. Plaintext returned once. |
+| POST | `/api/tokens` | `{label, scopes, expires_in_days?}`. Always minted as `kind: "user"`. Verb-scope ceiling: viewer→`read`/`mcp` only; user→`read,write,delete,mcp`; **never `admin`**. Empty scopes are never stored (would be "all"→escalation). A `root:<adapter>://<rel>` scope must be ⊆ the caller's own grants. Plaintext returned once. |
+| PATCH | `/api/tokens/{id}` | Ownership-checked; label / usernames only. `kind` is admin-only. |
 | DELETE | `/api/tokens/{id}` | Ownership-checked. |
+
+⚠ **This surface — and the other three self-service credential surfaces,
+`/api/auth/s3-keys`, `/api/auth/ssh-keys`, `/api/auth/nfs-exports` — answer 403
+to an `app` token** (`reason: "app_token"`, from one shared middleware,
+`handlers.RequirePersonalCaller`). A token acts AS its owner, so a shared
+integration token — the one a host app's proxy injects in front of many
+visitors — would otherwise let any of them list and revoke the credential that
+embed runs on, or mint a new S3 key bound to its owner. Cookie/OIDC sessions
+and `user` tokens are unaffected. See [MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app);
+the escape hatch for a personal token that migration `00030` defaulted to `app`
+is `PATCH /api/admin/ai-tokens/{id}` `{"kind":"user"}`.
+
+⚠ Kind is a **different axis from role and from confinement**. It does not widen
+or narrow what a caller may do — every check on this page still applies — it only
+decides whether the surfaces that belong to one identity are drawn at all.
 
 ## Endpoints — admin (`/api/admin`, admin-only)
 

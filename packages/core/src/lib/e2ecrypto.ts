@@ -3,35 +3,73 @@
  *
  * WebCrypto ONLY — zero dependencies. Design doc: docs/E2E-ENCRYPTION.md.
  *
- * Scheme (v1):
- *   folder password ─PBKDF2-SHA256(600k iter, per-folder 16B salt)─▶ KEK (AES-256-GCM)
- *   per-file random 32B DEK (AES-256-GCM) encrypts the content one-shot;
- *   the DEK is wrapped with the KEK and stored in the file's own header.
+ * ── Scheme ────────────────────────────────────────────────────────────
  *
- * File layout ('filexe2e' magic, fixed 97-byte header):
+ * Every encrypted file wraps its own random DEK under ONE key, the folder
+ * master key (FMK), and stores the wrapped copy in its own 97-byte header.
+ * The FMK is what a "key slot" in the folder marker hands back:
+ *
+ *   password ─PBKDF2-SHA256(600k, 16B salt)─▶ KEK ─┐
+ *   recovery key ─HKDF-SHA256(16B salt)─▶ RKEK ────┼─▶ unwraps the FMK
+ *   escrow private key ─RSA-OAEP-256───────────────┘
+ *                                                   │
+ *   per-file random 32B DEK ◀── AES-GCM-wrapped by the FMK, in the header
+ *
+ * Adding a recovery path therefore costs one more wrapped copy of a single
+ * 32-byte key in the marker — not a re-encrypt of anything. The file format
+ * below is UNCHANGED from v1 and stays that way; only the marker grew.
+ *
+ * ── Marker versions ───────────────────────────────────────────────────
+ *
+ * v1 (shipped up to 0.30.1) has no slots: the DEK is wrapped directly by
+ * the password KEK. Read that as "the FMK *is* the KEK". Such folders keep
+ * opening with nothing but their password, forever — the v1 read path is a
+ * first-class path here, not a migration shim.
+ *
+ * v2 adds the slots. It comes in two flavours, told apart by `fmk`:
+ *   - `fmk: 'wrapped'` — a fresh random FMK, held in `fmk_pw` wrapped under
+ *     the password KEK. Every folder created from 0.31 on.
+ *   - `fmk: 'kek'`     — a v1 folder that was given recovery keys in place.
+ *     Its files were already wrapped under the KEK and are not rewritten, so
+ *     the FMK stays defined as "the password-derived KEK" and the recovery
+ *     slots wrap those raw 32 bytes. The password path is byte-identical to
+ *     v1; only the extra slots are new.
+ *
+ * ── Invariants ────────────────────────────────────────────────────────
+ *
+ *   - No key, password or recovery key is ever stored, logged or sent to a
+ *     server. The FMK lives in an in-memory key ring and dies with the tab.
+ *   - `deriveKek` imports non-extractable. Raw KEK bytes are produced ONLY
+ *     by `deriveKekBits`, only while upgrading a v1 marker, and only long
+ *     enough to wrap them into the new slots.
+ *   - A folder created while escrow was off carries no escrow slot, so the
+ *     escrow key cannot open it. That is arithmetic, not policy.
+ *
+ * File layout ('filexe2e' magic, fixed 97-byte header) — UNCHANGED in v2:
  *   [0..8)   magic  "filexe2e"
  *   [8]      version 0x01
  *   [9..21)  wrapIV  (12B)  — GCM IV of the DEK wrap
- *   [21..69) wrappedDEK (48B = 32B DEK + 16B GCM tag)
+ *   [21..69) wrappedDEK (48B = 32B DEK + 16B GCM tag), wrapped by the FMK
  *   [69..81) dataIV  (12B)  — GCM IV of the content
  *   [81..97) reserved (zeros; v2 chunking/metadata)
  *   [97..)   ciphertext (content + 16B GCM tag)
- *
- * Folder marker `.filex-e2e.json` at the encrypted-folder root:
- *   { v:1, salt:<b64 16B>, iter:600000, verify:<b64 12B IV || GCM('filex-e2e-verify-v1')> }
- *
- * The KEK NEVER leaves memory — no storage of any kind. Password loss is
- * data loss by design (no recovery path exists anywhere).
  */
 
 export const E2E_MARKER_NAME = '.filex-e2e.json';
 export const E2E_MAGIC = 'filexe2e';
+/** File-header version byte. Unchanged by the recovery work. */
 export const E2E_VERSION = 1;
+/** Marker schema version written by this build. v1 markers still read. */
+export const E2E_MARKER_VERSION = 2;
 export const E2E_DEFAULT_ITERATIONS = 600_000;
 export const E2E_MIN_ITERATIONS = 600_000;
 /** MVP single-shot in-memory ceiling — larger uploads are refused with a warning. */
 export const E2E_MAX_FILE_BYTES = 200 * 1024 * 1024;
 export const E2E_MIN_PASSWORD_LEN = 8;
+/** Entropy of a user recovery key: 20 bytes = 160 bits = exactly 32 base32 chars. */
+export const E2E_RECOVERY_KEY_BYTES = 20;
+/** The only escrow algorithm this version understands. */
+export const E2E_ESCROW_ALG = 'RSA-OAEP-256';
 
 const VERIFY_PLAINTEXT = 'filex-e2e-verify-v1';
 const MAGIC_BYTES = new TextEncoder().encode(E2E_MAGIC); // 8 bytes
@@ -41,12 +79,41 @@ const WRAPPED_DEK_OFF = 21;
 const WRAPPED_DEK_LEN = 48;
 const DATA_IV_OFF = 69;
 const IV_LEN = 12;
+const FMK_LEN = 32;
+/** HKDF domain separation for the user recovery key. */
+const RK_INFO = 'filex-e2e-recovery-v1';
+const RK_SALT_LEN = 16;
+
+/** How the folder master key is obtained from the password slot. */
+export type E2eFmkMode = 'kek' | 'wrapped';
+
+/** User-recovery-key slot: HKDF salt + the FMK wrapped under the derived key. */
+export interface E2eRecoverySlot {
+  salt: string; // base64, 16B HKDF salt
+  blob: string; // base64: 12B IV || AES-GCM(RKEK, FMK)
+}
+
+/** Escrow slot: the FMK encrypted to the installation's escrow public key. */
+export interface E2eEscrowSlot {
+  /** First 8 bytes of SHA-256(SPKI), hex — names WHICH escrow key this is. */
+  kid: string;
+  alg: string; // E2E_ESCROW_ALG
+  blob: string; // base64: RSA-OAEP-256(escrow public key, FMK)
+}
 
 export interface E2eMarker {
   v: number;
-  salt: string; // base64
+  salt: string; // base64, PBKDF2 salt for the password slot
   iter: number;
   verify: string; // base64: 12B IV || AES-GCM ciphertext of VERIFY_PLAINTEXT
+  /** v2 only. Absent on a v1 marker, where the FMK is implicitly the KEK. */
+  fmk?: E2eFmkMode;
+  /** v2 + fmk==='wrapped' only: base64 12B IV || AES-GCM(KEK, FMK). */
+  fmk_pw?: string;
+  /** v2 only, optional: the user recovery key slot. */
+  rk?: E2eRecoverySlot;
+  /** v2 only, optional: the operator escrow slot. */
+  esc?: E2eEscrowSlot;
 }
 
 /** Thrown on wrong password / corrupted ciphertext (GCM tag mismatch). */
@@ -74,6 +141,51 @@ export function b64ToBytes(s: string): Uint8Array {
   return out;
 }
 
+/**
+ * Copy into a fresh ArrayBuffer — TS 5.9 BufferSource typing rejects views
+ * that may wrap a SharedArrayBuffer, and WebCrypto wants a plain buffer.
+ */
+function buf(b: Uint8Array): ArrayBuffer {
+  return new Uint8Array(b).buffer as ArrayBuffer;
+}
+
+/** IV || ciphertext, the shape every AES-GCM blob in the marker uses. */
+function joinIvCt(iv: Uint8Array, ct: Uint8Array): string {
+  const out = new Uint8Array(iv.length + ct.length);
+  out.set(iv, 0);
+  out.set(ct, iv.length);
+  return bytesToB64(out);
+}
+
+async function gcmSeal(key: CryptoKey, plain: Uint8Array): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: buf(iv) }, key, buf(plain)),
+  );
+  return joinIvCt(iv, ct);
+}
+
+/** Returns null (never throws) on a tag mismatch — i.e. "wrong key". */
+async function gcmOpen(key: CryptoKey, b64: string): Promise<Uint8Array | null> {
+  let raw: Uint8Array;
+  try {
+    raw = b64ToBytes(b64);
+  } catch {
+    return null;
+  }
+  if (raw.length <= IV_LEN) return null;
+  try {
+    const pt = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: buf(raw.slice(0, IV_LEN)) },
+      key,
+      buf(raw.slice(IV_LEN)),
+    );
+    return new Uint8Array(pt);
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------
 // Key derivation
 // ---------------------------------------------------------------------
@@ -96,9 +208,7 @@ export async function deriveKek(
     ['deriveKey'],
   );
   return crypto.subtle.deriveKey(
-    // Copy into a fresh ArrayBuffer-backed view — TS 5.9 BufferSource typing
-    // rejects Uint8Array<ArrayBufferLike> that may wrap a SharedArrayBuffer.
-    { name: 'PBKDF2', salt: new Uint8Array(salt).buffer as ArrayBuffer, iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: buf(salt), iterations, hash: 'SHA-256' },
     material,
     { name: 'AES-GCM', length: 256 },
     false, // non-extractable
@@ -106,11 +216,193 @@ export async function deriveKek(
   );
 }
 
+/**
+ * The same 32 bytes as `deriveKek`, but as raw material.
+ *
+ * ⚠ Used in exactly one place: upgrading a v1 marker, where the files are
+ * already wrapped under the KEK and the recovery slots must therefore hold
+ * those very bytes. Nothing else may call this — the steady-state password
+ * path uses `deriveKek`, whose key cannot be exported.
+ */
+async function deriveKekBits(
+  password: string,
+  salt: Uint8Array,
+  iterations: number,
+): Promise<Uint8Array> {
+  const material = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: buf(salt), iterations, hash: 'SHA-256' },
+    material,
+    FMK_LEN * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+/** Import raw 32 bytes as the AES-256-GCM folder master key. */
+async function importFmk(raw: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', buf(raw), { name: 'AES-GCM' }, false, [
+    'encrypt',
+    'decrypt',
+  ]);
+}
+
 // ---------------------------------------------------------------------
-// Marker create / verify
+// User recovery key — 160 bits, Crockford base32, 8 groups of 4
 // ---------------------------------------------------------------------
 
-/** Create a fresh folder marker for `password` (also returns the derived KEK). */
+/** Crockford base32: no I, L, O or U, so it survives being read aloud. */
+const B32_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * Format 20 raw bytes as the string the user writes down:
+ * `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX` (160 bits, no padding waste).
+ */
+export function formatRecoveryKey(raw: Uint8Array): string {
+  let bits = 0;
+  let acc = 0;
+  let out = '';
+  for (let i = 0; i < raw.length; i++) {
+    acc = (acc << 8) | raw[i];
+    bits += 8;
+    while (bits >= 5) {
+      out += B32_ALPHABET[(acc >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += B32_ALPHABET[(acc << (5 - bits)) & 31];
+  return (out.match(/.{1,4}/g) || []).join('-');
+}
+
+/** Mint a fresh user recovery key. Shown once, never stored by filex. */
+export function generateRecoveryKey(): string {
+  return formatRecoveryKey(crypto.getRandomValues(new Uint8Array(E2E_RECOVERY_KEY_BYTES)));
+}
+
+/**
+ * Parse a typed-in recovery key back to its 20 bytes, or null when it is not
+ * one. Forgiving about how a human retypes it: case, dashes, spaces and the
+ * Crockford look-alikes (O to 0, I/L to 1) are all normalised away.
+ */
+export function parseRecoveryKey(s: string): Uint8Array | null {
+  const clean = (s || '')
+    .toUpperCase()
+    .replace(/[\s-]/g, '')
+    .replace(/O/g, '0')
+    .replace(/[IL]/g, '1');
+  const need = Math.ceil((E2E_RECOVERY_KEY_BYTES * 8) / 5); // 32 chars
+  if (clean.length !== need) return null;
+  const out = new Uint8Array(E2E_RECOVERY_KEY_BYTES);
+  let acc = 0;
+  let bits = 0;
+  let n = 0;
+  for (const ch of clean) {
+    const v = B32_ALPHABET.indexOf(ch);
+    if (v < 0) return null;
+    acc = (acc << 5) | v;
+    bits += 5;
+    if (bits >= 8) {
+      out[n++] = (acc >>> (bits - 8)) & 0xff;
+      bits -= 8;
+    }
+  }
+  return n === E2E_RECOVERY_KEY_BYTES ? out : null;
+}
+
+/** HKDF-SHA256 the recovery key into the AES key that wraps the FMK. */
+async function deriveRecoveryKek(raw: Uint8Array, salt: Uint8Array): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey('raw', buf(raw), 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: buf(salt),
+      info: buf(new TextEncoder().encode(RK_INFO)),
+    },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+async function sealRecoverySlot(fmk: Uint8Array, recoveryKey: string): Promise<E2eRecoverySlot> {
+  const raw = parseRecoveryKey(recoveryKey);
+  if (!raw) throw new Error('e2e: malformed recovery key');
+  const salt = crypto.getRandomValues(new Uint8Array(RK_SALT_LEN));
+  const rkek = await deriveRecoveryKek(raw, salt);
+  const slot = { salt: bytesToB64(salt), blob: await gcmSeal(rkek, fmk) };
+  raw.fill(0);
+  return slot;
+}
+
+// ---------------------------------------------------------------------
+// Escrow (operator recovery) — RSA-OAEP-256
+// ---------------------------------------------------------------------
+//
+// The server holds the PUBLIC half only, so it can wrap new folders' FMKs to
+// the escrow identity. The private half was handed to the admin at install
+// and is supplied back by hand when it is used. A stolen filex database
+// therefore decrypts nothing.
+
+/** Import the installation escrow public key (base64 SPKI, as the server serves it). */
+export async function importEscrowPublicKey(spkiB64: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'spki',
+    buf(b64ToBytes(spkiB64)),
+    { name: 'RSA-OAEP', hash: 'SHA-256' },
+    true,
+    ['encrypt'],
+  );
+}
+
+/** Import the escrow private key the admin pastes in (base64 PKCS#8, PEM tolerated). */
+export async function importEscrowPrivateKey(pkcs8B64: string): Promise<CryptoKey> {
+  const clean = (pkcs8B64 || '').replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '');
+  return crypto.subtle.importKey(
+    'pkcs8',
+    buf(b64ToBytes(clean)),
+    { name: 'RSA-OAEP', hash: 'SHA-256' },
+    false,
+    ['decrypt'],
+  );
+}
+
+/**
+ * Stable short name for an escrow key: first 8 bytes of SHA-256(SPKI), hex.
+ * Written into every escrow slot so a marker says WHICH key opens it, and so
+ * the UI can tell "this server's escrow key" from "some other one".
+ */
+export async function escrowKeyId(spkiB64: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', buf(b64ToBytes(spkiB64))));
+  return Array.from(d.slice(0, 8))
+    .map((x) => x.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function sealEscrowSlot(fmk: Uint8Array, escrowSpkiB64: string): Promise<E2eEscrowSlot> {
+  const pub = await importEscrowPublicKey(escrowSpkiB64);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, pub, buf(fmk)));
+  return { kid: await escrowKeyId(escrowSpkiB64), alg: E2E_ESCROW_ALG, blob: bytesToB64(ct) };
+}
+
+// ---------------------------------------------------------------------
+// Marker create / parse / verify
+// ---------------------------------------------------------------------
+
+/**
+ * Create a v1 folder marker — the pre-0.31 format, with NO recovery of any
+ * kind.
+ *
+ * @deprecated Use `createEncryptedFolder`. Kept exported, and kept producing
+ * a genuine v1 marker, so an embedder pinned to the old API keeps creating
+ * folders this build can still open rather than half-formed v2 ones.
+ */
 export async function createMarker(
   password: string,
   iterations: number = E2E_DEFAULT_ITERATIONS,
@@ -118,60 +410,227 @@ export async function createMarker(
   const iter = Math.max(E2E_MIN_ITERATIONS, iterations);
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const kek = await deriveKek(password, salt, iter);
-  const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
-  const ct = new Uint8Array(
-    await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer },
-      kek,
-      new TextEncoder().encode(VERIFY_PLAINTEXT),
-    ),
-  );
-  const verify = new Uint8Array(IV_LEN + ct.length);
-  verify.set(iv, 0);
-  verify.set(ct, IV_LEN);
-  return {
-    marker: { v: E2E_VERSION, salt: bytesToB64(salt), iter, verify: bytesToB64(verify) },
-    kek,
-  };
+  const verify = await gcmSeal(kek, new TextEncoder().encode(VERIFY_PLAINTEXT));
+  return { marker: { v: 1, salt: bytesToB64(salt), iter, verify }, kek };
 }
 
-/** Parse marker JSON text; returns null when the shape is not a v1 marker. */
+export interface CreateFolderOptions {
+  iterations?: number;
+  /** Base64 SPKI of the installation escrow key, when escrow is enabled. */
+  escrowPublicKey?: string | null;
+}
+
+export interface CreatedFolder {
+  marker: E2eMarker;
+  /** The folder master key, ready for encryptFile/decryptFile. */
+  fmk: CryptoKey;
+  /** Show this ONCE. filex never stores it and can never show it again. */
+  recoveryKey: string;
+}
+
+/**
+ * Create a v2 encrypted folder: random FMK, wrapped under the password KEK,
+ * under a freshly minted user recovery key, and — when the installation has
+ * escrow enabled — to the escrow public key.
+ */
+export async function createEncryptedFolder(
+  password: string,
+  opts: CreateFolderOptions = {},
+): Promise<CreatedFolder> {
+  const iter = Math.max(E2E_MIN_ITERATIONS, opts.iterations ?? E2E_DEFAULT_ITERATIONS);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const kek = await deriveKek(password, salt, iter);
+  const rawFmk = crypto.getRandomValues(new Uint8Array(FMK_LEN));
+  const recoveryKey = generateRecoveryKey();
+
+  const marker: E2eMarker = {
+    v: E2E_MARKER_VERSION,
+    salt: bytesToB64(salt),
+    iter,
+    verify: await gcmSeal(kek, new TextEncoder().encode(VERIFY_PLAINTEXT)),
+    fmk: 'wrapped',
+    fmk_pw: await gcmSeal(kek, rawFmk),
+    rk: await sealRecoverySlot(rawFmk, recoveryKey),
+  };
+  if (opts.escrowPublicKey) marker.esc = await sealEscrowSlot(rawFmk, opts.escrowPublicKey);
+
+  const fmk = await importFmk(rawFmk);
+  rawFmk.fill(0);
+  return { marker, fmk, recoveryKey };
+}
+
+/**
+ * Give an existing v1 folder recovery keys, in place and without rewriting a
+ * single file.
+ *
+ * The v1 files are wrapped under the password KEK, so the FMK stays defined
+ * as "the KEK" (`fmk: 'kek'`) and the new slots wrap those raw bytes. The
+ * password path afterwards is byte-identical to what it was.
+ *
+ * ⚠ Requires the password — this is only callable at the one moment filex
+ * ever has it. There is no way to give a v1 folder recovery without it.
+ * ⚠ When the installation has escrow on, this ALSO hands the operator a key
+ * to a folder that did not have one. The caller must say so before asking.
+ */
+export async function upgradeMarkerV1(
+  marker: E2eMarker,
+  password: string,
+  opts: CreateFolderOptions = {},
+): Promise<CreatedFolder> {
+  if (marker.v !== 1) throw new Error('e2e: not a v1 marker');
+  const salt = b64ToBytes(marker.salt);
+  const kek = await deriveKek(password, salt, marker.iter);
+  // Prove the password before touching anything.
+  const ok = await gcmOpen(kek, marker.verify);
+  if (!ok || new TextDecoder().decode(ok) !== VERIFY_PLAINTEXT) {
+    throw new E2eDecryptError('e2e: wrong password');
+  }
+  const rawKek = await deriveKekBits(password, salt, marker.iter);
+  const recoveryKey = generateRecoveryKey();
+  const next: E2eMarker = {
+    v: E2E_MARKER_VERSION,
+    salt: marker.salt,
+    iter: marker.iter,
+    verify: marker.verify,
+    fmk: 'kek',
+    rk: await sealRecoverySlot(rawKek, recoveryKey),
+  };
+  if (opts.escrowPublicKey) next.esc = await sealEscrowSlot(rawKek, opts.escrowPublicKey);
+  rawKek.fill(0);
+  return { marker: next, fmk: kek, recoveryKey };
+}
+
+/** Parse marker JSON text; returns null when the shape is not a marker we read. */
 export function parseMarker(text: string): E2eMarker | null {
   try {
     const m = JSON.parse(text) as E2eMarker;
-    if (!m || m.v !== E2E_VERSION) return null;
+    if (!m || (m.v !== 1 && m.v !== 2)) return null;
     if (typeof m.salt !== 'string' || typeof m.verify !== 'string') return null;
     if (typeof m.iter !== 'number' || m.iter < 1) return null;
+    if (m.v === 2) {
+      if (m.fmk !== 'kek' && m.fmk !== 'wrapped') return null;
+      if (m.fmk === 'wrapped' && typeof m.fmk_pw !== 'string') return null;
+    }
     return m;
   } catch {
     return null;
   }
 }
 
+/** True when the folder has a user recovery key slot. */
+export function markerHasRecovery(m: E2eMarker | null): boolean {
+  return !!m && m.v === 2 && !!m.rk;
+}
+
+/** True when the folder has an operator escrow slot. */
+export function markerHasEscrow(m: E2eMarker | null): boolean {
+  return !!m && m.v === 2 && !!m.esc;
+}
+
 /**
  * Check `password` against a folder marker. Resolves to the derived KEK on
  * success, or `null` on a wrong password (GCM tag mismatch on the verify
  * blob). Never talks to any server.
+ *
+ * ⚠ This returns the KEK, not the FMK. On a v1 folder they are the same key;
+ * on a v2 `fmk: 'wrapped'` folder they are not. Use `unlockWithPassword` to
+ * get the key that actually decrypts files.
  */
 export async function verifyPassword(
   marker: E2eMarker,
   password: string,
 ): Promise<CryptoKey | null> {
-  const salt = b64ToBytes(marker.salt);
-  const kek = await deriveKek(password, salt, marker.iter);
-  const verify = b64ToBytes(marker.verify);
-  if (verify.length <= IV_LEN) return null;
+  const kek = await deriveKek(password, b64ToBytes(marker.salt), marker.iter);
+  const pt = await gcmOpen(kek, marker.verify);
+  if (!pt || new TextDecoder().decode(pt) !== VERIFY_PLAINTEXT) return null;
+  return kek;
+}
+
+// ---------------------------------------------------------------------
+// Unlock — the three ways to reach the FMK
+// ---------------------------------------------------------------------
+
+/** Turn a password KEK into the FMK for this marker. */
+async function fmkFromKek(marker: E2eMarker, kek: CryptoKey): Promise<CryptoKey | null> {
+  // v1, and v2 folders upgraded from v1: the files are wrapped by the KEK.
+  if (marker.v === 1 || marker.fmk === 'kek') return kek;
+  if (!marker.fmk_pw) return null;
+  const raw = await gcmOpen(kek, marker.fmk_pw);
+  if (!raw || raw.length !== FMK_LEN) return null;
+  const fmk = await importFmk(raw);
+  raw.fill(0);
+  return fmk;
+}
+
+/**
+ * Unlock with the folder password. Returns the FMK (the key `decryptFile`
+ * wants) or null when the password is wrong.
+ */
+export async function unlockWithPassword(
+  marker: E2eMarker,
+  password: string,
+): Promise<CryptoKey | null> {
+  const kek = await verifyPassword(marker, password);
+  if (!kek) return null;
+  return fmkFromKek(marker, kek);
+}
+
+/**
+ * Unlock with the user recovery key shown when the folder was created.
+ * Returns null for a malformed key, a wrong key, or a folder that has no
+ * recovery slot at all — the caller cannot tell those apart, and neither can
+ * an attacker.
+ */
+export async function unlockWithRecoveryKey(
+  marker: E2eMarker,
+  recoveryKey: string,
+): Promise<CryptoKey | null> {
+  if (marker.v !== 2 || !marker.rk) return null;
+  const raw = parseRecoveryKey(recoveryKey);
+  if (!raw) return null;
+  let salt: Uint8Array;
   try {
-    const pt = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: verify.slice(0, IV_LEN).buffer as ArrayBuffer },
-      kek,
-      verify.slice(IV_LEN).buffer as ArrayBuffer,
-    );
-    if (new TextDecoder().decode(pt) !== VERIFY_PLAINTEXT) return null;
-    return kek;
+    salt = b64ToBytes(marker.rk.salt);
   } catch {
-    return null; // wrong password
+    return null;
   }
+  const rkek = await deriveRecoveryKek(raw, salt);
+  raw.fill(0);
+  const fmkRaw = await gcmOpen(rkek, marker.rk.blob);
+  if (!fmkRaw || fmkRaw.length !== FMK_LEN) return null;
+  const fmk = await importFmk(fmkRaw);
+  fmkRaw.fill(0);
+  return fmk;
+}
+
+/**
+ * Unlock with the installation escrow private key.
+ *
+ * Returns null when the folder has no escrow slot — which is the case for
+ * every folder created while escrow was off, and is why escrow cannot be
+ * turned on retroactively.
+ */
+export async function unlockWithEscrowKey(
+  marker: E2eMarker,
+  privateKey: CryptoKey,
+): Promise<CryptoKey | null> {
+  if (marker.v !== 2 || !marker.esc || marker.esc.alg !== E2E_ESCROW_ALG) return null;
+  let raw: Uint8Array;
+  try {
+    raw = new Uint8Array(
+      await crypto.subtle.decrypt(
+        { name: 'RSA-OAEP' },
+        privateKey,
+        buf(b64ToBytes(marker.esc.blob)),
+      ),
+    );
+  } catch {
+    return null; // wrong escrow key, or a slot sealed to another installation
+  }
+  if (raw.length !== FMK_LEN) return null;
+  const fmk = await importFmk(raw);
+  raw.fill(0);
+  return fmk;
 }
 
 // ---------------------------------------------------------------------
@@ -179,8 +638,8 @@ export async function verifyPassword(
 // ---------------------------------------------------------------------
 
 /** True when the buffer starts with the 'filexe2e' magic. */
-export function hasMagic(buf: ArrayBuffer | Uint8Array): boolean {
-  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+export function hasMagic(data: ArrayBuffer | Uint8Array): boolean {
+  const b = data instanceof Uint8Array ? data : new Uint8Array(data);
   if (b.length < MAGIC_BYTES.length) return false;
   for (let i = 0; i < MAGIC_BYTES.length; i++) {
     if (b[i] !== MAGIC_BYTES[i]) return false;
@@ -193,25 +652,28 @@ export function hasMagic(buf: ArrayBuffer | Uint8Array): boolean {
 // ---------------------------------------------------------------------
 
 /**
- * Encrypt `content` under the folder KEK: mints a fresh DEK, encrypts the
- * content one-shot, wraps the DEK with the KEK and prepends the fixed
+ * Encrypt `content` under the folder master key: mints a fresh DEK, encrypts
+ * the content one-shot, wraps the DEK with the FMK and prepends the fixed
  * 'filexe2e' header. Throws when content exceeds E2E_MAX_FILE_BYTES.
+ *
+ * `fmk` is the key an unlock returned. On a v1 folder that is the password
+ * KEK, which is why v1 files keep working untouched.
  */
-export async function encryptFile(kek: CryptoKey, content: ArrayBuffer): Promise<ArrayBuffer> {
+export async function encryptFile(fmk: CryptoKey, content: ArrayBuffer): Promise<ArrayBuffer> {
   if (content.byteLength > E2E_MAX_FILE_BYTES) {
     throw new Error('e2e: file exceeds the 200MB single-shot limit');
   }
   const rawDek = crypto.getRandomValues(new Uint8Array(32));
-  const dek = await crypto.subtle.importKey('raw', rawDek.buffer as ArrayBuffer, { name: 'AES-GCM' }, false, [
+  const dek = await crypto.subtle.importKey('raw', buf(rawDek), { name: 'AES-GCM' }, false, [
     'encrypt',
   ]);
   const wrapIV = crypto.getRandomValues(new Uint8Array(IV_LEN));
   const dataIV = crypto.getRandomValues(new Uint8Array(IV_LEN));
   const wrappedDek = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wrapIV.buffer as ArrayBuffer }, kek, rawDek.buffer as ArrayBuffer),
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: buf(wrapIV) }, fmk, buf(rawDek)),
   );
   const ct = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dataIV.buffer as ArrayBuffer }, dek, content),
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: buf(dataIV) }, dek, content),
   );
   // Zero the raw DEK copy as a hygiene measure (best-effort — GC may have
   // other copies, but don't leave the obvious one around).
@@ -229,11 +691,11 @@ export async function encryptFile(kek: CryptoKey, content: ArrayBuffer): Promise
 }
 
 /**
- * Decrypt a 'filexe2e' blob with the folder KEK. Throws E2eDecryptError on
- * a wrong key / tampered data, and a plain Error when the header is not an
- * e2e file at all.
+ * Decrypt a 'filexe2e' blob with the folder master key. Throws
+ * E2eDecryptError on a wrong key / tampered data, and a plain Error when the
+ * header is not an e2e file at all.
  */
-export async function decryptFile(kek: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
+export async function decryptFile(fmk: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
   const b = new Uint8Array(data);
   if (!hasMagic(b) || b.length < HEADER_LEN) {
     throw new Error('e2e: not an encrypted file');
@@ -246,20 +708,16 @@ export async function decryptFile(kek: CryptoKey, data: ArrayBuffer): Promise<Ar
   const dataIV = b.slice(DATA_IV_OFF, DATA_IV_OFF + IV_LEN);
   let rawDek: ArrayBuffer;
   try {
-    rawDek = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: wrapIV.buffer as ArrayBuffer },
-      kek,
-      wrappedDek.buffer as ArrayBuffer,
-    );
+    rawDek = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf(wrapIV) }, fmk, buf(wrappedDek));
   } catch {
-    throw new E2eDecryptError('e2e: DEK unwrap failed (wrong password?)');
+    throw new E2eDecryptError('e2e: DEK unwrap failed (wrong key?)');
   }
   const dek = await crypto.subtle.importKey('raw', rawDek, { name: 'AES-GCM' }, false, ['decrypt']);
   try {
     return await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: dataIV.buffer as ArrayBuffer },
+      { name: 'AES-GCM', iv: buf(dataIV) },
       dek,
-      b.slice(HEADER_LEN).buffer as ArrayBuffer,
+      buf(b.slice(HEADER_LEN)),
     );
   } catch {
     throw new E2eDecryptError('e2e: content decrypt failed');
@@ -271,8 +729,8 @@ export async function decryptFile(kek: CryptoKey, data: ArrayBuffer): Promise<Ar
 // ---------------------------------------------------------------------
 
 /**
- * Tiny per-explorer key ring: encrypted-folder root (wire path) → KEK.
- * Lives ONLY in memory — "Kilitle" drops the entry, a reload drops all.
+ * Tiny per-explorer key ring: encrypted-folder root (wire path) → FMK.
+ * Lives ONLY in memory — "Lock" drops the entry, a reload drops all.
  */
 export function createKeyRing() {
   const keys = new Map<string, CryptoKey>();
@@ -280,10 +738,10 @@ export function createKeyRing() {
     get(root: string): CryptoKey | undefined {
       return keys.get(root);
     },
-    set(root: string, kek: CryptoKey): void {
-      keys.set(root, kek);
+    set(root: string, fmk: CryptoKey): void {
+      keys.set(root, fmk);
     },
-    /** Drop one folder's key ("Kilitle"). */
+    /** Drop one folder's key ("Lock"). */
     lock(root: string): void {
       keys.delete(root);
     },

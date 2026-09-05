@@ -11,6 +11,7 @@ proxy‑header auth, custom CORS) a `config.yaml` is handier because a few setti
 are **file‑only** (noted below). Individual storages are **not** configured here
 — they're database records; see [STORAGE.md](STORAGE.md).
 
+- [Install-time settings (`FILEX_INSTALLATION_*`)](#install-time-settings-filex_installation_)
 - [Server & networking](#server--networking)
 - [Logging](#logging)
 - [Database](#database)
@@ -30,6 +31,50 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 
 > **Booleans** are true only for `"1"` or (case‑insensitive) `"true"`. Any other
 > non‑empty value is treated as false.
+
+---
+
+## Install-time settings (`FILEX_INSTALLATION_*`)
+
+Settings with the **`FILEX_INSTALLATION_`** prefix are decided once, at the
+first boot of an installation, and **cannot be changed afterwards**. filex
+records what it was given in the `settings` table (key `installation.pinned`)
+and mirrors it to `<data-dir>/installation.json`; on every later boot it
+compares the two and **refuses to start** if they disagree, printing what
+changed and what your options are.
+
+That is not caution for its own sake. These settings change the *shape of data
+already written*, so flipping one later does not reconfigure anything — it
+produces an installation whose guarantees are true for some of its data and
+false for the rest, with nothing on either half to say which. Refusing to start
+is the only honest response.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_INSTALLATION_E2E_ESCROW_KEY` | *(unset — escrow off)* | Base64 SPKI **public** key (RSA ≥ 2048, PEM armour and whitespace tolerated) enabling [E2E key escrow](E2E-ENCRYPTION.md#key-escrow-optional-operator-recovery). Generate the pair with `filex e2e-escrow keygen`; put the public half here and keep the private half yourself. |
+
+**Why escrow in particular cannot move.** An encrypted folder wraps its master
+key once per recovery path *when the folder is created*. A folder made while
+escrow was off carries no escrow-wrapped key, and nothing can add one without
+the folder password — which the server never has. So:
+
+- turning escrow **on** later gives you access to nothing that already exists;
+- **changing** the key leaves old folders openable only by the old private key
+  and new ones only by the new;
+- turning it **off** does not un-escrow anything already created.
+
+**If you meant to change it**, the supported paths are: restore the original
+value, or start a new installation with a fresh data directory — keeping the
+old escrow private key for as long as the folders created under it exist.
+
+⚠ An unparseable value is **fatal**, not ignored. Running without escrow while
+the operator believes they configured it is the one failure mode worth crashing
+over.
+
+⚠ The private half never reaches filex. `filex e2e-escrow keygen` writes
+nothing and touches no database; it prints the pair and exits. That is what
+makes a stolen filex database worthless to an attacker even with escrow on —
+and what makes losing the private key unrecoverable.
 
 ---
 
@@ -580,3 +625,6 @@ Some settings (branding, default thumbnail policy) live in the database
 - Booleans accept only `"1"` / `"true"`; anything else is false.
 - LDAP and proxy‑header now have env vars (`FILEX_LDAP_*` / `FILEX_HEADER_*`); the
   env value overrides the matching `config.yaml` field.
+- `FILEX_INSTALLATION_*` settings are frozen after the first boot and make filex
+  refuse to start if they change — that is deliberate, not a bug. See
+  [Install-time settings](#install-time-settings-filex_installation_).

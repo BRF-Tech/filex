@@ -38,6 +38,8 @@ export interface ShortcutHandlers {
   onShowHelp?: () => void; // ? (Shift+/ on most layouts)
   onToggleInspector?: () => void; // i (koru:k1 details panel)
   onToggleHidden?: () => void; // Ctrl+Shift+. — dot-file visibility
+  /* yildiz:s1 */
+  onStar?: () => void; // S — star / unstar the selection
   onQuickLook?: () => void; // Space (wiring:c2 quick-look overlay)
   /* wiring:d1 — tab strip actions */
   onTabNew?: () => void; // Ctrl+T
@@ -87,6 +89,10 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'inspector', defaultCombo: 'I', labelKey: 'shortcuts.inspector', groupKey: 'shortcuts.group.nav' } /* koru:k1 */,
   { id: 'help', defaultCombo: '?', labelKey: 'shortcuts.help', groupKey: 'shortcuts.group.nav' },
   { id: 'toggle-hidden', defaultCombo: 'Ctrl+Shift+.', labelKey: 'shortcuts.toggle_hidden', groupKey: 'shortcuts.group.nav' },
+  /* yildiz:s1 — starring is an action, so it belongs where the other verbs
+   * are. A bare letter like the inspector's `I`; the handler ignores events
+   * from form controls, so it never eats a keystroke meant for a filename. */
+  { id: 'star', defaultCombo: 'S', labelKey: 'shortcuts.star', groupKey: 'shortcuts.group.file' },
   // Selection
   { id: 'select-all', defaultCombo: 'Ctrl+A', labelKey: 'shortcuts.select_all', groupKey: 'shortcuts.group.selection' },
   // File operations
@@ -115,6 +121,7 @@ const HANDLER_KEY: Record<string, keyof ShortcutHandlers> = {
   close: 'onClose',
   inspector: 'onToggleInspector',
   'toggle-hidden': 'onToggleHidden',
+  star: 'onStar' /* yildiz:s1 */,
   help: 'onShowHelp',
   'select-all': 'onSelectAll',
   rename: 'onRename',

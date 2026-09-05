@@ -92,6 +92,12 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 		TokenHash: apitoken.HashToken(plain),
 		Scopes:    scopes,
 		Usernames: usernames,
+		// Always a person's credential: this surface is reached by a signed-in
+		// human minting something for their own CLI / WebDAV / SFTP / S3
+		// client. Not client-settable — a caller who could ask for "app" here
+		// would be choosing which surfaces to hide from themselves, and an
+		// integration's token is issued at /api/admin/ai-tokens instead.
+		Kind: model.TokenKindUser,
 	}
 	if req.ExpiresInDays > 0 {
 		exp := time.Now().AddDate(0, 0, req.ExpiresInDays)
@@ -145,7 +151,11 @@ func (h *SelfTokens) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		usernames = &un
 	}
-	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames); err != nil {
+	// Kind stays admin-only (/api/admin/ai-tokens): letting a token promote
+	// itself out of "app" would make the gate above a suggestion. body.Kind is
+	// simply ignored here — the shared updateTokenBody carries it for the
+	// admin surface.
+	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames, nil); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

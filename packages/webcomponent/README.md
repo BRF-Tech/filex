@@ -103,12 +103,23 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 | `theme` | `config.theme` (`light` / `dark` / `auto`) |
 | `trash-visible` | `config.trashVisible` |
 | `sidenav` | `config.sideNav` — the navigation panel (Upload · Recent / Starred / Shared with me / Trash · storages). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |
-| `connections` | `config.connections` — the panel's "How to connect" and "API keys" entries. Default on, except under `ui-profile="simple"` where it is off. |
+| `connections` | `config.connections` — the panel's "How to connect" and "API keys" entries. Default on, except under `ui-profile="simple"` where it is off. ⚠ "API keys" is additionally dropped when the caller is an **app** token — see `config.callerKind` below. |
 | `ui-profile` | `config.uiProfile` — `"standard"` (default) or `"simple"`: one pane, list/grid only, no tab strip, no split pane. |
 
 For anything richer (auth, custom endpoints, share base, …) set the
 `config` JS property after element creation. Properties merge on top
 of attributes.
+
+`config.callerKind` — `"user"` (a person) or `"app"` (an integration: a host
+app's proxy, a bot). `"app"` leaves out the surfaces that belong to one
+identity: **API keys**, **Recent**, **Starred**, **Shared with me**. Upload, the
+storages, Trash and "How to connect" stay, so an embed is still an embed.
+Omit it and the element asks the server (`GET /api/files/capabilities` →
+`caller_kind`), which is authoritative because only the server knows a token's
+kind; set it when your page already knows, to spare the moment before that
+answer lands. ⚠ Proxying every visitor with one shared API token IS the `"app"`
+case — see
+[docs/MCP.md](https://github.com/BRF-Tech/filex/blob/main/docs/MCP.md#token-kinds--user-vs-app).
 
 ## Events
 

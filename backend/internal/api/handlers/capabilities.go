@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/share"
 )
 
@@ -24,6 +27,13 @@ type Capabilities struct {
 	// is on). While false — the default — the capabilities payload carries NO
 	// cloud field at all, keeping the flag-off wire format byte-identical.
 	CloudEnabled bool
+	/* wiring:e2 */
+	// E2EEscrow is the installation escrow PUBLIC key, or nil when escrow is
+	// off. It is published deliberately: the browser needs it to wrap a new
+	// encrypted folder's master key to the operator, and a user about to
+	// create such a folder is entitled to know, before they create it, that
+	// their operator holds a second key to it.
+	E2EEscrow *e2e.EscrowKey
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -104,5 +114,41 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	if h.Store != nil {
 		merged["share_max_ttl_days"] = share.NewService(h.Store).MaxTTLDays(r.Context())
 	}
+
+	// Who is asking — a person, or an integration (migration 00030)?
+	//
+	// The explorer needs this to decide whether to draw the identity-bearing
+	// surfaces (its own API keys, Recent, Starred, Shared with me). It cannot
+	// work it out for itself: an API token authenticates AS its owner, so from
+	// the browser's side a shared embed token and a person's own token look
+	// identical, and in the embeds we run ONE proxy-injected token serves every
+	// visitor.
+	//
+	// The field is caller_KIND, not token_kind, because the answer must cover
+	// the cookie/OIDC case too — a session has no token at all, and it is
+	// always a person. Same reason the fallback is "user": /api/files/
+	// capabilities is a public route, so an anonymous pre-login fetch (the
+	// share and drop pages make one) must not read as an app.
+	//
+	// ⚠ Suppression is per-KIND, never per-role. A viewer is still a person.
+	callerKind := model.TokenKindUser
+	if auth.TokenFrom(r.Context()).IsApp() {
+		callerKind = model.TokenKindApp
+	}
+	merged["caller_kind"] = callerKind
+
+	/* wiring:e2 — say plainly whether this installation holds a second key.
+	 * Fixed at install (FILEX_INSTALLATION_E2E_ESCROW_KEY) and immutable
+	 * afterwards, so this answer never changes for a running installation. */
+	esc := map[string]any{"enabled": false}
+	if h.E2EEscrow != nil {
+		esc = map[string]any{
+			"enabled":    true,
+			"kid":        h.E2EEscrow.KID,
+			"alg":        e2e.EscrowAlg,
+			"public_key": h.E2EEscrow.SPKI,
+		}
+	}
+	merged["e2e_escrow"] = esc
 	writeJSON(w, http.StatusOK, merged)
 }

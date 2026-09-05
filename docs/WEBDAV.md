@@ -52,6 +52,11 @@ account password, then falls back to interpreting the value as an API token
 file explorer's navigation panel under **Connections → API keys**). Failures return `401` with
 `WWW-Authenticate: Basic realm="filex"`.
 
+⚠ The **API keys** entry is missing when the explorer is an embed proxied with
+one shared *app* token — those credentials belong to a person, and an app token
+is not one ([MCP.md](MCP.md#token-kinds--user-vs-app)). Sign in to filex
+directly, or ask an admin to mint the token at `POST /api/admin/ai-tokens`.
+
 Notes:
 
 - **Use HTTPS.** Basic auth sends the secret with every request; only expose

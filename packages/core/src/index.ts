@@ -155,21 +155,47 @@ export {
   E2E_MARKER_NAME,
   E2E_MAGIC,
   E2E_VERSION,
+  E2E_MARKER_VERSION,
   E2E_DEFAULT_ITERATIONS,
   E2E_MAX_FILE_BYTES,
   E2E_MIN_PASSWORD_LEN,
+  E2E_RECOVERY_KEY_BYTES,
+  E2E_ESCROW_ALG,
   E2eDecryptError,
   deriveKek,
   createMarker,
+  createEncryptedFolder,
+  upgradeMarkerV1,
   parseMarker,
   verifyPassword,
+  unlockWithPassword,
+  unlockWithRecoveryKey,
+  unlockWithEscrowKey,
+  markerHasRecovery,
+  markerHasEscrow,
+  generateRecoveryKey,
+  formatRecoveryKey,
+  parseRecoveryKey,
+  importEscrowPublicKey,
+  importEscrowPrivateKey,
+  escrowKeyId,
   hasMagic,
   encryptFile,
   decryptFile,
   createKeyRing,
 } from './lib/e2ecrypto';
-export type { E2eMarker, E2eKeyRing } from './lib/e2ecrypto';
+export type {
+  E2eMarker,
+  E2eKeyRing,
+  E2eFmkMode,
+  E2eRecoverySlot,
+  E2eEscrowSlot,
+  CreateFolderOptions,
+  CreatedFolder,
+} from './lib/e2ecrypto';
 export { default as EncryptedFolderModal } from './components/EncryptedFolderModal.vue';
+export { default as RecoveryKeyModal } from './components/RecoveryKeyModal.vue';
+export { default as E2eRecoveryUnlockModal } from './components/E2eRecoveryUnlockModal.vue';
 /* /wiring:e2 */
 
 /* ── connections ────────────────────────────────────────────────────

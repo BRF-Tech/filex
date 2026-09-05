@@ -148,16 +148,45 @@ pnpm run test                        # all workspaces
 pnpm --filter='@brftech/filex-core' test
 ```
 
-Vitest with happy-dom; Playwright suites live in `web/e2e/` (run separately:
-`pnpm --filter='@brftech/filex-admin' e2e`).
+Vitest with happy-dom.
+
+### Browser suites
+
+There are two, and both run against a throwaway instance this repo starts for
+them — never against a live host, never with a secret:
+
+```bash
+node e2e/run.mjs local      # Playwright — e2e/tests/*.spec.ts
+node e2e/run.mjs cypress    # Cypress   — web/cypress/e2e/*.cy.ts
+```
+
+Add `--build` on the first run (it builds the packages, the admin UI, the embed
+assets and the Go binary); afterwards a binary in `bin/` is enough.
+
+**Which one do I add a test to?**
+
+| | Playwright (`e2e/`) | Cypress (`web/cypress/`) |
+|---|---|---|
+| Shape | one user journey per spec, end to end | many small cases per surface |
+| Best at | flows that cross screens — upload → trash → restore, share → open with a PIN, pair a desktop app | HTTP contracts, admin screens, envelope shapes, "every route answers" sweeps |
+| Reaches | the UI a person sees | the UI **and** the API underneath it, in the same file |
+| Gates | the release (`docs/CONTRIBUTING.md` → Release process) | every push and PR (`.github/workflows/ci.yml`) |
+
+Rule of thumb: **if you can describe it as a story ("a user does X, then Y, and
+sees Z"), it is Playwright. If you can describe it as a rule ("this endpoint
+answers 503 when the integration is off"), it is Cypress.** A regression in a
+shared package usually deserves one of each — the contract in Cypress, the
+journey in Playwright.
+
+`e2e/README.md` and `web/cypress/README.md` carry the traps for each.
 
 ### What needs tests
 
 - **Always**: every new HTTP endpoint, every new storage driver method,
   every config knob.
 - **Encouraged**: new UI components (Vitest `mount`).
-- **Optional but appreciated**: end-to-end Playwright scenarios when the
-  flow spans many components.
+- **Optional but appreciated**: an end-to-end scenario when the flow spans many
+  components — see the table above for which suite it belongs in.
 
 ---
 

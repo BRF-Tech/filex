@@ -264,11 +264,28 @@ export interface ExplorerConfig {
   /** Backend base URL, e.g. https://files.example.com (no trailing slash). */
   apiBase: string;
 
-  /** Auth scheme. */
+  /** Auth scheme. ⚠ This `kind` is the transport (how the credential travels).
+   *  It is unrelated to `callerKind` below, which is what the credential IS. */
   auth?:
     | { kind: 'cookie' }                              // default — relies on session cookie
     | { kind: 'bearer'; token: string }               // header auth
     | { kind: 'apikey'; header: string; value: string };
+
+  /**
+   * Is a person behind this explorer, or an integration?
+   *
+   * 'app' leaves out the surfaces that belong to ONE identity — API keys,
+   * Recent, Starred, Shared with me — and keeps Upload, the storages, Trash
+   * and "How to connect". Omit it and the explorer asks the server
+   * (GET /api/files/capabilities → `caller_kind`), which is authoritative
+   * because only the server knows a token's kind; set it when the host already
+   * knows, to spare the moment before that answer lands.
+   *
+   * ⚠ Proxying every visitor with ONE shared API token is the 'app' case:
+   * that token acts as its owner, so "your API keys" would be the credential
+   * the embed itself runs on. See docs/MCP.md → Token kinds.
+   */
+  callerKind?: 'user' | 'app';
 
   /** Initial path. */
   startPath?: string;

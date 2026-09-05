@@ -359,7 +359,7 @@ filemanager/
 ├── demo/                           # standalone HTML demos
 ├── docker/
 │   ├── Dockerfile                  # slim
-│   └── Dockerfile.full             # +ffmpeg/gs/libreoffice
+│   └── Dockerfile.slim             # binary only, no thumbnail toolchain
 │
 ├── scripts/
 │   └── sync-embed.mjs              # web/dist + wc/dist → backend/embed

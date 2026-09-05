@@ -186,6 +186,7 @@ export const tr: Record<string, string> = {
   'shortcuts.toggle_hidden': 'Gizli dosyaları göster/gizle',
   'shortcuts.help': 'Bu yardım penceresi',
   'shortcuts.select_all': 'Tümünü seç',
+  'shortcuts.star': 'Yıldızla / yıldızı kaldır',
   'shortcuts.rename': 'Yeniden adlandır',
   'shortcuts.delete': 'Sil',
   'shortcuts.cut': 'Kes',
@@ -227,6 +228,10 @@ export const tr: Record<string, string> = {
   /* === koru:k1 === */
   'toolbar.inspector': 'Ayrıntılar',
   'ctx.details': 'Ayrıntılar',
+  /* yildiz:s1 — yıldızlamak bir eylem, menüde de öyle görünür. */
+  'ctx.star': 'Yıldızla',
+  'ctx.unstar': 'Yıldızı kaldır',
+  'star.failed': 'Yıldız değiştirilemedi',
   'shortcuts.inspector': 'Ayrıntılar panelini aç/kapat',
   'inspector.title': 'Ayrıntılar',
   'inspector.close': 'Kapat',
@@ -403,8 +408,8 @@ export const tr: Record<string, string> = {
   'e2e.create.pw2_placeholder': 'Parolayı tekrar girin',
   'e2e.create.warn_title': 'GERİ DÖNÜŞÜ YOK',
   'e2e.create.warn_body':
-    'Dosyalar yalnız bu parolayla açılır. Parola sunucuda TUTULMAZ; unutursanız içerik sonsuza dek kaybolur. Kurtarma yolu yoktur — yönetici dahil kimse açamaz.',
-  'e2e.create.ack': 'Anladım: parolayı kaybedersem verilerim kurtarılamaz.',
+    'Bu klasördeki dosyalar yalnız bu parolayla ya da klasör oluşturulurken bir kez gösterilen kurtarma anahtarıyla açılır. Parola sunucuda TUTULMAZ; kurtarma anahtarının da filex\'te kopyası kalmaz. İkisini de kaybederseniz içerik sonsuza dek gider.',
+  'e2e.create.ack': 'Anladım: parolayı da kurtarma anahtarını da kaybedersem verilerim kurtarılamaz.',
   'e2e.create.ack_required': 'Devam etmek için uyarıyı onaylayın.',
   'e2e.create.pw_short': 'Parola en az 8 karakter olmalı.',
   'e2e.create.pw_mismatch': 'Parolalar birbirini tutmuyor.',
@@ -428,6 +433,63 @@ export const tr: Record<string, string> = {
   'e2e.upload.locked': 'Önce klasörün kilidini açın',
   'e2e.decrypting': 'Çözülüyor…',
   'e2e.decrypt_failed': 'Dosya çözülemedi (parola değişmiş ya da dosya bozulmuş olabilir).',
+  /* wiring:e2 recovery — kurtarma anahtarı + yönetici escrow'u */
+  'e2e.create.escrow_title': 'Bu sunucunun da bir anahtarı var',
+  'e2e.create.escrow_body':
+    'Bu kurulumda anahtar emaneti (escrow) açık: sunucunun işletmecisi bu klasörü parolanız olmadan açabilir. O anahtar kullanıldığında size bildirim gelir. Escrow sunucu kurulurken sabitlenir; bir klasör için kapatılamaz.',
+  'e2e.locked.use_recovery': 'Parolayı mı kaybettiniz? Kurtarma anahtarı kullanın',
+  'e2e.recovery.title': 'Kurtarma anahtarınızı saklayın',
+  'e2e.recovery.title_upgraded': 'Kurtarma anahtarınız',
+  'e2e.recovery.lead':
+    'Bu anahtar klasörü parolasız açar. Yalnız bir kez gösterilir — filex bu anahtarı saklamaz ve bir daha gösteremez.',
+  'e2e.recovery.lead_upgraded':
+    'Bu klasörün artık bir kurtarma anahtarı var. Klasörü parolasız açar, yalnız bir kez gösterilir ve filex\'te kopyası kalmaz.',
+  'e2e.recovery.copy': 'Kopyala',
+  'e2e.recovery.copied': 'Kopyalandı',
+  'e2e.recovery.download': 'Dosya olarak indir',
+  'e2e.recovery.warn_title': 'BUNU PAROLA GİBİ SAKLAYIN',
+  'e2e.recovery.warn_body':
+    'Bu anahtarı eline geçiren herkes klasörü okuyabilir. Parolanızdan ayrı bir yerde tutun — parolanın yanında duran bir anahtar sizi unutmaya karşı korur, başkasına karşı değil.',
+  'e2e.recovery.escrow_title': 'Bu sunucunun da bir anahtarı var',
+  'e2e.recovery.escrow_body':
+    'Bu kurulumda anahtar emaneti açık: sunucunun işletmecisi bu klasörü parolanız olmadan açabilir. O anahtar kullanıldığında size bildirim gelir.',
+  'e2e.recovery.escrow_kid': 'Emanet anahtarı',
+  'e2e.recovery.ack': 'Bu anahtarı güvenli bir yere kaydettim.',
+  'e2e.recovery.done': 'Tamam',
+  'e2e.recover.title': 'Parolasız kilit açma',
+  'e2e.recover.none':
+    'Bu klasör kurtarma anahtarları eklenmeden önce oluşturulmuş, bu yüzden anahtarı yok. Tek giriş yolu parolası. Bir kez parolayla açın, filex kurtarma anahtarı eklemeyi önerecek.',
+  'e2e.recover.tab_recovery': 'Kurtarma anahtarı',
+  'e2e.recover.tab_escrow': 'Emanet anahtarı',
+  'e2e.recover.recovery_hint': 'Klasör oluşturulurken bir kez gösterilen anahtar.',
+  'e2e.recover.recovery_placeholder': 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX',
+  'e2e.recover.escrow_warn_title': 'Klasörün sahibine haber gidecek',
+  'e2e.recover.escrow_warn_body':
+    'Emanet anahtarıyla açılan klasörün sahibine bildirim gönderilir. Yalnız yetkiniz olduğunda kullanın.',
+  'e2e.recover.escrow_kid': 'Emanet anahtarı',
+  'e2e.recover.escrow_placeholder': 'Emanet özel anahtarını yapıştırın (PKCS#8, base64 ya da PEM)',
+  'e2e.recover.bad_format':
+    'Bu bir kurtarma anahtarına benzemiyor. Dörtlü sekiz grup, toplam 32 karakter olmalı.',
+  'e2e.recover.escrow_required': 'Emanet özel anahtarını yapıştırın.',
+  'e2e.recover.wrong_recovery': 'Bu kurtarma anahtarı bu klasörü açmıyor.',
+  'e2e.recover.wrong_escrow':
+    'Bu emanet anahtarı bu klasörü açmıyor. Escrow açılmadan önce oluşturulmuş klasörlerin emanet anahtarı yoktur ve sonradan da eklenemez.',
+  'e2e.recover.bad_escrow_key': 'Bu okunabilir bir özel anahtar değil (PKCS#8, base64 ya da PEM bekleniyor).',
+  'e2e.recover.notify_failed':
+    'Klasör sahibine bildirim gönderilemedi, bu yüzden kilit açılmadı. Emanet anahtarının kullanımı her zaman duyurulur.',
+  'e2e.recover.recovery_done': 'Kurtarma anahtarıyla açıldı',
+  'e2e.recover.escrow_done': 'Emanet anahtarıyla açıldı — klasör sahibine bildirildi',
+  'e2e.recover.unlock': 'Kilidi aç',
+  'e2e.recover.busy': 'Açılıyor…',
+  'e2e.upgrade.title': 'Bu klasörün kurtarma anahtarı yok',
+  'e2e.upgrade.body':
+    'Kurtarma anahtarları eklenmeden önce oluşturulmuş, bu yüzden tek giriş yolu parolası. Şu anda — ve yalnız şu anda, parola bellekteyken — filex bir tane ekleyebilir. Dosyalarınız yeniden şifrelenmez, hiçbir yere taşınmaz.',
+  'e2e.upgrade.escrow_note':
+    'Not: bu kurulumda anahtar emaneti açık; kurtarma anahtarı eklemek aynı zamanda işletmecinin bu klasörü parolanız olmadan açabilmesi demektir.',
+  'e2e.upgrade.accept': 'Kurtarma anahtarı oluştur',
+  'e2e.upgrade.decline': 'Şimdi değil',
+  'e2e.upgrade.busy': 'Oluşturuluyor…',
+  'e2e.upgrade.failed': 'Bu klasöre kurtarma anahtarı eklenemedi',
   'e2e.download.failed': 'Şifreli dosya indirilemedi.',
   /* /wiring:e2 */
 
@@ -866,6 +928,13 @@ export const tr: Record<string, string> = {
   'empty.starred.hint': 'Bir dosyayı yıldızla, burada bulasın',
   'empty.shared.title': 'Seninle henüz bir şey paylaşılmadı',
   'empty.shared.hint': 'Başkalarının paylaştığı klasör ve dosyalar burada görünür',
+  /* etiket:t1 */
+  'sidenav.tags': 'Etiketler',
+  'sidenav.tags.empty': 'Henüz etiket yok — bir dosyaya sağ tıklayıp Etiketler’den ekleyebilirsin.',
+  'sidenav.tags.more': '{count} tane daha göster',
+  'sidenav.tags.less': 'Daha az göster',
+  'empty.tag.title': '“{tag}” etiketli hiçbir şey yok',
+  'empty.tag.hint': 'Bir dosyaya sağ tıklayıp Etiketler’i seç, burada görünsün',
   'sidenav.connections': 'Bağlantılar',
   'sidenav.connect': 'Nasıl bağlanılır',
   'sidenav.apikeys': 'API anahtarları',

@@ -86,16 +86,27 @@ import { useTabs, type TabState } from './composables/useTabs';
 /* /wiring:d1 */
 /* wiring:e2 — uçtan uca şifreli klasörler (docs/E2E-ENCRYPTION.md) */
 import EncryptedFolderModal from './components/EncryptedFolderModal.vue';
+import RecoveryKeyModal from './components/RecoveryKeyModal.vue';
+import E2eRecoveryUnlockModal from './components/E2eRecoveryUnlockModal.vue';
 import {
   createKeyRing,
-  createMarker,
+  createEncryptedFolder,
+  upgradeMarkerV1,
   parseMarker,
-  verifyPassword,
+  unlockWithPassword,
+  unlockWithRecoveryKey,
+  unlockWithEscrowKey,
+  importEscrowPrivateKey,
+  markerHasRecovery,
+  markerHasEscrow,
+  bytesToB64,
+  b64ToBytes,
   encryptFile,
   decryptFile,
   hasMagic,
   E2E_MARKER_NAME,
   E2E_MAX_FILE_BYTES,
+  type E2eMarker,
 } from './lib/e2ecrypto';
 /* /wiring:e2 */
 
@@ -104,12 +115,17 @@ import {
    panes or split view shows mismatched rows). */
 import {
   filterListing,
-  virtualSegmentKey,
+  virtualSegmentLabel,
+  makeTagSegment,
+  tagOfPath,
+  VIRTUAL_SEGMENTS,
   showHiddenFiles,
   setShowHiddenFiles,
   injectTrashRow,
   hydrateTrashRow as hydrateTrashRowShared,
 } from './lib/listing';
+import { setNodeStarred } from './lib/star';
+import { fetchAllTags, fetchTaggedRows, invalidateTagCache } from './lib/tags';
 import { resolveTransfer, type TransferIntent } from './lib/transfer';
 import {
   activeNativeDrag,
@@ -310,16 +326,37 @@ const trashActive = computed(() => trashMode.value);
  * pattern is trashMode's, generalised — including the part that matters most,
  * that load() clears the mode, or the view sticks and every later navigation
  * renders under the wrong heading. */
-type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash';
+type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
 const navView = ref<NavView>('');
 /** Where the view was entered from, so "up" goes back there. */
 const navViewOrigin = ref<string>('');
-/** Sentinel parked in `dirname` so the breadcrumb can label the view. */
-const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash'>, string> = {
+/** The tag being browsed while navView === 'tag' ('' otherwise). */
+const navTag = ref<string>('');
+/** Sentinel parked in `dirname` so the breadcrumb can label the view. The tag
+ *  view's sentinel is built per tag (`makeTagSegment`) — see lib/listing. */
+const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> = {
   recent: '.recent',
   starred: '.starred',
   shared: '.shared',
 };
+
+/**
+ * A path that is a virtual view rather than a folder. Used by load() so a
+ * sentinel reaching it — a restored tab, a pasted `#.tag~invoices`, a reload,
+ * the breadcrumb's own crumb — opens the VIEW instead of asking the backend
+ * for a folder called `.starred` and landing on "not found". (That was already
+ * true of the four shipped views; the tag view would have inherited it.)
+ */
+function virtualViewOf(path: string): { kind: Exclude<NavView, ''>; tag: string } | null {
+  const clean = String(path ?? '').replace(/^\/+|\/+$/g, '');
+  if (!clean) return null;
+  const tag = tagOfPath(clean);
+  if (tag) return { kind: 'tag', tag };
+  const key = VIRTUAL_SEGMENTS[clean];
+  if (!key) return null;
+  const kind = clean.slice(1) as Exclude<NavView, '' | 'tag'>;
+  return { kind, tag: '' };
+}
 
 // When the caller can see exactly ONE storage, the multi-storage root is a
 // one-row list that carries no information — the user clicks through it every
@@ -448,6 +485,72 @@ function onStarChange(n: FileNode, value: boolean) {
   starredIds.value = next;
 }
 
+/* === yildiz:s1 — starring as an ACTION ================================
+ * The star shipped as an indicator in ONE view: `StarButton` was rendered by
+ * ListView and nowhere else, so a user in grid view (the mode the navigation
+ * panel's own screenshots show) had a Starred view with no way to fill it.
+ * It is a verb, like tagging — so it is a menu entry beside Tags, a chip on
+ * every card, and a key.
+ *
+ * ⚠ ONE implementation of the request: `lib/star.ts`. StarButton calls it,
+ * this calls it. A menu cannot render a component, but it must not grow its
+ * own fetch either — that is the second path that drifts.
+ */
+/** Which of `targets` can carry a star: files the server knows by id. */
+function starableNodes(targets: FileNode[]): FileNode[] {
+  return targets.filter((n) => typeof n.id === 'number' && n.type === 'file');
+}
+
+/** True when EVERY starable target is starred — i.e. the action reads
+ *  "Unstar". A mixed selection reads "Star" and stars the rest, which is the
+ *  behaviour that needs no explanation. */
+function selectionAllStarred(targets: FileNode[]): boolean {
+  const list = starableNodes(targets);
+  return list.length > 0 && list.every((n) => starredIds.value.has(n.id as number));
+}
+
+/**
+ * Toggle the star on a selection. Optimistic like the button, and rolled back
+ * per node on failure — a partial failure must not leave the set lying about
+ * what the server holds.
+ */
+async function toggleStar(targets: FileNode[]) {
+  const list = starableNodes(targets);
+  if (list.length === 0) return;
+  const next = !selectionAllStarred(list);
+  const opts = {
+    apiBase: props.config.apiBase ?? '',
+    authHeaders: () => buildAuthHeaders(),
+    authCredentials: api.credentialsMode(),
+  };
+  const set = new Set(starredIds.value);
+  for (const n of list) {
+    if (next) set.add(n.id as number);
+    else set.delete(n.id as number);
+  }
+  starredIds.value = set;
+  let failed = 0;
+  await Promise.all(
+    list.map(async (n) => {
+      try {
+        await setNodeStarred(n.id as number, next, opts);
+      } catch {
+        failed += 1;
+        const rollback = new Set(starredIds.value);
+        if (next) rollback.delete(n.id as number);
+        else rollback.add(n.id as number);
+        starredIds.value = rollback;
+      }
+    }),
+  );
+  if (failed > 0) flashToast(t('star.failed'));
+  // Starring is what fills the Starred view; if that IS the view on screen,
+  // an unstar has to remove the row instead of leaving a listing that
+  // disagrees with its own heading.
+  if (navView.value === 'starred') await loadNavView('starred');
+}
+/* === /yildiz:s1 === */
+
 async function markRecent(n: FileNode) {
   if (typeof n.id !== 'number') return;
   try {
@@ -468,6 +571,17 @@ function openTagPickerFor(n: FileNode) {
   if (typeof n.id !== 'number') return;
   tagPickerNode.value = n;
   showTagPicker.value = true;
+}
+
+/* etiket:t1 — the user just changed a node's tags, so the cached "every tag
+ * that exists" list is wrong RIGHT NOW, which is the only staleness anybody
+ * notices. Drop it and re-ask; if a tag view is on screen, refresh it too —
+ * removing a file's tag has to remove it from the listing that is named after
+ * that tag. */
+function onNodeTagsChanged() {
+  invalidateTagCache();
+  void loadNavTags(true);
+  if (navView.value === 'tag' && navTag.value) void loadTagView(navTag.value);
 }
 
 function onRecentOpen(entry: { id: number; storage_id?: number; path: string; name: string }) {
@@ -659,6 +773,32 @@ const sharedStorageNames = ref<string[]>([]);
  * storage form), and /api/tokens caps every scope against the caller's own role.
  */
 const connectionsEnabled = computed(() => props.config.connections ?? !simpleUi.value);
+
+/**
+ * Is this caller an integration rather than a person (backend migration 00030)?
+ *
+ * A filex API token authenticates AS its owner, so from here a shared embed
+ * token and somebody's own token are indistinguishable — only the server knows
+ * which kind it is, and it says so in `capabilities.caller_kind`. A host that
+ * already knows can say so with `config.callerKind`, which wins — purely to
+ * spare the flash of a Starred row that appears and then disappears when
+ * capabilities land.
+ *
+ * ⚠ Defaults to "person" in every unknown state — no config, capabilities not
+ * back yet, or a server too old to answer. The cost of guessing wrong that way
+ * is one row too many for a moment; guessing the other way would hide Recent
+ * and API keys from every ordinary user of every older server.
+ */
+const callerIsApp = computed(
+  () => (props.config.callerKind ?? capabilitiesData.value?.caller_kind) === 'app',
+);
+/**
+ * The identity-bearing surfaces: API keys, Recent, Starred, Shared with me.
+ * ⚠ Suppression is per token KIND, never per role — a viewer is still a person
+ * with their own recents. And it is not the whole panel: Upload, the storages,
+ * Trash and "How to connect" stay useful inside an embed.
+ */
+const identitySurfaces = computed(() => !callerIsApp.value);
 const showConnections = ref(false);
 const showTokens = ref(false);
 function openConnections() {
@@ -666,6 +806,10 @@ function openConnections() {
   showConnections.value = true;
 }
 function openTokens() {
+  // Belt and braces: the panel entry is gone for an app token, but a host may
+  // also open this overlay from its own chrome, and /api/tokens would answer
+  // that caller with a 403 it has nowhere to show.
+  if (callerIsApp.value) return;
   showConnections.value = false;
   showTokens.value = true;
 }
@@ -776,17 +920,27 @@ async function fetchNavRows(kind: 'recent' | 'starred' | 'shared'): Promise<File
 /** Open one of the panel views in the main pane. */
 async function loadNavView(kind: Exclude<NavView, ''>) {
   closeNavDrawer();
+  if (kind === 'tag') {
+    // The tag view needs a name; the panel calls loadTagView directly.
+    if (navTag.value) await loadTagView(navTag.value);
+    return;
+  }
   if (kind === 'trash') {
     await loadTrash();
     // ⚠ After loadTrash, not before: loadTrash goes through load()-adjacent
     // state and the mode has to be the last word, or the panel row for Trash
     // never lights up.
     navView.value = 'trash';
+    navTag.value = '';
     return;
   }
   loading.value = true;
-  navViewOrigin.value = currentPath.value ?? '';
+  // ⚠ Only when coming from a real folder. Stepping Starred → Recent used to
+  // record `.starred` as the origin, so "up" out of Recent landed in Starred
+  // and the user had to press it twice to get back to their files.
+  if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
   navView.value = kind;
+  navTag.value = '';
   trashMode.value = false;
   e2eRoot.value = '';
   selection.clear();
@@ -807,6 +961,78 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
     loading.value = false;
   }
 }
+
+/* === etiket:t1 — the tag view ==========================================
+ * "Tagged files should show up inside the tag." A tag is not a folder: its
+ * files live all over the tree and in every storage, so this is the same
+ * shape as Starred — a per-user endpoint answering with node rows, each
+ * carrying its own qualified path, so opening one navigates normally.
+ *
+ * The sentinel is `.tag~<name>` (lib/listing). Every surface that renders a
+ * path segment — tab strip, breadcrumb, inspector heading, the address-bar
+ * hash — goes through `virtualSegmentLabel`, so none of them can print the
+ * sentinel the way the strip once printed `.shared`.
+ */
+async function loadTagView(tag: string) {
+  closeNavDrawer();
+  const name = String(tag ?? '').trim();
+  if (!name) return;
+  loading.value = true;
+  if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
+  navView.value = 'tag';
+  navTag.value = name;
+  trashMode.value = false;
+  e2eRoot.value = '';
+  selection.clear();
+  try {
+    const rows = await fetchTaggedRows(name, {
+      apiBase: props.config.apiBase ?? '',
+      authHeaders: () => buildAuthHeaders(),
+      authCredentials: api.credentialsMode(),
+    });
+    files.value = rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null);
+    const seg = makeTagSegment(name);
+    dirname.value = seg;
+    currentPath.value = seg;
+    // Spans every storage, like Starred/Recent/Shared — so no storage crumb.
+    adapter.value = '';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    files.value = [];
+    emit('error', { message: msg, context: { op: `nav-view:tag:${name}` } });
+    flashToast(msg);
+  } finally {
+    loading.value = false;
+  }
+}
+
+/**
+ * The tags that exist, for the panel's Tags section.
+ *
+ * ⚠ WHEN this loads was a deliberate decision, not a default: `tags/all` is a
+ * distinct-scan and the panel renders in every mounted explorer (a page can
+ * hold several). It is therefore NOT fetched during mount — it is asked for
+ * once the first listing is on screen, through a module-level cache that
+ * dedupes concurrent callers and reuses the answer for a minute
+ * (lib/tags.ts). N explorers on a page cost ONE query; a navigation costs
+ * none. The cache is dropped the instant the user edits tags, which is the
+ * only staleness anybody can notice.
+ */
+const navTags = ref<string[]>([]);
+const navTagsLoaded = ref(false);
+
+async function loadNavTags(force = false) {
+  if (!navVisible.value) return; // no panel → nobody can see the list
+  navTags.value = await fetchAllTags({
+    apiBase: props.config.apiBase ?? '',
+    authHeaders: () => buildAuthHeaders(),
+    authCredentials: api.credentialsMode(),
+    force,
+  });
+  navTagsLoaded.value = true;
+}
+
+/* === /etiket:t1 === */
 
 /** Panel to a storage root. */
 function openNavStorage(name: string) {
@@ -840,7 +1066,11 @@ const inspectorDirLabel = computed(() => {
   if (trashMode.value) return t('node.trash');
   const p = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   if (!p) return adapter.value || t('breadcrumb.root');
-  return p.split('/').pop() || p;
+  const seg = p.split('/').pop() || p;
+  /* etiket:t1 — a THIRD surface that renders a path segment, and it had the
+     same hole the tab strip did: in a virtual view the details panel headed
+     itself ".starred". Same shared resolver, so it cannot drift again. */
+  return virtualSegmentLabel(seg, t) || seg;
 });
 function onInspectorManage(n: FileNode) {
   permTarget.value = n;
@@ -1025,6 +1255,48 @@ function toggleHiddenFiles() {
 }
 
 async function load(path?: string) {
+  /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
+   * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
+   * or the breadcrumb crumb for the view you are standing in all arrive here
+   * as a plain path. Without this they went to the backend as a FOLDER NAME
+   * and came back 404, so a view that exists and is merely empty greeted the
+   * user with "Folder not found — this folder does not exist, was moved, or
+   * you do not have access to it" (measured on `#.trash` and `#.starred`,
+   * v0.30.1). The trash is not missing; it is empty, and it has a state that
+   * says so.
+   *
+   * ⚠ Through `virtualViewOf` → the ONE map in lib/listing.ts, never a second
+   * list of names here: two copies of that mapping are what printed `.shared`
+   * in the tab strip two days ago, and the tag view adds a dynamic third kind.
+   *
+   * ⚠ Only a sentinel this build KNOWS is intercepted. Anything else keeps
+   * going — a user may genuinely own a folder called `.config`, and with
+   * hidden files shown they can open it.
+   *
+   * ⚠ And only when the view is actually REACHABLE here. Under `rootPath` the
+   * panel is off on purpose (the views span storages and would list files
+   * outside the folder the embed was confined to), so a stale hash from
+   * another deployment must not smuggle them in: it falls back to the root —
+   * which the floor clamp below then turns into the confined folder.
+   *
+   * ⚠ No recursion: neither loader calls load(), and the fallback passes '',
+   * which is not a sentinel.
+   */
+  const asView = virtualViewOf(path ?? currentPath.value ?? '');
+  if (asView) {
+    const reachable =
+      asView.kind === 'trash' ? props.config.trashVisible !== false : sideNavEnabled.value;
+    if (!reachable) {
+      // Clear it explicitly: if the fallback lands on the path we are already
+      // on, watch(currentPath) never fires and the dead hash would survive to
+      // the next reload (the same trap leaveNotFound documents).
+      writePersistedPath('');
+      return await load('');
+    }
+    if (asView.kind === 'tag') await loadTagView(asView.tag);
+    else await loadNavView(asView.kind);
+    return;
+  }
   loading.value = true;
   // Any normal navigation exits trash mode (the trash view is entered only
   // by opening the virtual `.trash` row, which calls loadTrash()).
@@ -1033,6 +1305,7 @@ async function load(path?: string) {
      this the mode sticks and the breadcrumb keeps saying "Starred" over a
      folder listing. */
   navView.value = '';
+  navTag.value = '';
   let requested = path ?? currentPath.value ?? '';
   try {
     notFoundPath.value = '';
@@ -1376,6 +1649,25 @@ onMounted(async () => {
   /* gezinti:g1 — which storages are grant-only, so the panel can mark them
      before anybody opens the shared view. */
   void loadSharedStorages();
+  /* etiket:t1 — the panel's tag list. AFTER the first listing has been
+     awaited above, never racing it: `tags/all` is a distinct-scan and the
+     folder the user asked for is the only thing on the critical path. The
+     module-level cache in lib/tags.ts means several explorers on one page
+     still cost a single query. */
+  void loadNavTags();
+  /* ⚠ The panel is not always on screen at mount. Below 560px it is a DRAWER
+     that starts closed, so `navVisible` is false and the call above returns
+     without asking for anything — measured at 390px: the drawer opened with
+     no Tags section at all. Ask again the first time the panel appears.
+     ⚠ Registered HERE and not beside loadNavTags: `watch` evaluates its
+     source immediately, `navVisible` reads `isNarrow`, and `isNarrow` is
+     declared further down the file — so a watcher created at setup time threw
+     "Cannot access 'isNarrow' before initialization" and took the whole
+     explorer down with it (measured: blank pane, two TDZ errors in the
+     console). In onMounted every ref exists. */
+  watch(navVisible, (visible) => {
+    if (visible && !navTagsLoaded.value) void loadNavTags();
+  });
   if (hashPersistEnabled()) {
     window.addEventListener('hashchange', onHashChange);
   }
@@ -1522,6 +1814,7 @@ useKeyboardShortcuts(rootEl, {
   /* /cila:c wiring */
   onQuickLook: () => quickLookToggle() /* wiring:c2 */,
   onToggleHidden: () => toggleHiddenFiles(),
+  onStar: () => void toggleStar(selection.nodes.value) /* yildiz:s1 */,
   onToggleInspector: () => toggleInspector() /* koru:k1 */,
   /* wiring:d1 — sekme aksiyonları (registry: tab-new/close/next/prev) */
   onTabNew: () => newTabHere(),
@@ -2033,6 +2326,9 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   const isFile = single && sel[0]?.type === 'file';
   const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
   const singleHasId = single && typeof sel[0]?.id === 'number';
+  /* yildiz:s1 */
+  const canStar = starableNodes(sel).length > 0;
+  const allStarred = selectionAllStarred(sel);
   const copyIdLabel = locale.value === 'en' ? 'Copy node id' : "Node id'yi kopyala";
   // RBAC: gate mutating actions when the caller lacks edit on the target. The
   // "İzinler" (permissions) action shows only for owners on RBAC-on storages.
@@ -2058,7 +2354,17 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any || !w, disabled: !any },
     { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any, disabled: !any },
     { key: 'paste', label: t('ctx.paste'), icon: '📋', hidden: !w, disabled: !clipboard.value.mode },
-    { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId },
+    { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId && !canStar },
+    /* yildiz:s1 — "star must be an action, like a tag" (owner, v0.30.0).
+       Beside Tags on purpose: they are the same kind of verb, and this is the
+       ONLY star a grid/gallery user reaches with the keyboard. Works on a
+       multi-selection; the label follows the selection's state. */
+    {
+      key: 'star',
+      label: allStarred ? t('ctx.unstar') : t('ctx.star'),
+      icon: allStarred ? '★' : '☆',
+      hidden: !canStar,
+    },
     { key: 'tags', label: tagsLabel, icon: '🏷', hidden: !singleHasId, disabled: !singleHasId },
     ...keepActionsFor(sel),
     { divider: true, key: 'sep2', label: '', hidden: !w },
@@ -2176,6 +2482,9 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
           () => flashToast(`#${id}`),
         );
       }
+      break;
+    case 'star':
+      await toggleStar(targets);
       break;
     case 'tags':
       if (targets[0]) openTagPickerFor(targets[0]);
@@ -3285,8 +3594,8 @@ function tabLabel(path: string): string {
   // gezinti:g1 — the virtual views park a sentinel in the path. Translate via
   // the SHARED map: this special-cased only '.trash' when recent/starred/shared
   // arrived, so the strip read ".shared" at users (reported 2026-09-04).
-  const virtualKey = virtualSegmentKey(p.split('/').pop() || p);
-  if (virtualKey) return t(virtualKey);
+  const virtualLabel = virtualSegmentLabel(p.split('/').pop() || p, t);
+  if (virtualLabel) return virtualLabel;
   if (!p) return multiStorageRoot.value ? t('breadcrumb.root') : adapter.value || t('breadcrumb.root');
   return p.split('/').pop() || p;
 }
@@ -3577,6 +3886,35 @@ const e2eUnlockErr = ref('');
 const showEncFolder = ref(false);
 const e2eCreateBusy = ref(false);
 
+/* wiring:e2 recovery — kurtarma anahtarı + escrow.
+ *
+ * The marker of the folder we are looking at is cached here while the lock
+ * screen is up: the recovery dialog needs to know which doors this folder
+ * actually has (a pre-0.31 folder has none) before offering them. */
+const e2eMarker = ref<E2eMarker | null>(null);
+const showRecoveryUnlock = ref(false);
+const e2eRecoverBusy = ref(false);
+const e2eRecoverErr = ref<string | null>(null);
+// The shown-once key. Held only while its dialog is open.
+const showRecoveryKey = ref(false);
+const recoveryKeyValue = ref('');
+const recoveryKeyVariant = ref<'created' | 'upgraded'>('created');
+const recoveryKeyFolder = ref('');
+// A v1 folder that just opened by password: offer to give it recovery now,
+// because this is the only moment filex holds the password.
+const e2eUpgradeOffer = ref(false);
+const e2eUpgradePw = ref('');
+const e2eUpgradeBusy = ref(false);
+
+/** The installation's escrow public key, or null when escrow is off.
+ *  Published in /api/capabilities on purpose — see docs/E2E-ENCRYPTION.md. */
+const e2eEscrowPub = computed<string | null>(
+  () => capabilitiesData.value?.e2e_escrow?.public_key || null,
+);
+const e2eEscrowKid = computed<string | null>(
+  () => capabilitiesData.value?.e2e_escrow?.kid || null,
+);
+
 function e2eKek(): CryptoKey | null {
   return e2eRing.get(e2eRoot.value) ?? null;
 }
@@ -3607,13 +3945,24 @@ async function e2eUnlock() {
       e2eUnlockErr.value = t('e2e.unlock.marker_missing');
       return;
     }
-    const kek = await verifyPassword(marker, e2ePw.value);
-    if (!kek) {
+    e2eMarker.value = marker;
+    const fmk = await unlockWithPassword(marker, e2ePw.value);
+    if (!fmk) {
       e2eUnlockErr.value = t('e2e.unlock.wrong');
       return;
     }
-    e2eRing.set(e2eRoot.value, kek);
+    e2eRing.set(e2eRoot.value, fmk);
     e2eRingVer.value++;
+    /* wiring:e2 recovery — a folder from before recovery existed has no way
+     * back in but its password. This is the ONE moment we hold that password,
+     * so ask now. Asking is all we do: the folder keeps working untouched if
+     * the user says no, and saying yes is the only path that also hands the
+     * operator an escrow key (when the install has one), which is why the
+     * prompt says so rather than doing it quietly. */
+    if (marker.v === 1) {
+      e2eUpgradePw.value = e2ePw.value;
+      e2eUpgradeOffer.value = true;
+    }
     e2ePw.value = '';
   } finally {
     e2eUnlockBusy.value = false;
@@ -3740,17 +4089,28 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
   try {
     const dirWire = qualify(currentPath.value);
     await api.newFolder(dirWire, payload.name);
-    const { marker, kek } = await createMarker(payload.password);
+    /* wiring:e2 recovery — the folder gets a recovery key at birth, and an
+     * escrow slot when the installation has one. Both are decided HERE and
+     * never again: the wrapped copies are written into the marker now, so a
+     * folder created without escrow can never be opened by an escrow key. */
+    const { marker, fmk, recoveryKey } = await createEncryptedFolder(payload.password, {
+      escrowPublicKey: e2eEscrowPub.value,
+    });
     const markerFile = new File([JSON.stringify(marker)], E2E_MARKER_NAME, {
       type: 'application/json',
     });
     const newDirWire = wireJoin(dirWire, payload.name);
     await api.uploadMultipart(newDirWire, [markerFile]);
     // Oluşturan oturumda kilit açık başlar (parolayı az önce kendisi girdi).
-    e2eRing.set(newDirWire, kek);
+    e2eRing.set(newDirWire, fmk);
     e2eRingVer.value++;
     showEncFolder.value = false;
-    flashToast(t('e2e.create.done'));
+    // ⚠ Show the key only after the marker is safely uploaded. Showing it
+    // first would promise recovery for a folder that failed to be created.
+    recoveryKeyValue.value = recoveryKey;
+    recoveryKeyFolder.value = payload.name;
+    recoveryKeyVariant.value = 'created';
+    showRecoveryKey.value = true;
     await load();
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'e2e-create' } });
@@ -3758,6 +4118,143 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
   } finally {
     e2eCreateBusy.value = false;
   }
+}
+
+/* --- wiring:e2 recovery ------------------------------------------------
+ *
+ * Two more ways into a locked folder, and one way to give an old folder
+ * those ways. The password path above is untouched, and nothing here runs
+ * without an explicit user action.
+ */
+
+/** Unlock without the password: user recovery key, or the operator's escrow
+ *  key. The escrow branch announces itself to the server first. */
+async function e2eRecoverUnlock(payload: { mode: 'recovery' | 'escrow'; value: string }) {
+  if (!e2eMarker.value || !e2eRoot.value) return;
+  e2eRecoverBusy.value = true;
+  e2eRecoverErr.value = null;
+  try {
+    let fmk: CryptoKey | null = null;
+    if (payload.mode === 'recovery') {
+      fmk = await unlockWithRecoveryKey(e2eMarker.value, payload.value);
+      if (!fmk) {
+        e2eRecoverErr.value = t('e2e.recover.wrong_recovery');
+        return;
+      }
+    } else {
+      let priv: CryptoKey;
+      try {
+        priv = await importEscrowPrivateKey(payload.value);
+      } catch {
+        e2eRecoverErr.value = t('e2e.recover.bad_escrow_key');
+        return;
+      }
+      fmk = await unlockWithEscrowKey(e2eMarker.value, priv);
+      if (!fmk) {
+        e2eRecoverErr.value = t('e2e.recover.wrong_escrow');
+        return;
+      }
+      /* ⚠ Announce BEFORE unlocking, and treat a failure to announce as a
+       * failure to unlock. The server hands out a nonce sealed to the escrow
+       * public key; returning it proves the key was really here, and that is
+       * what earns the owner their notification.
+       *
+       * ⚠⚠ This is not enforcement and must never be described as such. An
+       * operator holding the escrow private key can decrypt the same folder
+       * offline, with a script, and this code will never run. Refusing to
+       * unlock on a failed announcement only keeps the honest path honest. */
+      try {
+        const ch = await api.e2eEscrowChallenge(e2eRoot.value);
+        const nonce = new Uint8Array(
+          await crypto.subtle.decrypt(
+            { name: 'RSA-OAEP' },
+            priv,
+            b64ToBytes(ch.challenge).buffer as ArrayBuffer,
+          ),
+        );
+        await api.e2eEscrowUsed({
+          path: e2eRoot.value,
+          id: ch.id,
+          nonce: bytesToB64(nonce),
+        });
+      } catch (err) {
+        e2eRecoverErr.value = t('e2e.recover.notify_failed');
+        emit('error', {
+          message: (err as Error).message,
+          context: { op: 'e2e-escrow-notify' },
+        });
+        return;
+      }
+    }
+    e2eRing.set(e2eRoot.value, fmk);
+    e2eRingVer.value++;
+    showRecoveryUnlock.value = false;
+    flashToast(
+      payload.mode === 'escrow' ? t('e2e.recover.escrow_done') : t('e2e.recover.recovery_done'),
+    );
+  } catch (err) {
+    e2eRecoverErr.value = (err as Error).message;
+  } finally {
+    e2eRecoverBusy.value = false;
+  }
+}
+
+/** Open the recovery dialog from the lock screen. The marker was cached by
+ *  the last unlock attempt; fetch it if the user came straight here. */
+async function openRecoveryUnlock() {
+  if (!e2eMarker.value && e2eRoot.value) {
+    try {
+      const { blob, url } = await api.fetchBlob(wireJoin(e2eRoot.value, E2E_MARKER_NAME));
+      URL.revokeObjectURL(url);
+      e2eMarker.value = parseMarker(await blob.text());
+    } catch {
+      e2eMarker.value = null;
+    }
+  }
+  e2eRecoverErr.value = null;
+  showRecoveryUnlock.value = true;
+}
+
+/** Give a pre-0.31 folder a recovery key, in place, using the password the
+ *  user just typed. The files are NOT rewritten — only the marker is. */
+async function e2eDoUpgrade() {
+  if (!e2eMarker.value || !e2eRoot.value || !e2eUpgradePw.value) return;
+  e2eUpgradeBusy.value = true;
+  try {
+    const up = await upgradeMarkerV1(e2eMarker.value, e2eUpgradePw.value, {
+      escrowPublicKey: e2eEscrowPub.value,
+    });
+    const markerFile = new File([JSON.stringify(up.marker)], E2E_MARKER_NAME, {
+      type: 'application/json',
+    });
+    await api.uploadMultipart(e2eRoot.value, [markerFile]);
+    e2eMarker.value = up.marker;
+    e2eUpgradeOffer.value = false;
+    e2eUpgradePw.value = '';
+    recoveryKeyValue.value = up.recoveryKey;
+    recoveryKeyFolder.value = wireBasename(e2eRoot.value);
+    recoveryKeyVariant.value = 'upgraded';
+    showRecoveryKey.value = true;
+  } catch (err) {
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-upgrade' } });
+    flashToast(t('e2e.upgrade.failed'));
+  } finally {
+    e2eUpgradeBusy.value = false;
+  }
+}
+
+/** Decline the offer. The folder keeps working exactly as it did, and the
+ *  prompt returns on the next unlock because the risk has not changed. */
+function e2eDeclineUpgrade() {
+  e2eUpgradeOffer.value = false;
+  e2eUpgradePw.value = '';
+}
+
+/** Drop the shown-once key from memory the moment its dialog closes. */
+function closeRecoveryKey() {
+  showRecoveryKey.value = false;
+  recoveryKeyValue.value = '';
+  recoveryKeyFolder.value = '';
 }
 /* === /wiring:e2 === */
 </script>
@@ -3844,16 +4341,21 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :expanded="sideNavExpanded"
       :narrow="isNarrow"
       :active-view="navView"
+      :active-tag="navTag"
+      :tags="navTags"
+      :tags-loaded="navTagsLoaded"
       :active-storage="adapter"
       :storages="config.storages ?? []"
       :shared-storages="sharedStorageNames"
       :trash-visible="config.trashVisible !== false"
       :show-connections="connectionsEnabled"
+      :show-identity-surfaces="identitySurfaces"
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :locale="locale"
       @toggle="toggleSideNav"
       @close="closeNavDrawer"
       @open-view="loadNavView"
+      @open-tag="loadTagView"
       @open-storage="openNavStorage"
       @upload="triggerUpload"
       @new-folder="showNewFolder = true"
@@ -3910,6 +4412,32 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
 
     <!-- wiring:e2 — kilit açık şeridi: şifreli klasörde anahtar bellekteyken
          görünür; "Kilitle" anahtarı ve çözülmüş blob'ları atar. -->
+    <!-- wiring:e2 recovery — a v1 folder just opened by password. Offer it
+         recovery HERE, visibly, rather than doing anything silently: this is
+         the only moment filex holds the password, and (when the install has
+         escrow) accepting also gives the operator a key. -->
+    <div v-if="e2eUpgradeOffer" class="fe-e2e-upgrade" role="alert">
+      <div class="fe-e2e-upgrade__text">
+        <strong>{{ t('e2e.upgrade.title') }}</strong>
+        <p>{{ t('e2e.upgrade.body') }}</p>
+        <p v-if="e2eEscrowKid" class="fe-e2e-upgrade__escrow">
+          {{ t('e2e.upgrade.escrow_note') }}
+        </p>
+      </div>
+      <div class="fe-e2e-upgrade__actions">
+        <button type="button" class="fe-btn" :disabled="e2eUpgradeBusy" @click="e2eDeclineUpgrade">
+          {{ t('e2e.upgrade.decline') }}
+        </button>
+        <button
+          type="button"
+          class="fe-btn fe-btn--primary"
+          :disabled="e2eUpgradeBusy"
+          @click="e2eDoUpgrade"
+        >
+          {{ e2eUpgradeBusy ? t('e2e.upgrade.busy') : t('e2e.upgrade.accept') }}
+        </button>
+      </div>
+    </div>
     <div v-if="e2eUnlocked" class="fe-e2e-strip" role="status">
       <span class="fe-e2e-strip__icon" aria-hidden="true">🔒</span>
       <span class="fe-e2e-strip__label">{{ t('e2e.strip.label') }}</span>
@@ -4048,6 +4576,13 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
           </button>
         </form>
         <p v-if="e2eUnlockErr" class="fe-form__error" role="alert">{{ e2eUnlockErr }}</p>
+        <!-- wiring:e2 recovery — the second door. Always offered: whether
+             this folder actually has one is answered inside the dialog,
+             which can say "this folder predates recovery keys" instead of
+             leaving the user guessing why there is no link. -->
+        <button type="button" class="fe-e2e-optlink" @click="openRecoveryUnlock">
+          {{ t('e2e.locked.use_recovery') }}
+        </button>
       </div>
       <!-- /wiring:e2 -->
       <!-- Search with zero hits — its own message, not "folder is empty". -->
@@ -4098,6 +4633,10 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
           <template v-else-if="navView === 'starred'">
             <path d="M60 26l9 18.6 20.4 3-14.8 14.4 3.5 20.4L60 72.8 41.9 82.4l3.5-20.4L30.6 47.6l20.4-3z" />
           </template>
+          <template v-else-if="navView === 'tag'">
+            <path d="M30 30h24l32 32-24 24-32-32z" />
+            <circle cx="43" cy="43" r="4.5" />
+          </template>
           <template v-else>
             <circle cx="84" cy="34" r="9" />
             <circle cx="36" cy="52" r="9" />
@@ -4105,8 +4644,15 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
             <path d="M44.5 47.5l31-9M44.5 56.5l31 9" />
           </template>
         </svg>
-        <p class="fe-state__title">{{ t(`empty.${navView}.title`) }}</p>
-        <p class="fe-state__hint">{{ t(`empty.${navView}.hint`) }}</p>
+        <!-- etiket:t1 — the tag view's empty state names the TAG. "Nothing
+             here" would be the fourth identical sentence and would not say
+             which of the user's tags is the empty one. -->
+        <p class="fe-state__title">
+          {{ navView === 'tag' ? t('empty.tag.title', { tag: navTag }) : t(`empty.${navView}.title`) }}
+        </p>
+        <p class="fe-state__hint">
+          {{ navView === 'tag' ? t('empty.tag.hint') : t(`empty.${navView}.hint`) }}
+        </p>
       </div>
       <!-- Empty trash view. -->
       <div v-else-if="!loading && files.length === 0 && trashMode" class="fe-state">
@@ -4189,11 +4735,16 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         :loading="loading"
         :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
         :thumb-src="thumbs.src"
+        :starred-ids="starredIds"
+        :api-base="props.config.apiBase ?? ''"
+        :auth-headers="() => buildAuthHeaders()"
+        :auth-credentials="api.credentialsMode()"
         @click-card="(n, m) => selection.click(n.path, m)"
         @dbl-card="openNode"
         @context-card="onContextTarget"
         @item-drag-start="onItemDragStart"
         @item-drop-into="onItemDropInto"
+        @star-change="onStarChange"
       />
       <!-- wiring:d2 — galeri görünümü (GridView ile aynı event sözleşmesi) -->
       <GalleryView
@@ -4205,11 +4756,16 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
         :locale="locale"
         :loading="loading"
         :thumb-src="thumbs.src"
+        :starred-ids="starredIds"
+        :api-base="props.config.apiBase ?? ''"
+        :auth-headers="() => buildAuthHeaders()"
+        :auth-credentials="api.credentialsMode()"
         @click-card="(n, m) => selection.click(n.path, m)"
         @dbl-card="openNode"
         @context-card="onContextTarget"
         @item-drag-start="onItemDragStart"
         @item-drop-into="onItemDropInto"
+        @star-change="onStarChange"
       />
       <!-- /wiring:d2 -->
     </div>
@@ -4399,8 +4955,31 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
       :open="showEncFolder"
       :locale="locale"
       :busy="e2eCreateBusy"
+      :escrow-kid="e2eEscrowKid"
       @close="showEncFolder = false"
       @submit="submitEncryptedFolder"
+    />
+    <!-- wiring:e2 recovery — the key, shown exactly once. -->
+    <RecoveryKeyModal
+      :open="showRecoveryKey"
+      :locale="locale"
+      :recovery-key="recoveryKeyValue"
+      :folder-name="recoveryKeyFolder"
+      :escrow-kid="e2eEscrowKid"
+      :variant="recoveryKeyVariant"
+      @close="closeRecoveryKey"
+    />
+    <!-- wiring:e2 recovery — the way back in without the password. -->
+    <E2eRecoveryUnlockModal
+      :open="showRecoveryUnlock"
+      :locale="locale"
+      :has-recovery="markerHasRecovery(e2eMarker)"
+      :has-escrow="markerHasEscrow(e2eMarker) && !!e2eEscrowKid"
+      :escrow-kid="e2eEscrowKid"
+      :busy="e2eRecoverBusy"
+      :error="e2eRecoverErr"
+      @close="showRecoveryUnlock = false"
+      @submit="e2eRecoverUnlock"
     />
     <!-- /wiring:e2 -->
     <RenameModal
@@ -4519,6 +5098,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
               :api-base="props.config.apiBase ?? ''"
               :auth-headers="() => buildAuthHeaders()"
               :auth-credentials="api.credentialsMode()"
+              @change="onNodeTagsChanged"
               @error="(msg: string) => emit('error', { message: msg, context: { op: 'tags' } })"
             />
           </div>

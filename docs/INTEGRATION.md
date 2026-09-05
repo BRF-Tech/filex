@@ -47,7 +47,7 @@ const config = {
   trashVisible: true,      // show the Trash entry (list + restore)
 
   // Navigation panel: Upload · Recent / Starred / Shared with me / Trash · the
-  // storage list. ON by default on every surface. The viewer collapses it to an
+  // tags in use · the storage list. ON by default on every surface. The viewer collapses it to an
   // icon rail with the toggle in the panel head (or the one in the toolbar) and
   // that choice is remembered per browser. Below 560px it is a drawer over the
   // listing rather than a column.
@@ -62,6 +62,14 @@ const config = {
   // ⚠ Never gated on role: the backend already decides what a caller sees, and
   // /api/tokens caps every scope against the caller's own role and grants.
   connections: true,
+
+  // Is a PERSON behind this explorer, or an integration?
+  // 'app' drops the surfaces that belong to one identity — API keys, Recent,
+  // Starred, Shared with me — and keeps Upload, the storages, Trash and
+  // "How to connect". Read from GET /api/files/capabilities (`caller_kind`)
+  // when you omit it; set it only to answer before that request lands.
+  // ⚠ Proxying with one shared token (below) is exactly the 'app' case.
+  callerKind: 'app',
 
   // 'standard' (default) — tab strip, split pane, list/grid/gallery.
   // 'simple'             — one pane, one folder, list/grid, no tab strip, no
@@ -81,10 +89,52 @@ last section is that path: **How to connect** opens the guides in an overlay
 inside the explorer, **API keys** opens the full self-service key manager
 (scopes, folder confinement, expiry). Both are `config.connections`.
 
+⚠ **If you proxy with one shared API token, API keys is not shown** and neither
+are Recent / Starred / Shared with me. That token is `kind: "app"`
+([docs/MCP.md](MCP.md#token-kinds--user-vs-app)), every visitor authenticates as
+its owner, and "your keys" would have meant the credential your embed itself
+runs on. "How to connect" stays — mount instructions belong to nobody in
+particular, and your users may still need them — but the credential forms
+*inside* it (S3 access keys, SSH keys, NFS exports) are replaced by a line
+saying this session cannot mint them, because those are bound to a person too.
+Your users read the guide and get their key from you.
+
 `<filex-connections>` still earns its own registration: a host that wants the
 connections surface on a page of its own — a settings tab, an onboarding step —
 mounts the element (or the `ConnectionsPanel` SFC) without an explorer around
 it. What changed is that it is no longer the *only* way in.
+
+### Starring and tags
+
+Starring is an **action**, not a read-out. `Star` / `Unstar` sits beside `Tags…`
+in the context menu of every view — list, grid, gallery and the split pane — it
+follows a multi-selection, and `S` does the same from the keyboard (remappable
+like every other shortcut). Grid and gallery cards additionally carry a star
+chip in the corner: it appears on hover or keyboard focus, and stays painted
+once the file is starred, so the Starred view's contents are visible without
+hovering every tile. All of it is the one `StarButton` component over the one
+`POST /api/files/manager/star` call — there is no second starring path to drift.
+
+The panel's **Tags** section lists every tag in use (`GET
+/api/files/manager/tags/all`) and opens one as a listing of the files carrying
+it (`GET /api/files/manager/tagged`). Notes for embedders:
+
+- The list is fetched **after** the first folder listing, not during mount, and
+  is cached module-wide for a minute with in-flight de-duplication: several
+  explorers on one page cost one query, and navigation costs none. Editing a
+  node's tags drops the cache immediately.
+- The first eight tags are shown with a "Show N more"; on the 56px icon rail the
+  section collapses to a single **Tags** button that opens the panel, because a
+  rail of identical tag glyphs names nothing.
+- A tag view is a virtual listing like Starred: it parks the sentinel
+  `.tag~<name>` in the path, so it is deep-linkable (`#.tag~invoices`) and every
+  surface that renders a path segment — tab strip, breadcrumb, details panel —
+  shows `#invoices`. A hash naming a tag that no longer exists opens that tag's
+  empty state, never an error.
+- ⚠ Reloading on any virtual view's hash (`#.trash`, `#.starred`, `#.recent`,
+  `#.shared`, `#.tag~…`) opens the **view**. Those hashes used to be handed to
+  the ordinary folder load, which answered "folder not found" for a trash that
+  was simply empty.
 
 ### The navigation panel and the simple profile
 
@@ -207,6 +257,10 @@ only cosmetic.** filex enforces confinement on `/api/files` from two sources
    token whose `scopes` include `root:<adapter>://<rel>`, e.g.
    `read,write,delete,root:main://projeler/acme`. Proxy `/api/files/*` with it
    as `Authorization: Bearer <token>` (server-side — the browser never sees it).
+   Mint it at `POST /api/admin/ai-tokens`, which issues `kind: "app"` by
+   default — the right kind here, because this one credential stands in for
+   every visitor. ⚠ Confinement and kind are independent: a `root:` scope does
+   not make a token an app, and an app token is not confined unless you say so.
 2. **`X-Filex-Root` header** (per-request, narrows within the token root). Your
    proxy sets `X-Filex-Root: main://projeler/acme` per request. A stray client
    header can only narrow, never escape the token root.

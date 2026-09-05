@@ -149,6 +149,48 @@ func MiddlewareWithToken(store db.Store, required bool) func(http.Handler) http.
 	}
 }
 
+// AnnotateToken attaches a valid API token to the context and NOTHING else.
+// It never authenticates a user, never consults the session drivers, and — the
+// whole point — never rejects: an unknown, revoked, expired or malformed
+// token, a disabled owner, a bogus X-Filex-Token-User all simply leave the
+// context untouched and the request proceeds as anonymous.
+//
+// It exists for PUBLIC routes that must merely describe the caller —
+// /api/files/capabilities reports `caller_kind` so the explorer knows whether
+// to draw a person's surfaces. Reaching for MiddlewareWithToken there was
+// wrong in a way that only shows up later: that chain answers 403 to a
+// disabled account, so a disabled user's browser (which still holds a cookie)
+// would have had the LOGIN page's capabilities probe fail closed. A public
+// probe that can fail is a worse trade than a capability field.
+//
+// ⚠ Do not add a rejection path here. If a route needs one it needs a
+// different middleware; this one's contract is that a public page can always
+// get an answer.
+func AnnotateToken(store db.Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw := extractAPIToken(r)
+			if raw == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := r.Context()
+			tok, err := store.GetAPITokenByHash(ctx, hashAPIToken(raw))
+			if err != nil || tok == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if tok.ExpiresAt != nil && tok.ExpiresAt.Before(time.Now()) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Deliberately no TouchAPIToken: describing yourself is not use,
+			// and a public probe should not write to the database.
+			next.ServeHTTP(w, r.WithContext(WithToken(ctx, tok)))
+		})
+	}
+}
+
 // RequireScope rejects requests whose token does not grant `scope`. A token
 // with an empty Scopes field grants everything. Must run after
 // APITokenMiddleware.

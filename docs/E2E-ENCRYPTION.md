@@ -1,183 +1,529 @@
-# filex — E2E şifreli klasörler (tasarım + MVP referansı)
+# End-to-end encrypted folders
 
-> **Durum:** MVP, v0.7.0 "Kimlik & Güven" dalgası (E2). İstemci tarafı
-> WebCrypto — sunucuya **hiçbir anahtar/parola gitmez**, sunucu içeriği
-> **okuyamaz**. Bu doküman tehdit modelini, anahtar yönetimini, dosya/marker
-> formatlarını, özellik trade-off tablosunu ve v2 yol haritasını tanımlar.
+A folder in filex can be made **end-to-end encrypted**: its files are encrypted
+and decrypted in the browser with WebCrypto, and **no password or key is ever
+sent to the server**. The server stores opaque blobs it cannot read and does not
+participate in the crypto at all.
+
+This page is the reference for that feature — the threat model, the key
+hierarchy, the on-disk formats, which parts of filex stop working inside such a
+folder, and the ways you can still end up with plaintext on the server.
+
+> ⚠ **Recovery is limited and deliberate.** A folder created from v0.31 on has
+> a **user recovery key**, shown once at creation and never stored by filex.
+> Lose *both* the password and that key and the files are gone — nobody can
+> restore them. Folders created before v0.31 have no recovery key until you
+> add one; see [Folders created before v0.31](#folders-created-before-v031).
+
+- [Threat model](#threat-model) — [what it protects](#what-it-protects) · [what it does not hide](#what-it-does-not-hide)
+- [Key management](#key-management) — [folder marker](#folder-marker--filex-e2ejson) · [file format](#file-format--filexe2e-magic)
+- [Recovery](#recovery) — [user recovery key](#the-user-recovery-key) · [key escrow](#key-escrow-optional-operator-recovery) · [what escrow cannot do](#what-escrow-can-and-cannot-do) · [before v0.31](#folders-created-before-v031)
+- [Feature trade-offs](#feature-trade-offs)
+- [Ways plaintext still reaches the server](#ways-plaintext-still-reaches-the-server)
+- [Using it](#using-it)
+- [What the server knows](#what-the-server-knows)
+- [Not implemented](#not-implemented)
+- [See also](#see-also)
 
 ---
 
-## 1. Tehdit modeli
+## Threat model
 
-**Koruduğu şey:** klasör içindeki dosyaların **İÇERİĞİ** — sunucu diski,
-S3 kovası, veritabanı yedeği, sunucu operatörü, sunucuya sızan bir saldırgan
-ya da hukuki el koyma senaryosunda dosya içerikleri okunamaz. Şifreleme ve
-çözme yalnız tarayıcıda (WebCrypto) yapılır; sunucu yalnız `filexe2e` magic'li
-opak blob görür.
+### What it protects
 
-**Korumadığı şeyler (bilinçli MVP sınırları):**
+The **contents** of the files inside the folder. An attacker holding the server
+disk, the S3 bucket, a database backup, a stolen host, or a legal seizure order
+gets ciphertext. So does filex itself. Encryption and decryption happen only in
+the browser; the server sees a blob that starts with the `filexe2e` magic and
+nothing else.
 
-| Sızıntı | Neden | Durum |
-|---------|-------|-------|
-| **Dosya/klasör ADLARI** | Adlar şifrelenmez (v2) | Sunucu ve listing'ler adları görür |
-| Dosya boyutları (~yaklaşık) | Ciphertext ≈ plaintext + 97B header | Görünür |
-| Klasör yapısı / dosya sayısı | Ağaç şifrelenmez | Görünür |
-| Erişim zamanları / audit | Normal audit akışı sürer | Görünür |
-| Aktif oturumdaki bellek | Anahtar RAM'de (yalnız oturum) | XSS/uzantı riski hosta ait |
-| Sunucunun İSTEMCİYE verdiği JS | Kötü niyetli sunucu, kötü JS servis edebilir | Web tabanlı E2E'nin doğal sınırı |
+⚠ **The server operator is in that list only while [key escrow](#key-escrow-optional-operator-recovery)
+is off** — which is the default, and cannot be changed after installation. When
+escrow *is* on, the operator holds a key to every folder created since, and a
+stolen server still yields nothing because the escrow private key is not on it.
 
-**Güven varsayımı:** İstemci (tarayıcı + filex frontend bundle'ı) güvenilir.
-Sunucu "honest-but-curious" (meraklı ama protokole uyan) kabul edilir — klasik
-web E2E modeli (Proton/Bitwarden web istemcileriyle aynı sınıf).
+### What it does not hide
 
-## 2. Anahtar yönetimi
+These are deliberate, and they are all still true today:
+
+| Leak | Why | Status |
+|------|-----|--------|
+| **File and folder names** | Names are not encrypted | The server, listings and name search all see them |
+| File sizes (approximate) | Ciphertext ≈ plaintext + 97-byte header + 16-byte tag | Visible |
+| Folder structure / file count | The tree is not encrypted | Visible |
+| Access times / audit trail | Normal audit logging continues | Visible |
+| Keys in the memory of an open tab | The key lives in RAM for the session | XSS and malicious extensions are the host's problem |
+| The JavaScript the server serves you | A hostile server can serve hostile JS | Inherent to browser-based E2E |
+
+**Trust assumption.** The client (your browser plus the filex frontend bundle)
+is trusted. The server is *honest-but-curious* — it follows the protocol but may
+read whatever it can. This is the same class of model as the Proton and
+Bitwarden web clients.
+
+---
+
+## Key management
 
 ```
-klasör parolası ──PBKDF2-SHA256 (600.000 iter, klasör-başına random 16B salt)──▶ KEK (AES-256-GCM)
-                                                                                  │
-dosya başına random 32B DEK (AES-256-GCM) ── içerik tek-shot şifreler ─┐          │
-                                                                       │          │
-DEK ◀── KEK ile AES-GCM wrap (dosya header'ında saklanır) ◀────────────┴──────────┘
+folder password ─PBKDF2-SHA256(600,000 iter, 16B salt)──▶ KEK  ─┐
+user recovery key ─HKDF-SHA256(16B salt)────────────────▶ RKEK ─┼─▶ unwrap the FMK
+escrow private key ─RSA-OAEP-256────────────────────────────────┘   (folder master key)
+                                                                    │
+per-file random 32B DEK (AES-256-GCM) encrypts the content one-shot │
+DEK ◀── wrapped with the FMK via AES-GCM, stored in the file header ┘
 ```
 
-- **KEK (klasör anahtarı):** `PBKDF2(parola, salt, iter=600000, SHA-256)` →
-  AES-256-GCM anahtarı, `extractable=false` olarak import edilir. **Yalnız
-  bellekte** yaşar (component state) — localStorage/sessionStorage/IndexedDB'ye
-  ASLA yazılmaz. Sekme kapanınca / "Kilitle" aksiyonuyla / sayfa yenilenince
-  gider.
-- **DEK (dosya anahtarı):** her dosya için `crypto.getRandomValues(32)`. İçerik
-  DEK ile AES-256-GCM tek-shot şifrelenir; DEK, KEK ile AES-GCM'de sarılıp
-  (wrap) dosyanın kendi header'ına gömülür. Böylece **parola değişimi v2'de
-  yalnız DEK'lerin yeniden sarılmasını gerektirir**, tüm içerik yeniden
-  şifrelenmez.
-- **Parola doğrulama:** marker'daki `verify` alanı = sabit metnin
-  (`filex-e2e-verify-v1`) KEK ile şifreli hali. Yanlış parola → GCM tag
-  doğrulaması patlar → "yanlış parola" hatası; sunucuya hiçbir doğrulama
-  isteği gitmez.
+Every file's key (its **DEK**) is wrapped by one key, the **folder master key**
+(FMK). The marker then holds the FMK wrapped once per way of reaching it. That
+is the whole trick: adding a recovery path costs one more wrapped copy of 32
+bytes, not a re-encrypt of anything, and the file format below is byte-for-byte
+what it was in v1.
 
-### 2.1 Klasör marker'ı — `.filex-e2e.json`
+- **KEK (folder key)** — `PBKDF2(password, salt, iter=600000, SHA-256)`,
+  imported as an AES-256-GCM key with `extractable: false`. It lives **only in
+  memory** (an in-component key ring) and is **never** written to
+  `localStorage`, `sessionStorage` or IndexedDB. It is gone when you close the
+  tab, reload the page, or press **Lock**.
+- **FMK (folder master key)** — a random 32 bytes, minted when the folder is
+  created. It is what wraps every file's DEK, and the only thing the marker's
+  key slots hand back. Never derived from anything, never leaves memory.
+- **DEK (file key)** — a fresh `crypto.getRandomValues(32)` per file. The
+  content is encrypted one-shot under the DEK; the DEK is then wrapped with the
+  **FMK** and embedded in that file's own header.
+- **Password verification** — the marker's `verify` field is a fixed string
+  (`filex-e2e-verify-v1`) encrypted under the KEK. A wrong password fails the
+  GCM tag check and produces a "wrong password" error locally. **No verification
+  request goes to the server**, so a wrong password is not something the server
+  can count, rate-limit, or learn about.
 
-Şifreli klasörün kökünde durur; **API listing'lerinde gizlenir** (`.filex-trash`
-deseni), ama path ile `preview` üzerinden okunabilir (unlock bunun içeriğine
-ihtiyaç duyar):
+Implementation: `packages/core/src/lib/e2ecrypto.ts`.
+
+### Folder marker — `.filex-e2e.json`
+
+Written at the root of the encrypted folder. It is **hidden from every listing
+and from search results**, but is readable by path through the preview endpoint
+— the client needs its contents to unlock:
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "salt": "<base64 16B>",
   "iter": 600000,
-  "verify": "<base64: 12B IV || AES-GCM('filex-e2e-verify-v1')>"
+  "verify": "<base64: 12B IV || AES-GCM('filex-e2e-verify-v1')>",
+  "fmk": "wrapped",
+  "fmk_pw": "<base64: 12B IV || AES-GCM(KEK, FMK)>",
+  "rk":  { "salt": "<base64 16B>", "blob": "<base64: 12B IV || AES-GCM(RKEK, FMK)>" },
+  "esc": { "kid": "<hex>", "alg": "RSA-OAEP-256", "blob": "<base64: RSA-OAEP(escrow public key, FMK)>" }
 }
 ```
 
-Marker'da gizli hiçbir şey yoktur (salt + doğrulama blob'u publiktir); parola
-olmadan işe yaramaz.
+| Field | Meaning |
+|---|---|
+| `v` | Marker schema. `1` = pre-v0.31, no slots. `2` = the shape above. **Both are read; only `2` is written.** The *file header* version is unrelated and still `1`. |
+| `salt` / `iter` / `verify` | The password slot, unchanged since v1. `verify` is still what a wrong password fails against. |
+| `fmk` | `"wrapped"` — the FMK is random and lives in `fmk_pw`. `"kek"` — the FMK *is* the password-derived KEK, which is how a v1 folder is upgraded in place without rewriting files. |
+| `fmk_pw` | Present only when `fmk` is `"wrapped"`. |
+| `rk` | The user recovery key slot. Absent means the folder has no recovery key. |
+| `esc` | The escrow slot. **Absent means no escrow key can ever open this folder**, and no later configuration change adds one. |
 
-### 2.2 Şifreli dosya formatı — `filexe2e` magic
+Nothing in the marker is secret: every slot is the same 32 bytes sealed under a
+key filex does not have. The salt and the verify blob are public by design, and
+useless without a password or key. New folders are always created with at least
+600,000 iterations (`E2E_MIN_ITERATIONS`); the unlock path derives with whatever
+`iter` the marker states.
 
-Her şifreli dosya, orijinal adıyla saklanır; içerik şu binary yapıdadır
-(sabit 97 baytlık header + ciphertext):
+⚠ An older filex (≤ v0.30.1) does not understand a `v: 2` marker and will report
+the key file as unreadable. The **files** are unaffected — see
+[before v0.31](#folders-created-before-v031).
 
-| Offset | Uzunluk | Alan |
-|--------|---------|------|
+### File format — `filexe2e` magic
+
+Each encrypted file keeps its original name. The content is a fixed 97-byte
+header followed by the ciphertext:
+
+| Offset | Length | Field |
+|--------|--------|-------|
 | 0 | 8 | Magic: ASCII `filexe2e` |
-| 8 | 1 | Sürüm: `0x01` |
-| 9 | 12 | wrapIV — DEK sarmalamasının GCM IV'ü |
-| 21 | 48 | wrappedDEK — `AES-GCM(KEK, wrapIV, rawDEK)` (32B + 16B tag) |
-| 69 | 12 | dataIV — içeriğin GCM IV'ü |
-| 81 | 16 | rezerve (0x00; v2 chunk/metadata için) |
-| 97 | n+16 | ciphertext — `AES-GCM(DEK, dataIV, içerik)` (+16B tag) |
+| 8 | 1 | Version: `0x01` |
+| 9 | 12 | `wrapIV` — GCM IV of the DEK wrap |
+| 21 | 48 | `wrappedDEK` — `AES-GCM(FMK, wrapIV, rawDEK)` (32B key + 16B tag) |
+| 69 | 12 | `dataIV` — GCM IV of the content |
+| 81 | 16 | Reserved (zeros; kept free for future chunked encryption) |
+| 97 | n+16 | Ciphertext — `AES-GCM(DEK, dataIV, content)` (+16B tag) |
 
-Sunucu tarafı **yalnız magic prefix'i tanır** (thumb/çıkarım/convert skip); asla
-çözemez.
+The server **only recognises the magic prefix** — that is enough to skip
+thumbnailing, content indexing and document conversion. It can never decrypt.
 
-### 2.3 KURTARMA YOK ⚠
+⚠ **This layout did not change when recovery was added, and that is the point.**
+In v1 the DEK was wrapped by the password KEK; now it is wrapped by the FMK, and
+for a v1 folder the FMK *is* that KEK. Not a byte of any existing file was
+touched, and a file written by v0.31 into a v1 folder is still readable by
+v0.30.1. Both directions are covered by the round-trip tests in
+`web/tests/lib/e2ecrypto.test.ts`, which encrypt with a frozen copy of the
+v0.30.1 module and decrypt with the current one.
 
-**Parola kaybı = veri kaybı.** Tasarım gereği:
+---
 
-- Sunucuda parola/anahtar/kurtarma kodu YOKTUR.
-- Admin dahil hiç kimse parolasız içerik çözemez.
-- "Parolamı unuttum" akışı YOKTUR ve OLMAYACAKTIR (varlığı sunucuya güveni geri
-  getirir, tüm modeli anlamsızlaştırır).
+## Recovery
 
-UI, klasör oluşturma modalında bu uyarıyı açıkça gösterir ve onay ister.
+There are up to three ways into an encrypted folder, and the folder decides
+which exist **when it is created**. Nothing added later can change that,
+because the wrapped copies live in the marker and each one needs the FMK to
+make — which needs a key the server never has.
 
-## 3. Özellik trade-off tablosu
+| Way in | Who holds it | Notified? | Exists when |
+|---|---|---|---|
+| Folder password | The user | — | Always |
+| User recovery key | The user | — | The folder was created (or upgraded) from v0.31 on |
+| Escrow key | The operator | The folder's owner is notified | Escrow was enabled at install **and** the folder was created (or upgraded) after that |
 
-Sunucu içeriği okuyamadığı için içerik-bilgisi gerektiren her sunucu-tarafı
-özellik şifreli klasörde **çalışmaz** ya da kısıtlıdır:
+### The user recovery key
 
-| Özellik | Şifreli klasörde davranış |
-|---------|---------------------------|
-| **Ad araması** | ÇALIŞIR (adlar şifrelenmez — bilinçli sızıntı, §1) |
-| **İçerik araması** ("Bul") | ÇALIŞMAZ — backend, marker'lı ağaç + magic'li dosyada içerik çıkarımını atlar (CPU israfı + endeks sızıntısı önlemi). İçerik endekslenmez → içerik aramada hit çıkmaz |
-| **Thumbnail** | ÜRETİLMEZ — thumb pipeline marker'lı ağaç altını `skipped` işaretler; grid/galeri ikon gösterir |
-| **Önizleme (text + görsel + medya + PDF)** | ÇALIŞIR (kilit açıkken) — istemci indirir, çözer, blob URL ile mevcut viewer'lara verir |
-| **Metin düzenleme / kaydetme** | MVP'de KAPALI — önizleme salt-okunur; save-text plaintext'i sunucuya yazacağı için engellenir (v2) |
-| **OnlyOffice** | KAPALI — sunucu doc'u DS'e verirken içeriği okumak zorunda; backend config endpoint'i magic'li dosyada **415** döner, UI da OnlyOffice'i devre dışı bırakır |
-| **Convert** | KAPALI — UI aksiyonu gizler; magic'li içerik convert servisine anlamsız |
-| **Paylaşım (public link) / Dosya İste** | MVP'de KAPALI (UI gizler) — link alıcısı ciphertext indirirdi. v2: parola-taşıyan şifreli paylaşım |
-| **DAV / CLI / ShareX / AI (REST+MCP) okuma** | Ciphertext döner (magic'li) — bu yüzeyler çözemez |
-| **DAV / CLI / AI YAZMA** ⚠ | Şifrelemez! filex-dışı yüzeyden şifreli klasöre yazılan dosya **düz metin** kalır (sunucu şifreleyemez — anahtarı yok). Kural: şifreli klasöre yalnız filex web arayüzünden yükleyin |
-| **Sürümler (versioning)** | ÇALIŞIR — sürümler ciphertext saklar; geri yükleme aynı klasör parolasıyla çözülür |
-| **Çöp / geri yükleme** | ÇALIŞIR — içerik dokunulmaz |
-| **ClamAV** | Ciphertext tarar → etkisiz (zararsız no-op). Belgelendi |
-| **Kopyala/taşı** | ÇALIŞIR (bayt-bayt) — ama şifreli klasör DIŞINA taşınan dosya şifreli kalır ve UI orada çözemez (marker yok). v2: taşımada şeffaf re-encrypt |
-| **Yükleme boyutu** | MVP tek-shot bellek şifrelemesi: **200 MB üstü reddedilir** (uyarı). v2: streaming chunk |
+Minted when the folder is created, **shown exactly once**, and never stored by
+filex — not in the database, not in the marker, not in browser storage. It
+opens the folder without the password.
 
-## 4. UI akışları (MVP)
+- **160 bits**, rendered as 32 Crockford base32 characters in eight groups of
+  four: `XKPT-9M4A-...`. Crockford drops `I`, `L`, `O` and `U`, and the parser
+  maps the look-alikes back (`O`→`0`, `I`/`L`→`1`), so a key read aloud or
+  retyped by hand survives.
+- It is a **password equivalent**, not a lesser credential. Anyone holding it
+  reads the folder. Store it somewhere other than the password: a recovery key
+  filed next to the password protects you from forgetting, and from nothing
+  else.
+- Losing it is not fatal on its own — the password still works. Losing **both**
+  is fatal, and filex cannot help.
+- There is currently no way to rotate or revoke one. See
+  [Not implemented](#not-implemented).
 
-- **Oluşturma:** Yeni Klasör modalında "🔒 Şifreli klasör" seçeneği →
-  `EncryptedFolderModal` (ad + parola ×2, ≥8 karakter + GERİ DÖNÜŞSÜZ uyarısı
-  onay kutusu). Akış: `newfolder` → marker üret → `.filex-e2e.json`'u klasöre
-  yükle.
-- **Rozet:** listing'de şifreli klasör satırı 🔒 ikonuyla çizilir (backend dir
-  satırına `e2e:true` işler).
-- **Kilit ekranı:** şifreli klasöre (ya da alt klasörüne) girince listing yerine
-  parola ekranı. Backend listing yanıtına `e2e_root` (şifreli kökün yolu)
-  ekler; frontend marker'ı kökten çeker, parolayı marker'a karşı doğrular.
-  Yanlış parola → i18n hata. Doğru parola → KEK bellekte, listing açılır.
-- **Kilit açıkken:** başlık şeridinde 🔒 + "Kilitle" düğmesi. Kilitle =
-  bellekteki KEK atılır → tekrar parola sorulur.
-- **Yükleme:** kilit açıkken upload şeffaf şifrelenir (dosya → ArrayBuffer →
-  şifrele → aynı adla yükle). 200 MB üstü reddedilir.
-- **İndirme / önizleme:** şeffaf çözülür — indirilen bayt çözülüp orijinal adla
-  kaydedilir; önizleme çözülmüş blob URL ile mevcut viewer'lara verilir.
+### Key escrow (optional operator recovery)
 
-## 5. Sunucu tarafı dokunuşlar (MINIMAL)
+Escrow gives the operator of an installation a second way into the encrypted
+folders created on it. It is **off by default** and can only be turned on
+**before the first boot**.
 
-Sunucu şifreden habersizdir; yalnız üç yerde marker/magic **farkındalığı** var:
+The shape is deliberately lopsided:
 
-1. `internal/e2e` — marker adı + magic sabitleri + `UnderEncrypted()` (bir
-   node yolunun atalarında `.filex-e2e.json` node'u var mı; pathHash lookup)
-   + `HasMagicPrefix()`.
-2. **Thumb pipeline** (`internal/thumb/pipeline.go`): marker'lı ağaç altındaki
-   dosyada üretim `skipped`.
-3. **İçerik çıkarımı** (`internal/queue/content_index.go`): marker'lı ağaç
-   altı + magic'li içerik → içerik endekslenmez (boş içerik + fingerprint,
-   yeniden kuyruklanmaz).
-4. **OnlyOffice config** (`internal/api/handlers/onlyoffice.go`): magic sniff →
+1. The operator runs `filex e2e-escrow keygen`, **anywhere** — a laptop is fine.
+   It prints an RSA-3072 keypair and exits. It writes nothing and touches no
+   database.
+2. The **public** half goes into `FILEX_INSTALLATION_E2E_ESCROW_KEY` on the
+   server. It is enough to *seal* a new folder's FMK to the escrow identity and
+   useless for opening anything.
+3. The **private** half is the operator's, kept wherever they keep a root
+   password. filex never receives it, never stores it, and cannot recover it.
+
+So a stolen filex database, disk or backup decrypts nothing, escrow or not.
+When the operator needs the key they paste it into the unlock dialog, in their
+own browser, where it is used and discarded.
+
+```bash
+filex e2e-escrow keygen                    # prints both halves, once
+filex e2e-escrow keygen --quiet            # public, then private, one per line
+```
+
+Configuration, and why it cannot be changed later:
+[CONFIGURATION.md → Install-time settings](CONFIGURATION.md#install-time-settings-filex_installation_).
+
+**Using it notifies the folder's owner.** The client asks the server for a
+nonce sealed to the escrow public key, decrypts it with the private half and
+returns it; only then does the server record the event and notify. That makes
+the notification evidence rather than a claim — a `e2e.escrow_used` warning
+that anyone could POST would be worth nothing. A wrong answer is refused with
+`403` and notifies nobody.
+
+### What escrow can and cannot do
+
+**Can:**
+
+- Open any encrypted folder created (or given a recovery key) while that escrow
+  key was configured, without the folder password and without the user's
+  involvement.
+- Do so at any time the operator chooses. There is no approval step, no
+  time-lock, and no way for a user to opt their folder out.
+
+**Cannot:**
+
+- Open a folder created while escrow was **off**, or under a **different**
+  escrow key. Those markers have no `esc` slot, and one cannot be added without
+  the folder password. This is arithmetic, not policy — no configuration
+  change, no admin flag and no future filex version can undo it.
+- Be recovered if the operator loses the private key. filex has no copy.
+
+⚠⚠ **The honest limits, stated plainly:**
+
+- **The notification is an announcement, not a control.** An operator holding
+  the escrow private key can copy the marker and the ciphertext off the disk
+  and decrypt them offline with a short script — no filex, no request, no
+  notification, no audit row. filex cannot detect this and does not claim to.
+  What the notification guarantees is that the *supported* path is honest: the
+  escrow unlock in the filex UI will not proceed unless the announcement
+  succeeds.
+- **An admin can already read anything not end-to-end encrypted.** Escrow does
+  not extend their reach outside encrypted folders; it extends it into them.
+- **Escrow is visible to users before they rely on it.** `/api/capabilities`
+  publishes whether escrow is on and which key id, and the create-folder dialog
+  and the recovery-key dialog both say so in words. That is deliberate: someone
+  deciding whether to put a file in an encrypted folder is entitled to know who
+  else holds a key, and a hidden escrow would make the whole feature a lie.
+- **A user cannot remove the escrow slot from their folder.** That is the point
+  of escrow, and it is why it belongs to the installation rather than to a
+  user preference.
+
+### Folders created before v0.31
+
+Every folder made by an earlier filex uses the v1 marker: no slots, no recovery,
+the password wraps the DEKs directly.
+
+**They keep working, unchanged, with nothing but their password. Forever.** The
+v1 read path is a first-class path in the code, not a migration shim, and the
+test suite measures it against a frozen copy of the v0.30.1 module rather than a
+re-creation of it.
+
+They **cannot** be given recovery retroactively by the server, because that
+needs the folder password and filex does not have it. There is exactly one
+moment when it does: **the next time you unlock the folder.** So that is when
+filex asks — visibly, in a strip above the listing, with the consequences
+spelled out:
+
+- Accepting rewrites only `.filex-e2e.json`. **No file is re-encrypted, moved or
+  rewritten.** The new marker keeps the original salt, iterations and verify
+  blob, and records `fmk: "kek"` — the FMK stays defined as the
+  password-derived key, which is why the existing files still open.
+- You get a recovery key, shown once, exactly like a new folder.
+- ⚠ **If the installation has escrow enabled, accepting also gives the operator
+  a key to this folder.** The prompt says so before you accept. This is the only
+  way a folder gains an escrow slot after creation, and it requires the folder
+  password, so only the user can do it.
+- Declining changes nothing at all. The folder behaves exactly as it did, and
+  the offer returns next time — because the risk has not changed.
+
+⚠ After an upgrade the marker is `v: 2`, which a filex ≤ v0.30.1 cannot parse:
+it would report the key file as unreadable. The **files** are untouched and
+still decrypt with the same password, so a rolled-back deployment loses the
+recovery UI, not the data.
+
+---
+
+## Feature trade-offs
+
+The server cannot read the content, so every server-side feature that needs to
+read content is **off or limited** inside an encrypted folder:
+
+| Feature | Behaviour in an encrypted folder |
+|---------|----------------------------------|
+| **Name search** | **Works** — names are not encrypted (a deliberate leak, see [threat model](#what-it-does-not-hide)). The `.filex-e2e.json` marker is filtered out of results |
+| **Content search** | **Does not work** — the indexer skips extraction under a marked subtree and for anything starting with the magic, and indexes empty content instead. Nothing is indexed, so nothing can match |
+| **Thumbnails** | **Not generated** — the thumbnail pipeline marks files under a marked subtree `skipped`; grid and gallery views show a generic icon |
+| **Preview** (text, images, media, PDF) | **Works while unlocked** — the client downloads the ciphertext, decrypts it in memory and hands a blob URL to the normal viewers |
+| **Text editing / saving** | **Off** — preview is read-only. Saving would write plaintext through the server, so the save-text endpoint is not wired up inside an encrypted folder |
+| **Open in a new tab** | **Off** — the standalone viewer route fetches raw bytes from the server, which would show ciphertext |
+| **OnlyOffice** | **Off** — the document server would have to read the file. The backend's config endpoint sniffs the magic and returns **415 `file is e2e-encrypted`**, and the UI does not offer OnlyOffice at all |
+| **Convert** | **Off** — the action is hidden; ciphertext is meaningless to the converter |
+| **Share links / file requests** | **Off** — the whole **Share / Permissions** entry is hidden, because a recipient would download ciphertext with no way to decrypt it. Note this also hides per-item permissions for that folder |
+| **Password change** | **Off.** The v2 marker makes it cheap in principle (re-wrap `fmk_pw`, touch no file) but no flow exists — and it would not be cheap for a folder upgraded from v1, whose FMK *is* the password-derived key. See [Not implemented](#not-implemented) |
+| **Desktop "keep local" / folder sync pinning** | **Off** — not offered for encrypted folders or their contents |
+| **Reads over DAV / CLI / ShareX / AI (REST + MCP)** | Return the raw ciphertext (magic and all). Those surfaces have no key and cannot decrypt |
+| **Writes over DAV / CLI / AI** ⚠ | **Not encrypted.** See [below](#ways-plaintext-still-reaches-the-server) |
+| **Versioning** | **Works** — versions store ciphertext; a restored version decrypts with the same folder password |
+| **Trash / restore** | **Works** — the bytes are untouched |
+| **ClamAV** | Scans ciphertext, so it finds nothing. Harmless, but do not mistake a clean scan for a scanned file |
+| **Copy / move** | **Refused across an encryption boundary** (HTTP 409). Inside one encrypted folder it works normally, and the encrypted folder itself can be moved. See [below](#ways-plaintext-still-reaches-the-server) |
+| **Upload size** | The MVP encrypts in one shot in memory: **files over 200 MB are refused** with a warning |
+
+---
+
+## Ways plaintext still reaches the server
+
+Encryption happens in the browser, in the filex web UI. Anything that puts bytes
+into the folder without going through that code path stores them **exactly as
+they arrive** — and the server cannot fix this, because it has no key.
+
+⚠ **A file written into an encrypted folder over WebDAV, the CLI, ShareX, or the
+AI surfaces (REST / MCP) stays plaintext.** It sits in the encrypted folder,
+looks like it belongs there, and is readable by anyone with server access.
+Nothing warns you.
+
+✅ **Copy, move and paste are no longer one of them.** They used to be the worst
+case, because filex's own UI produced it: paste, drag-and-drop and duplicate are
+server-side byte copies that never touch the crypto, so the explorer would put a
+plaintext file inside an encrypted folder with no warning at all.
+
+Since v0.31 the server refuses any transfer that crosses an encryption boundary,
+with `409` and a message naming the file:
+
+| Attempt | Answer |
+|---|---|
+| Plaintext file **into** an encrypted folder | Refused — the server has no key, so it cannot encrypt on the way in |
+| Encrypted file **out of** its folder | Refused — it stays encrypted, and outside the folder nothing knows which password opens it |
+| Between **two different** encrypted folders | Refused — each folder has its own key |
+| Within **one** encrypted folder | Allowed |
+| The encrypted folder **itself**, to a plain destination | Allowed — its marker travels with it |
+| An encrypted folder **into** another one | Refused — encrypted folders cannot be nested |
+
+The rule lives in `backend/internal/e2e/guard.go` and is called from every
+transfer surface — the async ops queue (web UI paste, drag, duplicate,
+cross-storage transfer), the synchronous move, and the AI/MCP `file_move` tool
+— so it is not something one client remembers and another forgets.
+
+**Rule: put files into an encrypted folder only by uploading them through the
+filex web UI, with the folder unlocked.** WebDAV, the CLI, ShareX and the AI
+*write* surfaces are still unguarded (see
+[Not implemented](#not-implemented)).
+
+One mitigation is already in place, and it is only a mitigation: a plaintext
+file that lands in an encrypted folder by one of these routes is **still not
+content-indexed**, because the indexer skips the whole marked subtree rather
+than deciding per file. So it will not leak into the search index — but it is
+plaintext on disk.
+
+---
+
+## Using it
+
+- **Create** — the New Folder dialog offers **Create encrypted folder…**, which
+  opens a dialog asking for a name, the password twice (minimum 8 characters)
+  and an acknowledgement of the warning. When the installation has escrow on,
+  the dialog says so **before** the folder exists. filex then creates the
+  folder, uploads the `.filex-e2e.json` marker, and shows the **recovery key
+  once** — in a dialog that will not close on ESC or a backdrop click until you
+  tick that you have saved it, because there is no second showing. Encrypted
+  folders **cannot be nested** — the option is not offered inside one.
+- **Badge** — encrypted folders are drawn with a 🔒 in listings (the backend
+  flags the directory row with `e2e: true`).
+- **Unlock without the password** — the lock screen carries a *Lost the
+  password? Use a recovery key* link. It opens a dialog with the recovery-key
+  field, plus an **Escrow key** tab when both the installation and the folder
+  have escrow. A folder with neither says so, rather than offering a door that
+  is not there.
+- **Lock screen** — entering an encrypted folder, or any subfolder of one, shows
+  a password prompt instead of the listing. The backend adds `e2e_root` (the
+  path of the encrypted root) to the listing response; the client fetches the
+  marker from that root and checks the password against it locally. Wrong
+  password → an error in the prompt. Right password → the KEK goes into the
+  in-memory key ring and the listing opens.
+- **While unlocked** — a 🔒 strip appears with a **Lock** button. Locking drops
+  the KEK from memory, revokes the decrypted blob URLs, and brings the password
+  prompt back.
+- **Upload** — transparently encrypted while unlocked (file → ArrayBuffer →
+  encrypt → upload under the same name). Files over 200 MB are refused.
+- **Download and preview** — transparently decrypted: downloaded bytes are
+  decrypted and saved under the original name, and previews are handed to the
+  normal viewers as a decrypted blob URL.
+
+---
+
+### What it looks like
+
+| | |
+|---|---|
+| ![Creating an encrypted folder](screenshots/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/e2e-recovery/recovery-key-shown-once.png) |
+| Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
+| ![The lock screen](screenshots/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/e2e-recovery/unlock-with-recovery-key.png) |
+| A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
+| ![The escrow tab](screenshots/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/e2e-recovery/legacy-folder-upgrade-offer.png) |
+| Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
+
+Retake them with
+`node e2e/shots/e2e-recovery.mjs --escrow-private <pkcs8-b64>` against an
+instance booted with escrow on. The same script is the end-to-end measurement
+of this feature: it creates the folder, loses the password, gets back in with
+the key, and checks the notification arrived.
+
+---
+
+## What the server knows
+
+There is **no encryption or decryption anywhere in the backend.** The server
+only carries *awareness* of the two artifacts the client leaves behind, so that
+pipelines stop doing pointless — and potentially leaky — work:
+
+1. **`internal/e2e`** — the marker name, the magic prefix, `HasMagicPrefix()`,
+   and the ancestor walk (`FindRoot()` / `UnderEncrypted()`) that answers "is
+   this path inside a folder carrying `.filex-e2e.json`?" via a path-hash
+   lookup.
+2. **Thumbnails** (`internal/thumb/pipeline.go`) — files under a marked subtree
+   are recorded as `skipped`.
+3. **Content indexing** (`internal/queue/content_index.go`) — the marker itself
+   is never eligible; anything under a marked subtree is indexed with empty
+   content; and a magic sniff catches encrypted files that escaped the subtree
+   walk (moved out, or marker deleted later). Empty content is indexed rather
+   than nothing, so the fingerprint records and the node stops re-queueing.
+4. **OnlyOffice config** (`internal/api/handlers/onlyoffice.go`) — magic sniff →
    `415 file is e2e-encrypted`.
-5. **Manager listing** (`internal/api/handlers/manager.go`): marker satırı
-   gizlenir; yanıt `e2e:true` (klasör içi) + `e2e_root` (alt ağaç) + dir
-   satırlarına `e2e:true` rozet alanı işler.
+5. **Listings** (`internal/api/handlers/manager.go`) — the marker row is hidden
+   from every listing projection; encrypted directory rows are badged
+   `e2e: true`; and a listing inside an encrypted subtree carries `e2e` and
+   `e2e_root` so the client knows to show the lock screen. A cold-cache
+   fallback flags a freshly created folder straight from the driver listing,
+   before the sync run has cached it.
+6. **Search** (`internal/api/handlers/search.go`) — the marker is filtered out
+   of tag listings, index hits and the SQL `LIKE` fallback alike.
+7. **The transfer guard** (`internal/e2e/guard.go`) — refuses a copy or move
+   that would cross an encryption boundary, from any surface. It compares
+   ancestor markers; it never opens a file.
+8. **Escrow, public half only** (`internal/e2e/escrow.go`,
+   `internal/api/handlers/e2e.go`) — the installation's escrow **public** key,
+   published in `/api/capabilities` so the browser can seal new folders to it,
+   and used to seal a challenge nonce so that "the escrow key was used" is
+   provable rather than merely asserted. The server has no private key and
+   cannot open anything.
+9. **The install pin** (`internal/e2e/installation.go`) — records at first boot
+   whether escrow is on and which key, and refuses to start if that later
+   disagrees with the environment.
 
-Şifreleme/çözme sunucuda YOKTUR; bu dokunuşların hepsi "işe yaramaz işi yapma
-+ sızıntı riskini kapat" kategorisindedir.
+Every one of these is in the category "don't do useless work, and don't open a
+leak" — none of them can read a byte of your content.
 
-## 6. v2 yol haritası
+---
 
-1. **Ad şifreleme** — dosya/klasör adları da şifreli (sunucuda opak ad + yerel
-   ad haritası dosyası); listing UI çözülmüş ad gösterir.
-2. **Şifreli paylaşım** — link URL fragment'ında (`#k=…`, sunucuya gitmez)
-   anahtar taşıyan public paylaşım; alıcı tarayıcıda çözer.
-3. **Streaming chunk şifreleme** — 200 MB sınırını kaldırmak için
-   chunk-per-GCM (64 MB dilim + dilim sayacı IV'e karılır; header rezerve
-   alanı bunun için ayrıldı).
-4. **Parola değiştirme** — DEK'ler yeni KEK ile yeniden sarılır (içerik
-   yeniden şifrelenmez); marker verify güncellenir.
-5. **Şifreli klasörde düzenleme** — text editör kaydı istemcide şifrelenip
-   upload yoluyla yazılır (save-text yerine).
-6. **Sunucu tarafı yazma reddi (opsiyonel policy)** — marker'lı ağaç altına
-   filex-dışı yüzeylerden (DAV/CLI/AI) düz metin yazımını reddeden opsiyonel
-   guard.
+## Not implemented
+
+These are known gaps, not scheduled work. They are listed because each one is a
+limitation you can hit today:
+
+- **Encrypted names.** File and folder names are stored in the clear (see the
+  [threat model](#what-it-does-not-hide)).
+- **Sharing an encrypted folder.** There is no way to hand a recipient a link
+  that also carries the key, so sharing is simply off.
+- **Files over 200 MB.** Encryption is one-shot in memory. The 16 reserved
+  header bytes exist so a chunked format could be added without breaking the
+  layout, but no chunked format exists.
+- **Changing the folder password.** The v2 marker makes it cheap for a folder
+  created since v0.31 — re-wrap `fmk_pw`, touch no file. For a folder upgraded
+  from v1 (`fmk: "kek"`) it is not cheap: the FMK *is* the password-derived key,
+  so changing the password means re-wrapping every file's DEK. Neither flow
+  exists. The only way to change a password today is to create a new encrypted
+  folder and re-upload.
+- **Rotating or revoking a recovery key.** A recovery key is minted once and
+  lives as long as the folder. There is no "show me a new one" and no way to
+  invalidate a key you think leaked, short of moving the files into a new
+  encrypted folder.
+- **Escrow at the folder level.** Escrow is per-installation and per-folder only
+  in the sense that it applies to folders created after it was enabled. A user
+  cannot opt a folder out, and an operator cannot escrow one folder and not
+  another.
+- **Detecting offline escrow use.** The notification covers the supported path
+  only. See [what escrow can and cannot do](#what-escrow-can-and-cannot-do).
+- **Editing files in place.** Preview is read-only inside an encrypted folder.
+- **A server-side guard against plaintext writes over DAV / CLI / ShareX / AI.**
+  Copy and move are guarded now; a direct *write* through those surfaces is
+  not — see [Ways plaintext still reaches the
+  server](#ways-plaintext-still-reaches-the-server).
+- **Re-encrypting on move.** filex refuses a transfer across an encryption
+  boundary rather than re-encrypting or decrypting the bytes, because it holds
+  no key to do either with. Move the file by downloading and re-uploading it.
+
+---
+
+## See also
+
+- [SEARCH.md](SEARCH.md) — name vs. content search, and the content index
+- [SHARING.md](SHARING.md) — share links and file requests (both off here)
+- [thumbnails.md](thumbnails.md) — the thumbnail pipeline and its skip states
+- [PROTOCOLS.md](PROTOCOLS.md) / [WEBDAV.md](WEBDAV.md) — the non-web surfaces
+  that write plaintext
+- [TRASH-VERSIONING.md](TRASH-VERSIONING.md) — both keep working on ciphertext
+- [RBAC.md](RBAC.md) — permissions, which are independent of encryption
+- [CONFIGURATION.md](CONFIGURATION.md#install-time-settings-filex_installation_) —
+  `FILEX_INSTALLATION_E2E_ESCROW_KEY` and why install-time settings are frozen

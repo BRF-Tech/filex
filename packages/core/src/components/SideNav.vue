@@ -28,12 +28,12 @@
  * hash does not match in the web-component build, so the rules silently stop
  * applying in every embed (measured on the share dialog: raw unstyled HTML).
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useLocale } from '../composables/useLocale';
 import type { LocaleCode } from '../types/ExplorerConfig';
 
 /** The virtual listings the panel can open. '' = an ordinary folder. */
-export type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash';
+export type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
 
 export interface NavStorage {
   name: string;
@@ -61,6 +61,20 @@ const props = defineProps<{
   sharedStorages?: string[];
   /** Show the Trash entry (mirrors ExplorerConfig.trashVisible). */
   trashVisible?: boolean;
+  /* === etiket:t1 — the Tags section ==================================
+   * "Tagged files should show up inside the tag." Tags are the one
+   * navigation family whose entries are USER data: unbounded in number and
+   * dynamic in name. Still presentational here — the host fetches
+   * `tags/all` (once, cached) and hands the list over, exactly as it does
+   * for storages. */
+  /** Every tag that exists, alphabetical. Empty → the section shows its own
+   *  "no tags yet" line rather than disappearing. */
+  tags?: string[];
+  /** False until the first answer arrives, so "no tags yet" is never shown
+   *  to somebody who is simply still waiting. */
+  tagsLoaded?: boolean;
+  /** The tag currently on screen (activeView === 'tag'). */
+  activeTag?: string;
   /**
    * Show the Connections entries — "How to connect" and "API keys".
    * ⚠ Never derived from a role here or anywhere: the backend decides what a
@@ -68,6 +82,19 @@ const props = defineProps<{
    * accounts that need it (see ExplorerConfig.connections).
    */
   showConnections?: boolean;
+  /**
+   * Draw the surfaces that only mean something for ONE person: API keys,
+   * Recent, Starred, Shared with me. False when the caller is an app token —
+   * a host proxy's shared credential, where "your keys" would be the proxy's
+   * own and "your Recent" would be the token owner's history shown to a
+   * stranger (see ExplorerConfig.callerKind).
+   *
+   * ⚠ This is a KIND check, not the role check the comment above forbids, and
+   * it is not the whole panel: Upload, the storages, Trash and "How to
+   * connect" stay — an embed's users still upload and still mount. An embedder
+   * who wants no panel at all already has `sideNav: false`.
+   */
+  showIdentitySurfaces?: boolean;
   /** RBAC/root state — false hides the write affordances. */
   canWrite?: boolean;
   locale: LocaleCode;
@@ -75,7 +102,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
-  (e: 'open-view', view: Exclude<NavView, ''>): void;
+  (e: 'open-view', view: Exclude<NavView, '' | 'tag'>): void;
+  (e: 'open-tag', tag: string): void;
   (e: 'open-storage', name: string): void;
   (e: 'open-root'): void;
   (e: 'upload'): void;
@@ -95,17 +123,50 @@ const showLabels = computed(() => props.expanded || !!props.narrow);
 
 const sharedSet = computed(() => new Set(props.sharedStorages ?? []));
 
+/** The views that answer "what did *I* do" — dropped for an app token. */
+const IDENTITY_VIEWS = new Set<string>(['recent', 'starred', 'shared']);
+
 const views = computed(() => {
-  const list: Array<{ key: Exclude<NavView, ''>; label: string }> = [
+  const list: Array<{ key: Exclude<NavView, '' | 'tag'>; label: string }> = [
     { key: 'recent', label: t('sidenav.recent') },
     { key: 'starred', label: t('sidenav.starred') },
     { key: 'shared', label: t('sidenav.shared') },
   ];
   if (props.trashVisible !== false) list.push({ key: 'trash', label: t('sidenav.trash') });
+  // Filtered at the end rather than built conditionally: Trash is shared by
+  // everyone and the list keeps growing, so one rule at the bottom beats a
+  // condition wrapped around each entry.
+  if (props.showIdentitySurfaces === false) return list.filter((v) => !IDENTITY_VIEWS.has(v.key));
   return list;
 });
 
 const writable = computed(() => props.canWrite !== false);
+
+/* === etiket:t1 — an unbounded list in a fixed panel ====================
+ * A user with sixty tags must not push Storages and Connections off the
+ * bottom of the panel, and must not be handed sixty identical glyphs on a
+ * 56px rail either.
+ *
+ *   expanded / drawer → the first TAG_PEEK, then "Show all (N)". Both states
+ *                       scroll (.fe-sidenav__scroll), so this is about the
+ *                       sections BELOW staying reachable, not about overflow.
+ *   rail             → ONE "Tags" button that opens the panel. Sixty rail
+ *                       icons would be sixty copies of the same glyph with no
+ *                       label — the rail's contract is "every destination one
+ *                       click away", and this keeps it with one click more.
+ */
+const TAG_PEEK = 8;
+const tagsExpanded = ref(false);
+const allTags = computed(() => props.tags ?? []);
+const visibleTags = computed(() =>
+  tagsExpanded.value ? allTags.value : allTags.value.slice(0, TAG_PEEK),
+);
+const hiddenTagCount = computed(() => Math.max(0, allTags.value.length - visibleTags.value.length));
+/* The section is rendered as soon as the panel knows there ARE tags, and also
+ * once the answer came back empty — an empty section that says why is how a
+ * user learns the feature exists at all. It stays hidden only while the first
+ * answer is still in flight. */
+const showTags = computed(() => !!props.tagsLoaded || allTags.value.length > 0);
 
 const toggleLabel = computed(() =>
   props.narrow
@@ -278,6 +339,105 @@ const toggleLabel = computed(() =>
         </li>
       </ul>
 
+      <!-- etiket:t1 — Tags. Between the views and the storages because a tag
+           IS a view (a listing with no folder behind it), not a place files
+           live. On the rail it collapses to one button that opens the panel:
+           sixty tags would otherwise be sixty copies of one glyph with no
+           label, and the rail's promise is that every destination stays one
+           click away. -->
+      <div v-if="showTags" class="fe-sidenav__section">
+        <template v-if="showLabels">
+          <p class="fe-sidenav__heading">{{ t('sidenav.tags') }}</p>
+          <ul class="fe-sidenav__group" :aria-label="t('sidenav.tags')">
+            <li v-for="tag in visibleTags" :key="tag">
+              <button
+                type="button"
+                class="fe-sidenav__item fe-sidenav__item--tag"
+                :class="{ 'is-active': activeView === 'tag' && activeTag === tag }"
+                :aria-current="activeView === 'tag' && activeTag === tag ? 'page' : undefined"
+                :title="tag"
+                :aria-label="tag"
+                :data-testid="`sidenav-tag-${tag}`"
+                @click="emit('open-tag', tag)"
+              >
+                <svg
+                  class="fe-ficon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path d="M4 4.5h7l9 9-6.5 6.5-9-9z" />
+                  <circle cx="8" cy="8.5" r="1.4" />
+                </svg>
+                <span class="fe-sidenav__text">{{ tag }}</span>
+              </button>
+            </li>
+            <!-- Nothing tagged yet: the section stays, and says how tags get
+                 made. A section that only exists once you already know the
+                 feature teaches nobody. -->
+            <li v-if="allTags.length === 0">
+              <p class="fe-sidenav__hint">{{ t('sidenav.tags.empty') }}</p>
+            </li>
+            <li v-if="hiddenTagCount > 0">
+              <button
+                type="button"
+                class="fe-sidenav__more"
+                data-testid="sidenav-tags-more"
+                @click="tagsExpanded = true"
+              >
+                {{ t('sidenav.tags.more', { count: hiddenTagCount }) }}
+              </button>
+            </li>
+            <li v-else-if="tagsExpanded && allTags.length > 8">
+              <button
+                type="button"
+                class="fe-sidenav__more"
+                data-testid="sidenav-tags-less"
+                @click="tagsExpanded = false"
+              >
+                {{ t('sidenav.tags.less') }}
+              </button>
+            </li>
+          </ul>
+        </template>
+        <template v-else>
+          <hr class="fe-sidenav__rule" aria-hidden="true" />
+          <ul class="fe-sidenav__group" :aria-label="t('sidenav.tags')">
+            <li>
+              <button
+                type="button"
+                class="fe-sidenav__item"
+                :class="{ 'is-active': activeView === 'tag' }"
+                :title="t('sidenav.tags')"
+                :aria-label="t('sidenav.tags')"
+                data-testid="sidenav-tags-rail"
+                @click="emit('toggle')"
+              >
+                <svg
+                  class="fe-ficon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path d="M4 4.5h7l9 9-6.5 6.5-9-9z" />
+                  <circle cx="8" cy="8.5" r="1.4" />
+                </svg>
+              </button>
+            </li>
+          </ul>
+        </template>
+      </div>
+
       <div v-if="storages.length" class="fe-sidenav__section">
         <p v-if="showLabels" class="fe-sidenav__heading">{{ t('sidenav.storages') }}</p>
         <hr v-else class="fe-sidenav__rule" aria-hidden="true" />
@@ -375,7 +535,10 @@ const toggleLabel = computed(() =>
               <span v-if="showLabels" class="fe-sidenav__text">{{ t('sidenav.connect') }}</span>
             </button>
           </li>
-          <li>
+          <!-- API keys is the person half of this section: "How to connect"
+               stays for an app token (mount instructions are not identity),
+               the keys go. -->
+          <li v-if="showIdentitySurfaces !== false">
             <button
               type="button"
               class="fe-sidenav__item"

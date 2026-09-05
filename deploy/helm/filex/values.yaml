@@ -187,8 +187,17 @@ storage:
   config: {}
 
 # Any extra FILEX_* overrides (see docs/CONFIGURATION.md).
+#
+# ⚠ FILEX_INSTALLATION_* settings are decided at the FIRST boot and frozen:
+# the pod refuses to start if one later changes. Set them here before the
+# first install, or not at all. See
+# docs/CONFIGURATION.md#install-time-settings-filex_installation_
 extraEnv: {}
   # FILEX_LOG_LEVEL: debug
+  # E2E key escrow — the PUBLIC half only, from `filex e2e-escrow keygen`.
+  # Keep the private half OUT of the cluster; that is what makes a stolen
+  # database worthless. Unset = escrow off (the default), permanently.
+  # FILEX_INSTALLATION_E2E_ESCROW_KEY: "MIIBoj..."
 
 resources:
   requests:

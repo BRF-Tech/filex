@@ -28,6 +28,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/dav"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/mailer"
@@ -133,6 +134,13 @@ type Deps struct {
 	// StagedUploads is filled in BY BuildRouter so the server bootstrap can
 	// run the staging sweeper against the same handler the routes use.
 	StagedUploads *handlers.StagedUpload
+	/* wiring:e2 */
+	// E2EEscrow is the installation's E2E key-escrow PUBLIC key, or nil when
+	// escrow is off (the default). It is published in /api/capabilities so the
+	// browser can wrap new folders' master keys to it, and it seals the
+	// proof-of-possession challenge in handlers.E2E. The server never has the
+	// private half — see internal/e2e/escrow.go.
+	E2EEscrow *e2e.EscrowKey
 	// Body resolves where a file's bytes are — the storage driver, or the
 	// staging area while a staged upload is still being transferred. Built in
 	// BuildRouter from Store+Staging when nil, and filled back in here so the
@@ -342,6 +350,7 @@ func BuildRouter(d *Deps) http.Handler {
 	ooh.AttachBody(d.Body)
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
+	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
 	stg := handlers.NewStorages(d.Store, d.Worker)
 	// The plugin conformance gate on storage save (handlers/plugin_gate.go).
 	stg.Plugins = d.Plugins
@@ -435,8 +444,24 @@ func BuildRouter(d *Deps) http.Handler {
 	// Embedders + the SPA both call /api/files/capabilities; keep the
 	// historical /api/capabilities working for older callers, but make
 	// the file-namespaced path the documented one.
-	r.Get("/api/capabilities", ch.Get)
-	r.Get("/api/files/capabilities", ch.Get)
+	// ⚠ Wrapped in auth.AnnotateToken so the answer can carry `caller_kind`:
+	// the explorer asks capabilities whether this caller is a person or an app
+	// token (migration 00030), and an unwrapped route sees no token at all and
+	// would report every embed as a person.
+	//
+	// ⚠ AnnotateToken, NOT MiddlewareWithToken(store, false). The latter is
+	// "optional auth" but it still REJECTS in three cases (disabled account,
+	// unknown X-Filex-Token-User, and it runs the session drivers) — and this
+	// route is fetched by the login screen and the public share/drop pages. A
+	// disabled user's browser still holds a cookie, so that chain would have
+	// made the login page's capabilities probe answer 403. This one cannot
+	// reject at all: anything unusable is simply anonymous, which reports as
+	// "user".
+	r.Group(func(r chi.Router) {
+		r.Use(auth.AnnotateToken(d.Store))
+		r.Get("/api/capabilities", ch.Get)
+		r.Get("/api/files/capabilities", ch.Get)
+	})
 
 	/* ────── wiring:e1 — branding ──────
 	   Settings-driven identity for the public share/drop/PIN pages + the
@@ -526,48 +551,61 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/api/auth/totp/verify", authSelf.TotpVerify)
 		r.Post("/api/auth/totp/disable", authSelf.TotpDisable)
 
-		// S3 access keys — self-service, because a credential only an admin can
-		// mint is one most people never get. The permission ceiling is enforced
-		// by protocolauth.Issue (a key can only narrow its owner), not by who
-		// is asking.
-		s3keys := handlers.NewS3Keys(d.Store, d.ProtocolAuth, d.Cfg.S3, d.Cfg.PublicURL)
-		r.Get("/api/auth/s3-keys", s3keys.List)
-		r.Post("/api/auth/s3-keys", s3keys.Create)
-		r.Post("/api/auth/s3-keys/{id}/state", s3keys.SetState)
-		r.Delete("/api/auth/s3-keys/{id}", s3keys.Delete)
+		// ────── self-service CREDENTIAL surfaces ──────
+		// Every route in this group answers the same question — "show me, and
+		// let me mint, the credentials of the person calling" — so they share
+		// one gate: an APP token has no such person and is refused here (403,
+		// handlers.RequirePersonalCaller). Grouping beats four copied checks;
+		// a new credential surface joins the rule by being registered inside
+		// this block. ⚠ Confinement and role are different axes and are NOT
+		// touched: a `root:`-scoped token may be a person's, a viewer is still
+		// a person, and each surface keeps its own ceiling.
+		r.Group(func(r chi.Router) {
+			r.Use(handlers.RequirePersonalCaller)
 
-		// Self-service SSH keys, for the SFTP endpoint.
-		//
-		// ⚠ Not a follow-up to shipping SFTP: `ssh-copy-id` appends to
-		// ~/.ssh/authorized_keys over a shell and filex has none, so without
-		// this screen public-key authentication is unreachable and everybody
-		// sends their account password to a file server instead.
-		sshkeys := handlers.NewSSHKeys(d.Store, d.ProtocolAuth, d.Cfg.SFTP.Enabled,
-			sftpHost(d.Cfg.PublicURL), sftpPort(d.Cfg.SFTP.Addr),
-			ftpsFacts(d.Cfg, d.FTPSAddr))
-		r.Get("/api/auth/ssh-keys", sshkeys.List)
-		r.Post("/api/auth/ssh-keys", sshkeys.Create)
-		r.Post("/api/auth/ssh-keys/{id}/state", sshkeys.SetState)
-		r.Delete("/api/auth/ssh-keys/{id}", sshkeys.Delete)
+			// S3 access keys — self-service, because a credential only an admin can
+			// mint is one most people never get. The permission ceiling is enforced
+			// by protocolauth.Issue (a key can only narrow its owner), not by who
+			// is asking.
+			s3keys := handlers.NewS3Keys(d.Store, d.ProtocolAuth, d.Cfg.S3, d.Cfg.PublicURL)
+			r.Get("/api/auth/s3-keys", s3keys.List)
+			r.Post("/api/auth/s3-keys", s3keys.Create)
+			r.Post("/api/auth/s3-keys/{id}/state", s3keys.SetState)
+			r.Delete("/api/auth/s3-keys/{id}", s3keys.Delete)
 
-		// Self-service NFS exports. ⚠ The path a POST returns IS the
-		// credential: NFSv3 cannot authenticate a request, so filex binds the
-		// identity to a high-entropy export path instead (see
-		// model.NFSExport). It is shown once and stored hashed.
-		nfsexports := handlers.NewNFSExports(d.Store, d.ProtocolAuth, d.Cfg.NFS.Enabled,
-			sftpHost(d.Cfg.PublicURL), portOf(d.Cfg.NFS.Addr, 2049))
-		r.Get("/api/auth/nfs-exports", nfsexports.List)
-		r.Post("/api/auth/nfs-exports", nfsexports.Create)
-		r.Post("/api/auth/nfs-exports/{id}/state", nfsexports.SetState)
-		r.Delete("/api/auth/nfs-exports/{id}", nfsexports.Delete)
+			// Self-service SSH keys, for the SFTP endpoint.
+			//
+			// ⚠ Not a follow-up to shipping SFTP: `ssh-copy-id` appends to
+			// ~/.ssh/authorized_keys over a shell and filex has none, so without
+			// this screen public-key authentication is unreachable and everybody
+			// sends their account password to a file server instead.
+			sshkeys := handlers.NewSSHKeys(d.Store, d.ProtocolAuth, d.Cfg.SFTP.Enabled,
+				sftpHost(d.Cfg.PublicURL), sftpPort(d.Cfg.SFTP.Addr),
+				ftpsFacts(d.Cfg, d.FTPSAddr))
+			r.Get("/api/auth/ssh-keys", sshkeys.List)
+			r.Post("/api/auth/ssh-keys", sshkeys.Create)
+			r.Post("/api/auth/ssh-keys/{id}/state", sshkeys.SetState)
+			r.Delete("/api/auth/ssh-keys/{id}", sshkeys.Delete)
 
-		// Self-service API tokens — any user (incl. non-admin user/viewer) may
-		// mint tokens bound to themselves, capped to their role ceiling + own
-		// grants (see handlers.SelfTokens). Admins also have /api/admin/ai-tokens.
-		r.Get("/api/tokens", selfTokensH.List)
-		r.Post("/api/tokens", selfTokensH.Create)
-		r.Patch("/api/tokens/{id}", selfTokensH.Update)
-		r.Delete("/api/tokens/{id}", selfTokensH.Delete)
+			// Self-service NFS exports. ⚠ The path a POST returns IS the
+			// credential: NFSv3 cannot authenticate a request, so filex binds the
+			// identity to a high-entropy export path instead (see
+			// model.NFSExport). It is shown once and stored hashed.
+			nfsexports := handlers.NewNFSExports(d.Store, d.ProtocolAuth, d.Cfg.NFS.Enabled,
+				sftpHost(d.Cfg.PublicURL), portOf(d.Cfg.NFS.Addr, 2049))
+			r.Get("/api/auth/nfs-exports", nfsexports.List)
+			r.Post("/api/auth/nfs-exports", nfsexports.Create)
+			r.Post("/api/auth/nfs-exports/{id}/state", nfsexports.SetState)
+			r.Delete("/api/auth/nfs-exports/{id}", nfsexports.Delete)
+
+			// Self-service API tokens — any user (incl. non-admin user/viewer) may
+			// mint tokens bound to themselves, capped to their role ceiling + own
+			// grants (see handlers.SelfTokens). Admins also have /api/admin/ai-tokens.
+			r.Get("/api/tokens", selfTokensH.List)
+			r.Post("/api/tokens", selfTokensH.Create)
+			r.Patch("/api/tokens/{id}", selfTokensH.Update)
+			r.Delete("/api/tokens/{id}", selfTokensH.Delete)
+		})
 
 		// Desktop authorization, browser half. Session-authenticated: the SPA
 		// calls this AFTER the user signed in however this install does it
@@ -694,6 +732,16 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Get("/comments", cmtH.List)
 			r.Post("/comments", cmtH.Create)
 			r.Delete("/comments/{id}", cmtH.Delete)
+
+			/* wiring:e2 */
+			// E2E escrow: prove you hold the escrow private key, then the
+			// folder's owner is told it was used. Registered even when escrow
+			// is off, so the answer is an explaining 404 rather than a bare
+			// "no such route".
+			e2eH := handlers.NewE2E(d.Store, d.E2EEscrow)
+			e2eH.AttachACL(d.ACL)
+			r.Post("/e2e/escrow/challenge", e2eH.EscrowChallenge)
+			r.Post("/e2e/escrow/used", e2eH.EscrowUsed)
 
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)

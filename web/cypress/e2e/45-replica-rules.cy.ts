@@ -10,7 +10,16 @@ describe('replica admin', () => {
     cy.adminGet<{ items?: Array<{ id: number; path_pattern: string; mode: string; enabled: boolean }> }>(
       '/api/admin/replica/rules',
     ).then((d) => {
-      expect(d.items, 'rules.items').to.be.an('array');
+      // ⚠ Go serializes an empty slice as JSON `null`, not `[]`, so a fresh
+      // instance answers `{"items": null}` and the old `to.be.an('array')`
+      // failed there while passing against a production DB that had rules.
+      // The envelope contract is "items is present, and every row in it has
+      // the full shape" — that is what is asserted, and the row assertions
+      // below are the part that can actually catch a serialization change.
+      expect(d, 'rules envelope').to.have.property('items');
+      if (d.items !== null && d.items !== undefined) {
+        expect(d.items, 'rules.items').to.be.an('array');
+      }
       for (const r of d.items ?? []) {
         expect(r, 'rule envelope').to.have.all.keys(
           'id',

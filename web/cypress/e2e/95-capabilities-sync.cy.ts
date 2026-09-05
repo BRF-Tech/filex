@@ -19,8 +19,19 @@ describe('capabilities', () => {
       external?: Record<string, { enabled?: boolean; state?: string }>;
     }>('/api/files/capabilities').then((d) => {
       expect(d.external, 'capabilities.external').to.be.an('object');
-      for (const slot of ['onlyoffice', 'drawio', 'mermaid']) {
+      // ⚠ `mermaid` is NOT one of these. The baseline slots this build
+      // advertises are convert / drawio / onlyoffice; the old assertion named
+      // `mermaid` and only ever passed because production's `external` table
+      // still carries a row from the version that had it (see
+      // 37-external-providers for the same stale literal).
+      for (const slot of ['onlyoffice', 'drawio', 'convert']) {
         expect(d.external, `capabilities.external.${slot}`).to.have.property(slot);
+      }
+      // Each slot has to carry its state, or the External page has nothing to
+      // colour the badge with.
+      for (const [name, slot] of Object.entries(d.external ?? {})) {
+        expect(slot, `${name} slot envelope`).to.have.property('state');
+        expect(slot, `${name} slot envelope`).to.have.property('enabled');
       }
     });
   });

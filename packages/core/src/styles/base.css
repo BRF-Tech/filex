@@ -542,6 +542,11 @@ filex-explorer {
   opacity: 0.7;
 }
 .fe-grid__thumb {
+  /* yildiz:s1 — positioning context for the star chip in the corner. The
+     gallery's thumb already had one; this one did not, so an absolutely
+     placed chip would have resolved against whatever ancestor happened to be
+     positioned (the grid, or the explorer root) and landed in the wrong tile. */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3836,6 +3841,153 @@ filex-explorer {
 .fe-e2e-optlink:hover {
   text-decoration: underline;
 }
+
+/* --- wiring:e2 recovery ---------------------------------------------
+   Unscoped and fe-prefixed on purpose: a scoped <style> in an SFC does not
+   survive the web-component build, so every class a core component uses has
+   to live here. */
+
+/* The shown-once key. Monospace, big, wrapping — it exists to be read off
+   the screen and typed somewhere else, so legibility beats compactness. */
+.fe-e2e-rk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fe-e2e-rk__lead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-rk__key {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  font-family: var(--fe-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  line-height: 1.7;
+  word-break: break-all;
+  user-select: all;
+  text-align: center;
+}
+.fe-e2e-rk__actions {
+  display: flex;
+  gap: 8px;
+}
+.fe-e2e-rk__escrow {
+  border: 1px solid var(--fe-border);
+  border-left: 3px solid var(--fe-warning, var(--fe-primary));
+  border-radius: var(--fe-radius-sm);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+.fe-e2e-rk__escrow strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--fe-text);
+}
+.fe-e2e-rk__escrow p {
+  margin: 0;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-rk__kid code {
+  font-size: 11.5px;
+}
+
+/* Unlock-without-the-password dialog. */
+.fe-e2e-recover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fe-e2e-recover__none {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-recover__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-recover__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  background: var(--fe-bg-elev);
+}
+.fe-e2e-recover__tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: calc(var(--fe-radius-lg) - 4px);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.fe-e2e-recover__tab--on {
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-weight: 600;
+}
+.fe-e2e-recover__key {
+  font-family: var(--fe-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.fe-e2e-recover__escrow {
+  font-family: var(--fe-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  resize: vertical;
+  min-height: 90px;
+}
+
+/* The offer to give a pre-recovery folder a recovery key. A strip, not a
+   modal: it must be visible and dismissible, never something that blocks
+   the folder the user came here to open. */
+.fe-e2e-upgrade {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--fe-border);
+  border-left: 3px solid var(--fe-primary);
+  border-radius: var(--fe-radius-sm);
+  background: color-mix(in srgb, var(--fe-primary) 6%, transparent);
+}
+.fe-e2e-upgrade__text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.fe-e2e-upgrade__text strong {
+  display: block;
+  font-size: 13px;
+  color: var(--fe-text);
+}
+.fe-e2e-upgrade__text p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--fe-text-muted);
+}
+.fe-e2e-upgrade__escrow {
+  color: var(--fe-danger) !important;
+}
+.fe-e2e-upgrade__actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
 /* === /wiring:e2 === */
 
 /* === ui-fix — toolbar tek satır + katlama + ölçüm şeridi ============= */
@@ -4218,6 +4370,106 @@ filex-explorer {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* === etiket:t1 — the Tags section ==================================== */
+/* A tag row is an ordinary panel item; only its label wraps differently,
+   because a tag is user text and can be long. */
+.fe-sidenav__item--tag .fe-sidenav__text {
+  text-transform: none;
+}
+/* "Show all (12)" / "Show fewer" — a link, not a button: it changes what this
+   section shows, it is not a destination. */
+.fe-sidenav__more {
+  display: block;
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fe-primary);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.fe-sidenav__more:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-sidenav__more:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+/* "No tags yet — add them from a file's menu." */
+.fe-sidenav__hint {
+  margin: 2px 0 4px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fe-text-muted);
+}
+
+/* === yildiz:s1 — the star chip on a grid / gallery tile =============== */
+/* Positioned by the card, painted by StarButton (.filex-star-btn.is-card).
+   ⚠ The rules live HERE and not in the SFC: the panel's styles do too, and
+   these are about the CARD's geometry, which is this file's business. */
+.fe-grid__star,
+.fe-gal__star {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  /* Hidden until the tile is hovered or something inside it is focused —
+     EXCEPT when the file is starred, which is the whole point: the mark has
+     to be visible without hovering every tile to find it (see .is-starred
+     below). */
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.fe-grid__card:hover .fe-grid__star,
+.fe-grid__card:focus-within .fe-grid__star,
+.fe-gal__card:hover .fe-gal__star,
+.fe-gal__card:focus-within .fe-gal__star,
+.fe-grid__star:focus-within,
+.fe-gal__star:focus-within,
+.fe-grid__star:has(.is-starred),
+.fe-gal__star:has(.is-starred) {
+  opacity: 1;
+}
+/* `:has()` is the modern half of the rule above; this is the same thing for
+   engines without it — a starred chip paints itself. Both are needed: the
+   parent wrapper carries the opacity, the child cannot raise it on its own. */
+.filex-star-btn.is-card.is-starred {
+  opacity: 1;
+}
+/* The chip itself: a round translucent puck, legible over a photo thumbnail
+   as well as over a flat icon tile. */
+.filex-star-btn.is-card {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.55);
+  color: #fff;
+  backdrop-filter: blur(2px);
+}
+.filex-star-btn.is-card:hover {
+  background: rgba(17, 24, 39, 0.78);
+  color: var(--filex-accent-amber, #f59e0b);
+}
+.filex-star-btn.is-card.is-starred {
+  color: var(--filex-accent-amber, #f59e0b);
+}
+.filex-star-btn.is-card:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+/* The gallery's meta strip covers the tile's foot on hover and is
+   aria-hidden; the star sits above it and stays clickable. */
+.fe-gal__star {
+  z-index: 3;
 }
 
 /* Narrow (<560px): a drawer over the listing, never a column. At 390px a

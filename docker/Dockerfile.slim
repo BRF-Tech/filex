@@ -1,0 +1,149 @@
+# filex slim image (~40 MB)
+#
+# The Go binary and the embedded admin UI, and nothing else. Image thumbnails
+# are produced in pure Go (internal/thumb/image.go), so they work here; every
+# thumbnail that shells out to another program does not:
+#
+#   video      needs ffmpeg          PDF        needs ghostscript / pdftoppm
+#   office     needs libreoffice     SVG        needs rsvg-convert
+#
+# filex probes for each tool at start (internal/capability) and reports what it
+# found on /api/files/capabilities, so a missing one is a disabled feature with
+# a reason, not a crash or a silent failure.
+#
+# Use this image when you want a file manager, not a preview generator: it
+# pulls in seconds instead of minutes and has a fraction of the attack surface.
+# Want the previews? Use `latest` / `full`, built from docker/Dockerfile.
+#
+# ⚠ Until v0.30.x the `slim` TAG was built from the full recipe: docs promised
+# ~40 MB and the registry served 511 MB compressed. This file is what makes the
+# name true again.
+#
+# Build (from repo root):
+#   docker build -t brftech/filex:slim -f docker/Dockerfile.slim .
+#
+# Run:
+#   docker run -p 5212:5212 -v $(pwd)/data:/data brftech/filex:slim
+
+# ---------------------------------------------------------------------------
+# Stage 1: Build npm packages (filex-core, webcomponent, react) + admin UI
+# ---------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-build
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /src
+
+# Copy lockfiles + workspace manifests first so Docker layer cache survives
+# source code edits when only deps haven't changed.
+COPY package.json pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml* ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/webcomponent/package.json ./packages/webcomponent/
+COPY packages/react/package.json ./packages/react/
+COPY web/package.json ./web/
+
+# Install all workspace deps (core/webcomponent/react/web). Use --no-frozen-lockfile
+# in dev images that don't ship a lockfile yet; CI ships a lockfile so it's frozen.
+# vue-tsc OOMs the default 1.7 GB Node heap once we pull in
+# @brftech/filex-core (workspace dep with code-split viewers). Bump
+# the budget to 4 GB for every Node process during the build.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
+RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+
+# Copy sources after install for max cache hit.
+COPY packages/ ./packages/
+COPY web/ ./web/
+
+# Build npm packages first (web depends on them transitively for type imports
+# and the webcomponent dist gets embedded into the Go binary).
+RUN pnpm -r --filter='./packages/*' build
+RUN pnpm --filter='./web' build
+
+# ---------------------------------------------------------------------------
+# Stage 2: Stage embed assets in /tmp for the Go build to consume
+# ---------------------------------------------------------------------------
+FROM frontend-build AS embed-prep
+RUN mkdir -p /tmp/embed/admin /tmp/embed/web && \
+    cp -r /src/web/dist/. /tmp/embed/admin/ && \
+    cp -r /src/packages/webcomponent/dist/. /tmp/embed/web/
+
+# ---------------------------------------------------------------------------
+# Stage 3: Build the Go binary with embedded assets
+# ---------------------------------------------------------------------------
+# Bumped to 1.25 for golang.org/x/image v0.39+ (BMP/TIFF/WebP decoders we
+# import in internal/thumb/image.go register Go 1.25 toolchain features).
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend-build
+RUN apk --no-cache add git ca-certificates
+WORKDIR /src
+
+# Cache deps layer. We accept a missing go.sum (first-time build before
+# `go mod tidy` has been run locally) — `go mod download` will create one.
+COPY backend/go.mod ./
+COPY backend/go.sum* ./
+RUN go mod download || go mod tidy
+
+# Copy backend sources + drop in embed assets from the frontend stage.
+COPY backend/ ./
+COPY --from=embed-prep /tmp/embed/admin ./embed/admin
+COPY --from=embed-prep /tmp/embed/web   ./embed/web
+
+# `go mod tidy` here (not just in the deps layer) because the COPY above
+# overwrites any go.sum produced earlier when the source tree didn't ship
+# one. This guarantees a complete go.sum before `go build`.
+RUN go mod tidy
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+# TARGETOS/TARGETARCH are set by buildx per requested platform; empty on a
+# plain `docker build`, where Go then falls back to the host defaults.
+ARG TARGETOS
+ARG TARGETARCH
+# ldflag symbol path must match the package var declarations in
+# internal/version/version.go — `-X main.version=...` is silently a no-op
+# because cmd/filex/main.go has no `version` symbol; the linker just skips
+# unknown -X targets, so the banner/footer falls back to "0.1.0-dev (unknown,
+# unknown)" even on tagged release builds. Use the fully-qualified package
+# path instead.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    -trimpath \
+    -ldflags="-s -w \
+        -X github.com/brf-tech/filex/backend/internal/version.Version=${VERSION} \
+        -X github.com/brf-tech/filex/backend/internal/version.Commit=${COMMIT} \
+        -X github.com/brf-tech/filex/backend/internal/version.Date=${DATE}" \
+    -o /out/filex \
+    ./cmd/filex
+
+# ---------------------------------------------------------------------------
+# Stage 4: Runtime — the binary's own needs, nothing more
+# ---------------------------------------------------------------------------
+FROM alpine:3.20
+
+#   ca-certificates — outbound TLS (S3, WebDAV, OIDC, update checks).
+#   tzdata          — local-time rendering and scheduled jobs.
+#   su-exec         — drop root in the entrypoint.
+#
+# Deliberately absent: ffmpeg, ghostscript, poppler-utils, libreoffice,
+# openjdk, rsvg-convert, imagemagick and the font packages. Together they are
+# ~470 MB compressed and the reason the full image exists. Adding one here
+# defeats the point of this file — put it in docker/Dockerfile instead.
+RUN apk --no-cache add \
+        ca-certificates \
+        tzdata \
+        su-exec \
+    && addgroup -S filex && adduser -S -G filex filex
+
+COPY --from=backend-build /out/filex /usr/local/bin/filex
+
+EXPOSE 5212
+VOLUME ["/data"]
+
+ENV FILEX_DATA_DIR=/data \
+    FILEX_LISTEN=0.0.0.0:5212 \
+    FILEX_THUMBS_ENABLED=true
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:5212/healthz || exit 1
+
+ENTRYPOINT ["/usr/local/bin/filex"]
+CMD ["serve"]

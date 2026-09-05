@@ -186,6 +186,7 @@ export const en: Record<string, string> = {
   'shortcuts.toggle_hidden': 'Show/hide hidden files',
   'shortcuts.help': 'This help dialog',
   'shortcuts.select_all': 'Select all',
+  'shortcuts.star': 'Star / unstar',
   'shortcuts.rename': 'Rename',
   'shortcuts.delete': 'Delete',
   'shortcuts.cut': 'Cut',
@@ -227,6 +228,10 @@ export const en: Record<string, string> = {
   /* === koru:k1 === */
   'toolbar.inspector': 'Details',
   'ctx.details': 'Details',
+  /* yildiz:s1 — starring is an action, so it has a verb in the menu. */
+  'ctx.star': 'Star',
+  'ctx.unstar': 'Unstar',
+  'star.failed': 'Could not change the star',
   'shortcuts.inspector': 'Toggle details panel',
   'inspector.title': 'Details',
   'inspector.close': 'Close',
@@ -403,8 +408,8 @@ export const en: Record<string, string> = {
   'e2e.create.pw2_placeholder': 'Repeat the password',
   'e2e.create.warn_title': 'NO WAY BACK',
   'e2e.create.warn_body':
-    'Files open ONLY with this password. The password is NEVER stored on the server; if you forget it the content is lost forever. There is no recovery — not even an admin can open it.',
-  'e2e.create.ack': 'I understand: if I lose the password my data cannot be recovered.',
+    'Files in this folder can only be opened with this password or the recovery key shown once when the folder is created. The password is NEVER stored on the server, and filex keeps no copy of the recovery key either. Lose both and the contents are gone for good.',
+  'e2e.create.ack': 'I understand: if I lose both the password and the recovery key, my data cannot be recovered.',
   'e2e.create.ack_required': 'Please confirm the warning to continue.',
   'e2e.create.pw_short': 'Password must be at least 8 characters.',
   'e2e.create.pw_mismatch': 'Passwords do not match.',
@@ -428,6 +433,63 @@ export const en: Record<string, string> = {
   'e2e.upload.locked': 'Unlock the folder first',
   'e2e.decrypting': 'Decrypting…',
   'e2e.decrypt_failed': 'Could not decrypt the file (password changed or file corrupted).',
+  /* wiring:e2 recovery — recovery keys + operator escrow */
+  'e2e.create.escrow_title': 'This server holds a second key',
+  'e2e.create.escrow_body':
+    'Key escrow is enabled on this installation, so its operator can open this folder without your password. Using that key notifies you. Escrow is fixed when the server is installed and cannot be turned off for a folder.',
+  'e2e.locked.use_recovery': 'Lost the password? Use a recovery key',
+  'e2e.recovery.title': 'Save your recovery key',
+  'e2e.recovery.title_upgraded': 'Your recovery key',
+  'e2e.recovery.lead':
+    'This key opens the folder without its password. It is shown once — filex does not store it and cannot show it again.',
+  'e2e.recovery.lead_upgraded':
+    'This folder now has a recovery key. It opens the folder without its password, is shown once, and is not stored by filex.',
+  'e2e.recovery.copy': 'Copy',
+  'e2e.recovery.copied': 'Copied',
+  'e2e.recovery.download': 'Download as a file',
+  'e2e.recovery.warn_title': 'TREAT THIS LIKE A PASSWORD',
+  'e2e.recovery.warn_body':
+    'Anyone holding this key can read the folder. Keep it somewhere separate from the password — a key stored next to the password protects you from forgetting, not from anyone else.',
+  'e2e.recovery.escrow_title': 'This server also holds a key',
+  'e2e.recovery.escrow_body':
+    'Key escrow is enabled here, so the operator of this installation can open this folder without your password. You are notified when that key is used.',
+  'e2e.recovery.escrow_kid': 'Escrow key',
+  'e2e.recovery.ack': 'I have saved this key somewhere safe.',
+  'e2e.recovery.done': 'Done',
+  'e2e.recover.title': 'Unlock without the password',
+  'e2e.recover.none':
+    'This folder was created before recovery keys existed, so it has none. Its password is the only way in. Unlock it with the password once and filex will offer to add a recovery key.',
+  'e2e.recover.tab_recovery': 'Recovery key',
+  'e2e.recover.tab_escrow': 'Escrow key',
+  'e2e.recover.recovery_hint': 'The key shown once when this folder was created.',
+  'e2e.recover.recovery_placeholder': 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX',
+  'e2e.recover.escrow_warn_title': 'The owner will be told',
+  'e2e.recover.escrow_warn_body':
+    'Opening a folder with the escrow key notifies its owner. Use it only when you are entitled to.',
+  'e2e.recover.escrow_kid': 'Escrow key',
+  'e2e.recover.escrow_placeholder': 'Paste the escrow private key (PKCS#8, base64 or PEM)',
+  'e2e.recover.bad_format':
+    'That does not look like a recovery key. It is 32 characters in eight groups of four.',
+  'e2e.recover.escrow_required': 'Paste the escrow private key.',
+  'e2e.recover.wrong_recovery': 'That recovery key does not open this folder.',
+  'e2e.recover.wrong_escrow':
+    'That escrow key does not open this folder. Folders created before escrow was enabled have no escrow key, and cannot be given one.',
+  'e2e.recover.bad_escrow_key': 'That is not a readable private key (expected PKCS#8, base64 or PEM).',
+  'e2e.recover.notify_failed':
+    'Could not notify the folder owner, so the folder was not unlocked. Escrow use is always announced.',
+  'e2e.recover.recovery_done': 'Unlocked with the recovery key',
+  'e2e.recover.escrow_done': 'Unlocked with the escrow key — the owner has been notified',
+  'e2e.recover.unlock': 'Unlock',
+  'e2e.recover.busy': 'Unlocking…',
+  'e2e.upgrade.title': 'This folder has no recovery key',
+  'e2e.upgrade.body':
+    'It was created before recovery keys existed, so its password is the only way in. Right now — and only right now, while the password is in memory — filex can add one. Your files are not re-encrypted or moved.',
+  'e2e.upgrade.escrow_note':
+    'Note: this installation has key escrow enabled, so adding a recovery key also lets its operator open this folder without your password.',
+  'e2e.upgrade.accept': 'Create a recovery key',
+  'e2e.upgrade.decline': 'Not now',
+  'e2e.upgrade.busy': 'Creating…',
+  'e2e.upgrade.failed': 'Could not add a recovery key to this folder',
   'e2e.download.failed': 'Could not download the encrypted file.',
   /* /wiring:e2 */
 
@@ -863,6 +925,13 @@ export const en: Record<string, string> = {
   'empty.starred.hint': 'Star a file to find it here',
   'empty.shared.title': 'Nothing has been shared with you',
   'empty.shared.hint': 'Folders and files other people share appear here',
+  /* etiket:t1 */
+  'sidenav.tags': 'Tags',
+  'sidenav.tags.empty': 'No tags yet — add one from a file’s right-click menu.',
+  'sidenav.tags.more': 'Show {count} more',
+  'sidenav.tags.less': 'Show fewer',
+  'empty.tag.title': 'Nothing is tagged “{tag}”',
+  'empty.tag.hint': 'Right-click a file and choose Tags to put it here',
   'sidenav.connections': 'Connections',
   'sidenav.connect': 'How to connect',
   'sidenav.apikeys': 'API keys',

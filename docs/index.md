@@ -77,7 +77,7 @@ features:
     linkText: CLI docs
   - icon: 🧭
     title: Navigation people already know
-    details: A left panel with a prominent Upload and the views Recent, Starred, Shared with me and Trash, plus the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for. Collapse it to an icon rail when you want the width back, and switch the simple profile on for people who want a file drive rather than a file manager.
+    details: A left panel with a prominent Upload; the views Recent, Starred, Shared with me and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail when you want the width back, and switch the simple profile on for people who want a file drive rather than a file manager.
     link: /INTEGRATION
     linkText: Turning it on
   - icon: 🧩
