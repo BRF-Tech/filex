@@ -61,6 +61,65 @@ jobs:
       - name: Unit tests
         run: pnpm --filter='./web' --filter='./packages/*' test
 
+  browser:
+    name: Browser E2E (Cypress)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/go.sum
+
+      # The Cypress binary is a ~250 MB download that is NOT in node_modules —
+      # it lands in ~/.cache/Cypress, keyed by version. Cache it on that key,
+      # not on the lockfile hash: a lockfile change that leaves cypress alone
+      # would otherwise re-download it.
+      - name: Cache the Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('web/package.json') }}
+
+      - run: pnpm install --frozen-lockfile
+      # Explicit, because a cached store can restore node_modules without ever
+      # running the package's postinstall — and then `cypress run` fails with
+      # "No version of Cypress is installed", which reads like a broken suite.
+      - name: Ensure the Cypress binary is present
+        run: pnpm --filter='./web' exec cypress install
+
+      # One command: builds packages + admin UI + embed assets + the Go binary,
+      # starts it on a free port against a throwaway data dir with a
+      # deterministic admin, seeds one local storage, runs every spec, tears it
+      # all down. No secrets, no network, and nothing pointed at a live host —
+      # `cypress run` here answers "is THIS build good?".
+      - name: Run the Cypress suite against a throwaway instance
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: node e2e/run.mjs cypress --build
+
+      # Uploaded on failure only: a red assertion in a browser is far cheaper
+      # to read as a screenshot and twenty seconds of video than as a stack
+      # trace. `video` is on when CI=true (web/cypress.config.ts).
+      - name: Upload failure screenshots + video
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-failures
+          path: |
+            web/cypress/screenshots
+            web/cypress/videos
+          if-no-files-found: ignore
+          retention-days: 7
+
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest

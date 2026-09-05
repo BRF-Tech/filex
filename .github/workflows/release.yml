@@ -8,8 +8,8 @@ name: Release
 #
 # Job graph — and why it is shaped like this:
 #
-#   binaries ──┬── docker   (multi-arch images, ~20-30 min under QEMU)
-#              └── desktop  (three installers, attached to the Release)
+#   binaries ───── desktop  (three installers, attached to the Release)
+#   docker ─────── docker-manifest   (one native runner per architecture)
 #   npm            (independent)
 #
 # `binaries` is goreleaser alone: it is what CREATES the GitHub Release, and
@@ -85,63 +85,162 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Docker images → ghcr.io/brf-tech/filex (multi-arch) ─────────────────
-  # Its own job since v0.25.0 (see the header). `needs: binaries` is not a
-  # build dependency — the Dockerfiles build everything from source — it keeps
-  # the order the operators rely on: a tag whose binaries failed to release
-  # must not quietly publish `:latest`.
+  # ── Docker images → ghcr.io ────────────────────────────────────────────
   #
-  # QEMU is only exercised by the final runtime stage (apk installs);
-  # the Node/Go build stages are pinned to $BUILDPLATFORM and the Go
-  # binary cross-compiles via TARGETARCH — see docker/Dockerfile.
+  # Two images, built once per architecture on a runner of that architecture:
+  #
+  #   docker/Dockerfile       full toolchain (ffmpeg, ghostscript, poppler,
+  #                           libreoffice + a JRE, fonts)  → latest, vX, full,
+  #                           full-vX
+  #   docker/Dockerfile.slim  the binary and nothing else  → slim, slim-vX
+  #
+  # ⚠ Two things here were wrong for a long time and are worth stating so they
+  # are not reintroduced:
+  #
+  # 1. `slim` was built from the FULL recipe. docs/DOCKER.md promised ~40 MB
+  #    and the registry served 511 MB compressed — measured on v0.30.0, all
+  #    three of latest/slim/full were byte-for-byte the same image. The only
+  #    difference between the two Dockerfiles was one package (imagemagick vs
+  #    vips-tools), and neither is called by anything in backend/internal/thumb.
+  #    docker/Dockerfile.slim now makes the name true.
+  #
+  # 2. arm64 was emulated. QEMU only ever hurt the runtime stage — the Node and
+  #    Go stages are pinned to $BUILDPLATFORM and the binary cross-compiles for
+  #    free (CGO_ENABLED=0) — but that stage is `apk add libreoffice + JRE`,
+  #    which is exactly the expensive thing to emulate. GitHub's free
+  #    `ubuntu-24.04-arm` runner (verified for this repo: aarch64, 4 cpus,
+  #    15 GiB) removes the emulation entirely. Each runner builds and pushes
+  #    ONE architecture by digest; `docker-manifest` then joins the digests
+  #    into the multi-arch tags.
+  #
+  # `needs:` is deliberately absent. The docker job builds its own binary from
+  # source inside the Dockerfile and takes nothing from the Release, so waiting
+  # for goreleaser only lengthened the critical path (measured on v0.30.0:
+  # binaries 544 s, then docker 696 s = 20.7 min wall). The cost of running in
+  # parallel is that a goreleaser failure can leave a :vX image behind with no
+  # GitHub Release beside it — delete the tag from ghcr.io by hand if that
+  # happens; it has to be a deliberate cleanup, not a silent inconsistency.
   docker:
-    needs: binaries
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - id: meta
         run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
+      # No setup-qemu-action: each job is native for its platform. Adding it
+      # back would silently re-enable emulation for whichever arch is missing
+      # a runner, turning a broken matrix into a slow build instead of a
+      # visible failure.
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Default image (latest + version)
+
+      - name: Full image
+        id: full
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: ${{ matrix.platform }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.date }}
-          # `slim`/`slim-vX` are the names the release notes (.goreleaser.yml
-          # header) and docs/DOCKER.md have advertised all along; until
-          # v0.25.0 they were never actually pushed, so every release note's
-          # `docker pull …:slim-vX` 404'd. Same image as :latest / :vX.
-          tags: |
-            ghcr.io/brf-tech/filex:latest
-            ghcr.io/brf-tech/filex:${{ github.ref_name }}
-            ghcr.io/brf-tech/filex:slim
-            ghcr.io/brf-tech/filex:slim-${{ github.ref_name }}
-      - name: Full image (extra thumbnail tools)
+          cache-from: type=gha,scope=full-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=full-${{ matrix.arch }}
+          # Push by digest only; docker-manifest attaches the human tags.
+          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Slim image
+        id: slim
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/Dockerfile.full
-          platforms: linux/amd64,linux/arm64
-          push: true
+          file: docker/Dockerfile.slim
+          platforms: ${{ matrix.platform }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.date }}
-          tags: |
-            ghcr.io/brf-tech/filex:full
-            ghcr.io/brf-tech/filex:full-${{ github.ref_name }}
+          cache-from: type=gha,scope=slim-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=slim-${{ matrix.arch }}
+          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=true
+
+      # The digests travel to the manifest job as files named after the digest,
+      # so two matrix legs writing into one artifact never collide.
+      - name: Record digests
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests/full /tmp/digests/slim
+          touch "/tmp/digests/full/${FULL_DIGEST#sha256:}"
+          touch "/tmp/digests/slim/${SLIM_DIGEST#sha256:}"
+        env:
+          FULL_DIGEST: ${{ steps.full.outputs.digest }}
+          SLIM_DIGEST: ${{ steps.slim.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Joins the per-architecture digests into the tags people actually pull.
+  # Nothing is tagged until BOTH architectures have pushed, so a half-built
+  # release never appears as `:latest`.
+  docker-manifest:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: /tmp/digests
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create the multi-arch tags
+        run: |
+          set -euo pipefail
+          img=ghcr.io/brf-tech/filex
+          ver="${GITHUB_REF_NAME}"
+
+          join() {                       # join <variant> <tag...>
+            local variant="$1"; shift
+            local srcs=()
+            for f in /tmp/digests/"$variant"/*; do
+              srcs+=("${img}@sha256:$(basename "$f")")
+            done
+            [ "${#srcs[@]}" -eq 2 ] || {
+              echo "expected 2 digests for ${variant}, found ${#srcs[@]}" >&2
+              exit 1
+            }
+            local args=()
+            for t in "$@"; do args+=(-t "${img}:${t}"); done
+            docker buildx imagetools create "${args[@]}" "${srcs[@]}"
+          }
+
+          join full "latest" "${ver}" "full" "full-${ver}"
+          join slim "slim" "slim-${ver}"
+
+          docker buildx imagetools inspect "${img}:${ver}"
+          docker buildx imagetools inspect "${img}:slim-${ver}"
 
   # ── npm packages → npmjs (@brftech scope) ─────────────────────────────
   # Independent of `binaries` so it can be re-run on its own. Publishes only if
