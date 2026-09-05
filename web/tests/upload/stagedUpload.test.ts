@@ -280,6 +280,70 @@ describe('staged upload (browser)', () => {
     });
     expect(states).toContain('transferring');
   });
+
+  // Issue #16. The commit is answered 202 before the bytes are written to the
+  // storage, so "done" on the 202 is a claim the server has not made yet. The
+  // reporter's uploads all reported success and none of them existed.
+  it('waits for the transfer by default, without being asked', async () => {
+    const up = useUploadChunked(config, fakeApi(server), memoryStorage());
+    const states: string[] = [];
+    await up.uploadFile({
+      path: 'main://docs',
+      file: makeFile(pattern(CHUNK * 2)),
+      onProgress: (j) => states.push(j.status),
+    });
+    expect(states).toContain('transferring');
+    expect(server.opCalls).toBeGreaterThan(0);
+  });
+
+  it('fails the upload when the backend transfer fails', async () => {
+    server.opStatus = 'failed';
+    server.opError = 'upload part 1: request stream is not seekable';
+    const up = useUploadChunked(config, fakeApi(server), memoryStorage());
+    const states: string[] = [];
+    const err = await up
+      .uploadFile({
+        path: 'main://docs',
+        file: makeFile(pattern(CHUNK * 2)),
+        onProgress: (j) => states.push(j.status),
+      })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain('not seekable');
+    expect(states).toContain('error');
+    expect(states).not.toContain('done');
+  });
+
+  it('opts out of the wait when told to', async () => {
+    server.opStatus = 'failed';
+    const up = useUploadChunked(config, fakeApi(server), memoryStorage());
+    const states: string[] = [];
+    await up.uploadFile({
+      path: 'main://docs',
+      file: makeFile(pattern(CHUNK * 2)),
+      waitForTransfer: false,
+      onProgress: (j) => states.push(j.status),
+    });
+    expect(states).not.toContain('transferring');
+    expect(states).toContain('done');
+  });
+
+  // ⚠ An op row we cannot read at all is unknowable, not failed. Waiting on it
+  // for ever would park the upload in `transferring` and be a worse bug than
+  // the one the wait exists to fix.
+  it('gives up waiting rather than hanging when the op row is unreadable', async () => {
+    server.opUnreadable = true;
+    const up = useUploadChunked(config, fakeApi(server), memoryStorage());
+    const states: string[] = [];
+    await up.uploadFile({
+      path: 'main://docs',
+      file: makeFile(pattern(CHUNK * 2)),
+      onProgress: (j) => states.push(j.status),
+    });
+    expect(states).toContain('done');
+    expect(server.opCalls).toBeLessThanOrEqual(8);
+  }, 20_000);
 });
 
 describe('staged upload — resume bookmarks', () => {

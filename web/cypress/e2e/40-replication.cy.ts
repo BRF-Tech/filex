@@ -1,4 +1,4 @@
-// 40-replication — Replikasyon page wires through the new
+// 40-replication — the Replication page wires through the new
 // `replication_targets` entity (v0.1.18) and the per-primary pairing
 // reads/writes `storages.replica_target_id` (not the deprecated
 // `replica_of_id` envelope).

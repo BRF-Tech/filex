@@ -146,7 +146,7 @@ export interface ArchiveEntry {
   lastModified?: number;
 }
 
-export type ViewMode = 'list' | 'grid' | 'gallery'; /* wiring:d2 — üçüncü görünüm: galeri */
+export type ViewMode = 'list' | 'grid' | 'gallery'; /* wiring:d2 — the third view: gallery */
 
 export interface ClipboardState {
   mode: 'cut' | 'copy' | null;

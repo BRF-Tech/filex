@@ -87,12 +87,12 @@ import { useOperations } from './composables/useOperations';
 /* wiring:c4 */
 import OnboardingTour from './components/OnboardingTour.vue';
 /* /wiring:c4 */
-/* wiring:d1 — sekmeler + tab başına split */
+/* wiring:d1 — tabs + per-tab split */
 import TabBar from './components/TabBar.vue';
 import SecondaryPane from './components/SecondaryPane.vue';
 import { useTabs, type TabState } from './composables/useTabs';
 /* /wiring:d1 */
-/* wiring:e2 — uçtan uca şifreli klasörler (docs/E2E-ENCRYPTION.md) */
+/* wiring:e2 — end-to-end encrypted folders (docs/E2E-ENCRYPTION.md) */
 import EncryptedFolderModal from './components/EncryptedFolderModal.vue';
 import RecoveryKeyModal from './components/RecoveryKeyModal.vue';
 import E2eRecoveryUnlockModal from './components/E2eRecoveryUnlockModal.vue';
@@ -158,6 +158,7 @@ import ShareModal from './modals/ShareModal.vue';
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
 import PermissionsModal from './modals/PermissionsModal.vue';
+import { resolveLocale } from './locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -187,7 +188,7 @@ const api = useFileApi(props.config);
 // Locale up-front: the pendingOps onSettled callback below (and the undo-toast
 // helpers) need `t()` at runtime, so the catalogue must be constructed before
 // they are wired. Depends only on props — safe this early.
-const locale = computed(() => props.config.locale || 'tr');
+const locale = computed(() => resolveLocale(props.config.locale));
 const { t } = useLocale(locale);
 
 // Live collaboration (WebSocket file-change events + presence), bundled into the
@@ -239,20 +240,20 @@ const pendingOps = usePendingOps(props.config, api, {
     const undo = opUndo.get(op.id);
     opUndo.delete(op.id);
     if (op.status === 'error') {
-      flashToast(op.error_message || 'İşlem başarısız');
+      flashToast(op.error_message || t('toast.failed'));
     } else if (undo) {
       undoToast(`${undo.message} (${op.progress_total})`, undo.fn);
     } else {
       const verb =
         op.op_type === 'copy'
-          ? 'Kopyalandı'
+          ? t('toast.copied')
           : op.op_type === 'move'
-            ? 'Taşındı'
-            : 'Silindi';
+            ? t('toast.moved')
+            : t('toast.deleted');
       flashToast(`${verb} (${op.progress_total})`);
     }
     void load();
-    void splitPaneRef.value?.reload(); /* wiring:d1 — ikincil panel de tazelenir */
+    void splitPaneRef.value?.reload(); /* wiring:d1 — refresh the secondary pane too */
   },
 });
 
@@ -661,8 +662,9 @@ const showDelete = ref(false);
 const showShare = ref(false);
 const showPreview = ref(false);
 const renameTarget = ref<FileNode | null>(null);
-/* ui-fix — açık olan rename/delete/new-folder modal'ı yan panele mi ait?
- * (menü ana panelle aynı; mutasyonlar doğru panele yönlensin diye.) */
+/* ui-fix — does the open rename/delete/new-folder modal belong to the side
+ * pane? (the menu is identical to the main pane's; this routes the mutation
+ * to the right one.) */
 const mutationInPane = ref(false);
 const shareTarget = ref<FileNode | null>(null);
 const activeShare = ref<(ShareInfo & { url: string; filename?: string }) | null>(null);
@@ -1506,7 +1508,7 @@ async function load(path?: string) {
       currentPath.value = '';
       adapter.value = '';
       dirname.value = '';
-      e2eRoot.value = ''; /* wiring:e2 — sanal kökte kilit ekranı olmaz */
+      e2eRoot.value = ''; /* wiring:e2 — no lock screen at the virtual root */
       files.value = virtualStorageRows();
       return;
     }
@@ -1553,7 +1555,7 @@ async function load(path?: string) {
       // show the dedicated not-found state instead of a toast over a stale
       // listing that reads as "this folder is empty".
       notFoundPath.value = String(requested);
-      e2eRoot.value = ''; /* wiring:e2 — ölü linkte kilit ekranı kalmasın */
+      e2eRoot.value = ''; /* wiring:e2 — no lock screen left over on a dead link */
       files.value = [];
       emit('error', { message: e, context: { path } });
       return;
@@ -1599,7 +1601,7 @@ async function loadTrash() {
   loading.value = true;
   trashOrigin.value = adapter.value || '';
   trashMode.value = true;
-  e2eRoot.value = ''; /* wiring:e2 — çöp görünümü şifreli bağlamın dışındadır */
+  e2eRoot.value = ''; /* wiring:e2 — the trash view is outside the encrypted context */
   selection.clear();
   try {
     const { entries } = await api.listTrash();
@@ -1678,10 +1680,10 @@ function wireParent(p: string): string {
   return slash === -1 ? prefix : prefix + rel.slice(0, slash);
 }
 
-/* ui-fix — iki wire yolun AYNI dizini gösterip göstermediği (trailing-slash
- * ve kök `adapter://` güvenli). Bir öğeyi ZATEN bulunduğu klasöre bırakma
- * (source parent === target) no-op olmalı; aksi halde backend "kendine
- * kopyala" 400'ü döner. */
+/* ui-fix — do two wire paths point at the SAME directory (safe against a
+ * trailing slash and against the bare `adapter://` root)? Dropping an item
+ * into the folder it is ALREADY in (source parent === target) must be a
+ * no-op; otherwise the backend answers with a "copy onto itself" 400. */
 function sameDir(a: string, b: string): boolean {
   const norm = (s: string) => {
     const i = s.indexOf('://');
@@ -1931,7 +1933,7 @@ async function openSearchHit(hit: GlobalSearchHit) {
 
 useKeyboardShortcuts(rootEl, {
   onDelete: () => {
-    /* ui-fix — kısayol da aktif panele gider (menüyle tutarlı). */
+    /* ui-fix — the shortcut goes to the active pane too (consistent with the menu). */
     if (paneIsActive.value) {
       const psel = splitPaneRef.value?.selectedNodes() ?? [];
       if (psel.length) {
@@ -2011,7 +2013,7 @@ useKeyboardShortcuts(rootEl, {
   onToggleHidden: () => toggleHiddenFiles(),
   onStar: () => void toggleStar(selection.nodes.value) /* yildiz:s1 */,
   onToggleInspector: () => toggleInspector() /* koru:k1 */,
-  /* wiring:d1 — sekme aksiyonları (registry: tab-new/close/next/prev) */
+  /* wiring:d1 — tab actions (registry: tab-new/close/next/prev) */
   onTabNew: () => newTabHere(),
   onTabClose: () => closeTabById(tabsActiveId.value),
   onTabNext: () => nextTab(),
@@ -2060,9 +2062,10 @@ function openNode(n: FileNode) {
     void load(target);
     return;
   }
-  /* wiring:e2 — şifreli klasörde dosya açma: kilit açıksa çöz + salt-okunur
-     önizleme (blob URL mevcut viewer'lara gider); kilitliyken hiçbir şey
-     açılmaz (kilit ekranı zaten listeyi kapatır). */
+  /* wiring:e2 — opening a file inside an encrypted folder: while unlocked,
+     decrypt + show a read-only preview (the blob URL feeds the existing
+     viewers); while locked nothing opens at all (the lock screen already
+     hides the listing). */
   if (e2eUnlocked.value && n.type === 'file') {
     void e2eOpenPreview(n);
     return;
@@ -2126,7 +2129,7 @@ async function restoreSelection(targets?: FileNode[]) {
         .map((n) => (n as { id?: number }).id)
         .filter((x): x is number => typeof x === 'number');
       const { restored } = await api.restoreIds(ids);
-      flashToast(`${restored} öğe geri getirildi`);
+      flashToast(t('toast.restored', { n: restored }));
       selection.clear();
       await loadTrash();
       return;
@@ -2135,7 +2138,7 @@ async function restoreSelection(targets?: FileNode[]) {
     if (!api.endpoints.restore) return;
     const items = nodes.map((n) => n.path); // qualified
     const { restored } = await api.restore(items);
-    flashToast(`${restored} öğe geri getirildi`);
+    flashToast(t('toast.restored', { n: restored }));
     selection.clear();
     await load();
   } catch (err) {
@@ -2144,7 +2147,7 @@ async function restoreSelection(targets?: FileNode[]) {
 }
 
 function previewNode(n: FileNode) {
-  /* wiring:e2 — önizleme de çözülmüş blob'dan beslenir */
+  /* wiring:e2 — the preview is fed from the decrypted blob as well */
   if (e2eUnlocked.value && n.type === 'file') {
     void e2eOpenPreview(n);
     return;
@@ -2171,8 +2174,9 @@ function openNodeInNewTab(n: FileNode) {
     void load(target);
     return;
   }
-  /* wiring:e2 — standalone editör rotası sunucudan HAM (şifreli) baytı
-     çeker; şifreli klasörde her "Aç" in-page çözülmüş önizlemeye iner. */
+  /* wiring:e2 — the standalone editor route pulls the RAW (encrypted) bytes
+     from the server, so inside an encrypted folder every "Aç" falls back to
+     the in-page decrypted preview. */
   if (e2eActive.value) {
     if (e2eUnlocked.value) void e2eOpenPreview(n);
     return;
@@ -2207,10 +2211,10 @@ function openNodeInNewTab(n: FileNode) {
   void markRecent(n);
 }
 
-type ContextMode = 'selection' | 'breadcrumb' | 'pane' /* ui-fix — yan panel sağ-tık */;
+type ContextMode = 'selection' | 'breadcrumb' | 'pane' /* ui-fix — side-pane right-click */;
 const ctxMode = ref<ContextMode>('selection');
 const breadcrumbCtxPath = ref<string>('');
-/* ui-fix — yan panel sağ-tık menüsünün hedef node'ları (pane selection). */
+/* ui-fix — target nodes of the side pane's right-click menu (pane selection). */
 const paneCtxTargets = ref<FileNode[]>([]);
 const breadcrumbCtxLabel = ref<string>('');
 
@@ -2415,15 +2419,17 @@ function onCrumbContext(payload: { x: number; y: number; adapterPath: string; la
   ctxRef.value?.show({ clientX: payload.x, clientY: payload.y }, []);
 }
 
-/* ui-fix — yan (ikincil) panelde sağ-tık: pane'i aktifleştir + menüyü aç.
- * Menü ana panelle BİREBİR aynı (selectionActionList tek kaynak); aksiyonlar
- * dispatchItemAction'a gider ve ctxMode==='pane' iken pane-route'lanır. */
+/* ui-fix — right-click in the side (secondary) pane: activate the pane, then
+ * open the menu. The menu is EXACTLY the main pane's (selectionActionList is
+ * the single source); actions go to dispatchItemAction and are pane-routed
+ * while ctxMode==='pane'. */
 function onPaneContext(node: FileNode | null, ev: MouseEvent) {
   activePane.value = 'split';
   void refreshKept();
   const sel = splitPaneRef.value?.selectedNodes() ?? [];
-  // node=null (boş alana sağ-tık): seçimsiz menü (Yeni Klasör + Yapıştır).
-  // Aksi halde pane seçimi (yoksa tıklanan node) hedeftir.
+  // node=null (right-click on empty space): the selection-less menu
+  // ("Yeni Klasör" + "Yapıştır"). Otherwise the pane selection is the target
+  // (falling back to the clicked node).
   paneCtxTargets.value = node ? (sel.length > 0 ? sel : [node]) : [];
   ctxMode.value = 'pane';
   ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
@@ -2436,10 +2442,10 @@ const contextActions = computed<ContextAction[]>(() => {
       { key: 'copy-path', label: t('breadcrumb.copy_path'), icon: '📋' },
     ];
   }
-  if (ctxMode.value === 'pane' /* ui-fix — yan panel menüsü ana panelle BİREBİR aynı */) {
+  if (ctxMode.value === 'pane' /* ui-fix — side-pane menu is EXACTLY the main pane's */) {
     const psel = paneCtxTargets.value;
     if (psel.length === 0) {
-      // Boş alana sağ-tık: ana paneldeki canvas menüsüyle aynı.
+      // Right-click on empty space: same as the main pane's canvas menu.
       return [
         { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
         { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
@@ -2470,7 +2476,7 @@ const contextActions = computed<ContextAction[]>(() => {
   // PRIOR BUG: this used `currentPath === '/'` but the load() branch
   // for the virtual root sets currentPath to EMPTY string, not '/'.
   // So the guard never fired and every mutation action leaked into
-  // the menu at the depo listing — including new-folder + paste,
+  // the menu at the storage listing — including new-folder + paste,
   // which Ada called out in the most direct possible terms. Use
   // the same empty-after-trim test as `atVirtualRoot` above.
   const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
@@ -2512,9 +2518,10 @@ const contextActions = computed<ContextAction[]>(() => {
 
 // selectionActionList — the SINGLE source of truth for the actions offered on a
 // selection. BOTH the right-click context menu AND the top toolbar render this
-// exact list so they can never drift apart (Ada: "sağ klik menüyle üst menü
-// tutmuyor"). The toolbar filters out dividers/hidden; the context menu shows
-// them. Action handling is unified in dispatchItemAction().
+// exact list so they can never drift apart (Ada, translated from Turkish: "the
+// right-click menu and the top menu don't match"). The toolbar filters out
+// dividers/hidden; the context menu shows them. Action handling is unified in
+// dispatchItemAction().
 function selectionActionList(sel: FileNode[]): ContextAction[] {
   const any = sel.length > 0;
   const single = sel.length === 1;
@@ -2537,11 +2544,11 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   const accessLabel = locale.value === 'en' ? 'Share / Permissions' : 'Paylaş / İzinler';
   return [
     { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
-    { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — klasörü yeni sekmede aç */,
+    { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — open the folder in a new tab */,
     { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
     { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
-    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w || e2eActive.value /* wiring:e2 — convert ciphertext'e anlamsız */, disabled: !isFile },
-    { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w || e2eActive.value /* wiring:e2 — paylaşım MVP'de kapalı (link ciphertext verir) */ },
+    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */, disabled: !isFile },
+    { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w || e2eActive.value /* wiring:e2 — sharing is off in the MVP (the link would serve ciphertext) */ },
     { key: 'details', label: t('ctx.details'), icon: 'ℹ', hidden: !any } /* koru:k1 */,
     { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
     { divider: true, key: 'sep1', label: '', hidden: !w },
@@ -2596,7 +2603,7 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
     }
     return;
   }
-  if (ctxMode.value === 'pane' /* ui-fix — yan panel: aynı dispatch, pane-route */) {
+  if (ctxMode.value === 'pane' /* ui-fix — side pane: same dispatch, pane-routed */) {
     await dispatchItemAction(action.key, paneCtxTargets.value);
     return;
   }
@@ -2692,23 +2699,23 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       }
       break;
     case 'cut':
-      /* ui-fix — pane bağlamında pano kaynağı pane'in dizini olmalı. */
+      /* ui-fix — in a pane context the clipboard source must be the pane's dir. */
       if (ctxMode.value === 'pane') paneCut();
       else {
         clipboard.value = { mode: 'cut', items: targets, sourcePath: currentPath.value };
-        flashToast('Kes → Yapıştır hazır');
+        flashToast(t('toast.cut_ready'));
       }
       break;
     case 'copy':
       if (ctxMode.value === 'pane') paneCopy();
       else {
         clipboard.value = { mode: 'copy', items: targets, sourcePath: currentPath.value };
-        flashToast('Kopyala → Yapıştır hazır');
+        flashToast(t('toast.copy_ready'));
       }
       break;
     case 'paste':
-      /* ui-fix — sağ-klik menüsünden yapıştırma da aktif panele gider
-       * (klavye kısayolu zaten pane-route'luydu; menü değildi). */
+      /* ui-fix — pasting from the right-click menu goes to the active pane too
+       * (the keyboard shortcut was already pane-routed; the menu was not). */
       if (ctxMode.value === 'pane' || paneIsActive.value) await panePaste();
       else await paste();
       break;
@@ -2729,7 +2736,7 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'duplicate':
       if (targets[0]) await duplicate(targets[0]);
       break;
-    /* wiring:d1 — sağ-tık "Yeni sekmede aç" */
+    /* wiring:d1 — right-click "Yeni sekmede aç" (open in new tab) */
     case 'open-tab':
       if (targets[0]) openNodeInTab(targets[0]);
       break;
@@ -2740,13 +2747,13 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
 function cut() {
   if (selection.isEmpty.value) return;
   clipboard.value = { mode: 'cut', items: selection.nodes.value, sourcePath: currentPath.value };
-  flashToast('Kesildi');
+  flashToast(t('toast.cut'));
 }
 
 function copyToClipboard() {
   if (selection.isEmpty.value) return;
   clipboard.value = { mode: 'copy', items: selection.nodes.value, sourcePath: currentPath.value };
-  flashToast('Kopyalandı');
+  flashToast(t('toast.copied'));
 }
 
 async function paste() {
@@ -2757,25 +2764,26 @@ async function paste() {
     const sourceDir = cb.sourcePath || '';
     const sameDir = cb.mode === 'cut' && sourceDir === currentPath.value;
     if (sameDir) {
-      flashToast('Aynı klasöre kesilemez');
+      flashToast(t('toast.same_folder_cut'));
       return;
     }
 
     const targetWire = qualify(currentPath.value);
-    // Depo farkı yalnız mesajı değiştirir: kes KESTİR, kopyala KOPYALAR —
-    // hedef başka depo olsa da. Aktarımı sunucu yapar (ops kuyruğu hem
-    // kaynak hem hedef depoyu taşır).
+    // A different storage only changes the message: cut still CUTS
+    // and copy still COPIES, even when the target lives on another storage.
+    // The server does the transfer (the ops queue carries both the source
+    // and the target storage).
     const plan = resolveTransfer(items, targetWire, cb.mode === 'cut' ? 'move' : 'copy');
     if (cb.mode === 'cut') {
       const originWire = qualify(sourceDir) || undefined;
       const { op } = await api.moveAsync(items, targetWire, originWire);
       registerMoveUndo(op.id, items, targetWire, originWire);
       pendingOps.register(op);
-      flashToast(plan.cross ? t('split.cross_move') : 'Taşıma kuyruğa alındı');
+      flashToast(plan.cross ? t('split.cross_move') : t('split.move_queued'));
     } else {
       const { op } = await api.copy(items, targetWire);
       pendingOps.register(op);
-      flashToast(plan.cross ? t('split.cross_copy') : 'Kopyalama kuyruğa alındı');
+      flashToast(plan.cross ? t('split.cross_copy') : t('split.copy_queued'));
     }
     clipboard.value = { mode: null, items: [], sourcePath: null };
   } catch (err) {
@@ -2793,8 +2801,9 @@ async function duplicate(n: FileNode) {
 }
 
 function downloadFile(n: FileNode) {
-  /* wiring:e2 — şifreli klasörde indirme: baytları çek, çöz, orijinal adla
-     kaydet (ham ciphertext'i kullanıcıya vermek anlamsız). */
+  /* wiring:e2 — downloading inside an encrypted folder: fetch the bytes,
+     decrypt them, save under the original name (handing the user raw
+     ciphertext would be pointless). */
   if (e2eUnlocked.value) {
     void e2eDownload(n);
     return;
@@ -2810,7 +2819,7 @@ function downloadFile(n: FileNode) {
 // ------- Modals -------
 
 async function submitNewFolder(name: string) {
-  const inPane = mutationInPane.value; /* ui-fix — yan panelde yeni klasör */
+  const inPane = mutationInPane.value; /* ui-fix — new folder in the side pane */
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     await api.newFolder(dirWire, name);
@@ -2825,7 +2834,7 @@ async function submitNewFolder(name: string) {
 async function submitRename(name: string) {
   const target = renameTarget.value;
   if (!target) return;
-  const inPane = mutationInPane.value; /* ui-fix — yan panelden yeniden adlandırma */
+  const inPane = mutationInPane.value; /* ui-fix — rename from the side pane */
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     const oldPath = target.path; // qualified
@@ -2853,7 +2862,7 @@ async function confirmDelete() {
   // offer Restore here rather than a delete that would just re-trash a path.
   if (trashMode.value) {
     showDelete.value = false;
-    flashToast('Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.');
+    flashToast(t('toast.trash_retention'));
     return;
   }
   /* ui-fix — yan panelden silme: hedefler + dizin + tazeleme pane'e ait. */
@@ -2885,7 +2894,7 @@ async function confirmDelete() {
         opUndo.set(op.id, { message: t('toast.trashed'), fn: restoreUndo });
       }
       pendingOps.register(op);
-      flashToast('Silme kuyruğa alındı');
+      flashToast(t('toast.delete_queued'));
     } else {
       await api.deleteItems(dirWire, items);
       if (inPane) await splitPaneRef.value?.reload();
@@ -2962,9 +2971,9 @@ function onFilePicked(ev: Event) {
 
 async function uploadFiles(list: File[]) {
   if (list.length === 0) return;
-  /* wiring:e2 — şifreli klasörde upload şeffaf şifrelenir. Kilitliyken
-     yükleme yok (düz metin sızdırma kapısı olurdu); 200MB üstü MVP
-     tek-shot sınırına takılır ve uyarıyla atlanır. */
+  /* wiring:e2 — uploads into an encrypted folder are encrypted transparently.
+     No upload while locked (that would be a plaintext-leak door); anything
+     over 200MB hits the MVP single-shot limit and is skipped with a warning. */
   if (e2eLocked.value) {
     flashToast(t('e2e.upload.locked'));
     return;
@@ -3135,9 +3144,10 @@ function isExternalFileDrag(ev: DragEvent): boolean {
   const dt = ev.dataTransfer;
   if (!dt) return false;
   if (dt.types && dt.types.includes(FE_DND_MIME)) return false;
-  /* wiring:f1 — kendi başlattığımız işletim sistemi sürüklemesi 'Files' taşır
-     ama YÜKLEME değildir: aynı baytları sunucudan indirip geri yüklemek
-     (taşıma yerine kopya, üstelik iki kat trafik) olurdu. */
+  /* wiring:f1 — an OS drag we started ourselves also carries 'Files', but it
+     is NOT an upload: it would mean downloading the same bytes from the
+     server and posting them straight back (a copy instead of a move, at
+     twice the traffic). */
   if (activeNativeDrag()) return false;
   // Some browsers expose `items` early in the drag, others only on
   // drop. When `items` is available we use it as the authoritative
@@ -3168,9 +3178,10 @@ function onDragLeave() {
   if (dragCounter.value === 0) dragOver.value = false;
 }
 function onDragOver(ev: DragEvent) {
-  /* wiring:d1 — iç sürüklemeler kök gövdeye de bırakılabilir olmalı ki split
-     panelinden ana panelin BOŞLUĞUNA bırakmak çalışsın (origin dragover'da
-     okunamaz — karar drop anında verilir; aynı-klasör drop'u no-op kalır). */
+  /* wiring:d1 — internal drags must be droppable on the root body too, so that
+     dropping from the split pane onto the main pane's EMPTY SPACE works (the
+     origin can't be read during dragover — the decision is made at drop time;
+     a same-folder drop stays a no-op). */
   if (hasInternalDrag(ev)) {
     ev.preventDefault();
     return;
@@ -3181,8 +3192,9 @@ function onDragOver(ev: DragEvent) {
   }
 }
 function onDropUpload(ev: DragEvent) {
-  /* wiring:d1 — split panelinden ana panelin boşluğuna bırakma = geçerli
-     klasöre aktar (aynı klasörden gelenler no-op, eski davranış korunur). */
+  /* wiring:d1 — dropping from the split pane onto the main pane's empty space
+     = transfer into the current folder (items from the same folder stay a
+     no-op, so the old behaviour is preserved). */
   if (hasInternalDrag(ev)) {
     const d1Origin = internalDragOrigin(ev) || '';
     const d1Here = qualify(currentPath.value);
@@ -3243,13 +3255,14 @@ onMounted(() => {
   window.addEventListener('drop', onWindowDrop);
   window.addEventListener('pointerup', onGlobalPointerUp);
   window.addEventListener('blur', onGlobalPointerUp);
-  /* wiring:f1 — kabuk hazırlarken tek bir "hazırlanıyor" der; her dosyada
-     toast atmak ilerlemeyi değil gürültüyü gösterirdi. Bitişi 'hazır'
-     toast'ı (prepareDragOut) duyurur. */
+  /* wiring:f1 — while the shell prepares, say "preparing" exactly once; a
+     toast per file would show noise rather than progress. The finish is
+     announced by the 'ready' toast (prepareDragOut). */
   dragOut.value?.onProgress?.((p) => {
-    // Bırakma SONRASI iş (yer tutucu yolu) her zaman duyurulur — kullanıcı
-    // dosyayı bir klasöre bıraktı, orada ne olduğunu bilmeye hakkı var.
-    // Sessizlik yalnız kimsenin istemediği ön-hazırlık için geçerli.
+    // Work that happens AFTER the drop (the placeholder path) is always
+    // announced — the user dropped a file into a folder and has a right to
+    // know what happened there. Silence only applies to the pre-preparation
+    // nobody asked for.
     const afterDrop = !!p?.dropped;
     if (p?.error === 'drop_not_found') {
       flashToast(t('dragout.not_found'));
@@ -3267,18 +3280,18 @@ onMounted(() => {
     if (!p?.finished && p?.done === 0) flashToast(t('dragout.preparing'));
   });
 });
-/* wiring:f1 — işletim sistemi sürüklemesi bizde 'dragend' üretmez (HTML5
-   sürüklemesi hiç başlamadı). Fare bırakıldığında kaydı düşürüyoruz; aksi
-   halde sonraki normal sürükleme bir önceki seçimi taşıdığını sanırdı. */
+/* wiring:f1 — an OS drag never fires 'dragend' for us (the HTML5 drag never
+   started). We drop the record when the mouse is released; otherwise the next
+   ordinary drag would think it was carrying the previous selection. */
 function onGlobalPointerUp() {
   if (activeNativeDrag()) {
     endNativeDrag();
-    // Bırakma bizim penceremizde OLMAYABİLİR de; kabuğun izlemesini yalnız
-    // kendi bırakma yollarımız iptal eder (onDropUpload / onItemDropInto).
+    // The drop MAY NOT have landed in our own window; only our own drop paths
+    // cancel the shell's watch (onDropUpload / onItemDropInto).
   }
 }
 
-/** Sürükleme uygulama içinde bitti: kabuk artık bir bırakma beklemesin. */
+/** The drag ended inside the app: the shell should stop waiting for a drop. */
 function cancelShellDrag() {
   if (dragOut.value?.cancel) void Promise.resolve(dragOut.value.cancel()).catch(() => undefined);
 }
@@ -3316,14 +3329,15 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
     .filter((n) => n.basename !== '.trash')
     .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
 
-  /* wiring:f1 — dışarı sürükleme (masaüstü / başka uygulama).
-     Kabuk varsa sürükleme HER ZAMAN işletim sistemi sürüklemesidir: klasörler
-     ve çoklu seçim ayrı ayrı GERÇEK dosya olarak düşer, BOYUT SINIRI YOK.
-     Baytlar hazırsa gerçek dosyalar verilir; değilse kabuk boş "yer tutucu"
-     verir, nereye bırakıldığını bulur ve indirmeyi ORAYA yapar (bkz.
-     desktop/src/dropwatch.ts). Uygulama İÇİNDE bırakılırsa sürükleme yine
-     sunucu tarafı taşımadır — payload bizde durur — ve kabuğa "vazgeç" denir
-     ki sürücüleri boşuna dinlemesin. */
+  /* wiring:f1 — drag-out (to the desktop / another application).
+     When a shell is present the drag is ALWAYS an OS drag: folders and
+     multi-selections land as REAL files, one by one, with NO SIZE LIMIT.
+     If the bytes are ready, real files are handed over; if not, the shell
+     hands over an empty "placeholder", finds out where it was dropped and
+     downloads THERE (see desktop/src/dropwatch.ts). If the drop lands INSIDE
+     the app the drag is still a server-side move — the payload stays with us —
+     and the shell is told to "give up" so it doesn't watch the drives for
+     nothing. */
   if (dragOut.value && items.length > 0) {
     ev.preventDefault();
     beginNativeDrag(items, qualify(currentPath.value));
@@ -3336,14 +3350,15 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
   }
 
   ev.dataTransfer.setData(FE_DND_MIME, JSON.stringify(items));
-  ev.dataTransfer.setData(FE_DND_SRC_MIME, qualify(currentPath.value)); /* wiring:d1 — paneller arası origin damgası */
+  ev.dataTransfer.setData(FE_DND_SRC_MIME, qualify(currentPath.value)); /* wiring:d1 — cross-pane origin stamp */
   ev.dataTransfer.setData('text/plain', items.map((i) => i.path).join('\n'));
   ev.dataTransfer.effectAllowed = 'move';
 
-  /* Tek dosya + çerezli oturum: tarayıcının kendi indirme yolu (DownloadURL)
-     bırakma anında dosyayı masaüstüne indirir; hiçbir hazırlık gerekmez.
-     Bearer token'lı kurulumda (masaüstü uygulaması) bu yol kimliksiz gider,
-     o yüzden orada üstteki yerel yol devrededir — bkz. lib/dragOut.ts. */
+  /* Single file + a cookie session: the browser's own download path
+     (DownloadURL) fetches the file onto the desktop at drop time; no
+     preparation is needed at all. In a bearer-token setup (the desktop app)
+     that path goes out unauthenticated, which is why the local path above
+     takes over there — see lib/dragOut.ts. */
   if (items.length === 1 && items[0] && canDownloadUrlDrag(props.config.auth)) {
     const payload = downloadUrlPayload(items[0], api.downloadUrl(items[0].path), node.mime_type);
     if (payload) ev.dataTransfer.setData('DownloadURL', payload);
@@ -3352,13 +3367,13 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
   if (dragOut.value && items.length > 0) void prepareDragOut(items);
 }
 
-/* === wiring:f1 — dışarı sürükleme hazırlığı ===
+/* === wiring:f1 — drag-out preparation ===
  *
- * Baytlar sürükleme BAŞLAMADAN diskte olmak zorunda (işletim sistemi bırakma
- * anında yoldan kopyalar), o yüzden hazırlık ayrı bir adımdır. Bitince
- * kullanıcıya "hazır" denir; ikinci sürükleme artık işletim sistemi
- * sürüklemesidir ve anında başlar. Bu bilgisayarda tutulan (senkron) dosyalar
- * için hazırlık ilk seferde de anında biter — kopya zaten yerelde.
+ * The bytes have to be on disk BEFORE the drag starts (the OS copies from the
+ * path at drop time), so preparation is a separate step. When it finishes the
+ * user is told "ready"; the second drag is now an OS drag and starts
+ * instantly. For files kept on this computer (synced) preparation finishes
+ * instantly on the first go too — the copy is already local.
  */
 const dragOut = computed(() => props.config.dragOut ?? null);
 const dragOutReadyKey = ref('');
@@ -3366,11 +3381,12 @@ const dragOutBusy = ref(false);
 /** True while a preparation nobody asked for is running. */
 let dragOutQuiet = false;
 
-/* Küçük seçimler SEÇİLDİĞİ anda hazırlanır, çünkü hazırlık bittikten sonraki
-   sürükleme işletim sistemi sürüklemesidir: bir belgeyi seçip masaüstüne
-   sürüklemek böylece İLK denemede çalışır. Tavan bilerek düşük — tıklayarak
-   gezinen biri her satırda film indirmemeli; sınırın üstündekiler ilk
-   sürüklemede hazırlanır, ikinci sürükleme anında başlar. */
+/* Small selections are prepared the moment they are SELECTED, because once
+   preparation is done the next drag is an OS drag: picking a document and
+   dragging it to the desktop therefore works on the FIRST try. The ceiling is
+   deliberately low — someone click-browsing shouldn't download a movie on
+   every row; anything above the limit is prepared on the first drag and the
+   second drag starts instantly. */
 const DRAGOUT_PREFETCH_MAX_BYTES = 8 * 1024 * 1024;
 const DRAGOUT_PREFETCH_MAX_ITEMS = 10;
 let dragOutPrefetchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3382,8 +3398,8 @@ watch(
     clearTimeout(dragOutPrefetchTimer);
     const nodes = selection.nodes.value;
     if (nodes.length === 0 || nodes.length > DRAGOUT_PREFETCH_MAX_ITEMS) return;
-    // Klasörün boyutu listelemede bilinmez; onu tahmin etmek yerine ilk
-    // sürüklemeye bırakıyoruz.
+    // A folder's size isn't known from the listing; rather than guess it, we
+    // leave it to the first drag.
     if (nodes.some((n) => n.type !== 'file')) return;
     const total = nodes.reduce((sum, n) => sum + (n.size ?? 0), 0);
     if (total > DRAGOUT_PREFETCH_MAX_BYTES) return;
@@ -3404,8 +3420,9 @@ async function prepareDragOut(items: DragItem[], quiet = false): Promise<void> {
     const res = await hook.prepare(items);
     if (res?.ready) {
       dragOutReadyKey.value = key;
-      // Sessiz tur seçimle tetiklenir; kullanıcı bir şey İSTEMEDİ, o yüzden
-      // ona bir şey söylemek de gerekmez. Sürüklemeyle başlayan tur söyler.
+      // The quiet round is triggered by a selection; the user ASKED for
+      // nothing, so there's nothing to tell them either. A round that starts
+      // from an actual drag does speak up.
       if (!quiet) flashToast(t('dragout.ready'));
     } else if (res?.error && !quiet) {
       flashToast(res.error);
@@ -3420,12 +3437,12 @@ async function prepareDragOut(items: DragItem[], quiet = false): Promise<void> {
 
 async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string, originOverride?: string): Promise<void> {
   try {
-    const originWire = originOverride ?? qualify(currentPath.value); /* wiring:d1 — split panelinden gelen sürüklemede gerçek kaynak klasör */
+    const originWire = originOverride ?? qualify(currentPath.value); /* wiring:d1 — the real source folder for a drag coming from the split pane */
     if (api.endpoints.moveAsync) {
       const { op } = await api.moveAsync(sources, targetDir, originWire);
       registerMoveUndo(op.id, sources, targetDir, originWire);
       pendingOps.register(op);
-      flashToast('Taşıma kuyruğa alındı');
+      flashToast(t('split.move_queued'));
     } else {
       await api.move(originWire, sources, targetDir);
       await load();
@@ -3451,11 +3468,12 @@ async function onItemDropInto(target: FileNode, ev: DragEvent) {
   const targetDir = target.path; // qualified
   const sources = items
     .map((i) => i.path)
-    // ui-fix — öğe zaten targetDir'in içindeyse (parent===target) atla: yerinde
-    // bırakma no-op, backend "kendine kopyala" 400'ü tetiklemez.
+    // ui-fix — skip items already inside targetDir (parent===target): an
+    // in-place drop is a no-op and must not trigger the backend's "copy onto
+    // itself" 400.
     .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/') && !sameDir(wireParent(p), targetDir));
-  if (sources.length === 0) return; // sessiz no-op (yerinde bırakma)
-  await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — depo-farkında aktarım */
+  if (sources.length === 0) return; // silent no-op (in-place drop)
+  await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — storage-aware transfer */
 }
 
 async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
@@ -3467,10 +3485,10 @@ async function onCrumbDropInto(adapterPath: string, ev: DragEvent) {
   const targetDir = adapterPath; // already qualified by breadcrumb
   const sources = items
     .map((i) => i.path)
-    // ui-fix — kırıntıya (aynı klasöre) yerinde bırakma no-op.
+    // ui-fix — an in-place drop onto the breadcrumb (the same folder) is a no-op.
     .filter((p) => p && p !== targetDir && !targetDir.startsWith(p + '/') && !sameDir(wireParent(p), targetDir));
   if (sources.length === 0) return;
-  await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — depo-farkında aktarım */
+  await transferItems(sources, targetDir, dndOrigin(ev)); /* wiring:d1 — storage-aware transfer */
 }
 
 function onCancelUpload(job: UploadJob) {
@@ -3613,7 +3631,7 @@ function quickLookToggle() {
   const sel = selection.nodes.value;
   const n = sel.length === 1 ? sel[0] : null;
   if (!n || n.type !== 'file' || n.basename === '.trash') return;
-  /* wiring:e2 — Space peek şifreli klasörde önce çözer, sonra açar */
+  /* wiring:e2 — in an encrypted folder the Space peek decrypts first, then opens */
   if (e2eActive.value) {
     if (!e2eUnlocked.value) return;
     void (async () => {
@@ -3657,14 +3675,14 @@ watch(
   (nodes) => {
     if (!quickLookOpen.value) return;
     const n = nodes.length === 1 && nodes[0].type === 'file' ? nodes[0] : null;
-    /* wiring:e2 — ok tuşlarıyla gezerken de hedef atanmadan ÖNCE çöz,
-       yoksa viewer bir anlığına ham ciphertext URL'i alır. */
+    /* wiring:e2 — when arrowing through files, decrypt BEFORE assigning the
+       target as well, otherwise the viewer briefly gets the raw ciphertext URL. */
     if (n && n.path !== quickLookTarget.value?.path && e2eUnlocked.value) {
       void (async () => {
         try {
           await e2eFetchDecrypted(n);
         } catch {
-          /* çözülemedi — hedefi yine de değiştir, viewer hata gösterir */
+          /* decryption failed — switch the target anyway, the viewer shows the error */
         }
         quickLookTarget.value = n;
         void markRecent(n);
@@ -3759,16 +3777,17 @@ onBeforeUnmount(() => {
 });
 /* === /wiring:c4 === */
 
-/* === wiring:d1 — sekmeler (tab şeridi) + tab başına split ===
+/* === wiring:d1 — tabs (tab strip) + per-tab split ===
  *
- * useTabs, mevcut konum state'inin (currentPath/viewMode) ÜSTÜNDE bir
- * katmandır: aktif tab gezinmeleri watch ile dinleyip snapshot'ını
- * günceller; tab geçişi mevcut load(path) yolunu çağırır — yeni fetch
- * mantığı yok. Şerit tek sekmede hiç render edilmez (embed pixel-aynı).
+ * useTabs is a layer ON TOP of the existing location state
+ * (currentPath/viewMode): the active tab watches navigations and updates its
+ * snapshot; switching tabs calls the existing load(path) path — no new fetch
+ * logic. The strip is not rendered at all on a single tab (embeds stay
+ * pixel-identical).
  *
- * Persist: `filex.tabs` — pathPersist scope mantığı izlenir: mode 'none'
- * ise persist kapalı; rootPath confine'ı anahtara eklenir ki farklı
- * confine'lı embed'ler birbirinin sekmelerini ezmesin.
+ * Persist: `filex.tabs` — it follows the pathPersist scope logic: with mode
+ * 'none' persistence is off; the rootPath confine is added to the key so that
+ * embeds with different confines don't overwrite each other's tabs.
  */
 const FE_DND_SRC_MIME = 'application/x-brf-files-src';
 
@@ -3783,7 +3802,7 @@ const tabsActiveId = tabsApi.activeId;
 
 const activeSplit = computed(() => tabsApi.activeTab.value?.split ?? null);
 
-// Sekme adı OTOMATİK = güncel klasör adı (kök = depo adı / kök etiketi).
+// Tab name is AUTOMATIC = the current folder name (root = storage name / root label).
 function tabLabel(path: string): string {
   const p = (path || '').replace(/^\/+|\/+$/g, '');
   // gezinti:g1 — the virtual views park a sentinel in the path. Translate via
@@ -3815,12 +3834,13 @@ const tabsVisible = computed(
       (props.config.tabStrip !== 'auto' && tabItems.value.length > 0)),
 );
 
-// Aktif tab kullanıcıyı izler: gezinme + görünüm değişimi snapshot'a yazılır.
+// The active tab follows the user: navigation + view changes go into the snapshot.
 watch(currentPath, (p) => tabsApi.syncActive({ path: p }));
 watch(viewMode, (v) => tabsApi.syncActive({ viewMode: v }));
 
-// İlk sekme, ilk konum belli olur olmaz tohumlanır (restore varsa dokunma —
-// aktif snapshot ilk load sonrası currentPath watcher'ıyla zaten senkronlanır).
+// The first tab is seeded as soon as the first location is known (don't touch
+// it if a restore happened — the active snapshot is already synced by the
+// currentPath watcher after the first load).
 onMounted(() => {
   if (!tabsRestored) tabsApi.seed(currentPath.value ?? '', viewMode.value);
 });
@@ -3838,7 +3858,7 @@ function activateTab(id: string) {
   if (tb) applyTabLocation(tb);
 }
 function newTabHere() {
-  // Mevcut konumu klonlar; görünüm zaten oradadır, load gerekmez.
+  // Clones the current location; the view is already there, so no load needed.
   tabsApi.openTab(currentPath.value ?? '', { viewMode: viewMode.value, background: false });
 }
 function closeTabById(id: string) {
@@ -3854,16 +3874,17 @@ function prevTab() {
   if (tb) applyTabLocation(tb);
 }
 
-/** Bir klasörü ARKA PLANDA yeni sekmede aç (orta-tık / sağ-tık / palet). */
+/** Open a folder in a new tab IN THE BACKGROUND (middle-click / right-click / palette). */
 function openNodeInTab(n: FileNode) {
   if (n.type !== 'dir' || n.basename === '.trash') return;
   const target = multiStorageRoot.value ? wireToVirtual(n.path) : stripAdapter(n.path);
   tabsApi.openTab(target, { viewMode: viewMode.value, background: true });
 }
 
-// Orta-tık delegasyonu: ListView/GridView satırları data-fe-path taşır; kendi
-// keydown/emit zinciri eklemek yerine kökte tek auxclick dinleyicisi yeter.
-// (SecondaryPane kendi satırlarında stopPropagation ile kendisi halleder.)
+// Middle-click delegation: ListView/GridView rows carry data-fe-path, so a
+// single auxclick listener at the root is enough instead of adding a
+// keydown/emit chain of our own. (SecondaryPane handles its own rows via
+// stopPropagation.)
 function onListAuxClick(ev: MouseEvent) {
   if (ev.button !== 1) return;
   const host = ev.target as HTMLElement | null;
@@ -3875,9 +3896,9 @@ function onListAuxClick(ev: MouseEvent) {
   ev.preventDefault();
   openNodeInTab(node);
 }
-// Orta-tuş mousedown'ı satırlar üzerinde iptal: scroll'lu gövdede Chromium'un
-// autoscroll'u devreye girer ve auxclick HİÇ üretilmez (canlı teşhis) —
-// preventDefault autoscroll'u bastırır, auxclick yeniden akar.
+// Cancel the middle-button mousedown over rows: in a scrollable body Chromium's
+// autoscroll kicks in and auxclick is NEVER produced (diagnosed live) —
+// preventDefault suppresses autoscroll and auxclick flows again.
 function onListMiddleDown(ev: MouseEvent) {
   if (ev.button !== 1) return;
   const host = ev.target as HTMLElement | null;
@@ -3894,10 +3915,10 @@ onBeforeUnmount(() => {
   rootEl.value?.removeEventListener('mousedown', onListMiddleDown);
 });
 
-// ---- split (tab başına ikincil panel) ------------------------------
+// ---- split (per-tab secondary pane) --------------------------------
 
 const splitPaneRef = ref<InstanceType<typeof SecondaryPane> | null>(null);
-// Dar modda split devre dışı (state korunur, genişleyince geri gelir).
+// Split is disabled in narrow mode (the state is kept and comes back on widen).
 const splitVisible = computed(
   () => !!activeSplit.value && !isNarrow.value && !simpleUi.value /* gezinti:g1 */,
 );
@@ -3918,16 +3939,18 @@ function closeSplit() {
 function onPaneNavigate(p: string) {
   tabsApi.setSplit({ ...(activeSplit.value ?? {}), path: p });
 }
-/* ui-fix — çöp kutusu satırı yan panelde açılınca: trash görünümü (geri
- * yükleme aksiyonlarıyla) ana panele aittir → ana paneli aktif edip aç. */
+/* ui-fix — when the trash row is opened from the side pane: the trash view
+ * (with its restore actions) belongs to the main pane → activate the main
+ * pane and open it there. */
 function onPaneOpenTrash() {
   activePane.value = 'main';
   void loadTrash();
 }
-/* ui-fix — pane'in KENDİ görünüm modu: split açılırken ana panelinkini
- * devralır, sonrasında bağımsız. Toolbar'ın görünüm değiştiricisi ve palet
- * toggle'ı AKTİF panele yazar (Ada: "B tıklıyken ikon değiştir dersem
- * B'nin değişmesi lazım"). */
+/* ui-fix — the pane's OWN view mode: it inherits the main pane's when the
+ * split opens, and is independent afterwards. The toolbar's view switcher and
+ * the palette toggle write to the ACTIVE pane (Ada, translated from Turkish:
+ * "if I say change the icon while B is focused, B is the one that has to
+ * change"). */
 const paneViewMode = computed<ViewMode>(() => activeSplit.value?.viewMode ?? viewMode.value);
 function setPaneViewMode(v: ViewMode) {
   if (!activeSplit.value) return;
@@ -3941,7 +3964,7 @@ function setDisplayedViewMode(v: ViewMode) {
   else viewMode.value = v;
 }
 
-// Aktif panel: kısayollar aktif panele gider; panel tıklamayla aktifleşir.
+// Active pane: shortcuts go to the active pane; a pane is activated by clicking it.
 const activePane = ref<'main' | 'split'>('main');
 function setPaneMain() {
   activePane.value = 'main';
@@ -3952,7 +3975,7 @@ watch(splitVisible, (v) => {
 const paneIsActive = computed(() => activePane.value === 'split' && splitVisible.value);
 const mainPaneFocus = computed(() => splitVisible.value && activePane.value === 'main');
 
-// Pane yardımcıları — hep ana panelin mevcut dönüştürücülerini sarar.
+// Pane helpers — always wrap the main pane's existing converters.
 function paneToUser(wire: string): string {
   return multiStorageRoot.value ? wireToVirtual(wire) : stripAdapter(wire);
 }
@@ -3963,20 +3986,20 @@ function paneClamp(p: string): string {
   return clean;
 }
 
-// Pano (clipboard) aktif panele göre: kes/kopyala pane seçiminden beslenir,
-// yapıştır pane klasörüne iner. State ana panelinkiyle ORTAK — panolar arası
-// kes-yapıştır bedavaya çalışır.
+// The clipboard follows the active pane: cut/copy is fed from the pane
+// selection and paste lands in the pane's folder. The state is SHARED with the
+// main pane's — so cut-and-paste between panes works for free.
 function paneCut() {
   const nodes = splitPaneRef.value?.selectedNodes() ?? [];
   if (nodes.length === 0) return;
   clipboard.value = { mode: 'cut', items: nodes, sourcePath: splitPaneRef.value?.getPath() ?? '' };
-  flashToast('Kesildi');
+  flashToast(t('toast.cut'));
 }
 function paneCopy() {
   const nodes = splitPaneRef.value?.selectedNodes() ?? [];
   if (nodes.length === 0) return;
   clipboard.value = { mode: 'copy', items: nodes, sourcePath: splitPaneRef.value?.getPath() ?? '' };
-  flashToast('Kopyalandı');
+  flashToast(t('toast.copied'));
 }
 async function panePaste() {
   const cb = clipboard.value;
@@ -3985,28 +4008,29 @@ async function panePaste() {
   const targetWire = qualify(pane.getPath() ?? '');
   const originWire = qualify(cb.sourcePath || '') || undefined;
   if (cb.mode === 'cut' && originWire === targetWire) {
-    flashToast('Aynı klasöre kesilemez');
+    flashToast(t('toast.same_folder_cut'));
     return;
   }
   await transferItems(cb.items.map((n) => n.path), targetWire, originWire, cb.mode === 'copy' ? 'copy' : 'move');
   clipboard.value = { mode: null, items: [], sourcePath: null };
 }
 
-// ---- paneller arası aktarım ----------------------------------------
+// ---- cross-pane transfer -------------------------------------------
 function dndOrigin(ev: DragEvent): string | undefined {
   return internalDragOrigin(ev);
 }
 
 /**
- * transferItems — panel-arası / pano aktarımının tek kapısı.
+ * transferItems — the single gate for cross-pane / clipboard transfers.
  *
- * Ne yapılacağını `resolveTransfer` söyler (lib/transfer.ts): sürükleme aynı
- * depoda TAŞI, depolar arasında KOPYALA; panodan gelen kes/kopyala ise ne
- * dendiyse odur — kes, hedef başka depo olsa da TAŞIR (sunucu baytları
- * aktarıp kaynağı siler). ⚠ Eskiden depolar arası her aktarım sessizce
- * kopyaya düşüyordu: kullanıcı "kes" deyip dosyayı iki yerde buluyordu.
- * Bitince ikincil panel de tazelenir (ana panel moveSourcesAsync /
- * pendingOps onSettled üzerinden zaten tazelenir).
+ * `resolveTransfer` decides what to do (lib/transfer.ts): a drag MOVES within
+ * the same storage and COPIES across storages; a cut/copy coming from
+ * the clipboard does exactly what it says — cut MOVES even when the target is
+ * another storage (the server transfers the bytes and deletes the source).
+ * ⚠ Cross-storage transfers used to silently fall back to a copy: the user
+ * said "cut" and found the file in two places. When it's done the secondary
+ * pane is refreshed too (the main pane is already refreshed via
+ * moveSourcesAsync / pendingOps onSettled).
  */
 async function transferItems(
   sources: string[],
@@ -4014,8 +4038,8 @@ async function transferItems(
   originWire?: string,
   intent: TransferIntent = 'auto',
 ): Promise<void> {
-  // ui-fix — yerinde bırakma (source parent === target) no-op: backend
-  // "kendine kopyala" 400'ü engellenir (paneller arası + pano yolu).
+  // ui-fix — an in-place drop (source parent === target) is a no-op: this
+  // avoids the backend's "copy onto itself" 400 (cross-pane + clipboard paths).
   const list = sources.filter(
     (p) => p && p !== targetWire && !targetWire.startsWith(p + '/') && !sameDir(wireParent(p), targetWire),
   );
@@ -4027,9 +4051,10 @@ async function transferItems(
       pendingOps.register(op);
       flashToast(plan.cross ? t('split.cross_copy') : t('split.copy_queued'));
     } catch (err) {
-      // ⚠ Sunucunun kendi mesajını göster. Burada sabit bir "depolar arası
-      // desteklenmiyor" metni vardı; artık DESTEKLENİYOR, yani o metin
-      // gerçek sebebi (izin, salt-okunur depo, dolu kota) örterdi.
+      // ⚠ Show the server's own message. There used to be a hard-coded
+      // "cross-storage is not supported" text here; it IS supported now, so
+      // that text would mask the real cause (permissions, a read-only storage,
+      // a full quota).
       emit('error', { message: (err as Error).message, context: { op: 'transfer', targetWire } });
       flashToast((err as Error).message);
       return;
@@ -4046,21 +4071,23 @@ function onPaneTransfer(p: { sources: string[]; targetWire: string; originWire?:
 }
 /* === /wiring:d1 === */
 
-/* === wiring:e2 — uçtan uca şifreli klasörler ===
+/* === wiring:e2 — end-to-end encrypted folders ===
  *
- * Kripto şeması + tehdit modeli: docs/E2E-ENCRYPTION.md ve lib/e2ecrypto.ts.
- * Burada yalnız orkestrasyon var: backend listing yanıtındaki `e2e_root`
- * kilit ekranını sürer; parola marker'a karşı TARAYICIDA doğrulanır (sunucuya
- * hiçbir şey gitmez); türetilen klasör anahtarı (KEK) YALNIZ bellekte yaşar
- * (`e2eRing`) — localStorage/sessionStorage'a asla yazılmaz. Upload şeffaf
- * şifrelenir, önizleme/indirme şeffaf çözülür (blob URL mevcut viewer'lara).
+ * Crypto scheme + threat model: docs/E2E-ENCRYPTION.md and lib/e2ecrypto.ts.
+ * Only the orchestration lives here: `e2e_root` in the backend listing
+ * response drives the lock screen; the password is verified against the
+ * marker IN THE BROWSER (nothing goes to the server); the derived folder key
+ * (KEK) lives ONLY in memory (`e2eRing`) — it is never written to
+ * localStorage/sessionStorage. Uploads are encrypted transparently and
+ * previews/downloads decrypted transparently (a blob URL to the existing
+ * viewers).
  */
 const e2eRing = createKeyRing();
-// Map'ler reaktif değil — sürüm sayacı computed'ları tetikler.
+// Maps aren't reactive — a version counter drives the computeds.
 const e2eRingVer = ref(0);
-// İçinde bulunulan şifreli kökün wire yolu ('' = şifreli bağlam yok).
+// Wire path of the encrypted root we are inside ('' = no encrypted context).
 const e2eRoot = ref('');
-// path → çözülmüş blob objectURL (önizleme). Kilitleme/unmount'ta revoke.
+// path → decrypted blob objectURL (preview). Revoked on lock/unmount.
 const e2eUrls = new Map<string, string>();
 
 const e2eActive = computed(() => !!e2eRoot.value && !trashMode.value);
@@ -4073,15 +4100,15 @@ const e2eLocked = computed(() => {
   return e2eActive.value && !e2eRing.has(e2eRoot.value);
 });
 
-// Kilit ekranı formu.
+// Lock screen form.
 const e2ePw = ref('');
 const e2eUnlockBusy = ref(false);
 const e2eUnlockErr = ref('');
-// Şifreli klasör oluşturma modalı.
+// Encrypted-folder creation modal.
 const showEncFolder = ref(false);
 const e2eCreateBusy = ref(false);
 
-/* wiring:e2 recovery — kurtarma anahtarı + escrow.
+/* wiring:e2 recovery — recovery key + escrow.
  *
  * The marker of the folder we are looking at is cached here while the lock
  * screen is up: the recovery dialog needs to know which doors this folder
@@ -4151,7 +4178,7 @@ function e2eRevokeAll() {
 }
 onBeforeUnmount(e2eRevokeAll);
 
-/** Kilidi aç: marker'ı kökten çek, parolayı YERELDE doğrula, KEK'i belleğe koy. */
+/** Unlock: fetch the marker from the root, verify the password LOCALLY, put the KEK in memory. */
 async function e2eUnlock() {
   if (!e2ePw.value || e2eUnlockBusy.value || !e2eRoot.value) return;
   e2eUnlockBusy.value = true;
@@ -4207,7 +4234,7 @@ async function e2eUnlock() {
   }
 }
 
-/** "Kilitle": bellekteki anahtarı ve çözülmüş blob'ları at. */
+/** "Kilitle" (Lock): drop the in-memory key and the decrypted blobs. */
 function e2eLock() {
   if (!e2eRoot.value) return;
   e2eRing.lock(e2eRoot.value);
@@ -4216,9 +4243,9 @@ function e2eLock() {
   flashToast(t('e2e.locked_toast'));
 }
 
-// Uzantı → önizleme MIME'ı: çözülmüş blob'un <img>/<video>/<object>
-// etiketlerinde doğru render'ı için (sunucu şifreli dosyayı octet-stream
-// bilir, oradan gelen tip işe yaramaz).
+// Extension → preview MIME: so the decrypted blob renders correctly in
+// <img>/<video>/<object> tags (the server knows the encrypted file as
+// octet-stream, so the type coming from there is useless).
 const E2E_MIME: Record<string, string> = {
   txt: 'text/plain', md: 'text/markdown', log: 'text/plain', csv: 'text/csv',
   json: 'application/json', xml: 'application/xml', html: 'text/html',
@@ -4235,9 +4262,10 @@ function e2eMimeFor(n: FileNode): string {
 }
 
 /**
- * Dosyayı çek + çöz + objectURL'ini cache'le. Magic'siz (ör. DAV'la düz
- * yazılmış) dosyada null döner — çağıran normal ham akışa düşer. Yanlış
- * anahtar/bozuk veri E2eDecryptError fırlatır (çağıran toast'lar).
+ * Fetch the file + decrypt it + cache its objectURL. Returns null for a file
+ * with no magic (e.g. written in the clear over DAV) — the caller then falls
+ * back to the normal raw flow. A wrong key / corrupt data throws
+ * E2eDecryptError (the caller toasts it).
  */
 async function e2eFetchDecrypted(n: FileNode): Promise<string | null> {
   const cached = e2eUrls.get(n.path);
@@ -4252,12 +4280,12 @@ async function e2eFetchDecrypted(n: FileNode): Promise<string | null> {
   return url;
 }
 
-/** PreviewModal/QuickLook'a giden URL sağlayıcı: çözülmüş blob > ham URL. */
+/** URL provider handed to PreviewModal/QuickLook: decrypted blob > raw URL. */
 function e2ePreviewSrc(p: string): string {
   return e2eUrls.get(p) ?? api.previewUrl(p);
 }
 
-/** Çöz + salt-okunur in-page önizleme (openNode/previewNode buraya iner). */
+/** Decrypt + read-only in-page preview (openNode/previewNode land here). */
 async function e2eOpenPreview(n: FileNode) {
   try {
     await e2eFetchDecrypted(n);
@@ -4272,7 +4300,7 @@ async function e2eOpenPreview(n: FileNode) {
   void markRecent(n);
 }
 
-/** Çöz + orijinal adla indir. Magic'siz dosya olduğu gibi iner. */
+/** Decrypt + download under the original name. A file with no magic comes down as-is. */
 async function e2eDownload(n: FileNode) {
   try {
     const buf = await api.fetchArrayBuffer(n.path);
@@ -4295,7 +4323,7 @@ async function e2eDownload(n: FileNode) {
   }
 }
 
-/** Upload listesi → şifreli File listesi (200MB üstü + marker adı atlanır). */
+/** Upload list → encrypted File list (anything over 200MB + the marker name is skipped). */
 async function e2eEncryptUploads(list: File[]): Promise<File[]> {
   const kek = e2eKek();
   if (!kek) return [];
@@ -4316,10 +4344,10 @@ async function e2eEncryptUploads(list: File[]): Promise<File[]> {
   return out;
 }
 
-/** EncryptedFolderModal submit'i: klasörü aç + marker'ı yükle + kilidi açık bırak. */
+/** EncryptedFolderModal submit: create the folder + upload the marker + leave it unlocked. */
 async function submitEncryptedFolder(payload: { name: string; password: string }) {
   if (e2eActive.value) {
-    // İç içe şifreli klasör kök tespitini bulanıklaştırır — MVP'de yok.
+    // Nested encrypted folders blur root detection — not in the MVP.
     flashToast(t('e2e.create.nested'));
     return;
   }
@@ -4339,7 +4367,7 @@ async function submitEncryptedFolder(payload: { name: string; password: string }
     });
     const newDirWire = wireJoin(dirWire, payload.name);
     await api.uploadMultipart(newDirWire, [markerFile]);
-    // Oluşturan oturumda kilit açık başlar (parolayı az önce kendisi girdi).
+    // It starts unlocked in the creating session (they just typed the password).
     e2eRing.set(newDirWire, fmk);
     e2eRingVer.value++;
     showEncFolder.value = false;
@@ -4610,7 +4638,7 @@ function closeRecoveryKey() {
     @drop="onDropUpload"
     @contextmenu="onContextCanvas"
   >
-    <!-- wiring:d1 — sekme şeridi: TEK sekmede hiç render edilmez (embed pixel-aynı) -->
+    <!-- wiring:d1 — tab strip: not rendered at all on a SINGLE tab (embeds stay pixel-identical) -->
     <TabBar
       v-if="tabsVisible"
       :tabs="tabItems"
@@ -4627,7 +4655,7 @@ function closeRecoveryKey() {
     <!-- /wiring:d1 -->
     <Toolbar
       ref="toolbarRef"
-      :view-mode="displayedViewMode /* ui-fix — aktif panelin modu */"
+      :view-mode="displayedViewMode /* ui-fix — the active pane's mode */"
       :search-query="searchQuery"
       :trash-active="trashActive"
       :actions="toolbarActions"
@@ -4650,7 +4678,7 @@ function closeRecoveryKey() {
       @toggle-inspector="toggleInspector /* koru:k1 */"
       @toggle-nav="toggleSideNav /* gezinti:g1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
-      @update:view-mode="setDisplayedViewMode($event) /* ui-fix — aktif panele */"
+      @update:view-mode="setDisplayedViewMode($event) /* ui-fix — to the active pane */"
       @update:search-query="searchQuery = $event"
       @update:density="density = $event"
       @open-shortcut-settings="showShortcutSettings = true /* wiring:c2 */"
@@ -4713,13 +4741,14 @@ function closeRecoveryKey() {
       :aria-label="t('sidenav.close')"
       @click="closeNavDrawer"
     ></button>
-    <!-- ui-fix — sol panelin başlığı (breadcrumb + durum şeritleri + body)
-         tek bir sarmalda: split modunda bu sarmal sol yarıya sığar, böylece
-         breadcrumb tüm sayfayı değil kendi panelini kaplar (SecondaryPane'in
-         kendi kırıntısıyla simetrik). Aktif-panel vurgusu da bu sarmalda. -->
+    <!-- ui-fix — the left pane's header (breadcrumb + status strips + body)
+         in one wrapper: in split mode this wrapper fits the left half, so the
+         breadcrumb spans its own pane rather than the whole page (symmetric
+         with SecondaryPane's own crumbs). The active-pane accent lives on
+         this wrapper too. -->
     <div
       class="fe__primary"
-      :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — aktif panel vurgusu */"
+      :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — active-pane accent */"
     >
     <!-- surucu:d1 — the breadcrumb row. In the drive shell it also carries the
          two controls that belong to a LISTING rather than to the app (the view
@@ -4802,8 +4831,9 @@ function closeRecoveryKey() {
       </span>
     </div>
 
-    <!-- wiring:e2 — kilit açık şeridi: şifreli klasörde anahtar bellekteyken
-         görünür; "Kilitle" anahtarı ve çözülmüş blob'ları atar. -->
+    <!-- wiring:e2 — unlocked strip: visible in an encrypted folder while the
+         key is in memory; "Kilitle" (Lock) drops the key and the decrypted
+         blobs. -->
     <!-- wiring:e2 recovery — a v1 folder just opened by password. Offer it
          recovery HERE, visibly, rather than doing anything silently: this is
          the only moment filex holds the password, and (when the install has
@@ -4916,7 +4946,7 @@ function closeRecoveryKey() {
            keeps the current list, exactly as before. -->
       <div v-if="loading && files.length === 0" class="fe__skeleton" role="status">
         <span class="fe-sr-only">{{ t('loading') }}</span>
-        <div v-if="viewMode !== 'list' /* wiring:d2 — galeri de grid iskeletini kullanır */" class="fe-skel-grid" aria-hidden="true">
+        <div v-if="viewMode !== 'list' /* wiring:d2 — the gallery uses the grid skeleton too */" class="fe-skel-grid" aria-hidden="true">
           <div v-for="i in 8" :key="i" class="fe-skel-card">
             <div class="fe-skel fe-skel--thumb"></div>
             <div class="fe-skel fe-skel--label"></div>
@@ -4994,9 +5024,10 @@ function closeRecoveryKey() {
         </details>
         <!-- /wiring:c4 -->
       </div>
-      <!-- wiring:e2 — şifreli klasör kilit ekranı: parola doğru girilene dek
-           listeleme render edilmez. Parola tarayıcıda marker'a karşı
-           doğrulanır; sunucuya gitmez. -->
+      <!-- wiring:e2 — encrypted-folder lock screen: the listing is not
+           rendered until the correct password is entered. The password is
+           verified against the marker in the browser; it never reaches the
+           server. -->
       <div v-else-if="e2eLocked" class="fe-state fe-e2e-lock">
         <svg
           class="fe-state__art"
@@ -5238,7 +5269,7 @@ function closeRecoveryKey() {
         @item-drop-into="onItemDropInto"
         @star-change="onStarChange"
       />
-      <!-- wiring:d2 — galeri görünümü (GridView ile aynı event sözleşmesi) -->
+      <!-- wiring:d2 — gallery view (same event contract as GridView) -->
       <GalleryView
         v-else
         :files="displayFiles /* surucu:d1 */"
@@ -5264,9 +5295,9 @@ function closeRecoveryKey() {
     </div>
     </div><!-- /fe__primary ui-fix -->
 
-    <!-- wiring:d1 — tab başına split: sağ ikincil panel (dar modda kapalı).
-         :key tab kimliğine bağlı — tab geçişinde pane kendi konumuyla temiz
-         remount olur. -->
+    <!-- wiring:d1 — per-tab split: the secondary pane on the right (off in
+         narrow mode). :key is bound to the tab id — on a tab switch the pane
+         remounts cleanly with its own location. -->
     <SecondaryPane
       :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
       v-if="splitVisible && activeSplit"
@@ -5285,15 +5316,15 @@ function closeRecoveryKey() {
       :active="paneIsActive"
       :view-mode="paneViewMode /* ui-fix */"
       :thumb-src="thumbs.src /* ui-fix */"
-      :trash-visible="config.trashVisible !== false /* ui-fix — çöp satırı simetrisi */"
-      :nav-offers-trash="navOffersTrash /* surucu:d1 — aynı kapı iki kez açılmaz */"
+      :trash-visible="config.trashVisible !== false /* ui-fix — trash row symmetry */"
+      :nav-offers-trash="navOffersTrash /* surucu:d1 — the same door is not opened twice */"
       @navigate="onPaneNavigate"
       @activate="activePane = 'split'"
       @close="closeSplit"
       @open-tab="(p: string) => tabsApi.openTab(p, { viewMode: viewMode, background: true })"
       @transfer="onPaneTransfer"
-      @context="onPaneContext /* ui-fix — yan panel sağ-tık menüsü */"
-      @open-trash="onPaneOpenTrash /* ui-fix — çöp kutusu ana panelde açılır */"
+      @context="onPaneContext /* ui-fix — side-pane right-click menu */"
+      @open-trash="onPaneOpenTrash /* ui-fix — the trash opens in the main pane */"
     />
     <!-- /wiring:d1 -->
 
@@ -5364,7 +5395,7 @@ function closeRecoveryKey() {
     <div v-if="dragOver" class="fe__dragover">
       <div class="fe__dragover-card">
         <span class="fe-icon">⬆</span>
-        <p>Dosyaları buraya bırak</p>
+        <p>{{ t('dropzone.hint') }}</p>
       </div>
     </div>
 
@@ -5441,12 +5472,12 @@ function closeRecoveryKey() {
     <NewFolderModal
       :open="showNewFolder"
       :locale="locale"
-      :encrypted-option="!e2eActive /* wiring:e2 — iç içe şifreli klasör yok */"
+      :encrypted-option="!e2eActive /* wiring:e2 — no nested encrypted folders */"
       @close="showNewFolder = false"
       @submit="submitNewFolder"
       @encrypted="showNewFolder = false; showEncFolder = true /* wiring:e2 */"
     />
-    <!-- wiring:e2 — şifreli klasör oluşturma modalı -->
+    <!-- wiring:e2 — encrypted-folder creation modal -->
     <EncryptedFolderModal
       :open="showEncFolder"
       :locale="locale"
@@ -5506,12 +5537,12 @@ function closeRecoveryKey() {
       :locale="locale"
       :file="previewTarget"
       :theme="themeMode"
-      :preview-url="(p) => e2ePreviewSrc(p) /* wiring:e2 — çözülmüş blob > ham URL */"
+      :preview-url="(p) => e2ePreviewSrc(p) /* wiring:e2 — decrypted blob > raw URL */"
       :download-url="(p) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
-      :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO ciphertext açamaz */"
+      :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO cannot open ciphertext */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
-      :new-tab-enabled="!e2eActive /* wiring:e2 — standalone rota ham baytı çeker */"
-      :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — düz metin kaydı sızıntı olur */"
+      :new-tab-enabled="!e2eActive /* wiring:e2 — the standalone route pulls raw bytes */"
+      :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
       :open-mode="previewMode"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"
@@ -5527,6 +5558,7 @@ function closeRecoveryKey() {
       :file-name="convertTarget?.basename || convertTarget?.path || ''"
       :fetch-bytes="() => api.fetchArrayBuffer(convertTarget?.path ?? '')"
       :upload="(f) => api.uploadMultipart(qualify(currentPath), [f]).then(() => {})"
+      :locale="locale"
       @close="showConvert = false"
       @done="onConvertDone"
     />
@@ -5619,7 +5651,7 @@ function closeRecoveryKey() {
       @navigate="(p: string) => load(p)"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
-      @toggle-view="setDisplayedViewMode(displayedViewMode === 'list' ? 'grid' : displayedViewMode === 'grid' ? 'gallery' : 'list') /* wiring:d2 + ui-fix — 3 mod döngüsü, aktif panele */"
+      @toggle-view="setDisplayedViewMode(displayedViewMode === 'list' ? 'grid' : displayedViewMode === 'grid' ? 'gallery' : 'list') /* wiring:d2 + ui-fix — 3-mode cycle, to the active pane */"
       @open-trash="loadTrash"
       @refresh="() => load()"
       @go-up="goUp"

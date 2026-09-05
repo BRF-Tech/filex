@@ -511,8 +511,9 @@ func TestReadDuringTransfer_FailedTransferKeepsServing(t *testing.T) {
 
 	node, err := f.store.GetNode(context.Background(), nodeID)
 	require.NoError(t, err)
-	require.Equal(t, model.TransferStateStaged, node.TransferState,
-		"a failed transfer leaves the node staged — that is what makes a retry free")
+	require.Equal(t, model.TransferStateFailed, node.TransferState,
+		"a failed transfer is marked failed, not left at staged where it is "+
+			"indistinguishable from one still in flight (issue #16)")
 	require.NotEmpty(t, stagingDirsOnDisk(t, f.dataDir), "a failed transfer must keep its staging")
 
 	resp := f.get(t, f.managerURL("download", "stuck.bin"), nil)
@@ -555,7 +556,7 @@ func TestReadDuringTransfer_MissingStagingFailsCleanly(t *testing.T) {
 
 	node, err := f.store.GetNode(context.Background(), nodeID)
 	require.NoError(t, err)
-	require.Equal(t, model.TransferStateStaged, node.TransferState)
+	require.Equal(t, model.TransferStateFailed, node.TransferState)
 
 	resp := f.get(t, f.managerURL("download", "orphan.bin"), nil)
 	got := readAll(t, resp)

@@ -164,8 +164,8 @@ func (s *Service) retryDelete(ctx context.Context, path string) error {
 // GenerateReport computes the singleton replica_status_reports row
 // and sends the full event to the webhook (in-app gets a summary).
 //
-// The full failed-paths list goes only to webhooks (kullanıcı kendi
-// sistemine post eder — F2/F3) — the in-app body keeps the message
+// The full failed-paths list goes only to webhooks (the user posts it
+// into their own system — F2/F3) — the in-app body keeps the message
 // short so the bell doesn't drown in JSON.
 func (s *Service) GenerateReport(ctx context.Context) error {
 	failed, err := s.store.CountUnresolvedReplicaFailures(ctx)

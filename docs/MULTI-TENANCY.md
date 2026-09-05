@@ -182,6 +182,37 @@ context through workers.
   id_token and access_token, dotted-path `admin_group`). `scope = platform if
   provider.is_supertenant else tenant`.
 
+### Absolute URLs (multi-tenant)
+
+**Every absolute URL filex hands out is built on the tenant's host, not on
+`FILEX_PUBLIC_URL`.** One resolver — `internal/tenanturl` — answers that
+question for the whole server, and a new absolute-URL builder belongs on it
+rather than on `PublicURL`:
+
+| Surface | URL |
+|---|---|
+| Share / file-request links | `/s/{token}`, `/d/{token}` |
+| Realtime | the `wss://…/api/ws` endpoint advertised with a ticket |
+| E-mail | drop-received notice, item-grant notice, **account-created (temp password + login link)**, invite share link |
+| Integrations | the `/s/{token}` and `/u/{ticket}` URLs returned to AI / MCP / ShareX |
+
+Two ways in, because not every URL is minted while a browser waits:
+
+- **From the request** — the host it asked for, and only when that host
+  resolves to an **enabled provider row** (same trusted-host model as tenant
+  resolution, §13). Anything else falls back to `PublicURL`, so a forged
+  `Host:` header can never appear in a minted link or an e-mail. The origin is
+  assembled from the provider row's own `host` column, not from the request
+  string.
+- **From the data** — where there is no `*http.Request` (an MCP tool call, an
+  async op, a queue worker), the tenant comes from the node's **storage** →
+  provider link. A storage linked to no provider falls back to `PublicURL`.
+
+Scheme is `https` (TLS-terminating proxy assumed) unless the proxy sends
+`X-Forwarded-Proto: http`, or `FILEX_PUBLIC_URL` itself is `http://` (a
+TLS-less dev install). **Single-tenant installs are unchanged**: the request is
+never consulted and `PublicURL` is always the answer.
+
 ### Callback redirects & session cookie (multi-tenant)
 
 - **OIDC callback redirects target the TENANT's host, not `FILEX_PUBLIC_URL`.**
@@ -245,9 +276,14 @@ are unchanged.
       secret means isolation rests entirely on doc-key→node→storage.
 - [ ] **`/api/capabilities`** (pre-auth, host-resolved) — return only *this*
       tenant's branding/features; never reveal other tenants exist.
-- [ ] **Public shares (`/s/{token}`) are intentionally host-agnostic** — a link
-      is a link; the file stays confined via token→node→storage. Drop/upload
-      (`/d/{token}`) confines the same way; client can't override storage.
+- [ ] **Public shares (`/s/{token}`) are intentionally host-agnostic to
+      *serve*** — a link is a link; the file stays confined via
+      token→node→storage. Drop/upload (`/d/{token}`) confines the same way;
+      client can't override storage. ⚠ Host-agnostic *serving* is not
+      host-agnostic *minting*: the link filex hands out names the tenant's
+      host (see "Absolute URLs" above), because a customer pasting the
+      operator's hostname into a mail to their own client is a leak even
+      though the token would still resolve.
 
 ## 11. Tenant lifecycle
 

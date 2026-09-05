@@ -18,14 +18,22 @@ tag shows up here without anyone writing it twice.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.31.0, 5 September 2026
-Forgetting the password on an encrypted folder no longer means losing the files. Creating one now shows a recovery key once — filex never stores it, and it opens the folder without the password. The file format did not change: existing encrypted files are byte-identical and open unchanged, verified by a round-trip test against a frozen copy of the previous release's crypto module. A folder made before this release cannot be given a recovery key by the server, because the server has no password to re-wrap with, so filex offers the upgrade at the one moment it holds one — the next successful unlock. Operators who need a second way in can set an escrow key at install time; it is RSA-OAEP, filex keeps only the public half, and the documentation says plainly that this is a backdoor and what its notification can and cannot promise. Also here: starring is a real action rather than a badge that only existed in list view, tags are browsable from the navigation panel, opening a virtual view like Trash from its own URL no longer says "Folder not found", and API tokens are split into user and app kinds so a shared embed credential can no longer manage its owner's keys.
+::: tip Latest — v0.32.0, 5 September 2026
+The explorer gained a third shape. `uiProfile: 'drive'` lays it out the way someone arriving from Google Drive expects — one **+ New** menu, a single search field across the header with the command palette behind it, Type / Modified / Size filters, Folders and Files as labelled sections, and Details / Activity in the info panel. It is a preset of the same explorer rather than a second UI, so the npm packages and embeds get it too, and a non-admin lands on it. Windows finally has a copy that runs without being installed: one .exe that keeps its data beside itself, so deleting one folder leaves nothing behind on a machine that is not yours — Linux and macOS already had this. On encrypted folders, an installation that already exists can now adopt key escrow, and — the part that makes escrow reach anything real — the owner of a folder created before escrow was turned on can grant it themselves, from the unlock dialog, with the consequence spelled out. Search stopped treating numbers as typos, so `2026` no longer returns last year's report. Several things that had been quietly broken were fixed rather than found by users: the install banner covered the sign-in button, middle-click did nothing in gallery view, a search at a storage root answered with a folder called Trash that is not a folder, and the file-infected notification spoke Turkish to everybody.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.31.0
-docker pull ghcr.io/brf-tech/filex:full-v0.31.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.32.0
+docker pull ghcr.io/brf-tech/filex:full-v0.32.0
 ```
+
+## v0.32.0
+
+<span class="filex-release-date">5 September 2026</span>
+
+The explorer gained a third shape. `uiProfile: 'drive'` lays it out the way someone arriving from Google Drive expects — one **+ New** menu, a single search field across the header with the command palette behind it, Type / Modified / Size filters, Folders and Files as labelled sections, and Details / Activity in the info panel. It is a preset of the same explorer rather than a second UI, so the npm packages and embeds get it too, and a non-admin lands on it. Windows finally has a copy that runs without being installed: one .exe that keeps its data beside itself, so deleting one folder leaves nothing behind on a machine that is not yours — Linux and macOS already had this. On encrypted folders, an installation that already exists can now adopt key escrow, and — the part that makes escrow reach anything real — the owner of a folder created before escrow was turned on can grant it themselves, from the unlock dialog, with the consequence spelled out. Search stopped treating numbers as typos, so `2026` no longer returns last year's report. Several things that had been quietly broken were fixed rather than found by users: the install banner covered the sign-in button, middle-click did nothing in gallery view, a search at a storage root answered with a folder called Trash that is not a folder, and the file-infected notification spoke Turkish to everybody.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.32.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.32.0`
 
 ## v0.31.0
 
@@ -203,36 +211,13 @@ A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engi
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.24.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.24.1`
 
-## v0.24.0
-
-<span class="filex-release-date">22 August 2026</span>
-
-A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at 0.24 MB/s moves at the speed of the network, and its inventory takes minutes rather than a quarter of an hour. A first sync that is interrupted resumes where it was instead of turning every finished file into a conflict copy, and moving the filex folder — to another drive included — keeps each folder's history, so nothing is transferred twice. A connection that dies quietly behind a proxy is noticed rather than waited on forever. A file whose name happens to contain ".." (Turkish company names end in "A.Ş.") can be previewed, downloaded and synced again. And three ways a sync could have read a missing or unlistable folder as "delete everything" are closed: a folder the server could not list fails the run instead of reading as gone, a pair cannot be pointed at a path that is not there, and a mirror whose drive is unplugged refuses to run rather than emptying the server.
-
-**New**
-
-- **Desktop** — Root migration rides sync move, with the watcher stopped.
-- **Sync** — Parallel transfers, resumable first runs, and a move that keeps history.
-- **Sync** — The remote walk lists eight folders at a time.
-
-**Fixed**
-
-- **Cliclient** — A half-dead connection cannot freeze a sync forever.
-- **Sync** — A half-written .filex-part-* download is never sync material.
-- **Api,sync** — A dotdot FILENAME is not a traversal, and adoption tolerates coarse mtimes.
-
-**Other changes**
-
-- Merge origin/main (v0.23.0) — the night's engine work rides on the release.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.24.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.24.0`
-
 ## Earlier releases
 
-The 79 releases before v0.24.0, in brief. Full notes are on GitHub.
+The 80 releases before v0.24.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.24.0](https://github.com/BRF-Tech/filex/releases/tag/v0.24.0) | 22 August 2026 | A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at… |
 | [v0.23.0](https://github.com/BRF-Tech/filex/releases/tag/v0.23.0) | 20 August 2026 | The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window… |
 | [v0.22.0](https://github.com/BRF-Tech/filex/releases/tag/v0.22.0) | 20 August 2026 | Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays… |
 | [v0.21.6](https://github.com/BRF-Tech/filex/releases/tag/v0.21.6) | 19 August 2026 | Two decisions about noise and blast radius. A demo instance no longer accepts any new storage backend — 0.21.4 stopped it reaching the server's own filesystem, and now the remote drivers go too, because "attach your own bucket"… |
@@ -315,4 +300,4 @@ The 79 releases before v0.24.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-09-05 from 99 published releases.</small>
+<small>Generated 2026-09-05 from 100 published releases.</small>

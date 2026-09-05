@@ -197,7 +197,6 @@ sister projects.
 | `audit_events`               | all auditable user actions |
 | `external_services`          | OnlyOffice/Drawio config + last_check |
 | `thumbs`                     | thumbnail cache index (bytes live on disk) |
-| `tombstones`                 | grace-period removal of files seen-then-not-seen |
 | `migration_lock`             | goose migration lock |
 
 ER diagram (high-level):
@@ -209,7 +208,6 @@ users 1──*  audit_events
 storages 1──* files (parent_path indexed)
 storages 1──* sync_runs
 files 1──1 thumbs
-storages 1──* tombstones
 users 1──* uploads
 users 1──* operations
 external_services (config row per service)
@@ -231,17 +229,45 @@ loop:
       seen.add(entry.path)
       upsert(files, storage_id, entry)
 
-    # tombstone guard: only mark missing after N consecutive misses
-    for f in db.files where storage_id=$id and path not in seen:
-      tombstones.upsert(...)
-      if tombstones.misses >= grace_count:
-        files.delete(...)
+    # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
+    if seen < 0.7 * previous_run.seen:      # the whole listing looks wrong
+      skip the pass entirely
+    for f in db.files where storage_id=$id and seen_at < run_started:
+      if f.transfer_state != "stored":      # filex never put the bytes there
+        keep
+      elif storage.Stat(f.path) is found:   # the listing missed it
+        keep
+      elif Stat failed for any other reason: # we could not check
+        keep
+      else:
+        soft_delete(f)                       # genuinely gone → trash
 
     finish_sync_run(run)
 ```
 
-The tombstone grace prevents transient API failures (S3 503 mid-list) from
-deleting cache rows. Default grace = 10 minutes / 2 misses.
+⚠ Absence from a listing is not proof of deletion, and answering it with
+"move to trash" turns any unrelated bug into lost data — which is exactly
+what happened in GitHub #16, where uploads that never reached S3 were trashed
+by the next run. So the pass has to be *right* about the deletion, and three
+things stand between a missing object and the trash:
+
+1. **A whole-listing guard.** If the run saw more than 30 % fewer entries than
+   the previous one, no deletions happen at all — that shape is a backend
+   glitch, not a mass deletion.
+2. **Did filex ever store it?** A node whose `transfer_state` is not `stored`
+   is in staging or is a failed upload. Its absence from the backend is the
+   *expected* state and is never a deletion. This also closes the race where a
+   run landing between publishing a node and finishing its transfer would
+   trash a healthy upload.
+3. **A direct second opinion.** For the remaining candidates the driver is
+   asked with `Stat`. Only a definite not-found counts; an object the listing
+   missed but `Stat` can see is kept, and so is one that could not be checked
+   at all (permissions, timeout, 503) — "I could not check" must never read as
+   "it is gone".
+
+A file genuinely deleted in the bucket still goes to trash, so deletions made
+outside filex are still reflected. `Stat` runs only for candidates that
+survive step 1, so a healthy sync costs nothing extra.
 
 `storage.Sync` is etag-diff-based when the driver supports it (S3 list
 versions, WebDAV PROPFIND). Otherwise it's a full re-list.

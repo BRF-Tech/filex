@@ -103,12 +103,21 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// ⚠ last_sync_state / last_sync_error are NOT columns on storages — they
+	// are the last sync_runs row for it. The UI has always read them from this
+	// endpoint, which never sent them, so the badge fell through to its "Never
+	// ran" default no matter how many runs had succeeded (issue #16). They are
+	// filled here rather than added to model.Storage because a run is a
+	// separate record with its own lifecycle; the storage row only carries when
+	// it last finished.
 	type storageWithStats struct {
 		*model.Storage
 		Stats struct {
 			FileCount int64 `json:"file_count"`
 			TotalSize int64 `json:"total_size_bytes"`
 		} `json:"stats"`
+		LastSyncState string `json:"last_sync_state,omitempty"`
+		LastSyncError string `json:"last_sync_error,omitempty"`
 	}
 	enriched := make([]storageWithStats, 0, len(out))
 	for _, st := range out {
@@ -123,6 +132,10 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 			row.Stats.FileCount = c
 			row.Stats.TotalSize = sz
+		}
+		if run, err := h.Store.GetLastSyncRun(r.Context(), st.ID); err == nil && run != nil {
+			row.LastSyncState = run.Status
+			row.LastSyncError = run.Error
 		}
 		enriched = append(enriched, row)
 	}

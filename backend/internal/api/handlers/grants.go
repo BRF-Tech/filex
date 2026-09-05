@@ -19,10 +19,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/tenant"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
 // Grants is the per-file/per-folder permission-management API backing the
-// explorer's right-side "İzinler" panel. It is mounted under
+// explorer's right-side "İzinler" (Permissions) panel. It is mounted under
 // /api/files/permissions inside the authenticated group (session OR token),
 // so confine.Middleware still applies to any path fields.
 //
@@ -35,7 +36,15 @@ type Grants struct {
 	Share     *share.Service // optional — nil disables the share fallback in Invite
 	Mailer    *mailer.Service
 	PublicURL string
+	// Tenants resolves which origin the invite e-mails link to. ⚠ The
+	// account-created mail carries a temporary password next to a login URL —
+	// on the operator's host that login cannot succeed, and the operator's
+	// hostname leaks to every tenant that adds a user.
+	Tenants tenanturl.Resolver
 }
+
+// AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
+func (h *Grants) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
 
 // NewGrants constructs the permissions handler.
 func NewGrants(store db.Store, resolver *acl.Resolver) *Grants {
@@ -48,6 +57,7 @@ func (h *Grants) AttachInvite(sh *share.Service, m *mailer.Service, publicURL st
 	h.Share = sh
 	h.Mailer = m
 	h.PublicURL = strings.TrimRight(publicURL, "/")
+	h.Tenants = tenanturl.New(h.Store, publicURL, h.Tenants.MultiTenant)
 }
 
 // tryMail sends best-effort; returns true iff the mail actually went out (SMTP
@@ -553,7 +563,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		if loc == "" {
 			loc = req.Locale
 		}
-		subject, body := itemGrantText(loc, st.Name+"://"+rel, h.PublicURL+"/admin/explore")
+		subject, body := itemGrantText(loc, st.Name+"://"+rel, h.Tenants.FromRequest(r)+"/admin/explore")
 		emailed := h.tryMail(r.Context(), email, subject, body)
 		writeJSON(w, http.StatusOK, map[string]any{"mode": "granted", "user_id": u.ID, "emailed": emailed})
 		return
@@ -604,7 +614,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
 		}
-		loginURL := h.PublicURL + "/admin/"
+		loginURL := h.Tenants.FromRequest(r) + "/admin/"
 		subject, body := accountCreatedText(loc, loginURL, email, tempPw)
 		emailed := h.tryMail(r.Context(), email, subject, body)
 		resp := map[string]any{"mode": "user_created", "user_id": newU.ID, "emailed": emailed}
@@ -631,7 +641,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": serr.Error()})
 		return
 	}
-	url := h.PublicURL + "/s/" + sh.Token
+	url := h.Tenants.FromRequest(r) + "/s/" + sh.Token
 	subject, body := shareMailText(req.Locale, h.siteName(r.Context()), baseName(rel), isDir, 0, url, "", 0)
 	emailed := h.tryMail(r.Context(), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})

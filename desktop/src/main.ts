@@ -2264,10 +2264,11 @@ function wireIpc(): void {
     // go. Arming the watcher after it therefore arms it after the drop has
     // already happened — the creation event is long gone, nothing is ever
     // found, and the folder the user dropped stays exactly as the shell left
-    // it: EMPTY. (Measured 2026-08-29, Burak: "klasör çekiyorum masaüstüne ve
-    // içi yine boş geliyor". Single files worked because a small selection is
-    // prepared in the background and handed over as a real file, which needs no
-    // watcher at all — that is why this only ever showed up on folders.)
+    // it: EMPTY. (Measured 2026-08-29, Burak, translated from Turkish: "I drag a
+    // folder onto the desktop and its insides still come over empty". Single
+    // files worked because a small selection is prepared in the background and
+    // handed over as a real file, which needs no watcher at all — that is why
+    // this only ever showed up on folders.)
     const watch = watchForDrop({
       names: session.paths.map((p) => path.basename(p)),
       ignoreDirs: [dragCache.rootDir],
@@ -2285,7 +2286,7 @@ function wireIpc(): void {
     dragLog('os drag returned', { note: 'on Windows this means the user has let go' });
     void watch.promise
       .then(async (loc) => {
-        dragLog('watch result', loc ?? 'BULUNAMADI');
+        dragLog('watch result', loc ?? 'not found');
         await fs.promises.rm(session.dir, { recursive: true, force: true }).catch(() => undefined);
         if (!loc) {
           // Nothing landed anywhere we can see: either the drag was let go over
@@ -2311,10 +2312,10 @@ function wireIpc(): void {
           // ⚠⚠ NOT dialog.showErrorBox. This runs long after the gesture, on
           // the main process, and showErrorBox is MODAL: the box freezes the
           // whole app until somebody clicks it — which is what a user gets for
-          // having dragged a folder (measured 2026-08-29, Burak: "açtığın filex
-          // hata veriyor"). The failure is reported where the user is looking
-          // (the explorer's toast) and, if the window is not in front, as an OS
-          // notification they can ignore.
+          // having dragged a folder (measured 2026-08-29, Burak, translated from
+          // Turkish: "the filex you opened is throwing an error"). The failure is
+          // reported where the user is looking (the explorer's toast) and, if the
+          // window is not in front, as an OS notification they can ignore.
           const body = syncText('dragFailedBody', { dir: loc.dir, err: res.error ?? '' });
           mainWindow?.webContents.send('drag:progress', {
             done: 0,

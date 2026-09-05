@@ -15,7 +15,7 @@ type textExtractor struct{}
 
 // textExts is the extension allowlist (normalized: lower-case, no dot).
 // Plain text + data + the common source-code families the "Bul" contract
-// lists (txt/md/csv/json/log + kod uzantıları).
+// lists (txt/md/csv/json/log + code extensions).
 var textExts = map[string]struct{}{
 	// plain text / docs / data
 	"txt": {}, "text": {}, "md": {}, "markdown": {}, "rst": {}, "adoc": {},

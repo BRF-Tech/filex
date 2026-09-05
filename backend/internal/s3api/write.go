@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // Writing and deleting objects.
@@ -107,6 +108,15 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request, p *protocola
 	sums := newChecksumSet(r.Header)
 	hashed := sums.Wrap(io.TeeReader(body, digest))
 
+	// The last moment at which the bytes this PUT is about to replace still
+	// exist -- see writehook/overwrite.go. Single-part only: anything above a
+	// client's multipart threshold lands in completeMultipartUpload instead,
+	// which carries its own guard.
+	if err := writehook.BeforeOverwrite(ctx, st.ID, key); err != nil {
+		WriteError(w, r, http.StatusServiceUnavailable, "ServiceUnavailable",
+			"could not preserve the existing object: "+err.Error())
+		return
+	}
 	if err := writer.Write(ctx, key, hashed, size); err != nil {
 		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
 		return
@@ -278,6 +288,13 @@ func (h *Handler) deleteObject(w http.ResponseWriter, r *http.Request, p *protoc
 
 // writable applies the confinement and the grant for a mutation.
 func (h *Handler) writable(p *protocolauth.Principal, set *acl.Set, key string) bool {
+	// Internal trees are not writable through the gateway either: a caller who
+	// could PUT over .versions/42/1 could destroy the very history the
+	// overwrite guard exists to keep, and the guard skips internal paths so
+	// nothing would snapshot it first.
+	if hiddenPath(key) {
+		return false
+	}
 	if c := p.Confine; c != nil && c.Rel != "" {
 		if key != c.Rel && !strings.HasPrefix(key, c.Rel+"/") {
 			return false

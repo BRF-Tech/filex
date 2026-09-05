@@ -258,7 +258,9 @@ type Store interface {
 	// open set releases its reservation by construction.
 	SumOpenStagedUploadBytes(ctx context.Context, userID int64) (int64, error)
 
-	// SetNodeTransferState flips nodes.transfer_state ("staged" → "stored").
+	// SetNodeTransferState sets nodes.transfer_state: "staged" while the bytes
+	// are in filex's staging area, "stored" once they are on the driver, and
+	// "failed" when the transfer to the driver did not succeed.
 	SetNodeTransferState(ctx context.Context, nodeID int64, state string) error
 
 	// Sync runs / conflicts

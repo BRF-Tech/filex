@@ -1,7 +1,7 @@
 package handlers_test
 
 /* calisma:d3 comments */
-// Integration tests for the node-comment endpoints (v0.6 "Çalışma"),
+// Integration tests for the node-comment endpoints (v0.6 "Çalışma" (Work)),
 // exercised through the real router (auth middleware + confine + acl
 // included): CRUD, body validation, node-visibility ACL denial,
 // author-or-admin delete, and trash-purge row cleanup.

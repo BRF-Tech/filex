@@ -18,14 +18,14 @@
 // Measured 2026-08-29 — a file created during a 4-second block was never
 // reported, before or after:
 //
-//	blok bitti (4065 ms), o ana kadar görülen: null
-//	bloktan sonra görülen: HİÇBİR ŞEY
+//	block ended (4065 ms), seen up to that point: null
+//	seen after the block: NOTHING
 //
 // So the watchers live in a WORKER THREAD, whose event loop keeps running while
 // the main thread is inside the drag loop. The same measurement with a worker
 // reported the file the moment the main thread was free again. This is the
-// difference between "the folder fills in" and Burak's "klasör çekiyorum
-// masaüstüne ve içi yine boş geliyor".
+// difference between "the folder fills in" and Burak's "I drag a folder onto the
+// desktop and its insides still come over empty" (translated from Turkish).
 //
 // ⚠ What this still cannot do: if the drop target is an APPLICATION rather than
 // a folder, nothing is written to disk, so there is nothing to find. The caller

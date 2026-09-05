@@ -58,16 +58,21 @@ const (
 	EventUpdateApplied EventType = "update_applied"
 )
 
-// Canonical file/share events (webhook v2 — "Bağlan" wave). Emitted
+// Canonical file/share events (webhook v2 — "Bağlan" (Connect) wave). Emitted
 // asynchronously from the API mutation handlers; webhook targets filter
 // on these names via their per-target events allow-list.
 const (
 	EventFileUploaded EventType = "file.uploaded"
-	EventFileDeleted  EventType = "file.deleted"
-	EventFileMoved    EventType = "file.moved"
-	EventFileTrashed  EventType = "file.trashed"
-	EventShareCreated EventType = "share.created"
-	EventDropReceived EventType = "drop.received"
+	// EventFileUploadFailed fires when bytes filex already acknowledged could
+	// not be written to the storage driver — the staged upload path answers the
+	// client before it transfers, so a failure after that point is invisible
+	// unless it is announced (issue #16).
+	EventFileUploadFailed EventType = "file.upload_failed"
+	EventFileDeleted      EventType = "file.deleted"
+	EventFileMoved        EventType = "file.moved"
+	EventFileTrashed      EventType = "file.trashed"
+	EventShareCreated     EventType = "share.created"
+	EventDropReceived     EventType = "drop.received"
 	/* koru:k2 av */
 	// EventFileInfected fires when the async ClamAV scan flags an
 	// uploaded file; the payload carries the node plus a `signature`
@@ -75,7 +80,7 @@ const (
 	EventFileInfected EventType = "file.infected"
 	/* calisma:d3 comments */
 	// EventCommentAdded fires when a user comments on a file/folder
-	// node (v0.6 "Çalışma"). The payload carries the node (path/name),
+	// node (v0.6 "Çalışma" (Work)). The payload carries the node (path/name),
 	// the actor, and meta {comment_id, body (first 200 chars)}.
 	EventCommentAdded EventType = "comment.added"
 )

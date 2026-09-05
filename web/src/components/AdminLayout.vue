@@ -42,11 +42,11 @@ function toggleSidebar() {
         <div class="mx-auto max-w-7xl flex flex-wrap items-center justify-between gap-2">
           <span>filex · self-hosted file manager</span>
           <a
-            href="https://github.com/brf-tech/filex"
+            href="https://github.com/BRF-Tech/filex"
             class="hover:text-brand-600 dark:hover:text-brand-400"
             target="_blank"
             rel="noopener"
-            >github.com/brf-tech/filex</a
+            >github.com/BRF-Tech/filex</a
           >
         </div>
       </footer>

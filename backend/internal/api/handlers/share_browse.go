@@ -1,6 +1,6 @@
 package handlers
 
-/* wiring:d2 — public klasör paylaşımı gezinme sayfası + alt-dosya endpoint'i.
+/* wiring:d2 — public folder-share browse page + sub-file endpoint.
 
 A folder share's plain GET /s/{token} now renders a browse page (see
 internal/share/viewer.go for the layout rules + template): a gallery grid

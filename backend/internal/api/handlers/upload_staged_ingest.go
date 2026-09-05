@@ -34,6 +34,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // ErrStagingUnavailable means this instance cannot stage: no staging
@@ -101,6 +102,15 @@ func (h *StagedUpload) IngestStream(
 		return nil, storage.ErrUnsupported
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, storageKey); err != nil {
+		return nil, err
+	}
+	// The last moment at which the bytes we are about to replace still exist --
+	// see writehook/overwrite.go. This is the ONE guard call for the whole
+	// ingest-then-transfer sequence: the commit below publishes the node as
+	// transfer_state="staged", after which a snapshot would read the incoming
+	// bytes instead of the ones being replaced (same note as transfer() in
+	// upload_staged.go).
+	if err := writehook.BeforeOverwrite(ctx, storageID, storageKey); err != nil {
 		return nil, err
 	}
 	if err := h.Area.EnsureFree(size); err != nil {

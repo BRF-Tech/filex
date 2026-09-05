@@ -3,9 +3,9 @@ package handlers_test
 // A big file on a slow backend: say "preparing", then serve it at local-disk
 // speed.
 //
-// The requirement, verbatim: "fs yavaş ve dosya büyükse kullanıcıya özel bir
-// caching üreteceğimizi belirtip cache hazır olduğunda indirmeye başlat tarzı
-// bişiler yapmamız gerekiyor."
+// The requirement, verbatim (translated from Turkish): "if the fs is slow and
+// the file is big, we need to do something like telling the user we're building
+// a cache just for them and starting the download once the cache is ready."
 //
 // These drive the REAL route (`/api/files/manager?action=download`) over a
 // real local-FS storage flagged `slow: true`, and they assert bytes and status

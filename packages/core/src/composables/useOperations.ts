@@ -14,9 +14,9 @@
  * are registered per row so the panel can route user intent back to the
  * owning surface without the store knowing any transport details.
  *
- * Lifecycle rules (per the İşlem Merkezi contract):
+ * Lifecycle rules (per the Operations Center contract):
  *   - running rows live in `active`;
- *   - done/aborted rows linger in `active` for DONE_LINGER_MS ("bitti"
+ *   - done/aborted rows linger in `active` for DONE_LINGER_MS ("done"
  *     flash) then move to `history` (session-only, capped);
  *   - error rows are STICKY: they stay in `active` until the user
  *     dismisses or retries them — even after the source list swept them
@@ -39,7 +39,7 @@ export interface OperationInput {
   percent: number | null;
   status: OperationStatus;
   error?: string | null;
-  /** Queue op accepted but not started yet ("Sırada"). */
+  /** Queue op accepted but not started yet ("Queued"). */
   queued?: boolean;
   /** Progress counters for queue ops (3/5 items). */
   doneCount?: number;

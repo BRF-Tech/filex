@@ -105,7 +105,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Gece Mavisi — deep indigo/navy.
+    // Night Blue — deep indigo/navy.
     id: 'night',
     nameKey: 'theme.name.night',
     light: {
@@ -140,7 +140,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Orman — calm greens.
+    // Forest — calm greens.
     id: 'forest',
     nameKey: 'theme.name.forest',
     light: {
@@ -175,7 +175,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Kehribar — warm amber/bronze.
+    // Amber — warm amber/bronze.
     id: 'amber',
     nameKey: 'theme.name.amber',
     light: {
@@ -210,7 +210,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Leylak — soft purple.
+    // Lilac — soft purple.
     id: 'lilac',
     nameKey: 'theme.name.lilac',
     light: {
@@ -245,7 +245,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Yüksek Kontrast — black/white with strong borders, saturated accents.
+    // High Contrast — black/white with strong borders, saturated accents.
     id: 'contrast',
     nameKey: 'theme.name.contrast',
     light: {
@@ -284,7 +284,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Yumuşak Gri — desaturated, quiet neutral.
+    // Soft Gray — desaturated, quiet neutral.
     id: 'gray',
     nameKey: 'theme.name.gray',
     light: {
@@ -319,7 +319,7 @@ export const THEMES: ThemeDef[] = [
     },
   },
   {
-    // Terminal Yeşili — phosphor green, monospace face for the full CRT vibe.
+    // Terminal Green — phosphor green, monospace face for the full CRT vibe.
     id: 'terminal',
     nameKey: 'theme.name.terminal',
     light: {

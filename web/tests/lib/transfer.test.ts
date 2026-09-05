@@ -1,11 +1,11 @@
 // What a transfer between two places MEANS — the question the explorer got
-// wrong for every depo pair.
+// wrong for every storage pair.
 //
 // Measured on 2026-08-29 (v0.26.1): with two storages configured, Ctrl+X in one
-// depo and Ctrl+V in another queued a COPY. The user was told "taşıma"
+// storage and Ctrl+V in another queued a COPY. The user was told "move"
 // nowhere — the toast said copy — but the gesture they made was cut, and the
 // file stayed in both places. The server side of the same bug was worse: the
-// paste was accepted and written into the SOURCE depo.
+// paste was accepted and written into the SOURCE storage.
 
 import { describe, expect, it } from 'vitest';
 
@@ -33,7 +33,7 @@ describe('resolveTransfer', () => {
 
   it('CUT + paste across depolar is a MOVE, not a copy', () => {
     // The regression this file exists for: the explorer downgraded every
-    // cross-depo transfer to a copy, so "kes" left the file in both places.
+    // cross-storage transfer to a copy, so "cut" left the file in both places.
     expect(resolveTransfer(inAlpha, 'beta://hedef', 'move')).toEqual({ kind: 'move', cross: true });
   });
 

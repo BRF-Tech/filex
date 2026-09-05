@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * SecondaryPane — wiring:d1 split görünümün sağ (ikincil) paneli.
+ * SecondaryPane — wiring:d1 the right-hand (secondary) pane of the split view.
  *
  * Deliberately LIGHT: its own path + its own listing — fetched through
  * the SAME FileApi instance the host already constructed (`api.index`,
@@ -79,11 +79,12 @@ const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'open-tab', path: string): void;
   (e: 'transfer', p: { sources: string[]; targetWire: string; originWire?: string }): void;
-  /* ui-fix — yan panelde sağ-tık: menü ana bileşende (FileExplorer) açılır.
-   * node=null → boş alana sağ-tık (seçimsiz, yalnız Yapıştır). */
+  /* ui-fix — right-click inside the side pane: the menu is opened by the main
+   * component (FileExplorer). node=null → right-click on empty space (nothing
+   * selected, so "Paste" only). */
   (e: 'context', node: FileNode | null, ev: MouseEvent): void;
-  /* ui-fix — çöp kutusu satırı açıldığında: trash görünümü ana panele aittir
-   * (geri yükleme aksiyonlarıyla), host loadTrash() ile açar. */
+  /* ui-fix — when the trash row is opened: the trash view belongs to the main
+   * panel (it carries the restore actions), so the host opens it via loadTrash(). */
   (e: 'open-trash'): void;
 }>();
 
@@ -144,7 +145,7 @@ async function loadPane(target?: string): Promise<void> {
 void loadPane(props.initialPath ?? '');
 
 // ------------------------------------------------------------------
-// Breadcrumb (kırıntı)
+// Breadcrumb
 // ------------------------------------------------------------------
 
 interface Crumb {
@@ -204,12 +205,12 @@ function onViewContext(n: FileNode, ev: MouseEvent) {
   emit('context', n, ev);
 }
 
-/* ui-fix — boş alana (arka plan) sağ-tık: seçimsiz menü (yalnız Yapıştır)
- * → boş klasöre / mevcut klasöre dosya yapıştırma. Satır menüsü stopProp
- * ettiğinden bu yalnız gerçek boş alanda tetiklenir. */
+/* ui-fix — right-click on empty space (the background): a selection-less menu
+ * ("Paste" only) → pasting files into an empty / into the current folder. The
+ * row menu calls stopProp, so this only fires on genuinely empty space. */
 function onBgContext(ev: MouseEvent) {
   ev.preventDefault();
-  ev.stopPropagation(); // FileExplorer kökündeki canvas menüsüne bubble etmesin
+  ev.stopPropagation(); // don't bubble into the canvas menu on the FileExplorer root
   emit('activate');
   selected.value = new Set();
   emit('context', null, ev);
@@ -399,8 +400,8 @@ defineExpose({ reload, goUp, selectAll, openSelected, selectedNodes, getPath });
       <div v-else-if="files.length === 0" class="fe-split__state">
         {{ t('empty.folder') }}
       </div>
-      <!-- ui-fix — aynı görünüm bileşenleri (list/grid/gallery), pane'in
-           kendi viewMode'uyla; eski düz fe-split__list kalktı. -->
+      <!-- ui-fix — the same view components (list/grid/gallery), driven by the
+           pane's own viewMode; the old flat fe-split__list is gone. -->
       <ListView
         v-else-if="(viewMode ?? 'list') === 'list'"
         :files="files"

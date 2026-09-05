@@ -275,7 +275,7 @@ filex-explorer {
 .fe-toolbar__spacer {
   flex: 1 1 auto;
 }
-/* Search + Yükle + Yenile pinned together so the cluster doesn't get
+/* Search + Upload + Refresh pinned together so the cluster doesn't get
  * orphaned by the wrap point on narrow widths. */
 .fe-toolbar__search-group {
   display: inline-flex;
@@ -342,8 +342,9 @@ filex-explorer {
   gap: 4px;
   flex-wrap: wrap;
   padding: 6px 12px;
-  /* ui-fix — split'te yan panel .fe-split__crumbs ile aynı yükseklik (ana
-     panelin "Yola Git" ✏ butonu yoksa da satırlar aynı y'den başlasın). */
+  /* ui-fix — same height as the side pane's .fe-split__crumbs in split mode
+     (so both rows start at the same y even without the main pane's "Yola Git"
+     ✏ button). */
   min-height: 37px;
   background: var(--fe-bg);
   border-bottom: 1px solid var(--fe-border);
@@ -373,7 +374,7 @@ filex-explorer {
 .fe-breadcrumb__sep {
   color: var(--fe-text-muted);
 }
-/* Edit pencil button — V1.5: "yolu yazıp gideyim" */
+/* Edit pencil button — V1.5, verbatim (translated): "let me type a path and go" */
 .fe-breadcrumb__edit {
   margin-left: auto;
   background: none;
@@ -2952,7 +2953,7 @@ filex-explorer {
   }
 }
 /* /wiring:c3 */
-/* === wiring:c4 — onboarding turu, erişilebilirlik ve etkileşim cilası === */
+/* === wiring:c4 — onboarding tour, accessibility and interaction polish === */
 
 /* ---------- Focus ring: grid cards (list rows already had one) ---------- */
 .fe-grid__card:focus-visible {
@@ -3164,7 +3165,7 @@ filex-explorer {
 }
 /* === /wiring:c4 === */
 
-/* === wiring:d1 — sekmeler (tab şeridi) + split panel === */
+/* === wiring:d1 — tabs (tab strip) + split pane === */
 
 /* Tab strip — thin row ABOVE the toolbar. The host renders it only with
    2+ tabs, so the default single-tab embed stays pixel-identical. */
@@ -3331,9 +3332,9 @@ filex-explorer {
   display: none;
 }
 
-/* ui-fix — sol panel sarmalı: breadcrumb + durum şeritleri + body bir
-   flex-column. Split olmadan tüm genişlik; split olunca sol yarı (böylece
-   breadcrumb kendi panelini kaplar, SecondaryPane ile simetrik). */
+/* ui-fix — left pane wrapper: breadcrumb + status strips + body in one
+   flex-column. Full width without split; the left half once split (so the
+   breadcrumb spans its own pane only, symmetric with SecondaryPane). */
 .fe__primary {
   display: flex;
   flex-direction: column;
@@ -3373,12 +3374,13 @@ filex-explorer {
 .fe-split__crumbs {
   display: flex;
   align-items: center;
-  /* ui-fix — ana panel .fe-breadcrumb ile BİREBİR aynı ölçüler (gap/padding/
-     font) → split'te iki breadcrumb tam hizalı, ince kayma yok. */
+  /* ui-fix — EXACTLY the same metrics as the main pane's .fe-breadcrumb
+     (gap/padding/font) → in split mode the two breadcrumbs line up perfectly,
+     with no hairline drift. */
   gap: 4px;
   flex: 0 0 auto;
   padding: 6px 12px;
-  min-height: 37px; /* ui-fix — ana panel .fe-breadcrumb ile aynı yükseklik */
+  min-height: 37px; /* ui-fix — same height as the main pane's .fe-breadcrumb */
   border-bottom: 1px solid var(--fe-border);
   font-size: 13px;
   color: var(--fe-text-muted);
@@ -3390,7 +3392,7 @@ filex-explorer {
   background: transparent;
   color: inherit;
   font: inherit;
-  padding: 2px 6px; /* ui-fix — .fe-breadcrumb__crumb ile aynı */
+  padding: 2px 6px; /* ui-fix — same as .fe-breadcrumb__crumb */
   border-radius: var(--fe-radius-sm);
   cursor: pointer;
   max-width: 140px;
@@ -3506,9 +3508,9 @@ filex-explorer {
 }
 /* === /wiring:d1 === */
 
-/* === wiring:d2 — galeri görünümü (GalleryView.vue) === */
+/* === wiring:d2 — gallery view (GalleryView.vue) === */
 
-/* Büyük thumbnail ızgarası: kare kartlar, ad altta, boyut+tarih hover'da. */
+/* Large thumbnail grid: square cards, name below, size+date on hover. */
 .fe-gal {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -3573,8 +3575,9 @@ filex-explorer {
   width: 64px;
   height: 64px;
 }
-/* Hover meta bandı — thumbnail'ın altına oturan yarı saydam şerit; yalnız
-   hover/klavye odağında görünür (dokunmatikte kartın title'ı yeterli). */
+/* Hover meta band — a translucent strip sitting at the bottom of the
+   thumbnail; visible only on hover/keyboard focus (on touch the card's
+   title is enough). */
 .fe-gal__meta {
   position: absolute;
   left: 0;
@@ -3622,11 +3625,11 @@ filex-explorer {
   text-align: center;
   color: var(--fe-text-muted);
 }
-/* Dar/embed mini modda daha küçük döşemeler (2-3 sütun sığar). */
+/* Smaller tiles in narrow/embed mini mode (2-3 columns fit). */
 .fe--narrow .fe-gal {
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
 }
-/* Yoğunluk: kompakt tercihte döşemeler küçülür (grid'le aynı mantık). */
+/* Density: tiles shrink under the compact preference (same logic as grid). */
 .fe--density-compact .fe-gal {
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: calc(var(--fe-gap) * 0.6);
@@ -3750,8 +3753,8 @@ filex-explorer {
 }
 /* === /wiring:d3 === */
 
-/* === wiring:e2 — uçtan uca şifreli klasörler === */
-/* Kilit açık şeridi (presence şeridiyle aynı yatay dil). */
+/* === wiring:e2 — end-to-end encrypted folders === */
+/* Unlocked strip (same horizontal language as the presence strip). */
 .fe-e2e-strip {
   display: flex;
   align-items: center;
@@ -3777,7 +3780,7 @@ filex-explorer {
   font-size: 12px;
 }
 
-/* Kilit ekranı: fe-state dilinin üstüne parola formu. */
+/* Lock screen: a passphrase form on top of the fe-state language. */
 .fe-e2e-lock__form {
   display: flex;
   gap: 8px;
@@ -3790,7 +3793,7 @@ filex-explorer {
   min-width: 0;
 }
 
-/* Şifreli klasör oluşturma modalı. */
+/* Encrypted-folder creation modal. */
 .fe-e2e-form {
   display: flex;
   flex-direction: column;
@@ -3826,7 +3829,7 @@ filex-explorer {
   accent-color: var(--fe-primary);
 }
 
-/* NewFolderModal içindeki "şifreli klasör" giriş linki. */
+/* The "şifreli klasör" (encrypted folder) entry link inside NewFolderModal. */
 .fe-e2e-optlink {
   margin-top: 10px;
   padding: 0;
@@ -4034,7 +4037,7 @@ filex-explorer {
 }
 /* === /wiring:e2 === */
 
-/* === ui-fix — toolbar tek satır + katlama + ölçüm şeridi ============= */
+/* === ui-fix — toolbar single row + folding + measure strip ============ */
 .fe:not(.fe--narrow) .fe-toolbar {
   flex-wrap: nowrap;
 }
@@ -4061,7 +4064,7 @@ filex-explorer {
 /* === /ui-fix ========================================================= */
 
 
-/* === wiring:c1 — gündüz / gece / otomatik =============================
+/* === wiring:c1 — day / night / auto ====================================
    Lives at the top of the theme gallery: "night mode" is what people open the
    theme button looking for, and a palette picker that cannot answer that
    question is the wrong place to stop. */

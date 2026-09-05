@@ -4,7 +4,7 @@
  * Backend POST /files/{copy,move,delete} returns `{op}` immediately
  * (status='pending') and the actual S3 work runs in a worker. The
  * client polls `/files/ops` every 2s while there's anything still
- * pending or running so the user gets live feedback ("3/5 kopyalandı").
+ * pending or running so the user gets live feedback ("3/5 copied").
  *
  * Polling is reference-counted: callers `register(op)` after starting a
  * new op; an interval ticks while the registered set has any non-

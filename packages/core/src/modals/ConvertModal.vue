@@ -15,6 +15,8 @@
  *   5. we wrap the bytes in a File and upload it to the current folder.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import type { LocaleCode } from '../types/ExplorerConfig';
+import { useLocale } from '../composables/useLocale';
 
 const props = defineProps<{
   /** Converter base, e.g. https://fm.example.com/convert */
@@ -25,8 +27,10 @@ const props = defineProps<{
   fetchBytes: () => Promise<ArrayBuffer>;
   /** Upload the produced File into the current folder (api.uploadMultipart bound to dir). */
   upload: (file: File) => Promise<void>;
-  t?: (key: string, fallback: string) => string;
+  locale: LocaleCode;
 }>();
+
+const { t } = useLocale(() => props.locale);
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'done', name: string): void }>();
 
@@ -107,7 +111,7 @@ async function loadFormats() {
     formats.value = res.formats || [];
     status.value = 'ready';
     if (!fromFmt.value) {
-      error.value = tt('convert.unsupportedInput', 'Bu dosya tipi için kaynak format bulunamadı.');
+      error.value = t('convert.unsupported_input');
     }
   } catch (e) {
     error.value = (e as Error).message;
@@ -139,8 +143,6 @@ async function doConvert() {
   }
 }
 
-function tt(k: string, fb: string) { return props.t ? props.t(k, fb) : fb; }
-
 onMounted(() => window.addEventListener('message', onMessage));
 onBeforeUnmount(() => window.removeEventListener('message', onMessage));
 </script>
@@ -149,27 +151,27 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
   <div class="filex-cv__bg" @click.self="emit('close')">
     <div class="filex-cv">
       <header class="filex-cv__head">
-        <h3>{{ tt('convert.title', 'Dönüştür') }} — {{ fileName }}</h3>
+        <h3>{{ t('convert.title') }} — {{ fileName }}</h3>
         <button class="filex-cv__x" @click="emit('close')">✕</button>
       </header>
 
       <div v-if="status === 'loading'" class="filex-cv__msg">
-        {{ tt('convert.loading', 'Dönüştürücü yükleniyor…') }}
+        {{ t('convert.loading') }}
       </div>
 
       <div v-else-if="status === 'done'" class="filex-cv__msg filex-cv__ok">
-        <p>✓ {{ tt('convert.done', 'Dönüştürüldü ve klasöre yüklendi.') }}</p>
-        <button class="filex-cv__convert" @click="emit('close')">{{ tt('convert.close', 'Kapat') }}</button>
+        <p>✓ {{ t('convert.done') }}</p>
+        <button class="filex-cv__convert" @click="emit('close')">{{ t('convert.close') }}</button>
       </div>
 
       <template v-else>
         <p class="filex-cv__src">
-          {{ tt('convert.from', 'Kaynak') }}: <b>{{ srcExt || '?' }}</b>
+          {{ t('convert.from') }}: <b>{{ srcExt || '?' }}</b>
         </p>
         <input
           v-model="search"
           class="filex-cv__search"
-          :placeholder="tt('convert.searchFmt', 'Hedef format ara (pdf, mp4, png…)')"
+          :placeholder="t('convert.search_format')"
         />
         <div class="filex-cv__list">
           <button
@@ -182,7 +184,7 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
             <small>{{ f.name }}</small>
           </button>
           <div v-if="toList.length === 0" class="filex-cv__empty">
-            {{ tt('convert.noFmt', 'Eşleşen format yok.') }}
+            {{ t('convert.no_format') }}
           </div>
         </div>
         <div v-if="error" class="filex-cv__err">{{ error }}</div>
@@ -192,7 +194,7 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
             :disabled="!selectedTo || !fromFmt || status === 'converting'"
             @click="doConvert"
           >
-            {{ status === 'converting' ? tt('convert.converting', 'Dönüştürülüyor…') : tt('convert.convert', 'Dönüştür') }}
+            {{ status === 'converting' ? t('convert.converting') : t('convert.convert') }}
           </button>
         </footer>
       </template>

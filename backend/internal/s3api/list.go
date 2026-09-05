@@ -368,13 +368,41 @@ func (l *lister) truncate(_ string) {
 	}
 }
 
-// visible reports whether a KEY may appear in Contents: strictly inside the
-// confinement, and granted.
+// hiddenNames are filex's own bookkeeping trees. /dav, /sftp, /ftp and /nfs
+// each already hide exactly this set (dav/fs.go, sftpsrv/handlers.go,
+// ftpsrv/fs.go, nfssrv/fs.go) and so does the browser listing (manager.go);
+// the S3 gateway had no such filter on any verb, which made it the one
+// surface where .versions/42/1 was both listed and readable.
 //
-// Both checks, because a confined credential and an ungranted subtree are
-// different restrictions — either one alone leaves the other open.
+// That matters much more now than it did: with the pre-write overwrite guard
+// wired, .versions/ stops being a handful of text-editor snapshots and becomes
+// a copy of every file any surface has ever replaced. Leaving it reachable
+// would hand any S3-key holder the prior contents of files whose folders they
+// may since have lost access to.
+var hiddenNames = map[string]bool{
+	".filex-trash": true,
+	".versions":    true,
+	".thumbs":      true,
+}
+
+// hiddenPath reports whether any segment of rel is an internal bucket.
+func hiddenPath(rel string) bool {
+	for _, seg := range strings.Split(rel, "/") {
+		if hiddenNames[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+// visible reports whether a KEY may appear in Contents: not one of filex's own
+// internal trees, strictly inside the confinement, and granted.
+//
+// All three checks, because a confined credential and an ungranted subtree are
+// different restrictions — either one alone leaves the other open — and an
+// internal tree is off limits regardless of both.
 func (l *lister) visible(rel string) bool {
-	return l.inConfine(rel) && l.set.CanSee(rel)
+	return !hiddenPath(rel) && l.inConfine(rel) && l.set.CanSee(rel)
 }
 
 // descendable reports whether a DIRECTORY may be entered or named.
@@ -387,6 +415,9 @@ func (l *lister) visible(rel string) bool {
 // a leak: the ancestor's name is part of the caller's own confinement path,
 // so it tells them nothing they did not supply.
 func (l *lister) descendable(rel string) bool {
+	if hiddenPath(rel) {
+		return false
+	}
 	if !l.inConfine(rel) && !l.isConfineAncestor(rel) {
 		return false
 	}

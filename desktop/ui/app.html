@@ -552,7 +552,7 @@
       let state = { accounts: [], activeId: null, syncFolders: [], syncStatuses: [] };
       let explorer = null;
       let explorerSyncCb = null;
-      // Dışarı sürükleme hazırlığının ilerlemesi — tek abone, mount'ta yenilenir.
+      // Drag-out preparation progress — one subscriber, refreshed on mount.
       let explorerDragCb = null;
       let mountedFor = null;
 
@@ -709,11 +709,11 @@
             // and overwrites it, so a stale component never gets poked.
             onChange: (cb) => { explorerSyncCb = cb; },
           },
-          // Dışarı sürükleme — masaüstüne / başka uygulamaya. Tarayıcı tek
-          // dosyayı kendi indirme yoluyla bırakabiliyor; klasör ve çoklu seçim
-          // GERÇEK yerel yollar ister, onları bu kabuk hazırlar (src/dragout.ts).
-          // Hesap kimliği burada, mount anında yakalanır: raydan hesap
-          // değişince explorer komple yeniden kurulur.
+          // Drag out — onto the desktop / into another app. The browser can drop
+          // a single file through its own download path; folders and multi-select
+          // want REAL local paths, and this shell prepares them (src/dragout.ts).
+          // The account id is captured here, at mount time: switching accounts on
+          // the rail rebuilds the explorer from scratch.
           dragOut: {
             prepare: (items) => window.filexApp.dragPrepare(account.id, items),
             start: (items) => window.filexApp.dragStart(account.id, items),

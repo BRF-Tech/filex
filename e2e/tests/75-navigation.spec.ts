@@ -142,7 +142,7 @@ test.describe('Navigation — root crumb + go-up', () => {
     await expect(page.locator('.fe-breadcrumb__crumb')).toHaveCount(2, { timeout: 5_000 });
     await expect(page.locator('.fe-breadcrumb__crumb').last()).toContainText('example');
 
-    // ↑ Üst Klasör — visible inside a sub-folder.
+    // ↑ "Üst Klasör" (Up one level) — visible inside a sub-folder.
     const upBtn = page.getByRole('button', { name: /üst klasör|up one level/i }).first();
     await expect(upBtn).toBeVisible();
     await upBtn.click();

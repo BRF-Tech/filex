@@ -7,8 +7,9 @@
 // growing do not carry an e-mail comfortably: `sftp://ada@example.com@host` needs
 // escaping, rclone and WinSCP config files split on `@`, and FTP's USER command
 // with an `@` in it confuses proxying clients. So accounts get a second, short
-// identifier — and every surface accepts EITHER (the owner's words: "olabilen
-// yerlerde hem maile bakalım hem username'e, dual-side login gibi düşün").
+// identifier — and every surface accepts EITHER (the owner's words, translated
+// from Turkish: "wherever we can, let's look at both the e-mail and the
+// username — think of it like a dual-side login").
 //
 // "Every surface" is the load-bearing half. A login rule that lives in one
 // handler is a login rule that is subtly different in the next one, and the

@@ -16,7 +16,7 @@
  * bul:s3 additions:
  *   4. "Everywhere" group — ≥3-char queries also hit the global files-search
  *      endpoint (debounced 250ms, max 8 rows) via the `globalSearch` prop.
- *      Content matches get an "İçerikte" badge + a «»-highlighted snippet
+ *      Content matches get an "In content" badge + a «»-highlighted snippet
  *      rendered as pure text nodes (no innerHTML).
  *   5. Saved searches — localStorage-backed (`filex.saved-searches`, max 10);
  *      "save current query" command + per-row delete.
@@ -140,7 +140,7 @@ const commandItems = computed<PaletteItem[]>(() => {
   const defs: Array<{ command: string; label: string; icon: string; enabled: boolean }> = [
     { command: 'new-folder', label: t('toolbar.new_folder'), icon: '📁', enabled: props.canWrite !== false },
     { command: 'upload', label: t('toolbar.upload'), icon: '⬆', enabled: props.canWrite !== false },
-    { command: 'toggle-view', label: t('cmd.view_toggle'), icon: props.viewMode === 'list' ? '▦' : props.viewMode === 'grid' ? '▣' : '☰', enabled: true /* wiring:d2 — sıradaki mod ikonu (list→grid→galeri→list) */ },
+    { command: 'toggle-view', label: t('cmd.view_toggle'), icon: props.viewMode === 'list' ? '▦' : props.viewMode === 'grid' ? '▣' : '☰', enabled: true /* wiring:d2 — icon of the NEXT mode (list→grid→gallery→list) */ },
     { command: 'open-trash', label: t('cmd.trash'), icon: '🗑', enabled: true },
     { command: 'refresh', label: t('toolbar.refresh'), icon: '⟳', enabled: true },
     { command: 'go-up', label: t('toolbar.go_up'), icon: '↑', enabled: props.canGoUp !== false },
@@ -148,7 +148,7 @@ const commandItems = computed<PaletteItem[]>(() => {
     { command: 'open-theme', label: t('theme.menu'), icon: '🎨', enabled: true },
     { command: 'open-shortcut-settings', label: t('shortcuts.settings.menu'), icon: '⌨', enabled: true },
     { command: 'start-tour', label: t('tour.restart'), icon: '🎓', enabled: true },
-    /* wiring:d1 — sekme + split */
+    /* wiring:d1 — tabs + split */
     { command: 'tab-new', label: t('cmd.tab_new'), icon: '⧉', enabled: true },
     { command: 'split-toggle', label: t('cmd.split_toggle'), icon: '◫', enabled: props.splitEnabled !== false },
   ];

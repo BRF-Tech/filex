@@ -1,9 +1,21 @@
 // Package versioning persists historical snapshots of node contents inside
 // the same storage backend, under a `.versions/<node_id>/<version_n>` prefix.
 //
-// Snapshots are taken before a destructive write (upload finalize, archive
-// extract that overwrites, manager save). Listing + restore are exposed via
-// dedicated /api/files/versions endpoints.
+// Snapshots are taken before a destructive write. Every surface that can
+// replace an existing file's bytes calls writehook.BeforeOverwrite first,
+// which lands in GuardOverwrite (guard.go) and snapshots whatever is about to
+// be lost; a snapshot that cannot be taken refuses the write rather than
+// proceeding. save-text snapshots directly through Snapshot instead, because
+// it already holds the node row.
+//
+// ⚠ This paragraph used to claim the same guarantee while it was not true:
+// until the pre-write guard landed, Snapshot was reached from save-text and
+// the versions endpoints and NOWHERE ELSE -- no upload, move, copy, archive
+// extract or AI write path ever called it, so uploading a file over an
+// existing one destroyed the old bytes with no version kept. Do not restate
+// the guarantee here without checking that the call sites still back it.
+//
+// Listing + restore are exposed via dedicated /api/files/versions endpoints.
 //
 // Storage drivers that implement storage.Copier get fast server-side copies;
 // anything else falls back to stream-and-rewrite via Read + Write.

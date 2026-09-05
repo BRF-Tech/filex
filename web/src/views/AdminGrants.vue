@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Admin İzinler — global overview of every per-file/folder RBAC grant: who has
+// Admin Permissions — global overview of every per-file/folder RBAC grant: who has
 // what level, on which path, in which storage. Admin can revoke any grant.
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';

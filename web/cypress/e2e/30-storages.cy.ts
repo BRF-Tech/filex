@@ -1,4 +1,4 @@
-// 30-storages — Depolar page renders the list, hides replica targets,
+// 30-storages — the Storages page renders the list, hides replica targets,
 // and shows real stats (file count + total bytes) per row.
 
 describe('storages list', () => {

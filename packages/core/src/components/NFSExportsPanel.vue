@@ -17,6 +17,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { NFSExport } from '../types/NFSExports';
 import { useLocale } from '../composables/useLocale';
 import { useNFSExports } from '../composables/useNFSExports';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -28,7 +29,7 @@ const emit = defineEmits<{
   (e: 'active', v: { host: string; port: number; enabled: boolean; path?: string; readOnly: boolean }): void;
 }>();
 
-const locale = computed<LocaleCode>(() => props.config.locale ?? 'tr');
+const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t } = useLocale(locale);
 
 const {

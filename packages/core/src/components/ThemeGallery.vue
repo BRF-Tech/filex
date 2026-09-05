@@ -6,7 +6,7 @@
  * toolbar chips + sample rows) painted with that theme's tokens for the
  * CURRENTLY resolved light/dark mode — so the card shows exactly what
  * you'd get. Click applies instantly (live preview behind the modal) and
- * persists; the selected card carries a ✓. "Varsayılana dön" resets.
+ * persists; the selected card carries a ✓. "Reset to default" resets.
  *
  * Presentational only — selection state + persistence live in
  * lib/themes.ts (shared across instances); the parent forwards `select`.

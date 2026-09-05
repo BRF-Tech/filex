@@ -19,7 +19,7 @@ import { fetchViewerText } from '../composables/useViewerFetch';
 const props = defineProps<{
   url: string;
   ext: string;
-  t?: (key: string) => string;
+  t?: (key: string, vars?: Record<string, string | number>) => string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
 }>();
@@ -144,8 +144,8 @@ watch(filter, () => {
   page.value = 1;
 });
 
-function tt(key: string, fallback: string): string {
-  return props.t ? props.t(key) : fallback;
+function tt(key: string, fallback: string, vars?: Record<string, string | number>): string {
+  return props.t ? props.t(key, vars) : fallback;
 }
 </script>
 
@@ -182,7 +182,7 @@ function tt(key: string, fallback: string): string {
         :disabled="page <= 1"
         @click="page--"
       >‹</button>
-      <span class="filex-viewer-csv__pageno">{{ page }} / {{ totalPages }} ({{ filtered.length }} satır)</span>
+      <span class="filex-viewer-csv__pageno">{{ page }} / {{ totalPages }} ({{ tt('viewer.csv_rows', `${filtered.length} rows`, { n: filtered.length }) }})</span>
       <button
         type="button"
         class="filex-viewer-btn"

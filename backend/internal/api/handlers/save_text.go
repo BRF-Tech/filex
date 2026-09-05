@@ -156,11 +156,27 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	if n, err := h.Store.GetNodeByPath(r.Context(), storageID, hash); err == nil {
 		existing = n
 	}
+	// This call predates writehook.BeforeOverwrite and still snapshots
+	// directly through h.Versions, because it already has the node row in
+	// hand. What it no longer does is proceed past a failure: it used to log
+	// "snapshot failed (continuing with write)" and overwrite anyway, which
+	// contradicted Snapshot's own documented contract two lines up from its
+	// body -- "if the snapshot itself fails the caller should NOT proceed".
+	// Editing a file in the browser is now refused on a failed snapshot for
+	// the same reason every other write surface is: losing history is not a
+	// reason to also lose the file.
 	if existing != nil && h.Versions != nil {
 		if _, snapErr := h.Versions.Snapshot(r.Context(), existing.ID); snapErr != nil {
-			slog.Warn("save-text: snapshot failed (continuing with write)",
+			slog.Warn("save-text refused: snapshot",
 				slog.Int64("node", existing.ID),
+				slog.Int64("storage", storageID),
+				slog.String("path", rel),
 				slog.String("err", snapErr.Error()))
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "could not preserve the existing file: " + snapErr.Error(),
+				"code":  "SNAPSHOT_FAILED",
+			})
+			return
 		}
 	}
 

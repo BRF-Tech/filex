@@ -240,6 +240,24 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 			Etag:       strings.Trim(p.Etag, `"`),
 		}
 	}
+	// The last moment at which the bytes this completion is about to replace
+	// still exist -- see writehook/overwrite.go. No shipped client speaks this
+	// legacy presigned path any more (the web client uses the driver-agnostic
+	// staged protocol), but any authenticated caller still can, and
+	// CompleteMultipart is exactly where a large upload on an S3-backed
+	// instance lands. The bytes went client-to-S3 directly, so this is the
+	// only server-side moment that exists at all on this path.
+	if err := writehook.BeforeOverwrite(r.Context(), cu.StorageID, cu.StorageKey); err != nil {
+		slog.Warn("finalize refused: snapshot",
+			slog.Int64("storage", cu.StorageID),
+			slog.String("path", cu.StorageKey),
+			slog.String("err", err.Error()))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "could not preserve the existing file: " + err.Error(),
+			"code":  "SNAPSHOT_FAILED",
+		})
+		return
+	}
 	if err := mp.CompleteMultipart(r.Context(), cu.StorageKey, cu.UploadID, completions); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "complete multipart: " + err.Error()})
 		return

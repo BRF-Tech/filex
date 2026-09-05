@@ -262,7 +262,7 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 		return nil, err
 	}
 
-	url := strings.TrimRight(a.publicURL, "/") + "/u/" + tok
+	url := a.tenants.ForStorage(ctx, s.ID) + "/u/" + tok
 	return &uploadTicketInfo{
 		URL:        url,
 		Ticket:     tok,

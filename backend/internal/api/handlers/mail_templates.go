@@ -200,3 +200,50 @@ func accountCreatedText(locale, loginURL, email, tempPw string) (string, string)
 			"\nE-posta: " + email + "\nGeçici parola: " + tempPw +
 			"\n\nLütfen giriş yaptıktan sonra parolanızı değiştirin."
 }
+
+// ─────────────────── file-drop notices ───────────────────
+//
+// A drop's uploader is anonymous by design, so there is no uploader locale to
+// read. Every one of these strings is read by the folder's OWNER — in the
+// notification bell, in the webhook v2 payload and in the owner e-mail — so
+// the owner's stored locale is the one that applies. See Drop.ownerLocale.
+
+// dropUploaderFallback names an uploader who did not fill the optional name
+// field. It appears inside dropNotifyText's title/body.
+func dropUploaderFallback(locale string) string {
+	if mailLangEN(locale) {
+		return "Someone"
+	}
+	return "Birisi"
+}
+
+// dropNotifyText builds the title + body for the "files were dropped in your
+// folder" notice. `who` is already resolved (a real name, or
+// dropUploaderFallback); `sub` is the submission subfolder.
+func dropNotifyText(locale, who, folder string, count int, sub string) (string, string) {
+	if mailLangEN(locale) {
+		return "New file upload",
+			fmt.Sprintf("%s dropped %d file(s) into %q (%s).", who, count, folder, sub)
+	}
+	return "Yeni dosya yüklemesi",
+		fmt.Sprintf("%s, %q klasörüne %d dosya bıraktı (%s).", who, folder, count, sub)
+}
+
+// dropNoteHeader prefixes the NOT.txt written beside a submission with the
+// uploader's name. The file is opened by the owner, so it follows the owner's
+// locale like the notification does.
+func dropNoteHeader(locale, uploaderName string) string {
+	if mailLangEN(locale) {
+		return "From: " + uploaderName + "\n\n"
+	}
+	return "Gönderen: " + uploaderName + "\n\n"
+}
+
+// smtpTestMailText is the body of the admin panel's "Test" send. It goes to
+// whichever address the acting admin typed, so it follows that admin's locale.
+func smtpTestMailText(locale string) (string, string) {
+	if mailLangEN(locale) {
+		return "filex SMTP test", "This is a filex SMTP test email."
+	}
+	return "filex SMTP testi", "Bu bir filex SMTP test e-postasıdır."
+}

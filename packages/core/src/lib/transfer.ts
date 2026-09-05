@@ -3,14 +3,14 @@
  *
  * Three gestures land on the same wire call — drag a row onto a folder, paste
  * after Ctrl+X, paste after Ctrl+C — and they do NOT mean the same thing once
- * the two ends live in different depolar:
+ * the two ends live in different storages:
  *
  *   • Ctrl+C → paste is a copy, wherever it lands.
- *   • Ctrl+X → paste is a move, wherever it lands. Across depolar the server
+ *   • Ctrl+X → paste is a move, wherever it lands. Across storages the server
  *     streams the bytes over and then deletes the original; before v0.27.0 the
  *     explorer quietly downgraded this to a copy and the user was left with the
  *     file in both places, believing they had moved it.
- *   • Dragging is a move inside one depo and a COPY across two — the rule
+ *   • Dragging is a move inside one storage and a COPY across two — the rule
  *     Explorer and Finder have taught everyone: a drag between drives copies.
  *
  * Kept as a pure function so both the pane path and the clipboard path ask the
@@ -23,13 +23,13 @@ export function wireAdapterOf(p: string): string {
   return i === -1 ? '' : p.slice(0, i);
 }
 
-/** What the caller asked for. `auto` is a drag: let the depolar decide. */
+/** What the caller asked for. `auto` is a drag: let the storages decide. */
 export type TransferIntent = 'auto' | 'copy' | 'move';
 
 export interface TransferPlan {
   /** What to actually ask the server for. */
   kind: 'copy' | 'move';
-  /** True when at least one source lives in another depo than the target. */
+  /** True when at least one source lives in another storage than the target. */
   cross: boolean;
 }
 
@@ -40,7 +40,7 @@ export function resolveTransfer(
 ): TransferPlan {
   const target = wireAdapterOf(targetWire);
   // A source with no prefix is a legacy embedder's bare path: it can only mean
-  // "the same depo I am looking at", so it never counts as crossing.
+  // "the same storage I am looking at", so it never counts as crossing.
   const cross = sources.some((p) => {
     const a = wireAdapterOf(p);
     return a !== '' && target !== '' && a !== target;

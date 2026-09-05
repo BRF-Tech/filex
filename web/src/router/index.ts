@@ -50,17 +50,17 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true, layout: 'blank' },
   },
   {
-    // Demo "Filex'i göster" lands here. No admin chrome — just the
-    // FileExplorer Web Component. `public: true` lets unauthenticated
-    // visitors see the page; the explorer itself returns 401 from
-    // /api endpoints, so the demo flow auto-logs-in first.
+    // The demo's "Filex'i göster" (Show Filex) button lands here. No admin
+    // chrome — just the FileExplorer Web Component. `public: true` lets
+    // unauthenticated visitors see the page; the explorer itself returns 401
+    // from /api endpoints, so the demo flow auto-logs-in first.
     path: '/explore',
     name: 'explore',
     component: () => import('@/views/Explore.vue'),
     meta: { public: true, layout: 'blank' },
   },
   {
-    // Standalone editor — the SFC's "Aç" / double-click opens this in
+    // Standalone editor — the SFC's "Open" / double-click opens this in
     // a new tab. Reads `?path=<adapter>://<rel>&type=<ext>&mode=edit`
     // from the URL and mounts the right viewer fullscreen with
     // save-on-change. No admin chrome.

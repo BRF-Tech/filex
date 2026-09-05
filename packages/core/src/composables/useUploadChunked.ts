@@ -85,10 +85,17 @@ export interface UploadOptions {
   onDone?: (job: UploadJob, result: UploadResult) => void;
   onError?: (job: UploadJob, err: Error) => void;
   /**
-   * Wait for the backend transfer before resolving. Default false: the node is
-   * listed the moment the commit is accepted, which is the whole point of
-   * staging. `true` is for a caller that must not report success until the
-   * bytes are on the driver.
+   * Wait for the backend transfer before resolving. Defaults to TRUE, because
+   * "the server has the bytes" and "the storage has the bytes" are different
+   * claims and only the second one is an upload.
+   *
+   * ⚠ It used to default to false and no caller ever set it, so the job went
+   * straight to `done` on the 202 — a transfer that failed afterwards in the
+   * ops worker left the user looking at a finished upload for a file that was
+   * never stored (issue #16: every file over the chunk threshold, on every S3
+   * backend). The `transferring` phase is short for a healthy storage and is
+   * the only place a failure can still be shown, so it is the default; pass
+   * false to opt out where the wait is genuinely unwanted.
    */
   waitForTransfer?: boolean;
 }
@@ -389,7 +396,7 @@ export function useUploadChunked(
       job.opId = result?.op_id;
       job.nodeId = result?.node_id;
 
-      if (opts.waitForTransfer && result?.op_id && api.endpoints.opsShow) {
+      if (opts.waitForTransfer !== false && result?.op_id && api.endpoints.opsShow) {
         job.status = 'transferring';
         report();
         await waitForOp(result.op_id);
@@ -484,17 +491,31 @@ export function useUploadChunked(
       if (!tmpl) return;
       const url = tmpl.replace('{id}', String(opId));
       let delay = 200;
+      // ⚠ A tray read that keeps failing must not park the upload in
+      // `transferring` for ever. One hiccup is not a verdict, but a row we
+      // cannot read at all (purged, or the endpoint is gone) is unknowable, so
+      // after a bounded run of failures the wait ends and the job settles the
+      // way it did before the wait existed — optimistic, but not hung.
+      let misses = 0;
       for (;;) {
         if (cancelled) throw new DOMException('Aborted by user', 'AbortError');
         try {
           const op = await api.jsonFetch<{ status?: string; error?: string }>(url);
           if (op?.status === 'ok') return;
           if (op?.status === 'failed' || op?.status === 'partial') {
-            throw new Error(op.error || 'transfer failed');
+            throw new TransferFailedError(op.error || 'transfer failed');
           }
+          misses = 0;
         } catch (err) {
-          if ((err as Error).message === 'transfer failed' || (err as Error).name === 'AbortError') throw err;
+          // ⚠ The verdict is told apart from the hiccup by TYPE, not by
+          // message. It used to be `message === 'transfer failed'`, which only
+          // matched when the server sent NO error text: the moment it sent a
+          // real one — which is every interesting failure — the throw above was
+          // swallowed here and the poll span for ever. Harmless while nothing
+          // set waitForTransfer; a hang the moment anything did.
+          if (err instanceof TransferFailedError || (err as Error).name === 'AbortError') throw err;
           /* a hiccup reading the tray is not a failed transfer */
+          if (++misses >= MAX_OP_POLL_MISSES) return;
         }
         await sleep(delay);
         delay = Math.min(delay * 2, 2000);
@@ -512,6 +533,17 @@ export function useUploadChunked(
     listResumable,
     discardResumable,
   };
+}
+
+/** How many consecutive unreadable op polls end the transfer wait (~7s). */
+const MAX_OP_POLL_MISSES = 6;
+
+/** The backend said the transfer failed — as opposed to "I could not ask". */
+class TransferFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TransferFailedError';
+  }
 }
 
 function sleep(ms: number): Promise<void> {

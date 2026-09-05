@@ -220,7 +220,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			if req.StorageID != 0 && n.StorageID != req.StorageID {
 				continue
 			}
-			/* wiring:e2 — marker dosyası ad aramasında da görünmez */
+			/* wiring:e2 — the marker file stays hidden in name search too */
 			if n.Name == e2e.MarkerName {
 				continue
 			}
@@ -234,7 +234,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
-				/* wiring:e2 — marker dosyası ad aramasında da görünmez */
+				/* wiring:e2 — the marker file stays hidden in name search too */
 				if n.Name == e2e.MarkerName {
 					continue
 				}
@@ -254,7 +254,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, plan.Like, req.Limit*search.FallbackOverFetch)
 		if err == nil {
 			for _, n := range fallback {
-				/* wiring:e2 — marker dosyası ad aramasında da görünmez */
+				/* wiring:e2 — the marker file stays hidden in name search too */
 				if n.Name == e2e.MarkerName {
 					continue
 				}

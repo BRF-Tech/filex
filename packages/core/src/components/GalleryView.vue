@@ -43,8 +43,8 @@ const props = defineProps<{
    * leaves that view out — a shared app token has no single person behind it,
    * so "your starred files" is one list shown to strangers — offering to star
    * something is offering to write into that same shared list. Owner's call,
-   * 2026-09-05: "yıldızlı yeri gözükmüyorsa o zaman yıldızla/yıldızı kaldır da
-   * gözükmemeli".
+   * 2026-09-05, verbatim (translated from Turkish): "if the starred place is
+   * not visible, then star/unstar should not be visible either".
    */
   starEnabled?: boolean;
   apiBase?: string;
@@ -159,7 +159,7 @@ function parentDir(path: string): string {
 function specialEmojiFor(n: FileNode): string | null {
   if (n.basename === '.trash') return '🗑';
   if (n.mime_type === 'inode/storage') return '💾';
-  if (n.type === 'dir' && n.e2e === true) return '🔒'; /* wiring:e2 — şifreli klasör rozeti */
+  if (n.type === 'dir' && n.e2e === true) return '🔒'; /* wiring:e2 — encrypted-folder badge */
   return null;
 }
 

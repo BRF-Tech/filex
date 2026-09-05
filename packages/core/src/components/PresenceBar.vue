@@ -11,6 +11,7 @@ import type { PresenceUser } from '../lib/realtime';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import PresenceAvatar from './PresenceAvatar.vue';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   users: PresenceUser[];
@@ -18,7 +19,7 @@ const props = defineProps<{
   locale?: LocaleCode;
 }>();
 
-const { t } = useLocale(() => props.locale ?? 'tr');
+const { t } = useLocale(() => resolveLocale(props.locale));
 
 const others = computed(() =>
   (props.users ?? []).filter((u) => props.selfId == null || u.id !== props.selfId),
@@ -87,7 +88,7 @@ function label(u: PresenceUser): string {
         <span v-if="others.length > 5" class="fx-presence-more">+{{ others.length - 5 }}</span>
       </div>
       <span class="fx-presence-text" :title="others.map(label).join(', ')">
-        {{ others.length === 1 ? others[0].name : `${others.length} kişi` }}
+        {{ others.length === 1 ? others[0].name : t('presence.others', { n: others.length }) }}
         <template v-if="others.length === 1 && others[0].file">
           · <span class="fx-presence-file">{{ others[0].file }}</span>
         </template>

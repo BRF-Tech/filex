@@ -1,4 +1,4 @@
-// Package handlers — comments.go (calisma:d3, v0.6 "Çalışma")
+// Package handlers — comments.go (calisma:d3, v0.6 "Çalışma" (Work))
 //
 // Node comment endpoints under /api/files:
 //

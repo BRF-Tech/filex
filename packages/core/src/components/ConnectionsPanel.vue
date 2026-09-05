@@ -40,6 +40,7 @@ import S3KeysPanel from './S3KeysPanel.vue';
 import SSHKeysPanel from './SSHKeysPanel.vue';
 import NFSExportsPanel from './NFSExportsPanel.vue';
 import TokensPanel from './TokensPanel.vue';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -56,7 +57,7 @@ const emit = defineEmits<{
   (e: 'error', err: { message: string }): void;
 }>();
 
-const locale = computed<LocaleCode>(() => props.config.locale ?? 'tr');
+const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t } = useLocale(locale);
 
 // Destructured on purpose: Vue only auto-unwraps refs that are top-level in

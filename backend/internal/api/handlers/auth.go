@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"html/template"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
 // Auth handles login/logout/oidc routes.
@@ -27,11 +27,19 @@ type Auth struct {
 	// too — a logout without the matching Domain leaves the old cookie
 	// behind.
 	CookieDomain string
+	// Tenants resolves the per-request origin for absolute URLs. See
+	// internal/tenanturl — it is the one implementation of this rule, and
+	// redirectBase below is now just its caller.
+	Tenants tenanturl.Resolver
 }
 
 // NewAuth constructs an Auth handler.
 func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publicURL string, multiTenant bool, cookieDomain string) *Auth {
-	return &Auth{Store: store, LocalAuth: local, OIDCAuth: oidc, PublicURL: publicURL, MultiTenant: multiTenant, CookieDomain: cookieDomain}
+	return &Auth{
+		Store: store, LocalAuth: local, OIDCAuth: oidc,
+		PublicURL: publicURL, MultiTenant: multiTenant, CookieDomain: cookieDomain,
+		Tenants: tenanturl.New(store, publicURL, multiTenant),
+	}
 }
 
 type loginReq struct {
@@ -210,30 +218,13 @@ func writeOIDCBounce(w http.ResponseWriter, target string) {
 // Multi-tenant: the callback arrives on the TENANT's own host (each realm's
 // redirect_uri points there — see multioidc.driverFor), so bouncing the user
 // to h.PublicURL would strand them on the operator/supertenant host where
-// they have no session and no files. Derive the base from the request host
-// instead — but only when that host resolves to an enabled provider row (the
-// same trusted-host model as tenant resolution, docs/MULTI-TENANCY.md §13);
-// anything else falls back to PublicURL. Scheme is https (multi-tenant hosts
-// sit behind the TLS-terminating proxy, same assumption as the per-tenant
-// OIDC redirect default) unless the trusted proxy says X-Forwarded-Proto:
-// http (TLS-less test setups).
+// they have no session and no files.
+//
+// The rule itself lives in tenanturl.Resolver, which every other absolute-URL
+// builder now shares; this method stays only so the OIDC code reads the way it
+// always did.
 func (h *Auth) redirectBase(r *http.Request) string {
-	if !h.MultiTenant {
-		return h.PublicURL
-	}
-	host := requestHost(r)
-	if host == "" {
-		return h.PublicURL
-	}
-	p, err := h.Store.GetProviderByHost(r.Context(), host)
-	if err != nil || p == nil {
-		return h.PublicURL
-	}
-	scheme := "https"
-	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
-		scheme = "http"
-	}
-	return scheme + "://" + host
+	return h.Tenants.FromRequest(r)
 }
 
 // cookieDomain returns the Domain attribute for the session cookie on this
@@ -273,16 +264,8 @@ func (h *Auth) cookieDomain(r *http.Request) string {
 }
 
 // requestHost extracts the bare lowercase hostname (no port) the client asked
-// for. Behind the reverse proxy filex trusts the proxied Host header — the
-// proxy is the only reachable path in the documented deployments (§13).
-// Mirrors multioidc.RequestHost.
-func requestHost(r *http.Request) string {
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	return strings.ToLower(host)
-}
+// for. One definition, in tenanturl, shared with the origin resolver.
+func requestHost(r *http.Request) string { return tenanturl.RequestHost(r) }
 
 // WhoAmI returns the current user (or null).
 func (h *Auth) WhoAmI(w http.ResponseWriter, r *http.Request) {

@@ -179,7 +179,7 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     connections: true,
     storages: roots.value,
     initialPath: initialPathFromQuery.value || '',
-    // "Aç" / double-click → open the standalone editor in a new tab.
+    // "Open" / double-click → open the standalone editor in a new tab.
     // The route reads `?path=&type=&mode=` and mounts the right viewer
     // (OnlyOffice for office, Monaco for code, drawio iframe for
     // .drawio, image/PDF/3D viewers otherwise) with save-on-change.

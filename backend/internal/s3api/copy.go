@@ -3,6 +3,7 @@ package s3api
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // CopyObject: how a client renames, moves, or duplicates without moving bytes
@@ -177,6 +179,16 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 
 	etag, err := h.performCopy(ctx, srcSt, dstSt, srcDrv, dstDrv, src.Key, dstKey, stat)
 	if err != nil {
+		var refused *overwriteRefusedError
+		if errors.As(err, &refused) {
+			// The S3 surface's own way of saying "refused, not failed": the
+			// write never happened. statusForStorageErr/codeForWriteErr do not
+			// recognise this error -- it is neither ErrNotFound, ErrReadOnly
+			// nor ErrUnsupported -- and would default it to a bare 500.
+			WriteError(w, r, http.StatusServiceUnavailable, "ServiceUnavailable",
+				"could not preserve the existing object: "+refused.err.Error())
+			return
+		}
 		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
 		return
 	}
@@ -208,7 +220,23 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 // S3 or a hard-link-style copy on a filesystem never moves the bytes through
 // this process. Falling back to a stream is correct but is NOT the same thing,
 // and on a 4 GB object the difference is minutes of transfer.
+// overwriteRefusedError marks a writehook.BeforeOverwrite refusal from
+// performCopy so copyObject can answer with the S3 surface's own idiom instead
+// of falling through the generic storage-error mapping.
+type overwriteRefusedError struct{ err error }
+
+func (e *overwriteRefusedError) Error() string { return e.err.Error() }
+func (e *overwriteRefusedError) Unwrap() error { return e.err }
+
 func (h *Handler) performCopy(ctx context.Context, srcSt, dstSt *model.Storage, srcDrv, dstDrv storage.Driver, srcKey, dstKey string, stat storage.Object) (string, error) {
+	// The last moment at which the bytes this copy is about to replace still
+	// exist -- see writehook/overwrite.go. One call here covers BOTH branches
+	// below: the driver Copier fast path and the stream fallback are equally a
+	// destructive write onto dstKey, and server-side CopyObject (rclone copy,
+	// every GUI rename) was unguarded at any size.
+	if err := writehook.BeforeOverwrite(ctx, dstSt.ID, dstKey); err != nil {
+		return "", &overwriteRefusedError{err}
+	}
 	if srcSt.ID == dstSt.ID {
 		if c, ok := srcDrv.(storage.Copier); ok {
 			if err := c.Copy(ctx, srcKey, dstKey); err != nil {

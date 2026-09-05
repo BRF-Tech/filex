@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"path"
@@ -39,6 +40,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // Service builds editor configs and validates document-server callbacks.
@@ -280,6 +282,24 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	// and `X/…` side by side on an object store (storage.ErrKindConflict).
 	if err := storage.EnsureFileTarget(r.Context(), drv, node.Path); err != nil {
 		return map[string]any{"error": 1, "message": "write back: " + err.Error()}, nil
+	}
+	// The last moment at which the bytes this save is about to replace still
+	// exist -- see writehook/overwrite.go.
+	//
+	// ⚠⚠ The message handed back to the document server is a CONSTANT, never
+	// the guard error itself. That error wraps the driver error and the
+	// storage-relative path, and this callback sits on the PUBLIC route block
+	// with its JWT checked only when a token is configured -- so an
+	// unauthenticated caller could otherwise walk ?node=1,2,3... and read path
+	// fragments back out of every tenant's storage. The detail still has to
+	// reach an operator, so it goes to the log, the same shape every other
+	// guarded site uses.
+	if err := writehook.BeforeOverwrite(r.Context(), node.StorageID, node.Path); err != nil {
+		slog.Warn("onlyoffice callback refused: snapshot",
+			slog.Int64("storage", node.StorageID),
+			slog.String("path", node.Path),
+			slog.String("err", err.Error()))
+		return map[string]any{"error": 1, "message": "could not preserve the existing file"}, nil
 	}
 	if err := writer.Write(r.Context(), node.Path, resp.Body, resp.ContentLength); err != nil {
 		return map[string]any{"error": 1, "message": "write back: " + err.Error()}, nil

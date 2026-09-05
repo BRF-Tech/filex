@@ -150,11 +150,11 @@ export interface StorageRef {
   replica_target_id?: number | null;
 }
 
-/** Ek storage_name field — backend ShareWithMeta envelope'unun
- *  storage adını UI'a getirir (Paylaşımlar tablosunda Depo kolonu).
- *  v0.1.19+ */
+/** Extra storage_name field — brings the storage name out of the backend
+ *  ShareWithMeta envelope and into the UI (the Storage column of the Shares
+ *  table). v0.1.19+ */
 /** Replication target — backup-only sink (NOT a regular storage).
- *  Lives in its own table; managed from the Replikasyon page. */
+ *  Lives in its own table; managed from the Replication page. */
 export interface ReplicationTarget {
   id: number;
   name: string;

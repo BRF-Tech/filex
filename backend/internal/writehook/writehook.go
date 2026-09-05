@@ -81,6 +81,39 @@ func OnFileWritten(ctx context.Context, storageID int64, node *model.Node, origi
 	}
 }
 
+// OnUploadFailed emits one `file.upload_failed` event: the bytes did NOT
+// reach the storage driver and the user has to be told.
+//
+// ⚠ It is the counterpart of OnFileWritten, and it exists because the staged
+// upload path acknowledges the bytes long before it writes them. The client
+// gets a 202 the moment the last chunk lands, the transfer happens afterwards
+// in the ops worker, and until issue #16 a transfer that failed there produced
+// one slog.Warn line and nothing else: the browser had already drawn a green
+// tick, the file was listed at its full size, and the only way to find out it
+// was never stored was to read the server log. An upload the user was told
+// succeeded and that did not is exactly what a notification is for.
+//
+// userID scopes the bell entry to the person who uploaded, because the
+// failure surfaces on a worker goroutine where there is no request user for
+// emit to infer one from.
+func OnUploadFailed(ctx context.Context, storageID int64, userID int64, p, name, origin, reason string, meta ...map[string]any) {
+	m := mergeMeta(origin, meta)
+	m["reason"] = reason
+	e := notify.Event{
+		Event:    notify.EventFileUploadFailed,
+		Severity: notify.SeverityError,
+		Title:    "Upload failed",
+		Body:     p,
+		Meta:     m,
+		Node:     &notify.NodeRef{StorageID: storageID, Path: p, Name: name},
+	}
+	if userID != 0 {
+		e.UserID = &userID
+		e.Actor = &notify.ActorRef{ID: userID}
+	}
+	emit(ctx, e)
+}
+
 // OnFileDeleted emits one `file.deleted` event (permanent removal —
 // trash purge or a hard delete on drivers without move support). For a
 // soft delete into the trash use OnFileTrashed instead.

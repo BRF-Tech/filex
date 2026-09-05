@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // Archive handles zip-listing, zip-extract, and zip-create operations.
@@ -186,6 +187,14 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 
 	mkdirer, _ := drv.(storage.Mkdirer)
 	keys := make([]string, 0)
+	// refused counts members the pre-write snapshot guard turned away, kept
+	// distinct from every other `continue` in this loop. The other skips are
+	// permanent and user-caused -- a zip-slip entry, a kind conflict -- and
+	// retrying changes nothing. A guard refusal is transient and
+	// system-caused (the object store is unreachable, say). Folding the two
+	// together would answer 200 {"count":0,"keys":[]} for a wholesale outage,
+	// with nothing telling the caller anything had gone wrong at all.
+	refused := 0
 	for _, f := range zr.File {
 		if len(wanted) > 0 && !wanted[f.Name] && !wanted[strings.TrimSuffix(f.Name, "/")] {
 			continue
@@ -219,6 +228,15 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 				slog.String("target", target), slog.String("err", kerr.Error()))
 			continue
 		}
+		// The last moment at which the bytes this member is about to replace
+		// still exist -- see writehook/overwrite.go. Counted in `refused`, not
+		// folded into the permanent skips above.
+		if kerr := writehook.BeforeOverwrite(r.Context(), req.StorageID, target); kerr != nil {
+			slog.Warn("archive: skipped member refused: snapshot",
+				slog.String("target", target), slog.String("err", kerr.Error()))
+			refused++
+			continue
+		}
 		rc, err := f.Open()
 		if err != nil {
 			slog.Warn("archive: zip member open", slog.String("name", f.Name), slog.String("err", err.Error()))
@@ -232,9 +250,22 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		}
 		keys = append(keys, target)
 	}
+	if len(keys) == 0 && refused > 0 {
+		// Fail-closed at the batch level, mirroring every single-write guard
+		// site: nothing landed, and it was refused rather than merely absent
+		// from the archive. A 200 here would read as "there was nothing to
+		// extract" when the truth is "the write layer refused everything".
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "could not preserve one or more existing files; nothing was written",
+			"code":    "SNAPSHOT_FAILED",
+			"refused": refused,
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"keys":  keys,
-		"count": len(keys),
+		"keys":    keys,
+		"count":   len(keys),
+		"refused": refused,
 	})
 }
 
@@ -313,7 +344,13 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmpName := tmp.Name()
+	// Remove registered BEFORE Close so the defers unwind Close-then-Remove:
+	// closed, then deleted, never the reverse. Every early return below
+	// (zw.Close, tmp.Seek, EnsureFileTarget, BeforeOverwrite, writer.Write)
+	// used to leak this fd -- only the success path closed it. The former
+	// trailing `_ = tmp.Close()` is redundant with this and has been dropped.
 	defer os.Remove(tmpName)
+	defer tmp.Close()
 
 	zw := zip.NewWriter(tmp)
 	addedNames := map[string]bool{}
@@ -374,11 +411,23 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
 		return
 	}
+	// The last moment at which the bytes this archive is about to replace
+	// still exist -- see writehook/overwrite.go.
+	if err := writehook.BeforeOverwrite(r.Context(), req.StorageID, req.Path); err != nil {
+		slog.Warn("archive add refused: snapshot",
+			slog.Int64("storage", req.StorageID),
+			slog.String("path", req.Path),
+			slog.String("err", err.Error()))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "could not preserve the existing file: " + err.Error(),
+			"code":  "SNAPSHOT_FAILED",
+		})
+		return
+	}
 	if err := writer.Write(r.Context(), req.Path, tmp, stat.Size()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = tmp.Close()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path": req.Path,
 		"size": stat.Size(),

@@ -390,6 +390,35 @@ Maintainer-only. Reproducible, automated by CI.
    node scripts/sync-chart-version.mjs --check
    ```
 
+   > ⚠⚠ **Changing the slug rule re-spells every deep link into docs.filex.sh.**
+   > The site uses GitHub's heading-id rule (`docs-site/.vitepress/github-slug.mjs`),
+   > adopted on 2026-09-05 because these pages are read on two surfaces and the
+   > in-page links were correct *GitHub* anchors. The cost of that switch was
+   > measured rather than guessed — both commits built, the emitted `id=`
+   > attributes diffed page by page: **245 of 666 headings changed spelling**,
+   > and **none disappeared**. Every heading holding an `&`, a `/`, a `.`, an
+   > apostrophe, an em dash or a leading digit moved: `#backup-restore` →
+   > `#backup--restore`, `#v0-31-0` → `#v0310`, `#config-yaml` → `#configyaml`,
+   > `#_1-pick-a-wrapper` → `#1-pick-a-wrapper`. Sixty-odd of them are on pages a
+   > stranger would link (INSTALLATION, CONFIGURATION, STORAGE, MCP, SSO, LDAP);
+   > the rest are `BACKEND.md`'s per-endpoint reference and the generated
+   > `RELEASES.md`.
+   >
+   > **No aliases were added, deliberately.** The old spellings existed only on
+   > the site and only for the seven weeks it used VitePress's rule; every link
+   > written against the GitHub rendering — the repo README, both npm package
+   > READMEs, every in-page TOC — was already correct, which is why the *rule*
+   > was changed instead of the 98 links; and an unmatched fragment lands the
+   > reader at the top of the right page, not on a 404. 245 hand-maintained
+   > `<a id>` aliases would need their own check to stay honest and would clutter
+   > markdown that is also read on GitHub, where those spellings never existed.
+   >
+   > ⚠ A URL fragment is **never sent to the server**, so a Caddy rule, a
+   > VitePress `rewrite` or a `_redirects` file cannot rescue an old anchor —
+   > only a per-heading `<a id>` or client-side JS can. If the rule is ever
+   > changed again, re-run the measurement (build at both commits, diff the
+   > emitted `id=` attributes per page) before deciding what it costs.
+
    ⚠ A relative link to a page that is in `srcExclude` is a dead link *on the
    site* even though it resolves in the repo — link those by full GitHub URL.
    That is how the "not published" list in `docs/README.md` broke the build the
@@ -488,5 +517,43 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
    > shipped that no existing install could see. Here, releases shipped that no
    > existing install was told about. A release that reaches nobody is not a
    > release, and neither gate is automatic — check the feeds, do not assume.
+
+10. **Push the documentation prose to docs.filex.sh.** A cron on the server
+    (`/root/filex-docs-refresh.sh`, versioned here as
+    `docs-site/scripts/refresh-on-main.sh`) rebuilds and republishes the site —
+    but it reads a **snapshot** at `/root/filex-docs-src`, and it deliberately
+    refreshes only `RELEASES.md` inside it. Everything else in `docs/` reaches
+    the site when a person copies it there, and nothing scripted does that.
+
+    ```bash
+    ssh main 'cp -a /root/filex-docs-src /root/filex-docs-src.bak-$(date +%Y%m%d-%H%M%S)'
+    ssh main 'rm -rf /root/filex-docs-src/docs'
+    tar czf - docs README.md CHANGELOG.md | ssh main 'tar xzf - -C /root/filex-docs-src'
+    tar czf - --exclude=node_modules --exclude=.vitepress/dist               --exclude=.vitepress/cache docs-site       | ssh main 'tar xzf - -C /root/filex-docs-src'
+    ssh main 'bash /root/filex-docs-refresh.sh'
+    ```
+
+    Then read the live page back — a page that builds is not a page that
+    published:
+
+    ```bash
+    curl -s https://docs.filex.sh/RELEASES | grep -o 'Latest — v[0-9.]*'
+    ```
+
+    > ⚠ Keep `docs-site/node_modules` on the server: the refresh script builds
+    > there and does not install. The `rm -rf` above is scoped to `docs/` for
+    > that reason.
+    >
+    > Why this is a numbered step: measured 2026-09-05, hours after v0.32.0 was
+    > tagged and deployed, `/root/filex-docs-src/docs/index.md` was still the
+    > 4 September copy — the whole release's documentation round, including a
+    > new feature card and a change to how every heading id is spelled, had not
+    > reached the site. The cron had been running the whole time and was working
+    > exactly as designed; the step it does not do is this one.
+    >
+    > ⚠ Also write the release's summary into
+    > `docs-site/data/release-highlights.json` **before** running this, or the
+    > generator renders the Latest blurb as a bare em dash. That file is
+    > hand-written from this repository's own CHANGELOG.
 
 If something fails, fix forward — never delete a published tag.

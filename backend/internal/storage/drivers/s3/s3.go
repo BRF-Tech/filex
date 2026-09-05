@@ -728,18 +728,74 @@ func (d *Driver) InitMultipart(ctx context.Context, p string, _ int64, partCount
 // size is always known at this point (it comes from the staging manifest), so
 // the body goes out with a Content-Length instead of chunked.
 func (d *Driver) UploadPart(ctx context.Context, p, uploadID string, partNumber int, r io.Reader, size int64) (string, error) {
+	body, release, err := partBody(r, size)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	out, err := d.client.UploadPart(ctx, &s3.UploadPartInput{
 		Bucket:        aws.String(d.bucket),
 		Key:           aws.String(d.key(p)),
 		UploadId:      aws.String(uploadID),
 		PartNumber:    aws.Int32(int32(partNumber)),
-		Body:          r,
+		Body:          body,
 		ContentLength: aws.Int64(size),
 	})
 	if err != nil {
 		return "", err
 	}
 	return strings.Trim(aws.ToString(out.ETag), `"`), nil
+}
+
+// partBody guarantees the part body can be read twice.
+//
+// ⚠ UploadPart is signed with SigV4 over the SHA256 of the payload, so the SDK
+// reads the whole part to hash it and then rewinds to send it. Handing it a
+// plain io.Reader fails the request before a single byte leaves the process,
+// with "failed to compute payload hash: failed to seek body to start, request
+// stream is not seekable" — which names the SDK, not the body, and so reads as
+// a broken object store rather than a broken call (issue #16).
+//
+// The interface promises io.Reader, so the driver has to make good on that
+// rather than require a Seeker the signature never asked for: a small part is
+// held in memory the same way Write holds one, a large part is spooled to a
+// temp file, and a body that is already seekable is passed straight through
+// and costs nothing. The declared length is asserted against what was actually
+// read, because a part that is quietly short would be accepted by the provider
+// and corrupt the assembled object instead of failing the upload.
+func partBody(r io.Reader, size int64) (io.Reader, func(), error) {
+	noop := func() {}
+	if _, seekable := r.(io.Seeker); seekable {
+		return r, noop, nil
+	}
+	if size >= 0 && size <= maxRewindBytes {
+		return &rewindable{r: r, buf: make([]byte, 0, size)}, noop, nil
+	}
+
+	tmp, err := os.CreateTemp("", "filex-s3-part-*")
+	if err != nil {
+		return nil, noop, fmt.Errorf("s3: part spool: %w", err)
+	}
+	release := func() {
+		name := tmp.Name()
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}
+	n, err := io.Copy(tmp, r)
+	if err != nil {
+		release()
+		return nil, noop, fmt.Errorf("s3: part spool: %w", err)
+	}
+	if size >= 0 && n != size {
+		release()
+		return nil, noop, fmt.Errorf("s3: part spool: got %d bytes, declared %d", n, size)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		release()
+		return nil, noop, fmt.Errorf("s3: part spool rewind: %w", err)
+	}
+	return tmp, release, nil
 }
 
 // CompleteMultipart implements storage.MultipartUploader.

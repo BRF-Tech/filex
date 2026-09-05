@@ -10,6 +10,7 @@ import { ref, watch, computed } from 'vue';
 import { setNodeStarred } from '../lib/star';
 import { useLocale } from '../composables/useLocale';
 import type { LocaleCode } from '../types/ExplorerConfig';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   starred: boolean;
@@ -45,7 +46,7 @@ const emit = defineEmits<{
 const local = ref(props.starred);
 watch(() => props.starred, (v) => { local.value = v; });
 
-const { t } = useLocale(() => props.locale ?? 'tr');
+const { t } = useLocale(() => resolveLocale(props.locale));
 const label = computed(() => t(local.value ? 'ctx.unstar' : 'ctx.star'));
 
 async function toggle() {

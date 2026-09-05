@@ -12,7 +12,7 @@
  *   office (docx/xlsx/pptx)       → OnlyOffice iframe (config.onlyOfficeBase)
  *   plain text (txt/log/conf)     → CodeMirror when saveText is set,
  *                                    `<pre>` otherwise
- *   anything else                 → "indir" fallback
+ *   anything else                 → "Download" fallback
  *
  * Monaco is dynamic-imported at FileExplorer onMounted; by the time the
  * user clicks an editable code file the chunk is usually already cached.
@@ -46,7 +46,7 @@ const props = defineProps<{
   pdfSaveUrl?: string | null;
   /** Standalone full-screen viewer route — `?path=…&storage=…&type=…`. */
   viewerBaseUrl?: string | null;
-  /* wiring:e2 — false hides the "Düzenle" / "Yeni Sekmede Aç" buttons.
+  /* wiring:e2 — false hides the "Edit" / "Open in New Tab" buttons.
    * The standalone route fetches RAW server bytes, which inside an
    * E2E-encrypted folder is ciphertext (and its save path could clobber
    * the encrypted blob) — the host disables the escape hatches there. */
@@ -258,7 +258,7 @@ function buildAndOpenStandalone(mode: 'view' | 'edit'): void {
 
 /**
  * Extensions that have a meaningful "edit" surface. Read-only kinds
- * (image/video/audio/3D/archive) don't surface a "Düzenle" button.
+ * (image/video/audio/3D/archive) don't surface an "Edit" button.
  */
 const EDITABLE_EXTS = new Set([
   // OnlyOffice — open the in-page office editor (or new tab) with
@@ -311,7 +311,7 @@ function onMdInput() {
   mdReRenderTimer = setTimeout(() => {
     renderMarkdown(rawText.value);
   }, 250);
-  // Autosave 1.5s after last keystroke — manual Kaydet button + Ctrl+S
+  // Autosave 1.5s after last keystroke — the manual Save button + Ctrl+S
   // still work; saveMarkdown() guards against overlap.
   if (mdAutosaveTimer) clearTimeout(mdAutosaveTimer);
   mdAutosaveTimer = setTimeout(() => {
@@ -785,7 +785,7 @@ async function mountOnlyOfficeEditor(): Promise<void> {
   officeError.value = null;
   if (!props.file || kind.value !== 'office') return;
   if (!props.onlyOfficeConfigEndpoint) {
-    officeError.value = 'OnlyOffice yapılandırması yok';
+    officeError.value = t('viewer.office_unconfigured');
     return;
   }
   if (!officeEl.value) return;
@@ -916,8 +916,8 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
         <object :data="src" type="application/pdf" class="fe-preview__iframe">
           <div class="fe-preview__fallback">
             <span class="fe-preview__fallback-icon">📕</span>
-            <p>Tarayıcı PDF'i inline açamadı.</p>
-            <a :href="download" class="fe-btn fe-btn--primary" target="_blank" rel="noopener">PDF'i Yeni Sekmede Aç</a>
+            <p>{{ t('viewer.pdf_inline_failed') }}</p>
+            <a :href="download" class="fe-btn fe-btn--primary" target="_blank" rel="noopener">{{ t('viewer.open_in_new_tab') }}</a>
           </div>
         </object>
       </template>
@@ -925,7 +925,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
       <template v-else-if="kind === 'markdown'">
         <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
         <div v-else-if="tooLarge" class="fe-preview__fallback">
-          Dosya çok büyük (>1 MB). <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
+          {{ t('viewer.too_large') }} <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
         </div>
         <div
           v-else-if="openMode === 'edit' && saveTextEndpoint"
@@ -995,7 +995,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
       <template v-else-if="kind === 'code' || kind === 'text'">
         <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
         <div v-else-if="tooLarge" class="fe-preview__fallback">
-          Dosya çok büyük (>1 MB). <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
+          {{ t('viewer.too_large') }} <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
         </div>
         <div v-else-if="fetchError" class="fe-preview__fallback">
           <p>{{ fetchError }}</p>

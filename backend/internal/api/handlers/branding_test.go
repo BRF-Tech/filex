@@ -93,7 +93,7 @@ func TestBranding_SharePageRendersIdentity(t *testing.T) {
 }
 
 // With no branding configured the page must keep the stock chrome — and the
-// powered-by footer must be there (MIT vitrini, default görünür).
+// powered-by footer must be there (the MIT showcase; visible by default).
 func TestBranding_SharePageDefaultChrome(t *testing.T) {
 	sharH, _, _, token := brandingShareFixture(t)
 	rec := getSharePage(t, sharH, token)

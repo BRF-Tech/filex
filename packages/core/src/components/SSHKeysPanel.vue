@@ -18,6 +18,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { FTPSFacts, SSHPublicKey } from '../types/SSHKeys';
 import { useLocale } from '../composables/useLocale';
 import { useSSHKeys } from '../composables/useSSHKeys';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -47,7 +48,7 @@ const emit = defineEmits<{
   }): void;
 }>();
 
-const locale = computed<LocaleCode>(() => props.config.locale ?? 'tr');
+const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t } = useLocale(locale);
 
 const { keys, connection, loading, error, canAdd, hasUsableKey, load, add, setDisabled, remove } =

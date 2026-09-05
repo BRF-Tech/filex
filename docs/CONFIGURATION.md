@@ -444,6 +444,31 @@ work on every driver. See [UPLOADS.md](UPLOADS.md).
 
 ---
 
+## Versioning on overwrite
+
+Before any destructive-write surface replaces an existing file, it snapshots
+the bytes being replaced into version history — and refuses the write rather
+than let it through unrecorded when that snapshot cannot be taken. The full
+per-surface list, including the two batch surfaces that skip a refused member
+instead of failing the whole request, is in
+[TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_VERSIONS_ON_OVERWRITE` | `1` | Master switch for the pre-write snapshot guard. `0`/`false` turns it off for a deployment whose storage backend cannot afford the extra write — those writes then proceed unsnapshotted, exactly as they did before the guard existed, and filex logs one WARN at boot naming the state. `1`/`true` turns it back on, including over a `config.yaml` that set `versions_on_overwrite: false`: like every other boolean here, the env var wins in both directions. |
+| `FILEX_VERSIONS_FAIL_OPEN` | `0` | Lets a snapshot **failure** fall through to the write instead of refusing it, logging `overwrite proceeding without a snapshot` (naming the storage and path) each time. Default off, because `Service.Snapshot`'s contract is that a caller must not proceed past a failed snapshot. It exists for one specific bind: if the object store fills up, snapshots start failing and the fail-closed default then refuses **every** overwrite on the instance — desktop sync, WebDAV, OnlyOffice saves, the browser. filex logs a WARN at boot while this is on, so the state is visible without reading the config. |
+
+⚠ These are independent. `FILEX_VERSIONS_ON_OVERWRITE=0` skips the snapshot
+attempt entirely; `FILEX_VERSIONS_FAIL_OPEN=1` still attempts it and still
+records one when it succeeds. Note also that `versions.keep_n = 0` does **not**
+disable versioning — `0` means "unlimited", and the snapshot path falls back to
+its built-in retention default.
+
+In `config.yaml`: `versions_on_overwrite: false` and `versions_fail_open: true`,
+both top-level alongside `upload:` / `cache:`.
+
+---
+
 ## Downloads from slow storage (prepared copies)
 
 When a **big** file lives on a **slow** backend, filex fetches it to local disk
@@ -670,6 +695,8 @@ queue:  { driver: sqlite, dsn: "", workers: 4, enabled: true }
 notify: { enabled: true, webhook_url: "", webhook_token: "" }
 demo:   { mode: false, user: demo@demo.com, pass: demo }
 sentry: { dsn: "", environment: "" }
+versions_on_overwrite: true       # pre-write snapshot guard - see Versioning on overwrite
+versions_fail_open: false         # let a failed snapshot through instead of refusing the write
 
 seed:                              # first-boot only-if-absent (see Zero-touch seeding)
   admin_email: ""

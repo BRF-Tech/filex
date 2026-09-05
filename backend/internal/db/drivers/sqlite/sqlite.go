@@ -3669,7 +3669,7 @@ func scanNotification(rs interface {
 
 /* calisma:d3 comments */
 
-// ─────────────────── Node comments (v0.6 "Çalışma") ───────────────────
+// ─────────────────── Node comments (v0.6 "Çalışma" (Work)) ───────────────────
 
 // CreateNodeComment inserts a comment row and returns the stored row
 // (with id + timestamps filled in). Body validation (length, emptiness)

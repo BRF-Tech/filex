@@ -208,6 +208,25 @@ export const tr: Record<string, string> = {
   'toast.renamed': 'Yeniden adlandırıldı',
   'toast.moved': 'Taşındı',
   'toast.trashed': 'Çöpe taşındı',
+  /* i18n:hardcoded — FileExplorer.vue'da düz string olarak duran, hiçbir dilin
+     değiştiremediği bildirim metinleri. */
+  'toast.failed': 'İşlem başarısız',
+  'toast.copied': 'Kopyalandı',
+  'toast.deleted': 'Silindi',
+  'toast.cut': 'Kesildi',
+  'toast.cut_ready': 'Kes → Yapıştır hazır',
+  'toast.copy_ready': 'Kopyala → Yapıştır hazır',
+  'toast.same_folder_cut': 'Aynı klasöre kesilemez',
+  'toast.restored': '{n} öğe geri getirildi',
+  'toast.delete_queued': 'Silme kuyruğa alındı',
+  'toast.trash_retention': 'Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.',
+  'dropzone.hint': 'Dosyaları buraya bırak',
+  'modal.newfolder.invalid': 'Geçersiz karakter',
+  'viewer.office_unconfigured': 'OnlyOffice yapılandırması yok',
+  'viewer.pdf_inline_failed': 'Tarayıcı PDF\'i inline açamadı.',
+  'viewer.too_large': 'Dosya çok büyük (>1 MB).',
+  'viewer.csv_rows': '{n} satır',
+  'presence.others': '{n} kişi',
   'conn.offline': 'Canlı bağlantı yok — değişiklikler gecikebilir',
   'conn.tooltip': 'Sunucuyla canlı bağlantı kurulamadı; liste belirli aralıklarla otomatik yenilenir. Bağlantı geri gelince bu uyarı kaybolur.',
 
@@ -383,6 +402,7 @@ export const tr: Record<string, string> = {
   'split.error': 'Liste yüklenemedi',
   'split.retry': 'Yeniden dene',
   'split.copy_queued': 'Kopyalama kuyruğa alındı',
+  'split.move_queued': 'Taşıma kuyruğa alındı',
   'split.cross_copy': 'Depolar farklı — kopyalama kuyruğa alındı',
   'dragout.downloading': 'Bırakılan klasöre indiriliyor…',
   'dragout.not_found': 'Bırakılan yer bulunamadı — dosya bir klasöre değil bir uygulamaya bırakıldıysa indirme yapılamaz',
@@ -1029,4 +1049,17 @@ export const tr: Record<string, string> = {
   'inspector.activity.comment': '{who} yorum yaptı',
   'inspector.activity.select': 'Etkinliğini görmek için bir dosya ya da klasör seç.',
   /* === /surucu:d1 === */
+  /* i18n:hardcoded — dönüştürme kutusunda hiç anahtar yoktu: her etiket,
+     kimsenin geçirmediği isteğe bağlı bir `t` prop'unun arkasındaki düz
+     Türkçe metindi. */
+  'convert.title': 'Dönüştür',
+  'convert.loading': 'Dönüştürücü yükleniyor…',
+  'convert.done': 'Dönüştürüldü ve klasöre yüklendi.',
+  'convert.close': 'Kapat',
+  'convert.from': 'Kaynak',
+  'convert.search_format': 'Hedef format ara (pdf, mp4, png…)',
+  'convert.no_format': 'Eşleşen format yok.',
+  'convert.unsupported_input': 'Bu dosya tipi için kaynak format bulunamadı.',
+  'convert.converting': 'Dönüştürülüyor…',
+  'convert.convert': 'Dönüştür',
 };

@@ -4,7 +4,7 @@ import "time"
 
 /* calisma:d3 comments */
 
-// NodeComment is one comment on a file/folder node (v0.6 "Çalışma" wave,
+// NodeComment is one comment on a file/folder node (v0.6 "Çalışma" (Work) wave,
 // migration 00020). Comments form a flat chronological thread per node,
 // surfaced in the inspector panel.
 //

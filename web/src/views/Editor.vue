@@ -2,7 +2,7 @@
 /**
  * Editor.vue — standalone fullscreen viewer/editor route.
  *
- * The FileExplorer SFC's "Aç" / double-click contract opens
+ * The FileExplorer SFC's "Open" / double-click contract opens
  *
  *   /files/edit?path=<adapter>://<rel>&type=<ext>&mode=edit
  *

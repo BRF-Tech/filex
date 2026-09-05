@@ -151,6 +151,13 @@ func (h *Handler) headDirectoryMarker(w http.ResponseWriter, r *http.Request, dr
 
 // readable applies the confinement and the grant to one key.
 func (h *Handler) readable(p *protocolauth.Principal, set *acl.Set, key string) bool {
+	// The shared gate GET and HEAD both run through, so refusing filex's own
+	// internal trees here is what stops a caller who already knows (or
+	// guesses) a key like .versions/42/1 from reading it directly — not just
+	// from finding it in a listing, which is list.go's half.
+	if hiddenPath(key) {
+		return false
+	}
 	if c := p.Confine; c != nil && c.Rel != "" {
 		if key != c.Rel && !strings.HasPrefix(key, c.Rel+"/") {
 			return false

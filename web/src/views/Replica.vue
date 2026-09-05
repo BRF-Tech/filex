@@ -32,8 +32,9 @@ const activeTab = ref<Tab>('rules');
 const refreshing = ref(false);
 
 // Replica targets — separate entity in the new `replication_targets`
-// table. NOT a regular storage (Ada: "replika bir depo değil"):
-// no Depolar page entry, no file-explorer presence, no write API.
+// table. NOT a regular storage (Ada, translated from Turkish: "a replica is
+// not a storage"): no Storages page entry, no file-explorer presence, no
+// write API.
 // Primaries link to one via `storages.replica_target_id`.
 const storages = useStoragesStore();
 const drivers = useStorageDriversStore();
@@ -313,9 +314,9 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
 
     <!-- ── Rules ──────────────────────────────────────── -->
     <div v-show="activeTab === 'rules'" class="space-y-3">
-      <!-- Replika Depoları — dedicated entity. Operators add one or
+      <!-- Replication targets — dedicated entity. Operators add one or
            more storages here that act as backup-only targets; they
-           never appear in the Depolar page (those are write-side
+           never appear on the Storages page (those are write-side
            primaries). -->
       <div class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div class="flex items-center justify-between mb-3">
@@ -345,7 +346,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
         </ul>
       </div>
 
-      <!-- Eşleştirmeler — each primary storage points at one replica
+      <!-- Pairings — each primary storage points at one replica
            target. PATCH /admin/storages/{primary-id} with
            replica_of_id sets the link. -->
       <div class="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

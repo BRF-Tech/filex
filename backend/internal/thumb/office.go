@@ -85,11 +85,11 @@ func (p *Pipeline) generateOffice(ctx context.Context, node *model.Node, drv sto
 	pdfName := strings.TrimSuffix(srcName, filepath.Ext(srcName)) + ".pdf"
 	pdfPath := filepath.Join(tmpDir, pdfName)
 	if _, statErr := os.Stat(pdfPath); statErr != nil {
-		// soffice exit 0 ama PDF yok — bu genelde kaynak dosyanın
-		// soffice'in beklediği şemaya uymadığı (truncated pptx, vs.)
-		// veya output adının convention'umuzla uyuşmadığı durumlarda
-		// olur. soffice'in kendi stdout/stderr'ini ekleyerek root
-		// cause'u görünür yap.
+		// soffice exited 0 but there is no PDF — this usually happens
+		// when the source file does not match the schema soffice
+		// expects (truncated pptx, etc.) or when the output name does
+		// not match our convention. Attach soffice's own stdout/stderr
+		// so the root cause is visible.
 		entries, _ := os.ReadDir(tmpDir)
 		names := make([]string, 0, len(entries))
 		for _, e := range entries {

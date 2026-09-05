@@ -22,6 +22,7 @@
  */
 
 import type { ExplorerConfig, AuthConfig, EndpointMap } from '../types/ExplorerConfig';
+import { resolveLocale } from '../locales/resolve';
 import type {
   FileNode,
   ShareInfo,
@@ -336,9 +337,10 @@ export function useFileApi(config: ExplorerConfig) {
 
   // Map an HTTP status to a short, human-readable message in the explorer's
   // locale. The raw JSON body is attached as `.detail` for debugging but never
-  // shown in the toast (Ada: "404/403 falan verince ham json görüyorum").
+  // shown in the toast (Ada, translated from Turkish: "when it gives a 404/403
+  // or whatever, I see raw json").
   function statusMessage(status: number): string {
-    const tr = (config.locale ?? 'tr') !== 'en';
+    const tr = resolveLocale(config.locale) !== 'en';
     const m: Record<number, [string, string]> = {
       400: ['Geçersiz istek', 'Bad request'],
       401: ['Oturum gerekli, tekrar giriş yapın', 'Sign-in required'],

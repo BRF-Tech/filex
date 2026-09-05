@@ -80,8 +80,8 @@ for (const [parent, name] of EXISTING ? [] : [[`${STORAGE}://`, RUN], [REMOTE, '
   }, token);
   if (!mk.ok) throw new Error(`seed ${parent}${name}: ${mk.status}`);
 }
-// İç içe klasör + boş klasör + Türkçe adlı dosya + biraz kalabalık: gerçek
-// bir klasörün şekli.
+// Nested folders + an empty folder + a Turkish-named file + a bit of clutter:
+// the shape of a real folder.
 for (const [parent, name] of EXISTING ? [] : [[SUB, 'alt'], [SUB, 'bos-klasor'], [`${SUB}/alt`, 'daha-derin']]) {
   const mk = await api('/api/files/manager?action=newfolder', {
     method: 'POST',

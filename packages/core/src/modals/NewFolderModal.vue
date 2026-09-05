@@ -38,7 +38,7 @@ function submit() {
     return;
   }
   if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
-    err.value = 'Geçersiz karakter';
+    err.value = t('modal.newfolder.invalid');
     return;
   }
   emit('submit', clean);

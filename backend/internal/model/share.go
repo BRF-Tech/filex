@@ -12,7 +12,7 @@ const (
 )
 
 // Share is a public token granting limited access to a node. For a
-// download share this is read (indir); for a drop share it is blind
+// download share this is read (download); for a drop share it is blind
 // upload into the node (a directory) — see Kind.
 type Share struct {
 	ID            int64      `json:"id"`

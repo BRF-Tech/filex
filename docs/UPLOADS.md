@@ -167,6 +167,16 @@ for the transfer. `ok` means the bytes are on the driver and the node is
 `stored`; `failed` means the staging directory has been kept and `commit` can be
 called again to retry, without re-uploading a byte.
 
+⚠ **The `202` is not success.** It says filex holds every byte, not that the
+storage does — the transfer happens afterwards, and it can fail. So the browser
+client (`useUploadChunked`) waits for that op by default, showing a
+`transferring` phase, and reports a failed transfer as a failed upload. A caller
+that genuinely wants the old behaviour passes `waitForTransfer: false`. On the
+server a failed transfer moves the node to `transfer_state = "failed"` and emits
+a `file.upload_failed` notification, carrying the reason, to whoever uploaded.
+Before v0.32.1 none of that happened: the only trace was one `WARN` line in the
+server log while the user was looking at a finished upload (GitHub #16).
+
 ### DELETE — abort
 
 Deletes the staging directory and the session row. Refused with `409` while a
@@ -234,6 +244,23 @@ the assembled staging file.
 > the staged file is on filex's disk, so there is nothing to hand a browser. A
 > plugin that returns no `part_urls` from `multipart/init` is doing the normal
 > thing.
+
+⚠⚠ **A part body must be REWINDABLE**, and a driver may not assume otherwise.
+SigV4 signs the SHA256 of the payload, so the S3 SDK reads a part once to hash
+it and then rewinds to send it. Cutting parts with `io.LimitReader` drops the
+`Seek` the staging reader has, and the request then dies inside the client
+before a byte is sent, with `failed to compute payload hash: failed to seek body
+to start, request stream is not seekable` — an error that names the SDK rather
+than the call, and reads like a broken object store (GitHub #16).
+
+It is the **scheme** that decides whether this bites, not the provider: over
+`https://` the SDK sends `x-amz-content-sha256: UNSIGNED-PAYLOAD` and never
+hashes the body, so a plain reader has always worked; over `http://` the payload
+hash binds the body to the signature and the body must be read twice. Every S3
+endpoint filex had been pointed at was HTTPS, which is why this survived to a
+release. Parts are therefore cut with a rewindable window over the staging
+reader, and the S3 driver makes any body rewindable — in memory when it is
+small, through a temp file when it is not — before handing it to the SDK.
 
 ---
 
@@ -332,8 +359,16 @@ The event's `meta.origin` is `manager`, same as a direct upload, with
 
 `nodes.transfer_state` is `stored` for everything written before this feature and
 for everything whose bytes are on the driver; it is `staged` between a commit
-being accepted and its transfer finishing. `staged_uploads.node_id` is the
-reverse index from a node back to the staging directory holding its bytes.
+being accepted and its transfer finishing; and it is `failed` when the transfer
+did not succeed. `staged_uploads.node_id` is the reverse index from a node back
+to the staging directory holding its bytes.
+
+⚠ The `failed` state is not cosmetic. A node left at `staged` for ever is
+indistinguishable from one still in flight, which is how a dead upload passed
+for a healthy one. It is also what the storage sync reads: a node that is not
+`stored` has never been confirmed on the backend, so the sync will not treat its
+absence from a listing as a deletion and will not move it to trash. The bytes
+stay in staging and `commit` can be called again.
 
 ## Reading a file while it is still transferring
 

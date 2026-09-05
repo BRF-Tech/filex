@@ -4,10 +4,11 @@ package cliclient
 // for the desktop app, which drives sync by running this binary.
 //
 // The case these tests exist for is the one that was asked for in as many
-// words: "yarıda kesilirse devam edebilir olması gerekiyor." So they do not
-// check which endpoints were called. They cut a real TCP connection in the
-// middle of a chunk, throw the client away, build a NEW one — the equivalent of
-// the process exiting and being started again — and then measure:
+// words (translated from Turkish): "if it is interrupted halfway, it has to be
+// able to resume." So they do not check which endpoints were called. They cut
+// a real TCP connection in the middle of a chunk, throw the client away, build
+// a NEW one — the equivalent of the process exiting and being started again —
+// and then measure:
 //
 //	how many bytes crossed the wire, and whether the assembled file's sha256
 //	matches the local one.

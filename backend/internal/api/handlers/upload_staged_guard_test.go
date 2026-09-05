@@ -446,7 +446,8 @@ func TestStagedUpload_FailedTransferKeepsStagingForRetry(t *testing.T) {
 
 	node, err := f.store.GetNode(context.Background(), nodeID)
 	require.NoError(t, err)
-	assert.Equal(t, model.TransferStateStaged, node.TransferState, "the node stays staged until its bytes land")
+	assert.Equal(t, model.TransferStateFailed, node.TransferState,
+		"a failed transfer says so; the staging is kept either way, so the retry below is still free")
 
 	// Retry: same bytes, no re-upload, and this time the driver cooperates.
 	fake.mu.Lock()

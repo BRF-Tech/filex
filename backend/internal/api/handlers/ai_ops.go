@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -56,6 +57,11 @@ type aiOps struct {
 	// tickets, when wired, lets this surface mint credential-free upload URLs
 	// for files too large to travel inside a tool call (see upload_ticket.go).
 	tickets *uploadTicketStore
+	// tenants resolves which origin a minted /s/ or /u/ URL is built on.
+	// ⚠ This surface has no *http.Request to ask — an MCP tool call, a queue
+	// worker and an async op all reach it through a context — so the tenant
+	// comes from the DATA: the storage the target lives on.
+	tenants tenanturl.Resolver
 }
 
 // attachBody wires the byte-source resolver so the AI/REST read and zip
@@ -77,7 +83,11 @@ func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need ac
 }
 
 func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *aiOps {
-	return &aiOps{store: store, resolver: resolver, share: shareSvc, publicURL: publicURL, convertURL: convertURL, origin: writehook.OriginAI}
+	return &aiOps{
+		store: store, resolver: resolver, share: shareSvc, publicURL: publicURL,
+		convertURL: convertURL, origin: writehook.OriginAI,
+		tenants: tenanturl.New(store, publicURL, false),
+	}
 }
 
 // aiEntry is the JSON-shaped directory/file row returned to AI callers.
@@ -92,6 +102,17 @@ type aiEntry struct {
 
 // errAINoStorage is returned when no storage is configured / resolvable.
 var errAINoStorage = errors.New("no storage configured")
+
+// errAISnapshotRefused means the pre-write guard refused a write: for a single
+// write, that one write; for a batch (Unzip), every member of it, so NOTHING
+// landed.
+//
+// It exists so aiStatus can answer 503 before mapDriverErr gets to
+// substring-match the error TEXT -- a guard error containing "not found"
+// became a 404 and one containing "exists" became a 409, and an agent reads
+// either as a permanent fault rather than the transient, system-caused
+// refusal it actually is.
+var errAISnapshotRefused = errors.New("could not preserve one or more existing files; nothing was written")
 
 // errAIForbidden is returned when the bound user lacks the required grant level
 // for a mutating AI op (read denials surface from resolveStorage instead).
@@ -455,6 +476,20 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 		if _, serr := sk.Seek(0, io.SeekStart); serr == nil {
 			body = src
 		}
+	}
+
+	// The last moment at which the bytes we are about to replace still exist --
+	// see writehook/overwrite.go. Only on this synchronous fallthrough: the
+	// staged branch above already ran the same guard inside IngestStream,
+	// before it published a node, and nothing between there and here changes
+	// the catalogued file.
+	//
+	// This one call covers five surfaces, because WriteStream is the funnel
+	// they all reach: POST /api/ai/upload (multipart and JSON), the MCP
+	// file_write tool, POST /api/sharex/upload, and the ticketed
+	// PUT|POST /u/{ticket}.
+	if err := writehook.BeforeOverwrite(ctx, s.ID, rel); err != nil {
+		return nil, fmt.Errorf("%w: %s", errAISnapshotRefused, err)
 	}
 
 	if err := wr.Write(ctx, rel, body, size); err != nil {
@@ -846,10 +881,7 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 	if err != nil {
 		return nil, err
 	}
-	url := "/s/" + sh.Token
-	if base := strings.TrimRight(a.publicURL, "/"); base != "" {
-		url = base + url
-	}
+	url := a.tenants.ForStorage(ctx, s.ID) + "/s/" + sh.Token
 	return &aiShareResult{
 		URL:          url,
 		Token:        sh.Token,
@@ -964,6 +996,13 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	if err := storage.EnsureFileTarget(ctx, drvDest, relDest); err != nil {
 		return nil, err
 	}
+	// The last moment at which the bytes this archive is about to replace still
+	// exist -- see writehook/overwrite.go. Wrapped like WriteStream above so
+	// aiStatus answers 503 rather than letting mapDriverErr substring-match
+	// the text into a 404/409.
+	if err := writehook.BeforeOverwrite(ctx, sDest.ID, relDest); err != nil {
+		return nil, fmt.Errorf("%w: %s", errAISnapshotRefused, err)
+	}
 	if err := wr.Write(ctx, relDest, tmp, size); err != nil {
 		return nil, err
 	}
@@ -1050,49 +1089,56 @@ func (a *aiOps) zipAdd(ctx context.Context, zw *zip.Writer, drv storage.Driver, 
 // confinement ceiling is enforced up front), and every member is zip-slip
 // sanitized + re-checked to stay under destDir. Returns the count of files
 // written. src and destDir must be on the same storage.
-func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
+// The returned refused count is how many members the pre-write snapshot guard
+// turned away, as distinct from a member skipped for a permanent reason
+// (zip-slip, kind conflict). When every member was refused and nothing landed,
+// the error is errAISnapshotRefused.
+func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error) {
+	// Declared before the first early return so every one of them can name it;
+	// it stays 0 until the member loop below actually runs.
+	refused := 0
 	sSrc, relSrc, err := a.resolveStorage(ctx, src)
 	if err != nil {
-		return 0, err
+		return 0, refused, err
 	}
 	if relSrc == "" {
-		return 0, errors.New("src path required")
+		return 0, refused, errors.New("src path required")
 	}
 	sDst, relDst, err := a.resolveStorage(ctx, destDir)
 	if err != nil {
-		return 0, err
+		return 0, refused, err
 	}
 	if sSrc.ID != sDst.ID {
-		return 0, errors.New("unzip dest must be on the same storage as src")
+		return 0, refused, errors.New("unzip dest must be on the same storage as src")
 	}
 	if sDst.ReadOnly {
-		return 0, storage.ErrReadOnly
+		return 0, refused, storage.ErrReadOnly
 	}
 	if !a.allow(ctx, sDst, relDst, acl.LevelEditor) {
-		return 0, errAIForbidden
+		return 0, refused, errAIForbidden
 	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {
-		return 0, err
+		return 0, refused, err
 	}
 	wr, ok := drv.(storage.Writer)
 	if !ok {
-		return 0, storage.ErrUnsupported
+		return 0, refused, storage.ErrUnsupported
 	}
 
 	// archive/zip needs a ReaderAt+Seeker — materialize to a tmp file first.
 	srcBody, err := a.body.Resolve(ctx, drv, sSrc.ID, relSrc, nil)
 	if err != nil {
-		return 0, err
+		return 0, refused, err
 	}
 	rc, err := srcBody.Open(ctx)
 	if err != nil {
-		return 0, err
+		return 0, refused, err
 	}
 	tmp, err := os.CreateTemp("", "filex-ai-unzip-*.zip")
 	if err != nil {
 		_ = rc.Close()
-		return 0, err
+		return 0, refused, err
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
@@ -1100,12 +1146,12 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 	_ = rc.Close()
 	_ = tmp.Close()
 	if cerr != nil {
-		return 0, cerr
+		return 0, refused, cerr
 	}
 
 	zr, err := zip.OpenReader(tmpName)
 	if err != nil {
-		return 0, fmt.Errorf("not a zip: %w", err)
+		return 0, refused, fmt.Errorf("not a zip: %w", err)
 	}
 	defer zr.Close()
 
@@ -1144,6 +1190,16 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 				slog.String("target", target), slog.String("err", kerr.Error()))
 			continue
 		}
+		// The last moment at which the bytes this member is about to replace
+		// still exist -- see writehook/overwrite.go. Counted in `refused`,
+		// never folded into the permanent skips above: those are user-caused
+		// and retrying changes nothing, this one is transient.
+		if kerr := writehook.BeforeOverwrite(ctx, sDst.ID, target); kerr != nil {
+			slog.Warn("ai unzip: skipped member refused: snapshot",
+				slog.String("target", target), slog.String("err", kerr.Error()))
+			refused++
+			continue
+		}
 		frc, oerr := f.Open()
 		if oerr != nil {
 			slog.Warn("ai unzip: member open", slog.String("name", f.Name), slog.String("err", oerr.Error()))
@@ -1158,7 +1214,12 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, error) {
 		a.cacheUpsertFile(ctx, sDst, target, int64(f.UncompressedSize64), mimeByExt(target))
 		count++
 	}
-	return count, nil
+	if count == 0 && refused > 0 {
+		// Fail-closed at the batch level, mirroring every single-write guard
+		// site: nothing landed, and it was refused rather than absent.
+		return 0, refused, errAISnapshotRefused
+	}
+	return count, refused, nil
 }
 
 // ───── cache mirror helpers (best-effort; sync reconciles later) ─────

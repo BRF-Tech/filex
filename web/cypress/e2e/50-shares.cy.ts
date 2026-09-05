@@ -1,4 +1,4 @@
-// 50-shares — admin Paylaşımlar list renders real values (no
+// 50-shares — the admin Shares list renders real values (no
 // "undefined" / "—" placeholders) and the backend envelope carries
 // the storage_name join + creator_email + node_path (v0.1.19).
 

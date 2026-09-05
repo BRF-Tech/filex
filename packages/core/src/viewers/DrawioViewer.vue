@@ -153,13 +153,13 @@ function onMessage(ev: MessageEvent): void {
 
 function bootIfReady(): void {
   if (!drawioBase.value) {
-    error.value = tt('viewer.drawio.disabled', 'Drawio (diagrams.net) yapılandırılmamış.');
+    error.value = tt('viewer.drawio.disabled', 'diagrams.net is not configured for this filex instance.');
     status.value = 'error';
     return;
   }
   // Clear a previous "disabled" error in case the prop just became
   // available (capability probe finished after mount).
-  if (error.value === tt('viewer.drawio.disabled', 'Drawio (diagrams.net) yapılandırılmamış.')) {
+  if (error.value === tt('viewer.drawio.disabled', 'diagrams.net is not configured for this filex instance.')) {
     error.value = null;
     status.value = 'loading';
   }

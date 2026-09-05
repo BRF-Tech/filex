@@ -660,9 +660,37 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// The last moment at which the bytes we are about to replace still
+		// exist. A refusal here is a refusal to overwrite -- see
+		// writehook/overwrite.go.
+		if err := writehook.BeforeOverwrite(r.Context(), current.ID, fullRel); err != nil {
+			_ = src.Close()
+			slog.Warn("upload refused: snapshot",
+				slog.Int64("storage", current.ID),
+				slog.String("path", fullRel),
+				slog.String("err", err.Error()))
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "could not preserve the existing file: " + err.Error(),
+				"code":  "SNAPSHOT_FAILED",
+			})
+			return
+		}
+
 		started := time.Now()
 		if err := wr.Write(r.Context(), fullRel, src, fh.Size); err != nil {
 			_ = src.Close()
+			// Before this, a failed write logged only
+			// method=POST path=/api/files/manager status=500 -- no storage, no
+			// path, no name, no reason, so "which file failed yesterday
+			// afternoon" was unanswerable from the server side alone.
+			// "upload failed" is the one grep target this and the staged
+			// commit path (upload_staged.go) share.
+			slog.Warn("upload failed",
+				slog.Int64("storage", current.ID),
+				slog.String("path", fullRel),
+				slog.String("name", name),
+				slog.Int64("size", fh.Size),
+				slog.String("reason", err.Error()))
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": "write: " + err.Error()})
 			return
 		}
@@ -1066,6 +1094,13 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 		if _, err := s.Seek(0, io.SeekStart); err == nil {
 			body = src
 		}
+	}
+	// The last moment at which the bytes we are about to replace still exist --
+	// see writehook/overwrite.go. IngestFile serves the PUBLIC file-drop link,
+	// so an anonymous submitter picking a name that already exists in the drop
+	// folder would otherwise destroy the earlier file with nothing kept.
+	if err := writehook.BeforeOverwrite(ctx, st.ID, fullRel); err != nil {
+		return nil, err
 	}
 	started := time.Now()
 	if err := wr.Write(ctx, fullRel, body, size); err != nil {

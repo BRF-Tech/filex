@@ -111,7 +111,7 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
       <ul class="space-y-2 text-sm">
         <li>
           <a
-            href="https://github.com/brf-tech/filex"
+            href="https://github.com/BRF-Tech/filex"
             target="_blank"
             rel="noopener"
             class="inline-flex items-center gap-2 text-brand-600 dark:text-brand-400 hover:underline"
@@ -123,7 +123,7 @@ const thumbnailTools = computed<ToolEntry[]>(() => [
         </li>
         <li>
           <a
-            href="https://github.com/brf-tech/filex/-/tree/main/docs"
+            href="https://docs.filex.sh"
             target="_blank"
             rel="noopener"
             class="inline-flex items-center gap-2 text-brand-600 dark:text-brand-400 hover:underline"

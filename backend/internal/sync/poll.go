@@ -44,6 +44,9 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 		stale, err := s.store.ListStaleNodes(ctx, s.storage.ID, runStart)
 		if err == nil {
 			for _, n := range stale {
+				if !s.confirmGone(ctx, n) {
+					continue
+				}
 				if err := s.store.SoftDeleteNode(ctx, n.ID); err == nil {
 					deleted++
 					if s.index != nil {
@@ -194,6 +197,72 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 		}
 	}
 	return count, nil
+}
+
+// confirmGone decides whether a node the walk did not see may be moved to
+// trash.
+//
+// ⚠⚠ Absence from a listing is NOT proof that the user's file was deleted, and
+// answering it with "move to trash" is how a bug in an unrelated part of filex
+// becomes data loss. In issue #16 every staged upload above 8 MiB failed to
+// reach S3 (the commit could not sign a non-seekable part body), the node stayed
+// in the catalogue with its bytes still in staging, and the next sync run — doing
+// exactly what it was told — read "this node is not in the bucket" and trashed
+// the file the user had just uploaded and been shown as complete. The upload bug
+// is fixed, but the shape recurs on its own: a permissions change that hides a
+// prefix, a driver that pages a listing badly, an object restored to a bucket
+// out of band. So the tombstone pass now has to be RIGHT about the deletion, not
+// merely unable to see the file.
+//
+// Two questions, both of which must say "yes, it is really gone":
+//
+//  1. Did filex ever put the bytes there? A node whose transfer_state is not
+//     "stored" has never been confirmed on the backend — it is either mid-flight
+//     or a failed upload whose bytes are still in staging. The backend not
+//     listing it is the EXPECTED state, not evidence of a deletion, and it is
+//     never a reason to trash it. (This also closes the race in which a sync run
+//     lands between publishing the node and the commit finishing, which would
+//     trash a perfectly healthy upload.)
+//
+//  2. Does the object really not exist? A listing can omit an object for reasons
+//     that have nothing to do with deletion. Stat is a direct, cheap second
+//     opinion and it only runs for candidates. Only a definite ErrNotFound is
+//     taken as deletion; any other error (permissions, timeout, 503) keeps the
+//     node, because "I could not check" must never read as "it is gone".
+func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
+	if n.TransferState != "" && n.TransferState != model.TransferStateStored {
+		slog.Info("sync: keeping unstored node out of the tombstone pass",
+			slog.Int64("node", n.ID),
+			slog.String("path", n.Path),
+			slog.String("transfer_state", n.TransferState),
+			slog.String("storage", s.storage.Name))
+		return false
+	}
+	if n.Type != model.NodeTypeFile {
+		// A directory is an artefact of the listing on most drivers (S3 has no
+		// such thing), so there is no object to Stat. The seen_at rule is all
+		// there is, and a directory carries no bytes of its own.
+		return true
+	}
+	key := n.StorageKey
+	if key == "" {
+		key = n.Path
+	}
+	if _, err := s.driver.Stat(ctx, key); err == nil {
+		slog.Warn("sync: listing missed an object that is still there",
+			slog.Int64("node", n.ID),
+			slog.String("path", n.Path),
+			slog.String("storage", s.storage.Name))
+		return false
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		slog.Warn("sync: could not confirm an object is gone, keeping it",
+			slog.Int64("node", n.ID),
+			slog.String("path", n.Path),
+			slog.String("storage", s.storage.Name),
+			slog.String("err", err.Error()))
+		return false
+	}
+	return true
 }
 
 func (s *storageSyncer) previousSeenCount(ctx context.Context) (int, error) {

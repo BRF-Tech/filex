@@ -10,3 +10,4 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 export const messages: Record<LocaleCode, Record<string, string>> = { tr, en };
 
 export { tr, en };
+export { resolveLocale, detectLocale } from './resolve';

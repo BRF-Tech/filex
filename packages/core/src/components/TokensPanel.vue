@@ -30,6 +30,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { ApiToken } from '../types/Tokens';
 import { useLocale } from '../composables/useLocale';
 import { useTokens } from '../composables/useTokens';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -50,7 +51,7 @@ const emit = defineEmits<{
   (e: 'active', v: { hasToken: boolean }): void;
 }>();
 
-const locale = computed<LocaleCode>(() => props.config.locale ?? 'tr');
+const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t } = useLocale(locale);
 
 const { tokens, loading, error, canMint, revealed, load, create, remove, dismiss } = useTokens(

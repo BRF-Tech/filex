@@ -98,7 +98,7 @@ export {
 } from './composables/useMonacoLoader';
 
 // ——— Locale catalogue (consumers may merge their own keys) ———
-export { messages, tr, en } from './locales';
+export { messages, tr, en, resolveLocale, detectLocale } from './locales';
 
 /* wiring:c1 — theme registry + gallery (hosts can list/apply themes programmatically) */
 export {
@@ -150,7 +150,7 @@ export type { TabState, TabSplit, TabsApi } from './composables/useTabs';
 export { default as TabBar } from './components/TabBar.vue';
 export { default as SecondaryPane } from './components/SecondaryPane.vue';
 /* /wiring:d1 */
-/* wiring:e2 — uçtan uca şifreli klasörler (WebCrypto; docs/E2E-ENCRYPTION.md) */
+/* wiring:e2 — end-to-end encrypted folders (WebCrypto; docs/E2E-ENCRYPTION.md) */
 export {
   E2E_MARKER_NAME,
   E2E_MAGIC,

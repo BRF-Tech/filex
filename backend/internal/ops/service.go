@@ -567,8 +567,8 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 // forever. If we somehow can't find a free name, we return the last
 // candidate and let the underlying driver decide what to do.
 //
-// (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" was sending source ==
-// destination and the S3 driver was 400ing the self-copy.)
+// (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" (Duplicate) was sending
+// source == destination and the S3 driver was 400ing the self-copy.)
 func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) string {
 	if dst != src && !pathExists(ctx, drv, dst) {
 		return dst

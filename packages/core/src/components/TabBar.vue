@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TabBar — wiring:d1 sekme şeridi.
+ * TabBar — wiring:d1 the tab strip.
  *
  * Thin strip that sits ABOVE the toolbar. The host renders it only when
  * 2+ tabs exist (embed pixel-parity: a single tab shows nothing at all).
@@ -8,7 +8,7 @@
  *
  * Interactions:
  *   click tab      → select
- *   × / middle-tık → close
+ *   ×/middle-click → close
  *   +              → new tab (clone of the current location)
  *   drag           → reorder (HTML5 DnD; live-swap while dragging)
  *   ⫿ (split)      → toggle the active tab's secondary pane

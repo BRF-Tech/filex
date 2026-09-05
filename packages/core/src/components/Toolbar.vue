@@ -3,7 +3,7 @@
  * Toolbar — selection-aware action row.
  *
  * Layout:
- *   - No selection            → [📁 Yeni Klasör]   [search | ⬆ ↻]   [☰ ▦]
+ *   - No selection            → [📁 New Folder]    [search | ⬆ ↻]   [☰ ▦]
  *   - 1 file selected         → [👁 ⬇ 🔗 ✎ 🗑]    [search | ⬆ ↻]   [☰ ▦]
  *   - 1 folder selected       → [↗ ✎ 🗑]          [search | ⬆ ↻]   [☰ ▦]
  *   - Multi selection         → [✂ ❐ 🗑]          [search | ⬆ ↻]   [☰ ▦]
@@ -334,8 +334,8 @@ const utilityActions = computed<ContextAction[]>(() => {
         : t('toolbar.density.compact'),
     icon: '⇅',
   });
-  /* wiring:d2 — dar mod ⋯ menüsü: aktif olmayan İKİ görünüm de listelenir
-     (list/grid/gallery); eski tekli toggle üç modda eksik kalıyordu. */
+  /* wiring:d2 — narrow-mode ⋯ menu: BOTH inactive views are listed
+     (list/grid/gallery); the old single toggle fell short with three modes. */
   if (props.viewMode !== 'list' && offersView('list')) list.push({ key: 'view-list', label: t('toolbar.view.list'), icon: '☰' });
   if (props.viewMode !== 'grid' && offersView('grid')) list.push({ key: 'view-grid', label: t('toolbar.view.grid'), icon: '▦' });
   if (props.viewMode !== 'gallery' && offersView('gallery')) list.push({ key: 'view-gallery', label: t('toolbar.view.gallery'), icon: '▣' });
@@ -347,7 +347,7 @@ const utilityActions = computed<ContextAction[]>(() => {
   }
   /* koru:k1 — inspector toggle also reachable from the narrow overflow menu */
   list.push({ key: 'inspector', label: t('toolbar.inspector'), icon: 'ℹ' });
-  /* wiring:c1 — tema galerisi de dar modda ⋯ menüsünden açılır */
+  /* wiring:c1 — the theme gallery is opened from the ⋯ menu in narrow mode too */
   list.push({ key: 'theme', label: t('theme.menu'), icon: '🎨' });
   list.push({ key: 'shortcut-settings', label: t('shortcuts.settings.menu'), icon: '⌨' }) /* wiring:c2 */;
   list.push({ key: 'tour', label: t('tour.restart'), icon: '🎓' }); /* wiring:c4 */
@@ -539,8 +539,8 @@ function onMoreSelect(a: ContextAction) {
         <span class="fe-btn__label">{{ a.label }}</span>
       </button>
 
-      <!-- ui-fix — sığmayan aksiyonlar tek satırı korumak için ⋯ menüsüne
-           katlanır (arama/görünüm kontrolleri artık alt satıra düşmez). -->
+      <!-- ui-fix — actions that don't fit fold into the ⋯ menu so the row stays
+           a single line (search/view controls no longer drop to a second row). -->
       <button
         v-if="overflowToolbarItems.length > 0"
         ref="wideMoreBtnEl"
@@ -554,8 +554,8 @@ function onMoreSelect(a: ContextAction) {
         <span class="fe-icon">⋯</span>
       </button>
 
-      <!-- Görünmez ölçüm şeridi: TÜM aksiyonlar her zaman burada render
-           edilir; katlama hesabı gerçek genişliklerden yapılır. -->
+      <!-- Invisible measuring strip: EVERY action is always rendered here, so
+           the fold calculation runs off real measured widths. -->
       <div ref="measureEl" class="fe-toolbar__measure" aria-hidden="true">
         <button
           v-for="a in toolbarItems"
@@ -969,7 +969,7 @@ function onMoreSelect(a: ContextAction) {
       />
     </template>
 
-    <!-- ui-fix — wide modda katlanan aksiyonların ⋯ menüsü -->
+    <!-- ui-fix — ⋯ menu for the actions folded away in wide mode -->
     <ContextMenu
       v-if="!narrow"
       ref="wideMoreRef"

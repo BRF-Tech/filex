@@ -319,6 +319,28 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		}
 	}
 
+	// The last moment at which the bytes a PUT is about to replace still exist
+	// -- see writehook/overwrite.go.
+	//
+	// ⚠⚠ It goes HERE, in preGate, and not in writeFile.Close() where the
+	// driver write happens, because x/net/webdav collapses ANY Close() error
+	// into a bare 405 -- and every real WebDAV client (rclone, Finder, the
+	// desktop sync client) reads 405 as "PUT is not allowed here" and
+	// abandons the file instead of retrying what is actually a transient
+	// refusal. preGate can choose its own status, and it also short-circuits
+	// before the body is spooled to a temp file, so a refusal costs no bytes.
+	//
+	// Deliberately AFTER gateWrite and the quota check above: an unauthorized
+	// caller must not be able to trigger the guard's own side effect (a
+	// snapshot write) against a file it cannot write to, and an upload already
+	// doomed by quota should not pay for a snapshot it will never need.
+	// PUT-only -- MOVE/COPY destination overwrites are a separate surface.
+	if r.Method == http.MethodPut {
+		if err := writehook.BeforeOverwrite(ctx, st.ID, rel); err != nil {
+			return http.StatusServiceUnavailable, "could not preserve the existing file: " + err.Error()
+		}
+	}
+
 	// MOVE/COPY also mutate the Destination.
 	if r.Method == "MOVE" || r.Method == "COPY" {
 		du, err := url.Parse(r.Header.Get("Destination"))

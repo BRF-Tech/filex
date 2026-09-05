@@ -2,9 +2,9 @@
  * A big file on a storage the operator marked slow — end to end, against the
  * running server.
  *
- * "fs yavaş ve dosya büyükse kullanıcıya özel bir caching üreteceğimizi
- *  belirtip cache hazır olduğunda indirmeye başlat tarzı bişiler yapmamız
- *  gerekiyor."
+ * The requirement, verbatim (translated from Turkish): "the fs is slow and if
+ *  the file is big, we need to tell the user we're building a cache just for
+ *  them and start the download once the cache is ready."
  *
  * The sequence under test is the product promise, in order:
  *

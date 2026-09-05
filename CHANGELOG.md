@@ -5,6 +5,353 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-09-06
+
+### Added
+
+- An i18n key-parity test for the `@brftech/filex-core` catalogue
+  (`web/tests/i18n/coreKeys.test.ts`). `web` already had one for its own
+  `en.json`/`tr.json`; `packages/core` ships `en.ts`/`tr.ts` but has no test
+  runner of its own, so the gate lives in `web`, which depends on the package.
+  It also fails on an "English" value that is still Turkish — the shape the
+  bug above would take once it wears a key.
+- **Almost every absolute URL a multi-tenant install handed out was the
+  operator's hostname, not the customer's.** Exactly one place in the codebase
+  derived the origin per request — `Auth.redirectBase`, written for the OIDC
+  callback and never reused. Everything else concatenated the global
+  `FILEX_PUBLIC_URL`: the `/s/` and `/d/` links a tenant sends to their own
+  clients, the `wss://…/api/ws` endpoint handed to the browser and opened
+  verbatim, the `/s/` and `/u/` URLs returned to AI / MCP / ShareX clients, and
+  four e-mails. The worst was the account-created mail: a customer's brand-new
+  user received a temporary password next to a link to **someone else's** login
+  page — a flow that cannot succeed, and a disclosure of the operator's
+  hostname to every tenant that ever adds a user.
+
+  The rule now lives in one place, `internal/tenanturl`, and every builder
+  calls it. It has two entry points because not every URL is minted while a
+  browser waits: `FromRequest` for the request-driven sites, and
+  `ForStorage` / `ForProvider` for the ones reached only through a context (the
+  AI/MCP share link and the upload ticket), where the tenant is taken from the
+  node's storage rather than from a `Host` header that isn't there.
+
+  **Host-header injection**: the request host is resolved with
+  `GetProviderByHost`, which matches an *enabled* provider row exactly, and the
+  origin is then assembled from that row's own `host` column — never from the
+  request string. An unknown, disabled or absent host falls back to
+  `PublicURL`, so `Host: evil.example` mints the operator's configured URL and
+  `evil.example` never reaches a link or an e-mail.
+
+  **Single-tenant installs are unchanged.** With `FILEX_MULTI_TENANT` off the
+  resolver does not read the request at all (asserted, not assumed: the test
+  counts store lookups and requires zero), so the call sites that have no
+  request in scope lose nothing. Covered by a new multi-tenant suite that
+  drives the real handlers — and, for the four e-mails, a real in-process SMTP
+  server, so the assertion is on the bytes a recipient receives.- **The public export's link check had never run once.** `scripts/export-public.sh`
+  ends by running `scripts/check-links.mjs` over the tree it just built and
+  refusing the export if anything is dead — the guard added on 2026-09-05 after
+  two dead links sat in the public README. It was wrapped in
+  `if command -v node; else echo "node not found: skipped…"; fi`, and on the
+  maintainer's machine it took the `else` branch **every time**: the script is
+  invoked as `wsl bash -lc 'bash scripts/export-public.sh …'`, and that WSL had
+  nvm and three node versions installed but `node` on no shell's PATH — the
+  interactive guard in `~/.bashrc` returns before the nvm block for
+  non-interactive shells, and for interactive ones a hard-coded `export PATH=`
+  two lines later wiped what nvm had just added. The export succeeded, printed
+  its own excuse, and nobody read the line.
+
+  A guard that degrades to nothing is not a guard, so **no node is now fatal**,
+  and the script looks for one before giving up: `PATH`, then the newest
+  `$NVM_DIR/versions/node/*/bin/node`, then — under WSL — the Windows
+  `node.exe`. ⚠ That last one is a *Windows* binary: handed `/mnt/g/…` it
+  resolves the path against the current drive and dies with
+  `Cannot find module 'G:\mnt\c\…'`, so both the checker and the tree are
+  converted with `wslpath -w` first. All three branches were exercised:
+  nvm node → `410 relative links … all resolve`; Windows node → the same 410;
+  no node at all → exit 1 with a refusal. A deliberately dead link
+  (`README.md` → `docs/MIGRATION.md`, which the export withholds) is refused
+  with exit 1.
+
+### Fixed
+
+- **The admin UI named a private repository, and every published screenshot
+  showed it.** The footer and the About page linked
+  `github.com/brf-tech/filex` — the internal development repo, which
+  answers 404 to anybody who is not us. `scripts/export-public.sh` rewrites that
+  string on the way out, so the *shipped source* was right; a **screenshot** is
+  a PNG and no rewrite reaches inside one, so the images in the public README
+  showed the dead URL. They now name `github.com/BRF-Tech/filex`, which is where
+  the product actually lives — including on our own installs, where a link to a
+  repository the reader cannot open was never useful either.
+
+- **Uploads over 8 MiB never reached an S3 storage over plain HTTP, and the
+  sync then moved them to trash** (GitHub #16). Reported against a fresh Garage
+  deployment: every upload looked like it worked, the bucket stayed empty, and
+  the next storage sync put the files in the trash. Files under a few MB were
+  fine. Reproduced end to end against a real Garage instance.
+
+  Two independent defects, and the second is the one that cost the user data.
+
+  **1. The commit could not sign a multipart part.** The browser posts files
+  under 8 MiB in one request; above that they take the staged path, where the
+  commit re-chunks the staging area into a driver multipart upload. Each part
+  was cut with `io.LimitReader`, which drops the `Seek` method the staging
+  reader has. SigV4 signs the SHA256 of the payload, so the SDK reads a part to
+  hash it and then rewinds to send it — with nothing to rewind the request died
+  inside the client, before a byte left the process:
+  `upload part 1: operation error S3: UploadPart, failed to compute payload
+  hash: failed to seek body to start, request stream is not seekable`.
+
+  ⚠ It is the SCHEME that decides this, not the provider — measured, because
+  the obvious guesses are wrong. Over `https://` the SDK sends
+  `x-amz-content-sha256: UNSIGNED-PAYLOAD`: TLS already protects the body, it is
+  never hashed, and a plain reader has always worked. Over `http://` the payload
+  hash is what binds the body to the signature, so the body must be read twice.
+  Every S3 endpoint filex had previously been pointed at is `https://`; the
+  reporter's Garage, a container on a podman network, is not. The bug was
+  waiting for the first plaintext endpoint, and it would have hit AWS, MinIO or
+  Hetzner over plaintext just the same.
+
+  Parts are now cut with a rewindable, length-bounded window over the staging
+  reader, and `UploadPart` on the S3 driver makes any body rewindable before it
+  hands it to the SDK — small ones in memory, large ones through a temp file,
+  an already-seekable one passed through untouched. The driver's signature
+  promises `io.Reader` and now honours it, instead of silently requiring a
+  `Seeker` and failing with a message that names the SDK rather than the call.
+
+  **2. A failed upload was silent.** The commit endpoint answers `202` as soon
+  as the last chunk lands; the transfer happens afterwards in the ops worker. A
+  transfer that failed there produced one `WARN` line in the server log and
+  nothing else — the node stayed at `transfer_state="staged"`, which is
+  indistinguishable from still-in-flight, no notification fired, and the browser
+  had already drawn a finished upload. The client now waits for the transfer by
+  default (the `transferring` phase, which was implemented but which no caller
+  ever switched on) and reports the failure; the node moves to a new
+  `transfer_state="failed"`; and a `file.upload_failed` notification, carrying
+  the reason, goes to whoever uploaded.
+
+  ⚠ While turning that wait on, a latent bug in it surfaced: it told a real
+  verdict from an incidental fetch error by comparing the message to the literal
+  string `"transfer failed"`, which only matches when the server sends no error
+  text. Any real error message was swallowed and the poll span for ever. The two
+  are now told apart by type, and a run of unreadable polls ends the wait
+  instead of hanging.
+
+- **Uploading a file over an existing one destroyed the old bytes, and nothing
+  kept a copy anywhere.** `versioning.Service.Snapshot` documents its own
+  contract — *"callers should invoke this BEFORE a destructive write… if the
+  snapshot itself fails the caller should NOT proceed"* — and the package doc
+  stated as fact that snapshots were taken on upload finalize and archive
+  extract. Neither was true. Across the whole product `Snapshot` was reached
+  from exactly two places: `save-text` and the versions endpoints. No upload,
+  drop, ShareX, AI/MCP write, archive extract, OnlyOffice save-back, WebDAV
+  `PUT` or S3 gateway write ever called it. Measured on a clean instance:
+  uploading `up.txt` twice left `GET /api/files/versions?node_id=1` answering
+  `{"versions":null}` with no `.versions/` tree on disk at all, while editing
+  the *same* file in the browser recorded one — so version history looked like
+  it worked right until the moment you needed it.
+
+  Every destructive write now calls `writehook.BeforeOverwrite` first, which
+  snapshots whatever is about to be replaced and **refuses the write** if that
+  snapshot cannot be taken: 503 with `"code": "SNAPSHOT_FAILED"`, existing file
+  untouched. The covered surfaces are the browser upload (single-POST and
+  staged), the public drop link, the ticketed upload, the legacy presigned
+  multipart finalize, ShareX, the AI/REST and MCP write/zip/unzip tools,
+  archive extract and add, OnlyOffice's save-back, WebDAV `PUT`, and the S3
+  gateway's `PutObject`, `CompleteMultipartUpload` and `CopyObject`.
+
+  ⚠ On the staged path the guard runs at **commit**, not at the driver write.
+  Two reasons, and both are load-bearing. Publishing the staged node flips it
+  to `transfer_state="staged"`, after which `filebody` answers with the
+  *incoming* bytes — a snapshot taken later would record the wrong content.
+  And `transfer()` picks between two write mechanisms: on any driver
+  implementing `storage.PartUploader` — i.e. S3, which is what real
+  deployments run — it calls `streamMultipart` and never touches
+  `storage.Writer.Write` at all. A guard hung off the driver write would have
+  protected small uploads and silently skipped every large one on exactly the
+  backend where it matters most. There is a test pinning the S3-shaped case
+  that asserts the object really did arrive via `CompleteMultipart`.
+
+  `save-text` is brought under the same rule rather than left as the
+  exception: it used to log `snapshot failed (continuing with write)` and
+  overwrite anyway, directly contradicting the contract quoted two lines above
+  its own call.
+
+  Archive extract and the AI/MCP `unzip` tool differ deliberately: they skip
+  just the refused member and keep going, reporting a `refused` count distinct
+  from the permanent, user-caused skips in the same loop (a zip-slip entry, a
+  file/folder kind clash). If every member was refused they answer 503 rather
+  than a misleading `200 {"count":0}`.
+
+  `FILEX_VERSIONS_ON_OVERWRITE=0` turns the guard off for a deployment whose
+  storage cannot afford the extra write; `FILEX_VERSIONS_FAIL_OPEN=1` keeps
+  attempting the snapshot but lets a failed one through. Both default to the
+  safe value and log a WARN at boot when they are not at it — the fail-closed
+  default has a sharp edge worth naming, because if the object store fills up
+  then every overwrite on the instance is refused until an operator changes an
+  env var and restarts.
+
+- **The S3 gateway exposed filex's own internal trees.** `.versions/`,
+  `.thumbs/` and `.filex-trash/` were listable AND readable by known key
+  through `/s3` — measured, `GET .versions/42/1` answered 200 — while `/dav`,
+  `/sftp`, `/ftp`, `/nfs` and the browser listing had all hidden them since
+  they were written. They are now refused at any depth on listing, read and
+  write. This was always wrong and became urgent with the guard above: before
+  it, `.versions/` held a handful of text-editor snapshots; after it, it holds
+  a copy of every file any surface has ever replaced, so leaving it reachable
+  would hand any S3-key holder the prior contents of files whose folders they
+  may since have lost access to.
+
+- **A failed upload named neither the file nor the reason.** The access log
+  said only `method=POST path=/api/files/manager status=500`, and no
+  write-failure branch logged a filename, so "which file failed yesterday
+  afternoon" had no server-side answer. Both the browser upload path and the
+  staged transfer — whichever of its two driver write mechanisms fails — now
+  log `msg="upload failed"` with `storage`, `path`, `name`, `size` and
+  `reason`.
+
+- **`POST /api/files/archive/add` leaked a file descriptor on every error
+  path.** Only the success path closed the temp file it built the archive in;
+  each of the early returns dropped it. Closed with a `defer`, registered
+  after the `defer os.Remove` so the two unwind in the right order.
+
+- **filex spoke Turkish to English users, and no locale setting could stop
+  it.** ~45 strings across the explorer, the viewers, the admin UI and the
+  backend were hard-coded Turkish literals sitting *beside* the translation
+  layer, not inside it. They are now keys in `en`/`tr` and go through `t()`.
+
+  The widest one was the whole **convert modal**. It resolved its labels
+  through a private `tt(key, fallback)` helper backed by an optional `t?` prop
+  — and three separate things had to be true for it to ever produce English:
+  the caller had to pass `t` (`FileExplorer.vue` never did), the `convert.*`
+  keys had to exist (they existed in *neither* catalogue), and the prop's
+  signature had to match `useLocale`'s (it did not — it declared
+  `(key, fallback)` where the real `t` is `(key, vars)`, so passing the real
+  one would have rendered the raw key, or spliced the fallback's characters in
+  as `{0}`, `{1}` … substitutions). Every user in every locale read Turkish.
+  The helper is gone: the modal now takes `locale` and calls `useLocale`, like
+  every sibling modal, and its ten labels are real keys.
+
+  Also: ~20 explorer toasts and the drag-and-drop overlay
+  (`İşlem başarısız`, `Kopyalandı` / `Taşındı` / `Silindi`, `Kesildi`,
+  `Aynı klasöre kesilemez`, `… kuyruğa alındı`, `… öğe geri getirildi`, the
+  trash-retention notice, `Dosyaları buraya bırak`); the new-folder validation
+  error; the presence bar's people count; the CSV viewer's row count; five
+  strings in the preview modal (two of them sitting next to a correct
+  `{{ t('viewer.download') }}`); and the SMTP password placeholder in
+  `Settings.vue`, whose `label` and `hint` on the same line were already
+  translated.
+
+  Where a key already said the same thing it was reused rather than
+  duplicated — the sharpest case being the paste toast, which was
+  `t('split.cross_copy')` on the cross-storage branch and a Turkish literal on
+  the same-storage branch of the *same expression*, while
+  `split.copy_queued` ('Copy queued' / 'Kopyalama kuyruğa alındı') already
+  existed and was exactly it.
+
+- **A file drop notified the folder's owner in Turkish regardless of their
+  language.** `Drop.notifyOwner` never consulted a locale, and its output is
+  not confined to one surface: the same title and body go to the in-app
+  notification bell, into the **webhook v2 `drop.received` payload** and into
+  the owner's **e-mail**. The `Gönderen:` header written into the persisted
+  `NOT.txt` beside the uploaded files had the same problem.
+
+  These now follow the same `mailLangEN` selection `mail_templates.go` next
+  door already used. The locale is the **folder owner's** (`users.locale`, via
+  the new `Drop.ownerLocale`), not the uploader's: a drop link is opened by an
+  anonymous visitor who has no account and therefore no locale, and the owner
+  is the only person who reads any of it.
+
+- The admin panel's SMTP **Test** mail sent a Turkish sentence followed by an
+  English one to whatever address was typed. It now follows the acting
+  admin's locale.
+
+- `DrawioViewer`'s untranslated fallbacks were Turkish where every sibling
+  fallback (e.g. `CsvViewer`'s `'Loading…'`) is English. The fallback is what
+  an embedder who does not pass `t` actually reads.
+
+- `desktop`: the drag-out diagnostic trail logged `'BULUNAMADI'` where every
+  neighbouring `dragLog` value is English. This one is **not** a translation
+  key — it is a developer log, and it is now `'not found'`.
+
+### Changed
+
+- **The storage sync no longer moves a file to trash just because the object is
+  missing** (GitHub #16). This is a behaviour change, and it is the part that made the
+  bug above data-shaped rather than merely broken: the upload was what failed,
+  but the sync is what deleted the user's file.
+
+  "The catalogue has a node and the backend does not list it" is not proof that
+  anyone deleted anything, and it will keep happening for reasons that have
+  nothing to do with deletion — a failed upload, a permissions change that hides
+  a prefix, a driver that pages a listing badly, an object restored out of band.
+  A sync run that answers all of those with "trash it" is a sync run that turns
+  someone else's bug into lost data. The tombstone pass now has to be *right*
+  about the deletion, which takes two questions:
+
+  - **Did filex ever put the bytes there?** A node whose `transfer_state` is not
+    `stored` has never been confirmed on the backend. Its absence is the
+    *expected* state, not evidence, and it is never a reason to trash it. This
+    also closes a race that existed even when everything worked: a sync landing
+    between publishing the node and finishing the transfer would trash a
+    perfectly healthy upload.
+  - **Is the object really not there?** For the remaining candidates the driver
+    is asked directly with `Stat`. Only a definite not-found counts as a
+    deletion; an object that the listing missed but `Stat` can see is kept, and
+    so is one we could not check at all, because "I could not check" must never
+    read as "it is gone".
+
+  A file genuinely deleted in the bucket still goes to trash, so deletions made
+  outside filex are still reflected — the guard is about certainty, not about
+  never deleting. The existing 30 %-drop guard is unchanged and still runs
+  first; `Stat` only runs for nodes that survive it, so a healthy sync costs
+  nothing extra.
+
+- **A storage that has just been synced no longer reads "Never ran"** (GitHub #16).
+  Two separate breaks, both on the way to the screen. `GET /api/admin/storages`
+  never sent `last_sync_state` or `last_sync_error` — the admin UI has always
+  read them and they exist only as the storage's last `sync_runs` row, so the
+  badge fell through to its "Never ran" default no matter how many runs had
+  succeeded. And the store's `syncNow` wrote an optimistic `running` and never
+  refetched; since the endpoint runs the sync synchronously, that optimistic
+  flip was the last thing written and the row stayed stale until a full page
+  reload. The endpoint now sends both fields, and the store refreshes after a
+  sync — including after a failed one, so a failure shows its state instead of
+  spinning.
+
+- **Source comments are in English.** filex was written as a private codebase, and
+  a large part of its commentary — the parts that explain *why* a thing is the way
+  it is, usually with a measurement or an incident behind it — was in Turkish.
+  Anybody reading the code to contribute had to read those. They are now English,
+  with the reasoning, the tone and the `⚠` / `⚠⚠` / `⭐` markers carried over
+  rather than flattened into one-line summaries.
+
+  Nothing that is Turkish *on purpose* was touched: the `tr` locale catalogues and
+  mail templates (the product speaking Turkish to Turkish users), the Turkish
+  filenames and file contents used precisely because they are non-ASCII test
+  fixtures, the selectors that assert against the Turkish UI, and UI labels quoted
+  inside a comment. Comments only — no code moved, and no behaviour changed.
+
+### Documentation
+
+- **What the site's slug-rule change actually cost, measured.** v0.32.0 moved
+  docs.filex.sh onto GitHub's heading-id rule, and noted that deep links into
+  headings containing `&`, `/`, an em dash, a dot, an apostrophe or a leading
+  digit would change spelling. That warning is now a number: the site was built
+  at both commits and the emitted `id=` attributes diffed page by page —
+  **245 of 666 headings changed spelling, none disappeared**. Roughly 65 are on
+  pages a stranger would deep-link (INSTALLATION, CONFIGURATION, STORAGE, MCP,
+  SSO, LDAP, the docs index); the rest are `BACKEND.md`'s per-endpoint reference
+  and the generated `RELEASES.md`.
+
+  No `<a id>` aliases were added, and the reasoning is written down beside the
+  anchor check in `docs/CONTRIBUTING.md` and pointed at from
+  `docs-site/.vitepress/github-slug.mjs`: the old spellings existed only on the
+  site and only for the seven weeks it used VitePress's rule, every link written
+  against the GitHub rendering was already correct, an unmatched fragment lands
+  the reader at the top of the right page rather than a 404 — and ⚠ a fragment
+  is never sent to the server, so no redirect of any kind could have rescued one
+  anyway.
+
 ## [0.32.0] - 2026-09-05
 
 ### Added

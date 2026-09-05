@@ -208,6 +208,25 @@ export const en: Record<string, string> = {
   'toast.renamed': 'Renamed',
   'toast.moved': 'Moved',
   'toast.trashed': 'Moved to trash',
+  /* i18n:hardcoded — toast copy that used to be Turkish string literals in
+     FileExplorer.vue, unreachable by any locale. */
+  'toast.failed': 'Operation failed',
+  'toast.copied': 'Copied',
+  'toast.deleted': 'Deleted',
+  'toast.cut': 'Cut',
+  'toast.cut_ready': 'Cut — ready to paste',
+  'toast.copy_ready': 'Copied — ready to paste',
+  'toast.same_folder_cut': 'Cannot cut into the same folder',
+  'toast.restored': '{n} item(s) restored',
+  'toast.delete_queued': 'Delete queued',
+  'toast.trash_retention': 'Items in the trash are removed automatically once the retention window ends. Permanent deletion is done from the admin panel.',
+  'dropzone.hint': 'Drop files here',
+  'modal.newfolder.invalid': 'Invalid character',
+  'viewer.office_unconfigured': 'OnlyOffice is not configured',
+  'viewer.pdf_inline_failed': 'Your browser could not display this PDF inline.',
+  'viewer.too_large': 'File is too large (>1 MB).',
+  'viewer.csv_rows': '{n} rows',
+  'presence.others': '{n} people',
   'conn.offline': 'No live connection — changes may be delayed',
   'conn.tooltip': 'Live connection to the server is unavailable; the list refreshes periodically. This notice disappears once the connection is back.',
 
@@ -383,6 +402,7 @@ export const en: Record<string, string> = {
   'split.error': 'Could not load the listing',
   'split.retry': 'Retry',
   'split.copy_queued': 'Copy queued',
+  'split.move_queued': 'Move queued',
   'split.cross_copy': 'Different storages — copy queued instead',
   'dragout.downloading': 'Downloading into the folder you dropped on…',
   'dragout.not_found': 'Could not find where it was dropped — a drop onto an application (rather than a folder) cannot be filled in',
@@ -1026,4 +1046,16 @@ export const en: Record<string, string> = {
   'inspector.activity.comment': 'Comment by {who}',
   'inspector.activity.select': 'Select a file or folder to see its activity.',
   /* === /surucu:d1 === */
+  /* i18n:hardcoded — the convert modal shipped with no keys at all: every
+     label was a Turkish literal behind an optional `t` prop nobody passed. */
+  'convert.title': 'Convert',
+  'convert.loading': 'Loading the converter…',
+  'convert.done': 'Converted and uploaded to this folder.',
+  'convert.close': 'Close',
+  'convert.from': 'Source',
+  'convert.search_format': 'Search a target format (pdf, mp4, png…)',
+  'convert.no_format': 'No matching format.',
+  'convert.unsupported_input': 'This file type has no source format the converter can read.',
+  'convert.converting': 'Converting…',
+  'convert.convert': 'Convert',
 };

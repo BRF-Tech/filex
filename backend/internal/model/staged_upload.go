@@ -26,6 +26,12 @@ const (
 	// TransferStateStored — the bytes are on the storage driver. Every node
 	// written before staged uploads existed is, by definition, stored.
 	TransferStateStored = "stored"
+	// TransferStateFailed — the transfer to the storage driver failed. The
+	// bytes are still in staging (the transfer is retryable) but they are NOT
+	// on the backend, and the node must say so: a node left at "staged"
+	// forever is indistinguishable from one still in flight, which is how a
+	// dead upload passed for a healthy one in issue #16.
+	TransferStateFailed = "failed"
 )
 
 // StagedUpload is one in-flight staged (resumable, driver-agnostic) upload.

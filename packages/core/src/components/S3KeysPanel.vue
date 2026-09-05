@@ -22,6 +22,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { S3AccessKey } from '../types/S3Keys';
 import { useLocale } from '../composables/useLocale';
 import { useS3Keys } from '../composables/useS3Keys';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -34,7 +35,7 @@ const emit = defineEmits<{
   (e: 'active', v: { accessKeyID: string; secret?: string; endpoint: string; pathStyle: boolean }): void;
 }>();
 
-const locale = computed<LocaleCode>(() => props.config.locale ?? 'tr');
+const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t } = useLocale(locale);
 
 const {

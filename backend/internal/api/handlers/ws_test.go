@@ -338,7 +338,7 @@ func mintVia(t *testing.T, user *model.User, token *model.APIToken, tokenUser st
 //   - API token      → its token USERNAME (default = first allow-list entry,
 //     else the label) — a shared proxy token must not show its owner
 //     account's name to everyone
-//   - API token + X-Filex-Presence-Name → "Kişi (username)" combined display
+//   - API token + X-Filex-Presence-Name → "Person (username)" combined display
 //     (trusted: proxies strip these headers from client requests)
 func TestWSTicketIdentity(t *testing.T) {
 	admin := &model.User{ID: 1, DisplayName: "admin", Email: "admin@local"}

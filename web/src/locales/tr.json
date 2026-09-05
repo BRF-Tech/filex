@@ -330,6 +330,7 @@
       "usernameHelp": "Kimlik doğrulamasız gönderim için boş bırakın.",
       "password": "Parola",
       "passwordHelp": "Mevcut parolayı korumak için boş bırakın.",
+      "passwordSaved": "••••••• (kayıtlı)",
       "test": "Test et",
       "verified": "Doğrulandı",
       "unverified": "Doğrulanmadı",

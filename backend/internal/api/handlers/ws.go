@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
 // WS is the live-collaboration WebSocket handler. It upgrades GET /api/ws to a
@@ -35,12 +36,23 @@ type WS struct {
 	Hub       *realtime.Hub
 	Tickets   *realtime.TicketStore // ticket auth for embedded/cross-origin clients
 	PublicURL string                // used to advertise the wss:// URL in ticket responses
+	// Tenants resolves which origin the advertised wss:// URL is built on.
+	// In multi-tenant mode a tenant's browser must be told to open ITS OWN
+	// host — the operator's would fail the origin check and, on a separate
+	// certificate, not connect at all.
+	Tenants tenanturl.Resolver
 }
+
+// AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
+func (h *WS) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
 
 // NewWS constructs the WebSocket handler. A nil hub makes Handle reply 503 so
 // the route can be registered unconditionally.
 func NewWS(store db.Store, resolver *acl.Resolver, hub *realtime.Hub, tickets *realtime.TicketStore, publicURL string) *WS {
-	return &WS{Store: store, ACL: resolver, Hub: hub, Tickets: tickets, PublicURL: publicURL}
+	return &WS{
+		Store: store, ACL: resolver, Hub: hub, Tickets: tickets, PublicURL: publicURL,
+		Tenants: tenanturl.New(store, publicURL, false),
+	}
 }
 
 // wsTicketTTL is how long a minted ticket stays valid — long enough for the
@@ -148,12 +160,13 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mint failed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"ticket": tok, "ws_url": h.wsURL()})
+	writeJSON(w, http.StatusOK, map[string]string{"ticket": tok, "ws_url": h.wsURL(r)})
 }
 
-// wsURL derives the public wss:// URL for /api/ws from the configured PublicURL.
-func (h *WS) wsURL() string {
-	base := strings.TrimRight(h.PublicURL, "/")
+// wsURL derives the public wss:// URL for /api/ws from the origin this request
+// belongs to (the tenant's host in multi-tenant mode, PublicURL otherwise).
+func (h *WS) wsURL(r *http.Request) string {
+	base := h.Tenants.FromRequest(r)
 	switch {
 	case strings.HasPrefix(base, "https://"):
 		return "wss://" + strings.TrimPrefix(base, "https://") + "/api/ws"

@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
@@ -58,7 +59,12 @@ type Share struct {
 	// Body resolves where a shared file's bytes are: the driver, or filex's
 	// staging area while a staged upload is still transferring. Nil-safe.
 	Body *filebody.Resolver
+	// Tenants resolves which origin a minted /s/ or /d/ link is built on.
+	Tenants tenanturl.Resolver
 }
+
+// AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
+func (h *Share) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
 
 // AttachBody wires the byte-source resolver so a share link serves a file that
 // is still being transferred to the backend.
@@ -98,6 +104,7 @@ func NewShare(svc *share.Service, store db.Store, resolver func(int64) (storage.
 		Store:           store,
 		StorageResolver: resolver,
 		PublicURL:       strings.TrimRight(publicURL, "/"),
+		Tenants:         tenanturl.New(store, publicURL, false),
 		Zip:             zipCache,
 	}
 }
@@ -267,9 +274,9 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// notice a date it did not ask for.
 	expiryClamped := sh.ExpiresAt != nil && (requestedExpiry == nil || !requestedExpiry.Equal(*sh.ExpiresAt))
 
-	linkURL := h.shareURL(sh.Token)
+	linkURL := h.shareURL(r, sh.Token)
 	if sh.IsDrop() {
-		linkURL = h.dropURL(sh.Token)
+		linkURL = h.dropURL(r, sh.Token)
 	}
 	inner := shareCreateRespInner{
 		ID:            sh.ID,
@@ -541,6 +548,9 @@ func (h *Share) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	user := auth.UserFrom(r.Context())
 	now := time.Now()
+	// Resolved once: the origin is a property of the request, not of the row,
+	// and asking per row would be one provider lookup per link.
+	base := h.Tenants.FromRequest(r)
 	out := make([]map[string]any, 0, len(rows))
 	for _, sh := range rows {
 		if sh.ExpiresAt != nil && !sh.ExpiresAt.After(now) {
@@ -549,9 +559,9 @@ func (h *Share) HandleList(w http.ResponseWriter, r *http.Request) {
 		if user != nil && !user.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != user.ID) {
 			continue // non-admins only manage their own links
 		}
-		link := h.shareURL(sh.Token)
+		link := base + "/s/" + sh.Token
 		if sh.IsDrop() {
-			link = h.dropURL(sh.Token)
+			link = base + "/d/" + sh.Token
 		}
 		out = append(out, map[string]any{
 			"uuid":          strconv.FormatInt(sh.ID, 10),
@@ -768,9 +778,10 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// cache builds. serveFolderZip owns the download-count increment (only on a
 	// real byte serve, not status polls / the wait page).
 	if node.Type == model.NodeTypeDirectory {
-		/* wiring:d2 — zip parametresi YOKSA klasör paylaşımı artık gezinme
-		   sayfası gösterir (≥%60 görsel/video → galeri, değilse liste);
-		   ZIP akışı sayfadaki "Tümünü indir" → ?zip=… arkasında aynen durur. */
+		/* wiring:d2 — with NO zip parameter a folder share now renders the
+		   browse page (≥60% images/video → gallery, otherwise a list); the ZIP
+		   flow stays exactly as it was, behind the page's "Tümünü indir"
+		   (Download all) → ?zip=… */
 		if r.URL.Query().Get("zip") == "" {
 			h.renderFolderBrowse(r.Context(), w, r, drv, node, resolved, pin)
 			return
@@ -1149,20 +1160,16 @@ func (h *Share) extractPIN(r *http.Request) string {
 	return ""
 }
 
-// shareURL returns the canonical /s/{token} URL.
-func (h *Share) shareURL(token string) string {
-	if h.PublicURL == "" {
-		return "/s/" + token
-	}
-	return h.PublicURL + "/s/" + token
+// shareURL returns the canonical /s/{token} URL for the origin r arrived on.
+// An unconfigured PublicURL still yields the relative "/s/{token}".
+func (h *Share) shareURL(r *http.Request, token string) string {
+	return h.Tenants.FromRequest(r) + "/s/" + token
 }
 
-// dropURL returns the canonical /d/{token} public upload (file-drop) URL.
-func (h *Share) dropURL(token string) string {
-	if h.PublicURL == "" {
-		return "/d/" + token
-	}
-	return h.PublicURL + "/d/" + token
+// dropURL returns the canonical /d/{token} public upload (file-drop) URL for
+// the origin r arrived on.
+func (h *Share) dropURL(r *http.Request, token string) string {
+	return h.Tenants.FromRequest(r) + "/d/" + token
 }
 
 // shareURLPath returns the URL path for a share token.

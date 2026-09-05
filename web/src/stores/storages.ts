@@ -42,11 +42,22 @@ export const useStoragesStore = defineStore('storages', () => {
   }
 
   async function syncNow(id: number): Promise<void> {
-    await StoragesApi.syncNow(id);
-    // Optimistic state flip; backend will report final via /sync-runs.
+    // Optimistic state flip so the row reacts to the click; the refresh below
+    // replaces it with what actually happened.
     items.value = items.value.map((s) =>
       s.id === id ? { ...s, last_sync_state: 'running' as const } : s,
     );
+    try {
+      await StoragesApi.syncNow(id);
+    } finally {
+      // ⚠ The run is over by the time this resolves — the endpoint executes it
+      // synchronously — so the row on screen is now stale, not pending. Without
+      // this refetch the optimistic 'running' was the LAST thing the store ever
+      // wrote: the storage kept reading "Never ran" until a full page reload,
+      // which is exactly what issue #16 reported. Refresh on failure too, so a
+      // failed run shows its state instead of spinning for ever.
+      await fetch();
+    }
   }
 
   function find(id: number): StorageRef | undefined {

@@ -129,7 +129,7 @@ func copyToWriter(w http.ResponseWriter, r interface {
 	}
 }
 
-/* ===== wiring:d2 — public klasör paylaşımı gezinme sayfası (liste / galeri) =====
+/* ===== wiring:d2 — public folder-share browse page (list / gallery) =====
 
 A folder share's GET /s/{token} renders a browse page instead of jumping
 straight to the ZIP. The layout auto-selects: when ≥60% of the folder's

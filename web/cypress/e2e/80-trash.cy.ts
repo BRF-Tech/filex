@@ -1,4 +1,4 @@
-// 80-trash — trash list endpoint shape + Çöp Kutusu page renders
+// 80-trash — trash list endpoint shape + the Trash page renders
 // even when empty (the empty state mustn't crash the SPA).
 
 describe('trash', () => {

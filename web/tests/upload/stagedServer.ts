@@ -47,6 +47,13 @@ export class FakeStagedServer {
   /** Set to make `begin` answer as an older server with no staged path. */
   unsupported: number | null = null;
 
+  // How GET /ops/{id} answers — the transfer the client now waits for.
+  opStatus: 'running' | 'ok' | 'failed' | 'partial' = 'ok';
+  opError = '';
+  /** Make the op row unreadable, so the wait cannot resolve from it. */
+  opUnreadable = false;
+  opCalls = 0;
+
   failChunkAt(start: number, fault: ChunkFault): void {
     this.faults.push({ match: (s) => s === start, fault });
   }
@@ -167,7 +174,11 @@ export class FakeStagedServer {
     }
 
     const op = path.match(/\/ops\/(\d+)$/);
-    if (op && method === 'GET') return { id: Number(op[1]), status: 'ok' };
+    if (op && method === 'GET') {
+      this.opCalls++;
+      if (this.opUnreadable) throw this.err(404, 'op not found');
+      return { id: Number(op[1]), status: this.opStatus, error: this.opError };
+    }
 
     throw this.err(404, `no route: ${method} ${path}`);
   }

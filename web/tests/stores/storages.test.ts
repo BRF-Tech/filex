@@ -106,11 +106,36 @@ describe('stores/storages', () => {
     expect(s.count).toBe(1);
   });
 
-  it('syncNow() flips state to running optimistically', async () => {
+  // Issue #16: "after I pressed Sync on storage and it finished, it says —
+  // Never ran". The endpoint runs the sync synchronously, so by the time
+  // syncNow resolves the row on screen is STALE, not pending. The old version
+  // wrote an optimistic 'running' and never refetched, so that flip was the
+  // last thing the store ever wrote and the storage read "Never ran" until a
+  // full page reload.
+  it('syncNow() refreshes the list, so the finished run is what the UI shows', async () => {
     (StoragesApi.syncNow as ReturnType<typeof vi.fn>).mockResolvedValue({ run_id: 1 });
+    (StoragesApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      fixture[0],
+      { ...fixture[1], last_sync_at: '2026-09-05T20:02:16Z', last_sync_state: 'ok' as const },
+    ]);
     const s = useStoragesStore();
     s.items = [...fixture];
     await s.syncNow(2);
-    expect(s.find(2)?.last_sync_state).toBe('running');
+    expect(StoragesApi.list).toHaveBeenCalled();
+    expect(s.find(2)?.last_sync_state).toBe('ok');
+    expect(s.find(2)?.last_sync_at).toBe('2026-09-05T20:02:16Z');
+  });
+
+  it('syncNow() refreshes even when the run fails, rather than spinning for ever', async () => {
+    (StoragesApi.syncNow as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('403'));
+    (StoragesApi.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      fixture[0],
+      { ...fixture[1], last_sync_state: 'failed' as const },
+    ]);
+    const s = useStoragesStore();
+    s.items = [...fixture];
+    await expect(s.syncNow(2)).rejects.toThrow('403');
+    expect(StoragesApi.list).toHaveBeenCalled();
+    expect(s.find(2)?.last_sync_state).toBe('failed');
   });
 });

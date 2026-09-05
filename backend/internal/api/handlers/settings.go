@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 )
@@ -48,7 +49,12 @@ func (h *Settings) SMTPTest(w http.ResponseWriter, r *http.Request) {
 	}
 	to := strings.TrimSpace(req.To)
 	if to != "" {
-		if err := h.Mailer.Send(r.Context(), to, "filex SMTP test", "Bu bir filex SMTP test e-postasıdır.\n\nThis is a filex SMTP test email."); err != nil {
+		locale := ""
+		if u := auth.UserFrom(r.Context()); u != nil {
+			locale = u.Locale
+		}
+		subject, body := smtpTestMailText(locale)
+		if err := h.Mailer.Send(r.Context(), to, subject, body); err != nil {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "stage": "send", "error": err.Error()})
 			return
 		}

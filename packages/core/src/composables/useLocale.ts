@@ -12,7 +12,7 @@ import { messages } from '../locales';
 export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
   const lookup = computed(() => {
     const code = typeof localeRef === 'function' ? localeRef() : localeRef.value;
-    return messages[code] ?? messages.tr;
+    return messages[code] ?? messages.en;
   });
 
   function t(key: string, vars: Record<string, string | number> = {}): string {

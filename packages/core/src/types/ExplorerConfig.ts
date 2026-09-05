@@ -137,7 +137,7 @@ export interface ExplorerConfig {
   onlyOfficeConfig?: string;
 
   /**
-   * Standalone editor page base — when set, "Aç" on an office file
+   * Standalone editor page base — when set, "Open" on an office file
    * opens `${openPageBase}?path=...&mode=edit` in a new tab instead
    * of the modal preview.
    */

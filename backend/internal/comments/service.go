@@ -1,5 +1,5 @@
 // Package comments implements flat, chronological comment threads on
-// file/folder nodes (v0.6 "Çalışma" wave, migration 00020).
+// file/folder nodes (v0.6 "Çalışma" (Work) wave, migration 00020).
 //
 // Access model (enforced by the caller/handler via acl.Resolver):
 // anyone who can SEE a node (≥viewer) may read AND write comments on it;

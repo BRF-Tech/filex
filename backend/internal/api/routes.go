@@ -50,6 +50,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/update"
@@ -304,7 +305,15 @@ func BuildRouter(d *Deps) http.Handler {
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	ah.AttachACL(d.ACL)
 	ah.AttachBody(d.Body)
+	// ⚠ Every absolute URL filex hands out (share + file-request links, the
+	// wss:// endpoint, upload-ticket URLs, every link inside an e-mail) is
+	// built from THIS resolver, so a multi-tenant install names the tenant's
+	// host and not the operator's. See internal/tenanturl — new absolute-URL
+	// builders belong on it too.
+	tenants := tenanturl.New(d.Store, d.Cfg.PublicURL, d.Cfg.MultiTenant)
+
 	sh := handlers.NewShare(d.Share, d.Store, d.StorageResolver, d.Cfg.PublicURL, d.ZipCache)
+	sh.AttachTenants(tenants)
 	sh.AttachACL(d.ACL)
 	sh.AttachBody(d.Body)
 	// The public folder page draws its gallery tiles from the same thumbnail
@@ -318,6 +327,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// the manager's ingest path (IngestFile/EnsureDir) so dropped files land
 	// exactly like authenticated uploads (mime, node cache, thumbnails).
 	dh := handlers.NewDrop(d.Store, mh, d.Share, d.Notify, d.Mailer, d.Cfg.PublicURL)
+	dh.AttachTenants(tenants)
 
 	// Upload tickets: minted on the token-authenticated AI/MCP surfaces below,
 	// redeemed on the credential-free /u/{ticket} route. The store is shared by
@@ -389,14 +399,57 @@ func BuildRouter(d *Deps) http.Handler {
 	saveTextH.AttachACL(d.ACL)
 	if d.Versions != nil {
 		// Snapshot the pre-edit bytes into version history before
-		// every save-text write (Ada: "değişiklik sonrası sürüm
-		// geçmişine bir bok gelmedi" — handler never tapped the
-		// versioning service).
+		// every save-text write (Ada, translated from Turkish: "not a
+		// damn thing showed up in the version history after a change"
+		// — handler never tapped the versioning service).
 		saveTextH.AttachVersions(d.Versions)
+		// The pre-write gate: every destructive write surface calls
+		// writehook.BeforeOverwrite, and it lands here.
+		if d.Cfg.VersionsOnOverwrite {
+			guard := d.Versions.GuardOverwrite
+			if d.Cfg.VersionsFailOpen {
+				// A one-shot boot line, because the per-overwrite WARN below
+				// only fires when a write actually hits a failed snapshot. An
+				// operator who flips this during a full-disk incident and then
+				// forgets has no other way to notice the instance is still
+				// running fail-open once the incident is over.
+				slog.Warn("versions: fail-open is ON at boot -- a snapshot failure will let the overwrite through and log, instead of refusing the write (FILEX_VERSIONS_FAIL_OPEN=1)")
+				inner := guard
+				guard = func(ctx context.Context, storageID int64, rel string) error {
+					if err := inner(ctx, storageID, rel); err != nil {
+						slog.Warn("overwrite proceeding without a snapshot",
+							slog.Int64("storage", storageID),
+							slog.String("path", rel),
+							slog.String("err", err.Error()))
+					}
+					return nil
+				}
+			}
+			writehook.ConfigureOverwriteGuard(guard)
+		} else {
+			// ⚠ Explicitly nil, not merely "skip wiring". The guard is
+			// process-wide state, so leaving whatever a previous BuildRouter
+			// installed would let one instance keep snapshotting through
+			// another instance's (possibly closed) store -- which is exactly
+			// what happens in a test binary, where several routers are built
+			// in one process.
+			writehook.ConfigureOverwriteGuard(nil)
+			// The loudest of the two non-default states: the guard is not
+			// wired at all, so every overwrite on this instance destroys the
+			// prior bytes with no snapshot and no refusal. One line at boot,
+			// not per-overwrite -- there is no per-write event to hang a log
+			// line on when nothing runs.
+			slog.Warn("versions: pre-write overwrite guard is DISABLED at boot -- an overwrite now destroys the prior bytes with no snapshot (FILEX_VERSIONS_ON_OVERWRITE=0)")
+		}
+	} else {
+		// No versioning service at all: same reasoning as the branch above --
+		// clear the process-wide guard rather than inheriting a stale one.
+		writehook.ConfigureOverwriteGuard(nil)
 	}
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
+	grantsH.AttachTenants(tenants)
 	selfTokensH := handlers.NewSelfTokens(d.Store, d.ACL, d.ProtocolAuth)
 	desktopAuthH := handlers.NewDesktopAuth(d.Store)
 
@@ -404,7 +457,7 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Get("/api/files/share/{token}", sh.HandleMetadata)
 	r.Get("/s/{token}", sh.HandleDownload)
 	r.Post("/s/{token}", sh.HandleDownload)      // PIN form posts to same URL
-	r.Get("/s/{token}/f/*", sh.HandleBrowseFile) /* wiring:d2 — klasör paylaşımı alt-dosya (galeri/liste sayfası) */
+	r.Get("/s/{token}/f/*", sh.HandleBrowseFile) /* wiring:d2 — folder-share sub-file (gallery/list page) */
 
 	// ────── public file-drop (upload link) ──────
 	// GET renders the upload page (PIN gate first when protected); POST is
@@ -514,6 +567,7 @@ func BuildRouter(d *Deps) http.Handler {
 	writehook.Configure(d.AVScan, d.Notify)
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
+	wsh.AttachTenants(tenants)
 
 	// Live-collaboration WebSocket (folder change events + presence). OPTIONAL
 	// auth (required=false): a session cookie / API token sets the user for the
@@ -687,7 +741,7 @@ func BuildRouter(d *Deps) http.Handler {
 			// OnlyOffice editor config. The SFC's PreviewModal posts a
 			// JSON body when it has the file context handy; the Editor
 			// route falls back to GET with `?path=…`. Accept both so the
-			// SFC's preview/Aç handoff doesn't 405.
+			// SFC's preview/"Aç" (Open) handoff doesn't 405.
 			r.Get("/onlyoffice/config", ooh.Config)
 			r.Post("/onlyoffice/config", ooh.Config)
 
@@ -725,7 +779,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 			/* calisma:d3 comments */
 			// Node comments — flat chronological threads on files/folders
-			// (v0.6 "Çalışma"). Read+write = anyone who can SEE the node;
+			// (v0.6 "Çalışma" (Work)). Read+write = anyone who can SEE the node;
 			// delete = author-or-admin (both enforced in the handler).
 			cmtH := handlers.NewComments(d.Store)
 			cmtH.AttachACL(d.ACL)
@@ -994,6 +1048,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
 	// scopes set grants everything.
 	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
+	aiH.AttachTenants(tenants)
 	aiH.AttachACL(d.ACL)
 	aiH.AttachThumbs(d.Thumbs)
 	aiH.AttachStaged(suh)
@@ -1012,6 +1067,7 @@ func BuildRouter(d *Deps) http.Handler {
 		ReplicaReloader: d.ReplicaReloader,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
+	aiMCP.AttachTenants(tenants)
 	aiMCP.AttachACL(d.ACL)
 	aiMCP.AttachThumbs(d.Thumbs)
 	aiMCP.AttachStaged(suh)
@@ -1073,6 +1129,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// a public /s/<token> share is minted, and {"url":"<link>?inline=1"} is
 	// returned (inline so images/text render in-browser).
 	sxUploadH := handlers.NewShareX(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
+	sxUploadH.AttachTenants(tenants)
 	sxUploadH.AttachACL(d.ACL)
 	sxUploadH.AttachThumbs(d.Thumbs)
 	sxUploadH.AttachStaged(suh)

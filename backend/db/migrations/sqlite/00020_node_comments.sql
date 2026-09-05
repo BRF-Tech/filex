@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Node comments (v0.6 "Çalışma" wave). Flat chronological comment
+-- Node comments (v0.6 "Çalışma" (Work) wave). Flat chronological comment
 -- threads on file/folder nodes, surfaced in the inspector panel.
 --
 -- Soft delete: `deleted_at` hides a row from listings but keeps it for

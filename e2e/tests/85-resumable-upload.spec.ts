@@ -1,6 +1,6 @@
 /**
- * Resumable uploads, end to end — "yarıda kesilirse devam edebilir olması
- * gerekiyor."
+ * Resumable uploads, end to end — the requirement, verbatim (translated from
+ * Turkish): "if it is cut off halfway it has to be able to resume."
  *
  * Two halves, because two different things can be broken:
  *

@@ -5,7 +5,7 @@
  * Historically a bottom-left toast list for queued copy/move/delete. Since
  * the unified operations center it renders NOTHING: it reconciles the
  * usePendingOps rows into the shared useOperations store; OperationsCenter
- * draws them. Terminal-state lingering ("bitti" flash → history) and sticky
+ * draws them. Terminal-state lingering ("done" flash → history) and sticky
  * errors are handled by the store — note usePendingOps sweeps terminal rows
  * after its RETAIN window, which the store treats as "move to history"
  * (errors stay pinned until the user dismisses them).

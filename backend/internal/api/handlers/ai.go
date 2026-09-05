@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
@@ -51,6 +52,9 @@ func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSv
 // AttachACL wires the RBAC resolver into the AI REST surface's ops core so
 // every /api/ai file op is gated by the bound user's grants + role ceiling.
 func (h *AI) AttachACL(r *acl.Resolver) { h.ops.acl = r }
+
+// AttachTenants wires the shared origin resolver (internal/tenanturl).
+func (h *AI) AttachTenants(rv tenanturl.Resolver) { h.ops.tenants = rv }
 
 // AttachThumbs wires the thumbnail pipeline so AI-surface writes dispatch
 // generation like manager uploads (nil = thumbnails skipped).
@@ -355,12 +359,23 @@ func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	n, err := h.ops.Unzip(r.Context(), body.Src, body.Dest)
+	n, refused, err := h.ops.Unzip(r.Context(), body.Src, body.Dest)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		resp := map[string]any{"error": err.Error()}
+		if errors.Is(err, errAISnapshotRefused) {
+			// The all-refused case: say so the way every other pre-write
+			// guard refusal does, with the count too -- an error string alone
+			// leaves "how many, of how many" unanswered.
+			resp["code"] = "SNAPSHOT_FAILED"
+			resp["refused"] = refused
+		}
+		writeJSON(w, aiStatus(err), resp)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "extracted": n})
+	// refused: members the pre-write guard turned away, distinct from a
+	// permanent skip (zip-slip, kind conflict). Surfaced on an otherwise-200
+	// partial batch too, not only on the all-refused case above.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "extracted": n, "refused": refused})
 }
 
 // aiStatus maps an aiOps error to an HTTP status code, reusing the driver
@@ -370,6 +385,13 @@ func aiStatus(err error) int {
 		return http.StatusOK
 	}
 	if errors.Is(err, errAINoStorage) {
+		return http.StatusServiceUnavailable
+	}
+	// A transient, system-caused refusal: the snapshot guard could not
+	// preserve a file this write would have replaced. 503, not mapDriverErr's
+	// default 500 and not the 404/409 its substring match on the error text
+	// would otherwise produce.
+	if errors.Is(err, errAISnapshotRefused) {
 		return http.StatusServiceUnavailable
 	}
 	// Permanent refusals, not server faults: a confined token reaching outside

@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/version"
 )
@@ -45,6 +46,7 @@ type AIMCP struct {
 	admin      *AIAdmin
 	share      *share.Service
 	publicURL  string
+	tenants    tenanturl.Resolver
 	convertURL string
 	acl        *acl.Resolver
 	thumbs     *thumb.Pipeline
@@ -75,12 +77,21 @@ func (h *AIMCP) AttachBody(b *filebody.Resolver) { h.body = b }
 // mint credential-free upload URLs for large local files.
 func (h *AIMCP) AttachTickets(s *uploadTicketStore) { h.tickets = s }
 
+// AttachTenants wires the shared origin resolver (internal/tenanturl). The
+// per-call ops core below is rebuilt for every request, so the resolver is
+// held here and stamped onto each one.
+func (h *AIMCP) AttachTenants(rv tenanturl.Resolver) { h.tenants = rv }
+
 // NewAIMCP builds the MCP HTTP handler. `admin` powers the admin_* tools,
 // which are only registered for tokens carrying the `admin` scope; pass nil
 // to disable the admin tool surface entirely. shareSvc + publicURL power the
 // file_share / file_unshare tools; convertURL is surfaced via file_root.
 func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL, convertURL string) *AIMCP {
-	h := &AIMCP{store: store, resolver: resolver, admin: admin, share: shareSvc, publicURL: publicURL, convertURL: convertURL}
+	h := &AIMCP{
+		store: store, resolver: resolver, admin: admin, share: shareSvc,
+		publicURL: publicURL, convertURL: convertURL,
+		tenants: tenanturl.New(store, publicURL, false),
+	}
 	h.handler = mcp.NewStreamableHTTPHandler(h.getServer, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
 		JSONResponse: true,
@@ -100,6 +111,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		return nil
 	}
 	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
+	ops.tenants = h.tenants
 	ops.acl = h.acl
 	ops.thumbs = h.thumbs
 	ops.staged = h.staged
@@ -224,6 +236,10 @@ type mcpUnzipIn struct {
 }
 type mcpUnzipOut struct {
 	Extracted int `json:"extracted"` // number of files written
+	// Refused: members the pre-write snapshot guard turned away (transient,
+	// system-caused) rather than skipped for a permanent reason such as a
+	// zip-slip entry or a kind conflict.
+	Refused int `json:"refused,omitempty"`
 }
 
 // searchIndex digs the shared Bleve index out of the admin surface — AIMCP's
@@ -418,11 +434,11 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		Name:        "file_unzip",
 		Description: "Extract a .zip already in storage into dest_dir ON THE SERVER (zip-slip protected; every entry stays within your confinement root). Returns the number of files written.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUnzipIn) (*mcp.CallToolResult, mcpUnzipOut, error) {
-		n, err := ops.Unzip(ctx, in.Src, in.DestDir)
+		n, refused, err := ops.Unzip(ctx, in.Src, in.DestDir)
 		if err != nil {
 			return toolErr[mcpUnzipOut](err)
 		}
-		return nil, mcpUnzipOut{Extracted: n}, nil
+		return nil, mcpUnzipOut{Extracted: n, Refused: refused}, nil
 	})
 }
 

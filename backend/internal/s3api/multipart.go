@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // Multipart uploads: how every client sends anything large.
@@ -294,6 +295,16 @@ func (h *Handler) completeMultipartUpload(w http.ResponseWriter, r *http.Request
 	writer, ok := drv.(storage.Writer)
 	if !ok {
 		WriteError(w, r, http.StatusNotImplemented, "NotImplemented", "this storage does not support writes")
+		return
+	}
+	// The last moment at which the bytes this completion is about to replace
+	// still exist -- see writehook/overwrite.go. Every S3 client above a size
+	// threshold (aws-cli, rclone, restic, Cyberduck, s3fs) switches to
+	// multipart, so this is the guard that actually covers a large upload;
+	// write.go's single-part guard never runs for one.
+	if err := writehook.BeforeOverwrite(ctx, st.ID, key); err != nil {
+		WriteError(w, r, http.StatusServiceUnavailable, "ServiceUnavailable",
+			"could not preserve the existing object: "+err.Error())
 		return
 	}
 	if err := writer.Write(ctx, key, body, size); err != nil {

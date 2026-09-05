@@ -101,6 +101,13 @@ switch that off with `auth.ldap.protocol_login: false`.
 > you are not allowed answers **AccessDenied**, because a client told "no such key" would
 > retry forever against a permission problem.
 
+filex's own bookkeeping trees — `.versions/`, `.thumbs/` and `.filex-trash/` —
+are **not** exposed here, at any depth, on any verb: not listed, not readable
+by known key, and not writable. Every other protocol has always hidden them;
+the S3 gateway is the one that had to catch up, and it matters most here
+because [version history](TRASH-VERSIONING.md#what-triggers-a-snapshot) now
+holds a copy of every file any surface has replaced.
+
 ## SFTP
 
 `FILEX_SFTP=1`. Its own TCP listener (default `:2022` — sftpgo and `rclone serve sftp`

@@ -20,8 +20,9 @@
 //
 // # What it decides
 //
-//   - Where the bytes are. nodes.transfer_state == "staged" → the staging area;
-//     anything else → the driver. The node is consulted FIRST, before the
+//   - Where the bytes are. nodes.transfer_state == "staged" or "failed" → the
+//     staging area (a failed transfer keeps its staging, and those bytes are
+//     the only copy); anything else → the driver. The node is consulted FIRST, before the
 //     driver, because an overwrite leaves a perfectly readable stale object
 //     behind and "the driver answered" is not evidence that it answered with
 //     the right file.
@@ -223,7 +224,14 @@ func (r *Resolver) Resolve(ctx context.Context, drv storage.Driver, storageID in
 	}
 	src.NodeID = node.ID
 	src.node = node
-	if node.TransferState != model.TransferStateStaged {
+	// ⚠ "failed" reads from staging exactly like "staged". The two differ in what
+	// they say about the FUTURE (one is still coming, the other needs a retry),
+	// not about where the bytes are: a failed transfer keeps its staging
+	// directory precisely so the retry is free, and those bytes are the only
+	// copy — the driver has nothing. Sending a failed node to the driver would
+	// make the file the user uploaded unreadable at the moment it most needs to
+	// be recoverable.
+	if !stagedBytes(node.TransferState) {
 		return src, nil
 	}
 
@@ -551,4 +559,10 @@ func (s *Source) acquire(ctx context.Context) (*filecache.Entry, bool) {
 		return nil, false
 	}
 	return c.Acquire(s.key(ctx))
+}
+
+// stagedBytes reports whether a node's bytes live in the staging area rather
+// than on the storage driver.
+func stagedBytes(state string) bool {
+	return state == model.TransferStateStaged || state == model.TransferStateFailed
 }

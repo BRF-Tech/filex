@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"html/template"
 	"log/slog"
 	"net"
@@ -25,6 +24,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
 // Drop serves the public file-drop (upload link) endpoints — the inverse of
@@ -47,13 +47,37 @@ type Drop struct {
 	// the visitor's browser asks for neither of the two we ship. Same
 	// contract as Share.DefaultLocale; see publicLocale.
 	DefaultLocale string
+	// Tenants resolves which origin the owner-notification e-mail links to.
+	Tenants tenanturl.Resolver
 }
+
+// AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
+func (h *Drop) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
 
 // AttachBranding wires the shared branding source (wiring:e1).
 func (h *Drop) AttachBranding(b *BrandingSource) { h.Branding = b }
 
 // AttachLocale sets the fallback language for the drop pages.
 func (h *Drop) AttachLocale(def string) { h.DefaultLocale = def }
+
+// ownerLocale resolves the language for everything a drop sends to the folder
+// owner - the bell notification, the webhook v2 payload, the owner e-mail and
+// the NOT.txt written beside the files.
+//
+// It is deliberately NOT the uploader's language: a drop link is opened by an
+// anonymous visitor who has no account and therefore no stored locale, and the
+// owner is the only person who reads any of it. Falls back to the instance
+// default (FILEX_DEFAULT_LOCALE) when the owner never picked one.
+func (h *Drop) ownerLocale(ctx context.Context, sh *model.Share) string {
+	if sh != nil && sh.CreatedBy != nil && h.Store != nil {
+		if u, err := h.Store.GetUser(ctx, *sh.CreatedBy); err == nil && u != nil {
+			if loc := strings.TrimSpace(u.Locale); loc != "" {
+				return loc
+			}
+		}
+	}
+	return h.DefaultLocale
+}
 
 // chrome computes the branded page fragments for one request (wiring:e1).
 func (h *Drop) chrome(r *http.Request) publicChrome { return publicChromeFor(h.Branding, r) }
@@ -75,14 +99,16 @@ func NewDrop(store db.Store, mgr *Manager, svc *share.Service, nf notify.Service
 		Notify:    nf,
 		Mailer:    ml,
 		PublicURL: strings.TrimRight(publicURL, "/"),
+		Tenants:   tenanturl.New(store, publicURL, false),
 		limiter:   newIPLimiter(40, time.Hour),
 	}
 }
 
 // ─────────────────── limits / settings ───────────────────
 
-// dropSettings mirrors the JSON blob persisted on a drop share (the "Gelişmiş"
-// options from the create modal). Zero fields fall back to the defaults below.
+// dropSettings mirrors the JSON blob persisted on a drop share (the
+// "Gelişmiş" (Advanced) options from the create modal). Zero fields fall back
+// to the defaults below.
 type dropSettings struct {
 	MaxFiles      int      `json:"max_files"`
 	MaxFileSizeMB int      `json:"max_file_size_mb"`
@@ -360,7 +386,7 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	if note := strings.TrimSpace(r.FormValue("note")); note != "" {
 		var b strings.Builder
 		if uploaderName != "" {
-			b.WriteString("Gönderen: " + uploaderName + "\n\n")
+			b.WriteString(dropNoteHeader(h.ownerLocale(r.Context(), sh), uploaderName))
 		}
 		b.WriteString(note + "\n")
 		body := b.String()
@@ -368,7 +394,7 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	}
 
 	_ = h.Service.IncrementUpload(r.Context(), sh.ID, saved)
-	h.notifyOwner(r.Context(), sh, node, saved, uploaderName, sub)
+	h.notifyOwner(r, sh, node, saved, uploaderName, sub)
 
 	// Live: a public drop created a new submission subfolder — refresh anyone
 	// viewing the drop target folder.
@@ -425,13 +451,16 @@ func (h *Drop) failWrite(w http.ResponseWriter, err error, stage string, st *mod
 
 // notifyOwner fires the in-app notification + owner email after a successful
 // drop. Both channels are best-effort.
-func (h *Drop) notifyOwner(ctx context.Context, sh *model.Share, node *model.Node, count int, uploaderName, sub string) {
+// The uploader's own request carries the origin: they opened the tenant's
+// /d/ link, so the owner's admin link belongs on that same host.
+func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, count int, uploaderName, sub string) {
+	ctx := r.Context()
+	locale := h.ownerLocale(ctx, sh)
 	who := uploaderName
 	if who == "" {
-		who = "Birisi"
+		who = dropUploaderFallback(locale)
 	}
-	title := "Yeni dosya yüklemesi"
-	body := fmt.Sprintf("%s, \"%s\" klasörüne %d dosya bıraktı (%s).", who, node.Name, count, sub)
+	title, body := dropNotifyText(locale, who, node.Name, count, sub)
 
 	if h.Notify != nil {
 		/* bag:b3 event */
@@ -456,8 +485,8 @@ func (h *Drop) notifyOwner(ctx context.Context, sh *model.Share, node *model.Nod
 	if h.Mailer != nil && sh.CreatedBy != nil {
 		if u, err := h.Store.GetUser(ctx, *sh.CreatedBy); err == nil && u != nil && strings.TrimSpace(u.Email) != "" {
 			mailBody := body
-			if h.PublicURL != "" {
-				mailBody += "\n\n" + h.PublicURL + "/admin/"
+			if base := h.Tenants.FromRequest(r); base != "" {
+				mailBody += "\n\n" + base + "/admin/"
 			}
 			_ = h.Mailer.Send(ctx, u.Email, title, mailBody)
 		}

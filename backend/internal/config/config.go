@@ -109,6 +109,22 @@ type Config struct {
 	Cache            CacheConfig  `yaml:"cache"`
 	/* kimlik:e3 cloud */
 	Cloud CloudConfig `yaml:"cloud"`
+	// VersionsOnOverwrite installs the pre-write versioning guard. Default on.
+	// FILEX_VERSIONS_ON_OVERWRITE=0 turns it off -- the escape hatch for a
+	// deployment where a broken or full object store would otherwise refuse
+	// writes -- and =1 turns it back on, including over a config.yaml that set
+	// versions_on_overwrite: false (env wins; see applyEnv).
+	// NOTE: versions.keep_n=0 does NOT do this (0 means "unlimited"; the
+	// snapshot path falls back to DefaultRetention).
+	VersionsOnOverwrite bool `yaml:"versions_on_overwrite"`
+	// VersionsFailOpen lets a snapshot failure fall through to the write
+	// instead of refusing it. Default false -- Service.Snapshot's own contract
+	// is that a caller must NOT proceed past a failed snapshot. It exists
+	// because the fail-closed default has a sharp edge: if the object store
+	// fills up, snapshots start failing and EVERY overwrite on the instance is
+	// refused (desktop sync, WebDAV, OnlyOffice saves, the browser) and the
+	// only other lever is an env var plus a restart.
+	VersionsFailOpen bool `yaml:"versions_fail_open"`
 }
 
 // CacheConfig — the local copy filex prepares for a big file that lives on a
@@ -212,7 +228,7 @@ type CloudConfig struct {
 	BaseHost string `yaml:"base_host"`
 }
 
-// DAVConfig — the WebDAV server surface at /dav (v0.3 "Bağlan"). ON by
+// DAVConfig — the WebDAV server surface at /dav (v0.3 "Bağlan" (Connect)). ON by
 // default; FILEX_DAV=0 is the kill switch (the handler then answers 404).
 type DAVConfig struct {
 	Enabled bool `yaml:"enabled"`
@@ -574,6 +590,9 @@ func Default() Config {
 		Listen:    "0.0.0.0:5212",
 		PublicURL: "http://localhost:5212",
 		DataDir:   filepath.Join(home, ".filex"),
+		// Fail-closed by default -- see the field docs on Config.
+		VersionsOnOverwrite: true,
+		VersionsFailOpen:    false,
 		Log: LogConfig{
 			Level:  "info",
 			Format: "text",
@@ -839,6 +858,16 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_CLOUD_BASE_HOST"); v != "" {
 		c.Cloud.BaseHost = v
+	}
+	// Both directions, like every other boolean here: an operator who set
+	// `versions_on_overwrite: false` in config.yaml must be able to turn it
+	// back on from the environment, not only off. docs/CONFIGURATION.md states
+	// that as the rule for the whole file.
+	if v := os.Getenv("FILEX_VERSIONS_ON_OVERWRITE"); v != "" {
+		c.VersionsOnOverwrite = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_VERSIONS_FAIL_OPEN"); v != "" {
+		c.VersionsFailOpen = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v

@@ -3,9 +3,9 @@ package handlers
 /* "Preparing your download…" — the answer a big file on a slow backend gives
    before it gives bytes.
 
-   The requirement, verbatim: "fs yavaş ve dosya büyükse kullanıcıya özel bir
-   caching üreteceğimizi belirtip cache hazır olduğunda indirmeye başlat tarzı
-   bişiler yapmamız gerekiyor."
+   The requirement, verbatim (translated from Turkish): "if the fs is slow and
+   the file is big, we need to do something like telling the user we're building
+   a cache just for them and starting the download once the cache is ready."
 
    Two clients, two shapes, one decision — mirroring what folder-share ZIPs
    have done since they grew a cache (share.go: renderZipWaitPage + ?zip=status):

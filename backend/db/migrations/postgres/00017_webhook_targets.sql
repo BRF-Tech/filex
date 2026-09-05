@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Webhook v2 targets ("Bağlan" wave). The legacy single global webhook
+-- Webhook v2 targets ("Bağlan" (Connect) wave). The legacy single global webhook
 -- (FILEX_WEBHOOK_URL / admin webhook-config) keeps working; these rows
 -- are ADDITIONAL destinations. Each delivery carries X-Filex-Event +
 -- X-Filex-Delivery headers and, when `secret` is set, an

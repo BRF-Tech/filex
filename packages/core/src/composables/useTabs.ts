@@ -1,5 +1,5 @@
 /**
- * useTabs — wiring:d1 sekmeler (çalışma alanı tab şeridi).
+ * useTabs — wiring:d1 tabs (the workspace tab strip).
  *
  * A LAYER ABOVE FileExplorer's location state, never a replacement for
  * it: each tab is a location snapshot `{ id, path, viewMode, split }`.

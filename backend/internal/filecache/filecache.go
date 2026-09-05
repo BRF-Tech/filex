@@ -2,11 +2,11 @@
 // backend, so that the request which pays for the transfer is honest about it
 // ("preparing… 40 %") and every request after it is served at local-disk speed.
 //
-// The requirement, in the owner's words:
+// The requirement, in the owner's words (translated from Turkish):
 //
-//	"fs yavaş ve dosya büyükse kullanıcıya özel bir caching üreteceğimizi
-//	 belirtip cache hazır olduğunda indirmeye başlat tarzı bişiler yapmamız
-//	 gerekiyor."
+//	"if the fs is slow and the file is big, we need to do something like
+//	 telling the user we're building a cache just for them and starting the
+//	 download once the cache is ready."
 //
 // A 4 GB file on a NAS or a distant bucket used to dribble at the backend's
 // speed with no explanation, no seeking and no resume; a retry paid for the

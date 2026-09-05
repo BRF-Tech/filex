@@ -472,6 +472,37 @@ func (h *StagedUpload) Commit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The last moment at which the bytes we are about to replace still exist,
+	// and the ONLY place on this path that gets to say so.
+	//
+	// ⚠⚠ It has to be HERE and not in transfer(), where the driver write
+	// actually happens, for two independent reasons:
+	//
+	//  1. publishStagedNode below flips this node to transfer_state="staged",
+	//     and from then on filebody.Resolver answers with the STAGED (incoming)
+	//     bytes rather than the live (about-to-be-replaced) ones -- so a
+	//     snapshot taken later records the wrong content, corrupting the very
+	//     history it exists to keep.
+	//  2. transfer() picks between two write mechanisms, and only one of them
+	//     is storage.Writer.Write: on any driver implementing PartUploader
+	//     (i.e. S3, which is what real deployments run) it calls
+	//     streamMultipart instead, which never touches Writer.Write at all. A
+	//     guard hung off the driver write would therefore protect small
+	//     uploads and silently skip every large one on exactly the storage
+	//     backend where it matters most.
+	if err := writehook.BeforeOverwrite(r.Context(), row.StorageID, row.StorageKey); err != nil {
+		slog.Warn("staged commit refused: snapshot",
+			slog.String("id", row.ID),
+			slog.Int64("storage", row.StorageID),
+			slog.String("path", row.StorageKey),
+			slog.String("err", err.Error()))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "could not preserve the existing file: " + err.Error(),
+			"code":  "SNAPSHOT_FAILED",
+		})
+		return
+	}
+
 	mime := row.Mime
 	if sniffed := h.sniffMime(row); sniffed != "" {
 		// Same rule as vfUpload: the bytes decide, not the client's claim.
@@ -574,11 +605,42 @@ func (h *StagedUpload) CommitUpload(ctx context.Context, uploadID string) error 
 			slog.String("id", row.ID),
 			slog.String("path", row.StorageKey),
 			slog.String("err", err.Error()))
+		// ⚠ Everything below is what makes the failure VISIBLE, and it is the
+		// point of issue #16: the client was answered 202 the moment the last
+		// chunk landed, so by now it has already drawn a finished upload. A
+		// transfer that dies here used to leave exactly one WARN line in the
+		// server log — the node stayed at "staged" (identical to still in
+		// flight), no notification fired, and the user's only clue was that the
+		// file would not download. Mark the node, then tell the user.
+		if row.NodeID != nil {
+			if serr := h.Store.SetNodeTransferState(ctx, *row.NodeID, model.TransferStateFailed); serr != nil {
+				slog.Warn("staged upload: transfer_state failed-mark",
+					slog.Int64("node", *row.NodeID), slog.String("err", serr.Error()))
+			}
+		}
+		writehook.OnUploadFailed(context.WithoutCancel(ctx), row.StorageID, row.UserID,
+			row.StorageKey, path.Base(row.StorageKey), writehook.OriginManager, err.Error(),
+			map[string]any{"staged": true, "upload_id": row.ID})
 		return err
 	}
 	metrics.StagedCommitted.Inc()
 	metrics.StagedInFlight.Dec()
 	return nil
+}
+
+// logStagedWriteFailure emits one named, grep-able line -- "upload failed",
+// the same message and field shape vfUpload's write-error branch uses -- no
+// matter which of transfer's two driver write mechanisms failed. Without it a
+// failed staged transfer showed up server-side only as "staged upload:
+// transfer failed" with no size and no basename, so "which file failed
+// yesterday afternoon" had no answer from the logs alone.
+func logStagedWriteFailure(row *model.StagedUpload, err error) {
+	slog.Warn("upload failed",
+		slog.Int64("storage", row.StorageID),
+		slog.String("path", row.StorageKey),
+		slog.String("name", path.Base(row.StorageKey)),
+		slog.Int64("size", row.TotalSize),
+		slog.String("reason", err.Error()))
 }
 
 func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) error {
@@ -596,6 +658,17 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 		return err
 	}
 
+	// ⚠ Deliberately NOT writehook.BeforeOverwrite here, even though this is
+	// the function that actually writes the bytes. Both routes into this
+	// transfer -- Commit (this file) and IngestStream (upload_staged_ingest.go)
+	// -- already ran the guard BEFORE publishing this row's node, which is the
+	// moment that matters: publishing flips the node to
+	// transfer_state="staged", and from then on a snapshot taken here reads
+	// the staged (incoming) bytes instead of the live ones via
+	// internal/filebody. A second call here would not add protection; it would
+	// record a version holding the wrong content.
+	// TestStagedCommit_OverExistingFile_KeepsAVersion pins this.
+
 	// Time the DRIVER WRITE only — not the staging open, the DB mirror, the
 	// index or the hooks. This number is what tells an operator "the NAS is
 	// slow", so anything that is not the backend has to stay out of it. The
@@ -609,6 +682,7 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 	// the client's chunk size.
 	if pu, isPart := drv.(storage.PartUploader); isPart && row.TotalSize > 0 {
 		if err := streamMultipart(ctx, pu, row.StorageKey, rd, row.TotalSize); err != nil {
+			logStagedWriteFailure(row, err)
 			return err
 		}
 	} else {
@@ -617,6 +691,7 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 			return storage.ErrUnsupported
 		}
 		if err := wr.Write(ctx, row.StorageKey, rd, row.TotalSize); err != nil {
+			logStagedWriteFailure(row, err)
 			return err
 		}
 	}
@@ -683,6 +758,17 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 // part sizes belong to the driver. A client that sent 1 MiB chunks must not
 // break an S3 backend, which rejects any non-final part below 5 MiB — and it
 // rejects it at CompleteMultipartUpload, i.e. after every byte has been sent.
+//
+// ⚠⚠ The second boundary rule is that a part body has to be REWINDABLE.
+// AWS SigV4 signs the SHA256 of the payload, so the S3 SDK reads the part
+// once to hash it and then rewinds to send it; when the body is a plain
+// io.Reader it cannot rewind and fails the request before a byte leaves the
+// process, with "failed to compute payload hash: failed to seek body to
+// start, request stream is not seekable" (issue #16 — every staged upload
+// above the client's 8 MiB chunk threshold died this way on every S3
+// backend, while smaller uploads took the single-shot path and worked).
+// io.LimitReader would drop the Seek method the staging reader already has,
+// so parts are cut with sectionOf, which keeps it.
 func streamMultipart(ctx context.Context, pu storage.PartUploader, key string, rd io.Reader, total int64) error {
 	partSize := int64(storage.MinBackendPartSize)
 	// Keep the part count inside the protocol's ceiling for very large objects.
@@ -699,24 +785,97 @@ func streamMultipart(ctx context.Context, pu storage.PartUploader, key string, r
 	}
 	completions := make([]storage.PartCompletion, 0, count)
 	remaining := total
+	var offset int64
 	for i := 1; i <= count; i++ {
 		n := partSize
 		if remaining < n {
 			n = remaining
 		}
-		etag, perr := pu.UploadPart(ctx, key, uploadID, i, io.LimitReader(rd, n), n)
+		etag, perr := pu.UploadPart(ctx, key, uploadID, i, sectionOf(rd, offset, n), n)
 		if perr != nil {
 			_ = pu.AbortMultipart(ctx, key, uploadID)
 			return fmt.Errorf("upload part %d: %w", i, perr)
 		}
 		completions = append(completions, storage.PartCompletion{PartNumber: i, Etag: etag})
 		remaining -= n
+		offset += n
 	}
 	if err := pu.CompleteMultipart(ctx, key, uploadID, completions); err != nil {
 		_ = pu.AbortMultipart(ctx, key, uploadID)
 		return fmt.Errorf("complete multipart: %w", err)
 	}
 	return nil
+}
+
+// sectionOf cuts [offset, offset+size) out of rd for one multipart part.
+//
+// When rd can seek — which the staging reader can, and which is the only case
+// that reaches production — the result can seek too, so a driver is free to
+// read the part twice (hash, then send). When it cannot, this degrades to
+// io.LimitReader: sequential, single-pass, exactly the old behaviour, so a
+// driver that never rewinds keeps working with any reader.
+func sectionOf(rd io.Reader, offset, size int64) io.Reader {
+	rs, ok := rd.(io.ReadSeeker)
+	if !ok {
+		return io.LimitReader(rd, size)
+	}
+	return &partSection{rs: rs, start: offset, size: size}
+}
+
+// partSection is a rewindable, length-bounded window over a seekable source.
+//
+// io.SectionReader would be the stdlib answer, but it needs io.ReaderAt, and
+// the staging reader is a cursor over a chain of part files rather than a
+// single addressable file. Seeking the shared cursor is enough here because
+// parts are uploaded one at a time: every Read and Seek positions the source
+// explicitly, so no caller can be surprised by where the cursor was left.
+type partSection struct {
+	rs    io.ReadSeeker
+	start int64
+	size  int64
+	pos   int64
+}
+
+func (p *partSection) Read(b []byte) (int, error) {
+	if p.pos >= p.size {
+		return 0, io.EOF
+	}
+	if int64(len(b)) > p.size-p.pos {
+		b = b[:p.size-p.pos]
+	}
+	if _, err := p.rs.Seek(p.start+p.pos, io.SeekStart); err != nil {
+		return 0, err
+	}
+	n, err := p.rs.Read(b)
+	p.pos += int64(n)
+	// A short source is a truncated staging area, not an empty part: report it
+	// rather than completing the upload with fewer bytes than promised.
+	if err == io.EOF && p.pos < p.size {
+		return n, io.ErrUnexpectedEOF
+	}
+	return n, err
+}
+
+func (p *partSection) Seek(offset int64, whence int) (int64, error) {
+	var abs int64
+	switch whence {
+	case io.SeekStart:
+		abs = offset
+	case io.SeekCurrent:
+		abs = p.pos + offset
+	case io.SeekEnd:
+		abs = p.size + offset
+	default:
+		return 0, fmt.Errorf("partSection: invalid whence %d", whence)
+	}
+	if abs < 0 {
+		return 0, fmt.Errorf("partSection: negative position %d", abs)
+	}
+	p.pos = abs
+	if _, err := p.rs.Seek(p.start+abs, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return abs, nil
 }
 
 // publishStagedNode creates or updates the destination node with

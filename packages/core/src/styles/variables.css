@@ -106,7 +106,7 @@
   --fe-icon-archive: #78716c;
   --fe-icon-code: #4f46e5;
   --fe-icon-text: #64748b;
-  --fe-icon-unknown: #64748b; /* ui-fix: acik temada 3:1 UI kontrasti */
+  --fe-icon-unknown: #64748b; /* ui-fix: 3:1 UI contrast on the light theme */
 }
 
 /* Dark values — same selector strategy as the palette blocks above. */

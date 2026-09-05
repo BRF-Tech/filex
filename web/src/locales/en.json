@@ -330,6 +330,7 @@
       "usernameHelp": "Leave empty for unauthenticated relay.",
       "password": "Password",
       "passwordHelp": "Leave empty to keep the current password.",
+      "passwordSaved": "••••••• (saved)",
       "test": "Test",
       "verified": "Verified",
       "unverified": "Not verified",

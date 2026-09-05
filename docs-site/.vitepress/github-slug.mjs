@@ -21,6 +21,12 @@
 //
 // Duplicate headings get `-1`, `-2` … from markdown-it-anchor, matching GitHub.
 //
+// ⚠ What the switch cost, measured after the fact (both commits built, the
+// emitted `id=` attributes diffed page by page): 245 of 666 headings on
+// docs.filex.sh changed spelling, none disappeared. No `<a id>` aliases were
+// added for the old ones, and the reasoning is written down beside the anchor
+// check in `docs/CONTRIBUTING.md` -- read it before touching this rule again.
+//
 // Verified against api.github.com/markdown; the fixtures are in
 // `web/tests/docs/anchorSlug.test.ts` and cover every punctuation shape that
 // occurs in these docs. Change this function only with a fresh measurement —

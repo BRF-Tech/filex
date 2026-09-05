@@ -181,6 +181,12 @@ Only **files** are versioned. Directories and symlinks are skipped. A snapshot
 is also skipped when there is nothing to capture — a brand‑new file with no live
 content yet, or a row whose object isn't on the backend.
 
+⚠ That last case is a **silent** skip: if the catalogued path and the object on
+the backend ever disagree, the guard finds nothing to snapshot and reports
+success. Every shipped driver normalises the key it is handed, so the two agree
+in practice — but a storage **plugin** that does not would lose history with no
+error anywhere. Plugin authors: normalise, and see [PLUGINS.md](PLUGINS.md).
+
 **Restore** copies a recorded version back over the live file and refreshes the
 node's size/etag. Passing `snapshot_current: true` snapshots the current content
 **first**, so the restore itself is reversible.
@@ -197,16 +203,56 @@ a fixed default rather than a DB‑tunable setting.
 
 ### What triggers a snapshot
 
-In the current release the wired trigger is the **text / code editor save** —
-`POST /api/files/save-text`. When you save a file from the built‑in code or
-markdown editor, filex snapshots the **existing** file first, then writes the new
-content. The snapshot is taken **only when** versioning is enabled *and* the file
-already exists in the cache (the very first save of a new file has nothing prior
-to capture).
+**Every destructive write.** Before any surface replaces an existing file's
+bytes it calls the pre‑write guard, which snapshots what is about to be lost:
 
-> **Binary overwrites (re‑uploading a file) are not versioned in v0.1.** Version
-> history reflects text‑editor saves only. Other write paths (upload finalize,
-> archive extract) do not currently snapshot.
+| Surface | Endpoint / entry point |
+|---|---|
+| Browser upload (single POST) | `POST /api/files/manager?action=upload` |
+| Browser upload (staged / chunked) | `POST /api/files/upload/{id}/commit` |
+| Public file‑drop link | `POST /d/{token}` |
+| Legacy presigned multipart | `POST /api/files/upload/finalize` |
+| Ticketed upload | `PUT`/`POST /u/{ticket}` |
+| AI / REST write | `POST /api/ai/upload` |
+| MCP `file_write`, `file_zip`, `file_unzip` | `/api/ai/mcp` |
+| ShareX | `POST /api/sharex/upload` |
+| Archive extract / add | `POST /api/files/archive/extract`, `/add` |
+| Text / code editor save | `POST /api/files/save-text` |
+| OnlyOffice save‑back | `POST /api/files/onlyoffice/callback` |
+| WebDAV | `PUT` |
+| S3 gateway | `PutObject`, `CompleteMultipartUpload`, `CopyObject` |
+
+A snapshot is taken **only when** there is something to lose: the path already
+holds a catalogued **file**. A brand‑new file, a directory, and filex's own
+internal trees (`.versions/`, `.thumbs/`, `.filex-trash/`, `.keepdir` markers)
+cost one indexed lookup and nothing else.
+
+> ⚠ **This used to be untrue, and the untrue version was written down.** Until
+> the pre‑write guard landed, the only wired trigger really was the text‑editor
+> save, while this page and the `versioning` package doc both described a
+> guarantee that covered uploads and archive extraction. The practical effect
+> was that re‑uploading a file over itself destroyed the old bytes with nothing
+> kept, while editing the *same* file in the browser kept a version — so the
+> feature looked like it worked right up until the moment you needed it.
+
+**If the snapshot cannot be taken, the write is refused.** That is the whole
+point: losing version history is not a reason to also lose the file. The
+surfaces answer **503** with `"code": "SNAPSHOT_FAILED"` and the existing file
+is left untouched.
+
+Two batch surfaces differ, deliberately. Archive extract and the AI/MCP `unzip`
+tool **skip just the refused member and keep going**, reporting a `refused`
+count alongside `count`/`extracted` — a guard refusal is transient and
+system‑caused, unlike the permanent, user‑caused skips in the same loop (a
+zip‑slip entry, a file/folder kind clash). If **every** member was refused and
+nothing landed, they answer 503 `SNAPSHOT_FAILED` with the count rather than a
+misleading `200 {"count":0}`.
+
+Turning it off: [`FILEX_VERSIONS_ON_OVERWRITE=0`](CONFIGURATION.md#versioning-on-overwrite)
+makes the guard a no‑op — writes then behave exactly as they did before it
+existed. `FILEX_VERSIONS_FAIL_OPEN=1` keeps the snapshot attempt but lets a
+failed one through instead of refusing the write. Both log a WARN at boot, so a
+non‑default state is visible without reading the config.
 
 `save-text` has its own guardrails:
 

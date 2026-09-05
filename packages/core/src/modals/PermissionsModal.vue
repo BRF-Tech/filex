@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// Access modal — one popup combining "İzinler" (per-user RBAC grants,
-// owner-only) and "Bağlantı ile paylaş" (public share link, editor+). Opened
-// from the explorer's unified "Paylaş / İzinler" action. The layout is a fixed
+// Access modal — one popup combining "Permissions" (per-user RBAC grants,
+// owner-only) and "Share by link" (public share link, editor+). Opened
+// from the explorer's unified "Share / Permissions" action. The layout is a fixed
 // header/tabs with a single scrollable body so the popup never grows into one
 // long scroll. Styling uses the SFC's --fe-* theme variables (light/dark).
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
@@ -9,6 +9,7 @@ import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
 import { shareCliCommand } from '../lib/shareCli';
 import { STOCK_EXPIRY_DAYS, clampExpiryOptions, defaultExpiryDays, ttlCeilingHint, validUntilLine } from '../lib/shareTtl';
+import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
   api: FileApi;
@@ -36,7 +37,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
-const tr = computed(() => (props.locale ?? 'tr') !== 'en');
+const tr = computed(() => (resolveLocale(props.locale)) !== 'en');
 function L(t: string, e: string): string {
   return tr.value ? t : e;
 }
@@ -300,7 +301,7 @@ async function inviteCreateUser() {
     const r = await props.api.invitePermission({
       path: props.path, email: email.value.trim().toLowerCase(),
       level: level.value, create_user: true, role: createRole.value, is_dir: !!props.isDir,
-      locale: props.locale ?? 'tr',
+      locale: resolveLocale(props.locale),
     });
     inviteResult.value = { tempPassword: r.temp_password };
     notice.value = r.emailed
@@ -314,7 +315,7 @@ async function inviteCreateUser() {
     busy.value = false;
   }
 }
-// "Sadece paylaş" → jump to the share tab with the address prefilled so the
+// "Just send a share link" → jump to the share tab with the address prefilled so the
 // owner creates a link (with their chosen expiry/PIN) and mails it there.
 function gotoShareWithMail() {
   shareMailTo.value = email.value.trim().toLowerCase();
@@ -388,7 +389,7 @@ async function sendShareMail() {
       path: props.path, emails: list, url: shareResult.value.url,
       pin: shareResult.value.pin ?? undefined,
       expires_days: shareExpiry.value || undefined,
-      locale: props.locale ?? 'tr',
+      locale: resolveLocale(props.locale),
       is_dir: !!props.isDir,
       size: props.size,
     });
@@ -456,7 +457,7 @@ async function sendDropMail() {
       path: props.path, emails: list, url: dropResult.value.url,
       pin: dropResult.value.pin ?? undefined,
       expires_days: dropExpiry.value || undefined,
-      locale: props.locale ?? 'tr',
+      locale: resolveLocale(props.locale),
       is_dir: true,
       mode: 'drop',
     });
@@ -756,7 +757,7 @@ async function nativeShare(body: { title: string; text: string }) {
               </div>
               <div v-if="shareMailNotice" class="fx-perm-notice">{{ shareMailNotice }}</div>
 
-              <!-- native share (OS share sheet) — same as the fishapp Paylaş button -->
+              <!-- native share (OS share sheet) — same as the fishapp Share button -->
               <button v-if="canShare" type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-sharebtn" @click="nativeShare(shareBody())">
                 <span aria-hidden="true">📤</span> {{ L('Paylaş', 'Share') }}
               </button>
@@ -855,7 +856,7 @@ async function nativeShare(body: { title: string; text: string }) {
               </div>
               <div v-if="dropMailNotice" class="fx-perm-notice">{{ dropMailNotice }}</div>
 
-              <!-- native share (OS share sheet) — same as the fishapp Paylaş button -->
+              <!-- native share (OS share sheet) — same as the fishapp Share button -->
               <button v-if="canShare" type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-sharebtn" @click="nativeShare(dropBody())">
                 <span aria-hidden="true">📤</span> {{ L('Paylaş', 'Share') }}
               </button>
@@ -1026,7 +1027,7 @@ async function nativeShare(body: { title: string; text: string }) {
 .fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }
 .fx-perm-ttlhint { margin: 4px 0 8px; }
 .fx-perm-validuntil { margin: 4px 0 6px; }
-/* native "Paylaş" button — sits under the mail row, full width */
+/* native "Share" button — sits under the mail row, full width */
 .fx-perm-sharebtn { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
 
 /* file-drop tab */

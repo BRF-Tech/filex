@@ -84,7 +84,7 @@ func TestOCR_Extract_StubBinary(t *testing.T) {
 		t.Fatalf("Extract = %q, want %q", got, "merhaba dünya OCR")
 	}
 
-	// Limit cut lands on a rune boundary ("dünya"nın ü'sü bölünmez).
+	// Limit cut lands on a rune boundary (the ü in "dünya" is not split).
 	got, err = o.Extract(context.Background(), strings.NewReader("x"), 9)
 	if err != nil {
 		t.Fatalf("Extract (limited): %v", err)

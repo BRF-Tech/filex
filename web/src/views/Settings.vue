@@ -52,7 +52,7 @@ async function save() {
   }
 }
 
-// ── SMTP (e-posta) — davet/paylaşım bildirimleri buradan gönderilir ──
+// ── SMTP (email) — invite/share notifications are sent from here ──
 const smtp = reactive({ host: '', port: '587', tls: 'starttls', from: '', username: '', password: '' });
 const smtpTesting = ref(false);
 const smtpTestMsg = ref('');
@@ -226,7 +226,7 @@ onMounted(() => settings.fetch());
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Input :model-value="smtp.username" :label="t('settings.smtp.username')" :hint="t('settings.smtp.usernameHelp')" monospace @update:model-value="(v) => (smtp.username = v as string)" />
-        <Input :model-value="smtp.password" type="password" :label="t('settings.smtp.password')" :placeholder="smtpPwSet ? '••••••• (kayıtlı)' : ''" :hint="t('settings.smtp.passwordHelp')" @update:model-value="(v) => (smtp.password = v as string)" />
+        <Input :model-value="smtp.password" type="password" :label="t('settings.smtp.password')" :placeholder="smtpPwSet ? t('settings.smtp.passwordSaved') : ''" :hint="t('settings.smtp.passwordHelp')" @update:model-value="(v) => (smtp.password = v as string)" />
       </div>
       <div class="space-y-2 pt-2">
         <div v-if="smtpTestAsking" class="flex flex-wrap items-end gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 p-3">

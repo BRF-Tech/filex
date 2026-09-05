@@ -11,6 +11,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -63,6 +64,9 @@ func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), sha
 		defaultDir: shareXDefaultDir,
 	}
 }
+
+// AttachTenants wires the shared origin resolver (internal/tenanturl).
+func (h *ShareX) AttachTenants(rv tenanturl.Resolver) { h.ops.tenants = rv }
 
 // AttachACL wires the RBAC resolver so the write + share both enforce the bound
 // user's grants (≥editor on the target), mirroring the AI surface.
