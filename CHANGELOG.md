@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-09-06
+
+### Fixed
+
+- **A user who had chosen Turkish saw an English admin panel on any second
+  device.** The language on the account (`users.locale`) was written by
+  Profile → Save and then **never read**. Saving also set it in this browser's
+  `localStorage`, so it looked right on the machine you saved it on; sign in
+  from another browser, another device or a private window and the account's
+  choice was ignored and the browser's language used instead.
+
+  It was invisible while `tr` was the fallback for everybody — a Turkish user
+  got Turkish either way, from the default rather than from their preference.
+  v0.33.0 made the fallback `en`, which was the right change, and this
+  never-read preference surfaced behind it.
+
+  The account's language is applied wherever the user is loaded, ranked below a
+  choice made on this device (the language switcher writes only locally, so it
+  is the newer decision) and above the instance default.
+
+- **A red CI suite could not stop a release, and had not.** `release.yml` now
+  calls `ci.yml` as its first job and nothing publishes until it is green.
+
+  Until now CI ran on the branch push and the release workflow on the tag
+  pushed two seconds later — in parallel, unaware of each other, with no
+  required status check anywhere in the repository. Measured 2026-09-06: **CI
+  had been red since v0.31.0 and four tags shipped over it**, carrying the
+  locale bug above. None of the release steps would have caught it: they check
+  the README, the screenshots, the links, the anchors and the version
+  manifests, and never run a test.
+
+- `17-theme-locale.cy.ts` asserted the account's language while measuring the
+  **browser's**: with no stored choice the app fell back to browser detection,
+  so it passed on a Turkish workstation and failed on an English CI runner. It
+  now pins the browser to English, so only the saved preference can satisfy it.
+
+- `siteAssets.test.ts` failed on every public CI run: `site/` is withheld from
+  the published tree, so the directory it compares does not exist there. It
+  skips where the directory is absent and still gates where it is present. The
+  failure also cascaded — the image-build job `needs` it, so v0.34.0's images
+  were never verified on main.
+
 ## [0.34.0] - 2026-09-06
 
 ### Upgrade notes

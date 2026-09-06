@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { AuthApi } from '@/api/auth';
 import type { LoginRequest, User } from '@/api/types';
 import { extractError } from '@/api/client';
+import { applyAccountLocale } from '@/i18n';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
@@ -20,6 +21,11 @@ export const useAuthStore = defineStore('auth', () => {
       const me = await AuthApi.me();
       user.value = me.user;
       permissions.value = me.permissions ?? [];
+      // ⚠ The account's saved language, applied at the one place every entry
+      // path passes through — a cold load, a login and a re-hydration all end
+      // up here. Putting it in login() alone would leave a returning session
+      // (cookie still valid, no login form) in the wrong language.
+      applyAccountLocale(me.user?.locale);
       error.value = null;
       return me.user;
     } catch (e: unknown) {

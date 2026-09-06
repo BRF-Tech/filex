@@ -2,7 +2,7 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.34.0"
+version: "0.34.1"
 tagline: Self-hosted file manager for all your storages
 description: >-
   filex is a fast, self-hosted file manager with a single-binary backend and a

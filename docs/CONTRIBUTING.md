@@ -492,6 +492,17 @@ Maintainer-only. Reproducible, automated by CI.
    `web/tests/deploy/deployVersions.test.ts` now fails the build if any of the
    seven pins drifts, and `--check` reports them without writing.
 6. Commit: `chore(release): vX.Y.Z`.
+   ⚠⚠ **The tag is now gated on the test suite, and it did not used to be.**
+   `release.yml`'s first job calls `ci.yml`, and everything that publishes —
+   binaries, images, npm, the installers — waits for it. Before this, CI ran on
+   the branch push and the release on the tag pushed two seconds later, in
+   parallel and unaware of each other, with no required status check anywhere
+   in the repository. Measured 2026-09-06: **CI had been red since v0.31.0 and
+   four tags shipped over it.** The failure was real (a user who had chosen
+   Turkish saw an English admin panel on any second device) and none of the
+   steps above would ever have caught it — they check README, screenshots,
+   links, anchors and version manifests, and never run a test.
+
 7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` — **signed**, and `git tag -v vX.Y.Z`
    must answer `Good signature` before you push. Releases up to and including
    v0.27.5 are plain annotated tags: the instruction said `-s` for months while

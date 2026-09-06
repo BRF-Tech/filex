@@ -21,14 +21,23 @@ const DST = path.join(REPO, 'site', 'assets');
 // Files with no counterpart are site-owned, not copies: `social-preview.png`
 // is rendered from `social-preview.src.html`, `end-user-drive.png` is a
 // site-only crop. They are deliberately not synced.
-const copies = readdirSync(DST)
-  .filter((f) => f.endsWith('.png'))
-  .filter((f) => existsSync(path.join(SRC, f)));
+// ⚠ `site/` is withheld from the public export (scripts/export-public.sh), so
+// in the published tree this directory does not exist at all and there is
+// nothing to compare. Skipping there is correct; skipping in the source repo
+// would make the gate a decoration, so the two cases are told apart by the
+// directory's presence and the skip is announced.
+const sitePresent = existsSync(DST);
+const copies = sitePresent
+  ? readdirSync(DST)
+      .filter((f) => f.endsWith('.png'))
+      .filter((f) => existsSync(path.join(SRC, f)))
+  : [];
 
-describe('site assets', () => {
+describe.skipIf(!sitePresent)('site assets', () => {
   it('there are screenshots shared with the docs at all', () => {
     // Guards against the list going empty through a rename and this whole
-    // suite passing vacuously.
+    // suite passing vacuously. Only meaningful where site/ exists at all,
+    // which is why the whole block is skipped rather than this assertion.
     expect(copies.length).toBeGreaterThan(0);
   });
 

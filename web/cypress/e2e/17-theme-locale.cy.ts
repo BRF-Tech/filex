@@ -63,6 +63,17 @@ describe('theme + locale persistence', () => {
   });
 
   it('dashboard renders TR labels when locale=tr', () => {
+    // ⚠⚠ Pin the BROWSER language to English, or this test measures the
+    // machine it runs on instead of the thing it claims to check. It passed
+    // on a Turkish workstation and failed on an English CI runner for four
+    // releases: with no stored choice the app fell back to browser detection,
+    // so the Turkish label came from the browser, never from the account.
+    // Forcing `en` here means only the saved account preference can produce it.
+    cy.on('window:before:load', (win) => {
+      Object.defineProperty(win.navigator, 'languages', { value: ['en-US', 'en'] });
+      Object.defineProperty(win.navigator, 'language', { value: 'en-US' });
+    });
+    cy.clearLocalStorage();
     cy.apiLogin().then((tok) => {
       cy.request({
         method: 'PATCH',
