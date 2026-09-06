@@ -55,14 +55,16 @@ jobs:
           node-version: "20"
           cache: pnpm
 
-      # ⚠⚠ The chart ships the image everyone who installs it runs: values.yaml
-      # leaves the tag empty and the helper resolves it to .Chart.appVersion.
-      # Left behind, a release quietly hands Helm users an old filex -- it sat
-      # at v0.4.0 for twenty-three releases before anyone noticed. A release
-      # that forgot the chart fails HERE, before anything is published, rather
-      # than shipping something nobody can see is wrong.
-      - name: Helm chart matches the release
-        run: node scripts/sync-chart-version.mjs --check
+      # ⚠⚠ Each of these ships the image somebody who installs filex actually
+      # runs: the chart's values.yaml leaves the tag empty and the helper
+      # resolves it to .Chart.appVersion, and the CasaOS/Umbrel/Runtipi
+      # manifests pin the tag outright. Left behind, a release quietly hands
+      # those users an old filex -- the chart sat at v0.4.0 for twenty-three
+      # releases before anyone noticed, and the three store manifests for
+      # twenty-nine. A release that forgot one fails HERE, before anything is
+      # published, rather than shipping something nobody can see is wrong.
+      - name: Every deployment target matches the release
+        run: node scripts/sync-deploy-versions.mjs --check
 
       - run: pnpm install --frozen-lockfile
       - name: Build frontend + sync into backend/embed
