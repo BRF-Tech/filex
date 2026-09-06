@@ -288,9 +288,46 @@ func (s *Store) GetNodeByPath(ctx context.Context, storageID int64, hash string)
 	return scanNode(row)
 }
 
+// GetNodeByPathIncludingDeleted returns the row at a path, live or trashed.
+//
+// ⚠ ORDER BY is load-bearing since migration 00032 made the unique index over
+// (storage_id, path_hash) live-only: several trashed rows may now share a path
+// with at most one live one. `deleted_at IS NULL` sorts the live row first
+// (0 before 1), and id DESC picks the most recent among the trashed. Without
+// it the sync worker's view of a path would depend on row order.
 func (s *Store) GetNodeByPathIncludingDeleted(ctx context.Context, storageID int64, hash string) (*model.Node, error) {
-	row := s.db.QueryRowContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND path_hash=?`, storageID, hash)
+	row := s.db.QueryRowContext(ctx, nodeSelectColumns()+
+		` FROM nodes WHERE storage_id=? AND path_hash=?`+
+		` ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, id DESC LIMIT 1`,
+		storageID, hash)
 	return scanNode(row)
+}
+
+// ListLiveNodesInTrash returns live rows sitting in the trash bucket. See the
+// db.Store declaration for why any such row is a defect to be cleaned up.
+func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trashPrefix string) ([]*model.Node, error) {
+	bare := strings.Trim(trashPrefix, "/")
+	if bare == "" {
+		return nil, nil
+	}
+	slashed := "/" + bare
+	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+
+		` FROM nodes WHERE storage_id=? AND deleted_at IS NULL`+
+		` AND (path=? OR path=? OR path LIKE ? OR path LIKE ?) ORDER BY id`,
+		storageID, slashed, bare, slashed+"/%", bare+"/%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error) {
@@ -729,10 +766,33 @@ func (s *Store) HardDeleteNode(ctx context.Context, id int64) error {
 	return err
 }
 
+// MoveNode re-homes a node: new parent, name, path and path hash — and,
+// for a LIVE row, the storage_key that must mirror that path.
+//
+// ⚠ storage_key is not decoration. It is what internal/versioning, the
+// antivirus quarantine, the id-addressed download (`Manager.Read`) and the
+// sync tombstone pass hand to the driver as the file's key, each of them
+// preferring it over `path`. Leaving it at the pre-move value made every one
+// of those address a path the file no longer occupies, and every one of them
+// fails SILENTLY on a miss: the snapshot before an overwrite records nothing
+// and lets the write through, the quarantine reports success while the
+// infected bytes stay live, `confirmGone` tombstones a file that is fine, and
+// a download by id 404s on a file the listing shows.
+//
+// ⚠⚠ The CASE is the trash exception and it is load-bearing. On a trashed row
+// storage_key deliberately holds the ORIGINAL path (SoftDeleteAndRetag writes
+// it) — that is the only record of where trash.Service.Restore has to put the
+// file back, and sync.reconcileTrash reads it to tell a restorable deletion
+// from a row that has to be hard-deleted. Overwriting it here would destroy
+// both. Live rows mirror path; trashed rows keep their origin.
 func (s *Store) MoveNode(ctx context.Context, id int64, parentID *int64, name, path, hash string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE nodes SET parent_id=?, name=?, path=?, path_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		parentID, name, path, hash, id)
+		`UPDATE nodes
+		    SET parent_id=?, name=?, path=?, path_hash=?,
+		        storage_key=CASE WHEN deleted_at IS NULL THEN ? ELSE storage_key END,
+		        updated_at=CURRENT_TIMESTAMP
+		  WHERE id=?`,
+		parentID, name, path, hash, path, id)
 	return err
 }
 
@@ -2144,6 +2204,49 @@ func (s *Store) UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error {
 func (s *Store) SetThumbnailState(ctx context.Context, nodeID int64, state, errMsg string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE thumbnails SET state=?, error=? WHERE node_id=?`, state, errMsg, nodeID)
 	return err
+}
+
+func (s *Store) DeleteThumbnail(ctx context.Context, nodeID int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM thumbnails WHERE node_id=?`, nodeID)
+	return err
+}
+
+// ExistingNodeIDs answers in batches of 500 placeholders — SQLite's default
+// variable ceiling is 999 and the caller feeds it whatever the thumbnail cache
+// directory happens to hold.
+func (s *Store) ExistingNodeIDs(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	out := make(map[int64]bool, len(ids))
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := s.db.QueryContext(ctx, `SELECT id FROM nodes WHERE id IN (`+ph+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[id] = true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*model.NodeVersion, error) {

@@ -139,6 +139,13 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 		st.State = "disabled"
 	case es.URL == "":
 		st.State = "unconfigured"
+	case missingSecret(name, es.SecretEnc):
+		// ⚠ Reachable is not the same as configured. A Document Server with no
+		// JWT secret on filex's side answers /healthcheck perfectly happily and
+		// then refuses every editor session, which is how a green Test button
+		// sat next to "OnlyOffice is not configured" in issue #17. Say the true
+		// thing here rather than probing and calling it healthy.
+		st.State = "unconfigured"
 	case probeHTTP(externalProbeURL(name, es.URL)):
 		st.State = "ok"
 	default:
@@ -200,9 +207,20 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	// advertised flag and the actual pipeline can never disagree.
 	caps.OCR = extract.TesseractBin() != ""
 	// Optional ClamAV upload scanning (v0.4 "Koru") — same shared-resolution
-	// pattern via internal/antivirus (FILEX_CLAMAV kill-switch,
-	// FILEX_CLAMAV_BIN authoritative, else $PATH clamdscan/clamscan).
-	caps.Antivirus = antivirus.ResolveBin() != ""
+	// pattern via internal/antivirus. ⚠ One call, antivirus.Resolve, answers
+	// both "is it on" and "how is it reached", and it is the SAME call the
+	// scan pipeline and the admin page make: the advertised flag cannot drift
+	// from what actually scans, because there is nothing else to drift from.
+	//
+	// ⚠ Configured, not probed. In daemon mode this says an address is set
+	// and parses; whether clamd answers is a network round-trip, made by
+	// GET /api/admin/protection where an admin is waiting, not on every
+	// capabilities fetch.
+	avRes := antivirus.Resolve(ctx, s.store)
+	caps.Antivirus = avRes.Available()
+	if caps.Antivirus {
+		caps.AntivirusMode = avRes.Mode
+	}
 
 	// External services from DB.
 	probeFailed := false
@@ -214,7 +232,11 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 				State:     es.LastState,
 				LastCheck: es.LastCheck,
 			}
-			if es.Enabled && es.URL != "" {
+			if es.Enabled && es.URL != "" && missingSecret(es.Name, es.SecretEnc) {
+				// Configured by halves — see ProbeExternal.
+				st.State = "unconfigured"
+				_ = s.store.UpdateExternalServiceState(ctx, es.Name, time.Now(), "unconfigured")
+			} else if es.Enabled && es.URL != "" {
 				if probeHTTP(externalProbeURL(es.Name, es.URL)) {
 					st.State = "ok"
 					_ = s.store.UpdateExternalServiceState(ctx, es.Name, time.Now(), "ok")
@@ -291,6 +313,16 @@ func probeStorage(drv storage.Driver) model.StorageCapabilities {
 func has(bin string) bool {
 	_, err := exec.LookPath(bin)
 	return err == nil
+}
+
+// externalSecretRequired names the services that need more than a URL before
+// they can do anything. OnlyOffice signs every editor descriptor and every
+// fetch URL with a shared HS256 secret; without it the integration is not
+// configured, however reachable the Document Server is.
+var externalSecretRequired = map[string]bool{"onlyoffice": true}
+
+func missingSecret(name, secret string) bool {
+	return externalSecretRequired[name] && secret == ""
 }
 
 // externalHealthPaths maps external service names to their dedicated

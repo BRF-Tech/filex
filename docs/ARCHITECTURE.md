@@ -9,6 +9,8 @@ SPA, talking to pluggable storage / auth / DB drivers.
 - [Driver model](#driver-model)
 - [DB schema](#db-schema)
 - [Sync worker](#sync-worker)
+- [Realtime hub](#realtime-hub)
+- [Operation queue](#operation-queue)
 - [Embed flow](#embed-flow)
 - [Plug & play external services](#plug--play-external-services)
 - [Repository layout](#repository-layout)
@@ -47,8 +49,8 @@ SPA, talking to pluggable storage / auth / DB drivers.
 │         ▼                       ▼                          ▼             │
 │  ┌───────────────────┐  ┌──────────────────┐    ┌──────────────────┐    │
 │  │  Storage drivers  │  │  Search (Bleve)  │    │   Auth drivers   │    │
-│  │ local · s3 ·      │  │  full-text +     │    │ local · oidc ·   │    │
-│  │ sftp · webdav     │  │  metadata        │    │ ldap · proxy_hdr │    │
+│  │ local · s3 · sftp │  │  full-text +     │    │ local · oidc ·   │    │
+│  │ webdav · ftp· smb │  │  metadata        │    │ ldap · proxy_hdr │    │
 │  └─────────┬─────────┘  └─────────┬────────┘    └─────────┬────────┘    │
 │            │                       │                       │             │
 │            ▼                       ▼                       ▼             │
@@ -62,8 +64,8 @@ SPA, talking to pluggable storage / auth / DB drivers.
 │         ▼                        ▼                          ▼            │
 │  ┌──────────────┐         ┌─────────────────┐        ┌─────────────┐    │
 │  │ Sync worker  │         │  Thumb pipeline │        │ Op runner   │    │
-│  │ ETag diff +  │         │ image · video · │        │ copy/move/  │    │
-│  │ tombstone    │         │  pdf · office   │        │ extract bg  │    │
+│  │ etag / size+ │         │ image · video · │        │ copy/move/  │    │
+│  │ mtime diff + │         │  pdf · office   │        │ extract bg  │    │
 │  └──────┬───────┘         └────────┬────────┘        └─────────────┘    │
 │         │                          │                                      │
 │         ▼                          ▼                                      │
@@ -108,7 +110,13 @@ stay consistent within the request.
 
 If a backend file changed outside filex (e.g. someone uploaded via S3
 console), the [sync worker](#sync-worker) reconciles within a configurable
-interval (default 5 min).
+interval (default **15 min**, per storage).
+
+A write that filex performed itself is **not** left to that: every write
+surface calls the shared post-write gate, which indexes the file, emits the
+webhook event, queues the antivirus scan and announces the change on the
+[realtime hub](#realtime-hub). The sync exists to discover what filex did not
+do.
 
 ---
 
@@ -140,7 +148,8 @@ type Storage interface {
 }
 ```
 
-Built-ins: `local`, `s3`, `sftp`, `webdav`.
+Built-ins: `local`, `s3`, `sftp`, `webdav`, `ftp`, `smb` — plus any installed
+[plugin](PLUGINS.md), registered as `plugin:<name>`.
 
 ### Auth driver
 
@@ -179,8 +188,12 @@ Built-ins:
 
 ## DB schema
 
-15 tables. Names use `singular_or_plural` to match Laravel conventions of the
-sister projects.
+The tables an operator or an integrator is most likely to need. ⚠ This is a
+map, not the schema: the real one has roughly twice as many tables and 33
+migrations, and some names here are the older ones (`files` is `nodes`,
+`operations` is `ops_queue`, `thumbs` is `thumbnails`). Read
+`backend/db/migrations/` for the truth. Names use `singular_or_plural` to match
+Laravel conventions of the sister projects.
 
 | Table                        | Purpose |
 |------------------------------|---------|
@@ -196,7 +209,7 @@ sister projects.
 | `sync_runs`                  | per-storage sync history with counts and errors |
 | `audit_events`               | all auditable user actions |
 | `external_services`          | OnlyOffice/Drawio config + last_check |
-| `thumbs`                     | thumbnail cache index (bytes live on disk) |
+| `thumbs`                     | thumbnail cache index (bytes live on disk; released when the node is purged, and a reconciler sweeps orphans at boot and every `FILEX_THUMBS_SWEEP_INTERVAL`) |
 | `migration_lock`             | goose migration lock |
 
 ER diagram (high-level):
@@ -226,8 +239,17 @@ loop:
     seen := {}
 
     for entry in storage.Sync(since=last_run_started):
+      if entry.path is inside .filex-trash/:  # filex's own bookkeeping
+        skip                                  # -- not catalogue content
       seen.add(entry.path)
       upsert(files, storage_id, entry)
+
+    # anything LIVE inside .filex-trash/ is a defect, and both kinds are fixed
+    for f in db.files where storage_id=$id and path under .filex-trash/ and not deleted:
+      if f.storage_key points OUTSIDE the trash:  # a deletion something revived
+        soft_delete(f)                            # -> back in the trash
+      else:                                       # a row minted for trash bytes
+        hard_delete(f)                            # -> dropped, bytes untouched
 
     # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
     if seen < 0.7 * previous_run.seen:      # the whole listing looks wrong
@@ -269,8 +291,115 @@ A file genuinely deleted in the bucket still goes to trash, so deletions made
 outside filex are still reflected. `Stat` runs only for candidates that
 survive step 1, so a healthy sync costs nothing extra.
 
-`storage.Sync` is etag-diff-based when the driver supports it (S3 list
-versions, WebDAV PROPFIND). Otherwise it's a full re-list.
+### The walk and the trash
+
+⚠⚠ **The walk does not enter `.filex-trash/`, and it never un-deletes a row.**
+
+Deleting a file in filex is a *rename*: the bytes move to
+`.filex-trash/<unix>-<rand>__<name>` and the node row is soft-deleted and
+retagged to that key ([TRASH-VERSIONING.md](TRASH-VERSIONING.md)). Quarantine
+is the same operation — the antivirus job produces an identical row
+([PROTECTION.md](PROTECTION.md)) — so nothing in the catalogue tells the two
+apart.
+
+The walk used to descend into the trash bucket, find an object with no *live*
+row, find the soft-deleted one, and clear `deleted_at` on it. A file the user
+deleted therefore came back at the next pass, and an infected file left
+quarantine at the next pass: the security control expired on a timer nobody
+set. It fired on every pass, on every driver, with no condition attached —
+poll, fsnotify and driver-watch all funnel into the same full `RunOnce` walk,
+so there is no incremental mode in which it did not happen.
+
+Two rules now stand in its place:
+
+1. **`.filex-trash/` is skipped.** The rows for everything in there already
+   exist, retagged to the very keys sitting on the storage, and they are
+   maintained by the trash service — restore, retention purge — never by a
+   listing. (A consequence: `seen` no longer counts trashed objects, so a
+   storage whose trash held more than 30 % of its objects trips the
+   whole-listing guard once on the first pass after upgrading.)
+2. **A trashed row is never revived.** When an object turns up at a path where
+   a trashed row still sits — an out-of-band restore, or simply a new file with
+   an old name — the trashed row stays in the trash and the object is
+   catalogued as a **new node**, which is indexed and treated as new
+   everywhere. Bytes that reappear at a path are not the file that was deleted
+   there; reviving the row would hand them another file's identity, version
+   history, comments and shares, and nothing downstream would ever look at
+   them again. Migration `00032` makes the `(storage_id, path_hash)` unique
+   index live-only so the new row is possible — the same thing `00018` did for
+   `(storage_id, parent_id, name)`.
+
+   > "Treated as new" means catalogued, indexed **and scanned**. The walk
+   > hands every file it newly catalogues — and every file whose content
+   > drifted — to the antivirus queue, so a file that appears on a storage out
+   > of band is scanned whether it lands on a fresh path or on one a trashed
+   > row once held. See
+   > [PROTECTION.md](PROTECTION.md#files-the-sync-discovers).
+
+Anything found **live** inside `.filex-trash/` is repaired on the spot, which
+is what heals an install that ran an earlier version: a revived deletion is
+soft-deleted again (keeping `storage_key`, so restore still knows where it came
+from), and a row the old walk minted for the trash's own bytes is dropped
+outright. Bytes are never touched by either.
+
+`storage.Sync` compares the backend's etag when the driver reports one (S3,
+WebDAV PROPFIND) and the object's **size and modification time** when it does
+not — which is local, SFTP, SMB and FTP. Either way the walk is a full re-list;
+the fingerprint decides which rows it updates. What each of those catches, and
+the two kinds of external change that slip past the second one, is in
+[STORAGE.md → Drift detection](STORAGE.md#drift-detection-what-a-replaced-file-looks-like).
+
+---
+
+## Realtime hub
+
+An open explorer is told what changed rather than asking. `internal/realtime`
+holds one hub per process; a browser mints a short-lived ticket at
+`POST /api/files/ws-ticket`, opens `GET /api/ws`, and subscribes to the folders
+it has on screen. It gets two kinds of frame: **presence** (who else is here,
+what they have focused) and **change** (something in this folder moved).
+
+Two properties matter to everything else in this document:
+
+- **An explorer with a healthy socket does not poll.** The 12 s re-listing in
+  `useRealtime.ts` is the fallback for a socket that failed. So a write that
+  emits no frame is not "slow to appear" — it does not appear at all until the
+  user navigates.
+- **Bursts are coalesced on the leading edge.** The first change in a quiet
+  room goes out immediately and unmodified; everything after it is merged into
+  one frame per window (200 ms, doubling to 1.5 s while the burst continues,
+  reset when the folder goes quiet). A merged frame carries `count`. Nothing is
+  dropped — a burst always ends with a frame reflecting its final state.
+
+Every write surface reaches the hub through the same post-write gate, and the
+five protocol servers reach it through `internal/protocolsync`, the one package
+they already shared. The contract, the frame shapes and the debounce advice for
+integrators are in [REALTIME.md](REALTIME.md).
+
+---
+
+## Operation queue
+
+`ops_queue` is the durable work list behind antivirus scans, content
+extraction, thumbnails, and async copy/move/delete. Three drivers implement one
+interface — **sqlite** (in the app DB), **postgres** (`SELECT … FOR UPDATE SKIP
+LOCKED`) and **redis** — and a shared contract test runs the same suite against
+all three.
+
+Three columns carry more meaning than their names suggest:
+
+- `priority` — claimed `ORDER BY priority DESC, enqueued_at ASC` on all three
+  drivers, which is what keeps an interactive scan ahead of a twenty-thousand
+  file first import. ⚠ The redis driver ignored it entirely until v0.34.0; its
+  pending set is now a **sorted set** whose score encodes priority and arrival,
+  claimed by a single Lua script, converted from the old LIST at startup.
+  Downgrading past that conversion is not supported.
+- `not_before` — a delayed operation, used by the editor's debounced save-scan.
+  Deliberately a row rather than a timer in the process, so a deploy does not
+  take every pending scan with it.
+- `dedup_key` — unique among **pending** rows only, so "one pending scan per
+  file" holds while a save burst is arriving and is released the moment a
+  worker claims the scan.
 
 ---
 
@@ -324,21 +453,31 @@ local development (`pnpm run build:all`).
 
 ## Plug & play external services
 
-OnlyOffice, Drawio, and Mermaid are mounted only when they're configured.
-The capability is exposed via `GET /api/capabilities` and the front-end
-hides UI affordances when a capability is `false`.
+OnlyOffice, Drawio and the converter are used only when they're configured;
+Mermaid renders client-side and needs no service at all. The capability is
+exposed via `GET /api/capabilities` and the front-end hides UI affordances when
+a capability is `false`.
+
+⚠ **The `external_services` row is the single runtime source of truth**, read
+on every use behind a one-second cache that the admin `PATCH` invalidates. It
+used to be a snapshot of env/YAML taken once at boot, which is how an operator
+could configure OnlyOffice in the admin UI, watch **Test** answer 200, and
+still get `503 onlyoffice not configured` from the editor forever (GitHub #17).
+Env and `config.yaml` are declarative configuration *for* that row: a service
+they name is re-asserted onto it at every boot and reported `env_managed: true`,
+so an admin-UI edit to one of those applies immediately and is reverted at the
+next start.
 
 ```
-admin sets ONLYOFFICE_URL ──┐
-                            ▼
-                     external_services
-                            │
-                       on next /api/capabilities
-                            ▼
-                   { external: { onlyoffice_url: "..." } }
-                            │
-                            ▼
-                     UI shows "Open in OnlyOffice" action
+admin PATCH /api/admin/external/onlyoffice ──┐
+                                             ▼
+                                      external_services
+                                             │
+                              read on every use (1 s cache,
+                              invalidated by the PATCH)
+                                             ▼
+                            editor descriptor, capabilities,
+                            the converter URL handed to AI/MCP
 ```
 
 Adding a new external service is mechanical:
@@ -384,8 +523,9 @@ filemanager/
 ├── web/                            # Vue 3 admin SPA (embedded)
 ├── demo/                           # standalone HTML demos
 ├── docker/
-│   ├── Dockerfile                  # slim
-│   └── Dockerfile.slim             # binary only, no thumbnail toolchain
+│   ├── Dockerfile                  # the :latest / :full image, ~510 MB
+│   ├── Dockerfile.slim             # the :slim image, ~43 MB, binary only
+│   └── Dockerfile.local            # local hot-fix builds from a host dist
 │
 ├── scripts/
 │   └── sync-embed.mjs              # web/dist + wc/dist → backend/embed

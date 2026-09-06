@@ -3,7 +3,7 @@
 # @brftech/filex
 
 Drop-in **`<filex-explorer>` Web Component** for the
-[filex](https://github.com/brf-tech/filex) file manager. Wraps the
+[filex](https://github.com/BRF-Tech/filex) file manager. Wraps the
 Vue 3 `<FileExplorer>` SFC from `@brftech/filex-core` and ships with
 the Vue runtime bundled in — load it from any CDN, embed in any
 framework, no peers required.

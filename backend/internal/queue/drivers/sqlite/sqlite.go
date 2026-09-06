@@ -108,15 +108,67 @@ func (d *Driver) Enqueue(ctx context.Context, op queue.Op) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("queue/sqlite: marshal payload: %w", err)
 	}
+	if op.DedupKey != "" {
+		return d.enqueueDeduped(ctx, op, id, string(body))
+	}
 	_, err = d.db.ExecContext(ctx,
 		`INSERT INTO ops_queue (id, type, payload, status, priority, max_attempts, not_before)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, op.Type, string(body), op.Status, op.Priority, op.MaxAttempts, asNullTime(op.NotBefore),
+		id, op.Type, string(body), op.Status, op.Priority, op.MaxAttempts, sqlTime(op.NotBefore),
 	)
 	if err != nil {
 		return "", fmt.Errorf("queue/sqlite: insert: %w", err)
 	}
 	return id, nil
+}
+
+// enqueueDeduped inserts only when no PENDING op already holds op.DedupKey,
+// returning queue.ErrDuplicate when one does.
+//
+// The guard is inside the INSERT rather than a SELECT followed by an INSERT:
+// SQLite serialises writers, so the statement decides the winner atomically
+// and two concurrent saves can never both insert — nor both skip, which is
+// the failure that would matter (a coalesced scan that never happens is the
+// gap this exists to close). The partial unique index added in migration
+// 00031 is a second line of defence for any backend where the statement
+// alone would not be atomic; a violation from it maps to the same
+// ErrDuplicate, so callers see one behaviour either way.
+//
+// `FROM (SELECT 1) AS one` keeps the statement legal on every SQL dialect
+// this driver is ever pointed at — a bare `SELECT ? WHERE ...` is invalid on
+// MySQL, and this driver is also what a MySQL-backed install gets, since the
+// queue driver defaults to sqlite and is handed the application *sql.DB.
+func (d *Driver) enqueueDeduped(ctx context.Context, op queue.Op, id, payload string) (string, error) {
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO ops_queue (id, type, payload, status, priority, max_attempts, not_before, dedup_key)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?
+		   FROM (SELECT 1) AS one
+		  WHERE NOT EXISTS (
+		        SELECT 1 FROM ops_queue o
+		         WHERE o.dedup_key = ? AND o.status = 'pending')`,
+		id, op.Type, payload, op.Status, op.Priority, op.MaxAttempts,
+		sqlTime(op.NotBefore), op.DedupKey, op.DedupKey,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return "", queue.ErrDuplicate
+		}
+		return "", fmt.Errorf("queue/sqlite: insert: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("queue/sqlite: insert rows: %w", err)
+	}
+	if n == 0 {
+		return "", queue.ErrDuplicate
+	}
+	return id, nil
+}
+
+// isUniqueViolation recognises the partial-unique-index collision from
+// migration 00031. modernc/sqlite surfaces it as a plain error string.
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 // Dequeue uses an UPDATE-with-subquery RETURNING (SQLite ≥ 3.35) to
@@ -159,7 +211,18 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 	// Claim it.
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE ops_queue
-		 SET status='running', started_at=CURRENT_TIMESTAMP, attempts=attempts+1
+		 SET status='running', started_at=CURRENT_TIMESTAMP, attempts=attempts+1,
+		     dedup_key=NULL
+		 -- ⚠ dedup_key is cleared here, not when the op finishes. Two reasons,
+		 -- and both are correctness rather than tidiness:
+		 --   1. A request arriving while this scan RUNS must queue a new one —
+		 --      this scan may already have read the old bytes.
+		 --   2. Fail(retry) puts the row back to pending. If it still held
+		 --      the key and a newer op had meanwhile taken it, that UPDATE
+		 --      would violate the partial unique index and the op would be
+		 --      stranded in running for ever.
+		 -- Redis releases its claim at the same moment, so all three drivers
+		 -- agree on when a key becomes free.
 		 WHERE id=? AND status='pending'`, id); err != nil {
 		return queue.Op{}, fmt.Errorf("queue/sqlite: claim: %w", err)
 	}
@@ -423,12 +486,31 @@ func getInTx(ctx context.Context, tx *sql.Tx, id string) (queue.Op, error) {
 	return scanRow(row)
 }
 
-// asNullTime converts *time.Time to sql.NullTime.
-func asNullTime(t *time.Time) sql.NullTime {
+// sqlTime renders a *time.Time for the `not_before` column the way SQLite's
+// own CURRENT_TIMESTAMP does: UTC, second resolution, "2006-01-02 15:04:05".
+//
+// ⚠⚠ This is not cosmetic. `not_before` is compared in SQL, as
+// `not_before <= CURRENT_TIMESTAMP`, and SQLite has no date type — the
+// comparison is a STRING comparison. Binding a Go time.Time let the SQL driver
+// write its own rendering ("2026-09-06 04:42:59.215071132 +0300 +03
+// m=+0.118370428"), which is not comparable with CURRENT_TIMESTAMP at all:
+// on a host at UTC+3 a scheduled op stayed invisible for three extra hours,
+// and on a host WEST of UTC it became runnable immediately, i.e. the delay was
+// silently dropped. Measured on this driver at TZ=Europe/Istanbul: a 100ms
+// delay was still not runnable 400ms later, while the same test at TZ=UTC
+// passed — which is exactly why it had never been noticed.
+//
+// The other two drivers were always correct and are untouched: postgres binds
+// a real timestamptz, and redis scores the scheduled ZSET by Unix seconds.
+//
+// Rows written by the old code still read back — the scan side accepts both
+// renderings — they merely compare wrongly until they are rewritten, and the
+// only ops that carry not_before are short-lived retries and save scans.
+func sqlTime(t *time.Time) any {
 	if t == nil {
-		return sql.NullTime{}
+		return nil
 	}
-	return sql.NullTime{Time: *t, Valid: true}
+	return t.UTC().Format("2006-01-02 15:04:05")
 }
 
 // newID returns a 16-byte hex random string. Crockford-style would be

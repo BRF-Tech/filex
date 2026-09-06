@@ -8,9 +8,9 @@
 //
 //   - async antivirus scan enqueue ("Koru" ClamAV pipeline) — only for
 //     persisted file nodes (the scan job re-reads the node by id);
-//   - canonical webhook-v2 file event (file.uploaded / file.deleted /
-//     file.moved / file.trashed) through the notify service, stamped
-//     with the originating surface in meta.origin.
+//   - canonical webhook-v2 file event (file.uploaded / file.updated /
+//     file.deleted / file.moved / file.trashed) through the notify
+//     service, stamped with the originating surface in meta.origin.
 //
 // The package is dependency-injected at bootstrap (Configure in
 // api.BuildRouter) with the same nil-safe, package-level sink pattern
@@ -41,12 +41,64 @@ const (
 	OriginSFTP    = "sftp"    // SFTP endpoint (internal/sftpsrv)
 	OriginFTP     = "ftp"     // FTPS endpoint (internal/ftpsrv)
 	OriginNFS     = "nfs"     // NFSv3 endpoint (internal/nfssrv)
+	// OriginOnlyOffice is the document server writing an edited office
+	// document back through the save callback (internal/onlyoffice). It is a
+	// surface of its own and not "manager": the bytes are assembled and
+	// posted by the document server, not by the browser that opened the file,
+	// and a subscriber deciding whether to re-run a pipeline needs to be able
+	// to tell an office save from a drag-and-drop upload.
+	OriginOnlyOffice = "onlyoffice"
 )
+
+// WriteKind says whether the bytes that just landed created the file or
+// replaced a file that was already there. It is what decides between
+// notify.EventFileUploaded and notify.EventFileUpdated, and it is a REQUIRED
+// argument of OnFileWritten rather than something the gate infers, so that a
+// new write surface cannot join the fan-out without answering the question.
+//
+// ⚠ Every surface must derive it from the fact it ALREADY has — the cache-row
+// lookup it does anyway (`existing != nil`), or, where the row is written
+// before the bytes move (the staged upload path), a driver Stat of the target
+// taken before the write. Do not invent a second notion of "did this exist".
+type WriteKind int
+
+const (
+	// Created — nothing was addressable at this path before the write.
+	// ⚠ Also the honest answer when the surface genuinely cannot tell (the
+	// DB mirror was unreachable, so there is no row to compare against): it
+	// is the value the event carried before file.updated existed, so an
+	// unknown degrades to the old behaviour rather than to a wrong claim
+	// that a file was edited.
+	Created WriteKind = iota
+	// Replaced — a file already existed at this path and its bytes changed.
+	Replaced
+)
+
+// Event maps the kind onto the canonical event name.
+func (k WriteKind) Event() notify.EventType {
+	if k == Replaced {
+		return notify.EventFileUpdated
+	}
+	return notify.EventFileUploaded
+}
+
+// String makes the kind readable in logs and test failures.
+func (k WriteKind) String() string {
+	if k == Replaced {
+		return "replaced"
+	}
+	return "created"
+}
 
 // Package-wide sinks. Stay nil until Configure wires them at startup.
 var (
 	avEnqueue func(ctx context.Context, n *model.Node)
-	sink      notify.Service
+	// avEnqueueAfterSave is the DEBOUNCED twin of avEnqueue: it schedules ONE
+	// scan per file per editing window and absorbs the saves that arrive
+	// inside it. Used by the surfaces that write repeatedly during a single
+	// editing session; see OnFileSaved.
+	avEnqueueAfterSave func(ctx context.Context, n *model.Node)
+	sink               notify.Service
 )
 
 // Configure installs the process-wide dependencies. Call once at boot
@@ -57,28 +109,83 @@ func Configure(av func(ctx context.Context, n *model.Node), s notify.Service) {
 	sink = s
 }
 
-// OnFileWritten is the single post-write gate: enqueue an antivirus scan
-// for the freshly written node (persisted nodes only — the scan job
-// re-fetches by id, so an id-less transient node is skipped) and emit
-// one `file.uploaded` event carrying the origin surface.
+// ConfigureSaveScan installs the debounced scan sink OnFileSaved uses. Call
+// once at boot, beside Configure. nil is legal and means "no debounced sink":
+// OnFileSaved then falls back to the immediate one, because a missing sink
+// must degrade to scanning too often, never to not scanning at all.
+func ConfigureSaveScan(av func(ctx context.Context, n *model.Node)) { avEnqueueAfterSave = av }
+
+// OnFileWritten is the single post-write gate: emit the canonical write event
+// (kind decides file.uploaded vs file.updated, see WriteKind) and enqueue an
+// antivirus scan for the freshly written node (persisted nodes only — the scan
+// job re-fetches by id, so an id-less transient node is skipped).
 //
 // node may be a transient (unsaved, ID==0) row when the DB mirror could
 // not be upserted — the event still fires because the bytes ARE on
 // storage; only the scan is skipped. nil node / directory nodes no-op.
 // meta is optional extra event metadata (e.g. {"chunked": true}).
-func OnFileWritten(ctx context.Context, storageID int64, node *model.Node, origin string, meta ...map[string]any) {
+func OnFileWritten(ctx context.Context, storageID int64, node *model.Node, origin string, kind WriteKind, meta ...map[string]any) {
+	if node == nil || node.Type == model.NodeTypeDirectory {
+		return
+	}
+	EmitWritten(ctx, storageID, node, origin, kind, meta...)
+	if avEnqueue != nil && node.ID != 0 {
+		avEnqueue(context.WithoutCancel(ctx), node)
+	}
+}
+
+// OnFileSaved is OnFileWritten for a write that is one save inside an ONGOING
+// editing session: same event, DEBOUNCED scan.
+//
+// ⚠ The divergence is in the SCAN, never in the event. A person editing a file
+// saves it repeatedly, and one ClamAV pass per save would spend a full scan on
+// a file nobody has finished writing — so the save schedules one scan per file
+// per editing window and the saves that arrive inside the window are absorbed
+// into it (queue.AntivirusScanner.EnqueueAfterSave). Nobody gets a different
+// EVENT out of this: a webhook subscriber must not be able to tell an editor
+// save from an upload of the same bytes.
+//
+// ⚠⚠ Use it only where more saves really are coming. A surface that writes a
+// whole file once wants OnFileWritten: deferring THAT scan buys nothing and
+// costs the file up to a full window unscanned. The two callers today are the
+// browser's text editor (a Ctrl+S burst) and an OnlyOffice force-save (an
+// interim save with the document still open); an OnlyOffice save that arrives
+// because the session ENDED is a final state and takes OnFileWritten.
+func OnFileSaved(ctx context.Context, storageID int64, node *model.Node, origin string, kind WriteKind, meta ...map[string]any) {
+	if node == nil || node.Type == model.NodeTypeDirectory {
+		return
+	}
+	EmitWritten(ctx, storageID, node, origin, kind, meta...)
+	if node.ID == 0 {
+		return
+	}
+	if avEnqueueAfterSave == nil {
+		if avEnqueue != nil {
+			avEnqueue(context.WithoutCancel(ctx), node)
+		}
+		return
+	}
+	avEnqueueAfterSave(context.WithoutCancel(ctx), node)
+}
+
+// EmitWritten is OnFileWritten without the antivirus enqueue — the same split
+// protocolsync draws between Write and WriteRows, for the same reason: a
+// surface that has already scheduled the scan itself must not get a second one.
+//
+// ⚠ Callers that want the debounced scan should reach for OnFileSaved above
+// rather than this, which schedules NO scan at all. The one direct caller left
+// is the text editor (api/handlers/save_text.go), which owns its own pair of
+// enqueue sinks in the handlers package; it gets the same event either way.
+func EmitWritten(ctx context.Context, storageID int64, node *model.Node, origin string, kind WriteKind, meta ...map[string]any) {
 	if node == nil || node.Type == model.NodeTypeDirectory {
 		return
 	}
 	emit(ctx, notify.Event{
-		Event: notify.EventFileUploaded,
+		Event: kind.Event(),
 		Body:  node.Path,
 		Meta:  mergeMeta(origin, meta),
 		Node:  &notify.NodeRef{StorageID: storageID, Path: node.Path, Name: node.Name, Size: node.Size},
 	})
-	if avEnqueue != nil && node.ID != 0 {
-		avEnqueue(context.WithoutCancel(ctx), node)
-	}
 }
 
 // OnUploadFailed emits one `file.upload_failed` event: the bytes did NOT

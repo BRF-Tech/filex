@@ -25,7 +25,8 @@ export default defineConfig({
   title: 'filex',
   titleTemplate: ':title · filex',
   description:
-    'Self-hosted file manager — one Go binary, embeddable UI, S3 / SFTP / WebDAV / local storage.',
+    'Self-hosted file manager — one Go binary, an embeddable UI, and storage that plugs in: ' +
+    'local, S3, SFTP, WebDAV, FTP, SMB. Reachable back as S3, SFTP, FTPS, NFS or WebDAV.',
   lang: 'en-US',
   base: '/',
   srcDir: '../docs',
@@ -34,8 +35,16 @@ export default defineConfig({
   // world can reach by URL and a search engine can index — leaving one out of
   // the sidebar hides it from readers who use the sidebar and from nobody else.
   //
-  //   DEPLOY_BRF / MIGRATION_FISHAPP — one deployment's runbooks, with real
-  //     hostnames and paths in them.
+  //   DEPLOY_BRF / MIGRATION_FISHAPP / MIGRATION — one deployment's runbooks
+  //     with real hostnames and paths in them, and two migration guides for
+  //     downstream applications that were never public. All three are also
+  //     withheld by scripts/export-public.sh, so on the published repo they
+  //     are not merely unlisted, they are absent.
+  //   README — the repository's documentation index. It is what GitHub renders
+  //     when somebody opens docs/, and on the site it was a second, competing
+  //     table of contents next to the home page and the sidebar — including a
+  //     section explaining which pages are kept OFF this site, which is a
+  //     contributor's note and not a reader's.
   //   CLOUD — its own first line says "preparation skeleton only, NOT a live
   //     service" and "do not launch a hosted cloud offering yet". Publishing it
   //     on the product's docs site announces a service that does not exist.
@@ -45,7 +54,8 @@ export default defineConfig({
   //     a list, because the next handover must be excluded by default rather
   //     than by somebody remembering to add it. Measured: the v0.20.0 build
   //     was serving one at /handovers/2026-08-14-write-path-and-slow-storage.
-  srcExclude: ['DEPLOY_BRF.md', 'MIGRATION.md', 'MIGRATION_FISHAPP.md', 'CLOUD.md', 'handovers/**'],
+  srcExclude: ['DEPLOY_BRF.md', 'MIGRATION.md', 'MIGRATION_FISHAPP.md', 'CLOUD.md',
+               'README.md', 'handovers/**'],
   // Example URLs in the docs (dev-server addresses). Real links stay checked.
   ignoreDeadLinks: [/^https?:\/\/localhost/],
 
@@ -114,6 +124,7 @@ export default defineConfig({
           { text: 'Thumbnails', link: '/thumbnails' },
           { text: 'Protection & Antivirus', link: '/PROTECTION' },
           { text: 'Trash & Versioning', link: '/TRASH-VERSIONING' },
+          { text: 'Realtime & presence', link: '/REALTIME' },
           { text: 'Notifications & Webhooks', link: '/NOTIFICATIONS' },
           { text: 'RBAC & Permissions', link: '/RBAC' },
           { text: 'End-to-end encryption', link: '/E2E-ENCRYPTION' },

@@ -2,12 +2,13 @@
 #
 # Always-on core:  filex + PostgreSQL (DB) + Redis (queue) + Caddy (HTTPS proxy)
 # Opt-in add-ons:  OnlyOffice · Drawio · universal Converter · MinIO (S3)
+#                  · ClamAV (antivirus — this image ships no scanner)
 #
 # ── Toggling add-ons ────────────────────────────────────────────────────
 # Every add-on is a Compose *profile*. Turn one on/off in your .env by editing
 # COMPOSE_PROFILES (comma list) together with the matching FILEX_*_URL:
 #
-#   COMPOSE_PROFILES=onlyoffice,drawio,minio     # (convert left out → off)
+#   COMPOSE_PROFILES=onlyoffice,drawio,minio,clamav   # (convert left out → off)
 #
 # To drop OnlyOffice tomorrow: remove `onlyoffice` from COMPOSE_PROFILES and
 # blank FILEX_ONLYOFFICE_URL, then:
@@ -34,6 +35,36 @@ services:
       FILEX_QUEUE_DRIVER: redis
       FILEX_QUEUE_DSN: redis://redis:6379/0
       FILEX_THUMBS_ENABLED: "true"
+      # ── Antivirus (optional) ───────────────────────────────────────────
+      # ⚠ This image contains no scanner — the ClamAV image plus its unpacked
+      # signature database is close to a gigabyte on disk, which is why it is
+      # not baked in. Use the `clamav` service in this file instead:
+      # filex streams each file to the daemon, so the two containers need a
+      # network route and NOT a shared filesystem. Two steps: uncomment the
+      # address below, and start with `--profile clamav`.
+      # FILEX_CLAMAV_ADDR: "clamav:3310"      # -> antivirus.clamd_addr, and
+      #                                       #    seeds antivirus.mode=daemon
+      #
+      # Same host over a unix socket instead (share the socket directory):
+      # FILEX_CLAMAV_ADDR: "/var/run/clamav/clamd.ctl"
+      #
+      # FILEX_CLAMAV: "0"                     # the on/off switch (default on)
+      # FILEX_CLAMAV_MODE: "daemon"           # or "binary" (a scanner on PATH)
+      # FILEX_CLAMAV_BIN: /usr/bin/clamdscan  # binary mode only, and env-only:
+      #                                       # this path is EXECUTED, so it is
+      #                                       # deliberately not admin-editable
+      #
+      # ⚠⚠ Every FILEX_CLAMAV* variable except _BIN is a SEED, not an
+      # override. Each is read on a boot where its setting has no stored row
+      # yet, and never again — after that the value lives in the database and
+      # is edited on Settings -> Protection in the admin UI. Changing one here
+      # later does nothing, silently.
+      #
+      # ⚠ The switch, the mode and the address take effect at the NEXT
+      # RESTART, in both directions; the two below apply to the next file
+      # scanned. The Protection page says which is which.
+      # FILEX_CLAMAV_MAX: "104857600"         # bytes -> antivirus.max_scan_mb (rounded up)
+      # FILEX_CLAMAV_SAVE_WINDOW_MINUTES: "30" # editor save-scan window, 2-60
       # ── Reaching filex without a browser (docs/PROTOCOLS.md) ───────────
       # The S3 endpoint and /dav are already on and need no port of their own.
       # ⚠ Set this before anybody mints an S3 access key: the secret must be
@@ -124,7 +155,11 @@ services:
     #                               #   error on either side
     #   - "2049:2049"               # ⚠ FILEX_NFS — unencrypted, LAN/VPN only
     volumes:
-      - filex-data:/data          # DB (if you switch to sqlite), search index, thumbs, first-run secret
+      # DB (if you switch to sqlite), search index, upload staging, cached
+      # thumbnails, first-run secret. A cached thumbnail is released when its
+      # file is purged, and orphans are swept every FILEX_THUMBS_SWEEP_INTERVAL
+      # (default 6h; "0" disables the sweep).
+      - filex-data:/data
       # - caddy-data:/certs:ro    # FILEX_FTPS_CERT/_KEY — Caddy's certificate store, read-only
       - ./files:/srv/files        # default local storage folder (seeded on boot)
     depends_on:
@@ -202,6 +237,24 @@ services:
     profiles: ["convert"]
     restart: unless-stopped
 
+  # ClamAV as its own container — the normal way to scan under Docker, since
+  # the filex image ships no scanner. Start it with `--profile clamav` and set
+  # FILEX_CLAMAV_ADDR: "clamav:3310" above.
+  #
+  # ⚠ The daemon refuses commands for the first minute or two after it starts
+  # while it loads its signature database. filex reports that as "not
+  # answering" on Settings -> Protection rather than as a scanner that works,
+  # and scans queued in the meantime retry.
+  clamav:
+    image: clamav/clamav:latest
+    profiles: ["clamav"]
+    volumes:
+      # ⚠ Keep the signature database across restarts. Without this volume
+      # every restart re-downloads the ~300 MB signature set from ClamAV's
+      # mirrors, which is both slow and a good way to get rate-limited.
+      - clamav-db:/var/lib/clamav
+    restart: unless-stopped
+
   minio:
     image: minio/minio:latest
     profiles: ["minio"]
@@ -229,6 +282,7 @@ services:
 
 volumes:
   filex-data:
+  clamav-db:
   postgres-data:
   redis-data:
   onlyoffice-data:

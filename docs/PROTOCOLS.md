@@ -25,7 +25,17 @@ that saw an empty success would delete the user's local copy.
 Everything below lands in the **same tree**, with the same RBAC grants, the same trash,
 the same quota, the same search index and the same audit trail as the web UI. A file
 uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped in the
-browser, because every protocol writes through the same funnel.
+browser, because every protocol writes through the same funnel — and since v0.34.0 it
+also **announces itself** on the realtime socket, so a browser with that folder open
+sees it appear rather than finding out on its next navigation
+([REALTIME.md](REALTIME.md)). ⚠ A write over any of these protocols that **replaces**
+an existing file emits `file.updated`, not `file.uploaded` — worth knowing if you have
+a webhook watching protocol traffic ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+
+⚠⚠ **One thing is not shared: version history.** WebDAV and the S3 gateway take a
+pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those three
+destroys the previous bytes silently. See
+[TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
 
 **The connection instructions are in the app**, not here: *Connections → Connect*, in the
 web UI and the desktop app, builds every command from *this* deployment — its host, its
@@ -105,8 +115,9 @@ filex's own bookkeeping trees — `.versions/`, `.thumbs/` and `.filex-trash/` �
 are **not** exposed here, at any depth, on any verb: not listed, not readable
 by known key, and not writable. Every other protocol has always hidden them;
 the S3 gateway is the one that had to catch up, and it matters most here
-because [version history](TRASH-VERSIONING.md#what-triggers-a-snapshot) now
-holds a copy of every file any surface has replaced.
+because [version history](TRASH-VERSIONING.md#what-triggers-a-snapshot) holds a
+copy of every file this gateway has replaced — the `.versions/` tree is real
+data, not scratch space.
 
 ## SFTP
 
@@ -180,6 +191,13 @@ than trusted, and the permissions you see are synthesised from your ACL.
 > ⚠ There is **no portmapper** on port 111, so every client must be told the port
 > explicitly: `-o port=2049,mountport=2049,nfsvers=3,nolock`. Windows' "Client for NFS"
 > has no way to say that at all, so it only works when filex is on the standard 2049.
+
+⚠ NFSv3 has **no "close"**, so the server opens, writes and closes the handle on every
+write RPC and filex commits on each close: one `cp -p` of a 5 MB file is a `CREATE` plus
+five 1 MiB writes. That used to reach every open browser as six separate change frames;
+they are now coalesced into two ([REALTIME.md](REALTIME.md)). Nothing is dropped — the
+last frame of a burst always reflects the final state — so this is a difference you
+notice only in how quiet the page is.
 
 ## WebDAV
 

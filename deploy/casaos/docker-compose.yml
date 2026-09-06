@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.4.0
+    image: ghcr.io/brf-tech/filex:v0.34.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -74,7 +74,11 @@ x-casaos:
       resumable uploads, full-text search, thumbnails, trash and versioning,
       end-to-end encrypted folders with a recovery key, RBAC, TOTP 2FA,
       optional SSO (OIDC/LDAP), a desktop app with folder sync and an AI/MCP
-      API for agents. On first start it
+      API for agents. An open folder keeps itself up to date over a WebSocket,
+      so a file somebody else uploads appears without a refresh. Antivirus is
+      optional and needs no fatter image: point filex at a ClamAV container
+      over the network and every file written is scanned, infected ones
+      quarantined into the trash. On first start it
       creates an admin account and prints the password once in the container
       logs (also saved to /data/.first-run.txt), unless FILEX_ADMIN_EMAIL /
       FILEX_ADMIN_PASSWORD are set.
@@ -94,11 +98,14 @@ x-casaos:
         After install, check the container logs for the one-time admin@local
         password (or set FILEX_ADMIN_EMAIL / FILEX_ADMIN_PASSWORD before
         starting). Set FILEX_PUBLIC_URL to the address you really use.
+        Antivirus is off until you run a scanner: this image ships none, so
+        install a ClamAV container and give filex its address on
+        Settings -> Protection.
   index: /
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.4.0"
+  version: "0.34.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

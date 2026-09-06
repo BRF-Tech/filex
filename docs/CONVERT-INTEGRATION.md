@@ -22,8 +22,16 @@ appear.
 
 Two steps: **run the converter service**, then **point filex at it**.
 
-filex loads the converter from `FILEX_CONVERT_URL` in an iframe, so that URL must
-be reachable from the **browser**. The simplest layout serves it under
+Pointing filex at it is done in one of two places, and either is complete on
+its own: *Settings → External services* in the admin UI, which applies to the
+running server with **no restart**, or `FILEX_CONVERT_URL` / the
+`external_services.convert` block in `config.yaml`, which is re-asserted onto
+the stored row at every boot and labelled `env_managed` in the UI. ⚠ Pick one
+per install: an admin-UI edit to a service the environment names applies
+immediately and is reverted at the next start.
+
+The converter is loaded **in an iframe**, so whatever URL you configure must be
+reachable from the **browser**. The simplest layout serves it under
 **`/convert`** on the same host as filex.
 
 The converter image is
@@ -94,8 +102,17 @@ filex (Vue)  ──hidden iframe──►  <FILEX_CONVERT_URL>/?embed=1   (conve
   file anywhere for conversion.
 - The GPL‑2.0 converter stays a **separate service**, embedded only via an iframe
   — so filex itself stays MIT‑licensed and its code never links the converter.
-- filex advertises the feature through its capabilities probe: the Convert action
-  appears only when `FILEX_CONVERT_URL` is set and reachable.
+- filex advertises the feature through its capabilities probe: the Convert
+  action appears when the stored `convert` service is enabled, whatever
+  configured it. `POST /api/admin/external/convert/test` probes `${url}/healthz`
+  with a 3 s timeout and records the verdict, which is what the **Test** button
+  in the admin UI calls.
+
+⚠ Before v0.34.0 the URL the *running process* used was a snapshot taken at
+boot, while the admin UI read and wrote the database — so configuring the
+converter in the UI saved, tested green, and changed nothing about what the
+server did (GitHub #17). The stored row is now the single runtime source of
+truth, read on every use.
 
 ---
 

@@ -191,6 +191,29 @@ package exists to prevent.
 
 See [docs/PROTOCOLS.md](https://github.com/BRF-Tech/filex/blob/main/docs/PROTOCOLS.md).
 
+### Live updates
+
+An embedded explorer keeps itself current over a WebSocket: it mints a
+short-lived ticket, opens the socket and re-lists a folder when something in it
+changes. Two things are worth knowing before you host it.
+
+**Proxy `/api/ws`.** If your page reaches filex through your own backend, the
+ticket route is under `/api/files/` and the socket is **not** — a proxy rule
+that only forwards `/api/files/*` leaves the explorer with no socket, and it
+falls back to re-listing every 12 s. It keeps working, quietly, which is why
+this is easy to ship without noticing.
+
+**A burst is one frame per window, not one frame per file.** The server sends
+the first change in a quiet folder immediately and merges everything after it
+into one frame per window (200 ms, stretching to 1.5 s while the burst
+continues); a merged frame carries `count`. Nothing is dropped — the last frame
+of a burst always reflects the final state. If you debounce on your side as
+well, give your debounce a **ceiling**: a plain trailing debounce starves under
+a sustained stream, because every arriving frame cancels the pending reload.
+The package's own `burstDebounce` does exactly that.
+
+Full contract: [docs/REALTIME.md](https://github.com/BRF-Tech/filex/blob/main/docs/REALTIME.md).
+
 ## Build
 
 ```bash

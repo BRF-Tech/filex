@@ -110,9 +110,16 @@ function readCookie(name: string): string | null {
 
 export function extractError(err: unknown, fallback = 'Unknown error'): string {
   if (axios.isAxiosError(err)) {
+    // ⚠ `message` FIRST when both are present. A response that carries both is
+    // one where `error` is a machine code and `message` is the sentence
+    // written for the person reading it (`supertenant_only` +
+    // "protection settings apply to the whole instance…", `plugins_disabled` +
+    // which env var did it). Preferring `error` put the code on screen and
+    // threw the sentence away. Handlers that return only `error` — the large
+    // majority, and they put the sentence there — are unaffected.
     return (
-      err.response?.data?.error ??
       err.response?.data?.message ??
+      err.response?.data?.error ??
       err.message ??
       fallback
     );

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -45,9 +46,14 @@ type AI struct {
 // NewAI constructs the AI REST handler. shareSvc + publicURL power the share
 // endpoints (pass nil shareSvc to disable sharing); convertURL is surfaced via
 // /api/ai/root so agents learn conversion is an external (non-API) operation.
-func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *AI {
+func NewAI(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string, convertURL func(context.Context) string) *AI {
 	return &AI{ops: newAIOps(store, resolver, shareSvc, publicURL, convertURL)}
 }
+
+// AttachSearchIndex wires the search index into the ops core, so a file an
+// agent writes is searchable at once rather than when the next storage sync
+// walks the folder.
+func (h *AI) AttachSearchIndex(idx *search.Index) { h.ops.attachSearchIndex(idx) }
 
 // AttachACL wires the RBAC resolver into the AI REST surface's ops core so
 // every /api/ai file op is gated by the bound user's grants + role ceiling.

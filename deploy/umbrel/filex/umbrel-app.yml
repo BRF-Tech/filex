@@ -2,7 +2,7 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.4.0"
+version: "0.34.0"
 tagline: Self-hosted file manager for all your storages
 description: >-
   filex is a fast, self-hosted file manager with a single-binary backend and a
@@ -24,8 +24,11 @@ description: >-
   the server only ever holds ciphertext) each with a recovery key shown once,
   role-based access control, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app
   with two-way folder sync, an embeddable web component, and an AI/MCP API for
-  agents. OnlyOffice and draw.io can be
-  connected for in-browser document and diagram editing.
+  agents. An open folder keeps itself current over a WebSocket, so a file
+  somebody else uploads appears without a refresh. OnlyOffice and draw.io can
+  be connected for in-browser document and diagram editing, and so can a
+  ClamAV container: give filex its address and every file written is scanned,
+  with infected ones quarantined into the trash.
 
 
   On Umbrel, filex stores its database in the app data directory and manages a

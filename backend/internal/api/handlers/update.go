@@ -63,8 +63,17 @@ func toRelease(r update.Release) updateRelease {
 	}
 }
 
+// updateIsInstanceWide is the refusal a tenant admin reads. Applying a release
+// replaces the binary every tenant is served by and requires a restart of the
+// whole instance; the status read is gated with it because an admin who cannot
+// apply an update has nothing to do with the answer.
+const updateIsInstanceWide = "software updates apply to the whole instance and are managed by the platform operator"
+
 // Status returns the cached view. Cheap by design — the admin shell polls it.
 func (h *Update) Status(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, updateIsInstanceWide) {
+		return
+	}
 	writeJSON(w, http.StatusOK, h.status())
 }
 
@@ -72,6 +81,9 @@ func (h *Update) Status(w http.ResponseWriter, r *http.Request) {
 // in the payload (check_error) rather than as an HTTP error, because "I could
 // not reach the update server" is information, not a server fault.
 func (h *Update) Check(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, updateIsInstanceWide) {
+		return
+	}
 	if h.svc == nil || !h.svc.Enabled() {
 		writeJSON(w, http.StatusOK, h.status())
 		return
@@ -84,6 +96,9 @@ func (h *Update) Check(w http.ResponseWriter, r *http.Request) {
 // replace itself (container) — a permanent condition the UI turns into
 // instructions, and 409 keeps it distinct from a transient 5xx.
 func (h *Update) Apply(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, updateIsInstanceWide) {
+		return
+	}
 	if h.svc == nil || !h.svc.Enabled() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "update checking is disabled"})
 		return

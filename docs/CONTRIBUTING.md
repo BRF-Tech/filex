@@ -18,7 +18,7 @@ about to do.
 ## Development setup
 
 Requirements:
-- Go 1.22+
+- Go 1.25+ (`backend/go.mod` declares 1.25.0; the images build on golang:1.25)
 - Node.js 20+
 - pnpm 9+
 - (optional) Docker, ffmpeg, ghostscript, libreoffice for thumbnail dev
@@ -43,7 +43,7 @@ ships in the binary), use `pnpm run build:all`.
 
 ```bash
 # Terminal 1 — Go (recompiles on save with air)
-go install github.com/cosmtrek/air@latest
+go install github.com/air-verse/air@latest
 cd backend && air
 
 # Terminal 2 — admin SPA + packages
@@ -233,8 +233,21 @@ Doc updates live alongside code changes in the same PR. The pattern:
 - New component prop / event → update [API.md](API.md).
 - New config field → update [CONFIGURATION.md](CONFIGURATION.md).
 - New driver → update [ARCHITECTURE.md](ARCHITECTURE.md) + driver-specific
-  section in [CONFIGURATION.md](CONFIGURATION.md).
+  section in [CONFIGURATION.md](CONFIGURATION.md). ⚠ Both places: the
+  ARCHITECTURE list sat at four drivers for two releases after `smb` and `ftp`
+  shipped, and contradicted a paragraph on its own page.
 - New external service → all of the above.
+- New **webhook event** → [NOTIFICATIONS.md](NOTIFICATIONS.md), and add the
+  constant to the backend catalogue — `backend/internal/notify/catalog_test.go`
+  refuses an inline `EventType("x.y")` and
+  `web/tests/webhooks/eventCatalog.test.ts` fails if the UI's mirror or either
+  translation is missing.
+- New **realtime frame or socket behaviour** → [REALTIME.md](REALTIME.md), which
+  is the contract embedders code against.
+- A setting that **moves from the environment into the `settings` table** →
+  both [CONFIGURATION.md](CONFIGURATION.md) (the variable becomes a *seed*, and
+  the Gotchas list is where somebody looks after their change did nothing) and
+  the page that owns the feature.
 - Behaviour change → CHANGELOG entry under `## [Unreleased]`.
 
 ---
@@ -292,12 +305,28 @@ Maintainer-only. Reproducible, automated by CI.
 
    It boots a local instance, seeds a demo tree, pins the UI language to
    English three ways over (browser locale, stored preference, server default)
-   and writes the set. `admin-plugins.png` needs the example plugin built for
-   the shots machine — the script builds it when `go` is on PATH, otherwise
-   point `SHOTS_PLUGIN_BIN` at a binary you built (on a Windows workstation
-   with the toolchain in WSL, cross-build it: `GOOS=windows go build -o …`). Then **look at the PNGs** before committing them — see
-   `e2e/README.md` for the knobs (running server, VM/WSL paths, thumbnails, the
-   demo-mode landing page).
+   and writes the set. `admin-plugins.png` needs the example plugin built and
+   running: the script tries `go build`, then cross-builds through WSL, then
+   `SHOTS_PLUGIN_BIN` if you point it at a binary yourself. Then **look at the
+   PNGs** before committing them — see `e2e/README.md` for the knobs (running
+   server, VM/WSL paths, thumbnails, the demo-mode landing page).
+
+   Then copy the ones filex.sh shows:
+
+   ```bash
+   node scripts/sync-site-assets.mjs
+   ```
+
+   ⚠ `site/assets/` is documented as a copy of `docs/screenshots/` and nothing
+   kept it one: on 2026-09-06 the marketing page was still showing the plugins
+   picture whose footer named the **private** GitLab repo, after the README had
+   been fixed. `web/tests/deploy/siteAssets.test.ts` fails the build now.
+
+   ⚠ **A shot the script could not take exits 1.** It used to log a line and
+   exit 0, which is how a picture stayed behind for several releases with a
+   `github.com/brf-tech/filex` footer in it — in the README of the public
+   GitHub repo. If you genuinely want a partial run, say so with
+   `SHOTS_ALLOW_SKIP=1`; do not commit around it.
 
    > Why this is a numbered step: by 2026-08-14 `share-modal.png` showed a
    > share dialog with no download limit — a control that had shipped two
@@ -374,6 +403,8 @@ Maintainer-only. Reproducible, automated by CI.
    # and for a while this line was a bare `cd docs-site` that left them inside
    # docs-site. The YAML command below then globbed `deploy/**` from there,
    # matched nothing, and printed `yaml ok` without opening a single file.
+   # This build writes NOTHING — see the note below. `git status` must be as
+   # clean after it as it was before.
    (cd docs-site && npm run build)
 
    # …and every in-page ANCHOR must land, which the build says nothing about.
@@ -386,8 +417,9 @@ Maintainer-only. Reproducible, automated by CI.
    python3 -c "import yaml,glob; [yaml.safe_load(open(f,encoding='utf-8')) \
      for f in glob.glob('deploy/**/*.yml', recursive=True)]; print('yaml ok')"
 
-   # the Helm chart ships the version you are about to release
-   node scripts/sync-chart-version.mjs --check
+   # every packaged deployment target names the version you are about to
+   # release -- the Helm chart AND the CasaOS/Umbrel/Runtipi manifests
+   node scripts/sync-deploy-versions.mjs --check
    ```
 
    > ⚠⚠ **Changing the slug rule re-spells every deep link into docs.filex.sh.**
@@ -419,24 +451,46 @@ Maintainer-only. Reproducible, automated by CI.
    > changed again, re-run the measurement (build at both commits, diff the
    > emitted `id=` attributes per page) before deciding what it costs.
 
+   > ⚠⚠ **This gate does not refresh `RELEASES.md`, and that is deliberate.**
+   > `npm run build` used to be `npm run releases && vitepress build`, so every
+   > person running this mandatory step came away with two modified files —
+   > `docs/RELEASES.md` and `docs-site/data/releases.json` — belonging to
+   > nobody's change. On 2026-09-06 three agents hit it in one day, each
+   > reverted it by hand, and one release nearly swept the churn into an
+   > unrelated commit. A gate that dirties the tree it is gating is a trap.
+   >
+   > The build now runs `docs-site/scripts/check-releases.mjs` instead: it
+   > asserts the generated page is present and lists at least one release,
+   > offline, writing nothing. Refreshing is **step 10**, run on purpose after
+   > the release exists. The generator is idempotent too — running
+   > `npm run releases` when nothing has changed leaves both files untouched
+   > rather than restamping today's date on them.
+
    ⚠ A relative link to a page that is in `srcExclude` is a dead link *on the
    site* even though it resolves in the repo — link those by full GitHub URL.
    That is how the "not published" list in `docs/README.md` broke the build the
    first time it was written.
 
 4. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
-5. **Every release updates the Helm chart. No exceptions.** (Burak's rule,
-   2026-08-29: *"her yeni tag'de versiyonda helm zorunlu"*.) Bump the
-   `package.json` versions across all packages, then the chart:
+5. **Every release updates every packaged deployment target. No exceptions.**
+   (Burak's rule, 2026-08-29: *"her yeni tag'de versiyonda helm zorunlu"*.) Bump
+   the `package.json` versions across all packages, then the deploy targets:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
-   node scripts/sync-chart-version.mjs      # Chart.yaml appVersion + chart version
+   node scripts/sync-deploy-versions.mjs    # Helm chart + CasaOS + Umbrel + Runtipi
    ```
-   ⚠ The chart's `appVersion` is not a label: `values.yaml` ships `tag: ""`, and
-   the image helper resolves that to `.Chart.appVersion` — so it IS the image a
-   Helm user runs. It sat at `v0.4.0` for twenty-three releases before anyone
-   noticed (2026-08-29). `web/tests/deploy/chartVersion.test.ts` fails the build
-   if the two drift, and `--check` reports it without writing.
+   ⚠ None of these are labels — each decides which image a real installation
+   pulls. The chart's `values.yaml` ships `tag: ""` and the image helper
+   resolves that to `.Chart.appVersion`; the three store manifests pin the tag
+   outright and compare their `version` field to decide an update exists.
+
+   ⚠⚠ It has gone wrong twice, the same way, because nothing failed when it
+   drifted. The chart sat at `v0.4.0` for twenty-three releases (found
+   2026-08-29). The fix covered only the chart — so on 2026-09-06 the three
+   **store manifests were still at `v0.4.0`, twenty-nine behind**, and anyone
+   installing filex from CasaOS, Umbrel or Runtipi got a build from February.
+   `web/tests/deploy/deployVersions.test.ts` now fails the build if any of the
+   seven pins drifts, and `--check` reports them without writing.
 6. Commit: `chore(release): vX.Y.Z`.
 7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` — **signed**, and `git tag -v vX.Y.Z`
    must answer `Good signature` before you push. Releases up to and including
@@ -518,7 +572,33 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
    > existing install was told about. A release that reaches nobody is not a
    > release, and neither gate is automatic — check the feeds, do not assume.
 
-10. **Push the documentation prose to docs.filex.sh.** A cron on the server
+10. **Refresh the generated Releases page and commit it.** The GitHub Release
+    now exists, so `docs/RELEASES.md` can finally include it — which is why
+    this is here and not back at step 3. Write the release's one-paragraph
+    summary first, then regenerate:
+
+    ```bash
+    $EDITOR docs-site/data/release-highlights.json   # add the "vX.Y.Z" entry
+    (cd docs-site && npm run releases)
+    git add docs/RELEASES.md docs-site/data/releases.json
+    git commit -m "docs(releases): vX.Y.Z"
+    ```
+
+    `npm run releases` is the **only** thing that writes these two files;
+    nothing else in the release does, and the docs build gate deliberately does
+    not. It writes only when the content actually changed, so a run that says
+    `nothing to do` is a run you can ignore rather than revert.
+
+    > ⚠ Without the `release-highlights.json` entry the generator renders the
+    > "Latest" blurb from the commit subjects, or as a bare em dash. That file
+    > is hand-written from this repository's own `CHANGELOG.md`.
+    >
+    > ⚠ If GitHub is unreachable the generator keeps the committed cache, says
+    > so loudly on stderr, and exits 0 — it never publishes an empty page. In
+    > that case the new release is simply not on the page yet; run it again
+    > later.
+
+11. **Push the documentation prose to docs.filex.sh.** A cron on the server
     (`/root/filex-docs-refresh.sh`, versioned here as
     `docs-site/scripts/refresh-on-main.sh`) rebuilds and republishes the site —
     but it reads a **snapshot** at `/root/filex-docs-src`, and it deliberately
@@ -551,9 +631,9 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
     > reached the site. The cron had been running the whole time and was working
     > exactly as designed; the step it does not do is this one.
     >
-    > ⚠ Also write the release's summary into
-    > `docs-site/data/release-highlights.json` **before** running this, or the
-    > generator renders the Latest blurb as a bare em dash. That file is
-    > hand-written from this repository's own CHANGELOG.
+    > ⚠ Step 10 above must already have happened: this copies `docs/` to the
+    > server, and the refresh script there deliberately regenerates only
+    > `RELEASES.md`. A `release-highlights.json` that never reached the server
+    > gives the Latest blurb as a bare em dash.
 
 If something fails, fix forward — never delete a published tag.

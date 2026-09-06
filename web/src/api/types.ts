@@ -264,6 +264,11 @@ export interface ExternalService {
   last_checked_at: string | null;
   last_state: 'healthy' | 'configured-unreachable' | 'disabled' | 'unconfigured';
   last_error: string | null;
+  // True when env/YAML pins this service. Its row is re-asserted from the
+  // environment at every boot, so an edit made here applies live but does not
+  // survive a restart — the card says so rather than letting the operator find
+  // out later.
+  env_managed?: boolean;
 }
 
 export interface AuthProvider {

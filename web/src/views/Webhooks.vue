@@ -8,6 +8,7 @@ import type { WebhookTarget } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { formatDate, formatRelative } from '@/lib/format';
+import { WEBHOOK_EVENTS, webhookEventKey } from '@/lib/webhookEvents';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -18,17 +19,6 @@ import Modal from '@/components/ui/Modal.vue';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
-
-// The canonical file/share events targets can filter on. An empty
-// selection subscribes the target to every event (backend contract).
-const KNOWN_EVENTS = [
-  'file.uploaded',
-  'file.deleted',
-  'file.moved',
-  'file.trashed',
-  'share.created',
-  'drop.received',
-] as const;
 
 const items = ref<WebhookTarget[]>([]);
 const loading = ref(false);
@@ -305,10 +295,11 @@ async function testTarget(target: WebhookTarget) {
           <p class="mb-2 text-xs text-zinc-500">{{ t('webhooks.eventsHint') }}</p>
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Checkbox
-              v-for="ev in KNOWN_EVENTS"
+              v-for="ev in WEBHOOK_EVENTS"
               :key="ev"
               :model-value="formEvents.has(ev)"
-              :label="ev"
+              :label="t(webhookEventKey(ev))"
+              :description="ev"
               @update:model-value="(v: boolean) => toggleEvent(ev, v)"
             />
           </div>

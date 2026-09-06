@@ -1,13 +1,13 @@
 {
   "name": "@brftech/filex-docs",
   "private": true,
-  "version": "0.33.0",
+  "version": "0.34.0",
   "type": "module",
   "description": "docs.filex.sh — VitePress documentation site (sources live in ../docs)",
   "scripts": {
     "releases": "node scripts/fetch-releases.mjs",
-    "dev": "npm run releases && vitepress dev",
-    "build": "npm run releases && vitepress build",
+    "dev": "node scripts/check-releases.mjs && vitepress dev",
+    "build": "node scripts/check-releases.mjs && vitepress build",
     "preview": "vitepress preview"
   },
   "devDependencies": {

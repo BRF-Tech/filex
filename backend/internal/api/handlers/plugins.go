@@ -25,13 +25,17 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/plugin"
-	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Plugins is the handler set. Manager may be nil when the subsystem is
 // disabled by configuration; every route then answers 503 with the reason.
 type Plugins struct {
-	Manager     *plugin.Manager
+	Manager *plugin.Manager
+	// MultiTenant is kept because the constructor is called with it from two
+	// places and the value is genuinely about this handler, but the gate no
+	// longer reads it: requireSupertenant decides from the request's tenant
+	// scope, which is attached only in multi-tenant mode, so the flag and the
+	// scope can never disagree.
 	MultiTenant bool
 }
 
@@ -41,21 +45,21 @@ func NewPlugins(m *plugin.Manager, multiTenant bool) *Plugins {
 }
 
 func (h *Plugins) gate(w http.ResponseWriter, r *http.Request) bool {
+	// ⚠ Tenancy first, subsystem state second. Both orders refuse the same
+	// requests, but the other one tells an admin who may not touch this
+	// surface at all whether the operator has plugins switched on — a fact
+	// about the instance, answered to somebody who has no standing on it. On a
+	// single-tenant install nothing changes: no scope is attached, the gate
+	// passes, and a disabled subsystem still answers 503.
+	if !requireSupertenant(w, r, "storage plugins are managed by the platform operator") {
+		return false
+	}
 	if h.Manager == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error":   "plugins_disabled",
 			"message": "storage plugins are disabled on this instance (FILEX_PLUGINS_DISABLED)",
 		})
 		return false
-	}
-	if h.MultiTenant {
-		if sc, ok := tenant.FromContext(r.Context()); !ok || sc == nil || !sc.IsSupertenant {
-			writeJSON(w, http.StatusForbidden, map[string]string{
-				"error":   "supertenant_only",
-				"message": "storage plugins are managed by the platform operator",
-			})
-			return false
-		}
 	}
 	return true
 }

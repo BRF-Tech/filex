@@ -62,7 +62,7 @@ features:
     linkText: Plugin docs
   - icon: 💾
     title: Mount it as a drive
-    details: filex mount attaches a remote server over ordinary HTTPS — a folder on Linux, a drive letter on Windows. Not a sync it opens one file out of a hundred thousand without downloading the rest.
+    details: filex mount attaches a remote server over ordinary HTTPS — a folder on Linux, a drive letter on Windows. Not a sync — it opens one file out of a hundred thousand without downloading the rest.
     link: /PROTOCOLS#filex-mount
     linkText: How to mount
   - icon: 🌐
@@ -105,14 +105,19 @@ features:
     details: Directory accounts sign in on the same password form as local ones — and on WebDAV, SFTP, FTPS, S3 and NFS too. Private CA supported; local login stays first, so your break-glass account works while the directory is down.
     link: /LDAP
     linkText: LDAP docs
+  - icon: ⚡
+    title: Live updates and presence
+    details: An open explorer is told what changed over a WebSocket instead of polling for it, and shows who else is in the folder and what they are looking at. One write appears the moment it lands; a burst — a zip extraction, a folder upload, an NFS client writing chunk after chunk — is merged into one frame per window, so five thousand files arriving at once cost the page a bounded trickle rather than five thousand redraws.
+    link: /REALTIME
+    linkText: Realtime docs
   - icon: 🔔
     title: Webhooks
-    details: Every event fans out to a persistent in-app bell and an outbound webhook from a single call.
+    details: Any number of webhook targets, each with its own signing secret and its own list of events, plus a persistent in-app bell — all filled from the same single call. A file that arrived and a file somebody replaced are different events, and an infected upload, a failed one or an encrypted folder opened with its recovery key can each be subscribed to on their own.
     link: /NOTIFICATIONS
     linkText: Notifications docs
   - icon: 🦠
     title: Antivirus
-    details: Optional ClamAV scanning on upload, with quarantine, retention windows and infected-file events.
+    details: Optional ClamAV scanning on every write, including the built-in editor and files the storage sync discovers — through a local binary or a clamd container over the network — with quarantine, retention windows and infected-file events.
     link: /PROTECTION
     linkText: Protection docs
 ---

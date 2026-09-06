@@ -18,6 +18,8 @@
 //                    server runs in a VM/WSL/container; defaults to SHOTS_STORAGE)
 //   SHOTS_OUT        output directory (default: ../docs/screenshots)
 //   SHOTS_KEEP=1     leave the instance running for poking around
+//   SHOTS_PLUGIN_BIN a prebuilt example plugin (else: go build, then WSL)
+//   SHOTS_ALLOW_SKIP=1  do not fail when a shot could not be taken
 //
 // Every shot is taken with the UI language pinned to English three ways over:
 // the browser locale, the stored preference and the server default. Getting a
@@ -26,7 +28,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { seedFixtures } from './fixtures.mjs';
@@ -49,7 +51,15 @@ const EMAIL = 'demo@demo.com';
 const PASSWORD = 'demo-shots';
 
 const log = (...a) => console.log('•', ...a);
+
+// Shots this run was asked for and could not take. ⚠ A skipped shot is a
+// FAILURE, not a warning: the repo keeps whatever picture is already committed,
+// so the release ships an old screenshot that reads as a current promise. This
+// is exactly how admin-plugins.png stayed six releases out of date.
+// SHOTS_ALLOW_SKIP=1 opts out, deliberately, for a partial local run.
+const skipped = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const firstLine = (err) => String(err.message).split(String.fromCharCode(10))[0];
 
 // ── the instance ──────────────────────────────────────────────────────────
 function defaultBin() {
@@ -336,6 +346,38 @@ async function shot(target, name) {
 }
 
 /**
+ * wslCrossBuild builds the example plugin for Windows from inside WSL and puts
+ * it where BOTH sides can see it — the repo's own gitignored bin/ — returning
+ * the Windows path, or null.
+ *
+ * ⚠ Platform-specific on purpose, and the only kind that is allowed: this is
+ * about where the Go toolchain lives on a Windows workstation (in WSL, while
+ * node runs on Windows), not about filex behaving differently anywhere.
+ */
+function wslCrossBuild(outPath) {
+  if (process.platform !== 'win32') return null;
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(REPO);
+  if (!m) return null;
+  const repoWsl = `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+  const name = basename(outPath);
+  const winOut = join(REPO, 'bin', name);
+  mkdirSync(join(REPO, 'bin'), { recursive: true });
+  try {
+    execFileSync(
+      'wsl',
+      ['-e', 'bash', '-lc',
+       `cd ${repoWsl}/backend && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 ` +
+       `go build -trimpath -o ${repoWsl}/bin/${name} ./examples/plugin-memfs`],
+      { stdio: 'pipe' },
+    );
+  } catch (err) {
+    log(`WSL cross-build failed: ${firstLine(err)}`);
+    return null;
+  }
+  return existsSync(winOut) ? winOut : null;
+}
+
+/**
  * installExamplePlugin builds backend/examples/plugin-memfs and installs it
  * through the very API the admin page uses, so the plugins screenshot shows a
  * REAL running plugin rather than an empty table.
@@ -352,8 +394,9 @@ async function installExamplePlugin(token) {
   // is perfectly good.
   let out = process.env.SHOTS_PLUGIN_BIN ?? null;
   if (out && !existsSync(out)) {
-    log(`SHOTS_PLUGIN_BIN does not exist: ${out}`);
-    return false;
+    // Told exactly where the binary is and it is not there: that is a typo to
+    // fix, not a shot to quietly drop.
+    throw new Error(`SHOTS_PLUGIN_BIN does not exist: ${out}`);
   }
   if (!out) {
   out = join(tmpdir(), process.platform === 'win32' ? 'filex-shot-memfs.exe' : 'filex-shot-memfs');
@@ -364,8 +407,10 @@ async function installExamplePlugin(token) {
       stdio: 'pipe',
     });
   } catch (err) {
-    log(`no example plugin in the shot: ${String(err.message).split('\n')[0]}`);
-    return false;
+    log(`go build: ${firstLine(err)} - trying the WSL toolchain`);
+    const cross = wslCrossBuild(out);
+    if (!cross) return false;
+    out = cross;
   }
   }
   const form = new FormData();
@@ -461,6 +506,8 @@ async function run() {
       await page.waitForSelector('[data-testid="plugin-memfs"]', { timeout: 15_000 });
       await sleep(600);
       await shot(page, 'admin-plugins.png');
+    } else {
+      skipped.push('admin-plugins.png');
     }
 
     // 3b — the connection guide. filex being reachable AS S3, SFTP, FTPS and
@@ -532,6 +579,14 @@ async function run() {
 
     await ctx.close();
     await browser.close();
+
+    if (skipped.length && !process.env.SHOTS_ALLOW_SKIP) {
+      throw new Error(
+        `not taken: ${skipped.join(', ')} — the committed picture stays, which ` +
+        `means the release would ship a stale one. Fix the cause, or set ` +
+        `SHOTS_ALLOW_SKIP=1 if you meant a partial run.`,
+      );
+    }
   } finally {
     if (proc && !process.env.SHOTS_KEEP) proc.kill();
     if (process.env.SHOTS_KEEP) log('instance left running (SHOTS_KEEP=1)');

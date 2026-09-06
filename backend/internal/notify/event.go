@@ -61,8 +61,37 @@ const (
 // Canonical file/share events (webhook v2 — "Bağlan" (Connect) wave). Emitted
 // asynchronously from the API mutation handlers; webhook targets filter
 // on these names via their per-target events allow-list.
+//
+// ⚠ This const block is the SINGLE SOURCE OF TRUTH for the subscribable
+// event catalogue. The rule is mechanical: an EventType whose value contains
+// a dot is a webhook-v2 event an operator can tick in the admin UI, and the
+// admin UI's list must match this block exactly. Two tests hold that:
+//
+//   - catalog_test.go here refuses an inline notify.EventType("x.y")
+//     anywhere in the backend, so a new event cannot be born outside this
+//     block (that is how "e2e.escrow_used" existed for a release without
+//     ever reaching the UI);
+//   - web/tests/webhooks/eventCatalog.test.ts parses this file and fails
+//     when web/src/lib/webhookEvents.ts drifts from it, or when an event is
+//     missing an operator-readable label in en.json or tr.json.
+//
+// The older underscore-named alerts above (replica_fail, disk_full, …) are
+// operational alarms from the pre-v2 global webhook; MatchesEvent will still
+// filter on them if a target names one, but they are not part of the catalogue
+// the UI offers.
 const (
 	EventFileUploaded EventType = "file.uploaded"
+	// EventFileUpdated fires when a write REPLACED the bytes of a file that
+	// already existed, where file.uploaded means the write created it. Both
+	// come from the same post-write gate (internal/writehook), so every write
+	// surface — editor save, browser re-upload, WebDAV PUT, S3 PutObject,
+	// SFTP/FTPS/NFS, the AI/MCP surface — splits them the same way.
+	//
+	// ⚠ Adding it NARROWS file.uploaded: a subscriber that watched
+	// file.uploaded to see edits stops hearing them and has to subscribe to
+	// file.updated as well. That is deliberate — an event called "uploaded"
+	// that also fires for an in-place edit cannot be filtered by anyone.
+	EventFileUpdated EventType = "file.updated"
 	// EventFileUploadFailed fires when bytes filex already acknowledged could
 	// not be written to the storage driver — the staged upload path answers the
 	// client before it transfers, so a failure after that point is invisible
@@ -83,6 +112,16 @@ const (
 	// node (v0.6 "Çalışma" (Work)). The payload carries the node (path/name),
 	// the actor, and meta {comment_id, body (first 200 chars)}.
 	EventCommentAdded EventType = "comment.added"
+	// EventE2EEscrowUsed fires when an encrypted folder was opened with the
+	// recovery (escrow) key rather than its owner's passphrase. The payload
+	// carries the node plus meta {escrow_kid, storage, folder} and, when the
+	// caller was authenticated, actor_email.
+	//
+	// It was written as an inline notify.EventType("e2e.escrow_used") in the
+	// handler, which is why it never appeared in the admin UI's list: an
+	// event that is not a constant here is invisible to everything that reads
+	// this block. catalog_test.go now refuses that shape.
+	EventE2EEscrowUsed EventType = "e2e.escrow_used"
 )
 
 // NodeRef identifies the file/folder an event is about (webhook v2

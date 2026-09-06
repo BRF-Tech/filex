@@ -254,7 +254,11 @@ You can run it two ways:
 Each run **upserts** the report row (so the latest counts are always available)
 but only **emits a `replica_status_report` notification when it's actionable** —
 i.e. when there are failures, there were repairs, *or* a webhook URL is
-configured (you've opted in to receive every report at your own endpoint). This
+configured (you've opted in to receive every report at your own endpoint).
+⚠ That last condition means the **legacy** `FILEX_WEBHOOK_URL` specifically —
+a webhook v2 target subscribed to `replica_status_report` does not make a
+quiet report actionable, because the decision is taken before any target is
+matched. This
 stops an every‑few‑hours cron from flooding the in‑app bell with "0 failures"
 no‑ops. When it does notify, the **in‑app** message stays terse while the
 **webhook** payload carries the **full list of failed paths** so you can pipe it

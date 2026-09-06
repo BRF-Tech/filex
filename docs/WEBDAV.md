@@ -33,9 +33,11 @@ FILEX_DAV=0
 ```
 
 (or `dav.enabled: false` in `config.yaml`). The whole `/dav` subtree then
-answers 404. Class-2 locking (`LOCK`/`UNLOCK`, in-memory) is always on when
-the server is enabled — Windows refuses to mount a read-write drive without
-it.
+answers 404. Class-2 locking (`LOCK`/`UNLOCK`) is always on when the server is
+enabled — Windows refuses to mount a read-write drive without it — and the
+locks are **durable**: they are written to `<data>/dav/dav-locks.json` and read
+back at boot, so a deploy no longer silently forgets every lock it was
+holding.
 
 ## Authentication
 
@@ -208,8 +210,8 @@ WebDAV enforces exactly the same authorization model as the web UI:
     free space; emptying the trash does.
   - The only way a WebDAV delete destroys data outright is a storage backend
     that supports neither move nor copy, since there is then no way to preserve
-    the bytes. None of the shipped drivers (local, S3, SFTP, FTP, WebDAV) are in
-    that category. When it does happen the item is *not* placed in the trash, so
+    the bytes. None of the shipped drivers (local, S3, SFTP, FTP, SMB, WebDAV)
+    are in that category. When it does happen the item is *not* placed in the trash, so
     nothing offers a restore that could not work, and the emitted event is
     `file.deleted` rather than `file.trashed`.
 - **This changed in the release that added `trash.Put`.** Earlier
@@ -222,14 +224,31 @@ WebDAV enforces exactly the same authorization model as the web UI:
 - Uploads are **spooled server-side** and written to the backing driver as a
   whole object on close — very large files need matching temp-dir space on
   the filex host.
-- Locks are **in-memory**: they don't survive a server restart and are not
-  shared between replicas. They exist to satisfy class-2 clients (Windows,
-  Office); filex itself does not arbitrate concurrent edits beyond them.
+- Locks are **persisted to disk** (`<data>/dav/dav-locks.json`) and survive a
+  restart. ⚠ They are still **per node**: the file lives under that instance's
+  data directory, so replicas do not share them. If the directory cannot be
+  written, filex logs `dav: locks are memory-only` and falls back to the old
+  in-memory behaviour rather than refusing to serve `/dav`. They exist to
+  satisfy class-2 clients (Windows, Office); filex itself does not arbitrate
+  concurrent edits beyond them.
 - The filex-internal buckets (`.filex-trash`, `.versions`, `.thumbs`) are
   hidden and unreachable over WebDAV.
 - Changes made over WebDAV are indexed **best-effort right away** (node
   cache, search, thumbnails); if anything hiccups, the storage's scheduled
   sync run reconciles later.
+- A `PUT` also **announces itself** on the realtime socket, so a browser with
+  that folder open sees the file appear (measured at 21 ms from the write).
+  ⚠ Before v0.34.0 the whole `/dav` surface was silent: the row and the index
+  were correct, nothing was broadcast, and an open explorer — which does not
+  poll while its socket is healthy — never showed the file at all
+  ([REALTIME.md](REALTIME.md)).
+- ⚠ A `PUT` over an **existing** path emits `file.updated`; a `PUT` that
+  creates a file emits `file.uploaded`. Until v0.34.0 both were
+  `file.uploaded`, so a webhook that wanted only new arrivals could not have
+  one ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+- ⚠ A `PUT` that replaces a file over WebDAV **does** take a version snapshot
+  first; the same operation over SFTP, FTPS or NFS does not. See
+  [TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
 - Multi-tenant installs: `/dav` is **tenant-scoped**. The scope comes from the
   authenticated user's provider — not the request Host — so it matches what
   the JSON API and the web UI apply. A caller sees only their own provider's

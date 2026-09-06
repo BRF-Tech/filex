@@ -506,6 +506,17 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 | `POST` | `/v1/instances/{id}/multipart/complete` | `{path, upload_id, parts:[{part_number, etag}]}` |
 | `POST` | `/v1/instances/{id}/multipart/abort` | `{path, upload_id}` |
 
+> ⚠⚠ **What your objects report decides how often filex re-reads them.** The
+> storage sync compares the object's `etag` when you return one, and its
+> **size and modification time to the second** when you do not — that is how
+> `local`, `sftp`, `smb` and `ftp` work too. So a plugin whose mtime jitters
+> (a backend that reports the *access* time, or one that rounds differently on
+> every call) reports drift on every file on every pass: the catalogue is
+> rewritten, the content is re-extracted, and on an install with antivirus on,
+> the entire storage is re-scanned every sync interval, forever. Return a
+> stable etag if the backend has one; if it does not, make sure the mtime you
+> report for an unchanged object does not move.
+
 > ⚠ `multipart/part` is **one route with a slash in it**, not `multipart` with a
 > sub-resource. Splitting the path and switching on the first segment alone
 > makes every multipart call answer 404 — which is what the Python example did

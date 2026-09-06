@@ -46,12 +46,25 @@ type Store interface {
 	CreateNode(ctx context.Context, n *model.Node) (*model.Node, error)
 	GetNode(ctx context.Context, id int64) (*model.Node, error)
 	GetNodeByPath(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
-	// GetNodeByPathIncludingDeleted is used by the sync worker to detect a
-	// previously soft-deleted row at the same path so it can resurrect it
-	// (UNIQUE(storage_id, path_hash) blocks a fresh insert otherwise).
-	// `RestoreNode` (declared further down for trash recovery) flips
-	// deleted_at back to NULL.
+	// GetNodeByPathIncludingDeleted answers "is there ANY row at this path",
+	// live or trashed. The sync worker asks it so that an object appearing
+	// where a trashed row still sits is reported rather than silently
+	// conflated with it.
+	//
+	// Since migration 00032 the unique index over (storage_id, path_hash) is
+	// partial on live rows, so several trashed rows may share a path with at
+	// most one live one. Implementations MUST return the live row when there
+	// is one, and otherwise the most recently trashed row -- an arbitrary
+	// pick would make the sync's decision depend on row order.
 	GetNodeByPathIncludingDeleted(ctx context.Context, storageID int64, pathHash string) (*model.Node, error)
+	// ListLiveNodesInTrash returns every LIVE node of a storage whose path is
+	// the trash bucket or sits inside it. Nothing should ever be live in
+	// there: it is either a trashed item an older sync worker un-deleted, or
+	// a row that same worker minted for the trash's own bytes. The sync pass
+	// uses it to clear both up. trashPrefix is given without a leading slash
+	// (`trash.Prefix`); implementations match the stored path with and
+	// without one, because drivers differ on that.
+	ListLiveNodesInTrash(ctx context.Context, storageID int64, trashPrefix string) ([]*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 	// AggNodes returns a lightweight {id, parent_id, is_dir, size} row for every
 	// live node of a storage — the input to folder-size aggregation.
@@ -309,6 +322,16 @@ type Store interface {
 	GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error)
 	UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error
 	SetThumbnailState(ctx context.Context, nodeID int64, state, errMsg string) error
+	// DeleteThumbnail drops the row for one node. The cached JPEG on disk is
+	// the pipeline's business (internal/thumb); this is only the catalogue
+	// half, and it exists so a purge does not have to wait for the FK cascade
+	// to be the only thing that ever removed it.
+	DeleteThumbnail(ctx context.Context, nodeID int64) error
+	// ExistingNodeIDs reports which of the given ids still have a `nodes` row —
+	// TRASHED ROWS INCLUDED, because a trashed file is restorable and must keep
+	// its thumbnail. It is the safety interlock of the thumbnail-cache sweeper:
+	// a cached file is deleted only when this positively says its node is gone.
+	ExistingNodeIDs(ctx context.Context, ids []int64) (map[int64]bool, error)
 
 	// Node versions
 	CreateNodeVersion(ctx context.Context, v *model.NodeVersion) (*model.NodeVersion, error)

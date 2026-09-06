@@ -113,7 +113,13 @@ onMounted(load);
               <Badge :tone="stateTone(s.last_state)" dot>
                 {{ t(`external.states.${s.last_state}` as any) }}
               </Badge>
+              <Badge v-if="s.env_managed" tone="zinc">
+                {{ t('external.envManaged') }}
+              </Badge>
             </h2>
+            <p v-if="s.env_managed" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+              {{ t('external.envManagedHint') }}
+            </p>
             <p
               v-if="s.last_checked_at && !s.last_checked_at.startsWith('0001-01-01') && !s.last_checked_at.startsWith('0000')"
               class="text-xs text-zinc-500 mt-0.5"

@@ -63,7 +63,7 @@ func TestOnFileWritten_EmitsEventAndEnqueuesAV(t *testing.T) {
 	sink, scanned := install(t)
 	node := &model.Node{ID: 7, StorageID: 3, Name: "a.txt", Path: "/dir/a.txt", Size: 12, Type: model.NodeTypeFile}
 
-	OnFileWritten(context.Background(), 3, node, OriginManager, map[string]any{"chunked": true})
+	OnFileWritten(context.Background(), 3, node, OriginManager, Created, map[string]any{"chunked": true})
 
 	// AV enqueue is synchronous.
 	require.Len(t, *scanned, 1)
@@ -86,7 +86,7 @@ func TestOnFileWritten_TransientNodeSkipsAV(t *testing.T) {
 	// ID == 0 → the scan job could never re-fetch it; event still fires.
 	node := &model.Node{StorageID: 1, Name: "b.txt", Path: "/b.txt", Size: 5, Type: model.NodeTypeFile}
 
-	OnFileWritten(context.Background(), 1, node, OriginAI)
+	OnFileWritten(context.Background(), 1, node, OriginAI, Created)
 
 	assert.Empty(t, *scanned, "transient (unsaved) node must not be AV-enqueued")
 	e := sink.waitEvent(t)
@@ -97,8 +97,8 @@ func TestOnFileWritten_TransientNodeSkipsAV(t *testing.T) {
 func TestOnFileWritten_NilAndDirectoryNoop(t *testing.T) {
 	sink, scanned := install(t)
 
-	OnFileWritten(context.Background(), 1, nil, OriginManager)
-	OnFileWritten(context.Background(), 1, &model.Node{ID: 2, Type: model.NodeTypeDirectory, Path: "/d"}, OriginManager)
+	OnFileWritten(context.Background(), 1, nil, OriginManager, Created)
+	OnFileWritten(context.Background(), 1, &model.Node{ID: 2, Type: model.NodeTypeDirectory, Path: "/d"}, OriginManager, Replaced)
 
 	assert.Empty(t, *scanned)
 	select {
@@ -155,8 +155,40 @@ func TestOnFileTrashed_EmitsEventWithTrashPath(t *testing.T) {
 func TestUnconfigured_Noop(t *testing.T) {
 	Configure(nil, nil)
 	// Must not panic anywhere.
-	OnFileWritten(context.Background(), 1, &model.Node{ID: 1, Path: "/a", Type: model.NodeTypeFile}, OriginManager)
+	OnFileWritten(context.Background(), 1, &model.Node{ID: 1, Path: "/a", Type: model.NodeTypeFile}, OriginManager, Created)
 	OnFileDeleted(context.Background(), 1, "/a", "a", OriginManager)
 	OnFileMoved(context.Background(), 1, "/a", "/b", "b", OriginManager)
 	OnFileTrashed(context.Background(), 1, "/a", "a", "/.filex-trash/a", OriginManager)
+}
+
+// The kind decides the event name. On main OnFileWritten hard-coded
+// file.uploaded, so an overwrite on any surface announced itself as a brand
+// new file and no webhook filter could separate the two.
+func TestOnFileWritten_KindDecidesTheEventName(t *testing.T) {
+	sink, scanned := install(t)
+	node := &model.Node{ID: 9, StorageID: 2, Name: "c.txt", Path: "/c.txt", Size: 3, Type: model.NodeTypeFile}
+
+	OnFileWritten(context.Background(), 2, node, OriginDAV, Created)
+	assert.Equal(t, notify.EventFileUploaded, sink.waitEvent(t).Event)
+
+	OnFileWritten(context.Background(), 2, node, OriginDAV, Replaced)
+	assert.Equal(t, notify.EventFileUpdated, sink.waitEvent(t).Event)
+
+	// The antivirus half is untouched by the kind: replaced bytes are new
+	// bytes and have to be scanned exactly like created ones.
+	require.Len(t, *scanned, 2)
+}
+
+// EmitWritten is the event without the scan — the editor's door, because it
+// schedules its own debounced scan and must not also get the immediate one.
+func TestEmitWritten_EmitsWithoutEnqueueingAScan(t *testing.T) {
+	sink, scanned := install(t)
+	node := &model.Node{ID: 11, StorageID: 4, Name: "d.md", Path: "/d.md", Size: 6, Type: model.NodeTypeFile}
+
+	EmitWritten(context.Background(), 4, node, OriginManager, Replaced, map[string]any{"editor": true})
+
+	e := sink.waitEvent(t)
+	assert.Equal(t, notify.EventFileUpdated, e.Event)
+	assert.Equal(t, true, e.Meta["editor"])
+	assert.Empty(t, *scanned, "EmitWritten must not enqueue an antivirus scan")
 }

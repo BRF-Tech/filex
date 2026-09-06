@@ -301,6 +301,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	srcDirs := make(map[string]struct{})
+	moved := make([]string, 0, 1)
 	for _, it := range body.Items {
 		srcAdapter, srcRel := splitAdapterPath(it.Path)
 		if srcAdapter != "" && srcAdapter != current.Name {
@@ -328,16 +329,27 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		writehook.OnFileMoved(r.Context(), current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), path.Base(dstRel),
 			writehook.OriginManager)
 		srcDirs[path.Dir(srcRel)] = struct{}{}
+		moved = append(moved, path.Base(dstRel))
 	}
 
 	// Live: items landed in the destination — and left their source folders.
-	emitFolderChange(current.ID, destRel, realtime.ChangeEvent{Action: "move"})
+	//
+	// ⚠ These frames used to carry no Name at all, while every other surface's
+	// do. A client keying off `name` — to highlight the row that changed, or to
+	// let the hub carry a viewer's presence focus — got nothing from the oldest
+	// path in the product and something from all the newer ones. A multi-item
+	// move has no single name, so it stays unnamed; a single item is named.
+	destEv := realtime.ChangeEvent{Action: "move"}
+	if len(moved) == 1 {
+		destEv.Name = moved[0]
+	}
+	emitFolderChange(current.ID, destRel, destEv)
 	destKey := normalizeDBPath(destRel)
 	for d := range srcDirs {
 		if normalizeDBPath(d) == destKey {
 			continue // same room as dest, already emitted
 		}
-		emitFolderChange(current.ID, d, realtime.ChangeEvent{Action: "move"})
+		emitFolderChange(current.ID, d, destEv)
 	}
 	h.vfIndex(w, r, current, destRel, storageNames, false)
 }
@@ -491,8 +503,14 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Live: items were removed from this directory.
-	emitFolderChange(current.ID, parentRel, realtime.ChangeEvent{Action: "delete"})
+	// Live: items were removed from this directory. A single item is named so
+	// the hub can clear the presence focus of anyone previewing it; a batch has
+	// no one name to give.
+	delEv := realtime.ChangeEvent{Action: "delete"}
+	if len(body.Items) == 1 {
+		delEv.Name = path.Base(normalizeDBPath(body.Items[0].Path))
+	}
+	emitFolderChange(current.ID, parentRel, delEv)
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
 }
 
@@ -711,7 +729,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 				Type:      model.NodeTypeFile,
 				Size:      fh.Size,
 				Mime:      mime,
-			}, writehook.OriginManager)
+			}, writehook.OriginManager, writehook.Created)
 			continue
 		}
 		clean := normalizeDBPath(fullRel)
@@ -727,7 +745,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 				// the pipeline regenerate.
 				h.dispatchThumb(fresh)
 				/* bag:b3 event + koru:k2 av — single post-write gate */
-				writehook.OnFileWritten(r.Context(), current.ID, fresh, writehook.OriginManager)
+				writehook.OnFileWritten(r.Context(), current.ID, fresh, writehook.OriginManager, writehook.Replaced)
 			}
 			continue
 		}
@@ -751,7 +769,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			h.indexNode(r.Context(), created)
 			h.dispatchThumb(created)
 			/* bag:b3 event + koru:k2 av — single post-write gate */
-			writehook.OnFileWritten(r.Context(), current.ID, created, writehook.OriginManager)
+			writehook.OnFileWritten(r.Context(), current.ID, created, writehook.OriginManager, writehook.Created)
 		}
 	}
 

@@ -10,12 +10,16 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 )
 
@@ -23,7 +27,17 @@ import (
 type Versions struct {
 	Store   db.Store
 	Service *versioning.Service
+	// Index keeps the restored content searchable. Optional; nil skips it.
+	Index *search.Index
 }
+
+// AttachSearchIndex wires the search index. ⚠ Restoring a version rewrites the
+// file's BYTES at an unchanged path, and nothing else ever revisits a
+// document whose path did not change — so without this the index keeps the
+// text of the version that was just rolled back. Measured: after restoring v1,
+// a content search for a phrase only v2 ever contained still returned the
+// file, and a phrase that IS in the restored file did not.
+func (h *Versions) AttachSearchIndex(i *search.Index) { h.Index = i }
 
 // NewVersions constructs the handler.
 func NewVersions(store db.Store, svc *versioning.Service) *Versions {
@@ -97,6 +111,29 @@ func (h *Versions) Restore(w http.ResponseWriter, r *http.Request) {
 	if err := h.Service.Restore(r.Context(), req.NodeID, req.VersionID, req.SnapshotCurrent); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if node, gerr := h.Store.GetNode(r.Context(), req.NodeID); gerr == nil && node != nil {
+		protocolsync.New(h.Store, h.Index, nil, "").IndexNode(r.Context(), node)
+		// ⚠⚠ The bytes in `.versions/` were never scanned. queue's Eligible()
+		// skips that prefix outright, deliberately: snapshotting is now what
+		// every destructive write does, so scanning each snapshot would
+		// multiply the scan load by the edit rate for bytes nobody can
+		// execute. Restoring is the moment they become live again, and it is
+		// rare — so the scan happens HERE. Without it, overwriting an
+		// infected file with a clean one and then rolling back was a way to
+		// put an infected file live on an install where every upload is
+		// scanned.
+		//
+		// Asynchronous, exactly like an upload: the file is live and
+		// unscanned until the verdict lands. That window is not a compromise
+		// specific to restore — it is the same window every uploaded file
+		// has, and the queue is what makes a slow scanner unable to stall a
+		// write. Blocking here would make restore the one write surface in
+		// filex that waits on ClamAV.
+		enqueueAntivirusScan(r.Context(), node)
+		emitFolderChange(node.StorageID, path.Dir(node.Path), realtime.ChangeEvent{
+			Action: "upload", Name: node.Name,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

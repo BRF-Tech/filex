@@ -8,6 +8,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -27,6 +28,19 @@ import (
 // (and, for copies, the same antivirus enqueue) the synchronous manager
 // paths do. The ops worker runs on a background context with no request
 // actor — the events simply carry no actor, like other system activity.
+//
+// ⚠ They also emit the realtime change frame, which they did not until the
+// write-announce audit. Missing it here is not a small thing: an explorer with
+// a live socket does not poll (see useRealtime.ts — the 12 s poll is the
+// FALLBACK for a dead socket), so a copy or a move a user started from the UI
+// finished, updated the row and the index, and left that user's own listing
+// showing the old contents until they navigated away and back.
+//
+// There is no barrier to emitting from here and no missing data: EmitChange
+// takes no context and no actor, it fans out to whoever is in the room, and
+// storage id + storage-relative path are already parameters of every method
+// below. The staged-upload commit path has been emitting from this very
+// goroutine all along (upload_staged.go).
 
 // SyncMove updates the moved node's path/parent. Delegates to the same
 // helper vfMove uses.
@@ -35,6 +49,24 @@ func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string
 	/* bag:b3 event */
 	writehook.OnFileMoved(ctx, storageID, normalizeDBPath(src), normalizeDBPath(dst), path.Base(normalizeDBPath(dst)),
 		writehook.OriginOps)
+	emitMoved(storageID, normalizeDBPath(src), normalizeDBPath(dst))
+}
+
+// emitMoved tells both ends of a move. srcClean/dstClean are normalized
+// storage-relative paths. A rename inside one folder is the same room twice,
+// so it is announced once — carrying both names, which is what lets the hub
+// follow a viewer's presence focus across the rename.
+func emitMoved(storageID int64, srcClean, dstClean string) {
+	ev := realtime.ChangeEvent{
+		Action:  "move",
+		Name:    path.Base(srcClean),
+		NewName: path.Base(dstClean),
+	}
+	srcDir, dstDir := path.Dir(srcClean), path.Dir(dstClean)
+	emitFolderChange(storageID, srcDir, ev)
+	if dstDir != srcDir {
+		emitFolderChange(storageID, dstDir, ev)
+	}
 }
 
 // SyncSoftDelete flags the node deleted and retags it to the trash path,
@@ -43,6 +75,11 @@ func (h *Manager) SyncMove(ctx context.Context, storageID int64, src, dst string
 func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, trashRel string) {
 	origClean := normalizeDBPath(src)
 	origHash := pathkey.Hash(storageID, origClean)
+	// ⚠ Deferred: the bytes are already in the trash, so every open listing of
+	// this folder is wrong whether or not we find a row to retag below.
+	defer emitFolderChange(storageID, path.Dir(origClean), realtime.ChangeEvent{
+		Action: "delete", Name: path.Base(origClean),
+	})
 	/* bag:b3 event — the worker already moved the bytes into the trash */
 	writehook.OnFileTrashed(ctx, storageID, origClean, path.Base(origClean),
 		normalizeDBPath(trashRel), writehook.OriginOps)
@@ -62,6 +99,9 @@ func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, tras
 func (h *Manager) SyncHardDelete(ctx context.Context, storageID int64, src string) {
 	origClean := normalizeDBPath(src)
 	origHash := pathkey.Hash(storageID, origClean)
+	defer emitFolderChange(storageID, path.Dir(origClean), realtime.ChangeEvent{
+		Action: "delete", Name: path.Base(origClean),
+	})
 	if existing, err := h.Store.GetNodeByPath(ctx, storageID, origHash); err == nil && existing != nil {
 		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
 		h.removeFromIndex(ctx, existing.ID)
@@ -130,8 +170,13 @@ func (h *Manager) SyncCopyAcross(ctx context.Context, srcStorageID int64, src st
 	}
 	if created, cerr := h.Store.CreateNode(ctx, n); cerr == nil && created != nil {
 		h.indexNode(ctx, created)
-		writehook.OnFileWritten(ctx, dstStorageID, created, writehook.OriginOps,
+		writehook.OnFileWritten(ctx, dstStorageID, created, writehook.OriginOps, writehook.Created,
 			map[string]any{"copy": true, "from": srcClean, "cross_storage": true})
+		// ⚠ The DESTINATION storage's room. Emitting on srcStorageID here
+		// would tell the wrong depo about a file it never received.
+		emitFolderChange(dstStorageID, path.Dir(dstClean), realtime.ChangeEvent{
+			Action: "upload", Name: created.Name,
+		})
 	}
 }
 
@@ -178,7 +223,10 @@ func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string
 		h.indexNode(ctx, created)
 		/* bag:b3 event + koru:k2 av — a copy writes fresh bytes; the gate
 		   itself skips directories, so folder-copy rows stay silent. */
-		writehook.OnFileWritten(ctx, storageID, created, writehook.OriginOps,
+		writehook.OnFileWritten(ctx, storageID, created, writehook.OriginOps, writehook.Created,
 			map[string]any{"copy": true, "from": srcClean})
+		emitFolderChange(storageID, path.Dir(dstClean), realtime.ChangeEvent{
+			Action: "upload", Name: created.Name,
+		})
 	}
 }

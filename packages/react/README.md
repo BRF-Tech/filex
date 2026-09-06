@@ -2,7 +2,7 @@
 
 # @brftech/filex-react
 
-React adapter for the [filex](https://github.com/brf-tech/filex)
+React adapter for the [filex](https://github.com/BRF-Tech/filex)
 file manager. Thin wrapper around `<filex-explorer>` (the
 `@brftech/filex` Web Component) — gives you proper React props and
 camelCased event handlers via `@lit/react`'s `createComponent`.

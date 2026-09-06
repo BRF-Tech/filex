@@ -17,7 +17,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -33,6 +37,43 @@ type Archive struct {
 	// Body resolves where a member's bytes are: the driver, or filex's
 	// staging area while a staged upload is still transferring. Nil-safe.
 	Body *filebody.Resolver
+	// Index and Thumbs feed the shared catalogue bookkeeper below. Both
+	// optional.
+	Index  *search.Index
+	Thumbs *thumb.Pipeline
+}
+
+// AttachSearchIndex / AttachThumbs wire the two optional halves of the
+// bookkeeper.
+func (a *Archive) AttachSearchIndex(i *search.Index) { a.Index = i }
+
+// AttachThumbs wires thumbnail generation for extracted members.
+func (a *Archive) AttachThumbs(p *thumb.Pipeline) { a.Thumbs = p }
+
+// sync returns the shared catalogue bookkeeper (internal/protocolsync) — row,
+// search index, thumbnail, write hook and realtime change frame in one call.
+//
+// ⚠ Extract and Add wrote bytes to the driver and then did NOTHING ELSE: no
+// node row, no index document, no event, no frame. The file existed on the
+// storage and was invisible to every read path in filex until the next
+// periodic sync walked the folder — which on an `ondemand` storage is never.
+// Origin is "manager" because these two endpoints are the browser file
+// manager's own Extract/Compress, reached from the SPA under a user session;
+// they are not a new protocol.
+func (a *Archive) sync() *protocolsync.Syncer {
+	return protocolsync.New(a.Store, a.Index, a.Thumbs, writehook.OriginManager)
+}
+
+// storageRow fetches the storage record the bookkeeper needs. A miss returns
+// nil and every caller degrades to "bytes written, catalogue not updated" —
+// which is exactly the old behaviour, so a lookup failure cannot make things
+// worse than they were.
+func (a *Archive) storageRow(ctx context.Context, id int64) *model.Storage {
+	st, err := a.Store.GetStorage(ctx, id)
+	if err != nil {
+		return nil
+	}
+	return st
 }
 
 // AttachBody wires the byte-source resolver so a file that is still being
@@ -186,6 +227,8 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mkdirer, _ := drv.(storage.Mkdirer)
+	st := a.storageRow(r.Context(), req.StorageID)
+	sy := a.sync()
 	keys := make([]string, 0)
 	// refused counts members the pre-write snapshot guard turned away, kept
 	// distinct from every other `continue` in this loop. The other skips are
@@ -218,6 +261,9 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				_ = mkdirer.Mkdir(r.Context(), target)
+				if st != nil {
+					sy.Mkdir(r.Context(), st, target)
+				}
 			}
 			continue
 		}
@@ -247,6 +293,9 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("archive: extract write", slog.String("target", target), slog.String("err", err.Error()))
 			continue
+		}
+		if st != nil {
+			sy.Write(r.Context(), st, target, int64(f.UncompressedSize64), mimeByExt(target))
 		}
 		keys = append(keys, target)
 	}
@@ -427,6 +476,9 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 	if err := writer.Write(r.Context(), req.Path, tmp, stat.Size()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if st := a.storageRow(r.Context(), req.StorageID); st != nil {
+		a.sync().Write(r.Context(), st, req.Path, stat.Size(), "application/zip")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path": req.Path,

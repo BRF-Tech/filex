@@ -8,8 +8,15 @@
 
 import { ref, type Ref } from 'vue';
 import { RealtimeClient, type PresenceUser, type PresenceMessage } from '../lib/realtime';
+import { burstDebounce } from '../lib/burstDebounce';
 
 const RELOAD_DEBOUNCE_MS = 200;
+// Ceiling on how long a run of change frames may postpone the reload it is
+// waiting for — see burstDebounce for the starvation this exists to stop.
+// Measured in a real browser on 2026-09-06, watching a folder while a
+// 5 000-file zip was extracted into it: the first re-listing came 114 s into
+// the job, and there was a 40 s gap in the middle.
+const RELOAD_MAX_WAIT_MS = 2_000;
 const POLL_INTERVAL_MS = 12_000;
 
 export interface RealtimeApi {
@@ -28,18 +35,11 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
 
   let client: RealtimeClient | null = null;
   let pendingSubscribe: string | null = null;
-  let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedReload = burstDebounce(() => opts.reload(), {
+    wait: RELOAD_DEBOUNCE_MS,
+    maxWait: RELOAD_MAX_WAIT_MS,
+  });
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-
-  function debouncedReload(): void {
-    // A burst of change frames (e.g. a multi-file upload) collapses into one
-    // soft reload of the current folder.
-    if (reloadTimer) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => {
-      reloadTimer = null;
-      opts.reload();
-    }, RELOAD_DEBOUNCE_MS);
-  }
 
   function onPresence(msg: PresenceMessage): void {
     // Ignore late frames for a folder we've already navigated away from.
@@ -85,10 +85,7 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
   }
 
   function stop(): void {
-    if (reloadTimer) {
-      clearTimeout(reloadTimer);
-      reloadTimer = null;
-    }
+    debouncedReload.cancel();
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;

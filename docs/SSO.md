@@ -211,6 +211,14 @@ Drivers can be combined. For the two that read a password — `local` and `ldap`
 order is the order they are **tried**: the first to accept wins, so keep `local` first
 and `admin@local` stays answerable while the directory is unreachable.
 
+⚠ Driver configuration (`/api/admin/auth-providers`) is **instance-wide**: the
+`auth.*` settings rows decide who can sign in to filex at all. In multi-tenant
+mode the surface is therefore **supertenant-only**, reads included — a tenant
+admin gets `403 supertenant_only`. *Per-tenant* auth is a different thing: it
+lives on the provider row, under `/api/admin/providers`. Single-tenant installs
+are unaffected. See
+[MULTI-TENANCY.md](MULTI-TENANCY.md#instance-wide-admin-surfaces).
+
 ### Why did a `local` login fail?
 
 The caller is told one thing and only one thing: `401 {"error":"invalid

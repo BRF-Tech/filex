@@ -19,13 +19,20 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 - [Authentication](#authentication)
 - [Zero-touch seeding](#zero-touch-seeding)
 - [External services](#external-services)
+- [Protocol endpoints (S3 · SFTP · FTPS · NFS · WebDAV)](#protocol-endpoints-s3--sftp--ftps--nfs--webdav)
+- [Storage plugins](#storage-plugins)
 - [Storage sync](#storage-sync)
+- [Uploads (staged / resumable)](#uploads-staged--resumable)
+- [Antivirus (ClamAV)](#antivirus-clamav)
+- [Versioning on overwrite](#versioning-on-overwrite)
+- [Downloads from slow storage (prepared copies)](#downloads-from-slow-storage-prepared-copies)
 - [Thumbnails](#thumbnails)
 - [Search](#search)
 - [Queue](#queue)
 - [Notifications](#notifications)
 - [CORS](#cors)
 - [Error reporting (Sentry/GlitchTip)](#error-reporting)
+- [Updates](#updates)
 - [Demo mode](#demo-mode)
 - [config.yaml](#configyaml)
 - [Gotchas](#gotchas)
@@ -312,8 +319,17 @@ for the storage model.)
 
 ## External services
 
-Each is optional — an empty URL disables it. Set via env or
-`external_services.*`.
+Each is optional — an empty URL disables it. Set via env, `external_services.*`,
+**or the admin UI** (*Settings → External services*).
+
+The value the running process uses is always the one in the `external_services`
+table, read on every request, so a change made in the admin UI takes effect
+without a restart. Env and `config.yaml` are declarative configuration **for**
+that table: a service they name is re-asserted onto its row at every boot, so
+editing `FILEX_ONLYOFFICE_URL` and restarting still works — and an admin-UI edit
+to such a service applies now but is reverted at the next start.
+`GET /api/admin/external` returns `env_managed: true` for those, and the UI
+labels them.
 
 | Env var | Description |
 |---|---|
@@ -436,11 +452,123 @@ work on every driver. See [UPLOADS.md](UPLOADS.md).
 |---|---|---|
 | `FILEX_UPLOAD_STAGING_DIR` | `<data_dir>/uploads` | Where in‑flight upload parts live. |
 | `FILEX_UPLOAD_CHUNK_SIZE` | `8388608` (8 MiB) | Default part size when the client does not request one. |
-| `FILEX_UPLOAD_STAGING_TTL` | `24h` | Idle time before the sweeper removes an abandoned staging directory. |
+| `FILEX_UPLOAD_STAGING_TTL` | `24h` | Idle time before the sweeper removes an abandoned staging directory. Staging that belongs to a file you delete **permanently** is released at once and does not wait for this. |
 
 > ⚠ The whole object passes through the staging directory — put it on a
 > filesystem with room for the largest upload you expect. `begin` refuses when
 > less than `size × 1.2` is free.
+
+---
+
+## Antivirus (ClamAV)
+
+Optional. filex scans written files with ClamAV, reached either through a local
+**binary** or through a **clamd daemon** over TCP or a unix socket; see
+[PROTECTION.md](PROTECTION.md#antivirus-clamav) for how to choose between them
+and for what a clean, infected or failed scan does.
+
+⚠⚠ **Every setting below now lives in the database**, edited on
+**Settings → Protection** in the admin UI. The environment variables still
+exist, but only as a **seed**:
+
+> **The env var applies on a boot where the setting has no stored row yet, and
+> never again.** Once a row exists — written by that first-boot seeding, or by
+> an admin on the Protection page — the variable is inert. Editing it in your
+> compose file and restarting the container changes nothing, and no warning is
+> printed, because there is nothing unusual about a setting that already has a
+> value. Change them on the Protection page.
+
+The seed is applied per setting, not per family: a setting whose row does not
+exist yet is seeded from its variable even if its siblings already have rows.
+So a deployment upgrading from an older filex keeps exactly the values it had.
+
+| Env var | Where it lives now | Default | Description |
+|---|---|---|---|
+| `FILEX_CLAMAV` | **seed → database** (`antivirus.enabled`) | on | The on/off switch. `0`/`false` disables scanning. ⚠⚠ It used to be an env-only kill switch and is now a **seed**: an install that had `FILEX_CLAMAV=0` keeps scanning off across the upgrade, because the value is seeded into the row on the first boot — but from then on the switch is on the Protection page and editing the variable does nothing. ⚠ Takes effect at the **next restart**, in both directions (see below). |
+| `FILEX_CLAMAV_MODE` | **seed → database** (`antivirus.mode`) | `binary` | How ClamAV is reached: `binary` (run `clamdscan`/`clamscan` from filex's own `$PATH`) or `daemon` (talk to a running clamd). ⚠ Setting `FILEX_CLAMAV_ADDR` without this seeds `daemon`, because a compose file that names a clamd container and comes up in binary mode is a deployment that looks configured and scans nothing. ⚠ Next restart. |
+| `FILEX_CLAMAV_ADDR` | **seed → database** (`antivirus.clamd_addr`) | unset | The clamd address for `daemon` mode: `clamav:3310`, `tcp://127.0.0.1:3310`, a bare host (port 3310 is assumed), or a unix socket path such as `/var/run/clamav/clamd.ctl`. The bytes are streamed to the daemon, so **filex and clamd need no shared filesystem** — which is what makes ClamAV-in-its-own-container work. An unparseable address is refused when you save it, not discovered at scan time. ⚠ Next restart. |
+| `FILEX_CLAMAV_BIN` | environment | unset | Absolute path to `clamdscan`/`clamscan` for `binary` mode; authoritative when set, and an invalid path disables scanning rather than silently falling back to `$PATH`. ⚠ The one that stays an environment concern **deliberately**: this is a path the server *executes*, so an admin-writable field for it would turn an admin account into arbitrary command execution as the filex process. A clamd *address* is a dial target, never executed, which is why that one is editable. |
+| `FILEX_CLAMAV_MAX` | **seed → database** (`antivirus.max_scan_mb`) | 100 MB | Largest file that gets scanned; bigger files are skipped, not failed. ⚠ The variable is in **bytes**, the stored setting is in **megabytes** — the number an admin types. The conversion at seed time rounds **up**, so an upgrade never shrinks an existing ceiling. Range 1–10240 MB. |
+| `FILEX_CLAMAV_SAVE_WINDOW_MINUTES` | **seed → database** (`antivirus.save_scan_window_minutes`) | 30 | How long a save from the built-in text editor waits before its scan is queued; further saves to the same file inside that window join it instead of queueing more. Range 2–60 minutes; `0` is refused. See below. |
+
+### ⚠⚠ Three of them take effect at the next restart
+
+The switch, the mode and the clamd address are stored the moment you save them
+and are **in force only after filex restarts — in both directions.** Turning
+scanning on does not start it and turning it off does not stop it until then,
+because the scan pipeline is wired once at boot: the queue handler is
+registered and the write paths are handed an enqueue function only when
+scanning resolved as available.
+
+This is a deliberate choice, not an oversight. Making "off" immediate while
+"on" stayed deferred — the shape a naive implementation falls into, since
+suppressing work is easy and creating a worker-pool handler at runtime is not —
+would give you a control that is sometimes live and sometimes not, with no way
+to tell which from looking at it. The admin page states the deferral at the
+moment you change it and keeps a "restart required" band up until the restart
+has happened.
+
+The scan-size ceiling and the save-scan window are **not** deferred: they are
+read per file, so they apply to the next file scanned. They tune a pipeline
+that is already running; the three above decide whether it exists.
+
+### Reaching a clamd container
+
+```yaml
+services:
+  filex:
+    environment:
+      FILEX_CLAMAV_ADDR: "clamav:3310"
+  clamav:
+    image: clamav/clamav:latest
+    volumes:
+      - clamav-db:/var/lib/clamav
+volumes:
+  clamav-db:
+```
+
+The Protection page shows whether clamd actually answered (`reachable`, with
+the error text beside it). ⚠ A daemon filex cannot reach never produces a clean
+verdict — the scan fails and retries on the queue — but nothing would *say* so
+without that field, so check it after changing an address.
+
+### The editor save-scan window
+
+A file **created** in filex's text editor is scanned immediately, exactly like
+an upload. A **save** over a file that already exists schedules one scan
+`FILEX_CLAMAV_SAVE_WINDOW_MINUTES` from now, and every further save inside that
+window is absorbed into it — so a burst of Ctrl+S costs exactly one scan, and
+that scan reads the file as it stands when it runs, not the content of the save
+that scheduled it.
+
+The trade is worth stating, because the default looks arbitrary otherwise: one
+scan per file per half-hour of editing, paid for by the file sitting unscanned
+for up to that long after its **last** save. Shorter means more scans and less
+exposure; longer means fewer scans and more.
+
+- **Minimum 2 minutes.** Below that the window stops coalescing anything — a
+  save every couple of minutes is still one editing session — while multiplying
+  scans.
+- **Maximum 1 hour.** The window *is* the time an infected file written through
+  the editor stays live. Longer is not a tuning preference, it is a different
+  security posture.
+- **`0` is not accepted.** It reads equally as "scan every save" and "never
+  scan", which are opposite behaviours, and the second would silently re-open
+  the gap this window lives inside. To turn scanning off, use the switch on the
+  Protection page (`antivirus.enabled`), which is explicit about being a
+  separate control and about applying at the next restart.
+
+A value outside the range is **refused** when you save it on the Protection
+page, so you find out while you are looking at the field. A value that is
+somehow already stored out of range — written by hand, or by an older build —
+is **clamped to the nearest bound on read**, with one WARN line naming the
+value in force, rather than refusing to boot over a scan interval.
+
+⚠ The delay is a row in filex's operation queue (`ops_queue.not_before`), not a
+timer inside the process, so a restart or a deploy mid-window does not lose the
+pending scan. Changing the window never rewrites scans already scheduled: they
+keep the time they were given, and only scans scheduled afterwards use the new
+value.
 
 ---
 
@@ -517,6 +645,7 @@ regenerable, and a single folder-share archive can be tens of gigabytes.
 |---|---|---|
 | `FILEX_THUMBS_ENABLED` | `true` | Master switch. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | — | Set `once` to backfill missing thumbnails on startup. |
+| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). `0` disables it. |
 
 Kinds and their tool requirements (auto‑detected on `PATH`; the full Docker
 image bundles them): images = built‑in; video/audio = `ffmpeg`; PDF = `gs` or
@@ -550,7 +679,14 @@ Index path is `config.yaml` only (`search.index_path`, default
 | `FILEX_QUEUE_ENABLED` | `true` | Disable to run without the persistent queue. |
 
 Use **redis** or **postgres** for multi‑node deployments (postgres uses
-`SELECT … FOR UPDATE SKIP LOCKED`). sqlite is fine single‑node.
+`SELECT … FOR UPDATE SKIP LOCKED`; redis keeps its pending set in a sorted set
+and claims with a Lua script). sqlite is fine single‑node.
+
+All three serve ops in the same order — `priority DESC`, then oldest first —
+so a background sweep never overtakes a person's request whichever one you
+run. ⚠ Switching **to** redis on an install that already ran the pre‑v0.34.0
+redis driver converts its pending list on startup, keeping every queued op;
+switching back to that older build afterwards will not work.
 
 ---
 
@@ -559,8 +695,18 @@ Use **redis** or **postgres** for multi‑node deployments (postgres uses
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_NOTIFY_ENABLED` | `true` | In‑app bell + webhook. |
-| `FILEX_WEBHOOK_URL` | — | Generic JSON POST per event (empty = in‑app only). |
-| `FILEX_WEBHOOK_TOKEN` | — | Sent as `Authorization: Bearer` to the webhook. |
+| `FILEX_WEBHOOK_URL` | — | The **legacy single** webhook: one JSON POST per event, no event filter. Empty = in‑app only, plus whatever targets exist. |
+| `FILEX_WEBHOOK_TOKEN` | — | Sent as `Authorization: Bearer` to that legacy webhook only. |
+
+⚠ These two are not the whole notification surface, and have not been for
+several releases: **webhook v2 targets** are rows managed in *Admin → Webhooks*,
+each with its own URL, its own signing secret and its own **per‑event
+allow‑list**. One event produces one POST per destination, not one POST. There
+is no environment variable for them.
+
+⚠ From v0.34.0 a write that **replaced** an existing file emits `file.updated`
+rather than `file.uploaded` — a behaviour change for anyone already subscribed
+to `file.uploaded` in order to see edits.
 
 See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 
@@ -684,7 +830,7 @@ external_services:
   drawio:     { url: "" }        # mermaid renders client-side — no service
   convert:    { url: "" }
 
-sync:   { default_interval: 15m, workers: 4 }
+sync:   { default_interval: 15m }   # ⚠ no `workers` key — see Storage sync
 thumbs: { enabled: true, formats: [image, video, pdf, office], cache_dir: "" }
 search: { enabled: true, index_path: "" }
 cors:
@@ -721,6 +867,12 @@ Some settings (branding, default thumbnail policy) live in the database
   `FILEX_SYNC_INTERVAL`.
 - `FILEX_SYNC_WORKERS` is **not** read either, and was removed in v0.20: there
   is no worker pool to size. See [Storage sync](#storage-sync).
+- ⚠⚠ **`FILEX_CLAMAV*` are seeds, not overrides.** Every one of them except
+  `FILEX_CLAMAV_BIN` is read on a boot where its setting has no stored row yet,
+  and never again — so once filex has booted once, editing the variable and
+  restarting **changes nothing, silently**, because a setting that already has a
+  value is not unusual and nothing warns. The stored values are edited on
+  *Settings → Protection*. See [Antivirus (ClamAV)](#antivirus-clamav).
 - `FILEX_DEFAULT_STORAGE_*` only takes effect on a **fresh** install (it seeds a
   default storage when none exists yet); it never edits or replaces an existing
   storage. See [Zero‑touch seeding](#zero-touch-seeding).

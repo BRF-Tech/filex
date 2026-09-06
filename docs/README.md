@@ -11,7 +11,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Installation](INSTALLATION.md) — minimal → full Compose → Helm → binary
 - [Configuration](CONFIGURATION.md) — every `FILEX_*` variable + `config.yaml`
 - [Releases](RELEASES.md) — every release with a plain‑English summary
-  (generated from the GitHub releases at build time)
+  (generated from the GitHub releases when a release is cut, by
+  `npm run releases`)
 - [Updates](UPDATES.md) — how filex checks for, and installs, a new release
 
 ## Storage
@@ -66,13 +67,18 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   matching (separators, several words in any order, folders, typos), VS
   Code-style subsequence scoring, ranked results, `tag:` filters, and an index
   that rebuilds itself after an upgrade without going dark
+- [Realtime updates & presence](REALTIME.md) — the WebSocket an open explorer
+  runs on: the ticket, the change and presence frames, how a burst is
+  coalesced (and why a plain trailing debounce starves), and the 12 s polling
+  fallback
 - [Notifications](NOTIFICATIONS.md) — webhook + in‑app bell
 - [Trash & versioning](TRASH-VERSIONING.md) — soft‑delete/restore + file history
 - [Replication](REPLICATION.md) — primary→replica mirroring & reconcile
 - [Quotas](QUOTAS.md) — per‑user ceilings: what counts, when it is
   released, and how a public drop link is billed
-- [Protection & antivirus](PROTECTION.md) — ClamAV scanning plus the trash and
-  version retention windows and the share-link life ceiling, behind one admin screen
+- [Protection & antivirus](PROTECTION.md) — ClamAV scanning, through a local
+  binary or a clamd daemon over TCP or a unix socket, plus the trash and version
+  retention windows and the share-link life ceiling, behind one admin screen
 - [End‑to‑end encryption](E2E-ENCRYPTION.md) — client‑side WebCrypto folders;
   the server stores ciphertext and never receives a key. Recovery keys, optional
   operator key escrow, and exactly what each one can and cannot open
@@ -113,6 +119,11 @@ list was written the first time.
 - [Cloud preparation](https://github.com/BRF-Tech/filex/blob/main/docs/CLOUD.md)
   — scaffolding for a hosted offering that has **not** launched; publishing it
   would announce a service that does not exist
+- **This page.** `docs/README.md` is the index GitHub renders when you open
+  `docs/`, and it stays in the repository — but the site already has a home
+  page and a sidebar, so publishing it put a second, competing table of
+  contents at `/README`, one whose last section explains which pages are kept
+  off the site. That is a note for contributors, not for readers
 
 ⚠ Three more are excluded from the site **and** from this repository, so they
 are deliberately listed without links — a deployment runbook carrying one

@@ -155,7 +155,10 @@ func TestService_ExternalHealthPaths(t *testing.T) {
 	ctx := context.Background()
 	_, store := dbtest.NewTestDB(t)
 	// Trailing slash on purpose: must still probe a single /healthcheck.
-	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, srv.URL+"/", "", "{}", time.Time{}, "unknown"))
+	// The secret matters: OnlyOffice with a URL and no JWT secret is reported
+	// "unconfigured" without a probe (see TestService_OnlyOfficeNeedsItsSecret),
+	// and this test is about which PATH gets probed.
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, srv.URL+"/", "jwt", "{}", time.Time{}, "unknown"))
 	require.NoError(t, store.UpsertExternalService(ctx, "convert", true, srv.URL, "", "{}", time.Time{}, "unknown"))
 	require.NoError(t, store.UpsertExternalService(ctx, "drawio", true, srv.URL, "", "{}", time.Time{}, "unknown"))
 
@@ -234,7 +237,7 @@ func TestService_SuccessfulProbeLongTTL(t *testing.T) {
 
 	ctx := context.Background()
 	_, store := dbtest.NewTestDB(t)
-	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, srv.URL, "", "{}", time.Time{}, "unknown"))
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, srv.URL, "jwt", "{}", time.Time{}, "unknown"))
 
 	svc := New(store)
 	svc.failTTL = 10 * time.Millisecond
@@ -273,4 +276,50 @@ func TestService_Get_Defaults(t *testing.T) {
 	assert.True(t, caps.Versions)
 	assert.True(t, caps.Thumbs.Image, "GD-backed image thumbs are always-on")
 	assert.NotNil(t, caps.External)
+}
+
+// ⚠ Reachable is not configured (issue #17).
+//
+// A Document Server with no JWT secret on filex's side answers /healthcheck
+// perfectly happily — and then refuses every editor session, because filex has
+// nothing to sign the descriptor with. Reporting that as "ok" is what put a
+// green Test button next to "OnlyOffice is not configured". No probe is even
+// attempted: there is nothing a healthy server could prove here.
+func TestService_OnlyOfficeNeedsItsSecretBeforeItCountsAsConfigured(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip network probe in short mode")
+	}
+	var probes int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&probes, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ctx := context.Background()
+	_, store := dbtest.NewTestDB(t)
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, srv.URL, "", "{}", time.Time{}, "unknown"))
+
+	svc := New(store)
+	caps, err := svc.Get(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "unconfigured", caps.External["onlyoffice"].State)
+	assert.EqualValues(t, 0, atomic.LoadInt32(&probes), "a reachable server proves nothing here")
+
+	// The Test button says the same thing.
+	st, err := svc.ProbeExternal(ctx, "onlyoffice")
+	require.NoError(t, err)
+	assert.Equal(t, "unconfigured", st.State)
+
+	// Add the secret and it becomes what it always looked like.
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, srv.URL, "jwt", "{}", time.Time{}, "unknown"))
+	st, err = svc.ProbeExternal(ctx, "onlyoffice")
+	require.NoError(t, err)
+	assert.Equal(t, "ok", st.State)
+
+	// drawio and the converter need no secret and are unaffected.
+	require.NoError(t, store.UpsertExternalService(ctx, "drawio", true, srv.URL, "", "{}", time.Time{}, "unknown"))
+	st, err = svc.ProbeExternal(ctx, "drawio")
+	require.NoError(t, err)
+	assert.Equal(t, "ok", st.State)
 }

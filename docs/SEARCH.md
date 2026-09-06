@@ -66,6 +66,18 @@ effort** — a failure never blocks the underlying operation:
    **outside** filex (e.g. dropped straight into an S3 bucket) become
    searchable after the next [sync](STORAGE.md#sync).
 
+⚠ Both paths had gaps closed in v0.34.0, and each of them looked like search
+being wrong rather than search being stale:
+
+- **Restoring from trash** never re-indexed the file, so a restored file stayed
+  unfindable (delete correctly removes it); **restoring a version** left the
+  index holding the text of the version that had just been rolled back, so a
+  content search returned the file for a phrase it no longer contains and
+  missed the one it does. Both now re-index.
+- **Half the write surfaces indexed nothing at all** — the AI/MCP surface, the
+  archive extractor, the editor's save — and an MCP `file_delete` left the
+  document in the index for good. All of them go through the shared gate now.
+
 **How a query runs.** Filenames tokenise awkwardly. Bleve's standard analyzer
 keeps `square.jpg` as one token, because a dot between two letters is not a word
 boundary — but it splits `invoice_2026.pdf` into `invoice_2026` + `pdf`, and
@@ -315,6 +327,17 @@ falling back to size+mtime) against what the index already holds. On drift, a
 reads the file from its storage driver, runs the matching extractor, and
 updates the node's document with the text — metadata fields are preserved.
 Unchanged files never re-extract; errors are logged and skipped.
+
+⚠ **On `local`, `sftp`, `smb` and `ftp` this never fired for a file changed
+outside filex, until v0.34.0.** The fingerprint falls back to size+mtime, but
+the *sync* that decides whether to re-index compared etags only — and those
+backends report none, so two empty strings compared equal and nothing ever
+drifted. A file replaced on disk kept its **old extracted text indefinitely**:
+you found the words it used to contain and not the ones it does. The sync now
+compares size and modification time where there is no etag
+([STORAGE.md → Drift detection](STORAGE.md#drift-detection-what-a-replaced-file-looks-like)),
+so this is the likeliest answer to "why did content search suddenly start
+working".
 
 **What gets extracted** (built-in extractors, `internal/search/extract`):
 

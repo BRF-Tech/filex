@@ -4,7 +4,7 @@
 //
 //	sqlite   — default, single-node; uses the existing filex DB file
 //	postgres — production HA via SELECT FOR UPDATE SKIP LOCKED
-//	redis    — work-list pattern via BLMOVE for low-latency hot paths
+//	redis    — priority-ordered sorted set, claimed with one Lua script
 //
 // All drivers share the same Op struct and Driver contract so callers can
 // swap them via the FILEMANAGER_QUEUE_DRIVER env var without touching
@@ -28,6 +28,11 @@ var ErrEmpty = errors.New("queue: empty")
 
 // ErrNotFound is returned when a specific op id can't be located.
 var ErrNotFound = errors.New("queue: op not found")
+
+// ErrDuplicate is returned by Enqueue when the op carries a DedupKey and a
+// pending op already holds that key. It is a NORMAL outcome, not a failure:
+// the caller asked for "one of these, please" and one already exists.
+var ErrDuplicate = errors.New("queue: duplicate op")
 
 // Status values for Op.Status. Drivers must use exactly these strings —
 // the admin UI renders them verbatim.
@@ -73,6 +78,23 @@ type Op struct {
 	StartedAt   *time.Time     `json:"started_at,omitempty"`
 	FinishedAt  *time.Time     `json:"finished_at,omitempty"`
 	NotBefore   *time.Time     `json:"not_before,omitempty"`
+
+	// DedupKey coalesces ops: while a PENDING op holds this key, another
+	// Enqueue with the same key is refused with ErrDuplicate instead of
+	// creating a second op. Empty (the default) opts out entirely, so every
+	// existing caller keeps its behaviour byte for byte.
+	//
+	// Scoped to `pending` on purpose. The key is released the moment the op
+	// is dequeued, so a request that arrives while the op is RUNNING queues
+	// a fresh one — the running scan may already have read the old bytes.
+	// The failure this ordering avoids is the dangerous one: dropping a
+	// request whose content nothing will ever look at. Queueing one scan too
+	// many wastes a scan; queueing none is the bug.
+	//
+	// ⚠ Write-only on the wire: drivers persist and enforce it, but Dequeue,
+	// Get and List do NOT populate it back. Assert on the ErrDuplicate
+	// behaviour, which is the actual contract, not on the field round-tripping.
+	DedupKey string `json:"-"`
 }
 
 // Stats is a snapshot of queue health for the admin dashboard.
@@ -96,6 +118,11 @@ type Driver interface {
 	Name() string
 
 	// Enqueue persists op and returns its assigned id. Op.ID is ignored.
+	//
+	// When op.DedupKey is non-empty and a pending op already holds that
+	// key, implementations MUST return ErrDuplicate and persist nothing.
+	// Two concurrent Enqueues with the same key must resolve to exactly
+	// one stored op — never zero.
 	Enqueue(ctx context.Context, op Op) (id string, err error)
 
 	// Dequeue atomically picks and marks-running the next eligible op.

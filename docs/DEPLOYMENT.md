@@ -7,8 +7,8 @@ scaling, backups, health checks, and a hardening pass.
 
 filex is a single Go process that serves **everything from one origin** on port
 `5212` — the admin SPA, the JSON API, public share (`/s/…`) and file‑drop
-(`/d/…`) pages, the `/embed.js` web component, the MCP stream at
-`/api/ai/mcp`, and `/healthz`. There is no separate frontend to host and no
+(`/d/…`) pages, the `/embed.js` web component, the realtime WebSocket at
+`/api/ws`, the MCP stream at `/api/ai/mcp`, and `/healthz`. There is no separate frontend to host and no
 second port. Production deployment is therefore mostly "put a good reverse proxy
 in front of port 5212."
 
@@ -16,6 +16,7 @@ in front of port 5212."
 - [HTTPS](#https)
 - [PUBLIC_URL](#public_url)
 - [Scaling / high availability](#scaling--high-availability)
+- [What else runs beside filex](#what-else-runs-beside-filex)
 - [Backup & restore](#backup--restore)
 - [Health & monitoring](#health--monitoring)
 - [Hardening checklist](#hardening-checklist)
@@ -40,9 +41,17 @@ it terminate TLS itself. Whatever proxy you pick must:
   bucket and only the small init/finalize JSON transits the proxy — but
   **local / SFTP / WebDAV / FTP** uploads stream the whole file through it, so the
   limits have to be generous.
-- **Allow WebSocket / SSE upgrades.** The MCP endpoint at `/api/ai/mcp` is a
-  long‑lived streamable‑HTTP transport (POST for requests, GET to open the SSE
-  stream); download/upload streaming benefits from unbuffered proxying too.
+- **Allow WebSocket / SSE upgrades — on `/api/ws` above all.** That is the
+  socket an open explorer runs on, and an explorer that has one **does not
+  poll**: the 12 s re‑listing is the fallback for a socket that failed, not the
+  normal mode. Scope the upgrade to `/api/ai/mcp` alone and every browser
+  quietly degrades to a folder that refreshes twice a minute — which is exactly
+  the symptom "I upload a file and it shows up ten minutes later"
+  ([REALTIME.md](REALTIME.md)). ⚠ The same‑origin, cookie‑authenticated upgrade
+  is **origin‑checked**, so the proxy must pass the real `Host` header through.
+  The MCP endpoint at `/api/ai/mcp` is a long‑lived streamable‑HTTP transport
+  (POST for requests, GET to open the SSE stream) and needs the same;
+  download/upload streaming benefits from unbuffered proxying too.
 - **gzip/zstd the admin SPA** and JSON responses (the hashed Vite assets are
   large; filex already sets long `Cache-Control` on them).
 
@@ -119,6 +128,21 @@ server {
         proxy_read_timeout      600s;
         proxy_send_timeout      600s;
         proxy_request_buffering off;
+    }
+
+    # The realtime socket. Without this block an open explorer never gets a
+    # change frame and falls back to re-listing every 12 s.
+    location /api/ws {
+        proxy_pass         http://127.0.0.1:5212;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        $connection_upgrade;
+        proxy_buffering    off;
+        proxy_read_timeout 3600s;
     }
 
     # The MCP stream needs unbuffered, long-lived proxying so SSE tokens flush
@@ -222,14 +246,28 @@ FILEX_QUEUE_DRIVER=redis
 FILEX_QUEUE_DSN=redis://redis:6379/0
 ```
 
-**`/data` is per‑instance.** Beyond the SQLite DB, each node keeps two things on
-local disk under `FILEX_DATA_DIR`:
+⚠ **Both drivers had a bug worth knowing about if you are upgrading.** Before
+v0.34.0 the **postgres** driver could never claim an operation at all — every
+type‑filtered dequeue failed with `42P18` — so on `FILEX_QUEUE_DRIVER=postgres`
+nothing in the queue ever ran: no antivirus scans, no content extraction, no
+async copy/move/delete. And the **redis** driver ignored `Priority`, so an
+interactive operation queued behind a bulk import waited for all of it. Both
+are fixed. The redis pending set changes from a LIST to a SORTED SET, converted
+at startup with every queued operation preserved — ⚠ after which **downgrading
+is not supported**.
+
+**`/data` is per‑instance.** Beyond the SQLite DB, each node keeps four things
+on local disk under `FILEX_DATA_DIR`:
 
 - `search.bleve/` — the full‑text index (its embedded store takes an **exclusive
   file lock**, so it can't be shared read‑write either),
-- `thumbs/` — the thumbnail cache.
+- `thumbs/` — the thumbnail cache (released when a node is purged, and swept
+  for orphans every `FILEX_THUMBS_SWEEP_INTERVAL`),
+- `cache/` — the read cache for slow storages,
+- `uploads/` — staging for chunked and resumable uploads. ⚠ Not rebuildable
+  while a transfer is in flight: until it commits, this is the file's only copy.
 
-Both are **rebuildable** (see [Backup & restore](#backup--restore)), so for a
+The first three are **rebuildable** (see [Backup & restore](#backup--restore)), so for a
 multi‑replica deployment you have two honest options:
 
 1. **Per‑node local `/data`** (an emptyDir‑style volume each) — every replica
@@ -247,6 +285,39 @@ shared by definition.
 > **Bottom line:** filex scales *up* trivially and scales *out* to a Postgres +
 > Redis/Postgres‑queue topology with per‑node (or carefully‑shared) search/thumb
 > state. It does not yet ship a turnkey active‑active cluster.
+
+---
+
+## What else runs beside filex
+
+filex is one process, but four optional things run **next to** it, each as its
+own container or service, each reached over the network:
+
+| Service | What it gives you | Configured |
+|---|---|---|
+| **ClamAV** (`clamav/clamav`) | virus scanning of every file written | `FILEX_CLAMAV_ADDR=clamav:3310` seeds it; after the first boot, *Settings → Protection* |
+| **OnlyOffice Document Server** | in‑browser Office editing | *Settings → External services*, applies with no restart |
+| **drawio** | diagram editing | same |
+| **converter** side‑car | format conversion from the UI | same |
+
+⚠ **The filex images ship no scanner.** ClamAV plus its signature database is
+close to a gigabyte, so it is not baked in — which makes "run clamd next to
+filex" the normal shape rather than a fallback. Files are sent with clamd's
+`INSTREAM`, streamed down the same connection the command went out on, so the
+two containers need **a network route and not a shared filesystem**. There is a
+ready `clamav` profile in
+[`deploy/compose/docker-compose.full.yml`](../deploy/compose/docker-compose.full.yml);
+on Kubernetes it is a Deployment plus a Service, with the address handed to
+filex through `extraEnv`. Details, including what an unreachable daemon does
+(it fails the scan loudly; it never marks a file clean), are in
+[PROTECTION.md](PROTECTION.md#antivirus-clamav).
+
+⚠ The three external services are read from the database **on every use**, so
+an edit in the admin UI reaches the running process. A service named in the
+environment or `config.yaml` is re-asserted onto that row at every boot and is
+labelled `env_managed` in the UI — an admin edit to one of those applies
+immediately and is reverted at the next restart. Pick one place per service and
+stay there.
 
 ---
 

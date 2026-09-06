@@ -9,6 +9,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
@@ -40,6 +41,10 @@ type ShareX struct {
 	defaultDir string
 }
 
+// AttachSearchIndex wires the search index into the ops core — a ShareX
+// capture is a write like any other and must be searchable immediately.
+func (h *ShareX) AttachSearchIndex(idx *search.Index) { h.ops.attachSearchIndex(idx) }
+
 // shareXMaxUpload caps a single ShareX capture. The bytes are streamed rather
 // than buffered now, so this is no longer a memory ceiling — it bounds what one
 // request may push into the staging filesystem. Matches the AI upload ceiling.
@@ -55,7 +60,7 @@ const shareXDefaultDir = "sharex"
 // must be non-nil for sharing to work — it is the same *share.Service the rest
 // of the app uses.
 func NewShareX(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string) *ShareX {
-	ops := newAIOps(store, resolver, shareSvc, publicURL, "")
+	ops := newAIOps(store, resolver, shareSvc, publicURL, nil)
 	// Same aiOps core, distinct writehook origin — ShareX captures stamp
 	// their file events (and AV scans) as origin "sharex", not "ai".
 	ops.origin = writehook.OriginShareX

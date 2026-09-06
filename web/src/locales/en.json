@@ -357,7 +357,9 @@
     },
     "savedOk": "Service updated",
     "testOk": "Reachable",
-    "testFail": "Health check failed"
+    "testFail": "Health check failed",
+    "envManaged": "Set by the environment",
+    "envManagedHint": "Pinned by an environment variable. A change here applies immediately but is reset from the environment the next time filex restarts."
   },
   "authProviders": {
     "title": "Auth providers",
@@ -898,13 +900,26 @@
   },
   "webhooks": {
     "title": "Webhooks",
-    "subtitle": "POST file events (uploads, deletes, shares, drops) to external endpoints. Each delivery carries X-Filex-Event and X-Filex-Delivery headers; targets with a secret are signed with X-Filex-Signature (HMAC-SHA256).",
+    "subtitle": "POST file events (uploads, edits, deletes, shares, drops) to external endpoints. Each delivery carries X-Filex-Event and X-Filex-Delivery headers; targets with a secret are signed with X-Filex-Signature (HMAC-SHA256).",
     "add": "New webhook",
     "edit": "Edit webhook",
     "empty": "No webhook targets yet. The legacy single webhook on the Notifications page keeps working.",
     "namePlaceholder": "e.g. ops-alerts",
     "allEvents": "All events",
     "eventsHint": "Leave everything unchecked to receive every event.",
+    "events": {
+      "file_uploaded": "File uploaded — a write created a file that did not exist",
+      "file_updated": "File updated — a write replaced the bytes of an existing file",
+      "file_upload_failed": "Upload failed — bytes filex had already acknowledged could not be stored",
+      "file_infected": "Virus found — the scan flagged a file and quarantined it into the trash",
+      "file_deleted": "File deleted permanently",
+      "file_trashed": "File moved to the trash",
+      "file_moved": "File moved or renamed",
+      "share_created": "Share link created",
+      "drop_received": "File received through a public request link",
+      "comment_added": "Comment added to a file or folder",
+      "e2e_escrow_used": "Encrypted folder opened with the recovery key instead of its passphrase"
+    },
     "secretSet": "Secret set",
     "secretUnset": "No secret",
     "secretPlaceholder": "Optional signing secret",
@@ -931,7 +946,7 @@
   },
   "protection": {
     "title": "Protection",
-    "subtitle": "Trash retention, version policy, share-link life and antivirus status",
+    "subtitle": "Trash retention, version policy, share-link life and antivirus",
     "unsupported": "The server does not support this version — the protection settings API was not found. This page activates after a backend update.",
     "savedOk": "Protection settings saved",
     "trash": {
@@ -958,9 +973,49 @@
     },
     "av": {
       "title": "Antivirus",
-      "desc": "Uploaded files are scanned in the background with ClamAV; infected files are moved to the trash and a file.infected event is emitted. Scanning never blocks uploads.",
-      "binary": "Scanner binary",
-      "setupHint": "ClamAV not found. For installation and configuration see:"
+      "desc": "Files written to filex are scanned in the background with ClamAV — reached either through a scanner binary on this server or through a clamd daemon over the network or a unix socket. Infected files are moved to the trash and a file.infected event is emitted. Scanning never blocks a write.",
+      "binary": "Answering scanner",
+      "setupHint": "No scanner is configured. Pick a mode below, or see:",
+      "maxScan": {
+        "title": "Largest file scanned",
+        "desc": "Files bigger than this are skipped, not blocked — they are stored and served as usual, they are simply never handed to ClamAV. In binary mode each file is copied to a temporary file before the scanner runs, so this is a disk and time budget there as well as a policy; in daemon mode the bytes are streamed straight to clamd.",
+        "label": "Megabytes",
+        "hint": "Between {min} and {max} MB. Takes effect on the next file scanned, with no restart.",
+        "errRange": "Enter a whole number between {min} and {max}."
+      },
+      "window": {
+        "title": "Editor save-scan window",
+        "desc": "A file created in the built-in text editor is scanned straight away. A save to a file that already exists schedules one scan this many minutes later, and further saves inside that window join it rather than queueing more — so a burst of Ctrl+S costs one scan, and that scan reads the file's final state. The trade: a saved file can sit unscanned for up to this long after the last save.",
+        "label": "Minutes",
+        "hint": "Between {min} and {max} minutes. Takes effect immediately, with no restart; scans already scheduled keep their original time.",
+        "errRange": "Enter a whole number between {min} and {max}."
+      },
+      "reachable": "Reachable",
+      "unreachable": "Not answering",
+      "address": "clamd address",
+      "restartPending": "Saved. The antivirus switch, mode and address take effect the next time the server restarts — until then it keeps running with the configuration it started with.",
+      "power": {
+        "label": "Scan uploaded files",
+        "desc": "Takes effect at the next restart, in both directions — turning this on does not start scanning, and turning it off does not stop it, until the server is restarted.",
+        "onAtRestart": "Antivirus scanning will be enabled the next time the server restarts.",
+        "offAtRestart": "Antivirus scanning will be disabled the next time the server restarts."
+      },
+      "transport": {
+        "label": "How ClamAV is reached",
+        "mode": {
+          "binary": "Local binary (clamdscan / clamscan)",
+          "daemon": "clamd daemon (network or socket)"
+        },
+        "hint": {
+          "binary": "Runs a scanner found on this server's PATH. Set FILEX_CLAMAV_BIN to name a specific one.",
+          "daemon": "Streams each file to a running clamd. Use this when ClamAV is its own container — no shared filesystem is needed."
+        },
+        "addrLabel": "clamd address",
+        "addrHint": "host:port (port 3310 if omitted), or a unix socket path such as /var/run/clamav/clamd.ctl.",
+        "binaryNote": "The scanner binary itself stays an environment setting (FILEX_CLAMAV_BIN): it is a path this server executes, so it is deliberately not editable here.",
+        "errAddrRequired": "Daemon mode needs a clamd address.",
+        "savedAtRestart": "Saved. The new transport takes effect the next time the server restarts."
+      }
     }
   },
   "branding": {

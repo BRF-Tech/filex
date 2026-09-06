@@ -342,6 +342,28 @@ user's role + grants + confinement):
 | `file_zip` | Pack files/folders into a `.zip` **on the server** (dest lands in storage; share it to download). |
 | `file_unzip` | Extract a stored `.zip` into a directory **on the server** (zip-slip protected, stays within your root). |
 
+### What a write through this surface now does
+
+⚠ Until v0.34.0 an agent's write reached the storage and the catalogue and
+stopped there. It is worth knowing what changed, because two of these were
+visible as "the agent's file is missing" rather than as an error:
+
+- **it is indexed**, so a file an agent wrote is findable by search
+  immediately, instead of only after the next storage sync;
+- **it announces itself**, so a browser with that folder open sees it appear
+  ([REALTIME.md](REALTIME.md));
+- **it emits an event** — `file.uploaded` when the write created a file and
+  **`file.updated`** when it replaced one. A `file_write` over an existing path
+  is therefore a different event id than it used to be, for anybody with a
+  webhook on it ([NOTIFICATIONS.md](NOTIFICATIONS.md));
+- **it is virus-scanned**, on the same terms as a browser upload
+  ([PROTECTION.md](PROTECTION.md));
+- `file_delete` **removes the document from the search index**. It did not,
+  so a file an agent deleted stayed findable for good, under its
+  `.filex-trash/…` alias, pointing at a path with nothing behind it;
+- `file_move` on a **folder** re-homes every descendant. It moved only the top
+  row, so the listing afterwards handed out paths that 404.
+
 **Admin tools** (`admin_*`) — registered **only** when the token carries the
 `admin` scope. They mirror the admin panel one-to-one (dashboard, users,
 storages, settings, sync runs, shares, trash, search index, auth providers,
@@ -423,8 +445,10 @@ JSON-RPC response. Use the REST `GET /api/ai/download?path=…` stream, or
 `file_share` the file and fetch the link.
 
 ### `not indexed yet` when sharing
-`file_share` needs the target in filex's node cache. Write or list it first (or
-wait for a storage [sync](STORAGE.md#sync)) so the entry exists, then share.
+`file_share` needs the target in filex's node cache. Write or list it first so
+the entry exists, then share — a write through this surface catalogues the file
+before it returns, so this now really only affects a file that appeared on the
+storage out of band, which waits for the next [sync](STORAGE.md#sync).
 
 ### Ticket redeem answers: `404`, `410`, `409`, `411`, `413`
 

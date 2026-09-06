@@ -54,8 +54,12 @@ CREATE TABLE ops_queue (
     enqueued_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at    DATETIME,
     finished_at   DATETIME,
-    not_before    DATETIME
-);`)
+    not_before    DATETIME,
+    dedup_key     TEXT
+);
+CREATE UNIQUE INDEX idx_ops_queue_dedup_pending
+    ON ops_queue (dedup_key)
+    WHERE dedup_key IS NOT NULL AND status = 'pending';`)
 	require.NoError(t, err)
 
 	drv, err := queue.Get("sqlite")

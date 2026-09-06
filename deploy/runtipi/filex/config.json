@@ -6,10 +6,10 @@
   "dynamic_config": true,
   "port": 5212,
   "id": "filex",
-  "tipi_version": 1,
-  "version": "0.4.0",
+  "tipi_version": 3,
+  "version": "0.34.0",
   "categories": ["utilities", "data"],
-  "description": "filex is a fast, self-hosted file manager: browse, upload, preview, share and edit files across local folders, S3/MinIO, SFTP, WebDAV, FTP and SMB/NAS shares. Public share links with PIN and expiry, file-drop upload links, full-text search, thumbnails, trash and versioning, end-to-end encrypted folders with a recovery key, RBAC, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app with two-way folder sync and an AI/MCP API for agents. The same tree is also reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic or WinSCP can point straight at it. Leave the admin fields empty to get a random admin@local password printed once in the app logs (also saved to /data/.first-run.txt).",
+  "description": "filex is a fast, self-hosted file manager: browse, upload, preview, share and edit files across local folders, S3/MinIO, SFTP, WebDAV, FTP and SMB/NAS shares. Public share links with PIN and expiry, file-drop upload links, full-text search, thumbnails, trash and versioning, end-to-end encrypted folders with a recovery key, RBAC, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app with two-way folder sync and an AI/MCP API for agents. An open folder updates itself over a WebSocket, and pointing filex at a ClamAV container turns on virus scanning of every file written, with infected ones quarantined into the trash. The same tree is also reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic or WinSCP can point straight at it. Leave the admin fields empty to get a random admin@local password printed once in the app logs (also saved to /data/.first-run.txt).",
   "short_desc": "Self-hosted file manager for all your storages",
   "author": "BRF-Tech",
   "website": "https://filex.sh",
@@ -32,6 +32,6 @@
   ],
   "supported_architectures": ["amd64", "arm64"],
   "created_at": 1784246400000,
-  "updated_at": 1784246400000,
+  "updated_at": 1788707438692,
   "min_tipi_version": "4.5.0"
 }

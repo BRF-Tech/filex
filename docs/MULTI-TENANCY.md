@@ -162,7 +162,12 @@ hand-rolled `Store` interface makes this a single wrapper instead of dozens of
 edits.
 
 **Background work is storage-scoped, not request-scoped.** Sync, the queue
-(thumbs/ops/replica) and cron run outside any HTTP request — no host, no session.
+(thumbs, ops, replica, content extraction and **antivirus scans** — including
+the two producers added in v0.34.0: a scan for every file the storage walk
+newly catalogues or finds drifted, enqueued one priority step below anything a
+person asked for, and the editor's delayed save-scan, which is an `ops_queue`
+row with a `not_before` rather than a timer in the process) and cron run
+outside any HTTP request — no host, no session.
 They already operate *on a storage/node*, so they derive tenancy from that
 storage, not from a context. The scoped-store wrapper is for the HTTP/API path;
 workers are storage-native and already isolated. Do not thread request-tenant
@@ -276,6 +281,10 @@ are unchanged.
       secret means isolation rests entirely on doc-key→node→storage.
 - [ ] **`/api/capabilities`** (pre-auth, host-resolved) — return only *this*
       tenant's branding/features; never reveal other tenants exist.
+- [x] **Instance-wide admin surfaces are gated on the supertenant.** See
+      [Instance-wide admin surfaces](#instance-wide-admin-surfaces) below — it
+      lists what is gated, what is still open, and why the distinction is not
+      obvious from `/api/admin`.
 - [ ] **Public shares (`/s/{token}`) are intentionally host-agnostic to
       *serve*** — a link is a link; the file stays confined via
       token→node→storage. Drop/upload (`/d/{token}`) confines the same way;
@@ -284,6 +293,75 @@ are unchanged.
       host (see "Absolute URLs" above), because a customer pasting the
       operator's hostname into a mail to their own client is a leak even
       though the token would still resolve.
+
+### Instance-wide admin surfaces
+
+Everything under `/api/admin` has already passed `auth.RequireAdmin`, and in
+mode-on that means **an admin of some tenant** — the resolver labels the
+request, it does not deny anything, and the scoped store filters exactly three
+list queries (storages, enabled storages, users). Most admin routes are fine
+with that because the rows they touch belong to a tenant. A handful are not:
+they read and write a single global row, or drive the process itself, and every
+tenant then lives with the result.
+
+Those ask `requireSupertenant` (`backend/internal/api/handlers/supertenant.go`),
+one predicate shared by every such surface. ⚠ The check is inside the HANDLER
+and not on the chi route, because the route is not the only door:
+`/api/ai/admin` mounts the same handler instances behind an `admin`-scoped API
+token, and the MCP admin tools drive those same methods in-process.
+
+⚠ **Single-tenant installs are unaffected by construction.** `TenantResolver`
+attaches no scope when mode is off, absence means "unscoped", and unscoped
+passes. There is no flag to set and nothing to configure.
+
+**Gated today:**
+
+| Surface | What one tenant admin could otherwise do to everyone |
+|---|---|
+| `/api/admin/protection` | Turn antivirus **off** for the instance, or point clamd at a host they control. Also trash + version retention. The READ is gated too: it returns the clamd address and a live reachability probe. |
+| `/api/admin/external` | Repoint the shared OnlyOffice / converter at their own host **and overwrite the shared JWT secret** — every tenant's documents in transit. `POST /{name}/test` dials arbitrary addresses. |
+| `/api/admin/auth-providers` | Rewrite the global `auth.*` rows (OIDC issuer + client secret, LDAP bind) — who can sign in to the instance at all. ⚠ *Per-tenant* auth is a different surface: it lives on the provider row, under `/api/admin/providers`. |
+| `/api/admin/update` | Replace the binary every tenant is served by, and require a restart of the whole instance. |
+| `/api/admin/providers` | Tenant lifecycle. Gated since the feature shipped. |
+| `/api/admin/plugins` | Install a process filex runs. Gated since plugins shipped. ⚠ The tenancy check now runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether the operator has plugins switched on. |
+
+**Not gated, and a decision rather than an oversight.** Each of these is
+instance-wide too, and each needs an answer that is not simply "supertenant
+only" — so they are named here rather than half-closed:
+
+- **`/api/admin/settings`** (`PATCH`, `PUT /{key}`) — the same global `settings`
+  table, with an **unrestricted key namespace**: `auth.*`, `antivirus.*`, SMTP,
+  `share.max_ttl_days`. It cannot simply be gated, because `branding.*` keys
+  *are* tenant-namespaced today (`handlers/branding.go`) and a tenant admin is
+  meant to write those. The fix is a per-key classification, not a route gate.
+- **`/api/admin/webhooks`, `/api/admin/notifications/webhook-config`** — a
+  target list that receives **every tenant's** event stream. Arguably a tenant
+  admin should have their own targets; that is a per-tenant feature, not a
+  gate.
+- **`/api/admin/replication-targets`, `/api/admin/replica/{rules,settings}`** —
+  fan every tenant's writes at a backup sink. Same shape of question.
+- **`/api/admin/search/rebuild`, `/api/admin/queue`, `/api/admin/trash/empty`**
+  — one index, one queue, one trash sweep across all storages.
+- **Cross-tenant reads**: `/metrics` (inside the admin group), `/duplicates`,
+  `/sync-runs`, `/notifications` (list), and the dashboard's global counters +
+  `recent_activity`. Leaks other tenants' *paths and activity*, not their bytes.
+
+**A different class, listed so it is not mistaken for the above.** These are
+tenant-scoped rows reachable by raw id with no scope check — the fix is a
+`CanAccessStorage`-style ownership check, not a supertenant gate:
+`storages/{id}` (`GET`/`PATCH`/`DELETE`/`sync`/`drift`/`sync-runs`),
+`users/{id}/reset-password`, `quota/{user_id}`, `versions/{id}`,
+`grants/{id}` (`DELETE`), `shares/{id}` (revoke/delete), `trash/{id}`,
+`sync-runs/{id}`, and `ai-tokens` (list is global; create accepts any
+`user_id`).
+
+⚠⚠ **Do not read the ungated lists as "safe".** Until they are answered, an
+`admin` role inside a tenant is still more authority than the tenant boundary
+suggests, so grant it only to people you would trust with the instance. What
+changed is narrower and worth having: the four surfaces that let one tenant
+admin **disarm or hijack the whole platform** — switch off scanning, repoint
+the document server, rewrite the login configuration, replace the binary — no
+longer do.
 
 ## 11. Tenant lifecycle
 

@@ -11,6 +11,12 @@
 #   2. stop here if nothing changed (a rebuild that publishes identical bytes is
 #      cost with no benefit — the site is only stale when a release appears)
 #   3. build the VitePress site
+#
+# Note on step 1: it invokes the generator directly, not `npm run build`. The
+# build script no longer regenerates anything (it would dirty a contributor's
+# tree on every run of the release gate), and the generator itself now leaves
+# both files untouched when the release list has not changed — so the sha
+# comparison in step 2 answers "did a release appear", not "is it a new day".
 #   4. sanity-gate the build (index + releases page present, plausible file count)
 #   5. hand the result to the brf-mono StaticSites module, which does the atomic
 #      swap into /srv/caddy-static/filex-docs and keeps .prev-filex-docs

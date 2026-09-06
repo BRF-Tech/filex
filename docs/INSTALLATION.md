@@ -58,8 +58,9 @@ add a **local** storage in the UI pointing at `/srv/files` and drop files there
 
 A production‑shaped, one‑command stack: filex + **PostgreSQL** (database) +
 **Redis** (queue) + **OnlyOffice** (document editing) + **MinIO** (S3 storage) +
-**Caddy** (reverse proxy with automatic HTTPS). Files in
-[`deploy/compose/`](../deploy/compose/).
+**Caddy** (reverse proxy with automatic HTTPS), and optionally **ClamAV**
+(antivirus — the filex image ships no scanner, so it runs as its own container
+under the `clamav` profile). Files in [`deploy/compose/`](../deploy/compose/).
 
 **1. Configure.**
 
@@ -252,14 +253,18 @@ Enable TOTP 2FA per user under **Profile → Security**. Add SSO/LDAP via
 ## Behind a reverse proxy
 
 filex serves everything from **one origin** on port `5212` — the SPA, the API,
-public share (`/s/…`) and file‑drop (`/d/…`) pages, `/embed.js`, `/healthz`.
+public share (`/s/…`) and file‑drop (`/d/…`) pages, `/embed.js`, the realtime
+WebSocket at `/api/ws`, `/healthz`.
 Forward `/` to `filex:5212` and:
 
 - set `FILEX_PUBLIC_URL` to the external `https://…` URL,
 - pass the real client IP (`X-Real-IP` / `X-Forwarded-For`) — used for audit and
   file‑drop rate limiting,
 - allow large bodies (e.g. `5G`) and long timeouts for uploads,
-- allow WebSocket/SSE upgrades (the MCP stream at `/api/ai/mcp`),
+- allow WebSocket/SSE upgrades — `/api/ws` (the socket an open explorer runs
+  on; blocked, it silently falls back to re‑listing every 12 s) and the MCP
+  stream at `/api/ai/mcp` — and pass the real `Host` header, because the
+  same‑origin upgrade is origin‑checked,
 - enable gzip for the admin SPA.
 
 The bundled Caddy config ([`deploy/compose/Caddyfile`](../deploy/compose/Caddyfile))
@@ -273,7 +278,12 @@ Everything filex owns lives under `FILEX_DATA_DIR` (`/data` in Docker):
 
 - `instance.sqlite` — the database (unless you use PostgreSQL/MySQL),
 - `search.bleve/` — the full‑text index (rebuildable),
-- `thumbs/` — the thumbnail cache (regenerable),
+- `thumbs/` — the thumbnail cache (regenerable; released when a file is purged,
+  and swept for orphans every `FILEX_THUMBS_SWEEP_INTERVAL`),
+- `cache/` — the read cache for slow storages (disposable),
+- `uploads/` — staging for chunked and resumable uploads. ⚠ Until a transfer
+  commits, this is the file's only copy — it is not disposable while one is in
+  flight,
 - `.first-run.txt` — the initial admin secret.
 
 Back up the **database** (the SQLite file, or your Postgres), your **storage

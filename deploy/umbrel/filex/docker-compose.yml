@@ -13,7 +13,7 @@ services:
       APP_PORT: 5212
 
   server:
-    image: ghcr.io/brf-tech/filex:v0.4.0
+    image: ghcr.io/brf-tech/filex:v0.34.0
     restart: on-failure
     stop_grace_period: 1m
     environment:

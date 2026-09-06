@@ -1,7 +1,8 @@
 # filex — self-hosted file manager stack.
 #
 # Profiles let you mix-and-match optional services. Defaults to the slim
-# filex image only, with SQLite + local storage. Bring up extras as needed:
+# filex image only (~43 MB, no thumbnail toolchain), with SQLite + local
+# storage. Bring up extras as needed:
 #
 #   docker compose up                                            # filex slim only
 #   docker compose --profile full up                             # filex + thumbnail tools
@@ -16,7 +17,7 @@ services:
   # filex (slim) — default
   # ---------------------------------------------------------------------
   filex:
-    image: ${FILEX_IMAGE:-brftech/filex:latest}
+    image: ${FILEX_IMAGE:-ghcr.io/brf-tech/filex:slim}
     container_name: filex
     restart: unless-stopped
     ports:
@@ -69,15 +70,16 @@ services:
       - filex-net
 
   # ---------------------------------------------------------------------
-  # filex (full) — the default image; thumbnail toolchain included (~510 MB
-  # compressed). The lean alternative is brftech/filex:slim (~43 MB), which has
-  # the same binary and none of the programs the thumbnailer shells out to.
+  # filex (full) — the registry's default tag; thumbnail toolchain included
+  # (~510 MB). The lean alternative is ghcr.io/brf-tech/filex:slim (~43 MB),
+  # which has the same binary and none of the programs the thumbnailer shells
+  # out to.
   # Activate with `--profile full` and stop the `filex` service first
   # (or change the published port via FILEX_PORT in .env).
   # ---------------------------------------------------------------------
   filex-full:
     profiles: ["full"]
-    image: ${FILEX_FULL_IMAGE:-brftech/filex:full}
+    image: ${FILEX_FULL_IMAGE:-ghcr.io/brf-tech/filex:full}
     container_name: filex-full
     restart: unless-stopped
     ports:

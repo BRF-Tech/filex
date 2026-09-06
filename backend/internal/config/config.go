@@ -551,6 +551,14 @@ type ThumbsConfig struct {
 	Enabled  bool     `yaml:"enabled"`
 	Formats  []string `yaml:"formats"`
 	CacheDir string   `yaml:"cache_dir"`
+	// SweepInterval is how often the cached JPEGs are reconciled against the
+	// node catalogue, so a file whose node no longer exists stops occupying
+	// disk (FILEX_THUMBS_SWEEP_INTERVAL, default 6h, 0 = never).
+	//
+	// ⚠ The sweeper is deliberately independent of Enabled: an operator who
+	// turns thumbnails OFF still has whatever the cache accumulated while they
+	// were on, and that is exactly when nobody is watching it.
+	SweepInterval time.Duration `yaml:"sweep_interval"`
 }
 
 // SearchConfig — bleve index.
@@ -611,8 +619,9 @@ func Default() Config {
 			DefaultInterval: 15 * time.Minute,
 		},
 		Thumbs: ThumbsConfig{
-			Enabled: true,
-			Formats: []string{"image", "video", "pdf", "office"},
+			Enabled:       true,
+			Formats:       []string{"image", "video", "pdf", "office"},
+			SweepInterval: 6 * time.Hour,
 		},
 		Search: SearchConfig{
 			Enabled:         true,
@@ -729,6 +738,12 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Upload.SweepInterval <= 0 {
 		cfg.Upload.SweepInterval = time.Hour
+	}
+	// ⚠ Only a NEGATIVE value falls back to the default here. Zero is the
+	// operator saying "never sweep the thumbnail cache", and a <= 0 test would
+	// silently turn that kill switch back on.
+	if cfg.Thumbs.SweepInterval < 0 {
+		cfg.Thumbs.SweepInterval = 6 * time.Hour
 	}
 	return cfg, nil
 }
@@ -949,6 +964,14 @@ func applyEnv(c *Config) {
 		}
 	}
 	// FILEX_SYNC_WORKERS is intentionally NOT parsed — see SyncConfig.
+	if v := os.Getenv("FILEX_THUMBS_SWEEP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			c.Thumbs.SweepInterval = d
+		} else {
+			slog.Warn("config: FILEX_THUMBS_SWEEP_INTERVAL is not a Go duration; keeping default",
+				slog.String("value", v))
+		}
+	}
 	if v := os.Getenv("FILEX_THUMBS_ENABLED"); v != "" {
 		c.Thumbs.Enabled = v == "1" || strings.EqualFold(v, "true")
 	}

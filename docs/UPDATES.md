@@ -224,7 +224,13 @@ after the bump that the host page still loads the bundle it expects.
 
 ## API
 
-All three are admin-only.
+All three are admin-only, and in **multi-tenant mode supertenant-only**:
+applying a release replaces the binary every tenant is served by and needs a
+restart of the whole instance, so it belongs to the platform operator. A tenant
+admin gets `403 supertenant_only`, on the status read as well — an admin who
+cannot apply an update has nothing to do with the answer. Single-tenant
+installs are unaffected. See
+[MULTI-TENANCY.md](MULTI-TENANCY.md#instance-wide-admin-surfaces).
 
 ```http
 GET  /api/admin/update        → cached status; never touches the network

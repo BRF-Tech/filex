@@ -21,6 +21,7 @@
 | Admin Email / Password | no | Empty → random `admin@local` password printed once in the container log. |
 
 Data (DB, search index, thumbnails) lives in `/mnt/user/appdata/filex`.
-The template pins `:latest` so CA's update checks work; pin
-`ghcr.io/brf-tech/filex:v0.4.0` in the Repository field if you prefer fixed
-versions.
+The template pins `:latest` so CA's update checks work; put
+`ghcr.io/brf-tech/filex:vX.Y.Z` (a tag from
+[Releases](https://github.com/BRF-Tech/filex/releases)) in the Repository
+field if you prefer fixed versions.

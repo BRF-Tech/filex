@@ -23,6 +23,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
@@ -39,11 +42,15 @@ import (
 // filex (adapter == storage name). An empty/relative path defaults to the
 // first enabled storage at its root.
 type aiOps struct {
-	store      db.Store
-	resolver   func(int64) (storage.Driver, error)
-	share      *share.Service  // optional — nil disables file_share/unshare
-	publicURL  string          // base for /s/<token> links
-	convertURL string          // external converter URL (empty = not configured)
+	store     db.Store
+	resolver  func(int64) (storage.Driver, error)
+	share     *share.Service // optional — nil disables file_share/unshare
+	publicURL string         // base for /s/<token> links
+	// convertURL resolves the external converter's URL AT CALL TIME. It is a
+	// function and not a string on purpose: the value lives in the
+	// `external_services` table and an operator may set it from the admin UI
+	// while the process runs (issue #17). Nil = never configured.
+	convertURL func(context.Context) string
 	acl        *acl.Resolver   // RBAC — nil disables per-user grant enforcement
 	thumbs     *thumb.Pipeline // optional — nil skips thumbnail dispatch (manager-upload parity)
 	origin     string          // writehook origin stamp — "ai" by default, "sharex" for the ShareX wrapper
@@ -62,11 +69,38 @@ type aiOps struct {
 	// worker and an async op all reach it through a context — so the tenant
 	// comes from the DATA: the storage the target lives on.
 	tenants tenanturl.Resolver
+	// index is the same Bleve index the manager writes to. Optional: nil
+	// leaves search falling back to SQL LIKE, exactly as it does for a
+	// manager upload on an instance with no index wired.
+	index *search.Index
 }
 
 // attachBody wires the byte-source resolver so the AI/REST read and zip
 // surfaces serve a file that is still being transferred.
 func (a *aiOps) attachBody(b *filebody.Resolver) { a.body = b }
+
+// attachSearchIndex wires the search index. ⚠ Without it an agent-written file
+// is not searchable until the periodic storage sync walks the folder, which is
+// a mechanism for discovering changes filex did NOT make.
+func (a *aiOps) attachSearchIndex(idx *search.Index) { a.index = idx }
+
+// sync returns the shared catalogue bookkeeper — the same
+// internal/protocolsync Syncer that WebDAV, S3, SFTP, FTPS and NFS write
+// through. It upserts the row, indexes it, cuts a thumbnail, fires the write
+// hook and tells the realtime hub, in that one place.
+//
+// ⚠ Built per call rather than held: origin is mutated after construction (the
+// ShareX wrapper stamps its own), and index/thumbs are attached later still. It
+// is a four-field struct — the allocation is noise next to the DB round trips
+// it is about to make.
+//
+// Going through it rather than keeping a private copy is the point. The
+// hand-rolled version that used to live here indexed nothing, dropped nothing
+// from the index on delete, and moved a folder without its children. All three
+// were already solved in that package.
+func (a *aiOps) sync() *protocolsync.Syncer {
+	return protocolsync.New(a.store, a.index, a.thumbs, a.origin)
+}
 
 // allow reports whether the bound user has at least `need` on rel within s.
 // The AI surface bypasses confine.Middleware and manager gating, so every op
@@ -82,7 +116,7 @@ func (a *aiOps) allow(ctx context.Context, s *model.Storage, rel string, need ac
 	return set.Effective(rel) >= need
 }
 
-func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL, convertURL string) *aiOps {
+func newAIOps(store db.Store, resolver func(int64) (storage.Driver, error), shareSvc *share.Service, publicURL string, convertURL func(context.Context) string) *aiOps {
 	return &aiOps{
 		store: store, resolver: resolver, share: shareSvc, publicURL: publicURL,
 		convertURL: convertURL, origin: writehook.OriginAI,
@@ -238,9 +272,13 @@ func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 	// Conversion is NOT a server-side MCP operation — it runs in an external
 	// converter. Surface the URL (when configured) so the agent points the user
 	// there instead of trying a non-existent file_convert tool.
-	if a.convertURL != "" {
-		info.Convert = a.convertURL
-		info.Hint += " File conversion is not a server-side MCP operation: it runs in the external converter at " + a.convertURL + " (use the filex UI's Convert action)."
+	convertURL := ""
+	if a.convertURL != nil {
+		convertURL = a.convertURL(ctx)
+	}
+	if convertURL != "" {
+		info.Convert = convertURL
+		info.Hint += " File conversion is not a server-side MCP operation: it runs in the external converter at " + convertURL + " (use the filex UI's Convert action)."
 	} else {
 		info.Hint += " File conversion is not a server-side MCP operation; it runs in an external converter (admin → External services / Dış servisler) — none is configured here."
 	}
@@ -548,17 +586,19 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	out, terr := trash.Put(ctx, drv, rel)
 	switch {
 	case terr == nil && out.Trashed:
-		a.trashRetagCache(ctx, s.ID, rel, out.Key)
+		a.trashRetagCache(ctx, s, rel, out.Key)
 		/* bag:b3 event */
 		writehook.OnFileTrashed(ctx, s.ID, normalizeDBPath(rel), base, normalizeDBPath(out.Key), a.origin)
+		a.emitDeleted(s, rel)
 		return nil
 
 	case terr == nil && out.Missing:
 		// Nothing was there to keep (an empty folder marker, or a stale cache
 		// row). Drop the row rather than parking an unrestorable trash entry.
-		a.dropCacheRow(ctx, s.ID, rel)
+		a.dropCacheRow(ctx, s, rel)
 		/* bag:b3 event */
 		writehook.OnFileDeleted(ctx, s.ID, normalizeDBPath(rel), base, a.origin)
+		a.emitDeleted(s, rel)
 		return nil
 
 	case errors.Is(terr, trash.ErrUnsupported):
@@ -569,9 +609,10 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 		if err := deleter.Delete(ctx, rel); err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return err
 		}
-		a.dropCacheRow(ctx, s.ID, rel)
+		a.dropCacheRow(ctx, s, rel)
 		/* bag:b3 event */
 		writehook.OnFileDeleted(ctx, s.ID, normalizeDBPath(rel), base, a.origin)
+		a.emitDeleted(s, rel)
 		return nil
 
 	default:
@@ -579,13 +620,26 @@ func (a *aiOps) Delete(ctx context.Context, p string) error {
 	}
 }
 
-// dropCacheRow removes the node row for rel outright. Used when the bytes are
-// gone for good, so the trash listing never offers a Restore that cannot work.
-func (a *aiOps) dropCacheRow(ctx context.Context, storageID int64, rel string) {
-	origHash := pathkey.Hash(storageID, normalizeDBPath(rel))
-	if existing, gerr := a.store.GetNodeByPath(ctx, storageID, origHash); gerr == nil && existing != nil {
-		_ = a.store.HardDeleteNode(ctx, existing.ID)
-	}
+// emitDeleted tells the folder an item was removed from it. Name is carried
+// because the hub uses it to clear the presence focus of anyone who was
+// previewing the file that just stopped existing.
+func (a *aiOps) emitDeleted(s *model.Storage, rel string) {
+	clean := normalizeDBPath(rel)
+	emitFolderChange(s.ID, path.Dir(clean), realtime.ChangeEvent{
+		Action: "delete", Name: path.Base(clean),
+	})
+}
+
+// dropCacheRow removes the node row for rel outright, and its cached
+// descendants when it is a folder. Used when the bytes are gone for good, so
+// the trash listing never offers a Restore that cannot work.
+//
+// ⚠ It goes through the shared Syncer for the search index. The version that
+// lived here hard-deleted the row and left the Bleve document behind, so a
+// file an agent deleted stayed findable by search — for good, since nothing
+// ever revisits an index entry for a path that no longer exists.
+func (a *aiOps) dropCacheRow(ctx context.Context, s *model.Storage, rel string) {
+	a.sync().DeleteRows(ctx, s, rel)
 }
 
 // listAllFiles recursively returns every FILE object path under root (skipping
@@ -621,14 +675,14 @@ func (a *aiOps) listAllFiles(ctx context.Context, drv storage.Driver, root strin
 
 // trashRetagCache soft-deletes the cache node at rel and retags it to its trash
 // location so Restore can find it and a fresh write at the original path works.
-func (a *aiOps) trashRetagCache(ctx context.Context, storageID int64, rel, trashRel string) {
-	origClean := normalizeDBPath(rel)
-	origHash := pathkey.Hash(storageID, origClean)
-	if existing, gerr := a.store.GetNodeByPath(ctx, storageID, origHash); gerr == nil && existing != nil {
-		newClean := normalizeDBPath(trashRel)
-		newHash := pathkey.Hash(storageID, newClean)
-		_ = a.store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
-	}
+//
+// ⚠ Same story as dropCacheRow: the version that lived here retagged the row
+// and left the search index alone, so a trashed file kept turning up in search
+// results pointing at a path with nothing behind it. Going through the shared
+// Syncer also drags a trashed folder's whole cached subtree out of the index,
+// which the local version never attempted.
+func (a *aiOps) trashRetagCache(ctx context.Context, s *model.Storage, rel, trashRel string) {
+	a.sync().TrashRows(ctx, s, rel, trashRel)
 }
 
 // Move renames/moves src to dst within the same storage.
@@ -727,10 +781,10 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	// is not there.
 	if files, lerr := a.listAllFiles(ctx, srcDrv, relSrc); lerr == nil {
 		for _, f := range files {
-			a.dropCacheRow(ctx, sSrc.ID, f)
+			a.dropCacheRow(ctx, sSrc, f)
 		}
 	}
-	a.dropCacheRow(ctx, sSrc.ID, relSrc)
+	a.dropCacheRow(ctx, sSrc, relSrc)
 	if err := del.Delete(ctx, relSrc); err != nil {
 		return nil, fmt.Errorf("copied to %s, but deleting the source failed: %w", sDst.Name, err)
 	}
@@ -1222,52 +1276,40 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	return count, refused, nil
 }
 
-// ───── cache mirror helpers (best-effort; sync reconciles later) ─────
+// ───── catalogue helpers ─────
+//
+// These used to be headed "cache mirror helpers (best-effort; sync reconciles
+// later)", and that heading was the bug. The periodic sync exists to DISCOVER
+// changes filex did not make — an object dropped in a bucket with `aws s3 cp`,
+// a file written on the mount by another process. A write filex performed
+// itself needs no discovery, and leaning on the sync for it meant an
+// agent-written file was unsearchable and invisible to every open explorer for
+// up to the poll interval (900 s by default).
 
+// cacheUpsertFile records a file the AI surface just wrote: row, search index,
+// thumbnail, write hook and a change frame for the folder — all of it through
+// the shared Syncer.
 func (a *aiOps) cacheUpsertFile(ctx context.Context, s *model.Storage, rel string, size int64, mime string) {
-	parentID, perr := a.walkParent(ctx, s.ID, rel)
-	clean := normalizeDBPath(rel)
-	hash := pathkey.Hash(s.ID, clean)
-	if existing, _ := a.store.GetNodeByPath(ctx, s.ID, hash); existing != nil {
-		_ = a.store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
-		existing.Size = size
-		existing.Mime = mime
-		a.dispatchThumb(existing)
-		/* bag:b3 event + koru:k2 av — single post-write gate */
-		writehook.OnFileWritten(ctx, s.ID, existing, a.origin)
+	if a.sync().Write(ctx, s, rel, size, mime) {
 		return
 	}
-	var node *model.Node
-	if perr == nil {
-		node, _ = a.store.CreateNode(ctx, &model.Node{
-			StorageID:  s.ID,
-			ParentID:   parentID,
-			Name:       path.Base(clean),
-			Path:       clean,
-			PathHash:   hash,
-			StorageKey: clean,
-			Type:       model.NodeTypeFile,
-			Size:       size,
-			Mime:       mime,
-			SyncState:  model.SyncStateSynced,
-		})
-		a.dispatchThumb(node)
-	}
-	if node == nil {
-		// Cache mirror failed (unindexed parent / insert error) — the bytes
-		// ARE on storage, so still emit file.uploaded with a transient node;
-		// the writehook skips the AV enqueue for id-less rows.
-		node = &model.Node{
-			StorageID: s.ID,
-			Name:      path.Base(clean),
-			Path:      clean,
-			Type:      model.NodeTypeFile,
-			Size:      size,
-			Mime:      mime,
-		}
-	}
-	/* bag:b3 event + koru:k2 av — single post-write gate */
-	writehook.OnFileWritten(ctx, s.ID, node, a.origin)
+	// The row could not be written, but the bytes ARE on the storage, so the
+	// file event is still true. Emit it with a transient node — the write hook
+	// skips the AV enqueue for id-less rows. (The Syncer has already emitted
+	// the change frame; it does that on every path for this exact reason.)
+	clean := normalizeDBPath(rel)
+	/* bag:b3 event + koru:k2 av — single post-write gate.
+	   writehook.Created because the row lookup that would have answered
+	   "did this path exist" is the very thing that just failed; claiming an
+	   edit we cannot see is worse than the pre-file.updated behaviour. */
+	writehook.OnFileWritten(ctx, s.ID, &model.Node{
+		StorageID: s.ID,
+		Name:      path.Base(clean),
+		Path:      clean,
+		Type:      model.NodeTypeFile,
+		Size:      size,
+		Mime:      mime,
+	}, a.origin, writehook.Created)
 }
 
 // dispatchThumb fires async thumbnail generation for a freshly written file —
@@ -1296,40 +1338,78 @@ func (a *aiOps) dispatchThumb(node *model.Node) {
 	}(node)
 }
 
+// cacheUpsertDir records a directory the AI surface just created, and any
+// parents of it that had no row yet.
+//
+// ⚠ The old version gave up when a parent had no row (walkParent returned an
+// error), so a mkdir two levels deep into an uncatalogued folder recorded
+// nothing at all. EnsureDirChain creates the chain instead — the same thing the
+// browser upload path does, for the same reason.
 func (a *aiOps) cacheUpsertDir(ctx context.Context, s *model.Storage, rel string) {
-	parentID, perr := a.walkParent(ctx, s.ID, rel)
-	if perr != nil {
-		return
-	}
-	clean := normalizeDBPath(rel)
-	hash := pathkey.Hash(s.ID, clean)
-	if existing, _ := a.store.GetNodeByPath(ctx, s.ID, hash); existing != nil {
-		return
-	}
-	_, _ = a.store.CreateNode(ctx, &model.Node{
-		StorageID:  s.ID,
-		ParentID:   parentID,
-		Name:       path.Base(clean),
-		Path:       clean,
-		PathHash:   hash,
-		StorageKey: clean,
-		Type:       model.NodeTypeDirectory,
-		SyncState:  model.SyncStateSynced,
-	})
+	a.sync().Mkdir(ctx, s, rel)
 }
 
+// cacheMove re-homes the moved item — and, when it is a folder, every cached
+// descendant — then tells both the folder it left and the folder it arrived in.
 func (a *aiOps) cacheMove(ctx context.Context, s *model.Storage, srcRel, dstRel string) {
-	srcHash := pathkey.Hash(s.ID, normalizeDBPath(srcRel))
-	existing, err := a.store.GetNodeByPath(ctx, s.ID, srcHash)
-	if err != nil || existing == nil {
+	// MoveRows, not Move: aiOps.Move fires its own OnFileMoved with its own
+	// origin, and Syncer.Move would fire a second one.
+	if !a.sync().MoveRows(ctx, s, srcRel, dstRel) {
+		a.adoptMoved(ctx, s, dstRel)
+	}
+	srcDir := path.Dir(normalizeDBPath(srcRel))
+	dstDir := path.Dir(normalizeDBPath(dstRel))
+	// ⚠ Outside any success check. The bytes have moved either way, so both
+	// listings are already wrong; a missing source row is a bookkeeping miss,
+	// not a reason to also leave two open explorers stale.
+	ev := realtime.ChangeEvent{
+		Action:  "move",
+		Name:    path.Base(normalizeDBPath(srcRel)),
+		NewName: path.Base(normalizeDBPath(dstRel)),
+	}
+	emitFolderChange(s.ID, srcDir, ev)
+	if dstDir != srcDir {
+		emitFolderChange(s.ID, dstDir, ev)
+	}
+}
+
+// adoptMoved records the destination of a move whose SOURCE had no catalogue
+// row — a file that reached the storage some other way and that filex has
+// therefore never seen.
+//
+// ⚠ Without this the change frame above is honest but useless: it tells the
+// destination folder to reload, the reload reads the catalogue, and the
+// catalogue still has nothing, so the file stays invisible. Announcing a
+// folder is only half the job when the row is missing too.
+//
+// WriteRows, not Write: this is still ONE move. aiOps.Move fires OnFileMoved
+// for it, and Write would add an OnFileWritten and a second change frame for
+// the same event.
+//
+// The driver is asked for the size and mime rather than guessing: a row
+// claiming "file, 0 bytes" would put a wrong size in the listing and in the
+// quota. A driver that cannot answer leaves things exactly as they were.
+func (a *aiOps) adoptMoved(ctx context.Context, s *model.Storage, dstRel string) {
+	if a.resolver == nil {
 		return
 	}
-	dstClean := normalizeDBPath(dstRel)
-	dstHash := pathkey.Hash(s.ID, dstClean)
-	parentID, _ := a.walkParent(ctx, s.ID, dstRel)
-	if merr := a.store.MoveNode(ctx, existing.ID, parentID, path.Base(dstClean), dstClean, dstHash); merr != nil {
-		_ = a.store.SoftDeleteNode(ctx, existing.ID)
+	drv, err := a.resolver(s.ID)
+	if err != nil {
+		return
 	}
+	obj, err := drv.Stat(ctx, strings.TrimPrefix(normalizeDBPath(dstRel), "/"))
+	if err != nil {
+		return
+	}
+	if obj.Kind == storage.KindDirectory {
+		a.sync().Mkdir(ctx, s, dstRel)
+		return
+	}
+	mime := obj.Mime
+	if mime == "" {
+		mime = mimeByExt(dstRel)
+	}
+	a.sync().WriteRows(ctx, s, dstRel, obj.Size, mime)
 }
 
 // walkParent resolves the parent dir of rel to a *int64 node id (nil at

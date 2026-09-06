@@ -24,8 +24,9 @@ Steps:
 
 - filex version (`filex --version` or image tag):
 - Deployment: single binary / Docker / other:
-- Storage driver: local / s3 / sftp / webdav / ftp:
+- Storage driver: local / s3 / sftp / webdav / ftp / smb / a plugin:
 - DB driver: sqlite / postgres / mysql:
+- Queue driver: sqlite / redis / postgres:
 - Auth driver: local / oidc / ldap / proxy-header:
 - Browser (if a UI issue):
 

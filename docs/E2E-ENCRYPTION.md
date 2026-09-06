@@ -249,6 +249,14 @@ the notification evidence rather than a claim — a `e2e.escrow_used` warning
 that anyone could POST would be worth nothing. A wrong answer is refused with
 `403` and notifies nobody.
 
+⚠ From v0.34.0 `e2e.escrow_used` is also **subscribable on its own** — tick it
+on a webhook target in *Admin → Webhooks* and every escrow unlock reaches
+whatever you route security events to. It was emitted before, but as an inline
+event id nothing that reads the catalogue could see, so it could not be
+selected: a target either took the whole feed or never saw it. Of everything
+filex emits this is the one most worth its own destination
+([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+
 ### What escrow can and cannot do
 
 **Can:**

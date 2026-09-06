@@ -27,6 +27,7 @@ Config in use:
   OnlyOffice: {{ if and .Values.onlyoffice.enabled .Values.onlyoffice.url }}{{ .Values.onlyoffice.url }}{{ else }}off{{ end }}
   Drawio:     {{ if and .Values.drawio.enabled .Values.drawio.url }}{{ .Values.drawio.url }}{{ else }}off{{ end }}
   Convert:    {{ if and .Values.convert.enabled .Values.convert.url }}{{ .Values.convert.url }}{{ else }}off{{ end }}
+  Antivirus:  {{- with .Values.extraEnv }}{{ with index . "FILEX_CLAMAV_ADDR" }} clamd at {{ . }}{{ else }} off (run clamav/clamav and set extraEnv.FILEX_CLAMAV_ADDR){{ end }}{{ else }} off (run clamav/clamav and set extraEnv.FILEX_CLAMAV_ADDR){{ end }}
 
 Next: add a storage in the admin UI (Storages -> Add) — see docs/STORAGE.md.
 

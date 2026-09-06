@@ -47,13 +47,16 @@ type AIMCP struct {
 	share      *share.Service
 	publicURL  string
 	tenants    tenanturl.Resolver
-	convertURL string
+	convertURL func(context.Context) string
 	acl        *acl.Resolver
 	thumbs     *thumb.Pipeline
 	staged     *StagedUpload
-	body       *filebody.Resolver
-	tickets    *uploadTicketStore
-	handler    http.Handler
+	// index is held rather than pushed into the core once, because a fresh
+	// aiOps is built per tool call below.
+	index   *search.Index
+	body    *filebody.Resolver
+	tickets *uploadTicketStore
+	handler http.Handler
 }
 
 // AttachACL wires the RBAC resolver so every per-request MCP tool op is gated
@@ -63,6 +66,10 @@ func (h *AIMCP) AttachACL(r *acl.Resolver) { h.acl = r }
 // AttachThumbs wires the thumbnail pipeline so MCP tool writes dispatch
 // generation like manager uploads (nil = thumbnails skipped).
 func (h *AIMCP) AttachThumbs(p *thumb.Pipeline) { h.thumbs = p }
+
+// AttachSearchIndex wires the search index; every aiOps this handler builds
+// per tool call gets it.
+func (h *AIMCP) AttachSearchIndex(idx *search.Index) { h.index = idx }
 
 // AttachStaged routes MCP tool writes above the chunk threshold through the
 // staging area, so an agent gets the same acknowledge-then-transfer behaviour
@@ -86,7 +93,7 @@ func (h *AIMCP) AttachTenants(rv tenanturl.Resolver) { h.tenants = rv }
 // which are only registered for tokens carrying the `admin` scope; pass nil
 // to disable the admin tool surface entirely. shareSvc + publicURL power the
 // file_share / file_unshare tools; convertURL is surfaced via file_root.
-func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL, convertURL string) *AIMCP {
+func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admin *AIAdmin, shareSvc *share.Service, publicURL string, convertURL func(context.Context) string) *AIMCP {
 	h := &AIMCP{
 		store: store, resolver: resolver, admin: admin, share: shareSvc,
 		publicURL: publicURL, convertURL: convertURL,
@@ -111,6 +118,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 		return nil
 	}
 	ops := newAIOps(h.store, h.resolver, h.share, h.publicURL, h.convertURL)
+	ops.attachSearchIndex(h.index)
 	ops.tenants = h.tenants
 	ops.acl = h.acl
 	ops.thumbs = h.thumbs

@@ -357,7 +357,9 @@
     },
     "savedOk": "Servis güncellendi",
     "testOk": "Erişilebilir",
-    "testFail": "Sağlık kontrolü başarısız"
+    "testFail": "Sağlık kontrolü başarısız",
+    "envManaged": "Ortam değişkeniyle ayarlı",
+    "envManagedHint": "Bir ortam değişkeniyle sabitlenmiş. Buradaki değişiklik hemen uygulanır ama filex bir sonraki açılışta ortamdaki değeri geri yazar."
   },
   "authProviders": {
     "title": "Kimlik sağlayıcılar",
@@ -898,13 +900,26 @@
   },
   "webhooks": {
     "title": "Webhook'lar",
-    "subtitle": "Dosya olaylarını (yükleme, silme, paylaşım, drop) dış uçlara POST'lar. Her gönderim X-Filex-Event ve X-Filex-Delivery başlıklarını taşır; secret tanımlı hedefler X-Filex-Signature (HMAC-SHA256) ile imzalanır.",
+    "subtitle": "Dosya olaylarını (yükleme, düzenleme, silme, paylaşım, drop) dış uçlara POST'lar. Her gönderim X-Filex-Event ve X-Filex-Delivery başlıklarını taşır; secret tanımlı hedefler X-Filex-Signature (HMAC-SHA256) ile imzalanır.",
     "add": "Yeni webhook",
     "edit": "Webhook düzenle",
     "empty": "Henüz webhook hedefi yok. Bildirimler sayfasındaki eski tekil webhook çalışmaya devam eder.",
     "namePlaceholder": "örn. ops-alarmlari",
     "allEvents": "Tüm olaylar",
     "eventsHint": "Hiçbirini işaretlemezsen tüm olaylar gönderilir.",
+    "events": {
+      "file_uploaded": "Dosya yüklendi — yazma işlemi var olmayan bir dosyayı oluşturdu",
+      "file_updated": "Dosya güncellendi — yazma işlemi var olan bir dosyanın içeriğini değiştirdi",
+      "file_upload_failed": "Yükleme başarısız — filex'in kabul ettiği veri depoya yazılamadı",
+      "file_infected": "Virüs bulundu — tarama dosyayı işaretledi ve çöpe karantinaya aldı",
+      "file_deleted": "Dosya kalıcı olarak silindi",
+      "file_trashed": "Dosya çöpe taşındı",
+      "file_moved": "Dosya taşındı veya yeniden adlandırıldı",
+      "share_created": "Paylaşım bağlantısı oluşturuldu",
+      "drop_received": "Herkese açık istek bağlantısından dosya alındı",
+      "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
+      "e2e_escrow_used": "Şifreli klasör parolası yerine kurtarma anahtarıyla açıldı"
+    },
     "secretSet": "Secret tanımlı",
     "secretUnset": "Secret yok",
     "secretPlaceholder": "İsteğe bağlı imza secret'ı",
@@ -931,7 +946,7 @@
   },
   "protection": {
     "title": "Koruma",
-    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi ve antivirüs durumu",
+    "subtitle": "Çöp kutusu saklama süresi, sürüm politikası, paylaşım bağlantısı süresi ve antivirüs",
     "unsupported": "Sunucu bu sürümü desteklemiyor — koruma ayarları API'si bulunamadı. Backend güncellemesinden sonra bu sayfa etkinleşir.",
     "savedOk": "Koruma ayarları kaydedildi",
     "trash": {
@@ -958,9 +973,49 @@
     },
     "av": {
       "title": "Antivirüs",
-      "desc": "Yüklenen dosyalar arka planda ClamAV ile taranır; virüslü dosyalar çöp kutusuna taşınır ve file.infected bildirimi üretilir. Tarama yüklemeyi asla engellemez.",
-      "binary": "Tarayıcı komutu",
-      "setupHint": "ClamAV bulunamadı. Kurulum ve yapılandırma için:"
+      "desc": "filex'e yazılan dosyalar arka planda ClamAV ile taranır — bu sunucudaki bir tarayıcı komutu ya da ağ veya unix soketi üzerinden bir clamd servisi aracılığıyla. Virüslü dosyalar çöp kutusuna taşınır ve file.infected bildirimi üretilir. Tarama hiçbir yazma işlemini engellemez.",
+      "binary": "Yanıt veren tarayıcı",
+      "setupHint": "Yapılandırılmış bir tarayıcı yok. Aşağıdan bir kip seçin ya da bakın:",
+      "maxScan": {
+        "title": "Taranan en büyük dosya",
+        "desc": "Bundan büyük dosyalar engellenmez, atlanır — normal şekilde saklanır ve sunulur, yalnızca ClamAV'a hiç verilmez. Komut kipinde her dosya tarayıcı çalışmadan önce geçici bir kopyaya yazıldığı için bu ayar orada aynı zamanda bir disk ve süre bütçesidir; servis kipinde baytlar doğrudan clamd'ye akıtılır.",
+        "label": "Megabayt",
+        "hint": "{min} ile {max} MB arasında. Yeniden başlatma gerekmeden, taranacak ilk dosyadan itibaren geçerli olur.",
+        "errRange": "{min} ile {max} arasında tam sayı girin."
+      },
+      "window": {
+        "title": "Düzenleyici kayıt tarama penceresi",
+        "desc": "Yerleşik metin düzenleyicide oluşturulan dosya hemen taranır. Zaten var olan bir dosyaya kaydetme, taramayı bu kadar dakika sonrasına planlar; pencere içindeki diğer kaydetmeler yeni tarama açmak yerine aynı taramaya katılır — böylece art arda Ctrl+S tek bir taramaya mal olur ve o tarama dosyanın son hâlini okur. Karşılığı: kaydedilen dosya, son kaydetmeden sonra bu süre kadar taranmamış kalabilir.",
+        "label": "Dakika",
+        "hint": "{min} ile {max} dakika arasında. Yeniden başlatma gerekmeden hemen geçerli olur; planlanmış taramalar özgün zamanlarını korur.",
+        "errRange": "{min} ile {max} arasında tam sayı girin."
+      },
+      "reachable": "Erişilebilir",
+      "unreachable": "Yanıt vermiyor",
+      "address": "clamd adresi",
+      "restartPending": "Kaydedildi. Antivirüs anahtarı, kipi ve adresi sunucunun bir sonraki yeniden başlatılmasında devreye girer — o ana kadar sunucu, başladığı yapılandırmayla çalışmaya devam eder.",
+      "power": {
+        "label": "Yüklenen dosyaları tara",
+        "desc": "Her iki yönde de bir sonraki yeniden başlatmada geçerli olur — açmak taramayı hemen başlatmaz, kapatmak da sunucu yeniden başlatılana kadar durdurmaz.",
+        "onAtRestart": "Antivirüs taraması sunucunun bir sonraki yeniden başlatılmasında devreye girecektir.",
+        "offAtRestart": "Antivirüs taraması sunucunun bir sonraki yeniden başlatılmasında devreden çıkacaktır."
+      },
+      "transport": {
+        "label": "ClamAV'a nasıl ulaşılıyor",
+        "mode": {
+          "binary": "Yerel komut (clamdscan / clamscan)",
+          "daemon": "clamd servisi (ağ ya da soket)"
+        },
+        "hint": {
+          "binary": "Bu sunucunun PATH'inde bulunan tarayıcıyı çalıştırır. Belirli birini seçmek için FILEX_CLAMAV_BIN kullanın.",
+          "daemon": "Her dosyayı çalışan bir clamd'ye akıtır. ClamAV ayrı bir kapsayıcıdayken bunu kullanın — ortak dosya sistemi gerekmez."
+        },
+        "addrLabel": "clamd adresi",
+        "addrHint": "sunucu:port (port yazılmazsa 3310) ya da /var/run/clamav/clamd.ctl gibi bir unix soket yolu.",
+        "binaryNote": "Tarayıcı komutunun kendisi ortam değişkeni olarak kalır (FILEX_CLAMAV_BIN): bu sunucunun ÇALIŞTIRDIĞI bir yol olduğu için buradan düzenlenemez.",
+        "errAddrRequired": "Servis kipi bir clamd adresi ister.",
+        "savedAtRestart": "Kaydedildi. Yeni bağlantı biçimi sunucunun bir sonraki yeniden başlatılmasında geçerli olur."
+      }
     }
   },
   "branding": {

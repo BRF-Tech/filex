@@ -31,11 +31,22 @@ func writeFakeClam(t *testing.T, name, body string) string {
 	return p
 }
 
-func TestAntivirusResolveBin_KillSwitch(t *testing.T) {
+// The kill-switch moved out of ResolveBin: FILEX_CLAMAV now SEEDS the
+// antivirus.enabled row and is applied once, by Resolve. ResolveBin resolves
+// the executable and nothing else, so that a stale compose entry cannot
+// silently veto a switch an admin turned on in the UI.
+func TestAntivirusResolveBin_KillSwitchAppliesInResolveNotResolveBin(t *testing.T) {
 	t.Setenv("FILEX_CLAMAV", "0")
-	t.Setenv("FILEX_CLAMAV_BIN", "/bin/sh") // even a valid bin is ignored
-	assert.Equal(t, "", antivirus.ResolveBin())
-	assert.False(t, antivirus.New().Supports())
+	t.Setenv("FILEX_CLAMAV_BIN", "/bin/sh")
+	assert.Equal(t, "/bin/sh", antivirus.ResolveBin(),
+		"ResolveBin answers only the binary question")
+	assert.False(t, antivirus.New(context.Background(), nil).Supports(),
+		"with no settings store the env seed is the only source of intent")
+
+	// And the row wins over the environment once one exists: a store that
+	// says on beats FILEX_CLAMAV=0.
+	on := antivirus.New(context.Background(), settingsMap{antivirus.EnabledSetting.Key: "true"})
+	assert.True(t, on.Supports())
 }
 
 func TestAntivirusResolveBin_ExplicitBinAuthoritative(t *testing.T) {
@@ -55,7 +66,7 @@ func TestAntivirusResolveBin_PathAbsent(t *testing.T) {
 	t.Setenv("FILEX_CLAMAV_BIN", "")
 	t.Setenv("PATH", t.TempDir()) // empty dir → no clamdscan/clamscan
 	assert.Equal(t, "", antivirus.ResolveBin())
-	sc := antivirus.New()
+	sc := antivirus.New(context.Background(), nil)
 	assert.False(t, sc.Supports())
 	assert.Equal(t, "", sc.BinName())
 
@@ -76,7 +87,7 @@ func TestAntivirusResolveBin_PathPrefersClamdscan(t *testing.T) {
 	t.Setenv("FILEX_CLAMAV_BIN", "")
 	t.Setenv("PATH", dir)
 	assert.Equal(t, filepath.Join(dir, "clamdscan"), antivirus.ResolveBin())
-	assert.Equal(t, "clamdscan", antivirus.New().BinName())
+	assert.Equal(t, "clamdscan", antivirus.New(context.Background(), nil).BinName())
 }
 
 func TestAntivirusScan_Clean(t *testing.T) {
@@ -123,11 +134,18 @@ func TestAntivirusScan_Timeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "timed out")
 }
 
+// The ceiling moved from the environment into the settings table. What used to
+// be MaxScanBytes() reading FILEX_CLAMAV_MAX is now MaxScanBytesFrom(ctx, store)
+// reading antivirus.max_scan_mb; FILEX_CLAMAV_MAX only seeds it on first boot
+// (see maxscan_test.go).
 func TestAntivirusMaxScanBytes(t *testing.T) {
-	t.Setenv("FILEX_CLAMAV_MAX", "")
-	assert.Equal(t, antivirus.DefaultMaxScanBytes, antivirus.MaxScanBytes())
-	t.Setenv("FILEX_CLAMAV_MAX", "1048576")
-	assert.EqualValues(t, 1048576, antivirus.MaxScanBytes())
-	t.Setenv("FILEX_CLAMAV_MAX", "not-a-number")
-	assert.Equal(t, antivirus.DefaultMaxScanBytes, antivirus.MaxScanBytes())
+	ctx := context.Background()
+	assert.Equal(t, antivirus.DefaultMaxScanBytes, antivirus.MaxScanBytesFrom(ctx, nil),
+		"no settings source falls back to the documented default")
+	assert.Equal(t, antivirus.DefaultMaxScanBytes,
+		antivirus.MaxScanBytesFrom(ctx, settingsMap{}))
+	assert.EqualValues(t, 1<<20,
+		antivirus.MaxScanBytesFrom(ctx, settingsMap{antivirus.MaxScanSetting.Key: "1"}))
+	assert.Equal(t, antivirus.DefaultMaxScanBytes,
+		antivirus.MaxScanBytesFrom(ctx, settingsMap{antivirus.MaxScanSetting.Key: "not-a-number"}))
 }

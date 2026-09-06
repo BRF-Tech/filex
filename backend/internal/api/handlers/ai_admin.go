@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/queue"
@@ -85,6 +86,11 @@ type AIAdminDeps struct {
 	ReplicaService  *replica.Service
 	ReplicaCron     *replica.CronScheduler
 	ReplicaReloader *replica.RulesReloader
+	// External + EnvManagedExternal mirror what the native /admin routes get,
+	// so the MCP admin surface reports and applies external-service changes the
+	// same way the UI does.
+	External           *external.Resolver
+	EnvManagedExternal map[string]bool
 }
 
 // NewAIAdmin constructs the admin AI surface from shared deps. Each wrapped
@@ -104,7 +110,7 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		trash:       NewTrash(d.Trash, d.Store),
 		searchAdm:   NewSearchAdmin(d.Index, d.Store),
 		authProv:    NewAuthProviders(d.Store),
-		external:    NewExternalAdmin(d.Store, d.Caps),
+		external:    NewExternalAdmin(d.Store, d.Caps, d.External, d.EnvManagedExternal),
 		replica:     NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader),
 		repTargets:  NewReplicationTargets(d.Store),
 		queue:       NewQueue(d.Queue),

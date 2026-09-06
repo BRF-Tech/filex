@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
@@ -28,7 +32,16 @@ type Trash struct {
 	Service *trash.Service
 	Store   db.Store
 	ACL     *acl.Resolver
+	// Index puts a restored file back into search. Optional; nil skips it.
+	Index *search.Index
 }
+
+// AttachSearchIndex wires the search index. ⚠ Deleting a file removes its
+// document from the index (correctly). Restoring it never put the document
+// back, so a restored file was in the listing, on the storage, and
+// unfindable — and looked findable anyway, because a name search falls back
+// to a SQL LIKE over node rows.
+func (h *Trash) AttachSearchIndex(i *search.Index) { h.Index = i }
 
 // NewTrash constructs the handler.
 func NewTrash(svc *trash.Service, store db.Store) *Trash { return &Trash{Service: svc, Store: store} }
@@ -104,7 +117,47 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	h.announceRestore(r.Context(), req.NodeID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// announceRestore re-indexes the restored node — and, for a folder, every
+// cached descendant, since deleting it dropped the whole subtree from the
+// index — enqueues a virus scan for every file coming back, then tells the
+// folder it landed back in.
+//
+// Read AFTER the restore on purpose: the row's path is rewritten from
+// `.filex-trash/…` back to the original by Service.Restore, and indexing the
+// pre-restore value would file the document under a path that no longer
+// exists. The scan needs the post-restore row for the same reason, and for
+// one more: queue's Eligible() refuses anything still soft-deleted or still
+// sitting under `.filex-trash/`, which is every row before Restore ran.
+//
+// ⚠⚠ Why restore scans at all. The trash is where quarantine puts an infected
+// file — the antivirus job and a user deletion produce the identical row — so
+// "restore from trash" includes "release a file ClamAV condemned". It is also
+// the one way bytes go live in filex without passing an upload surface: they
+// were scanned when they arrived, but the signature database has moved on, and
+// a file that was clean in March is not necessarily clean today. Same
+// asynchronous contract as an upload: live first, verdict shortly after; an
+// infected verdict quarantines it straight back.
+func (h *Trash) announceRestore(ctx context.Context, nodeID int64) {
+	node, err := h.Store.GetNode(ctx, nodeID)
+	if err != nil || node == nil {
+		return
+	}
+	sy := protocolsync.New(h.Store, h.Index, nil, "")
+	for _, n := range sy.CollectSubtree(ctx, node.StorageID, node) {
+		sy.IndexNode(ctx, n)
+		// A restored FOLDER brings its whole subtree back, and each file in it
+		// is as live and as unverified as the folder row itself. Scanning only
+		// the row the user clicked would protect the one case and miss the one
+		// that carries more files.
+		enqueueAntivirusScan(ctx, n)
+	}
+	emitFolderChange(node.StorageID, path.Dir(node.Path), realtime.ChangeEvent{
+		Action: "create", Name: node.Name,
+	})
 }
 
 // AdminEmpty triggers an immediate purge.

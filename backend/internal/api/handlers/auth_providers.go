@@ -24,6 +24,13 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 )
 
+// authProvidersAreInstanceWide is the refusal a tenant admin reads. These are
+// the global `auth.*` settings rows — the OIDC issuer and client secret, the
+// LDAP bind — that decide who can sign in to the instance AT ALL. PER-TENANT
+// auth is a different surface: it lives on the provider row and is edited
+// through /api/admin/providers, which has always been gated.
+const authProvidersAreInstanceWide = "authentication drivers apply to the whole instance and are managed by the platform operator"
+
 // AuthProviders handles /api/admin/auth-providers.
 type AuthProviders struct {
 	Store db.Store
@@ -44,6 +51,9 @@ type providerInfo struct {
 
 // List returns every registered auth driver and its current config (redacted).
 func (h *AuthProviders) List(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, authProvidersAreInstanceWide) {
+		return
+	}
 	names := auth.Names()
 	sort.Strings(names)
 
@@ -83,6 +93,9 @@ func (h *AuthProviders) List(w http.ResponseWriter, r *http.Request) {
 
 // Update writes a full JSON config under `auth.<name>.<key>` settings.
 func (h *AuthProviders) Update(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, authProvidersAreInstanceWide) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
@@ -112,6 +125,9 @@ func (h *AuthProviders) Update(w http.ResponseWriter, r *http.Request) {
 // V0.1 returns a stub OK so the UI works; richer test logic (OIDC discovery,
 // LDAP bind probe) lives in the driver implementations and can be added later.
 func (h *AuthProviders) Test(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, authProvidersAreInstanceWide) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	if _, err := auth.Get(name); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such driver"})

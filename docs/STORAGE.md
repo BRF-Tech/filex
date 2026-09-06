@@ -125,7 +125,7 @@ seeds nothing.
 
 | Variable | For | Example |
 |---|---|---|
-| `FILEX_DEFAULT_STORAGE_DRIVER` | all | `local` · `s3` · `sftp` · `webdav` · `ftp` |
+| `FILEX_DEFAULT_STORAGE_DRIVER` | all | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb` |
 | `FILEX_DEFAULT_STORAGE_NAME` | all | `Files` (top‑level folder label) |
 | `FILEX_DEFAULT_STORAGE_PATH` | local | `/srv/files` |
 | `FILEX_DEFAULT_STORAGE_S3_*` (`BUCKET`/`PREFIX`/`ENDPOINT`/`REGION`/`ACCESS_KEY`/`SECRET_KEY`/`PATH_STYLE`) | s3 | see below |
@@ -190,7 +190,7 @@ storage:
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `name` | string | — | Display name + top‑level folder label. Required. |
-| `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp`. Required. |
+| `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`, or the name of an installed [plugin](PLUGINS.md). Required. |
 | `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
 | `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. |
@@ -237,7 +237,7 @@ so configs written before a rename keep working. Adding a driver on the backend
 puts it in every picker without a frontend release.
 
 `capabilities` on `/api/capabilities` still carries the plain
-`storage_drivers: ["ftp","local","s3","sftp","webdav"]` name list for older
+`storage_drivers: ["ftp","local","s3","sftp","smb","webdav"]` name list for older
 callers.
 
 ---
@@ -336,6 +336,15 @@ isn't `local` — and a mounted share *is* the `local` driver: nothing falls bac
 nothing warns. Choose `poll` explicitly and set an interval that matches
 how fresh you need the listing (`sync_interval_s`; `900` = 15 min is the default
 when you don't set one, and 60 s is reasonable on a busy share).
+
+> A poll over a mounted share detects a file **changed** by another machine, not
+> only a new one, because a mount has no etag and drift falls back to size +
+> modification time — see
+> [Drift detection](#drift-detection-what-a-replaced-file-looks-like). ⚠ That
+> rests on the share reporting an honest mtime. NFS attribute caching can serve a
+> stale one for a few seconds (`actimeo`), and a share backed by FAT keeps
+> timestamps in two‑second steps; neither loses a change, both can delay it to
+> the next pass.
 
 **Trap 2 — mount before filex starts.** filex **creates a storage's root
 directory if it is missing**, so a storage pointed at an *unmounted* path will
@@ -489,12 +498,45 @@ uploaded straight to the S3 console).
 - **`ondemand`** — only syncs when explicitly triggered
   (`POST /api/admin/storages/{id}/sync`).
 
-**What a sync does:** new objects are indexed, changed objects (by **ETag diff**)
-are updated, and objects gone from the backend are soft‑deleted from the cache.
+**What a sync does:** new objects are indexed, changed objects are updated (see
+[Drift detection](#drift-detection-what-a-replaced-file-looks-like)), and
+objects gone from the backend are soft‑deleted from the cache. A newly
+catalogued file and a file whose content drifted are also **queued for an
+antivirus scan**, one priority step below everything a person asked for, so a
+first import of twenty thousand files does not make an upload's scan wait
+behind it ([PROTECTION.md → Files the sync discovers](PROTECTION.md#files-the-sync-discovers)).
+
+**What a sync does not do: it never un‑deletes.** Deleting in filex is a
+rename — the bytes move to `.filex-trash/` and the row is soft‑deleted and
+retagged to that key — and the walk used to see the object, find no live row,
+find the soft‑deleted one and clear `deleted_at`. On every pass, on every
+driver, with no condition attached, which meant a deletion undid itself and an
+infected file left quarantine on a timer nobody set (quarantine is the same
+operation). Two rules replace it:
+
+- the walk **skips `.filex-trash/`** — the rows for everything in there already
+  exist, retagged to those very keys, and the trash service owns them;
+- a **trashed row is never revived**. An object at a path where a trashed row
+  still sits is catalogued as a **new node**; the old row stays in the trash,
+  restorable and on the retention clock. Bytes that reappear at a path are not
+  the file that was deleted there.
+
+⚠ Anything found **live** inside `.filex-trash/` is repaired, which is what
+heals an install that ran the old code: a revived deletion is soft‑deleted
+again (keeping its `storage_key`, so restore still knows where to put it back)
+and a row minted for the trash's own bytes is dropped. Bytes are never touched
+either way.
 A **tombstone guard** protects against transient backend glitches: if a run sees
 fewer than ~70 % of the objects the previous run saw, the delete pass is skipped
-(so a flaky S3 endpoint doesn't wipe your tree from the cache). ⚠ The comparison
-is against the **previous run only**: a backend that stays empty records a run
+(so a flaky S3 endpoint doesn't wipe your tree from the cache).
+
+⚠ **On the first pass after upgrading to v0.34.0 this guard may trip once,
+and that is expected.** `seen` no longer counts objects inside `.filex-trash/`,
+so a storage whose trash held more than ~30 % of its objects looks like it
+shrank: one warning, one skipped delete pass, and the next run compares like
+with like.
+
+⚠ The comparison is against the **previous run only**: a backend that stays empty records a run
 with a seen count of 0, and the run after that has nothing to compare against
 and deletes. The guard buys a cycle to notice the outage in — see
 [NAS trap 2](#nas-nfs-smb-and-friends).
@@ -507,6 +549,49 @@ the storage rather than looking for a global knob.
 
 You can watch runs at `GET /api/admin/storages/{id}/sync-runs` and detect drift
 with `GET /api/admin/storages/{id}/drift`.
+
+### Drift detection: what a replaced file looks like
+
+Catching a file that was changed *outside* filex is the whole point of the sync,
+so it matters exactly how "changed" is decided.
+
+**With an etag** — the backend's own content fingerprint — that is the answer,
+and it is exact. Only **S3 and WebDAV** report one.
+
+**Without one** — local, SFTP, SMB, FTP, and any WebDAV server that omits the
+header — the comparison is the file's **size and modification time**, the two
+fields every one of those drivers does report. Both are already in the listing
+the walk just made, so a full walk costs what it always did: measured over
+20 000 files on a local disk, three consecutive passes took 3.0–4.0 s before the
+change and 3.0–4.0 s after, and reported zero drift on every one of them.
+
+| Change made outside filex | Noticed? |
+|---|---|
+| An ordinary edit — content and mtime both move | **yes** |
+| A rewrite that keeps the same size (a config line swapped for one the same length) | **yes**, the mtime moved |
+| A file that grew or shrank, even with its mtime preserved (`cp -p`, `rsync --times`) | **yes**, the size moved |
+| A restore from backup, whose mtime is **older** than the row's | **yes** — the test is inequality, not "newer than" |
+| A replacement that preserves **both** the size and the mtime | **no** |
+| A rewrite landing in the same clock second as the recorded mtime, with the size unchanged | **no** |
+
+The last two need the file's content to detect. Hashing every file on every pass
+would turn a three-second walk of 20 000 files into something nobody can run —
+the same trade-off [folder sync](SYNC.md#limits-worth-knowing) makes, and the one
+`rsync` makes by default. If a storage holds files that are rewritten in place
+without their size or timestamp changing, an on-demand
+`POST /api/admin/storages/{id}/sync` does not help either; nothing short of
+re-reading the bytes will.
+
+Times are compared **to the second**. Finer would not detect more: Postgres
+stores timestamps to the microsecond, FTP's `MDTM` has no sub-second field at
+all, and FAT keeps two-second steps — so a finer comparison would report drift
+on every pass for files nothing touched, which on an install with antivirus
+enabled means re-scanning the whole storage every sync interval, forever.
+
+⚠ **Directories are not drift-checked.** A folder's row carries its cached
+*recursive* size so the explorer can show folder sizes; a listing reports the
+directory entry's own few kilobytes. They never match, and comparing them would
+mark every folder on the storage as drifted on every pass.
 
 ---
 
@@ -538,8 +623,8 @@ another region — filex is built so that the slow part stays the slow part.
 `Accept-Ranges: bytes` and serves `206` / `Content-Range` for a `Range`
 request, so video and audio seek, a dropped download resumes from where it
 stopped instead of restarting, and only the missing bytes are re-read from the
-backend. All five drivers (`local`, `s3`, `sftp`, `ftp`, `webdav`) can start a
-transfer at an offset; a driver that could not would answer
+backend. All six built-in drivers (`local`, `s3`, `sftp`, `ftp`, `smb`,
+`webdav`) can start a transfer at an offset; a driver that could not would answer
 `Accept-Ranges: none` and serve the whole object, never a wrong window.
 Public **share links** (`/s/…`) deliberately stay whole-object: one request
 there is one download against the link's cap.

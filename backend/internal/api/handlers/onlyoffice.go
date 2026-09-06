@@ -40,8 +40,12 @@ func (h *OnlyOffice) AttachBody(b *filebody.Resolver) { h.Body = b }
 // editable config additionally needs ≥editor (else it's downgraded to view).
 func (h *OnlyOffice) AttachACL(r *acl.Resolver) { h.ACL = r }
 
-// NewOnlyOffice constructs the handler. Pass nil svc to disable the routes
-// (handlers will return 503 — easier than gating in routes.go).
+// NewOnlyOffice constructs the handler.
+//
+// ⚠ The handler is ALWAYS wired now, even when nothing is configured yet: what
+// "configured" means is a question for the `external_services` row at request
+// time, not for whatever env carried at boot. Every entry point asks
+// Service.EnabledCtx, which is nil-safe, so a nil service still answers 503.
 func NewOnlyOffice(svc *onlyoffice.Service, store db.Store, resolver func(int64) (storage.Driver, error)) *OnlyOffice {
 	return &OnlyOffice{Service: svc, Store: store, StorageResolver: resolver}
 }
@@ -59,7 +63,7 @@ func NewOnlyOffice(svc *onlyoffice.Service, store db.Store, resolver func(int64)
 // it has the adapter-qualified path handy but not the node id, so the
 // handler must resolve path → node before continuing.
 func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
-	if h.Service == nil || !h.Service.Enabled() {
+	if !h.Service.EnabledCtx(r.Context()) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
 		return
 	}
@@ -164,7 +168,7 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	/* /wiring:e2 */
-	cfg, err := h.Service.BuildConfigForNode(node, user, lang, mode)
+	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -212,7 +216,7 @@ func (h *OnlyOffice) resolveNodeByPath(ctx context.Context, raw string) (*model.
 //
 // GET /api/files/onlyoffice/fetch?n=<id>&exp=<unix>&sig=<b64url>
 func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
-	if h.Service == nil || !h.Service.Enabled() {
+	if !h.Service.EnabledCtx(r.Context()) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
 		return
 	}
@@ -227,7 +231,7 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad exp"})
 		return
 	}
-	if err := h.Service.VerifyFetchSignature(id, exp, q.Get("sig")); err != nil {
+	if err := h.Service.VerifyFetchSignatureCtx(r.Context(), id, exp, q.Get("sig")); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
@@ -280,7 +284,7 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 // Public — relies on the JWT in the body or Authorization header for
 // integrity.
 func (h *OnlyOffice) Callback(w http.ResponseWriter, r *http.Request) {
-	if h.Service == nil || !h.Service.Enabled() {
+	if !h.Service.EnabledCtx(r.Context()) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": 1, "message": "onlyoffice not configured"})
 		return
 	}

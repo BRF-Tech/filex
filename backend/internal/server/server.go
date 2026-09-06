@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/ftpsrv"
@@ -118,6 +119,10 @@ type Server struct {
 	// constructs the handler the routes use — running the sweeper against a
 	// second instance would sweep a different view of the same directory.
 	stagedUploads *handlers.StagedUpload
+	// staging is the upload staging area, held so a purge can release the
+	// directory that belonged to the node being destroyed instead of leaving
+	// it to age out of the idle sweeper (up to upload.staging_ttl later).
+	staging *staging.Area
 
 	mu       sync.RWMutex
 	storages map[int64]storage.Driver
@@ -494,18 +499,35 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		storages: map[int64]storage.Driver{},
 	}
 
-	// OnlyOffice integration — disabled if no document server URL/secret
-	// is configured (the handlers return 503 in that case).
-	var ooSvc *onlyoffice.Service
-	if cfg.ExternalServices.OnlyOffice.URL != "" && cfg.ExternalServices.OnlyOffice.JWTSecret != "" {
-		ooSvc = onlyoffice.New(
-			store,
-			nil, // resolver wired below once it exists
-			cfg.ExternalServices.OnlyOffice.URL,
-			cfg.ExternalServices.OnlyOffice.JWTSecret,
-			cfg.PublicURL,
-			0,
-		)
+	// External services (OnlyOffice, drawio, converter) resolve from the
+	// `external_services` table on every use, so what the admin UI saves is
+	// what the running process does.
+	extResolver := external.New(store)
+
+	// OnlyOffice integration.
+	//
+	// ⚠⚠ Built UNCONDITIONALLY. It used to be constructed only when env/YAML
+	// carried a URL and a secret, which meant an operator who configured
+	// OnlyOffice from the admin UI — the only option when the document server
+	// lives in a separate compose file — got a nil service and a permanent 503
+	// "onlyoffice not configured", while the Test button, the admin listing and
+	// /api/files/capabilities all read the DB row and reported it healthy
+	// (issue #17). The boot values are kept as the fallback for installs that
+	// have no row yet; Live is what decides.
+	ooSvc := onlyoffice.New(
+		store,
+		nil, // resolver wired below once it exists
+		cfg.ExternalServices.OnlyOffice.URL,
+		cfg.ExternalServices.OnlyOffice.JWTSecret,
+		cfg.PublicURL,
+		0,
+	)
+	ooSvc.Live = func(ctx context.Context) (string, string) {
+		st := extResolver.Get(ctx, external.OnlyOffice)
+		if !st.Enabled {
+			return "", ""
+		}
+		return st.URL, st.Secret
 	}
 
 	// Storage resolver — connects API handlers and pipeline to live drivers.
@@ -548,9 +570,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Now that resolver exists, fill in dependents that need it.
 	caps.AttachStorageResolver(resolver)
-	if ooSvc != nil {
-		ooSvc.StorageResolver = resolver
-	}
+	ooSvc.StorageResolver = resolver
 
 	// Async ops queue — DB-backed, restart-safe.
 	opsSvc := ops.New(sqlDB, resolver)
@@ -655,23 +675,75 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 
 	/* koru:k2 av */
-	// Optional ClamAV upload scanning ("Koru" v0.4). Only wired when a
-	// binary resolved (FILEX_CLAMAV_BIN > $PATH clamdscan/clamscan,
-	// FILEX_CLAMAV=0 kill-switch) AND the persistent queue is up — the
-	// scan is an async job (content_index pattern) and must never sit on
-	// the upload path. avEnqueue stays nil otherwise, which disables the
-	// handlers' emission sink entirely.
+	// Optional ClamAV upload scanning ("Koru" v0.4). Only wired when
+	// scanning resolved as available — the antivirus.enabled switch is on
+	// AND either a binary resolved or a clamd address is configured — AND
+	// the persistent queue is up: the scan is an async job (content_index
+	// pattern) and must never sit on the upload path. avEnqueue stays nil
+	// otherwise, which disables the handlers' emission sink entirely.
 	var avEnqueue func(ctx context.Context, n *model.Node)
+	var avEnqueueAfterSave func(ctx context.Context, n *model.Node)
+	// Database-backed settings seeded from the environment on first boot only.
+	// The env var is inert once a row exists (see package dbsetting).
+	antivirus.SeedSettings(ctx, store)
+	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
+	// enabled / mode / clamd address are read once, here, because the lines
+	// below are the wiring itself: registering the queue handler and handing
+	// the upload surfaces an enqueue function. An admin flipping the switch on
+	// the Protection page changes the row, and the page says plainly that it
+	// applies at the next restart — SetBoot is what lets it stop saying so
+	// once that restart has happened.
+	avRes := antivirus.Resolve(ctx, store)
+	antivirus.SetBoot(avRes)
 	if srvObj.qpool != nil {
-		if avScanner := antivirus.New(); avScanner.Supports() {
-			avJob := queue.NewAntivirusScanner(store, resolver, avScanner, srvObj.notify, idx, antivirus.MaxScanBytes())
+		if avScanner := antivirus.NewWithResolution(avRes); avScanner.Supports() {
+			avJob := queue.NewAntivirusScanner(store, resolver, avScanner, srvObj.notify, idx,
+				antivirus.MaxScanBytesFrom(ctx, store))
 			avJob.AttachBody(bgBody)
+			// Live ceiling: read per eligibility check so the Protection page
+			// applies to the next file scanned, not the next restart.
+			avJob.AttachMaxBytes(func() int64 {
+				return antivirus.MaxScanBytesFrom(context.Background(), store)
+			})
 			srvObj.qpool.Register(queue.TypeAntivirusScan, avJob.Handle)
 			qd := srvObj.queue
 			avEnqueue = func(ctx context.Context, n *model.Node) {
 				avJob.Enqueue(ctx, qd, n)
 			}
-			slog.Info("antivirus: enabled", slog.String("bin", avScanner.Bin()))
+			// Debounced twin for the text editor's save path. ⚠ The window is
+			// resolved HERE, per call, not captured at boot: that is what
+			// makes the Protection page's field take effect without a
+			// restart. Scans already scheduled keep the not_before they were
+			// given — nothing rewrites a pending op.
+			avEnqueueAfterSave = func(ctx context.Context, n *model.Node) {
+				avJob.EnqueueAfterSave(ctx, qd, n, antivirus.SaveWindow(ctx, store))
+			}
+			// Files that arrive ON a storage instead of through filex — an
+			// `aws s3 cp` into the bucket, another process writing on a
+			// mounted disk, everything that was already there when the
+			// storage was added — reach the catalogue through the sync
+			// walk, and only through it. Same enqueue, same eligibility,
+			// same handler; the walk decides WHEN (newly catalogued or
+			// content drifted, never merely "seen again").
+			worker.AttachAntivirus(func(ctx context.Context, n *model.Node) {
+				avJob.EnqueueDiscovered(ctx, qd, n)
+			})
+			slog.Info("antivirus: enabled",
+				slog.String("mode", avScanner.Mode()),
+				slog.String("bin", avScanner.Bin()),
+				slog.String("clamd", avScanner.Address()),
+				slog.Duration("save_scan_window", antivirus.SaveWindow(ctx, store)))
+		} else if avRes.Enabled {
+			// Switched on but unusable. ⚠ Say so loudly: the alternative is a
+			// deployment that looks configured (a clamd container named in
+			// compose, a green switch on the admin page) and scans nothing.
+			reason := "no clamav binary on $PATH"
+			if avRes.Err != nil {
+				reason = avRes.Err.Error()
+			}
+			slog.Warn("antivirus: switched on but unavailable; nothing will be scanned",
+				slog.String("mode", avRes.Mode),
+				slog.String("reason", reason))
 		}
 	}
 
@@ -728,6 +800,17 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Trash retention service — handles soft-delete restore + scheduled
 	// purge of expired tombstones.
 	trashSvc := trash.New(store, resolver, quotaSvc)
+	// Per-node cache reclamation at the moment a node is destroyed for good.
+	//
+	// ⚠ Purge only. A soft delete into the trash is reversible, so dropping a
+	// restorable file's thumbnail there would be a regression the user sees as
+	// a blank tile after restoring. The staging half is the same argument in
+	// reverse: a node whose transfer FAILED has its only copy of the bytes in
+	// staging, so those may be released only once the node is unrecoverable.
+	trashSvc.Reclaim = func(ctx context.Context, nodeID int64) {
+		pipeline.Forget(ctx, nodeID)
+		srvObj.releaseStagingFor(ctx, nodeID)
+	}
 	srvObj.trash = trashSvc
 
 	// Versioning service — snapshots before destructive writes; the API
@@ -872,6 +955,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Worker:          worker,
 		Index:           idx,
 		Caps:            caps,
+		External:        extResolver,
 		Thumbs:          pipeline,
 		Share:           shareSvc,
 		OnlyOffice:      ooSvc,
@@ -893,8 +977,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Mailer:          srvObj.mailer,
 		ZipCache:        zipCache,
 		FileCache:       fileCache,
-		AVScan:          avEnqueue, /* koru:k2 av */
-		E2EEscrow:       escrowKey, /* wiring:e2 — nil when escrow is off */
+		AVScan:          avEnqueue,          /* koru:k2 av */
+		AVScanAfterSave: avEnqueueAfterSave, /* koru:k2 av — debounced editor save */
+		E2EEscrow:       escrowKey,          /* wiring:e2 — nil when escrow is off */
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see
@@ -920,6 +1005,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			slog.Int64("chunk", cfg.Upload.ChunkSize))
 	}
 	deps.Staging = stagingArea
+	srvObj.staging = stagingArea
 
 	// ⚠ Set BEFORE BuildRouter but READ later: the listener does not exist yet,
 	// and with `:0` the configured address names no port at all. The closure
@@ -1051,11 +1137,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Seed default rows in external_services so the admin UI has editable
-	// cards for OnlyOffice/Drawio/Convert even on fresh installs, then seed
-	// settings (SMTP/branding/trash) + an initial storage from env. All are
-	// only-if-absent, so operator UI edits are never clobbered.
+	// Reconcile external_services with env/YAML (see the function comment: a
+	// service the environment configures is re-asserted, one it says nothing
+	// about belongs to the admin UI), then seed settings (SMTP/branding/trash)
+	// and an initial storage from env — those remain only-if-absent.
 	seedExternalDefaults(ctx, store, cfg)
+	extResolver.Invalidate()
 	seedFromEnv(ctx, store, cfg)
 
 	return srvObj, nil
@@ -1095,10 +1182,22 @@ func migrateShareZipDir(legacy, dst string) {
 		slog.String("dir", legacy))
 }
 
-// seedExternalDefaults inserts placeholder rows for the three known
-// external services if they're missing. We mark them disabled when
-// no URL is configured so the capability prober reports "disabled"
-// instead of "unreachable" on the next refresh.
+// seedExternalDefaults reconciles the `external_services` table with env/YAML.
+//
+// Two rules, and the second one is the reason this is not just a seeder:
+//
+//   - a service env/YAML says nothing about is created once, disabled, and then
+//     belongs entirely to the admin UI. Its row is the runtime truth and an
+//     operator's edit applies live;
+//   - a service env/YAML DOES configure is re-asserted on every boot. Compose
+//     is declarative: an operator who edits FILEX_ONLYOFFICE_URL and restarts
+//     expects the new URL, and a seed-if-missing would have silently kept the
+//     old one from first boot forever — the same class of "saved value the
+//     process ignores" that issue #17 was about, just pointing the other way.
+//
+// A UI edit to an env-pinned service therefore applies immediately and is
+// reverted at the next restart; GET/PATCH /api/admin/external return
+// `env_managed` so the operator is told that rather than finding out later.
 func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config) {
 	type defRow struct {
 		name   string
@@ -1111,19 +1210,77 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 		{name: "convert", url: cfg.ExternalServices.Convert.URL, secret: ""},
 	}
 	for _, d := range defaults {
-		// Only seed when missing; don't clobber operator-edited rows.
-		if cur, _ := store.GetExternalService(ctx, d.name); cur != nil {
+		cur, _ := store.GetExternalService(ctx, d.name)
+		if cur != nil && d.url == "" {
+			// Not pinned by the environment: the row is the operator's.
 			continue
+		}
+		if cur != nil && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) {
+			continue // already matches the environment; nothing to say
+		}
+		options := "{}"
+		secret := d.secret
+		if cur != nil {
+			options = cur.OptionsJSON
+			if secret == "" {
+				secret = cur.SecretEnc
+			}
+			slog.Info("external service is pinned by the environment; re-asserting it over the stored row",
+				slog.String("name", d.name),
+				slog.String("stored_url", cur.URL),
+				slog.String("env_url", d.url))
 		}
 		enabled := d.url != ""
 		state := "unconfigured"
 		if enabled {
 			state = "unknown"
 		}
-		if err := store.UpsertExternalService(ctx, d.name, enabled, d.url, d.secret, "{}", time.Time{}, state); err != nil {
+		if err := store.UpsertExternalService(ctx, d.name, enabled, d.url, secret, options, time.Time{}, state); err != nil {
 			slog.Warn("seed external_services row", slog.String("name", d.name), slog.String("err", err.Error()))
 		}
 	}
+}
+
+// releaseStagingFor drops the staging directory (and its row) belonging to a
+// node that has just been purged.
+//
+// Without it those bytes sit in <data>/uploads until the idle sweeper's TTL —
+// up to a day by default — for a file the user has already deleted permanently,
+// which is what "space is not recovered" looked like in issue #18.
+//
+// ⚠ Provably scoped: the row is looked up BY NODE ID, so the only bytes it can
+// touch are the ones that were staged for exactly this node. A row in state
+// `committing` is left alone — its bytes are being read by the transfer right
+// now, and removing them under a live reader is how a half-written object
+// reaches the backend.
+func (s *Server) releaseStagingFor(ctx context.Context, nodeID int64) {
+	if s == nil || s.staging == nil || !s.staging.Enabled() || s.store == nil || nodeID <= 0 {
+		return
+	}
+	row, err := s.store.GetStagedUploadByNode(ctx, nodeID)
+	if err != nil || row == nil {
+		return
+	}
+	if row.State == model.StagedUploadCommitting {
+		slog.Info("staged upload kept: its node was purged while the transfer is still running",
+			slog.String("id", row.ID), slog.Int64("node", nodeID))
+		return
+	}
+	if err := s.staging.Remove(row.ID); err != nil {
+		slog.Warn("staged upload: could not release staging for a purged node",
+			slog.String("id", row.ID), slog.Int64("node", nodeID), slog.String("err", err.Error()))
+		return
+	}
+	if err := s.store.DeleteStagedUpload(ctx, row.ID); err != nil {
+		slog.Warn("staged upload: released staging but could not remove the row",
+			slog.String("id", row.ID), slog.String("err", err.Error()))
+	}
+	slog.Info("staged upload released with its purged node",
+		slog.String("id", row.ID),
+		slog.Int64("node", nodeID),
+		slog.String("path", row.StorageKey),
+		slog.Int64("staged_bytes", row.ReceivedBytes),
+		slog.String("state", row.State))
 }
 
 // Start runs first-run, prints the banner, starts the worker, and serves
@@ -1172,6 +1329,13 @@ func (s *Server) Start(ctx context.Context) error {
 	// logged with its id, path and staged size.
 	if s.stagedUploads != nil {
 		go s.stagedUploads.RunSweeper(ctx, s.cfg.Upload.SweepInterval)
+	}
+	// Thumbnail cache reconciler — the same argument as the staging sweeper,
+	// for the directory that had no GC at all until issue #18. It repairs
+	// installs that have been accumulating orphaned JPEGs since v0.1, not just
+	// the ones deleted from here on.
+	if s.pipeline != nil {
+		go s.pipeline.RunReaper(ctx, s.cfg.Thumbs.SweepInterval)
 	}
 	if s.replicaCron != nil {
 		s.replicaCron.Start()

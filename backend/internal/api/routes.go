@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/dav"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/mailer"
@@ -39,6 +40,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -60,11 +62,15 @@ import (
 
 // Deps is the bundle of services every handler needs.
 type Deps struct {
-	Cfg             config.Config
-	Store           db.Store
-	Worker          *syncpkg.Worker
-	Index           *search.Index
-	Caps            *capability.Service
+	Cfg    config.Config
+	Store  db.Store
+	Worker *syncpkg.Worker
+	Index  *search.Index
+	Caps   *capability.Service
+	// External resolves the live `external_services` rows. It is what makes an
+	// admin-UI change to OnlyOffice / drawio / the converter take effect
+	// without a restart (issue #17). Constructed in BuildRouter when nil.
+	External        *external.Resolver
 	Thumbs          *thumb.Pipeline
 	Share           *share.Service
 	OnlyOffice      *onlyoffice.Service
@@ -125,6 +131,12 @@ type Deps struct {
 	// binary and the persistent queue are both available; nil disables
 	// scanning entirely.
 	AVScan func(ctx context.Context, n *model.Node)
+
+	// AVScanAfterSave is the DEBOUNCED twin of AVScan, used only by the text
+	// editor's save-over-an-existing-file path: it schedules one scan per
+	// file per editing window instead of one per Ctrl+S. nil falls back to
+	// AVScan (scan immediately) rather than to no scan.
+	AVScanAfterSave func(ctx context.Context, n *model.Node)
 	// Updater tracks published releases and (on installs that own their
 	// binary) applies them. Nil = the feature is off; the admin endpoints then
 	// report a "disabled" status instead of disappearing. See docs/UPDATES.md.
@@ -159,6 +171,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// the caller's grants + account-role ceiling.
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
+	}
+	if d.External == nil {
+		d.External = external.New(d.Store)
 	}
 	if d.ProtocolAuth == nil {
 		d.ProtocolAuth = protocolauth.New(d.Store, d.ACL, d.Cfg.MultiTenant)
@@ -305,6 +320,10 @@ func BuildRouter(d *Deps) http.Handler {
 	ah := handlers.NewArchive(d.Store, d.StorageResolver)
 	ah.AttachACL(d.ACL)
 	ah.AttachBody(d.Body)
+	// ⚠ Without these two, Extract and Add put bytes on the storage and told
+	// nobody: no node row, no search document, no realtime frame.
+	ah.AttachSearchIndex(d.Index)
+	ah.AttachThumbs(d.Thumbs)
 	// ⚠ Every absolute URL filex hands out (share + file-request links, the
 	// wss:// endpoint, upload-ticket URLs, every link inside an e-mail) is
 	// built from THIS resolver, so a multi-tenant install names the tenant's
@@ -336,6 +355,7 @@ func BuildRouter(d *Deps) http.Handler {
 	tuh := handlers.NewTicketUpload(d.Store, d.StorageResolver, uploadTickets)
 	tuh.AttachACL(d.ACL)
 	tuh.AttachThumbs(d.Thumbs)
+	tuh.AttachSearchIndex(d.Index)
 	tuh.AttachStaged(suh)
 	tuh.AttachBody(d.Body)
 	// Same fallback language as the share pages — without this a drop page
@@ -358,6 +378,14 @@ func BuildRouter(d *Deps) http.Handler {
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	ooh.AttachACL(d.ACL)
 	ooh.AttachBody(d.Body)
+	// The save callback fans out through the same post-write gate as every
+	// other write surface: row + index + thumbnail + realtime frame +
+	// `file.updated` + antivirus. ⚠ Without this wire an office document keeps
+	// its pre-edit text in content search and is the one write ClamAV never
+	// sees (docs/ONLYOFFICE.md, "What a save does").
+	if d.OnlyOffice != nil {
+		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice))
+	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
@@ -380,7 +408,7 @@ func BuildRouter(d *Deps) http.Handler {
 	auditH := handlers.NewAudit(d.Store)
 	syncAdmH := handlers.NewSyncAdmin(d.Store)
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
-	externalH := handlers.NewExternalAdmin(d.Store, d.Caps)
+	externalH := handlers.NewExternalAdmin(d.Store, d.Caps, d.External, envManagedExternal(d.Cfg))
 	authProvH := handlers.NewAuthProviders(d.Store)
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
 	// Test probes a plugin driver properly (handlers/storages_admin.go).
@@ -391,12 +419,14 @@ func BuildRouter(d *Deps) http.Handler {
 	notifH := handlers.NewNotifications(d.Notify)
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
 	trashH := handlers.NewTrash(d.Trash, d.Store)
+	trashH.AttachSearchIndex(d.Index)
 	trashH.AttachACL(d.ACL)
 	metaH := handlers.NewMeta(d.Store)
 	sharedH := handlers.NewShared(d.Store)
 	quotaH := handlers.NewQuota(d.Quota)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 	saveTextH.AttachACL(d.ACL)
+	saveTextH.AttachSearchIndex(d.Index)
 	if d.Versions != nil {
 		// Snapshot the pre-edit bytes into version history before
 		// every save-text write (Ada, translated from Turkish: "not a
@@ -447,6 +477,7 @@ func BuildRouter(d *Deps) http.Handler {
 		writehook.ConfigureOverwriteGuard(nil)
 	}
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
+	versionsH.AttachSearchIndex(d.Index)
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
 	grantsH.AttachTenants(tenants)
@@ -547,10 +578,18 @@ func BuildRouter(d *Deps) http.Handler {
 	// a nil emitter (unwired) is a safe no-op.
 	hub := realtime.NewHub()
 	handlers.SetChangeEmitter(hub)
+	// The protocol servers (WebDAV, S3, SFTP, FTPS, NFS) reach the catalogue
+	// through internal/protocolsync rather than through these handlers, so the
+	// same hub has to be wired there too — otherwise a file written over any
+	// of them lands in the DB and the index while every open explorer keeps
+	// showing the old listing. Package-level on purpose: s3api is constructed
+	// at the top of this function and the SFTP/FTPS/NFS servers live in
+	// internal/server, so a field would make this depend on wiring order.
+	protocolsync.SetChangeEmitter(hub)
 
 	/* bag:b3 event */
 	// Wire the notify sink so the mutation handlers can emit canonical
-	// file/share events (file.uploaded, share.created, …) to webhook v2
+	// file/share events (file.uploaded, file.updated, share.created, …) to webhook v2
 	// targets. Nil-safe: an unwired sink disables emission.
 	handlers.SetNotifySink(d.Notify)
 
@@ -559,12 +598,17 @@ func BuildRouter(d *Deps) http.Handler {
 	// write (upload finalize, manager vfUpload, public drop). Nil-safe:
 	// unwired (no ClamAV binary / no queue) disables scanning.
 	handlers.SetAntivirusEnqueue(d.AVScan)
+	handlers.SetAntivirusEnqueueAfterSave(d.AVScanAfterSave)
 
 	// Writehook — the single post-write side-effect gate (AV enqueue +
 	// canonical file event) every write surface routes through with its
 	// origin stamp (manager/ai/sharex/dav/ops). Same sinks as above; both
 	// nil-safe.
 	writehook.Configure(d.AVScan, d.Notify)
+	// …and the debounced twin, for the surfaces that save repeatedly during a
+	// single editing session (writehook.OnFileSaved). nil falls back to the
+	// immediate scan, never to no scan.
+	writehook.ConfigureSaveScan(d.AVScanAfterSave)
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 	wsh.AttachTenants(tenants)
@@ -1047,8 +1091,12 @@ func BuildRouter(d *Deps) http.Handler {
 	// X-Filex-Token / Bearer and attaches the bound principal + token;
 	// RequireScope gates verbs (read/write/delete/mcp). A token with no
 	// scopes set grants everything.
-	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
+	convertURL := func(ctx context.Context) string { return d.External.URL(ctx, external.Convert) }
+	aiH := handlers.NewAI(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL, convertURL)
 	aiH.AttachTenants(tenants)
+	// An agent-written file must be searchable at once, not when the next
+	// storage sync walks the folder. Nil index is a no-op.
+	aiH.AttachSearchIndex(d.Index)
 	aiH.AttachACL(d.ACL)
 	aiH.AttachThumbs(d.Thumbs)
 	aiH.AttachStaged(suh)
@@ -1065,11 +1113,15 @@ func BuildRouter(d *Deps) http.Handler {
 		ReplicaService:  d.ReplicaService,
 		ReplicaCron:     d.ReplicaCron,
 		ReplicaReloader: d.ReplicaReloader,
+
+		External:           d.External,
+		EnvManagedExternal: envManagedExternal(d.Cfg),
 	})
-	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, d.Cfg.ExternalServices.Convert.URL)
+	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, convertURL)
 	aiMCP.AttachTenants(tenants)
 	aiMCP.AttachACL(d.ACL)
 	aiMCP.AttachThumbs(d.Thumbs)
+	aiMCP.AttachSearchIndex(d.Index)
 	aiMCP.AttachStaged(suh)
 	aiMCP.AttachBody(d.Body)
 	aiMCP.AttachTickets(uploadTickets)
@@ -1132,6 +1184,7 @@ func BuildRouter(d *Deps) http.Handler {
 	sxUploadH.AttachTenants(tenants)
 	sxUploadH.AttachACL(d.ACL)
 	sxUploadH.AttachThumbs(d.Thumbs)
+	sxUploadH.AttachSearchIndex(d.Index)
 	sxUploadH.AttachStaged(suh)
 	sxUploadH.AttachBody(d.Body)
 	r.Route("/api/sharex", func(r chi.Router) {
@@ -1512,4 +1565,19 @@ func ftpsFacts(cfg config.Config, live func() string) handlers.FTPSFacts {
 		f.PasvMin, f.PasvMax = 30000, 30100
 	}
 	return f
+}
+
+// envManagedExternal reports which external services are PINNED by env/YAML.
+//
+// A pinned service is re-asserted onto its `external_services` row at every
+// boot (server.seedExternalDefaults), so an edit made in the admin UI applies
+// live but is reverted the next time filex starts. The admin API says so
+// instead of letting the operator discover it after a restart — the whole point
+// of issue #17 was a UI that looked like it had saved something it had not.
+func envManagedExternal(cfg config.Config) map[string]bool {
+	return map[string]bool{
+		external.OnlyOffice: cfg.ExternalServices.OnlyOffice.URL != "",
+		external.Drawio:     cfg.ExternalServices.Drawio.URL != "",
+		external.Convert:    cfg.ExternalServices.Convert.URL != "",
+	}
 }

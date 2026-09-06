@@ -71,7 +71,10 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   list, read, write, share and zip — nothing else.
 - **Real-time** — presence avatars (a profile picture set once on the account, shown for
   every client signed in as you) and live file updates over WebSocket, in the native UI
-  *and* in embedded contexts (short-lived ticket auth, API-polling fallback).
+  *and* in embedded contexts (short-lived ticket auth, API-polling fallback). A batch job
+  is coalesced on the way out, so extracting a five-thousand-file archive costs an open
+  explorer a bounded trickle of frames rather than five thousand
+  ([docs/REALTIME.md](docs/REALTIME.md)).
 - **On your desktop too** — the same explorer ships as a Windows/Linux/macOS app that keeps
   local folders in step with the server from the tray, updates itself, and holds several
   accounts (or tenants) side by side. Right-click a folder → **Keep on this computer** and
@@ -104,9 +107,9 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 │  Realtime:       │  WebSocket presence + live updates       │
 │  RBAC:           │  roles + per-item grants + share invites │
 │  AI / MCP:       │  /api/ai REST + native MCP server        │
-│  Sync Worker:    │  ETag diff + tombstone guard             │
+│  Sync Worker:    │  etag / size+mtime diff + tombstone      │
 │  Replica Layer:  │  primary→replica + rules + reconcile     │
-│  Protection:     │  trash + versions + ClamAV scanning      │
+│  Protection:     │  trash + versions + ClamAV (bin/clamd)   │
 │  E2E folders:    │  client-side WebCrypto (server blind)    │
 │  Notifications:  │  webhook + in-app bell + read/unread     │
 │  Search:         │  Bleve (full-text, embedded)             │
@@ -327,27 +330,27 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Storage plugins** — a storage filex has never heard of is a **separate program** you install from the admin panel: it describes its own config form, filex speaks a small HTTP/JSON protocol to it, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. filex **probes every capability a plugin claims** — at install, and again against the configuration you type when you save a storage on it — and refuses one that cannot do what it says, because a half-working driver produces failures that look like filex being broken. Upgrades replace the binary in place and roll back if the new one does not come up ([docs/PLUGINS.md](docs/PLUGINS.md)).
 - **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate — it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
 - **`filex mount`** — attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.
-- **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback.
+- **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback. One write is announced the moment it lands; a burst (a zip extraction, a folder upload, an NFS client writing chunk after chunk) is merged into one frame per window so the folder stays live without flooding the page ([docs/REALTIME.md](docs/REALTIME.md)).
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings. **Shared with me** answers the reverse question from the recipient's side — what other people granted you, and which storages you reach only through a grant.
 - **Drive shell (`uiProfile: 'drive'`)** — the end-user layout, and a preset of the same explorer rather than a second one: a primary **+ New** menu (upload files · new folder · request files), one **search field in the header** whose ⌘K / Ctrl+K chip hands the query to the command palette (the field searches this folder; the palette is where "everywhere", saved searches and commands live), a **Type · Modified · Size** filter row under the breadcrumb, **Folders** and **Files** as labelled sections in grid view, an info panel split into **Details** (with "People with access" and a share-link row) and **Activity** (version history and comments), and a **storage line** under the navigation. Density, theme, the shortcut editor and the other view modes stay one click away in the header's "⋯" menu — nothing is removed from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Navigation panel** — Upload as the primary action, the views Recent / Starred / Shared with me / Trash, the storages you can see, and **How to connect** + **API keys**: the per-protocol guides and the self-service token manager, opened from inside the explorer so an embedded copy's users can mint the credential WebDAV/FTPS/`filex mount` ask for instead of asking an administrator. Collapsible to an icon rail (remembered per browser), a drawer instead of a column under 560px. On by default in the web app, the desktop app and every embed; `uiProfile: 'simple'` additionally turns off the tab strip, the split pane, the gallery view mode and the "How to connect" surface without removing any of them from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Sharing** — public links with PIN, expiry and max-downloads, under an admin-set **maximum link life** (default 7 days — the dialog only offers what the server will keep); folder links stream as ZIP (cached, pre-warmed up to a size ceiling, swept after a week); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint ([docs/SHARING.md](docs/SHARING.md)).
 - **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
-- **Upload protection** — optional ClamAV scanning plus trash/version retention behind one admin surface ([docs/PROTECTION.md](docs/PROTECTION.md)).
+- **Write protection** — optional ClamAV scanning of every file written — the built-in editor included, and files the storage sync finds on the backend rather than through filex — reached through a local binary or a clamd container over the network; plus trash/version retention behind one admin surface. The switch, the scanner mode and address, the size ceiling and the editor save-scan window live on **Settings → Protection**; the `FILEX_CLAMAV*` variables seed them on a first boot and then step aside (the scanner's binary path stays environment-only, deliberately — it is a command this server executes) ([docs/PROTECTION.md](docs/PROTECTION.md)).
 - **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key. Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** — at install, or adopted later on a running installation; it never reaches existing folders on its own, but their owners are offered the choice at unlock — and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
 - **Native multi-tenancy** — provider/tenant mode with per-tenant isolation on one instance ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)).
 - **Driver-pluggable everything** — storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
 - **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).
 - **LDAP / Active Directory** — directory accounts sign in on the same password form as local ones, and on WebDAV/SFTP/FTPS/S3/NFS too; private-CA support, and `local` stays first so `admin@local` works while the directory is down ([docs/LDAP.md](docs/LDAP.md)).
 - **Replica + reconciliation** — primary→replica fan-out (mirror / append-only / skip per path-glob rule), read fallback, scheduled status report, one-click "Fix all".
-- **Persistent op queue** — restart-safe queue (SQLite / Redis / Postgres), worker pool with retries + cancel + admin dashboard.
-- **DB-backed file tree** — listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); periodic ETag-diff sync catches out-of-band changes.
+- **Persistent op queue** — restart-safe queue (SQLite / Redis / Postgres), worker pool with retries + cancel + admin dashboard. All three drivers order by priority, so the antivirus scan for a file somebody just uploaded is served ahead of the twenty thousand a first import queued.
+- **DB-backed file tree** — listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); a periodic sync catches out-of-band changes, by etag where the backend reports one and by size + modification time where it does not.
 - **Viewers & editors** — image/video/audio, PDF, Markdown (split editor + preview), CSV, code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models.
-- **Universal converter** — optional side-car converts between document/image formats from the UI.
-- **Notifications** — generic JSON webhook (Slack/Discord-agnostic) + in-app bell with read/unread + per-user mute matrix.
+- **Universal converter** — optional side-car converts between document/image formats from the UI. It, OnlyOffice and drawio are configured in the admin panel and apply to the running server, with no restart ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md), [docs/CONVERT-INTEGRATION.md](docs/CONVERT-INTEGRATION.md)).
+- **Notifications** — generic JSON webhooks (Slack/Discord-agnostic): any number of targets, each with its own signing secret and its own per-event subscription, plus an in-app bell with read/unread and a per-user mute matrix. A write that **creates** a file and a write that **replaces** one are different events (`file.uploaded` / `file.updated`), and the ones an operator most wants on their own — an infected upload quarantined, a failed upload, an encrypted folder opened with its recovery key — are subscribable individually ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
 - **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`) while numbers are matched literally (`2026` never means `2025`), `tag:` filters, exact matches ranked first.
-- **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware.
+- **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware. A cached thumbnail is released when the file it belongs to is deleted for good, and a periodic reconciler reclaims the orphans an older install accumulated ([docs/thumbnails.md](docs/thumbnails.md)).
 - **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there.
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.
 - **CLI client** — the same binary reaches a remote server (`filex client`, `filex sync`) with no server-side plugin ([docs/CLI.md](docs/CLI.md)).
@@ -374,7 +377,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 **Without a browser** — [Protocols (S3 · SFTP · FTPS · NFS · WebDAV ·
 `filex mount`)](docs/PROTOCOLS.md) · [WebDAV](docs/WEBDAV.md)
 
-**Storage & access** — [Storage](docs/STORAGE.md) · [Uploads & resume](docs/UPLOADS.md) ·
+**Storage & access** — [Storage](docs/STORAGE.md) · [Storage plugins](docs/PLUGINS.md) ·
+[Uploads & resume](docs/UPLOADS.md) ·
 [Quotas](docs/QUOTAS.md) · [SSO (OIDC)](docs/SSO.md) ·
 [LDAP & proxy auth](docs/LDAP.md) · [RBAC & permissions](docs/RBAC.md) ·
 [Multi-tenancy](docs/MULTI-TENANCY.md)
@@ -383,6 +387,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 [ShareX](docs/SHAREX.md) ·
 [Trash & versioning](docs/TRASH-VERSIONING.md) · [Protection](docs/PROTECTION.md) ·
 [E2E encryption](docs/E2E-ENCRYPTION.md) · [Search](docs/SEARCH.md) ·
+[Realtime & presence](docs/REALTIME.md) ·
 [Notifications](docs/NOTIFICATIONS.md) · [Thumbnails](docs/thumbnails.md) ·
 [Replication](docs/REPLICATION.md)
 

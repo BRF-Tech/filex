@@ -1,6 +1,6 @@
 ---
 title: Releases
-description: Every filex release with a plain-English summary of what changed — generated from the GitHub releases at build time.
+description: Every filex release with a plain-English summary of what changed — generated from the GitHub releases at release time.
 ---
 
 <!-- GENERATED FILE — do not edit by hand. Your edits will be overwritten.
@@ -12,20 +12,29 @@ description: Every filex release with a plain-English summary of what changed �
 # Releases
 
 Every published filex release, newest first. This page is generated from the
-[GitHub releases](https://github.com/BRF-Tech/filex/releases) each time the site is built, so a new
-tag shows up here without anyone writing it twice.
+[GitHub releases](https://github.com/BRF-Tech/filex/releases) by `npm run releases`, which is
+run once when a release is cut — not by the site build, which would rewrite this
+file on every contributor who ran it.
 
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.32.0, 5 September 2026
-The explorer gained a third shape. `uiProfile: 'drive'` lays it out the way someone arriving from Google Drive expects — one **+ New** menu, a single search field across the header with the command palette behind it, Type / Modified / Size filters, Folders and Files as labelled sections, and Details / Activity in the info panel. It is a preset of the same explorer rather than a second UI, so the npm packages and embeds get it too, and a non-admin lands on it. Windows finally has a copy that runs without being installed: one .exe that keeps its data beside itself, so deleting one folder leaves nothing behind on a machine that is not yours — Linux and macOS already had this. On encrypted folders, an installation that already exists can now adopt key escrow, and — the part that makes escrow reach anything real — the owner of a folder created before escrow was turned on can grant it themselves, from the unlock dialog, with the consequence spelled out. Search stopped treating numbers as typos, so `2026` no longer returns last year's report. Several things that had been quietly broken were fixed rather than found by users: the install banner covered the sign-in button, middle-click did nothing in gallery view, a search at a storage root answered with a folder called Trash that is not a folder, and the file-infected notification spoke Turkish to everybody.
+::: tip Latest — v0.33.0, 5 September 2026
+A release of things that were quietly wrong. A large upload to an S3 endpoint served over plain HTTP died inside the client and the storage sync then moved the file to the trash — reported from the outside, and worth knowing why it had never been seen here: SigV4 hashes the request body over `http` and does not over `https`, so filex was requiring a rewindable stream it never asked for, and the bug sat waiting for the first plaintext endpoint. Overwriting a file now keeps the old bytes: the snapshot happens before the write at every destructive surface, and if it cannot be taken the write is refused rather than losing the file — until now only the in-browser text editor versioned anything, so uploading over a file destroyed it. The S3 gateway stopped exposing filex's own `.versions/`, `.thumbs/` and `.filex-trash/` trees, which every other protocol had hidden since it was written. On a multi-tenant install every absolute URL now names the tenant's host rather than the operator's — share links, the WebSocket endpoint, and the account-created e-mail that carried a temporary password to somebody else's login page. And the product stopped speaking Turkish to people who never asked: the convert dialog, eighteen notifications, the file-request e-mail, and an embed that defaulted to Turkish now follow the locale, or the browser's, or English.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.32.0
-docker pull ghcr.io/brf-tech/filex:full-v0.32.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.33.0
+docker pull ghcr.io/brf-tech/filex:full-v0.33.0
 ```
+
+## v0.33.0
+
+<span class="filex-release-date">5 September 2026</span>
+
+A release of things that were quietly wrong. A large upload to an S3 endpoint served over plain HTTP died inside the client and the storage sync then moved the file to the trash — reported from the outside, and worth knowing why it had never been seen here: SigV4 hashes the request body over `http` and does not over `https`, so filex was requiring a rewindable stream it never asked for, and the bug sat waiting for the first plaintext endpoint. Overwriting a file now keeps the old bytes: the snapshot happens before the write at every destructive surface, and if it cannot be taken the write is refused rather than losing the file — until now only the in-browser text editor versioned anything, so uploading over a file destroyed it. The S3 gateway stopped exposing filex's own `.versions/`, `.thumbs/` and `.filex-trash/` trees, which every other protocol had hidden since it was written. On a multi-tenant install every absolute URL now names the tenant's host rather than the operator's — share links, the WebSocket endpoint, and the account-created e-mail that carried a temporary password to somebody else's login page. And the product stopped speaking Turkish to people who never asked: the convert dialog, eighteen notifications, the file-request e-mail, and an embed that defaulted to Turkish now follow the locale, or the browser's, or English.
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.33.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.33.0`
 
 ## v0.32.0
 
@@ -203,20 +212,13 @@ Share links now have a ceiling on how long they live, and the admin holds it: a 
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.0`
 
-## v0.24.1
-
-<span class="filex-release-date">22 August 2026</span>
-
-A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engine writes its sync history while it works — every 50 transfers or 15 seconds — instead of only at the very end, so a run interrupted at file 9,000 of 10,000 picks up with the pending 1,000 on the next round rather than turning everything it had already pushed into conflict copies.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.24.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.24.1`
-
 ## Earlier releases
 
-The 80 releases before v0.24.1, in brief. Full notes are on GitHub.
+The 81 releases before v0.25.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.24.1](https://github.com/BRF-Tech/filex/releases/tag/v0.24.1) | 22 August 2026 | A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engine writes its sync history while it works — every 50 transfers or 15 seconds — instead of only at the very end, so a run interrupted at file 9,000 of… |
 | [v0.24.0](https://github.com/BRF-Tech/filex/releases/tag/v0.24.0) | 22 August 2026 | A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at… |
 | [v0.23.0](https://github.com/BRF-Tech/filex/releases/tag/v0.23.0) | 20 August 2026 | The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window… |
 | [v0.22.0](https://github.com/BRF-Tech/filex/releases/tag/v0.22.0) | 20 August 2026 | Folders you also want on the computer are now one right-click away. “Keep on this computer” mirrors a server folder — or a whole storage — under a single filex folder chosen once per account, while everything else stays… |
@@ -300,4 +302,4 @@ The 80 releases before v0.24.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Generated 2026-09-05 from 100 published releases.</small>
+<small>Last refreshed 2026-09-06 from 101 published releases.</small>

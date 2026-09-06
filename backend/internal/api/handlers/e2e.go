@@ -273,7 +273,7 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 		name = root
 	}
 	ev := notify.Event{
-		Event:    notify.EventType("e2e.escrow_used"),
+		Event:    notify.EventE2EEscrowUsed,
 		Severity: notify.SeverityWarning,
 		Title:    "Encrypted folder opened with the escrow key",
 		Body:     root,

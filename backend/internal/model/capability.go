@@ -25,10 +25,22 @@ type Capabilities struct {
 	// content search index (v0.2 "Bul").
 	OCR bool `json:"ocr"`
 
-	// Antivirus reports whether an optional ClamAV binary was found
-	// (FILEX_CLAMAV_BIN or $PATH clamdscan/clamscan; FILEX_CLAMAV=0
-	// kill-switch) — async upload scanning (v0.4 "Koru").
+	// Antivirus reports whether async upload scanning (v0.4 "Koru") is both
+	// switched on and reachable-in-principle: the `antivirus.enabled`
+	// setting is true AND either a scanner binary resolved or a clamd
+	// address is configured.
+	//
+	// ⚠ It does not mean clamd ANSWERED. Reachability costs a network
+	// round-trip and is probed where an operator is waiting for the answer
+	// (GET /api/admin/protection), not on every capabilities fetch.
 	Antivirus bool `json:"antivirus"`
+
+	// AntivirusMode names HOW ClamAV is reached — "binary" (an executable on
+	// filex's $PATH) or "daemon" (clamd over TCP / a unix socket); empty when
+	// Antivirus is false. Two very different deployments produce the same
+	// green light, and the person looking at it has to know which one
+	// answered before they can debug it.
+	AntivirusMode string `json:"antivirus_mode,omitempty"`
 
 	// Per-storage capability probe — keyed by storage ID (string for JSON).
 	Storage map[string]StorageCapabilities `json:"storage,omitempty"`

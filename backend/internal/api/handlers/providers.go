@@ -10,7 +10,6 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Providers handles /api/admin/providers — the tenant lifecycle API
@@ -38,12 +37,12 @@ func NewProviders(store db.Store, multiTenant bool) *Providers {
 // requireSupertenant gates management: in multi-tenant mode only the
 // supertenant's admins pass (the route group already requires admin); in
 // single-tenant mode every admin passes (no scope is set).
+//
+// The decision itself lives in handlers/supertenant.go — one predicate for
+// every instance-wide admin surface, so there is a single place to read what
+// "instance-wide" is gated on and a single place to get it wrong.
 func (h *Providers) requireSupertenant(w http.ResponseWriter, r *http.Request) bool {
-	if scope, ok := tenant.FromContext(r.Context()); ok && !scope.IsSupertenant {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only the platform operator may manage tenants"})
-		return false
-	}
-	return true
+	return requireSupertenant(w, r, "tenants are managed by the platform operator")
 }
 
 type providerReq struct {

@@ -5,6 +5,934 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.34.0] - 2026-09-06
+
+### Upgrade notes
+
+- ⚠ **Webhook subscribers: a write that REPLACES a file now emits
+  `file.updated`, not `file.uploaded`.** Until this release every write
+  announced `file.uploaded` whether it had created a file or overwritten one,
+  because the post-write gate hard-coded the id — no filter could tell the two
+  apart. A target subscribed to `file.uploaded` in order to see edits will go
+  quiet; tick `file.updated` beside it on Settings → Webhooks. A target with an
+  empty event list still receives everything, and a target that only ever
+  wanted new files needs no change and now gets a quieter feed.
+
+- ⚠ **`FILEX_CLAMAV`, `FILEX_CLAMAV_BIN` and `FILEX_CLAMAV_MAX` are now
+  first-boot seeds, not live switches.** The antivirus on/off state, its mode
+  and the clamd address live in the settings table and are edited on
+  Settings → Protection. An existing `FILEX_CLAMAV=0` survives the upgrade —
+  it seeds the row — but changing it in `compose.yml` afterwards will have no
+  effect, which is a change in what that variable means.
+
+- **Redis queue users:** the pending queue converts from a list to an ordered
+  set on first boot so that priority is honoured. Every queued op is kept, in
+  the order the old build was about to serve them. Downgrading afterwards is
+  not supported.
+
+### Added
+
+- **Three events the server has been emitting all along are finally
+  subscribable, and a fourth that had no name at all now has one.** The
+  webhook subscription checkboxes were driven by a hand-written copy of the
+  backend's event list, and it had drifted: `file.upload_failed`,
+  `file.infected` and `comment.added` were being delivered to targets with an
+  empty allow-list but could not be ticked by anyone who wanted only those.
+  `file.infected` is the one that matters — filex scans uploads for viruses and
+  there was no way to ask it to tell you when it found one.
+
+  A fifth event was worse off. The escrow announcement — *an encrypted folder
+  was opened with the recovery key rather than its owner's passphrase*, about
+  as security-relevant as this product gets — was written as an inline
+  `notify.EventType("e2e.escrow_used")` inside a handler. It is emitted on
+  every escrow unlock, and because it was not a constant, nothing that reads
+  the event catalogue could see it. It is `EventE2EEscrowUsed` now and appears
+  in the list with the rest.
+
+  Every event in the list also gained a label an operator can read, in English
+  and Turkish, with the wire name kept underneath the checkbox — the checkbox
+  used to be labelled `file.trashed` and nothing else.
+
+- **`file.updated` — a write that replaced an existing file no longer claims a
+  new one arrived.** ⚠ **This is a behaviour change for existing webhook
+  subscribers.** Until now every write on every surface emitted
+  `file.uploaded`, whether the bytes created a file or overwrote one that was
+  already there, so nothing downstream could tell "a document arrived in this
+  folder" from "somebody edited that document" — and no filter could separate
+  them, because they were literally the same event id.
+
+  From this release the post-write gate splits them: **created →
+  `file.uploaded`, replaced → `file.updated`.** A target subscribed to
+  `file.uploaded` in order to see edits will go quiet and has to tick
+  `file.updated` as well (the admin UI lists it next to `file.uploaded`); a
+  target with an empty event list still receives everything, and one that only
+  ever wanted new files needs no change and gets a quieter feed.
+
+  It is one decision in one place — `writehook.OnFileWritten` now takes the
+  kind, so every surface answers the same question from the fact it already
+  had: the cache-row lookup it does anyway. That covers the browser upload
+  form, WebDAV `PUT`, S3 `PutObject`/`CopyObject`, SFTP, FTPS, NFS, the AI/MCP
+  write, the archive extractor and the ops-worker copy. Two paths are called
+  out because they answer it differently:
+
+  - The **staged (large-file) upload** asks the storage driver rather than the
+    catalogue, one statement before the overwrite. It has to: its node row is
+    published at commit time, before the bytes move, so by transfer time the DB
+    has a row either way and has forgotten whether it minted it — and unlike a
+    flag carried from commit, the driver's answer survives a restart in between.
+  - Where a surface genuinely **cannot tell** (the DB mirror was unreachable,
+    so there is no row to compare against) it reports `file.uploaded` — the
+    value the event carried before, rather than a wrong claim that a file was
+    edited.
+
+- **The text editor announced nothing at all.** `/api/files/save-text` wrote
+  the bytes, updated the row, re-indexed the file and scheduled the antivirus
+  scan — and never emitted an event, so a file created or rewritten in the
+  browser reached no webhook and no notification bell. It now goes through the
+  shared gate like every other write surface (`file.uploaded` on create,
+  `file.updated` on save), using the same `existing` lookup that already chose
+  between an immediate and a debounced scan. It keeps its own debounced scan:
+  the divergence is in the scan, never in the event.
+
+### Fixed
+
+- **The Office editor was the one write nothing looked at afterwards.** Every
+  other write surface in filex fans out through the shared post-write gate —
+  announce the change to open explorers, re-index for search, fire the webhook,
+  queue an antivirus scan — and this release *extended* that gate to two more
+  places. The OnlyOffice save-back was not one of them: it took its version
+  snapshot, wrote the revision, refreshed the node row, and stopped. So a
+  `.docx` edited in the browser kept its **pre-edit text in content search**,
+  never reached a `file.updated` subscriber, left another browser with the
+  folder open showing a stale listing, and — on an install where every upload
+  is scanned — **was never scanned**. Office documents are exactly the file
+  type macro-borne malware travels in, which is what made this the wrong gap to
+  ship a release about scan coverage with.
+
+  The callback now goes through the gate like everything else, as a
+  **replacement** (`file.updated`, never `file.uploaded` — a save-back
+  overwrites a document that was already there) stamped with a new
+  `meta.origin: "onlyoffice"`, because the bytes are assembled and posted by
+  the document server rather than by the browser that opened the file.
+
+  ⚠ **Whether the scan runs now or on the save window is decided by the
+  callback status, not by a rule of thumb.** The reason the browser's text
+  editor got a debounced window is that it cannot tell a mid-session Ctrl+S
+  from the last one. The document server does not make filex guess:
+
+  - **status 2** (ready for saving) arrives once per editing session, after
+    every editor has *closed* the document and the server has assembled the
+    final revision — roughly ten seconds after the last one disconnects. The
+    bytes are final and nobody is still typing, so it is scanned **immediately**,
+    like an upload. Deferring it would coalesce nothing (there is one save) and
+    would leave a finished document unscanned for up to a full window.
+  - **status 6** (force save) is an *interim* save with the document still
+    open. filex never asks for one and the document server does not send them
+    by default, but an operator can switch them on, and then they repeat for as
+    long as somebody keeps the document open — the shape of a Ctrl+S burst. It
+    takes the **debounced** window, the same one the text editor uses.
+
+  A session with force-save on therefore costs one scan per window while it is
+  open plus one immediate scan when it closes. That last one is deliberate: a
+  document server that dies mid-session never sends status 2, and then the
+  debounced scan of the interim bytes is the only one there will ever be.
+
+  ⚠ The driver `Stat` still lands on the row **before** the index runs, and
+  that ordering is load-bearing: content re-extraction is triggered by the
+  content fingerprint drifting, the fingerprint prefers the etag, and indexing
+  against the pre-edit etag would refresh the metadata while leaving the **old
+  text** searchable — most of the symptom being fixed.
+
+- **`/api/admin/protection` let any tenant admin turn antivirus off for every
+  tenant** — and three other instance-wide surfaces were open the same way.
+  Everything under `/api/admin` has passed `RequireAdmin`, and in multi-tenant
+  mode that means an admin of *some* tenant: the tenant resolver labels the
+  request without denying anything, and the scoped store filters three list
+  queries and nothing else. `/providers` and `/plugins` asked the extra
+  question. These did not:
+
+  - **`/protection`** — the antivirus switch, its mode and the clamd address
+    moved into the global settings table in this release, so one customer's
+    admin could disable scanning platform-wide or point the scanner at a host
+    they control. Trash and version retention sat beside it.
+  - **`/external`** — one document server, one converter, one shared JWT
+    secret: repointing it is enough to read and rewrite every tenant's office
+    documents in transit, and the Test button dials whatever it is given.
+  - **`/auth-providers`** — the global `auth.*` rows that decide who can sign
+    in to the instance at all (OIDC issuer and client secret, LDAP bind).
+  - **`/update`** — replaces the binary every tenant is served by.
+
+  All four now ask `requireSupertenant`, one predicate shared with `/providers`
+  and `/plugins` rather than a second mechanism. ⚠ The check lives in the
+  **handler**, not on the chi route, because the route is not the only door:
+  `/api/ai/admin` mounts the same handler instances behind an `admin`-scoped
+  API token, and the MCP admin tools drive those same methods in-process — a
+  route middleware would have closed one of three.
+
+  ⚠ **Reads are gated too, not only writes.** `/protection` returns the clamd
+  address in force and a live reachability probe; `/external` returns where the
+  document server lives. That is a map of the operator's internal
+  infrastructure, handed to somebody with no standing to act on it.
+
+  ⚠ **Single-tenant installs are unaffected, by construction.** The tenant
+  resolver attaches no scope when multi-tenant mode is off, absence means
+  "unscoped", and unscoped passes — there is no flag to set. The gate fails
+  *closed* the other way: an authenticated user whose provider cannot be
+  resolved already gets a deny-all scope, and it is refused rather than read as
+  "no scope, therefore single-tenant".
+
+  The surfaces that are still instance-wide and still ungated are now
+  **named** rather than half-closed — `/settings` (the same global table, but
+  `branding.*` keys are legitimately per-tenant, so it needs a per-key
+  classification and not a route gate), webhooks, replication targets and
+  rules, the search rebuild, the queue, the trash sweep, and a set of
+  cross-tenant metadata reads. See
+  [MULTI-TENANCY.md](docs/MULTI-TENANCY.md#instance-wide-admin-surfaces).
+
+- **A 403 that had a sentence to say showed a machine code instead.** The admin
+  SPA's error extractor preferred `data.error` over `data.message`, so a
+  response carrying both — the two `supertenant_only` and `plugins_disabled`
+  shapes — put `supertenant_only` on screen and threw away the explanation
+  written for the person reading it. `message` now wins when both are present;
+  the handlers that return only `error` are the majority and put the sentence
+  there, so they are unchanged.
+
+- **The plugins gate answered "plugins are disabled" before "not yours".** A
+  tenant admin who may not touch the surface at all could still learn whether
+  the operator had the subsystem switched on. The tenancy check runs first now.
+  Single-tenant installs see no difference: no scope is attached, the gate
+  passes, and a disabled subsystem still answers `503`.
+
+- **The docs-site build no longer hands you somebody else's diff.**
+  `cd docs-site && npm run build` is a mandatory release gate, so everybody
+  runs it — and it was `npm run releases && vitepress build`, which refetched
+  the GitHub releases and rewrote `docs/RELEASES.md` and
+  `docs-site/data/releases.json` every single time, restamping today's date
+  even when nothing had changed. Three people hit it in one day, each reverted
+  it by hand, and one release nearly committed the churn under an unrelated
+  message.
+
+  The build now runs an offline check instead (`check-releases.mjs`: the page
+  exists and lists at least one release, no network, no writes), and
+  regenerating is an explicit `npm run releases` at the release step that means
+  to do it. `docs/RELEASES.md` stays tracked and published — ignoring it was
+  never an option, readers see that page.
+
+  The generator is idempotent as well, which is the other half: `generatedAt`
+  only moves when the release list actually moved, and neither file is written
+  unless its bytes changed. So a curious `npm run releases` cannot dirty the
+  tree either — only a real new release can.
+
+- **Two gates now catch the drift that caused the above, instead of a user
+  reporting it.** The UI's event list stays a hand-maintained mirror on purpose
+  — the admin SPA is compiled into the server binary, so an endpoint listing
+  the events could never disagree with the bundled UI and would only add a way
+  for the checkbox list to render empty. What a mirror needs is a build-time
+  check, so it has one: `web/tests/webhooks/eventCatalog.test.ts` parses the Go
+  constants and fails when the two sets differ or an event is missing its
+  English or Turkish label, and `backend/internal/notify/catalog_test.go`
+  refuses an inline `EventType("x.y")` anywhere in the backend, so an event
+  cannot be born somewhere the catalogue does not look.
+
+- **The Redis queue driver ignored `Priority`.** Its pending set was a LIST
+  consumed with `BLMOVE`, and a list is positional: an op's priority was
+  persisted, returned by `Get` and rendered in the admin UI, and had no effect
+  whatsoever on the order ops came out. So the rule the SQLite and Postgres
+  drivers enforce — a scan the storage sync discovered sits one step below a
+  person's upload, `ORDER BY priority DESC, enqueued_at ASC` — simply did not
+  apply on Redis: a first import of 20 000 files was still FIFO and an upload's
+  scan still waited behind all of it. Measured on a real Redis with that
+  backlog, an interactive op waited **20.0 s** behind 18 000 sweep ops; it is
+  now served **first, in 1 ms**.
+
+  The pending set is a **sorted set** whose score encodes `priority DESC,
+  arrival ASC` exactly, and claiming is **one Lua script**: the removal from
+  pending, the move to running, the status write, the attempt bump and the
+  release of the coalescing key happen as one indivisible step. That is
+  stricter than what it replaces — `BLMOVE` moved the id and a *second*
+  transaction flipped the hash, and a process that died in the gap left an op
+  in no list at all, permanently `pending` in its own hash, which
+  `RecoverOrphans` then dropped. Type filtering no longer mutates anything
+  either: the script walks candidates in priority order and steps over the ones
+  this worker cannot handle, instead of popping them and pushing them back.
+  `Enqueue` is a script too, so it is one round trip rather than two and can no
+  longer leave a coalescing claim behind a write that failed.
+
+  ⚠ **What it costs:** the claim is no longer a blocking Redis command, because
+  a script cannot block. A worker with nothing to do now waits on a capped
+  doorbell list that every push into pending writes a token to, so an arriving
+  op still wakes a worker in about a millisecond. Two honest differences: a
+  token can be taken by a worker whose type filter does not match the op that
+  produced it, and a drained burst can leave a few stale tokens behind. Each
+  costs one extra script call, never a missed op.
+
+  ⚠ **Upgrading:** an install already running the Redis driver has a LIST at
+  the pending key, and `ZADD` against a list is a `WRONGTYPE` error. Startup
+  converts it, keeping every queued op and the order the old build was about to
+  serve them in — and improving it, since those ops now carry their priority.
+  Downgrading afterwards is not supported.
+
+- **A file replaced under a local storage was never noticed.** The storage sync
+  exists to find changes filex did not make; on the drivers that report no
+  etag — **local, SFTP, SMB, FTP**, and any WebDAV server that omits the header
+  — it found none, ever. Drift was an etag comparison, and comparing two empty
+  strings is never a difference, so a file swapped out underneath filex looked
+  unchanged on every pass: its size stayed stale in the catalogue, its extracted
+  text stayed stale in the search index (you found the old words, not the new
+  ones), and since the sync began queueing antivirus scans, a clean file could
+  be replaced with an infected one and nothing would ever read it again.
+
+  Where the backend reports no etag, drift is now the file's **size and
+  modification time** — the two fields every one of those drivers does report,
+  both already in the listing the walk just made, so a full walk costs what it
+  always did (20 000 files on local disk: 3.0–4.0 s per pass before, 3.0–4.0 s
+  after, with zero drift reported on three consecutive unchanged passes).
+
+  It catches an ordinary edit, a rewrite that keeps the same size, a file that
+  grew or shrank with its mtime preserved, and a restore whose mtime is *older*
+  than the row's. It does **not** catch a replacement that preserves both the
+  size and the modification time, or a rewrite landing in the same clock second
+  as the recorded mtime with the size unchanged — those need the content, and
+  hashing every file on every pass is not a walk anyone can run. See
+  [STORAGE.md → Drift detection](docs/STORAGE.md#drift-detection-what-a-replaced-file-looks-like).
+
+  Times are compared **to the second** deliberately: Postgres stores
+  microseconds, FTP's `MDTM` has no sub-second field and FAT keeps two-second
+  steps, so a finer comparison would report drift on every file on every pass —
+  which on an install with antivirus enabled is the whole storage re-scanned
+  every sync interval, forever. Directories are exempt for the same reason:
+  their row holds the cached *recursive* size, which a listing never reports.
+
+- **`Store.MoveNode` did not update `storage_key`, so a renamed or moved file
+  kept the key it had at its old path.** `storage_key` is not decoration:
+  versioning (`Snapshot` *and* `Restore`), the antivirus quarantine, the
+  id-addressed download in `Manager.Read` and the sync tombstone pass all hand
+  it to the storage driver **in preference to** `path`. Every one of them fails
+  *silently* on a miss, which is why this survived so long:
+
+  - `Snapshot` stats the stale key, gets `ErrNotFound`, and returns "nothing to
+    snapshot" — so the pre-overwrite guard passes with **zero versions written**
+    and the destructive write goes ahead. A moved file lost its history.
+  - The antivirus quarantine moves the stale key into `.filex-trash/`, tolerates
+    the `ErrNotFound`, marks the file quarantined and drops it from the search
+    index — **while the infected bytes stay live** at the real path, now
+    invisible to any future rescan.
+  - `Restore` writes the restored version to the stale path, leaving the real
+    file untouched, then stamps the node with the restored size and etag.
+  - A download by id 404s on a file the listing shows.
+  - `confirmGone` stats the stale key, gets a miss and tombstones a file that
+    is perfectly fine.
+
+  The column now follows the path on a **live** row. It deliberately does *not*
+  on a **trashed** one, where `storage_key` holds the original path: that is
+  the only record of where `trash.Service.Restore` puts the file back, and what
+  `sync.reconcileTrash` reads to tell a restorable deletion from a row that has
+  to be hard-deleted.
+
+  Existing rows are repaired by migration `00033`, because nothing else would:
+  the periodic storage walk only touches `seen_at` and `UpdateNodeMeta`, and
+  neither statement writes this column, so a wrong value survives every sync
+  run indefinitely. The repair is live rows only, and leaves an empty
+  `storage_key` alone (every reader already falls back to `path`).
+
+- **A single write announced itself three to six times, and a 5 000-file
+  extraction announced itself 5 000 times.** Both reached every open explorer
+  over the WebSocket. Measured on 2026-09-06 against a real NFSv3 mount and a
+  real browser.
+
+  The NFS half is not a bug in filex's counting — NFSv3 has no "close", so
+  go-nfs opens, writes and **closes** the handle on every write RPC, and filex
+  commits and announces on each close. `cp -p` of a 5 MB file: 1 `CREATE` +
+  5 × 1 MiB `WRITE` = **6 frames** for one file.
+
+  What the browser actually did with 5 000 frames turned out to be the more
+  interesting half, and it was not "re-render 5 000 times". The explorer already
+  coalesced — with a plain trailing debounce, which **starves**: while frames
+  arrive closer together than the 200 ms window, every one of them cancels the
+  pending reload. Measured in a real browser watching the folder being filled:
+  the first re-listing came **114 seconds** into the job, with a 40-second gap
+  in the middle. The open folder sat empty while five thousand files landed in
+  it.
+
+  Two changes, both in shared code, so the web app, the desktop app and every
+  `@brftech/filex` embed get them together:
+
+  - The realtime hub coalesces per folder on the **leading edge**: the first
+    change in a quiet room goes out immediately with nothing added to it, and
+    everything after it is merged into one trailing frame per window (200 ms,
+    doubling to 1.5 s while a burst continues, reset when the folder goes
+    quiet). A merged frame carries `count`, and keeps the file's name only when
+    every merged change was the same change — naming one of five thousand would
+    be worse than naming none. **Nothing is dropped, only merged**: a burst
+    always ends with a frame reflecting its final state.
+  - The explorer's reload debounce grew a ceiling (`burstDebounce`), so a
+    sustained stream from any source can no longer postpone the re-listing
+    indefinitely.
+
+  Measured, same steps, same instance, before → after:
+
+  | | before | after |
+  |---|---|---|
+  | frames, one 5 MB `cp -p` over NFS | 6 | **2** |
+  | frames, 5 000-file zip extraction | 5 000 | **134** (all 5 000 changes accounted for by `count`) |
+  | first re-listing of the open folder | 114.1 s | **0.46 s** |
+  | longest gap between re-listings | 40.5 s | **2.0 s** |
+  | longest single main-thread block | 1 087 ms | **360 ms** |
+  | single WebDAV PUT → frame | 24 ms | **21 ms** |
+  | single NFS write → frame reflecting final state | 171 ms | **218 ms** |
+
+  ⚠ The last two rows are the ones that decided the design. A window that
+  batches nicely but delays one ordinary upload would be a regression however
+  good the frame count looked, which is why the first change in a quiet room is
+  never delayed at all.
+
+  New page: [Realtime updates & presence](docs/REALTIME.md) — the socket, the
+  frames, the coalescing contract, and the debounce-with-a-ceiling advice for
+  anyone integrating against it.
+
+- **The README showed a screenshot advertising the private GitLab repo.** The
+  plugins picture had a `github.com/brf-tech/filex` footer in it, on a
+  page whose whole job is to be read by strangers on GitHub. It had also
+  outlived several releases while every other screenshot was retaken.
+
+  The cause was not the picture, it was the gate. `admin-plugins.png` needs the
+  example plugin built and really running, so the capture script builds it with
+  `go build` — and on a Windows workstation the Go toolchain lives in WSL, so
+  that is `ENOENT` every single time. The script logged one line, skipped the
+  shot, and **exited 0**. A release step that reports success while quietly
+  leaving the old file in place is not a gate.
+
+  Two changes: the script now falls back to cross-building through WSL, and a
+  shot it was asked for and could not take **fails the run** (`SHOTS_ALLOW_SKIP=1`
+  for a deliberate partial run). A wrong `SHOTS_PLUGIN_BIN` is an error rather
+  than a shrug, for the same reason.
+
+- **Files that arrive *on* a storage were catalogued, indexed and never
+  scanned.** Every write *through* filex is handed to ClamAV — uploads, the
+  AI/MCP surface, ShareX, drop links, the editor, both restore paths. A file
+  that turns up on the backend instead (`aws s3 cp` into the bucket, another
+  process writing on a mounted disk, everything that was already there when the
+  storage was pointed at the folder) reaches the catalogue only through the
+  periodic sync walk, which created the row, fed the search index and queued
+  content extraction — and never once handed the bytes to the scanner. That is
+  the one place a reader most expects a scan, because an operator who turned
+  scanning on believes the files in filex are scanned.
+
+  Measured end to end on a real instance with a real ClamAV: an EICAR sample
+  written straight into a storage folder, one sync pass — catalogued at the
+  root, trash empty, nothing in the log. The same run now quarantines it into
+  `.filex-trash/` and logs `antivirus: infected file detected … quarantined=true`.
+
+  The walk enqueues a scan in exactly two cases: a file it **newly catalogues**,
+  and a file whose **content drifted**. ⚠ Not "every file the walk sees" — the
+  walk sees the same objects forever, so scanning on sight would re-scan the
+  entire storage every sync interval, 96 times a day on the 15-minute default.
+  Eligibility is the ordinary one, so directories, empty files, oversized files
+  and anything under `.filex-trash/` or `.versions/` are refused exactly as on
+  the upload path, and an infected file the sync found is quarantined exactly
+  like an uploaded one.
+
+  ⚠ **The first import of an existing storage was the case that decided the
+  shape of this.** Point filex at a folder holding 20 000 files and one pass
+  queues 20 000 scans. The backlog itself is right — those files genuinely have
+  never been scanned — and it is cheap: 465 MiB drained in **53 s** on 4
+  workers with `clamdscan`, the walk itself about a second slower (0.8 s and
+  1.4 s over two runs), 1.95 MiB of queue rows. What was *not* right is where
+  it left everybody else: the queue
+  orders `priority DESC, enqueued_at ASC`, so at equal priority those 20 000
+  rows sit ahead of whatever arrives next, and a probe standing in for an
+  upload's scan, enqueued ten seconds into the import, waited **41 s** to be
+  picked up. Scans the sync asks for are therefore enqueued one step **below**
+  every other op filex queues; the same probe then waited **1 ms**, because an
+  interactive scan only ever waits for a worker to finish the one scan it is
+  holding.
+
+  There is deliberately **no cap** on how many a pass may enqueue: a file is
+  "newly catalogued" exactly once, so a per-pass cap would silently drop the
+  scans it deferred and leave them unscanned forever — a bound that reads like
+  safety and is really data loss. ⚠ Two honest limits go with it: without
+  `clamav-daemon`, `clamscan` re-loads its ~112 MB signature database on every
+  invocation — measured over the same code path, 0.25 scans/s on 4 workers,
+  which puts that same import at roughly **22 hours** — and the **Redis** queue
+  driver's pending list is positional and ignores `priority`, so on Redis the
+  first import is FIFO.
+
+- **External services tested green and then did not work: the admin UI and the
+  running process were reading different configurations** (GitHub issue #17).
+  An operator whose OnlyOffice / drawio / converter lived in a separate compose
+  file configured them the only way open to them — the admin UI — watched the
+  **Test** button answer 200 for each, saw `PATCH /api/admin/external/<name>`
+  save and `GET /api/admin/external` reflect it, and then got **"OnlyOffice is
+  not configured"** the moment they opened a `.ods`.
+
+  Both halves were true at once because they came from different places. The
+  admin API, the Test probe and `/api/files/capabilities` all read the
+  `external_services` **table**. Everything that *used* the configuration read
+  a snapshot of env/YAML taken once at boot: `server.New` built the OnlyOffice
+  service only `if cfg.ExternalServices.OnlyOffice.URL != "" && …JWTSecret != ""`,
+  so with nothing in the environment the service was **nil** and every editor
+  endpoint answered `503 {"error":"onlyoffice not configured"}` forever; the
+  converter URL was baked into the AI/MCP handlers the same way. Nothing an
+  operator did in the UI could reach the process.
+
+  ⚠ The reporter's "thumbnails still work" was the clue that named it. The
+  thumbnailer shells out to local binaries and consults external services *not
+  at all* — so the split was exactly "reads the DB" vs "reads the boot
+  snapshot", and thumbnails were in neither camp.
+
+  Reproduced against their stack (podman-shaped: a real Garage S3 over a plain
+  `http://` endpoint, SQLite, admin-API configuration only). Before: Test →
+  `{"reachable":true,"state":"ok"}`, capabilities → `onlyoffice_url` set,
+  `POST /api/files/onlyoffice/config` → **HTTP 503**. After, same steps, same
+  process: **HTTP 200** with a signed editor descriptor whose fetch URL serves
+  the document (285 bytes, ZIP magic). `file_root`'s converter URL went from
+  `null` to the configured URL the same way.
+
+  **The DB row is now the single runtime source of truth**, read on every use
+  (`internal/external`, 1-second cache, invalidated by the admin PATCH). Env
+  and `config.yaml` are declarative configuration *for* that row: a service they
+  name is re-asserted onto it at every boot, so editing `FILEX_ONLYOFFICE_URL`
+  and restarting still takes effect. An admin-UI edit to such a service applies
+  immediately and is reverted at the next start — `GET`/`PATCH
+  /api/admin/external` return `env_managed: true` for those and the UI labels
+  the card, rather than letting the operator discover it after a restart.
+
+  ⚠ Also fixed on the way: `GET` redacts a stored secret to `"***"`, and the
+  admin UI re-sends what it was shown, so a save that only changed the URL would
+  have written six asterisks over a working JWT secret. `PATCH` now ignores that
+  exact value.
+
+  ⚠ And the other way the same symptom could still be reached: **a URL with no
+  JWT secret**. The health probe hits `/healthcheck`, a Document Server with no
+  secret configured in filex answers it perfectly happily, and the editor then
+  refuses because there is nothing to sign the descriptor with — a green Test
+  next to "not configured" all over again. OnlyOffice with no secret is now
+  reported `unconfigured` without a probe (a reachable server proves nothing
+  there), and the Test button says *which* half is missing. drawio and the
+  converter need no secret and are unaffected.
+
+- **Deleted files left their bytes in `thumbs` and `uploads`, so disk was never
+  reclaimed** (GitHub issue #18).
+
+  **`thumbs` was an unbounded leak, and had been since v0.1.** Every generator
+  writes `<data>/thumbs/<node id>.jpg`; *nothing in the tree ever removed one*.
+  The `thumbnails` row went away with its node through the FK cascade, so the
+  catalogue looked clean while the directory only grew — a delete did not clear
+  it, purging from the trash did not, removing the whole storage did not, and
+  `filex thumb` had no prune. Measured against Garage: three files uploaded → 3
+  cached JPEGs; trashed → still 3; purged → **still 3, 5642 B**, with the
+  objects gone from S3 and the node rows gone from the database.
+
+  Two mechanisms now release them. A **purge** (trash emptied, retention expiry,
+  "delete permanently") drops the file and its row there and then, so the space
+  comes back when the user asks for it. And a **reconciler** — at boot and every
+  `FILEX_THUMBS_SWEEP_INTERVAL` (default 6 h, `0` disables) — deletes cached
+  files whose node no longer exists, which is what repairs an install that has
+  been accumulating orphans for versions. One log line per pass, including the
+  quiet ones.
+
+  ⚠ Deleting cached bytes is destructive, so the reconciler removes a file only
+  when **all** of: the name is exactly `<digits>.jpg`; the database *positively*
+  reports that id absent from `nodes` (a query error abandons the pass and
+  deletes nothing — "I could not ask" is never read as "it is gone"); node ids
+  are never reused, so an absent id cannot acquire a file later; and the file is
+  older than a 10-minute grace window. **A trashed file keeps its thumbnail** —
+  it is restorable, and a cleanup that cannot tell "deleted" from "restorable"
+  is the failure this must not be. Measured: live kept, trashed kept and still
+  servable after restore, orphan reaped (`scanned=3 removed=1 freed_bytes=2403
+  kept=2`).
+
+  **`uploads` was bounded but did not release what a purge made dead.** Staging
+  for an abandoned or failed upload ages out of the idle sweeper after
+  `FILEX_UPLOAD_STAGING_TTL` (24 h) — verified — but nothing shortened that when
+  the file those bytes belonged to was deleted permanently. Measured against
+  Garage with a failing transfer: **1,109,269 bytes** still held after the node
+  had been trashed *and* purged. The staged row is now looked up **by node id**
+  at purge and released with it, so only that node's bytes are touched; a row in
+  state `committing` is still left alone, because its bytes are being read by a
+  transfer right now. ⚠ Trashing releases nothing: for a failed transfer the
+  staging area holds the file's only copy.
+
+- **The storage sync un-deleted files, so a deletion undid itself and an
+  infected file left quarantine on its own.** Deleting in filex is a *rename*:
+  the bytes move to `.filex-trash/<unix>-<rand>__<name>` and the node row is
+  soft-deleted and retagged to that key. The sync worker then walked the
+  storage from `/` down with no idea any of that existed — it saw the object,
+  found no *live* row for it, found the soft-deleted one, and cleared
+  `deleted_at`.
+
+  It fired on **every pass, on every driver, with no condition attached**:
+  there is no incremental mode — poll, fsnotify and driver-watch all funnel
+  into the same full `RunOnce` walk — so there is no configuration in which it
+  does not happen, only ones where it happens sooner. Measured end to end
+  against
+  a real S3 backend (MinIO on a pinned port): delete `rapor.txt`, trash listing
+  shows 1, run one sync, trash listing shows **0** and the row's `deleted_at`
+  is back to `NULL` — plus a second row minted for the `.filex-trash` bucket
+  itself.
+
+  ⚠ Quarantine is the same operation. The antivirus job condemns a file by
+  calling the *same* `SoftDeleteAndRetag` with the *same* key shape, so nothing
+  in the catalogue distinguishes a quarantine from a user deletion — and the
+  resurrection therefore expired the security control on a timer nobody set.
+  There was no way for the sync to tell the two apart, and no need: both must
+  survive a sync pass.
+
+  ⚠ The rule was not careless. It was written for GitHub issue #5, where
+  `UNIQUE(storage_id, path_hash)` counted soft-deleted rows and one stale
+  trashed row permanently blocked a fresh create at the same path. Reviving the
+  row was the only way out **of that index**. Migration `00032` makes the index
+  live-only, exactly as `00018` already did for
+  `(storage_id, parent_id, name)`, and takes the reason away.
+
+  Two rules replace it:
+
+  - **The walk skips `.filex-trash/`.** The rows for everything in there
+    already exist, retagged to the very keys on the storage, and the trash
+    service owns them — restore and retention purge, never a listing.
+  - **A trashed row is never revived.** An object at a path where a trashed row
+    still sits is catalogued as a **new node**; the trashed row stays in the
+    trash, restorable and on the retention clock. Bytes that reappear at a path
+    are not the file that was deleted there — someone restored something out of
+    band, or a new file landed with an old name — and reviving the row would
+    hand them another file's identity, history, comments and shares while
+    nothing downstream ever looked at them again.
+
+  ⚠ Anything found **live** inside `.filex-trash/` is now repaired, which is
+  what heals an install that already ran the old code: a revived deletion is
+  soft-deleted again (keeping `storage_key`, so restore still knows where it
+  came from) and a row minted for the trash's own bytes is dropped outright.
+  That distinction matters in both directions — hard-deleting the first kind
+  destroys a restorable deletion, and soft-deleting the second puts a
+  `.filex-trash` entry in the trash listing whose purge would delete the trash
+  directory. Bytes are never touched either way.
+
+  ⚠ `seen` no longer counts trashed objects, so a storage whose trash held more
+  than 30 % of its objects trips the whole-listing tombstone guard **once** on
+  the first pass after upgrading: one warning, one skipped tombstone pass, and
+  the next run compares like with like.
+
+- **Restoring never scanned anything, on either path.** Two operations put
+  bytes live without passing an upload surface, and neither enqueued a scan.
+
+  - **Version restore.** Snapshots in `.versions/` are deliberately not scanned
+    when taken — every destructive write takes one, so scanning each would
+    multiply the scan load by the edit rate for bytes nobody can reach — which
+    left "overwrite the infected file with a clean one, then roll back" as a
+    way to put an infected file live on an install where every upload is
+    scanned. The scan now happens at restore, which is rare and is the moment
+    the bytes become live again.
+  - **Trash restore**, the neighbouring path, had the same gap and a stranger
+    version of it: the trash is where quarantine puts an infected file, so a
+    restore could release something ClamAV had condemned. Restoring a folder
+    scans every file in the subtree it brings back, not just the row the user
+    clicked.
+
+  ⚠ Both are asynchronous, exactly like an upload: the file is live and
+  unscanned until the verdict lands, and an infected verdict quarantines it
+  straight back. That window is not specific to restore — it is the window
+  every uploaded file has, and it is what stops a slow scanner stalling a
+  write. Blocking would make restore the only write surface in filex that waits
+  on ClamAV.
+
+- **A file created in filex's own text editor was never virus-scanned**, on an
+  install where every uploaded file is. Found while auditing write surfaces,
+  and reproduced before it was fixed: a real instance with a scanner wired, an
+  infected file typed into the browser editor, and an `ops_queue` that shows a
+  `content_index` job for that file and no `antivirus_scan` job at all — the
+  editor reached the storage driver, the catalogue and the search index, and
+  never the scanner.
+
+  `writehook.OnFileWritten` is the single post-write gate every upload path
+  goes through, and among other things it enqueues a scan. `save-text` never
+  called it, for a defensible reason: routing it through the gate would have
+  queued a full ClamAV pass on every Ctrl+S. The answer taken was to scan
+  nothing, which is how a text editor became a way to introduce an unscanned
+  file.
+
+  The two cases are now split, because they are genuinely different:
+
+  - **Creating** a file in the editor — a write to a path with no catalogue row
+    — scans **immediately**, exactly like an upload.
+  - **Saving** over a file that already exists schedules **one** scan, half an
+    hour out by default. Further saves inside that window are dropped rather
+    than rescheduled, so the window starts at the first save and the scan
+    cannot be pushed out indefinitely by someone who keeps typing. When it
+    runs it reads the file as it stands **then** — the final state, not the
+    content of the save that scheduled it. A burst of Ctrl+S costs exactly one
+    scan.
+
+  ⚠ The delay is a row in the operation queue (`ops_queue.not_before`), not a
+  timer inside the process. A `time.AfterFunc` would die with the process and
+  take every pending scan with it — on every deploy, which is exactly when a
+  server is most likely to restart. Measured: with a two-minute window, killing
+  the server mid-window and starting it again still quarantines the file.
+
+  ⚠ "One pending scan per file" is a new `dedup_key` column on `ops_queue`,
+  unique among **pending** rows only — so the key is released the moment a
+  worker claims the scan, and a save arriving after that queues a fresh one.
+  The asymmetry is deliberate: an extra scan wastes a scan, while a dropped one
+  is the bug being fixed. Two saves landing at the same instant produce exactly
+  one scan, never zero; the SQL drivers decide it with a guarded insert plus a
+  partial unique index, redis with `SET NX`.
+
+- **A Postgres-backed queue could never claim an operation.** `Dequeue` builds
+  its candidate SELECT with one placeholder per requested op type, then reused
+  that same argument list for the claim UPDATE, which references none of them —
+  so Postgres answered `could not determine data type of parameter $1`
+  (SQLSTATE 42P18) on every type-filtered dequeue. `queue.Pool` always passes
+  its registered handler types, so on `FILEX_QUEUE_DRIVER=postgres` nothing in
+  the queue ever ran: no antivirus scans, no content extraction, no async
+  copy/move/delete. It survived because no test had ever executed this driver —
+  the comment promising integration tests "when `FILEX_TEST_PG_DSN` /
+  `FILEX_TEST_REDIS_URL` are set" described tests that did not exist. They do
+  now, and they run the same contract against all three drivers.
+
+- **One unhandled op type could stall a Redis-backed queue completely.** Ops
+  enter the pending list on the left and are claimed from the right, but a type
+  the worker has no handler for was pushed back on the **right** — returning it
+  to exactly the position the next claim pops from. The worker re-examined the
+  same op until it hit its retry guard and then reported an empty queue, while
+  everything queued behind it waited, for as long as that op stayed pending.
+
+- **Delayed queue operations fired at the wrong time on any server not running
+  in UTC.** `ops_queue.not_before` is compared in SQL as a string, because
+  SQLite has no date type, and the sqlite driver was binding a Go `time.Time`
+  — which the SQL driver rendered with an offset and a monotonic-clock suffix
+  (`2026-09-06 04:42:59.215071132 +0300 +03 m=+0.118370428`). That does not
+  compare with `CURRENT_TIMESTAMP` at all. Measured on this driver: at
+  `TZ=Europe/Istanbul` a 100 ms delay was still not runnable 400 ms later,
+  while the identical test at `TZ=UTC` passed — which is why nobody had noticed,
+  CI runs at UTC, and the one existing test overrode `not_before` rather than
+  waiting for it. East of UTC a delayed op sat for the offset in extra hours;
+  west of UTC it became runnable immediately, i.e. the delay was silently
+  dropped. Times are now written the way SQLite writes them: UTC, second
+  resolution. The postgres and redis drivers were always correct (a real
+  `timestamptz`, and a ZSET scored by Unix seconds) and are unchanged. This
+  affected the queue's retry backoff as well as the new save scans.
+
+- **Half of filex's write surfaces put a file on the storage and told nobody
+  it was there.** Reported as "I upload a file and it shows up on screen ten
+  minutes later, not straight away". Ten minutes is the storage sync's poll
+  interval (900 s by default), and leaning on it was the bug: that sync exists
+  to *discover* changes filex did NOT make — an object dropped in a bucket with
+  `aws s3 cp`, a file written on the mount by another process. A write filex
+  performed itself needs no discovery.
+
+  Measured, not read. Every surface below was driven against a running instance
+  with the periodic sync disabled (`sync_mode=ondemand`), then checked three
+  ways: is there a node row, is there a Bleve document, does a `change` frame
+  reach a subscribed WebSocket. What that turned up:
+
+  - **WebDAV, SFTP, FTPS, NFS and the S3 gateway** — 20 operations between
+    them — recorded the row and indexed the file correctly (2-20 ms) and
+    emitted **nothing**. `internal/protocolsync`, the package that exists so
+    those five protocols share one implementation, had no reference to the
+    realtime hub at all.
+  - **The AI/MCP surface** (`/api/ai/upload`, MCP `file_write` / `file_mkdir` /
+    `file_move` / `file_unzip` / `file_zip`, ShareX, the credential-free upload
+    ticket) created the row and neither indexed nor emitted. A file an agent
+    wrote was not findable by search and no open explorer was ever told.
+  - **`file_delete` was worse than silent**: nothing removed the node from the
+    search index, so a file an agent deleted stayed findable for good, under
+    its `.filex-trash/…__name` alias, pointing at a path with nothing behind it.
+  - **An MCP folder move left its children behind** — only the top row was
+    re-homed, so every descendant row and index entry went on pointing at the
+    old path, and the listing handed out a path that 404s.
+  - **The async ops worker** (copy / move / delete started from the UI) updated
+    the row and the index and emitted nothing — so the user who started the
+    operation watched their own listing stay wrong.
+  - **Archive extract and archive add wrote bytes and did nothing else at all**:
+    no row, no index, no event, no frame. The extracted files existed on the
+    storage and were invisible to every read path in filex.
+  - **Restoring from trash never put the file back in the search index** (delete
+    correctly removes it), and **restoring a version left the index holding the
+    text of the version that had just been rolled back** — a content search
+    returned the file for a phrase it no longer contains and missed the phrase
+    it does. That one was not absent but wrong.
+  - **Saving from the built-in editor** never re-indexed, so the document kept
+    its pre-edit text indefinitely.
+
+  Why the silence mattered more than it looks: an explorer with a live
+  WebSocket **does not poll**. The 12 s timer in `useRealtime.ts` is the
+  fallback for a socket that has *failed*. Measured in a real browser — a write
+  that emitted no frame produced **zero** listing requests in 26 s and never
+  appeared; the next announced write produced exactly one request 196 ms later.
+  And the periodic sync does not rescue this either: it repairs rows and the
+  index and emits nothing, so before this change the only thing that could
+  refresh an open folder was the user navigating away and back.
+
+  The fix adds no new mechanism. `internal/protocolsync` — already the one
+  place five protocols share — gained the emitter and now announces from
+  `Write`, `EnsureDirChain`, `Move`, `Trash` and `Delete`, so all five
+  protocols and every future one are covered in one file. The emission is
+  deferred, so it fires even on the give-up paths: the bytes are on the storage
+  whether or not filex managed to write the row. The AI/MCP surface's private
+  cache helpers, which had drifted into a second, worse copy of that package,
+  now call into it — which is also what fixes the delete-index leak and the
+  folder move, both of which `protocolsync` had solved years earlier.
+
+  **Nothing was slow. Every failure was silence.** Against a 3-second
+  acceptance line, all 46 measured operations now land three orders of
+  magnitude inside it: the row appears in a listing in 1.4-13 ms, the file
+  becomes findable by search in 5-29 ms, and the change frame reaches a
+  subscribed client in under 100 ms — usually before the write call has even
+  returned. End to end in a real browser, a WebDAV PUT into a folder an
+  explorer already had open went from **never appearing** (35.8 s, zero listing
+  requests, still absent) to **visible in 224 ms**, of which 200 ms is the
+  frontend's deliberate debounce. No timer was shortened to achieve that; the
+  numbers were already fast when the announcement existed at all.
+
+- **A search for a file's name could report a hit with an empty index.**
+  `/api/files/search` falls back to a SQL `LIKE` over node rows when Bleve
+  returns nothing, gated on `storage_id`. That is deliberate and stays — but it
+  means a scoped name search proves the *row* exists, not the document. Three
+  of the surfaces above looked correctly indexed until they were re-probed
+  without `storage_id`. No behaviour change; recorded here because it is the
+  reason an earlier pass missed them.
+
+- **Directories created over a protocol stored a non-canonical path.**
+  `EnsureDirChain` built `dav/davdir` where every other producer writes
+  `/dav/davdir`. `pathkey.Hash` normalizes internally, so lookups, dedupe and
+  `parent_id` were all correct and the bug hid — it surfaced only in the string
+  `/api/files/search` handed back. The sharp edge was `Move`, which re-homes
+  descendants with `strings.TrimPrefix(n.Path, srcClean)`: an unslashed path
+  matches no canonical prefix, the trim silently does nothing, and the new path
+  comes out doubled.
+
+### Changed
+
+- **`docs/NOTIFICATIONS.md` was describing the notification system filex had
+  before webhook v2.** Most visibly it stated there is *"no server-side
+  per-event webhook filter"* — the filter has existed for releases and is the
+  entire point of the checkboxes above. The whole page was written around a
+  single global webhook, so it also said every event produces *exactly one*
+  POST (it produces one per destination), that a row is `skipped` whenever
+  `FILEX_WEBHOOK_URL` is empty (only when no target matches either), and that
+  every file event carries `meta.origin` (only the six write events do). The
+  payload table was missing `at`, `node`, `share` and `actor`; the header table
+  was missing `X-Filex-Event`, `X-Filex-Delivery` and `X-Filex-Signature`, and
+  scoped `Authorization` to every request rather than to the legacy webhook;
+  the admin endpoint table did not mention the five `/api/admin/webhooks`
+  routes; and both worked examples used `file_dropped`, an event id that was
+  renamed to `drop.received`. The per-user `muted_events` / `in_app_enabled`
+  fields are now marked for what they are — stored and returned, not yet
+  applied by any read path.
+
+- **ClamAV can now be a daemon on the other end of a socket, not just a binary
+  on filex's own `$PATH`.** A new **mode** setting picks between `binary`
+  (exec `clamdscan`/`clamscan`, as before) and `daemon` (talk clamd's protocol
+  over TCP — `clamav:3310` — or a unix socket path). Set it on
+  **Settings → Protection**, or seed it from `FILEX_CLAMAV_MODE` /
+  `FILEX_CLAMAV_ADDR`.
+
+  This closes a real gap rather than adding a preference. Under Docker, podman
+  and Kubernetes, ClamAV is normally its own container (`clamav/clamav`), and
+  the filex images ship no scanner — ClamAV plus its signature database is
+  close to a gigabyte — so the only previous answer was "build your own image".
+  Files are sent with clamd's `INSTREAM`, which streams the bytes down the same
+  connection the command went out on, so **filex and clamd need a network route
+  and not a shared filesystem**; `SCAN <path>` would have required the daemon
+  to see the same file, which is exactly what a container split does not give
+  you. It is also why the daemon path never writes a temp file, while the
+  binary path still has to.
+
+  ⚠⚠ **An unreachable daemon is visibly unavailable, never silently clean.**
+  Every failure — a refused connection, a timeout, a reply filex does not
+  recognise, clamd refusing a stream over its own `StreamMaxLength` — returns an
+  error, so the queue op fails and retries instead of marking the file scanned.
+  The Protection page probes clamd with `PING`/`PONG` and shows `reachable`
+  with the error text beside it, because a configured-but-dead daemon would
+  otherwise sit behind the same green badge as a working one.
+  `GET /api/capabilities` gained `antivirus_mode` for the same reason: two very
+  different deployments produce the same `"antivirus": true`.
+
+  `deploy/compose/docker-compose.full.yml` gained a `clamav` service under the
+  `clamav` profile, with a volume for the signature database.
+
+- **The antivirus on/off switch moved into the database too**, joining the scan
+  ceiling and the save-scan window. There is now a toggle on
+  **Settings → Protection** instead of only `FILEX_CLAMAV=0` in compose.
+
+  ⚠⚠ **It takes effect at the next restart, in both directions**, and the UI
+  says so at the moment you flip it — turning scanning on does not start it and
+  turning it off does not stop it until filex restarts, because the scan
+  pipeline is wired once at boot. That is a choice: making "off" immediate
+  while "on" stayed deferred would give you a control that is sometimes live
+  and sometimes not, with no way to tell which by looking at it. The API
+  reports `restart_pending` for as long as the stored configuration differs
+  from what the running process booted with, and the page keeps a band up until
+  the restart has actually happened. The mode and address settings are deferred
+  the same way; the scan ceiling and save-scan window stay live, because they
+  tune a pipeline that is already running.
+
+  `FILEX_CLAMAV` is now a **seed** like its siblings: an install that had
+  `FILEX_CLAMAV=0` keeps scanning off across the upgrade, and from then on the
+  switch is on the Protection page. Before the row exists — the window between
+  an upgrade and first-boot seeding — the variable is still honoured, so the
+  documented kill switch never stops working mid-upgrade.
+
+- `internal/dbsetting` grew **`BoolSpec`** and **`StringSpec`** beside the
+  existing `IntSpec`, so a setting that is a switch or an address is a struct
+  literal rather than a hand-rolled reimplementation of resolution order,
+  first-boot seeding and validate-on-save. A string setting carries its own
+  `Check` hook, because text has no bounds to clamp to: without one,
+  `clamav 3310` is accepted at save time and discovered at scan time, by the
+  file that did not get scanned.
+
+- **Two antivirus settings moved out of the environment and into the database**,
+  where the admin UI can change them without a restart: the **largest file
+  scanned** (was `FILEX_CLAMAV_MAX`) and the new **editor save-scan window**.
+  Both now have a field on **Settings → Protection**, both are validated when
+  you save them rather than silently clamped later, and both take effect on the
+  next scan rather than the next restart.
+
+  ⚠⚠ **If you configure antivirus by environment variable, your next change to
+  it will silently do nothing.** `FILEX_CLAMAV_MAX` and
+  `FILEX_CLAMAV_SAVE_WINDOW_MINUTES` are now **seeds**: they are read on a boot
+  where the setting has no stored row, and never again. After that the stored
+  value wins, editing your compose file and restarting changes nothing, and no
+  warning is printed — because a setting that already has a value is not
+  unusual. Use the Protection page.
+
+  Nobody loses their configuration on upgrade. The seed is applied per setting,
+  not per family, so a setting whose row does not exist yet is seeded from its
+  variable even if its siblings already have rows. `FILEX_CLAMAV_MAX` is in
+  bytes while the stored setting is in megabytes — the number an admin types —
+  and the conversion rounds **up**, so an upgrade can only leave the ceiling
+  the same or very slightly larger, never smaller.
+
+  `FILEX_CLAMAV_BIN` deliberately stays in the environment. The binary is a
+  path this server *executes*: an admin-writable field for it would turn an
+  admin account into arbitrary command execution as the filex process.
+  (`FILEX_CLAMAV`, the kill-switch, has since moved to the database as well —
+  see the next entry.)
+
+- A `change` frame now carries the name of the item that changed, from every
+  surface. The browser manager's own frames were the only ones that never did,
+  so a client keying off `name` — to highlight the row that changed, or to let
+  the hub carry a viewer's presence focus across a rename — got nothing from
+  the oldest path in the product and something from all the newer ones. A
+  single-item move or delete is now named; a batch still is not, because there
+  is no one name to give.
+
+- ⚠ The two rooms told about a move now hear **different** names. The source
+  hears the name that left and what it became; the destination hears only the
+  name that arrived. Sending the destination the source basename named a file
+  that is not in that folder.
+
+### Known issues
+
+- **An idempotent delete now broadcasts a refresh for a no-op.** Deleting a
+  path with no row and no bytes succeeds (the ops layer reports `ok`, S3
+  correctly answers `204`) and now emits a `delete` frame where it previously
+  emitted none. This falls out of the deliberate choice to announce on every
+  path, and it matters most on S3, where rclone and restic issue speculative
+  deletes routinely. Left as is: gating the emission on "a row actually
+  changed" would give back exactly the case the deferral exists to protect.
+
 ## [0.33.0] - 2026-09-06
 
 ### Added

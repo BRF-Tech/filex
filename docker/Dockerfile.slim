@@ -1,4 +1,4 @@
-# filex slim image (~40 MB)
+# filex slim image (~43 MB)
 #
 # The Go binary and the embedded admin UI, and nothing else. Image thumbnails
 # are produced in pure Go (internal/thumb/image.go), so they work here; every
@@ -16,8 +16,8 @@
 # Want the previews? Use `latest` / `full`, built from docker/Dockerfile.
 #
 # ⚠ Until v0.30.x the `slim` TAG was built from the full recipe: docs promised
-# ~40 MB and the registry served 511 MB compressed. This file is what makes the
-# name true again.
+# ~40 MB and the registry served 511 MB. This file is what makes the name true
+# again.
 #
 # Build (from repo root):
 #   docker build -t brftech/filex:slim -f docker/Dockerfile.slim .

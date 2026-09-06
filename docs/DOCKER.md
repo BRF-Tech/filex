@@ -56,7 +56,7 @@ docker build -t brftech/filex:slim -f docker/Dockerfile.slim .
 Both Dockerfiles are multi-stage:
 1. `frontend-build` — node 20 + pnpm, builds packages + admin UI
 2. `embed-prep` — stages the dist files
-3. `backend-build` — golang 1.23, builds with `//go:embed` consuming the staged dist
+3. `backend-build` — golang 1.25, builds with `//go:embed` consuming the staged dist
 4. runtime — `alpine:3.20`; this is the only stage where slim and full differ
 
 Pass build-args to embed version metadata into the binary:
@@ -81,6 +81,30 @@ docker build \
 | `onlyoffice`  | `onlyoffice` | OnlyOffice Document Server |
 | `postgres`    | `postgres`   | Postgres 16 (set `FILEX_DB_DRIVER=postgres`) |
 | `minio`       | `minio`      | S3-compatible blob store |
+
+The production-shaped stack in [`deploy/compose/docker-compose.full.yml`](../deploy/compose/docker-compose.full.yml)
+adds three more profiles — `drawio`, `convert` and **`clamav`**. The last one
+is how antivirus is meant to be run under Docker: **the filex images ship no
+scanner** (ClamAV plus its signature database is close to a gigabyte), so
+`clamav/clamav` runs as its own container and filex streams each file to it
+over the network. Two settings and nothing else:
+
+```yaml
+services:
+  filex:
+    environment:
+      FILEX_CLAMAV_ADDR: "clamav:3310"   # seeds daemon mode on first boot
+  clamav:
+    image: clamav/clamav:latest
+    profiles: ["clamav"]
+    volumes:
+      - clamav-db:/var/lib/clamav        # keep signatures across restarts
+```
+
+⚠ `FILEX_CLAMAV_ADDR` — like every `FILEX_CLAMAV*` variable except `_BIN` — is
+a **seed**, read on a boot where the setting has no stored row and never again.
+After that the switch, the mode and the address live on *Settings → Protection*
+([PROTECTION.md](PROTECTION.md#antivirus-clamav)).
 
 Bring up with:
 
@@ -208,10 +232,16 @@ files.example.com {
 
 ### Cloudflare Tunnel
 
-filex is plain HTTP/2 + WebSocket-free, so it works through `cloudflared`
-without QUIC issues. Add a public hostname pointing to
-`http://filex:5212` and CF will set the correct `X-Forwarded-*` headers
-automatically.
+Add a public hostname pointing to `http://filex:5212` and CF will set the
+correct `X-Forwarded-*` headers automatically.
+
+⚠ **Leave WebSocket support on.** filex serves a WebSocket at `GET /api/ws`,
+and an open explorer that has one **does not poll** — the 12 s re-listing is
+only the fallback for a socket that failed. Block the upgrade and every
+browser silently degrades to a folder that refreshes twice a minute, which is
+the shape of "I upload a file and it shows up ten minutes later". The MCP
+stream at `/api/ai/mcp` needs the same. See
+[Realtime](REALTIME.md) and [Deployment](DEPLOYMENT.md).
 
 ---
 
@@ -250,12 +280,16 @@ the file bytes — the storage is the source of truth.
 
 ### What's safe to lose
 
-- `data/search/`  — Bleve index. Rebuilt from DB on next sync if missing.
-- `data/thumbs/`  — Cache. Regenerated lazily.
-- `data/tmp/`     — Multipart staging. In-flight uploads will need to retry.
+- `data/search.bleve/` — Bleve index. Rebuilt from the DB if missing.
+- `data/thumbs/`  — Cache. Regenerated lazily; a cached file is released when
+  its node is purged, and orphans are swept every `FILEX_THUMBS_SWEEP_INTERVAL`.
+- `data/cache/`   — read cache for slow storages.
+- `data/uploads/` — staging for chunked and resumable uploads. In-flight
+  uploads will need to retry. ⚠ For a transfer that has not committed yet,
+  this is the file's **only** copy.
 
 What's **not** safe to lose:
-- `data/filex.db` (or your Postgres/MySQL DB) — auth, shares, audit, sync metadata.
+- `data/instance.sqlite` (or your Postgres/MySQL DB) — auth, shares, audit, sync metadata.
 - `data/.first-run.txt` — initial admin password (only useful pre-first-login).
 
 ---

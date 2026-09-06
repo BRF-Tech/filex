@@ -279,7 +279,7 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	node, err := u.upsertNode(r.Context(), cu.StorageID, cu.StorageKey, size, mime, etag, mtime)
+	node, kind, err := u.upsertNode(r.Context(), cu.StorageID, cu.StorageKey, size, mime, etag, mtime)
 	if err != nil {
 		slog.Warn("upload: node upsert failed",
 			slog.String("path", cu.StorageKey),
@@ -288,7 +288,7 @@ func (u *Upload) Finalize(w http.ResponseWriter, r *http.Request) {
 
 	if node != nil {
 		/* bag:b3 event + koru:k2 av — single post-write gate */
-		writehook.OnFileWritten(r.Context(), cu.StorageID, node, writehook.OriginManager,
+		writehook.OnFileWritten(r.Context(), cu.StorageID, node, writehook.OriginManager, kind,
 			map[string]any{"chunked": true})
 	}
 
@@ -349,8 +349,11 @@ func (u *Upload) Abort(w http.ResponseWriter, r *http.Request) {
 
 // upsertNode either creates a new node row or updates an existing one for
 // the (storage, path) pair. Returns the resulting node so callers can
-// dispatch follow-up work (thumbnails, indexing).
-func (u *Upload) upsertNode(ctx context.Context, storageID int64, p string, size int64, mime, etag string, mtime time.Time) (*model.Node, error) {
+// dispatch follow-up work (thumbnails, indexing), plus whether the row was
+// created or an existing one replaced — the write hook needs that to pick
+// between file.uploaded and file.updated, and this lookup is the fact, so
+// no caller has to repeat it.
+func (u *Upload) upsertNode(ctx context.Context, storageID int64, p string, size int64, mime, etag string, mtime time.Time) (*model.Node, writehook.WriteKind, error) {
 	clean := "/" + strings.TrimLeft(path.Clean("/"+p), "/")
 	hash := pathkey.Hash(storageID, clean)
 	if existing, err := u.Store.GetNodeByPath(ctx, storageID, hash); err == nil && existing != nil {
@@ -358,7 +361,7 @@ func (u *Upload) upsertNode(ctx context.Context, storageID int64, p string, size
 		existing.Size = size
 		existing.Mime = mime
 		existing.Etag = etag
-		return existing, nil
+		return existing, writehook.Replaced, nil
 	}
 	n := &model.Node{
 		StorageID:  storageID,
@@ -377,7 +380,7 @@ func (u *Upload) upsertNode(ctx context.Context, storageID int64, p string, size
 	}
 	created, err := u.Store.CreateNode(ctx, n)
 	if err != nil {
-		return nil, fmt.Errorf("create node: %w", err)
+		return nil, writehook.Created, fmt.Errorf("create node: %w", err)
 	}
-	return created, nil
+	return created, writehook.Created, nil
 }

@@ -377,7 +377,7 @@ func TestTenantURLs_InviteShareFallback(t *testing.T) {
 // node's storage.
 func aiShareURL(t *testing.T, f *tenantFixture, multi bool, path string) string {
 	t.Helper()
-	ai := handlers.NewAI(f.store, f.resolver, share.NewService(f.store), tenantOperatorURL, "")
+	ai := handlers.NewAI(f.store, f.resolver, share.NewService(f.store), tenantOperatorURL, nil)
 	ai.AttachTenants(f.tenants(multi))
 
 	body, _ := json.Marshal(map[string]any{"path": path})
@@ -414,7 +414,7 @@ func TestTenantURLs_UploadTicket(t *testing.T) {
 	mkdirNode(t, f.store, f.storage, f.root, "docs")
 
 	ticketURL := func(multi bool) string {
-		ai := handlers.NewAI(f.store, f.resolver, nil, tenantOperatorURL, "")
+		ai := handlers.NewAI(f.store, f.resolver, nil, tenantOperatorURL, nil)
 		ai.AttachTickets(handlers.NewUploadTicketStore())
 		ai.AttachTenants(f.tenants(multi))
 

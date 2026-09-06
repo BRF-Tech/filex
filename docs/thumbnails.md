@@ -13,6 +13,7 @@ kind degrades gracefully instead of erroring.
 - [How it works](#how-it-works)
 - [Generators & required tools](#generators--required-tools)
 - [Configuration](#configuration)
+- [Reclaiming the cache](#reclaiming-the-cache)
 - [The Docker image & bundled tools](#the-docker-image--bundled-tools)
 - [Serving](#serving)
 - [Backfill — catching up existing files](#backfill--catching-up-existing-files)
@@ -51,6 +52,9 @@ Generation is triggered two ways:
 2. **Backfill** — a one‑shot pass over files that already exist in the cache (see
    [Backfill](#backfill--catching-up-existing-files)).
 
+Cached JPEGs are released two ways, both described in
+[Reclaiming the cache](#reclaiming-the-cache).
+
 ---
 
 ## Generators & required tools
@@ -88,12 +92,53 @@ Notes:
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | *(unset)* | env | Set `once` (or `true` / `1`) to run one background backfill on startup. See [Backfill](#backfill--catching-up-existing-files). |
 | `thumbs.cache_dir` | `<data_dir>/thumbs` | **config.yaml only** | Directory the cached `<id>.jpg` files live in. No env override. |
 | `thumbs.formats` | `[image, video, pdf, office]` | **config.yaml only** | Declares the kind list. No env override. |
+| `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | env / `thumbs.sweep_interval` | How often the cache is reconciled against the node catalogue. `0` disables the sweeper entirely. See [Reclaiming the cache](#reclaiming-the-cache). |
 
 There is **no env var or config key for the external tools** — filex probes
 `PATH` at boot (`ffmpeg`, `gs`, `pdftoppm`, `libreoffice`/`soffice`,
 `rsvg-convert`) and enables each kind accordingly. In practice a kind renders
 when its MIME type matches **and** its tool is present; `cache_dir` is the
 `thumbs.*` value read at runtime.
+
+---
+
+## Reclaiming the cache
+
+A thumbnail outlives nothing: when its file is gone for good, so are its bytes.
+
+**At the moment of deletion.** Purging a file — emptying the trash, a retention
+expiry, or "delete permanently" — removes its `<id>.jpg` and its `thumbnails`
+row there and then, so the space comes back when the user asks for it.
+
+⚠ **Trashing a file does not.** A trashed file is restorable and keeps its
+thumbnail, so it is on screen the instant it comes back.
+
+**The sweeper.** Every `FILEX_THUMBS_SWEEP_INTERVAL` (and once at boot) filex
+walks the cache directory and deletes files whose node no longer exists. This is
+what repairs an install that has been accumulating orphans — from a removed
+storage, a sync tombstone, or simply from a version of filex that never cleaned
+up at all — and it logs one line per pass, including the passes that delete
+nothing:
+
+```
+thumb cache sweep dir=/data/thumbs scanned=20412 removed=317 freed_bytes=6114233 kept=20095 skipped=0 interval=6h0m0s
+```
+
+A file is deleted only when **all** of the following hold, which is what makes
+the sweeper safe to run unattended:
+
+1. its name is exactly `<digits>.jpg` — nothing else in the directory is ever a
+   candidate, so a file you put there yourself is left alone;
+2. the database **positively reports** that node id absent from `nodes`. A
+   trashed node still has a row. If the query fails, the pass is abandoned and
+   nothing is deleted — "I could not ask" is never read as "it is gone";
+3. node ids are never reused (`AUTOINCREMENT` on SQLite, `BIGSERIAL` on
+   Postgres), so an id that is absent today cannot acquire a file tomorrow;
+4. the file has not been written within the last 10 minutes, so a thumbnail
+   still being generated is never judged mid‑flight.
+
+Set `FILEX_THUMBS_SWEEP_INTERVAL=0` to turn it off; nothing else in filex
+removes a cached thumbnail on a schedule.
 
 ---
 
@@ -280,6 +325,12 @@ while `filex serve` is live.
 The cache lives at `<data_dir>/thumbs/<id>.jpg` and is safe to delete. Remove the
 stale file (or the whole `thumbs/` dir) and re‑run `filex thumb backfill
 --retry-failed` — the cache is regenerated lazily.
+
+⚠ This also covers a case nobody does by hand: a file **replaced on the backing
+storage**, which the storage sync now notices on every driver. The sync updates
+the row, the search index and the antivirus verdict — and does **not** touch
+the cached JPEG, so the grid keeps showing the old picture until something
+removes the file. Same fix: delete `<data_dir>/thumbs/<id>.jpg`.
 
 ---
 

@@ -28,6 +28,9 @@ const DefaultPollInterval = 15 * time.Minute
 type Worker struct {
 	store db.Store
 	index *search.Index // optional — when set, sync upserts feed Bleve
+	// avScan, when set, enqueues an antivirus scan for a file the walk has
+	// just catalogued or whose content drifted. See AttachAntivirus.
+	avScan func(ctx context.Context, n *model.Node)
 	// fallback is the global poll cadence for storages with no interval of
 	// their own (FILEX_SYNC_INTERVAL).
 	fallback time.Duration
@@ -68,6 +71,25 @@ func NewWithInterval(store db.Store, fallback time.Duration) *Worker {
 // about whatever the admin's `Rebuild` button has flushed.
 func (w *Worker) AttachIndex(idx *search.Index) {
 	w.index = idx
+}
+
+// AttachAntivirus wires the antivirus enqueue so files that arrive ON a
+// storage — rather than through a filex write surface — are scanned too.
+//
+// A file dropped into a bucket with `aws s3 cp`, written on a mounted disk by
+// another process, or simply already there when the storage was added, is
+// discovered by the walk, catalogued and content-indexed. Until this hook it
+// was never handed to ClamAV, which is precisely the place an operator who
+// turned scanning on assumes a scan happens.
+//
+// fn is queue.AntivirusScanner.EnqueueDiscovered bound to the queue driver: it
+// is best-effort by contract (an enqueue failure is logged, never returned)
+// and it applies Supports()/Eligible() itself, so directories, oversized files
+// and anything under `.filex-trash/` or `.versions/` are refused there rather
+// than second-guessed here. nil (no ClamAV binary, or no persistent queue)
+// leaves the walk byte for byte as it was.
+func (w *Worker) AttachAntivirus(fn func(ctx context.Context, n *model.Node)) {
+	w.avScan = fn
 }
 
 // Start launches one syncer per enabled storage. ctx is the parent
@@ -164,6 +186,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 	syncer := &storageSyncer{
 		store:    w.store,
 		index:    w.index,
+		avScan:   w.avScan,
 		storage:  st,
 		driver:   driver,
 		ctx:      ctx,
@@ -185,6 +208,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 type storageSyncer struct {
 	store   db.Store
 	index   *search.Index
+	avScan  func(ctx context.Context, n *model.Node)
 	storage *model.Storage
 	driver  storage.Driver
 	ctx     context.Context

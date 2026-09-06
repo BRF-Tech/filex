@@ -658,6 +658,27 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 		return err
 	}
 
+	// Created vs replaced, asked of the DRIVER and asked HERE.
+	//
+	// ⚠ Every other surface answers this from its node-row lookup, and this
+	// one cannot: Commit already ran publishStagedNode, so by the time the
+	// bytes move there is a row at this path either way -- the DB has
+	// forgotten whether it minted it. The storage itself has not. An object
+	// still sitting at the target key one statement before we overwrite it is
+	// exactly "a file was already there", and unlike a flag carried from
+	// commit it survives a restart between commit and transfer.
+	//
+	// Inconclusive Stat (driver unwell, unsupported) degrades to Created --
+	// the value the event carried before file.updated existed. A RETRY after a
+	// transfer that failed part-way can find its own leftovers and report
+	// Replaced; on the drivers that matters for (a plain Writer, not S3 -- a
+	// multipart upload publishes no object until Complete) it is also not
+	// wrong: there really are bytes at that key being overwritten.
+	writeKind := writehook.Created
+	if obj, serr := drv.Stat(ctx, row.StorageKey); serr == nil && obj.Kind != storage.KindDirectory {
+		writeKind = writehook.Replaced
+	}
+
 	// ⚠ Deliberately NOT writehook.BeforeOverwrite here, even though this is
 	// the function that actually writes the bytes. Both routes into this
 	// transfer -- Commit (this file) and IngestStream (upload_staged_ingest.go)
@@ -733,7 +754,7 @@ func (h *StagedUpload) transfer(ctx context.Context, row *model.StagedUpload) er
 		h.Manager.indexNode(ctx, node)
 		h.Manager.dispatchThumb(node)
 		/* bag:b3 event + koru:k2 av — single post-write gate */
-		writehook.OnFileWritten(ctx, row.StorageID, node, writehook.OriginManager,
+		writehook.OnFileWritten(ctx, row.StorageID, node, writehook.OriginManager, writeKind,
 			map[string]any{"staged": true})
 		emitFolderChange(row.StorageID, storageRelDir(node.Path), realtime.ChangeEvent{Action: "upload"})
 	}

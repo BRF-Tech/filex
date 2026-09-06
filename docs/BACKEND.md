@@ -12,10 +12,13 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Archives](#archives)
 - [Sharing](#sharing)
 - [Thumbnails](#thumbnails)
+- [Realtime (WebSocket)](#realtime-websocket)
 - [Operations (long-running)](#operations-long-running)
 - [Admin: storages](#admin-storages)
 - [Admin: users](#admin-users)
 - [Admin: external services](#admin-external-services)
+- [Admin: protection & antivirus](#admin-protection--antivirus)
+- [Admin: webhooks](#admin-webhooks)
 - [Admin: sync runs](#admin-sync-runs)
 - [Admin: audit log](#admin-audit-log)
 
@@ -113,32 +116,44 @@ focus change — unlike the branding logo, which is fetched once per page.
 Tells the frontend what features are available — used to hide buttons for
 disabled features.
 
-**Response 200**
+**Response 200** (abridged — the real body also carries the per-storage probe,
+build metadata and a set of flat aliases kept for older embeds)
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.34.0",
+  "upload": true, "move": true, "copy": true, "delete": true, "mkdir": true,
+  "search": true, "versions": true, "ocr": false,
   "thumbs": {
     "enabled": true,
     "image": true, "video": true, "pdf": true, "office": false
   },
+  "antivirus": true,
+  "antivirus_mode": "daemon",
   "external": {
-    "onlyoffice_url": "https://docs.example.com",
-    "drawio_url": "",
-    "mermaid": true
+    "onlyoffice": { "enabled": true, "url": "https://docs.example.com", "state": "ok" },
+    "drawio":     { "enabled": false, "url": "", "state": "" },
+    "convert":    { "enabled": false, "url": "", "state": "" }
   },
-  "auth": {
-    "drivers": ["local", "oidc"],
-    "allow_signup": false
-  },
-  "limits": {
-    "max_upload_bytes": 5368709120,
-    "max_archive_bytes": 1073741824
-  },
+  "onlyoffice_url": "https://docs.example.com",
+  "drawio_url": "",
+  "convert_url": "",
+  "max_upload_size": 5368709120,
+  "chunk_size": 8388608,
+  "auth_drivers": ["local", "oidc"],
+  "storage_drivers": ["ftp", "local", "s3", "sftp", "smb", "webdav"],
+  "db_driver": "sqlite",
   "share_max_ttl_days": 7
 }
 ```
 Cached client-side for 1h. `share_max_ttl_days` is the longest life a new share
 link may be given (0 = no ceiling; [PROTECTION.md](PROTECTION.md)).
+
+⚠ `antivirus` means **configured**, not answering: the setting is on and either
+a scanner binary resolved or a clamd address is set. Reachability costs a
+network round trip and is probed on `GET /api/admin/protection`, where an
+operator is waiting for the answer. `antivirus_mode` is `binary` or `daemon`
+and is absent when `antivirus` is false — the two deployments produce the same
+green light and behave very differently when one of them breaks.
 
 ---
 
@@ -296,6 +311,23 @@ but with `path` echoing the matching entry's full path.
 `POST /api/files/search` takes the same fields as a JSON body. Hits come back in
 a defined rank order — exact filename, prefix, name, path, fuzzy, then
 content-only. Full reference: [SEARCH.md](SEARCH.md).
+
+### `POST /api/files/save-text` ![user](https://img.shields.io/badge/-user-blue)
+Writes the body of the built-in text / code / Markdown editor. Takes a version
+snapshot of what it is about to replace, writes the bytes, updates the row and
+re-indexes the file.
+
+⚠ Creating and saving are **different events** and get **different scans**:
+
+| | event | antivirus |
+|---|---|---|
+| the path has no row yet | `file.uploaded` | scanned **immediately**, like an upload |
+| the path already holds a file | `file.updated` | **one** scan scheduled `antivirus.save_scan_window_minutes` out; further saves inside that window join it rather than rescheduling, and it reads the file as it stands *then* |
+
+So a burst of Ctrl+S costs exactly one scan, and the window cannot be pushed
+out indefinitely by somebody who keeps typing. The delay is a row in the
+operation queue, not a timer in the process, so it survives a restart. See
+[PROTECTION.md → Files written in the editor](PROTECTION.md#files-written-in-the-editor).
 
 ---
 
@@ -496,6 +528,33 @@ cookie.
 
 ---
 
+## Realtime (WebSocket)
+
+### `POST /api/files/ws-ticket` ![user](https://img.shields.io/badge/-user-blue)
+Mints a short-lived ticket for the socket, and returns the **absolute**
+`ws_url` to open. An embedded client that cannot send a cookie uses this;
+a same-origin browser can upgrade with its session instead.
+
+### `GET /api/ws` ![user](https://img.shields.io/badge/-user-blue)
+The WebSocket. Subscribe to the folders on screen and receive **presence**
+frames (who else is here, what they have focused) and **change** frames
+(something in this folder moved).
+
+⚠ Two things break integrations if they are not known:
+
+- an explorer with a healthy socket **does not poll** — the 12 s re-listing is
+  the fallback for a socket that failed. A reverse proxy that does not pass the
+  upgrade on this path turns live updates into a folder that refreshes twice a
+  minute, silently;
+- the same-origin, cookie-authenticated upgrade is **origin-checked**, so the
+  proxy must preserve the real `Host` header.
+
+Frame shapes, the coalescing contract (a burst is merged into one frame per
+window, carrying `count`) and the client-side debounce advice are in
+[REALTIME.md](REALTIME.md).
+
+---
+
 ## Operations (long-running)
 
 Copy / extract / archive create kick off background ops.
@@ -560,7 +619,9 @@ See [STORAGE.md → Driver descriptors](STORAGE.md#driver-descriptors-get-apiadm
 Storage drivers that live outside the binary. Instance-wide, and in
 multi-tenant mode **supertenant-only** (a tenant admin gets `403
 supertenant_only`, not an empty list). With `FILEX_PLUGINS_DISABLED=1` every
-route answers `503 plugins_disabled`. Full picture: [PLUGINS.md](PLUGINS.md).
+route answers `503 plugins_disabled`. ⚠ The two are checked in that order: a
+tenant admin is refused *before* being told whether the operator has plugins
+switched on. Full picture: [PLUGINS.md](PLUGINS.md).
 
 ### `GET /api/admin/plugins` ![admin](https://img.shields.io/badge/-admin-red)
 Every registered plugin plus its live state — the row is the admin's intent,
@@ -702,7 +763,7 @@ Storages created on it are left in place.
 > accepts connections and then says nothing cannot hang the save.
 > See [PLUGINS.md → Conformance](PLUGINS.md#conformance-a-plugin-has-to-prove-its-claims).
 
-### `PUT /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
+### `PATCH /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Same body shape; partial updates allowed. A plugin storage is **re-probed on
 every change** — the operator may have just pointed it at a different bucket,
 and a configuration that half works fails the same way a half-working plugin
@@ -714,10 +775,13 @@ are **not** deleted.
 
 ### `POST /api/admin/storages/:id/sync` ![admin](https://img.shields.io/badge/-admin-red)
 Triggers an immediate sync run. Returns `202 + { run_id: "..." }`; poll via
-`/api/admin/sync/runs/:id`.
+`/api/admin/sync-runs/:id`, or read this storage's history at
+`GET /api/admin/storages/:id/sync-runs`.
 
-### `POST /api/admin/storages/:id/test` ![admin](https://img.shields.io/badge/-admin-red)
-Validates the connection without persisting.
+### `POST /api/admin/storages/test` ![admin](https://img.shields.io/badge/-admin-red)
+Validates a connection without persisting. ⚠ The candidate configuration is in
+the body — there is no `:id` in this path, because the usual caller is the
+create form, which has no storage to name yet.
 
 ---
 
@@ -831,32 +895,124 @@ The caller's own snapshot is at `GET /api/files/quota/me`.
 
 ## Admin: external services
 
+⚠ **Instance-wide, and in multi-tenant mode supertenant-only.** There is one document server, one converter, and one shared JWT secret behind them, so this surface decides where every tenant's documents are sent and what credential signs the handoff. A
+tenant admin gets `403 supertenant_only` on **every** verb here, reads
+included. Single-tenant installs are unaffected — the ordinary admin still
+administers everything. See
+[MULTI-TENANCY.md](MULTI-TENANCY.md#instance-wide-admin-surfaces).
+
 ### `GET /api/admin/external` ![admin](https://img.shields.io/badge/-admin-red)
 **Response 200**
 ```json
 {
-  "services": [
-    { "name": "onlyoffice", "url": "https://docs.example.com",
-      "enabled": true, "healthy": true, "last_check": "..." },
-    { "name": "drawio", "url": "", "enabled": false, "healthy": null }
+  "entries": [
+    { "Name": "onlyoffice", "Enabled": true, "URL": "https://docs.example.com",
+      "SecretEnc": "***", "OptionsJSON": "{}",
+      "LastCheck": "2026-09-06T08:28:32Z", "LastState": "ok",
+      "env_managed": false },
+    { "Name": "drawio", "Enabled": false, "URL": "", "SecretEnc": "",
+      "OptionsJSON": "{}", "LastCheck": null, "LastState": "unconfigured",
+      "env_managed": true }
   ]
 }
 ```
 
-### `PUT /api/admin/external/:name` ![admin](https://img.shields.io/badge/-admin-red)
+`LastState` is one of `ok | unreachable | disabled | unconfigured | unknown`.
+Secrets are never returned — a configured one reads `"***"`.
+
+`env_managed` says the service is pinned by env/`config.yaml`. Its row is
+re-asserted from there at every boot, so a `PATCH` to it applies immediately but
+does not survive a restart.
+
+### `PATCH /api/admin/external/:name` ![admin](https://img.shields.io/badge/-admin-red)
 ```json
-{ "url": "https://docs.example.com", "jwt_secret": "..." }
+{ "enabled": true, "url": "https://docs.example.com", "secret": "…",
+  "options_json": "{}" }
 ```
+Every field is optional; an omitted one keeps its stored value.
+
+⚠ A `secret` of exactly `"***"` is **ignored**, because that is what `GET`
+returns in place of a stored secret and a UI that re-sends what it was shown
+would otherwise overwrite the real one.
+
+**Response 200** — `{ "ok": true, "env_managed": false }`, plus a `note` when
+`env_managed` is true.
+
+The change is live: the running process reads this row on every use, so the
+editor, the diagram embed and the converter pick it up on the next request. No
+restart.
 
 ### `POST /api/admin/external/:name/test` ![admin](https://img.shields.io/badge/-admin-red)
-Probes `${url}/healthcheck` (or the service's equivalent). Returns
-`200 + { healthy: true, version: "...", latency_ms: 23 }`.
+Probes the service's health endpoint — `${url}/healthcheck` for `onlyoffice`,
+`${url}/healthz` for `convert`, the bare URL for `drawio` — with a 3 s timeout,
+stores the verdict on the row and returns
+`200 + { ok, name, reachable, url, state }`. An unknown name is `404`.
+
+⚠ Reachable is not the same as configured: OnlyOffice also needs a JWT secret,
+and a Document Server with no secret set in filex answers this probe happily
+while refusing every editor session.
+
+---
+
+## Admin: protection & antivirus
+
+⚠ **Instance-wide, and in multi-tenant mode supertenant-only.** Every value here is a single global row: switching antivirus off, or pointing clamd elsewhere, does it for the whole instance. The read is gated too — it returns the clamd address in force and a live reachability probe. A
+tenant admin gets `403 supertenant_only` on **every** verb here, reads
+included. Single-tenant installs are unaffected — the ordinary admin still
+administers everything. See
+[MULTI-TENANCY.md](MULTI-TENANCY.md#instance-wide-admin-surfaces).
+
+### `GET /api/admin/protection` ![admin](https://img.shields.io/badge/-admin-red)
+Returns the trash-retention window, the version keep count, the share-link life
+ceiling and the whole `antivirus` block — the switch, the mode, the clamd
+address, the size ceiling, the editor save-scan window — plus a **status**
+sub-object describing what this process is actually doing: what would answer
+(`clamscan` / `clamdscan` / `clamd`), whether it is `reachable`, its version,
+and `restart_pending`.
+
+⚠ `restart_pending` is true for as long as the stored configuration differs
+from what the running process booted with. The switch, the mode and the address
+take effect **at the next restart, in both directions**; the size ceiling and
+the save window apply to the next file scanned.
+
+### `PATCH /api/admin/protection` ![admin](https://img.shields.io/badge/-admin-red)
+Partial update; echoes the fresh `GET` shape. Values are validated on save
+rather than clamped later — an out-of-range number or an address like
+`clamav 3310` is a `400`, and `daemon` mode with no address is refused as well.
+
+⚠ The scanner **binary** is deliberately not settable here: it is a path this
+server executes, so an admin-writable field would turn an admin account into
+arbitrary command execution. It stays in `FILEX_CLAMAV_BIN`. Full semantics:
+[PROTECTION.md](PROTECTION.md).
+
+---
+
+## Admin: webhooks
+
+Five routes under `/api/admin/webhooks` manage **webhook v2 targets** — rows,
+each with its own URL, its own signing secret and its own per-event allow-list.
+`GET` masks the secret to a `secret_set` boolean and never returns the value.
+One event produces one POST **per matching destination**.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/admin/webhooks` | List targets (secrets masked) plus each one's last delivery. |
+| `POST /api/admin/webhooks` | Create: `name`, `url`, optional `secret`, optional `events` allow-list, `enabled`. |
+| `PATCH /api/admin/webhooks/:id` | Partial update. |
+| `DELETE /api/admin/webhooks/:id` | Remove the target. |
+| `POST /api/admin/webhooks/:id/test` | Send a test delivery. |
+
+⚠ `/api/admin/notify` governs the **legacy single** webhook
+(`FILEX_WEBHOOK_URL`); these govern the v2 targets. The event catalogue —
+including `file.updated`, which from v0.34.0 replaces `file.uploaded` for a
+write that overwrote an existing file — is in
+[NOTIFICATIONS.md](NOTIFICATIONS.md).
 
 ---
 
 ## Admin: sync runs
 
-### `GET /api/admin/sync/runs` ![admin](https://img.shields.io/badge/-admin-red)
+### `GET /api/admin/sync-runs` ![admin](https://img.shields.io/badge/-admin-red)
 **Query**: `?storage_id=…&limit=50&offset=0`
 
 **Response 200**
@@ -872,7 +1028,7 @@ Probes `${url}/healthcheck` (or the service's equivalent). Returns
 }
 ```
 
-### `GET /api/admin/sync/runs/:id` ![admin](https://img.shields.io/badge/-admin-red)
+### `GET /api/admin/sync-runs/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Includes per-error detail array.
 
 ---

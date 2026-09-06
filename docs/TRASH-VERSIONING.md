@@ -38,6 +38,22 @@ re‑attaches in the right place in the tree. If the original parent no longer
 exists, filex falls back to a **root restore** rather than leaving the row
 orphaned in trash.
 
+⚠ **Restoring enqueues a virus scan** of every file it brings back (a folder
+restore scans its whole subtree). The trash is also where the antivirus job
+puts an infected file — quarantine and a user deletion produce the identical
+row — so a restore can release something ClamAV condemned, and the bytes may
+have been sitting there since before the current signature database. The scan
+is asynchronous, exactly like an upload's; see
+[PROTECTION.md](PROTECTION.md#restoring-is-a-write).
+
+⚠⚠ **The storage sync worker does not touch the trash**, and it never
+un-deletes a row. It used to: it walked into `.filex-trash/`, found an object
+with no live row, found the soft-deleted one, and cleared `deleted_at` — so a
+deleted file came back on its own, and a quarantined one left quarantine, at
+the next sync pass. See
+[ARCHITECTURE.md](ARCHITECTURE.md#the-walk-and-the-trash) for the rule that
+replaced it and for how an install that already took the damage repairs itself.
+
 > **Two edge behaviours worth knowing:**
 > - If the storage driver can rename, the trash step is a rename. If it can only
 >   **copy**, filex copies into the trash key and deletes the source afterwards,
@@ -187,9 +203,27 @@ success. Every shipped driver normalises the key it is handed, so the two agree
 in practice — but a storage **plugin** that does not would lose history with no
 error anywhere. Plugin authors: normalise, and see [PLUGINS.md](PLUGINS.md).
 
+⚠⚠ **Until v0.34.0 that disagreement was not hypothetical: it happened to
+every moved or renamed file.** `Store.MoveNode` did not update `storage_key`,
+so the row went on naming the old path, and versioning prefers `storage_key`
+over `path` — the snapshot stated `ErrNotFound`, reported "nothing to
+snapshot", and the destructive write went ahead with **zero versions written**.
+The column now follows the path on a live row, and migration `00033` repairs
+the rows that already exist, because nothing else would: the periodic walk
+writes `seen_at` and `UpdateNodeMeta` and neither statement touches this
+column. (It deliberately does *not* follow the path on a **trashed** row, where
+`storage_key` is the only record of where restore puts the file back.)
+
 **Restore** copies a recorded version back over the live file and refreshes the
 node's size/etag. Passing `snapshot_current: true` snapshots the current content
 **first**, so the restore itself is reversible.
+
+⚠ It also **enqueues a virus scan of the restored file**. Snapshots themselves
+are never scanned — every destructive write takes one, so scanning each would
+multiply the scan load by the edit rate for bytes nobody can reach — which left
+"overwrite the infected file with a clean one, then roll back" as a way to put
+an infected file live. The restore is where that is closed; see
+[PROTECTION.md](PROTECTION.md#restoring-is-a-write).
 
 ### Version retention
 
@@ -203,8 +237,8 @@ a fixed default rather than a DB‑tunable setting.
 
 ### What triggers a snapshot
 
-**Every destructive write.** Before any surface replaces an existing file's
-bytes it calls the pre‑write guard, which snapshots what is about to be lost:
+**Every destructive write on the surfaces below.** Each of them calls the
+pre‑write guard, which snapshots what is about to be lost:
 
 | Surface | Endpoint / entry point |
 |---|---|
@@ -221,6 +255,17 @@ bytes it calls the pre‑write guard, which snapshots what is about to be lost:
 | OnlyOffice save‑back | `POST /api/files/onlyoffice/callback` |
 | WebDAV | `PUT` |
 | S3 gateway | `PutObject`, `CompleteMultipartUpload`, `CopyObject` |
+
+⚠⚠ **`SFTP`, `FTPS` and `NFS` are not in that table, and their absence is
+real, not an omission in the writing.** Those three write through
+`internal/protocolsync`, which does not call the pre‑write guard, so a client
+that replaces a file over SFTP, FTPS or NFS destroys the previous bytes with
+**no snapshot taken and no error**. Everything else those surfaces share with
+the rest of filex — the catalogue row, the search index, the realtime frame,
+the antivirus scan, trash on delete — they do have. Versioning is the one gap.
+If version history is what you are relying on, keep those three protocols out
+of the write path, or check the file's history after the first overwrite rather
+than assuming it.
 
 A snapshot is taken **only when** there is something to lose: the path already
 holds a catalogued **file**. A brand‑new file, a directory, and filex's own

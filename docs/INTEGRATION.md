@@ -304,6 +304,9 @@ Browser ── /your/files/* ──▶  Your app (proxy)  ── /api/files/* �
 1. **Vendor the web component** (no build): copy `packages/webcomponent/dist/`
    into your app's assets and load `filex.js`. Or `import '@brftech/filex'`.
 2. **Add a proxy route** in your backend, `"/your/files/*" → "<filex>/api/files/*"`.
+   ⚠ **And one for `/api/ws`**, or the embed has no live updates: the ticket is
+   minted under `/api/files/ws-ticket`, which that rule covers, but the socket
+   itself is at a *different* prefix. See the note under step 4.
    On every request it MUST:
    - add the filex auth (a Bearer API token — ideally root-scoped per §4b, or a
      filex session) so the browser never holds filex credentials;
@@ -322,6 +325,24 @@ Browser ── /your/files/* ──▶  Your app (proxy)  ── /api/files/* �
    must return `403`. Because the browser can't set the token or the header
    (the proxy controls both), a tenant cannot reach another's files — even by
    crafting requests by hand.
+
+⚠⚠ **Live updates need one more route than this pattern gives them.**
+`POST /api/files/ws-ticket` is proxied by the rule above and returns an
+**absolute** `ws_url`, derived from filex's own public origin (the tenant's
+host in multi-tenant mode). Two things follow:
+
+- the browser is told to open `wss://<filex host>/api/ws`, which in a
+  proxy-only deployment it cannot reach — the embed then falls back to
+  re-listing every 12 s, silently, and looks merely sluggish rather than
+  broken;
+- `/api/ws` is not under `/api/files/`, so `"/your/files/*"` never matched it
+  in the first place.
+
+Proxy `/api/ws` alongside the files route, pass the WebSocket upgrade and the
+`Host` header through, and set filex's `FILEX_PUBLIC_URL` (or the tenant's
+host) to the origin the *browser* uses, so the `ws_url` it hands back points at
+your proxy. The contract itself — frames, coalescing, the ceiling your own
+debounce needs — is in [REALTIME.md](REALTIME.md).
 
 Pick the confinement strength in §4b: the `X-Filex-Root` header alone is enough
 when filex is reachable ONLY through your proxy; a root-scoped token adds
@@ -368,6 +389,10 @@ anything about that; a host writing its own drop targets does.
 - An auth token the explorer can send as `Authorization: Bearer …` (or a CSRF
   cookie). Issue it from your app's session — the explorer never logs in itself.
 - CORS: if the explorer is served from a different origin than the API, allow it.
+- A path to the **WebSocket** at `/api/ws`, with the upgrade and the `Host`
+  header passed through (the same-origin, cookie-authenticated upgrade is
+  origin-checked). Without it the explorer still works and still shows changes
+  — on a 12 s poll instead of instantly.
 
 That's it — drop the component in, give it `apiBase` + a token, and the file
 manager is live. See `demo/` for runnable references.

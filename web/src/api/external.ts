@@ -27,6 +27,7 @@ interface BackendExternal {
   last_check?: string | null;
   LastState?: string;
   last_state?: string;
+  env_managed?: boolean;
 }
 interface ListResponse {
   entries: BackendExternal[] | null;
@@ -76,6 +77,7 @@ function toExternal(b: BackendExternal): ExternalService {
     last_checked_at: lastCheck,
     last_state: mapState(rawState),
     last_error: null,
+    env_managed: b.env_managed === true,
   };
 }
 

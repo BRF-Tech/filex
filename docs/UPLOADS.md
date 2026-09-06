@@ -288,6 +288,18 @@ TTL, so a permanently failing upload does not keep its bytes forever. Directorie
 with no row at all (a crash between `mkdir` and the `INSERT`) age out by their
 own mtime.
 
+**Purging a file releases its staging immediately.** A node whose transfer failed
+keeps its only copy of the bytes in staging — deliberately, so a retry costs
+nothing — but once the file is deleted **permanently** (trash emptied, retention
+expiry, "delete permanently") those bytes have no referent at all, and waiting
+out a 24-hour idle TTL for a file the user has already destroyed is just disk
+nobody gets back. The row is looked up **by node id**, so only the staging that
+belonged to that exact node is touched, and a row in state `committing` is still
+left alone: its bytes are being read by a transfer right now.
+
+⚠ Trashing does **not** release it. A trashed node is restorable, and for a
+failed transfer the staging area holds the only copy of its contents.
+
 ---
 
 ## Configuration
@@ -350,10 +362,17 @@ curl -s https://filex.example/api/files/ops/42 -b cookies.txt
 Everything the direct path runs, in the same order and through the same helpers:
 the kind-conflict guard, mime sniffing (including the ZIP-based office-format
 refinement), the node upsert, the search index, the thumbnail job, the
-`writehook` gate — which is what fans out to the antivirus scan, the
-`file.uploaded` webhook and notifications — and the realtime folder-change event.
+`writehook` gate — which is what fans out to the antivirus scan, the write
+webhook and notifications — and the realtime folder-change event.
 The event's `meta.origin` is `manager`, same as a direct upload, with
 `meta.staged = true` added so a consumer can tell which path it came from.
+
+The event is `file.uploaded` when the upload created the file and
+`file.updated` when it replaced one that was already there. ⚠ On this path the
+question is put to the **storage driver**, one statement before the overwrite,
+rather than to the node row: the row is published at commit time, before the
+bytes move, so by the time the event fires the catalogue has a row either way
+and has forgotten which. An inconclusive `Stat` reports `file.uploaded`.
 
 ## `transfer_state`
 

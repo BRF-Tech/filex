@@ -47,11 +47,27 @@ const DefaultRetentionDays = 30
 // StorageResolver maps storage_id → live driver. Same shape used elsewhere.
 type StorageResolver func(int64) (storage.Driver, error)
 
+// OnPurge is called once per node the instant before its row is destroyed for
+// good, so the caches keyed on that node id can release their bytes.
+//
+// It exists because a purge is the ONE moment at which "this node will never
+// come back" is true — a soft delete is reversible, and a cache dropped there
+// would be a cache dropped for a file the user can restore. Wiring it as a
+// callback keeps this package free of the thumbnail pipeline and the upload
+// staging area, which both live above it.
+//
+// Best-effort: an implementation must not fail the purge.
+type OnPurge func(ctx context.Context, nodeID int64)
+
 // Service is the retention engine entry point.
 type Service struct {
 	Store    db.Store
 	Resolver StorageResolver
 	Quota    *quota.Service
+	// Reclaim, when wired, releases the per-node caches (the cached thumbnail
+	// JPEG, any staging directory still holding this node's bytes). See
+	// OnPurge. Nil is a no-op, which is what the unit tests use.
+	Reclaim OnPurge
 }
 
 // New constructs a Service.
@@ -350,6 +366,14 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	// to the node_comments FK CASCADE — engines run with FK enforcement
 	// on, but an explicit delete keeps the purge self-contained).
 	_ = s.Store.DeleteNodeCommentsByNode(ctx, n.ID)
+	// Per-node caches, released here because this is the last instant at which
+	// the node id is still meaningful — and the first at which "gone for good"
+	// is true. Before this call nothing ever removed the cached thumbnail: the
+	// `thumbnails` row went with the node via the FK cascade while the JPEG sat
+	// in <data>/thumbs forever (issue #18).
+	if s.Reclaim != nil {
+		s.Reclaim(ctx, n.ID)
+	}
 	// ⚠ The quota release happens INSIDE HardDeleteNode, in the accounting
 	// store (internal/quotastore) — the one place that also counts the bytes
 	// when they land. Subtracting here as well would release every purged
@@ -402,6 +426,11 @@ func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
 						slog.String("err", err.Error()))
 				}
 			}
+		}
+		// Same reclamation as purgeOne — a descendant purged through this
+		// loop must not leave its cached bytes behind either.
+		if s.Reclaim != nil {
+			s.Reclaim(ctx, c.ID)
 		}
 		// Quota release is inside HardDeleteNode (internal/quotastore) — see
 		// purgeOne.

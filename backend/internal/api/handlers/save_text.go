@@ -12,6 +12,40 @@
 //
 // Whitelist: only files matching a text/code MIME class are saveable
 // here. Binary edits go through OnlyOffice's callback channel.
+//
+// # Antivirus
+//
+// This surface does NOT call writehook.OnFileWritten, and that omission was
+// the gap: the hook enqueues an antivirus scan, so routing every Ctrl+S
+// through it would have queued a ClamAV pass per keystroke-burst — and the
+// answer taken instead was to scan nothing, which made the editor a way to
+// introduce a file that is never scanned on an install where every uploaded
+// file is. The two branches below now split it the way the behaviour actually
+// splits:
+//
+//	create (no node row for the path)  → scan immediately, like an upload
+//	save   (node row already existed)  → schedule one scan, debounced
+//
+// The debounce lives in the queue (not_before + a coalescing key), not in a
+// timer in this process, so a restart mid-window does not lose the pending
+// scan. See queue.AntivirusScanner.EnqueueAfterSave.
+//
+// # The write event
+//
+// The scan is the only thing this surface schedules for itself. The EVENT goes
+// through the shared gate like every other write surface --
+// writehook.EmitWritten, which is OnFileWritten minus the antivirus half it
+// has already taken care of -- so the editor is not a place where webhook
+// subscribers hear something different from the browser upload that wrote the
+// same file. The two branches split the event exactly as they split the scan:
+//
+//	create (no node row for the path)  -> file.uploaded
+//	save   (node row already existed)  -> file.updated
+//
+// Same `existing` fact, one decision, two consequences. Until this was wired
+// the editor announced NOTHING at all: a file created or rewritten in the
+// browser reached no webhook and no notification bell, so an integration
+// watching a folder simply did not see edits happen.
 package handlers
 
 import (
@@ -28,7 +62,11 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // VersionSnapshotter is the narrow surface save-text needs to capture
@@ -43,7 +81,16 @@ type SaveText struct {
 	StorageResolver func(int64) (storage.Driver, error)
 	Versions        VersionSnapshotter
 	ACL             *acl.Resolver
+	// Index keeps the saved text searchable. Optional; nil skips indexing.
+	Index *search.Index
 }
+
+// AttachSearchIndex wires the search index. ⚠ Without it an edit saved from
+// the built-in editor never reaches Bleve: the file keeps whatever text it had
+// when it was last indexed, so a content search finds the OLD words and misses
+// the new ones — and a name search only appears to work because the search
+// endpoint falls back to a SQL LIKE over node rows.
+func (h *SaveText) AttachSearchIndex(i *search.Index) { h.Index = i }
 
 // NewSaveText constructs the handler.
 func NewSaveText(store db.Store, resolver func(int64) (storage.Driver, error)) *SaveText {
@@ -186,9 +233,27 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Whatever happens to the row below, the bytes changed and anyone looking
+	// at this folder is now out of date.
+	defer emitFolderChange(storageID, path.Dir(clean), realtime.ChangeEvent{
+		Action: "upload", Name: path.Base(clean),
+	})
+	sy := protocolsync.New(h.Store, h.Index, nil, "")
+
 	// Refresh cache metadata so the next listing carries the new size.
 	if existing != nil {
 		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, int64(len(body)), existing.Mime, existing.Etag, time.Now())
+		existing.Size = int64(len(body))
+		// ⚠ Re-index, or the document keeps the pre-edit text for good:
+		// nothing else ever revisits a file whose path did not change.
+		sy.IndexNode(r.Context(), existing)
+		// SAVE to a file that already existed → file.updated, and a debounced
+		// scan. Scanning on every Ctrl+S is why this surface had no scan at
+		// all; one scan per file per editing window is the answer to that, not
+		// no scan.
+		writehook.EmitWritten(r.Context(), storageID, existing, writehook.OriginManager, writehook.Replaced,
+			map[string]any{"editor": true})
+		enqueueAntivirusScanAfterSave(r.Context(), existing)
 	} else {
 		// A brand-new file had NO node row: the bytes went to the driver and
 		// the catalogue only learned about them on the next storage scan —
@@ -202,7 +267,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 				parentID = &p.ID
 			}
 		}
-		if _, cerr := h.Store.CreateNode(r.Context(), &model.Node{
+		created, cerr := h.Store.CreateNode(r.Context(), &model.Node{
 			StorageID:  storageID,
 			ParentID:   parentID,
 			Name:       path.Base(clean),
@@ -213,9 +278,24 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 			Size:       int64(len(body)),
 			Mime:       "text/plain; charset=utf-8",
 			SyncState:  model.SyncStateSynced,
-		}); cerr != nil {
+		})
+		if cerr != nil {
 			slog.Warn("save-text: node create",
 				slog.String("path", clean), slog.String("err", cerr.Error()))
+		} else {
+			sy.IndexNode(r.Context(), created)
+			writehook.EmitWritten(r.Context(), storageID, created, writehook.OriginManager, writehook.Created,
+				map[string]any{"editor": true})
+			// CREATE → scan now, exactly like an upload. This branch is the
+			// hole: `existing == nil` means no catalogue row addressed this
+			// path before the write, so these bytes are new to filex and
+			// nothing else will ever look at them. Until now the editor was
+			// the one way to put a file on an install where every uploaded
+			// file is scanned and have it never be.
+			//
+			// ⚠ There is no debounce here on purpose. A create happens once;
+			// the saves that follow it take the branch above.
+			enqueueAntivirusScan(r.Context(), created)
 		}
 	}
 

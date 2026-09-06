@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +63,11 @@ type AntivirusScanner struct {
 	notify   notify.Service
 	index    *search.Index
 	maxBytes int64
+	// maxBytesFn, when set, is asked for the ceiling on every eligibility
+	// check instead of using the fixed maxBytes above. That is what makes the
+	// admin page's value apply to the next file scanned rather than to the
+	// next restart.
+	maxBytesFn func() int64
 }
 
 // NewAntivirusScanner wires the job. maxBytes <= 0 disables the size
@@ -74,13 +80,27 @@ func NewAntivirusScanner(store AVNodeStore, resolver func(int64) (storage.Driver
 // is still being transferred reads the staged bytes.
 func (a *AntivirusScanner) AttachBody(b *filebody.Resolver) { a.body = b }
 
+// AttachMaxBytes makes the size ceiling live: fn is consulted per eligibility
+// check. nil restores the fixed value passed to the constructor.
+func (a *AntivirusScanner) AttachMaxBytes(fn func() int64) { a.maxBytesFn = fn }
+
+// limit returns the ceiling in force. <=0 means "no ceiling".
+func (a *AntivirusScanner) limit() int64 {
+	if a.maxBytesFn != nil {
+		if v := a.maxBytesFn(); v > 0 {
+			return v
+		}
+	}
+	return a.maxBytes
+}
+
 // Eligible reports whether n qualifies for a scan: a live file within the
 // size cap that is not itself a trash/version artifact.
 func (a *AntivirusScanner) Eligible(n *model.Node) bool {
 	if a == nil || n == nil || n.Type != model.NodeTypeFile || n.DeletedAt != nil {
 		return false
 	}
-	if n.Size <= 0 || (a.maxBytes > 0 && n.Size > a.maxBytes) {
+	if lim := a.limit(); n.Size <= 0 || (lim > 0 && n.Size > lim) {
 		return false
 	}
 	p := strings.TrimPrefix(n.Path, "/")
@@ -90,19 +110,116 @@ func (a *AntivirusScanner) Eligible(n *model.Node) bool {
 	return true
 }
 
+// PriorityDiscovered is the Op.Priority given to a scan the STORAGE SYNC asked
+// for, as opposed to one a person is waiting on.
+//
+// ⚠⚠ This exists because of one measurement. Point filex at a folder that
+// already holds 20 000 files and every one of them is newly discovered, so one
+// pass enqueues 20 000 scans. The queue orders `priority DESC, enqueued_at
+// ASC`, so at equal priority those 20 000 rows are simply ahead of everything
+// that arrives next — and an upload's scan, enqueued ten seconds into the
+// backlog, waited **41 s** to be picked up: not most of a scan, most of the
+// whole import. Dropping the sync's scans one step below everything else took
+// the same probe to **1 ms**, because the only thing an interactive scan then
+// waits for is a worker finishing the one scan it is holding.
+//
+// Negative rather than "interactive positive" so that every op filex already
+// enqueues — content extraction, thumbnails, replica retry, copy/move — keeps
+// its current standing and also overtakes the sweep. Nothing else in filex
+// sets Priority, so this is the first row that is not 0.
+//
+// ⚠ SQLite and Postgres order by it; the Redis driver's pending LIST is
+// positional and ignores it. On Redis the backlog is FIFO and the 41 s is
+// what an operator gets. That is a driver difference, not a policy: the fix
+// belongs in the Redis driver (a second list, or a ZSET keyed by priority),
+// and it is out of scope here.
+const PriorityDiscovered = -1
+
 // Enqueue schedules a scan for n when the scanner is available and n is
 // eligible. Best-effort: enqueue failures are logged, never surfaced — a
 // scan must not cost a write.
 func (a *AntivirusScanner) Enqueue(ctx context.Context, drv Driver, n *model.Node) {
+	a.enqueue(ctx, drv, n, 0)
+}
+
+// EnqueueDiscovered is Enqueue for a file the STORAGE SYNC found rather than a
+// file somebody wrote: same op, same eligibility, same handler, one step down
+// the queue. See PriorityDiscovered.
+func (a *AntivirusScanner) EnqueueDiscovered(ctx context.Context, drv Driver, n *model.Node) {
+	a.enqueue(ctx, drv, n, PriorityDiscovered)
+}
+
+func (a *AntivirusScanner) enqueue(ctx context.Context, drv Driver, n *model.Node, priority int) {
 	if a == nil || drv == nil || a.scanner == nil || !a.scanner.Supports() || !a.Eligible(n) {
 		return
 	}
 	if _, err := drv.Enqueue(ctx, Op{
-		Type:    TypeAntivirusScan,
-		Payload: map[string]any{"node_id": n.ID},
+		Type:     TypeAntivirusScan,
+		Payload:  map[string]any{"node_id": n.ID},
+		Priority: priority,
 	}); err != nil {
 		slog.Warn("antivirus: enqueue failed",
 			slog.Int64("node", n.ID), slog.String("err", err.Error()))
+	}
+}
+
+// AVDedupKey is the coalescing key for a node's pending scan. One pending
+// scan per node, which is the whole of the debounce rule: while an op holds
+// this key, further requests for the same node are absorbed.
+func AVDedupKey(nodeID int64) string {
+	return TypeAntivirusScan + ":" + strconv.FormatInt(nodeID, 10)
+}
+
+// EnqueueAfterSave schedules a DEBOUNCED scan for a file the browser's text
+// editor has just overwritten: one scan, `window` from now, coalesced so that
+// a burst of Ctrl+S costs exactly one scan.
+//
+// Three properties make this work, and none of them is incidental:
+//
+//   - The delay is the queue's own not_before, never a time.AfterFunc. An
+//     in-process timer dies with the process and takes the pending scan with
+//     it, so every restart and every deploy would silently drop whatever was
+//     in flight — reintroducing, at exactly the moments a server is most
+//     likely to be restarted, the gap this feature exists to close. The wider
+//     the window, the more scans an in-process timer would lose.
+//   - Repeat saves inside the window are DROPPED, not rescheduled. The window
+//     therefore starts at the first save and the scan is guaranteed to happen,
+//     rather than being pushed out indefinitely by someone who keeps typing.
+//   - Handle resolves the node and opens its bytes at EXECUTION time, so the
+//     one scan that does run reads the file's final state, not the content of
+//     the save that scheduled it.
+//
+// Best-effort, exactly like Enqueue: a scan must not cost a write. ErrDuplicate
+// is the normal, expected outcome of the second save onwards and is not an
+// error — it means the scan the caller wanted is already scheduled.
+func (a *AntivirusScanner) EnqueueAfterSave(ctx context.Context, drv Driver, n *model.Node, window time.Duration) {
+	if a == nil || drv == nil || a.scanner == nil || !a.scanner.Supports() || !a.Eligible(n) {
+		return
+	}
+	if window <= 0 {
+		// Refuse to interpret a nonsense window as "right now" or as
+		// "never"; the caller resolves and clamps it (antivirus.SaveWindow).
+		// Scanning immediately is the safe reading, so take it.
+		a.Enqueue(ctx, drv, n)
+		return
+	}
+	at := time.Now().Add(window)
+	_, err := drv.Enqueue(ctx, Op{
+		Type:      TypeAntivirusScan,
+		Payload:   map[string]any{"node_id": n.ID},
+		NotBefore: &at,
+		DedupKey:  AVDedupKey(n.ID),
+	})
+	switch {
+	case errors.Is(err, ErrDuplicate):
+		slog.Debug("antivirus: save scan already scheduled",
+			slog.Int64("node", n.ID))
+	case err != nil:
+		slog.Warn("antivirus: delayed enqueue failed",
+			slog.Int64("node", n.ID), slog.String("err", err.Error()))
+	default:
+		slog.Debug("antivirus: save scan scheduled",
+			slog.Int64("node", n.ID), slog.Time("not_before", at))
 	}
 }
 

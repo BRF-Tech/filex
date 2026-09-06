@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
@@ -312,7 +313,7 @@ type TicketUpload struct {
 // thumbnailing, write-hook and DB-cache behaviour.
 func NewTicketUpload(store db.Store, resolver func(int64) (storage.Driver, error), tickets *uploadTicketStore) *TicketUpload {
 	return &TicketUpload{
-		ops:     newAIOps(store, resolver, nil, "", ""),
+		ops:     newAIOps(store, resolver, nil, "", nil),
 		tickets: tickets,
 		limiter: newIPLimiter(120, time.Hour),
 	}
@@ -323,6 +324,13 @@ func (h *TicketUpload) AttachACL(r *acl.Resolver) { h.ops.acl = r }
 
 // AttachThumbs mirrors the manager-upload thumbnail dispatch.
 func (h *TicketUpload) AttachThumbs(p *thumb.Pipeline) { h.ops.thumbs = p }
+
+// AttachSearchIndex wires the search index. ⚠ Easy to forget, and the symptom
+// is quiet: a ticket upload without it lands a row and a change frame — so the
+// folder listing and every open explorer look right — while the file is
+// findable by name only through the search endpoint's SQL LIKE fallback, and
+// not at all by its content.
+func (h *TicketUpload) AttachSearchIndex(idx *search.Index) { h.ops.attachSearchIndex(idx) }
 
 // AttachStaged routes big transfers through the staging area — the whole point
 // of tickets is big files, so this is the common path, not the exception.

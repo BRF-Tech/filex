@@ -342,12 +342,28 @@ export interface ShareInfo {
   downloads: number;
 }
 
+export interface ExternalServiceState { enabled: boolean; url: string; state: string }
+
 export interface Capabilities {
   version: string;
+  upload: boolean; move: boolean; copy: boolean; delete: boolean; mkdir: boolean;
+  search: boolean; versions: boolean; ocr: boolean;
   thumbs: { enabled: boolean; image: boolean; video: boolean; pdf: boolean; office: boolean };
-  external: { onlyoffice_url: string; drawio_url: string; mermaid: boolean };
-  auth: { drivers: string[]; allow_signup: boolean };
-  limits: { max_upload_bytes: number; max_archive_bytes: number };
+  /** Configured, not necessarily answering — reachability is probed on the admin route. */
+  antivirus: boolean;
+  /** "binary" (a scanner on the server's PATH) or "daemon" (clamd over TCP / a socket). */
+  antivirus_mode?: 'binary' | 'daemon';
+  /** Keyed by service name: onlyoffice · drawio · convert. */
+  external: Record<string, ExternalServiceState>;
+  /** Flat aliases kept for older embeds; empty string when the service is off. */
+  onlyoffice_url: string; drawio_url: string; convert_url: string;
+  max_upload_size: number;
+  chunk_size: number;
+  auth_drivers: string[];
+  storage_drivers: string[];
+  db_driver: string;
+  /** Only on /api/files/capabilities: "user" or "app" — which kind of token is asking. */
+  caller_kind?: 'user' | 'app';
 }
 
 export interface ApiError {

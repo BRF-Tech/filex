@@ -118,6 +118,9 @@ func (d *Driver) Enqueue(ctx context.Context, op queue.Op) (string, error) {
 	// the explicit ::jsonb cast on $3 perform the conversion. This
 	// keeps the wire format the same as every other JSONB INSERT in
 	// the project (see internal/db/drivers/postgres for the same idiom).
+	if op.DedupKey != "" {
+		return d.enqueueDeduped(ctx, op, id, string(body))
+	}
 	_, err = d.db.ExecContext(ctx,
 		`INSERT INTO ops_queue (id, type, payload, status, priority, max_attempts, not_before)
 		 VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7)`,
@@ -127,6 +130,58 @@ func (d *Driver) Enqueue(ctx context.Context, op queue.Op) (string, error) {
 		return "", fmt.Errorf("queue/postgres: insert: %w", err)
 	}
 	return id, nil
+}
+
+// enqueueDeduped inserts only when no PENDING op already holds op.DedupKey,
+// returning queue.ErrDuplicate when one does.
+//
+// Two guards, and both are needed here. The WHERE NOT EXISTS handles the
+// ordinary case in one round-trip; under READ COMMITTED it can still let two
+// concurrent transactions both see "nothing pending" and both insert, so the
+// partial unique index from migration 00031 decides that race and its
+// violation (SQLSTATE 23505) maps to the same ErrDuplicate. What neither path
+// can produce is both callers skipping — one insert always survives, which is
+// the property that matters: a coalesced scan that never gets queued is the
+// gap this exists to close.
+func (d *Driver) enqueueDeduped(ctx context.Context, op queue.Op, id, payload string) (string, error) {
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO ops_queue (id, type, payload, status, priority, max_attempts, not_before, dedup_key)
+		 SELECT $1, $2, $3::jsonb, $4, $5, $6, $7, $8
+		  WHERE NOT EXISTS (
+		        SELECT 1 FROM ops_queue o
+		         WHERE o.dedup_key = $8 AND o.status = 'pending')`,
+		id, op.Type, payload, op.Status, op.Priority, op.MaxAttempts,
+		asNullTime(op.NotBefore), op.DedupKey,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return "", queue.ErrDuplicate
+		}
+		return "", fmt.Errorf("queue/postgres: insert: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("queue/postgres: insert rows: %w", err)
+	}
+	if n == 0 {
+		return "", queue.ErrDuplicate
+	}
+	return id, nil
+}
+
+// isUniqueViolation recognises SQLSTATE 23505 (unique_violation) from the
+// partial index added in migration 00031, without binding this file to a
+// concrete pgx error type — the driver is registered through database/sql.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) {
+		return pgErr.SQLState() == "23505"
+	}
+	return strings.Contains(err.Error(), "23505") ||
+		strings.Contains(strings.ToLower(err.Error()), "duplicate key value")
 }
 
 // Dequeue claims the next eligible op atomically using SELECT … FOR
@@ -173,12 +228,31 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 	// belt-and-braces — it would be impossible for another worker to
 	// have claimed it, but the predicate keeps recovery semantics tidy
 	// if a future change widens the SELECT.
-	idArgIdx := len(args) + 1
+	// ⚠ Only `id` is bound here. The claim used to be given the SELECT's
+	// args as well (`append(args, id)`), so every type-filtered Dequeue sent
+	// Postgres one parameter per type that the UPDATE never referenced, and
+	// Postgres answered "could not determine data type of parameter $1"
+	// (SQLSTATE 42P18). Since queue.Pool always passes its registered handler
+	// types, that meant a postgres-backed queue could never claim an op at
+	// all: antivirus scans, content indexing and the copy/move/delete worker
+	// silently never ran. It survived because nothing in the suite had ever
+	// executed this driver — see TestDriverContract_*, which found it.
 	if _, err := tx.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE ops_queue
-		             SET status='running', started_at=NOW(), attempts=attempts+1
-		             WHERE id=$%d AND status='pending'`, idArgIdx),
-		append(args, id)...); err != nil {
+		`UPDATE ops_queue
+		             SET status='running', started_at=NOW(), attempts=attempts+1,
+		                 dedup_key=NULL
+		                 -- ⚠ dedup_key is cleared here, not when the op finishes. Two reasons,
+		                 -- and both are correctness rather than tidiness:
+		                 --   1. A request arriving while this scan RUNS must queue a new one —
+		                 --      this scan may already have read the old bytes.
+		                 --   2. Fail(retry) puts the row back to pending. If it still held
+		                 --      the key and a newer op had meanwhile taken it, that UPDATE
+		                 --      would violate the partial unique index and the op would be
+		                 --      stranded in running for ever.
+		                 -- Redis releases its claim at the same moment, so all three drivers
+		                 -- agree on when a key becomes free.
+
+		             WHERE id=$1 AND status='pending'`, id); err != nil {
 		return queue.Op{}, fmt.Errorf("queue/postgres: claim: %w", err)
 	}
 

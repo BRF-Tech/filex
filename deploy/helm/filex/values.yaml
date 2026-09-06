@@ -4,7 +4,7 @@
 
 image:
   repository: ghcr.io/brf-tech/filex
-  tag: ""                 # defaults to .Chart.appVersion (e.g. "v0.4.0")
+  tag: ""                 # defaults to .Chart.appVersion
   pullPolicy: IfNotPresent
 
 # The external URL users open. REQUIRED — it is baked into share links, the OIDC
@@ -57,6 +57,13 @@ postgresql:
   storage: 8Gi
 
 # Queue. Default sqlite (shares the DB). Redis enables distributed workers.
+# All three drivers order by priority, so an interactive operation is served
+# ahead of a bulk backlog (a first storage import can queue tens of thousands).
+#
+# ⚠ Upgrading an install that already runs the redis driver: the pending set
+# was a LIST and becomes a SORTED SET, converted at startup. Every queued
+# operation survives, but an older filex cannot read the converted key —
+# downgrading after this is not supported.
 queue:
   driver: sqlite          # sqlite | postgres | redis
   dsn: ""
@@ -192,6 +199,21 @@ storage:
 # the pod refuses to start if one later changes. Set them here before the
 # first install, or not at all. See
 # docs/CONFIGURATION.md#install-time-settings-filex_installation_
+#
+# ⚠ Antivirus has no first-class block in this chart yet. The images ship no
+# scanner (ClamAV plus its signature database is close to a gigabyte), so on
+# Kubernetes you run `clamav/clamav` as its own Deployment + Service and point
+# filex at it over the network — filex streams each file to the daemon, so the
+# two need a route and NOT a shared volume:
+#
+#   extraEnv:
+#     FILEX_CLAMAV_ADDR: "clamav:3310"    # seeds antivirus.mode=daemon
+#
+# ⚠⚠ That variable is a SEED, not an override: it is read on a boot where the
+# setting has no stored row yet, and never again. After the first boot the
+# switch, the mode and the address live in the database and are edited on
+# Settings -> Protection in the admin UI — changing the value here later does
+# nothing, silently. See docs/PROTECTION.md.
 extraEnv: {}
   # FILEX_LOG_LEVEL: debug
   # E2E key escrow — the PUBLIC half only, from `filex e2e-escrow keygen`.

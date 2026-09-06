@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-09-05",
+  "generatedAt": "2026-09-06",
   "releases": [
+    {
+      "tag": "v0.33.0",
+      "date": "2026-09-05T23:02:33Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.33.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.33.0",
+        "ghcr.io/brf-tech/filex:full-v0.33.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 25
+    },
     {
       "tag": "v0.32.0",
       "date": "2026-09-05T16:55:48Z",

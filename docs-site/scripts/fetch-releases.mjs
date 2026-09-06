@@ -9,9 +9,22 @@
  *   docs/RELEASES.md               the generated VitePress page (COMMITTED, so a
  *                                  reviewer can see exactly what gets published)
  *
- * Why build-time and not fetch-in-the-browser: the page stays static, is indexed
+ * Why generated and not fetch-in-the-browser: the page stays static, is indexed
  * by the site's local search, survives a rate-limited GitHub, and reads fine with
  * JavaScript disabled.
+ *
+ * ⚠ This script is NOT part of `npm run build` any more. The build is a
+ * mandatory release gate that everybody runs, and a gate that rewrites two
+ * tracked files on every run hands every contributor a diff that is not theirs
+ * — three of them reverted it by hand on 2026-09-06 and one release nearly
+ * committed the churn. `npm run build` now runs the offline
+ * scripts/check-releases.mjs instead, and refreshing is this script, run
+ * deliberately at the release step that refreshes it.
+ *
+ * It is also idempotent, which is the second half of the same promise: when the
+ * fetched release list is byte-identical to the committed cache, `generatedAt`
+ * is kept as it was and NEITHER file is rewritten. Running it out of curiosity
+ * therefore cannot dirty the tree either — only an actual new release does.
  *
  * Honest degradation — the two failure modes are deliberately different:
  *
@@ -37,10 +50,10 @@
  * Unauthenticated the API allows 60 requests/hour/IP; this makes one.
  *
  * Usage:
- *   node scripts/fetch-releases.mjs            fetch, then regenerate
- *   FILEX_RELEASES_OFFLINE=1 node …            skip the fetch (exercises the
+ *   cd docs-site && npm run releases           fetch, then regenerate if changed
+ *   FILEX_RELEASES_OFFLINE=1 npm run releases  skip the fetch (exercises the
  *                                              cache path — used to verify that
- *                                              a dead API still builds)
+ *                                              a dead API still renders)
  */
 
 import fs from 'node:fs'
@@ -398,7 +411,7 @@ function renderPage(releases, highlights, meta) {
   out.push('---')
   out.push('title: Releases')
   out.push(
-    'description: Every filex release with a plain-English summary of what changed — generated from the GitHub releases at build time.'
+    'description: Every filex release with a plain-English summary of what changed — generated from the GitHub releases at release time.'
   )
   out.push('---')
   out.push('')
@@ -414,9 +427,12 @@ function renderPage(releases, highlights, meta) {
     'Every published filex release, newest first. This page is generated from the'
   )
   out.push(
-    `[GitHub releases](https://github.com/${REPO}/releases) each time the site is built, so a new`
+    `[GitHub releases](https://github.com/${REPO}/releases) by \`npm run releases\`, which is`
   )
-  out.push('tag shows up here without anyone writing it twice.')
+  out.push(
+    'run once when a release is cut — not by the site build, which would rewrite this'
+  )
+  out.push('file on every contributor who ran it.')
   out.push('')
   out.push(
     'Whether filex installs a release by itself depends on which part of the version moved —'
@@ -465,10 +481,14 @@ function renderPage(releases, highlights, meta) {
 
   out.push('---')
   out.push('')
+  // No "GitHub was unreachable" marker here, deliberately. The unreachable path
+  // renders from the committed cache, which by definition produces the page
+  // that is already published — adding a banner would make an identical refresh
+  // rewrite the file, which is exactly the churn this script stopped causing.
+  // The date below already tells the reader how fresh the list is, and the
+  // operator gets a loud banner on stderr.
   out.push(
-    `<small>Generated ${meta.generatedAt} from ${releases.length} published releases` +
-      (meta.stale ? ' — **from the last cached copy: GitHub was unreachable at build time**' : '') +
-      '.</small>'
+    `<small>Last refreshed ${meta.generatedAt} from ${releases.length} published releases.</small>`
   )
   out.push('')
 
@@ -482,6 +502,23 @@ function renderPage(releases, highlights, meta) {
 function loud(lines) {
   const bar = '='.repeat(74)
   process.stderr.write(`\n${bar}\n${lines.join('\n')}\n${bar}\n\n`)
+}
+
+/**
+ * Write only when the bytes differ.
+ *
+ * Both outputs are tracked files, and rewriting one with identical content
+ * still moves its mtime — enough to make a watcher rebuild and enough to look
+ * like a change to anyone eyeballing the tree. Returns whether it wrote.
+ */
+function writeIfChanged(file, content) {
+  try {
+    if (fs.readFileSync(file, 'utf8') === content) return false
+  } catch {
+    // missing or unreadable — fall through and write it
+  }
+  fs.writeFileSync(file, content, 'utf8')
+  return true
 }
 
 function readJson(file, fallback) {
@@ -544,22 +581,43 @@ async function main() {
     releases = cached.releases
   }
 
-  const generatedAt = stale && cached ? cached.generatedAt : new Date().toISOString().slice(0, 10)
-
-  fs.mkdirSync(path.dirname(CACHE), { recursive: true })
-  fs.writeFileSync(
-    CACHE,
-    JSON.stringify({ repo: REPO, generatedAt, releases }, null, 2) + '\n',
-    'utf8'
-  )
+  // Idempotence: `generatedAt` only moves when the release list actually moved.
+  // Stamping today's date on an unchanged list is what made a re-run dirty the
+  // tree — the data was identical and only the date differed, so the diff said
+  // "something happened" when nothing had.
+  const unchanged =
+    cached &&
+    Array.isArray(cached.releases) &&
+    JSON.stringify(cached.releases) === JSON.stringify(releases)
+  const generatedAt =
+    unchanged || (stale && cached)
+      ? cached.generatedAt
+      : new Date().toISOString().slice(0, 10)
 
   const highlights = readJson(HIGHLIGHTS, {})
-  const page = renderPage(releases, highlights, { generatedAt, stale })
-  fs.writeFileSync(PAGE, page, 'utf8')
+
+  fs.mkdirSync(path.dirname(CACHE), { recursive: true })
+  const wroteCache = writeIfChanged(
+    CACHE,
+    JSON.stringify({ repo: REPO, generatedAt, releases }, null, 2) + '\n'
+  )
+  const wrotePage = writeIfChanged(PAGE, renderPage(releases, highlights, { generatedAt }))
+
+  if (!wroteCache && !wrotePage) {
+    console.log(
+      `[releases] nothing to do — ${releases.length} releases, unchanged since ` +
+        `${generatedAt}. Both files left exactly as they were.`
+    )
+    return
+  }
 
   const summarised = releases.filter((r) => highlights[r.tag]).length
+  const written = [wrotePage && PAGE, wroteCache && CACHE]
+    .filter(Boolean)
+    .map((f) => path.relative(process.cwd(), f))
+    .join(' + ')
   console.log(
-    `[releases] wrote ${path.relative(process.cwd(), PAGE)} — ` +
+    `[releases] wrote ${written} — ` +
       `${releases.length} releases, ${summarised} with a hand-written summary`
   )
 }

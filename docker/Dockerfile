@@ -1,14 +1,16 @@
-# filex default image (~600-700 MB)
+# filex default image (~510 MB) — published as :latest and :full
 # - Pure Go binary (CGO=0, modernc.org/sqlite)
 # - + ffmpeg (video thumbs)
 # - + ghostscript + poppler-utils (PDF → JPEG, page 1)
 # - + libreoffice (headless soffice for .doc/.xls/.ppt/.odt/.ods/.odp → PDF → JPEG)
 # - + ttf-liberation + ttf-dejavu + font-noto so libreoffice/Ghostscript don't tofu non-ASCII glyphs
 #
-# Image size grew from ~40 MB (no thumb deps) to ~600-700 MB; the bulk is libreoffice.
+# Image size grew from ~43 MB (no thumb deps) to ~510 MB; the bulk is libreoffice.
 # Trade-off accepted: every advertised thumbnail format actually works at runtime.
-# A truly-slim variant (frontend + Go binary only) is no longer kept — the previous
-# Dockerfile.full has been merged into this single canonical recipe.
+# The lean variant IS kept, and is built from docker/Dockerfile.slim (~43 MB,
+# frontend + Go binary only) — from v0.31.0, when the :slim TAG stopped being
+# built from this recipe. The older docker/Dockerfile.full is what was merged
+# into this one.
 #
 # Build (from repo root):
 #   docker build -t brftech/filex:latest -f docker/Dockerfile .

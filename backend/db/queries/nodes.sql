@@ -34,7 +34,12 @@ UPDATE nodes SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?;
 DELETE FROM nodes WHERE id = ?;
 
 -- name: MoveNode :exec
-UPDATE nodes SET parent_id = ?, name = ?, path = ?, path_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;
+-- storage_key follows path on a LIVE row (the readers in internal/versioning,
+-- the antivirus quarantine and Manager.Read prefer it over path). A TRASHED
+-- row keeps it: there it holds the original path restore needs.
+UPDATE nodes SET parent_id = ?, name = ?, path = ?, path_hash = ?,
+    storage_key = CASE WHEN deleted_at IS NULL THEN ? ELSE storage_key END,
+    updated_at = CURRENT_TIMESTAMP WHERE id = ?;
 
 -- name: ListStaleNodes :many
 SELECT * FROM nodes WHERE storage_id = ? AND seen_at < ? AND deleted_at IS NULL;
