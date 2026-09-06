@@ -611,6 +611,7 @@ func BuildRouter(d *Deps) http.Handler {
 	writehook.ConfigureSaveScan(d.AVScanAfterSave)
 	wsTickets := realtime.NewTicketStore()
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
+	wsh.AttachPublicURLConfigured(d.Cfg.PublicURLSet)
 	wsh.AttachTenants(tenants)
 
 	// Live-collaboration WebSocket (folder change events + presence). OPTIONAL

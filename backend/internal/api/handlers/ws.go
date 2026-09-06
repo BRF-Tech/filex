@@ -41,7 +41,17 @@ type WS struct {
 	// host — the operator's would fail the origin check and, on a separate
 	// certificate, not connect at all.
 	Tenants tenanturl.Resolver
+	// PublicURLSet reports whether PublicURL was chosen by the operator. False
+	// means it is the built-in guess, and wsURL then takes the origin from the
+	// request instead of announcing an address nothing is listening on.
+	PublicURLSet bool
 }
+
+// AttachPublicURLConfigured records whether PublicURL was chosen rather than
+// defaulted. ⚠ Kept out of NewWS deliberately: every test constructs a WS with
+// an explicit URL, and a constructor that guessed at this would have them all
+// disagree with the running server about the one thing being fixed.
+func (h *WS) AttachPublicURLConfigured(set bool) { h.PublicURLSet = set }
 
 // AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
 func (h *WS) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
@@ -52,6 +62,17 @@ func NewWS(store db.Store, resolver *acl.Resolver, hub *realtime.Hub, tickets *r
 	return &WS{
 		Store: store, ACL: resolver, Hub: hub, Tickets: tickets, PublicURL: publicURL,
 		Tenants: tenanturl.New(store, publicURL, false),
+		// A caller that names an origin has chosen one. Only the built-in
+		// guess counts as unconfigured — the string is repeated here rather
+		// than imported from internal/config, which would make the handler
+		// package depend on the loader it is called by.
+		//
+		// ⚠ Defaulting this the other way round is a trap I walked into: every
+		// existing test passes an explicit URL and none of them knew to say so,
+		// so four of them started taking the origin from the request instead.
+		// The server still calls AttachPublicURLConfigured with the real
+		// answer, which stays authoritative.
+		PublicURLSet: publicURL != "" && publicURL != "http://localhost:5212",
 	}
 }
 
@@ -165,8 +186,30 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 
 // wsURL derives the public wss:// URL for /api/ws from the origin this request
 // belongs to (the tenant's host in multi-tenant mode, PublicURL otherwise).
+// wsURL is the address the browser is told to open the socket on.
+//
+// ⚠⚠ When no public URL was configured, it comes from THIS REQUEST rather than
+// from the default guess. filex assumes `http://localhost:5212`, so an
+// instance on any other port handed every browser `ws://localhost:5212/api/ws`
+// — refused, and RealtimeClient falls back to 12-second polling silently. The
+// symptom is "live updates do not arrive" while the server is perfectly fine.
+//
+// ⚠ Safe to take from the request here, and only here: this response goes back
+// to the very client that sent it, so a forged Host header can only mislead
+// the sender about its own socket. A share link is different — it is mailed to
+// a third party — which is why those still go through the configured origin
+// and are NOT changed by this.
 func (h *WS) wsURL(r *http.Request) string {
 	base := h.Tenants.FromRequest(r)
+	if !h.PublicURLSet && r != nil {
+		if host := r.Host; host != "" {
+			scheme := "http"
+			if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+				scheme = "https"
+			}
+			base = scheme + "://" + host
+		}
+	}
 	switch {
 	case strings.HasPrefix(base, "https://"):
 		return "wss://" + strings.TrimPrefix(base, "https://") + "/api/ws"

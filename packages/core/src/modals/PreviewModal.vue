@@ -1034,7 +1034,7 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
       </template>
 
       <template v-else-if="kind === 'office'">
-        <div v-if="officeError" class="fe-preview__fallback">
+        <div v-if="officeError" class="fe-preview__fallback" data-testid="office-fallback">
           <span class="fe-preview__fallback-icon">📄</span>
           <p>{{ officeError }}</p>
           <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>

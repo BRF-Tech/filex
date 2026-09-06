@@ -26,8 +26,18 @@ import (
 
 // Config is the top-level runtime configuration object.
 type Config struct {
-	Listen        string `yaml:"listen"`
-	PublicURL     string `yaml:"public_url"`
+	Listen    string `yaml:"listen"`
+	PublicURL string `yaml:"public_url"`
+	// PublicURLSet reports whether the operator actually chose PublicURL,
+	// rather than inheriting DefaultPublicURL.
+	//
+	// ⚠ It matters because the default is a GUESS and filex hands it out as
+	// fact: the realtime ticket derives `ws_url` from it, so an instance on any
+	// other port told every browser to connect to :5212, the connection was
+	// refused, and the client fell back to 12-second polling with no error
+	// raised anywhere. Not serialised -- it describes how the config was
+	// loaded, not the deployment.
+	PublicURLSet  bool   `yaml:"-"`
 	DataDir       string `yaml:"data_dir"`
 	DefaultLocale string `yaml:"default_locale"`
 	// CookieDomain sets the Domain attribute on the filex_session cookie
@@ -596,7 +606,7 @@ func Default() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
 		Listen:    "0.0.0.0:5212",
-		PublicURL: "http://localhost:5212",
+		PublicURL: DefaultPublicURL,
 		DataDir:   filepath.Join(home, ".filex"),
 		// Fail-closed by default -- see the field docs on Config.
 		VersionsOnOverwrite: true,
@@ -693,6 +703,11 @@ func ParseDurationDays(v string) (time.Duration, error) {
 	return time.ParseDuration(v)
 }
 
+// DefaultPublicURL is the address filex assumes when nobody says otherwise.
+// ⚠ It is a guess, and anything derived from it must be able to tell that it
+// is one -- see Config.PublicURLSet.
+const DefaultPublicURL = "http://localhost:5212"
+
 // Load reads a YAML file and applies environment overrides. Pass empty
 // path for defaults + env only.
 func Load(path string) (Config, error) {
@@ -708,6 +723,12 @@ func Load(path string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	// Set by either source -- a YAML `public_url` counts as much as the env
+	// var. Comparing against the default rather than tracking each writer
+	// keeps this true no matter how many ways there are to set it; an operator
+	// who spells out the default gets the default, which is what they asked
+	// for.
+	cfg.PublicURLSet = cfg.PublicURL != DefaultPublicURL
 	// Default the OIDC redirect to <public_url>/api/auth/oidc/callback so an
 	// issuer + client id/secret are enough to stand up SSO (no need to also
 	// spell out the callback URL).

@@ -35,7 +35,16 @@ func PrintBanner(w io.Writer, cfg config.Config, fr FirstRunCredentials, caps ma
 	bold.Fprintf(w, "  filex %s · self-hosted file manager\n", version.Version)
 	cyan.Fprintln(w, bar)
 
-	fmt.Fprintf(w, "  %s    %s\n", bold.Sprint("Listening on:"), cfg.PublicURL)
+	// ⚠ "Listening on" used to print PublicURL, which is a GUESS unless the
+	// operator set it — so an instance started on another port announced
+	// http://localhost:5212 and the operator read back a URL nothing was
+	// serving. The listen address is the fact; the public URL is the claim.
+	if !cfg.PublicURLSet {
+		fmt.Fprintf(w, "  %s    %s  %s\n", bold.Sprint("Listening on:"), cfg.Listen,
+			dim.Sprint("(FILEX_PUBLIC_URL unset — the socket URL follows the request)"))
+	} else {
+		fmt.Fprintf(w, "  %s    %s\n", bold.Sprint("Listening on:"), cfg.PublicURL)
+	}
 	fmt.Fprintf(w, "  %s        %s/admin\n", bold.Sprint("Admin UI:"), cfg.PublicURL)
 	// The URL an operator hands to everybody else. Both doors serve the same
 	// app; this is the one that does not tell an ordinary user they are inside

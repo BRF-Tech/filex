@@ -169,9 +169,13 @@ test.describe('Capability gating', () => {
     await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE_NAME)}`);
     await page.getByRole('row', { name: /gating\.docx/ }).dblclick();
 
-    // The in-page PreviewModal shows the operator-friendly Turkish
-    // string declared in PreviewModal.vue:598.
-    await expect(page.getByText('OnlyOffice yapılandırması yok')).toBeVisible({
+    // ⚠ Asserted on the element, not on its words. This used to look for the
+    // Turkish sentence, which was correct only while Turkish was the fallback
+    // language for everybody; v0.33.0 made the fallback English and the test
+    // went red without the gating branch having changed at all. A test that
+    // fails when the UI is translated is testing the translation.
+    const fallback = page.getByTestId('office-fallback');
+    await expect(fallback).toBeVisible({
       timeout: 5_000,
     });
 

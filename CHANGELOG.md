@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.2] - 2026-09-06
+
+### Fixed
+
+- **An instance that was never told its public URL sent every browser to
+  `localhost:5212`.** The realtime ticket built `ws_url` from `PublicURL`,
+  whose default is a guess — so filex on any other port advertised a socket
+  address nothing was listening on, the connection was refused, and the client
+  dropped to 12-second polling **with nothing logged**. It reads as "live
+  updates do not work" while the server is perfectly healthy, and it is the
+  default state of any install that has not set `FILEX_PUBLIC_URL`.
+
+  With no public URL configured the socket address now comes from the request,
+  which is safe *here and only here*: the ticket goes back to the client that
+  asked for it, so a forged `Host` can mislead nobody but its sender. Share
+  links are mailed to third parties and still use the configured origin — a
+  test pins that difference.
+
+  The startup banner had the same fault, printing the guess under "Listening
+  on". It prints the real listen address, and says so, when no public URL was
+  chosen.
+
+- Two browser tests asserted **translated strings** and so failed once English
+  became the fallback language in v0.33.0, with nothing about the features
+  having changed: `82-capability-gating` looked for the Turkish OnlyOffice
+  message (now a stable selector), and `17-theme-locale` was fixed in 0.34.1.
+  A test that fails when the UI is translated is testing the translation.
+
 ## [0.34.1] - 2026-09-06
 
 ### Fixed
