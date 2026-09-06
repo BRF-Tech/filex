@@ -36,10 +36,35 @@ permissions:
   packages: write   # push images to ghcr.io
 
 jobs:
+  # ── The gate ────────────────────────────────────────────────────────────
+  #
+  # ⚠⚠ Everything that publishes anything needs this. It exists because
+  # nothing connected a tag to the test suite: CI runs on the branch push and
+  # this workflow on the tag pushed two seconds later, in parallel, neither
+  # aware of the other, and the repository required no status check at all.
+  #
+  # Measured 2026-09-06: CI had been red since v0.31.0 and FOUR tags shipped
+  # over it. The failure was real -- a user who had chosen Turkish saw an
+  # English admin panel on any second device -- and it was the release
+  # process's blind spot, not a flake: the documented steps check README,
+  # screenshots, links, anchors and version manifests, and never once run a
+  # test.
+  #
+  # Cost: the release critical path grows by one CI run (~7 min). A release
+  # that has to wait seven minutes to prove it works is not a cost worth
+  # arguing about against four releases nobody could see were broken.
+  test:
+    name: Test suite
+    uses: ./.github/workflows/ci.yml
+    with:
+      # The release's own docker job builds and pushes the same image.
+      skip_docker: true
+
   # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
   # Creates the Release. Everything that uploads to it depends on this job
   # and on nothing else.
   binaries:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,6 +148,7 @@ jobs:
   # GitHub Release beside it — delete the tag from ghcr.io by hand if that
   # happens; it has to be a deliberate cleanup, not a silent inconsistency.
   docker:
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -251,6 +277,7 @@ jobs:
   # still demands an OTP and fails with EOTP in CI. Package versions are pinned
   # to the tag, so a `v0.1.60` tag publishes @brftech/*@0.1.60.
   npm:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
