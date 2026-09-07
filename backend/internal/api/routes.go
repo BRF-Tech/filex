@@ -253,6 +253,12 @@ func BuildRouter(d *Deps) http.Handler {
 		MaxAge:           300,
 	}))
 
+	// ⚠ Before any route is registered, and above every auth chain: a public
+	// demo publishes an admin login, so "admin-only" means "public" there and
+	// the whole operator surface is a stranger's to change. Reads still pass —
+	// see demo_guard.go for what is refused and why. No-op unless Demo.Mode.
+	r.Use(DemoGuard(d.Cfg.Demo.Mode))
+
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
 	mh.AttachACL(d.ACL)
@@ -423,11 +429,16 @@ func BuildRouter(d *Deps) http.Handler {
 	// New self-service + admin handlers.
 	authSelf := handlers.NewAuthSelf(d.Store)
 	dashH := handlers.NewDashboard(d.Store, d.Caps, d.Worker)
+	dashH.DemoMode = d.Cfg.Demo.Mode
 	auditH := handlers.NewAudit(d.Store)
+	// A demo's audit page is a public page. Hide the addresses of the people
+	// reading it — see handlers/demo_redact.go.
+	auditH.DemoMode = d.Cfg.Demo.Mode
 	syncAdmH := handlers.NewSyncAdmin(d.Store)
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
 	externalH := handlers.NewExternalAdmin(d.Store, d.Caps, d.External, envManagedExternal(d.Cfg))
 	authProvH := handlers.NewAuthProviders(d.Store)
+	authProvH.DemoMode = d.Cfg.Demo.Mode
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
 	// Test probes a plugin driver properly (handlers/storages_admin.go).
 	storagesAdmH.Plugins = d.Plugins
@@ -579,8 +590,14 @@ func BuildRouter(d *Deps) http.Handler {
 	// made the login page's capabilities probe answer 403. This one cannot
 	// reject at all: anything unusable is simply anonymous, which reports as
 	// "user".
+	//
+	// ⚠ auth.AnnotateUser for the same reason, one layer up: the answer also
+	// carries the operator's external-service HOSTS, and an anonymous caller
+	// gets told only WHETHER a capability is on, never where it lives. Like
+	// AnnotateToken it never rejects — an unusable credential is anonymous.
 	r.Group(func(r chi.Router) {
 		r.Use(auth.AnnotateToken(d.Store))
+		r.Use(auth.AnnotateUser())
 		r.Get("/api/capabilities", ch.Get)
 		r.Get("/api/files/capabilities", ch.Get)
 	})
@@ -1168,6 +1185,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 		External:           d.External,
 		EnvManagedExternal: envManagedExternal(d.Cfg),
+		DemoMode:           d.Cfg.Demo.Mode,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, convertURL)
 	aiMCP.AttachTenants(tenants)

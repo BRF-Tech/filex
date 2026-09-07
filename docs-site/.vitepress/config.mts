@@ -85,6 +85,7 @@ export default defineConfig({
           { text: 'Docker', link: '/DOCKER' },
           { text: 'Deployment', link: '/DEPLOYMENT' },
           { text: 'Configuration', link: '/CONFIGURATION' },
+          { text: 'Demo mode', link: '/DEMO' },
           { text: 'Updates', link: '/UPDATES' },
           { text: 'Releases', link: '/RELEASES' }
         ]

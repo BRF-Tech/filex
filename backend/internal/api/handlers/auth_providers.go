@@ -34,6 +34,9 @@ const authProvidersAreInstanceWide = "authentication drivers apply to the whole 
 // AuthProviders handles /api/admin/auth-providers.
 type AuthProviders struct {
 	Store db.Store
+	// DemoMode marks a public playground, where every admin-only read is a
+	// public read. See maskNestedSecrets.
+	DemoMode bool
 }
 
 // NewAuthProviders constructs the handler.
@@ -85,6 +88,9 @@ func (h *AuthProviders) List(w http.ResponseWriter, r *http.Request) {
 				val = "***"
 			}
 			info.ConfigRedacted[leaf] = val
+		}
+		if h.DemoMode {
+			maskNestedSecrets(info.ConfigRedacted)
 		}
 		out = append(out, info)
 	}

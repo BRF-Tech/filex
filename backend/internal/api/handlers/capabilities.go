@@ -98,6 +98,24 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ⚠ An anonymous caller is told WHETHER a capability is on, never WHERE it
+	// lives. Measured on the public demo (2026-09-07): an unauthenticated GET
+	// /api/files/capabilities answered 200 carrying
+	// `"url":"https://docs.example.com"` — the operator's internal OnlyOffice host,
+	// handed to anyone who asked. Not a demo bug: every install leaks whatever
+	// its operator configured.
+	//
+	// The endpoint stays public on purpose (docs/INTEGRATION.md: embedders
+	// probe it before they log in), and every consumer that needs a HOST is
+	// behind a login already — the drawio iframe and the convert modal only
+	// open on a file the caller can already read, and OnlyOffice's real host
+	// arrives from the authenticated POST /api/files/onlyoffice/config
+	// (`documentServerUrl`), never from here. So the hostnames travel with the
+	// credential and the booleans travel without one.
+	if anonymousCaller(r) {
+		redactExternalHosts(merged)
+	}
+
 	// Per-tenant branding: identify only the tenant this host belongs to.
 	if h.MultiTenant && h.Store != nil {
 		if p, _ := h.Store.GetProviderByHost(r.Context(), multioidc.RequestHost(r)); p != nil {
@@ -151,4 +169,42 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	merged["e2e_escrow"] = esc
 	writeJSON(w, http.StatusOK, merged)
+}
+
+// anonymousCaller reports that nothing on this request identified anybody.
+//
+// Both halves matter: a browser session arrives as a user (auth.AnnotateUser),
+// an integration arrives as an API token (auth.AnnotateToken), and a token
+// whose owner the session drivers also resolved shows up as both. Neither
+// annotation ever rejects, so "anonymous" here means exactly "no usable
+// credential was presented", not "authentication failed".
+func anonymousCaller(r *http.Request) bool {
+	return auth.UserFrom(r.Context()) == nil && auth.TokenFrom(r.Context()) == nil
+}
+
+// redactExternalHosts strips the operator's addresses from a capabilities
+// payload, leaving every flag that says whether a feature is available.
+//
+// It removes the `url` from each entry of the nested `external` map and blanks
+// the three flat aliases. `enabled`, `state` and `last_check` stay: a public
+// embedder legitimately asks "can this instance preview a .docx", and that is
+// answered without naming a host.
+func redactExternalHosts(merged map[string]any) {
+	for _, alias := range []string{"onlyoffice_url", "drawio_url", "convert_url"} {
+		if _, ok := merged[alias]; ok {
+			merged[alias] = ""
+		}
+	}
+	ext, ok := merged["external"].(map[string]any)
+	if !ok {
+		return
+	}
+	for name, svc := range ext {
+		entry, ok := svc.(map[string]any)
+		if !ok {
+			continue
+		}
+		delete(entry, "url")
+		ext[name] = entry
+	}
 }

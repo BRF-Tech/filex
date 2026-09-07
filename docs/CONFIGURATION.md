@@ -801,6 +801,14 @@ FILEX_UPDATE_PRE_COMMAND='pg_dump -Fc filex > /backups/filex-pre-$FILEX_UPDATE_T
 | `FILEX_DEMO_USER` | `demo@demo.com` | The account the CTA logs in as. |
 | `FILEX_DEMO_PASS` | `demo` | The password the CTA submits, and the one printed under the button. **These are published credentials** — on a demo instance the server returns them in `/api/capabilities` so the page can use them, which is the whole point of a demo. Neither variable creates or changes the account: keep the DB user in sync yourself. |
 
+⚠⚠ Demo mode is not only a login page. Because the credentials are published,
+"admin-only" means "public" on that instance, so the whole admin surface goes
+**read-only**: every write under `/api/admin/…` and `/api/ai/admin/…` is
+refused with 403, as are changes to the shared account itself (password,
+e-mail, TOTP). Reads still work — a demo exists to show the operator surfaces —
+and audit-log IPs are masked. Nothing here runs unless `FILEX_DEMO_MODE` is on.
+Full list: [DEMO.md](DEMO.md).
+
 ---
 
 ## config.yaml

@@ -19,6 +19,10 @@ type Dashboard struct {
 	Store  db.Store
 	Caps   *capability.Service
 	Worker *syncpkg.Worker
+	// DemoMode marks a public playground. The `recent_activity` block below
+	// is the same audit rows the Audit page serves, client addresses and all,
+	// on the FIRST page of the admin panel. See maskAuditRecent.
+	DemoMode bool
 }
 
 // NewDashboard constructs the handler.
@@ -125,6 +129,9 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recent, _ := h.Store.ListAuditRecent(ctx, 10)
+	if h.DemoMode {
+		maskAuditRecent(recent)
+	}
 	if recent == nil {
 		recent = []*model.AuditEntry{}
 	}

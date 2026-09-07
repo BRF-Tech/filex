@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-09-07
+
+### Upgrade notes
+
+- ⚠⚠ **Running a public demo (`FILEX_DEMO_MODE`)? Upgrade before you link it
+  anywhere.** The demo account is an administrator, and the guard covered
+  storage creation and plugins only. Measured by walking the real route table:
+  **all 101 routes under `/api/admin` answered, and not one returned 403** —
+  resetting the shared account's password, deleting users, repointing an
+  existing storage, making the server connect wherever a visitor pointed
+  `smtp-test`, applying an update. `/api/ai/admin/*` is the same surface behind
+  a token and was reachable the same way, proven end to end. Writes are refused
+  now; reads are not, because showing the operator surfaces is what a demo is
+  for.
+
+- ⚠ **`GET /api/files/capabilities` no longer returns service URLs to
+  anonymous callers.** It still says *whether* OnlyOffice, drawio and the
+  converter are configured — that is what embedders probe it for — but not
+  *where* they live, because it was handing the operator's internal hostname to
+  anyone with curl. Signed-in responses are unchanged. **If you read
+  `onlyoffice_url`, `drawio_url` or `convert_url` from an unauthenticated
+  call**, send credentials; the first-party consumers all already do.
+
+- **The container can drop root.** Set `PUID`/`PGID` (or `user:` /
+  `runAsUser`) and filex runs as that user, chowning `/data` once. Nothing
+  changes without them: no variable means root, exactly as before, and the
+  upgrade path from a root-owned data directory was measured — the database
+  survives byte-identical and `rm -rf ./data` stops needing `sudo`.
+
+### Fixed
+
+- **docs.filex.sh was built from the private tree, so it published an import
+  path that does not compile.** `docs/PLUGINS.md` tells a plugin author to
+  import `github.com/brf-tech/filex/backend/pkg/pluginsdk`; the published
+  module is `github.com/brf-tech/filex/backend`. Anyone following the plugin
+  guide copied a path that names a repository they cannot reach and does not
+  build. `CONTRIBUTING` carried two more of the same. The release step now
+  pushes the site's prose from the **export**, which is where every other
+  public artifact comes from.
+
+  It also explains a second symptom: the site had been serving a v0.33.0 build,
+  so `/REALTIME` was a 404 while the README's first paragraph advertises
+  real-time collaboration and nine pages link to it, `/CONFIGURATION` never
+  mentioned ClamAV (nineteen times in the repo), and `/PROTECTION` still said
+  WebDAV and AI/MCP writes were "not yet" scanned — a security page describing
+  a gap that had been closed.
+
 ### Added
 
 - **`PUID` / `PGID`.** The image installed `su-exec` and created a `filex`
@@ -68,6 +115,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs.filex.sh` appeared in none of them: the nav "Docs" and the footer
   "Documentation" both pointed at raw GitHub markdown while a 38-page
   VitePress site sat unlinked.
+
+### Security
+
+- ⚠⚠ **A public demo no longer hands every visitor a working admin panel.**
+  `FILEX_DEMO_MODE` publishes the credentials on purpose, which makes
+  "admin-only" mean "public" on that instance — and until now the only thing
+  refused was *adding a storage*. Measured on a local demo: all **101** admin
+  routes answered, none with a 403, including
+  `POST /api/admin/users/{id}/reset-password`,
+  `DELETE /api/admin/users/{id}`, `PATCH /api/admin/settings`,
+  `PATCH /api/admin/storages/{id}` (repointing an existing storage — the
+  create-side guard never covered it), `POST /api/admin/webhooks` and
+  `POST /api/admin/update/apply`. One visitor resetting the shared password
+  locked out every other reader until the nightly restore.
+
+  Every state-changing method under `/api/admin/…` and `/api/ai/admin/…` is
+  now refused with 403 on a demo, as are changes to the shared account itself
+  (`/api/auth/password`, `/api/auth/profile`, `/api/auth/totp/…`). **Reads are
+  untouched** — a demo exists to show the operator surfaces — and so is every
+  ordinary install, where the middleware is a pass-through. Full list:
+  [docs/DEMO.md](docs/DEMO.md).
+
+  ⚠ `/api/ai/admin/…` is the same admin surface behind an admin-scoped API
+  token, and a visitor could mint one at `POST /api/admin/ai-tokens` (201) and
+  then drive `PATCH /api/ai/admin/settings` (200) with it. Guarding one mount
+  point without the other would only have moved the door.
+
+- ⚠⚠ **`/api/capabilities` no longer tells anonymous callers where the
+  operator's services live.** The endpoint is public by design (embedders probe
+  it before logging in) and it published `external.<service>.url` plus the flat
+  `onlyoffice_url` / `drawio_url` / `convert_url` to anybody who asked —
+  measured on demo.filex.sh: `"url": "https://docs.example.com"`, with no
+  credential. This affected **every install**, not just demos. Anonymous
+  callers now get `enabled` and `state` and no host; authenticated callers see
+  the payload unchanged, because the draw.io iframe and the convert modal need
+  a real address. OnlyOffice's document-server URL was never needed here — the
+  browser gets it from the authenticated `POST /api/files/onlyoffice/config`.
+
+- On a demo, the audit log and the dashboard's `recent_activity` no longer
+  print client IP addresses: with published credentials, one visitor's address
+  is readable by the next. Ordinary installs still show them.
+
+- On a demo, `GET /api/admin/auth-providers` no longer returns credentials in
+  clear. Its `config_redacted` block masks by leaf NAME, and the admin UI saves
+  a provider's whole config as one leaf called `config`, so an OIDC
+  `client_secret` went out in full under a field named "redacted".
+
+### Fixed
+
+- The demo advertised two searches that returned nothing. The login splash
+  promised `"invoice 2026" finds invoice_2026.pdf` and the search box suggested
+  `tag:report`; on the demo corpus both answer 0 results — there is no file
+  with "invoice" in its name and no tags at all — while `mian.go` and
+  `package main` work. The examples now name files the demo actually holds, and
+  a test pins them to the recorded corpus so a suggestion that stops being true
+  fails a build instead of greeting visitors.
 
 ## [0.35.0] - 2026-09-07
 

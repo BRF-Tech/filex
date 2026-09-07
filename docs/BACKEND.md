@@ -150,6 +150,25 @@ build metadata and a set of flat aliases kept for older embeds)
 Cached client-side for 1h. `share_max_ttl_days` is the longest life a new share
 link may be given (0 = no ceiling; [PROTECTION.md](PROTECTION.md)).
 
+⚠⚠ **An anonymous caller is told _whether_ a capability is on, never _where_ it
+lives.** The endpoint is deliberately public — an embedder probes it before
+anybody logs in ([INTEGRATION.md](INTEGRATION.md)) — so for a request carrying
+no usable credential the `url` is dropped from every `external.<service>` entry
+and the flat `onlyoffice_url` / `drawio_url` / `convert_url` aliases come back
+empty. `enabled` and `state` are unchanged, which is what a feature probe
+actually asks.
+
+Signed-in callers see the payload above in full, because two consumers need a
+real host in the browser: the draw.io iframe and the convert modal. OnlyOffice
+does not — the browser gets its document-server URL from the authenticated
+`POST /api/files/onlyoffice/config` (`documentServerUrl`) — so that host now
+travels only with a credential as well.
+
+Measured before this changed (2026-09-07, demo.filex.sh): an unauthenticated
+`GET /api/files/capabilities` answered 200 with
+`"url": "https://docs.example.com"` — the operator's internal document server,
+published by every install that configured one.
+
 ⚠ `antivirus` means **configured**, not answering: the setting is on and either
 a scanner binary resolved or a clamd address is set. Reachability costs a
 network round trip and is probed on `GET /api/admin/protection`, where an
@@ -1144,6 +1163,14 @@ Includes per-error detail array.
   "offset": 0
 }
 ```
+
+⚠ On a **demo** instance (`FILEX_DEMO_MODE`) `ip` comes back as
+`hidden on the demo`. The page itself stays readable — it is one of the
+operator surfaces a demo exists to show — but the addresses in it belong to the
+other visitors, and on a public demo every visitor can read it. The same
+masking applies to the `recent_activity` block of `GET /api/admin/dashboard`,
+which carries the same rows. An ordinary install is untouched; see
+[DEMO.md](DEMO.md).
 
 ⚠ Both the envelope and the action list on this page used to be invented. The
 key is `entries` (not `events`), each row wraps the entry under `entry` with

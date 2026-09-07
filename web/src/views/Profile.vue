@@ -6,6 +6,7 @@ import { Save, ShieldCheck, ShieldOff } from 'lucide-vue-next';
 import { AuthApi } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
 import { useToastStore } from '@/stores/toast';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { extractError } from '@/api/client';
 import { setStoredLocale, type Locale } from '@/i18n';
 import { downscaleImageToDataURL } from '@/lib/image';
@@ -20,6 +21,11 @@ import Badge from '@/components/ui/Badge.vue';
 const { t, locale } = useI18n();
 const auth = useAuthStore();
 const toast = useToastStore();
+// ⚠ The demo account is SHARED. Changing its password, its e-mail or enrolling
+// a second factor takes the demo away from every other reader until the
+// nightly restore, so the server refuses all three (api/demo_guard.go) and the
+// page does not offer them.
+const caps = useCapabilitiesStore();
 
 const email = ref('');
 // The short login name. It is what the connection protocols use (SFTP, FTPS,
@@ -254,7 +260,7 @@ async function disableTotp() {
         />
         <Input v-model="timezone" :label="t('profile.timezone')" placeholder="Europe/Istanbul" />
       </div>
-      <div class="flex justify-end pt-2">
+      <div v-if="!caps.demoReadOnly" class="flex justify-end pt-2">
         <Button type="submit" :loading="savingProfile">
           <Save class="h-4 w-4" />
           {{ t('common.save') }}
@@ -263,7 +269,7 @@ async function disableTotp() {
     </form>
 
     <!-- Password -->
-    <form class="card card-body space-y-3" @submit.prevent="changePassword">
+    <form v-if="!caps.demoReadOnly" class="card card-body space-y-3" @submit.prevent="changePassword">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-zinc-500">
         {{ t('profile.section.security') }}
       </h2>
@@ -297,7 +303,7 @@ async function disableTotp() {
     </form>
 
     <!-- TOTP -->
-    <div class="card card-body space-y-3">
+    <div v-if="!caps.demoReadOnly" class="card card-body space-y-3">
       <div class="flex items-start justify-between gap-3">
         <div>
           <h2 class="text-sm font-semibold uppercase tracking-wide text-zinc-500">

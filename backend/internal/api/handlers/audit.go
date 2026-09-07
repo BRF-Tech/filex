@@ -15,6 +15,10 @@ import (
 // Audit handles /api/admin/audit.
 type Audit struct {
 	Store db.Store
+	// DemoMode marks a public playground, where this page is readable by
+	// whoever read the credentials off the landing page — and the addresses
+	// in it belong to the other visitors. See maskAuditEntries.
+	DemoMode bool
 }
 
 // NewAudit constructs the handler.
@@ -84,6 +88,9 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = kept
 		total = int64(len(entries))
+	}
+	if h.DemoMode {
+		maskAuditEntries(entries)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,

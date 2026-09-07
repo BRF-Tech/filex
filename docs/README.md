@@ -14,6 +14,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   (generated from the GitHub releases when a release is cut, by
   `npm run releases`)
 - [Updates](UPDATES.md) — how filex checks for, and installs, a new release
+- [Demo mode](DEMO.md) — running filex as a public playground: the published
+  account, the read-only guard over the whole admin surface, and what a demo
+  does *not* publish
 
 ## Storage
 

@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { Plus, Trash2, Pencil, KeyRound, RefreshCcw } from 'lucide-vue-next';
 
 import { useUsersStore } from '@/stores/users';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
@@ -21,6 +22,12 @@ import CopyButton from '@/components/ui/CopyButton.vue';
 const { t, locale } = useI18n();
 const router = useRouter();
 const users = useUsersStore();
+// ⚠ On a public demo the account on screen is the SHARED one every visitor
+// signs in with, so "reset password" and "delete" are the two buttons that
+// take the demo away from the next reader. The server refuses them either way
+// (api/demo_guard.go); not drawing them is how a visitor finds that out
+// without first breaking the demo for somebody else.
+const caps = useCapabilitiesStore();
 const toast = useToastStore();
 
 const q = ref('');
@@ -150,7 +157,7 @@ onMounted(load);
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.refresh') }}
         </Button>
-        <Button @click="showCreate = true">
+        <Button v-if="!caps.demoReadOnly" @click="showCreate = true">
           <Plus class="h-4 w-4" />
           {{ t('users.addNew') }}
         </Button>
@@ -204,6 +211,7 @@ onMounted(load);
             <Pencil class="h-3.5 w-3.5" />
           </Button>
           <Button
+            v-if="!caps.demoReadOnly"
             size="xs"
             variant="ghost"
             @click="showReset = row as User"
@@ -212,6 +220,7 @@ onMounted(load);
             <KeyRound class="h-3.5 w-3.5" />
           </Button>
           <Button
+            v-if="!caps.demoReadOnly"
             size="xs"
             variant="ghost"
             @click="showDelete = row as User"

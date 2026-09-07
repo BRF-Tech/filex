@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { CapabilitiesApi } from '@/api/capabilities';
 import type { Capabilities } from '@/api/types';
 import { applyServerDefaultLocale } from '@/i18n';
@@ -46,6 +46,14 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
     }
   }
 
+  // ⚠ ONE definition of "this instance is a public demo, so writing is
+  // refused". The server is the authority — api/demo_guard.go answers 403 on
+  // every admin mutation — and this is the UI's copy of the same fact, so a
+  // page can stop offering a control it knows will be refused. A view that
+  // asks the question its own way is a view that will disagree with the
+  // server on the next release.
+  const demoReadOnly = computed(() => data.value.demo_mode === true);
+
   function has(key: keyof Capabilities): boolean {
     const v = data.value[key];
     if (typeof v === 'boolean') return v;
@@ -54,5 +62,5 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
     return Boolean(v);
   }
 
-  return { data, loading, loaded, fetch, has };
+  return { data, loading, loaded, demoReadOnly, fetch, has };
 });

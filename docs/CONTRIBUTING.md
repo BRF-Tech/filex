@@ -625,6 +625,14 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
     ```bash
     ssh main 'cp -a /root/filex-docs-src /root/filex-docs-src.bak-$(date +%Y%m%d-%H%M%S)'
     ssh main 'rm -rf /root/filex-docs-src/docs'
+    # ⚠⚠ From the EXPORT, not from here. docs.filex.sh is a public site, and
+    # this tree carries the private module path: `docs/PLUGINS.md` tells a
+    # plugin author to import `github.com/brf-tech/filex/backend/pkg/
+    # pluginsdk`, while the published module is `github.com/brf-tech/filex/
+    # backend`. Pushed from the source, the site hands strangers an import
+    # path that does not compile and names a repository they cannot reach.
+    # Measured 2026-09-07: PLUGINS had one such line and CONTRIBUTING two.
+    cd /g/filex-export
     tar czf - docs README.md CHANGELOG.md | ssh main 'tar xzf - -C /root/filex-docs-src'
     tar czf - --exclude=node_modules --exclude=.vitepress/dist               --exclude=.vitepress/cache docs-site       | ssh main 'tar xzf - -C /root/filex-docs-src'
     ssh main 'bash /root/filex-docs-refresh.sh'

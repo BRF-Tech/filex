@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { RouterView } from 'vue-router';
+import { useI18n } from 'vue-i18n';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import Sidebar from './Sidebar.vue';
 import TopNav from './TopNav.vue';
 import Breadcrumbs from './Breadcrumbs.vue';
 import PendingOpsTray from './PendingOpsTray.vue';
 
 const sidebarOpen = ref(true);
+// ⚠ Said once, at the layout, rather than on each page: a visitor who is
+// refused a save should already know why before they try it. The refusal
+// itself is the server's (api/demo_guard.go) — this is the sign on the door.
+const caps = useCapabilitiesStore();
+const { t } = useI18n();
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value;
@@ -29,6 +36,12 @@ function toggleSidebar() {
 
       <main class="flex-1 px-4 py-4 sm:px-6 lg:px-8">
         <div class="mx-auto max-w-7xl">
+          <p
+            v-if="caps.demoReadOnly"
+            class="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            {{ t('demo.readOnly') }}
+          </p>
           <Breadcrumbs class="mb-3" />
           <RouterView v-slot="{ Component }">
             <transition name="fade" mode="out-in">

@@ -69,9 +69,15 @@ describe('virtual view labels', () => {
       //    not "some tab": the second tab still sits on the folder it was
       //    opened from, so `contain.text` over the whole strip would pass on
       //    the wrong element.
-      cy.get('.fe-tabs__tab.is-active .fe-tabs__label')
-        .invoke('text')
-        .then((t) => expect(t.trim(), 'active tab label').to.eq(label));
+      // ⚠ `should(callback)` and NOT `.invoke('text').then(...)`: Cypress
+      // retries a `should`, and does not retry the body of a `then`. The
+      // sidenav's `aria-current` flips the moment the route changes, while the
+      // tab label follows when the view resolves — so a one-shot read caught
+      // the previous label. It passed here every time and failed in CI, which
+      // is the signature of a race, not of a bug in the product.
+      cy.get('.fe-tabs__tab.is-active .fe-tabs__label').should(($el) =>
+        expect($el.text().trim(), 'active tab label').to.eq(label),
+      );
 
       // 2. The breadcrumb — the copy that was RIGHT, and therefore the one that
       //    made the disagreement visible ("Shared with me" beside ".shared").
@@ -80,9 +86,9 @@ describe('virtual view labels', () => {
       // 3. The inspector — the third copy, which headed itself ".starred".
       //    Its folder-summary heading only renders with nothing selected, which
       //    is the state a view opens in.
-      cy.get('.fe-inspector__name')
-        .invoke('text')
-        .then((t) => expect(t.trim(), 'inspector heading').to.eq(label));
+      cy.get('.fe-inspector__name').should(($el) =>
+        expect($el.text().trim(), 'inspector heading').to.eq(label),
+      );
 
       // And no surface anywhere prints the raw sentinel.
       cy.get('.fe').should(($fe) => {

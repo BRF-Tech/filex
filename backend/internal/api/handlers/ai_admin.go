@@ -91,6 +91,10 @@ type AIAdminDeps struct {
 	// same way the UI does.
 	External           *external.Resolver
 	EnvManagedExternal map[string]bool
+	// DemoMode marks a public playground, so the wrapped handlers redact the
+	// same things they redact on the native /admin routes. The token surface
+	// is not a way around a demo's rules.
+	DemoMode bool
 }
 
 // NewAIAdmin constructs the admin AI surface from shared deps. Each wrapped
@@ -99,23 +103,23 @@ type AIAdminDeps struct {
 func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 	return &AIAdmin{
 		store:       d.Store,
-		dash:        NewDashboard(d.Store, d.Caps, d.Worker),
+		dash:        newDemoAwareDashboard(d),
 		settings:    NewSettings(d.Store),
 		users:       NewUsers(d.Store),
 		usersAdm:    NewUsersAdmin(d.Store),
-		storages:    NewStorages(d.Store, d.Worker),
+		storages:    newDemoAwareStorages(d),
 		storagesAdm: NewStoragesAdmin(d.Store),
 		syncAdm:     NewSyncAdmin(d.Store),
 		sharesAdm:   NewSharesAdmin(d.Store),
 		trash:       NewTrash(d.Trash, d.Store),
 		searchAdm:   NewSearchAdmin(d.Index, d.Store),
-		authProv:    NewAuthProviders(d.Store),
+		authProv:    newDemoAwareAuthProviders(d),
 		external:    NewExternalAdmin(d.Store, d.Caps, d.External, d.EnvManagedExternal),
 		replica:     NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader),
 		repTargets:  NewReplicationTargets(d.Store),
 		queue:       NewQueue(d.Queue),
 		notif:       NewNotifications(d.Notify),
-		audit:       NewAudit(d.Store),
+		audit:       newDemoAwareAudit(d),
 		grants:      NewGrants(d.Store, acl.New(d.Store)),
 	}
 }

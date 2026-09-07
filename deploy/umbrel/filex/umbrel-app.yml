@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.35.0"
+version: "0.36.0"
 releaseNotes: |-
-  filex v0.35.0 — 2026-09-07
-  • Running FILEX_MULTI_TENANT?
-  • Everyone: thumbnails were readable without logging in.
-  • Emptying the trash for one storage used to empty all of them.
-  • Directory logins now refuse rather than mis-home.
-  • Version restore now requires editor.
+  filex v0.36.0 — 2026-09-07
+  • Running a public demo (FILEX_DEMO_MODE)?
+  • GET /api/files/capabilities no longer returns service URLs to anonymous callers.
+  • The container can drop root.
+  • docs.filex.sh was built from the private tree, so it published an import path that does not compile.
+  • PUID / PGID.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
