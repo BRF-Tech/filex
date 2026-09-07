@@ -75,5 +75,15 @@ ENV FILEX_DATA_DIR=/data \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q --spider http://127.0.0.1:5212/healthz || exit 1
 
-ENTRYPOINT ["/usr/local/bin/filex"]
+# ⚠⚠ The entrypoint, not the binary. `su-exec` and the `filex` account above
+# were installed by an image that then ran everything as root and never used
+# either of them, so `/data` came back root-owned on the host and a reader
+# needed sudo to delete their own data directory. docker/entrypoint.sh honours
+# PUID/PGID and otherwise keeps the old behaviour exactly — read the reasoning
+# there before changing this line; the default has to stay root or every
+# existing install loses access to its own database on upgrade.
+COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["serve"]

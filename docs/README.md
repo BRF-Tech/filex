@@ -89,7 +89,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Deployment
 
 - [Deployment](DEPLOYMENT.md) — reverse proxy, HTTPS, scaling, backup
-- [Docker](DOCKER.md) — images & compose details
+- [Docker](DOCKER.md) — images, compose details, and which user the container runs as
 - [Metrics](METRICS.md) — the Prometheus surface, how to scrape it, and
   the handful of alerts worth having
 - Packaging in the repo: [`deploy/compose/`](../deploy/compose/) (minimal + full)

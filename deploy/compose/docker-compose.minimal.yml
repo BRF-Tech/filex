@@ -25,6 +25,14 @@ services:
       # admin-UI setup needed.
       FILEX_DEFAULT_STORAGE_DRIVER: local
       FILEX_DEFAULT_STORAGE_PATH: /srv/files
+      # The container runs as ROOT by default, so everything it writes into
+      # /data is root-owned and you need sudo to delete your own data
+      # directory. Uncomment these two (with YOUR ids -- `id -u`, `id -g`)
+      # and the entrypoint takes ownership of /data once and drops to that
+      # user. Safe on an install that has been running as root; see
+      # docs/DOCKER.md -> "Which user the container runs as".
+      # PUID: 1000
+      # PGID: 1000
       # Optional: preset the first admin instead of a random password.
       # FILEX_ADMIN_EMAIL: admin@example.com
       # FILEX_ADMIN_PASSWORD: change-me

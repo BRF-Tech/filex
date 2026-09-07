@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`PUID` / `PGID`.** The image installed `su-exec` and created a `filex`
+  account, then ran everything as root and used neither — so `/data` came back
+  owned by `root:root` and deleting one's own data directory needed `sudo`.
+  There is now a `docker/entrypoint.sh`: set `PUID`/`PGID` and it takes
+  ownership of the data directory once, records what it chowned to in a
+  `.filex-uid` marker so later boots skip the walk, and drops privilege.
+
+  ⚠ The default is unchanged — **still root**. An existing install whose data
+  directory is full of root-owned files must keep working on upgrade, so
+  opting in is the operator's decision. `docker run --user` / compose `user:`
+  / Kubernetes `runAsUser` are detected and left alone (nothing to drop, and
+  no permission to chown); `PUID` alongside them says so in the log rather
+  than pretending. Measured on the published image: an old root-owned data
+  directory, then `PUID=1000`, gives a 200 on `/healthz`, a byte-identical
+  `installation.json`, and a `rm -rf ./data` that no longer needs `sudo`.
+
+  ⚠ Only the DATA directory is chowned. Storage roots — a bind mount, an NFS
+  or SMB share — are left as they are; they may be shared with other software
+  and re-owning them is not a container's decision.
+
+### Fixed
+
+- **Every GitHub release page ended with two dead links, one of them
+  "Issues".** `scripts/export-public.sh` rewrote the GitLab host to
+  `github.com` but not the URL *grammar*: GitLab's `/-/` route separator
+  arrived verbatim, so `https://github.com/…/filex/-/issues` — the link a
+  reader clicks to report a bug — answered **404**. Measured 2026-09-07:
+  **104 of the 105 published releases** carried it, not the recent few. The
+  export now translates the route shape (and renames `merge_requests` →
+  `pulls`, `pipelines` → `actions`), refuses to publish a tree where a
+  `github.com/…/-/…` survives, and the release footer points at
+  <https://docs.filex.sh> instead of raw markdown. All 105 published bodies
+  were corrected.
+
+- **Release notes said nothing.** GoReleaser builds the body from `git log`,
+  and the config filters drop `docs:`, `test:`, `chore:` and `ci:` — so the
+  published v0.34.2 page was, in full, a heading and one commit hash, while
+  `CHANGELOG.md` carried 1,445 characters of prose for that same version. The
+  release workflow now derives the body from `CHANGELOG.md` (extending
+  `scripts/release-notes.mjs`, which already did this for the Umbrel store)
+  and hands it to `goreleaser --release-notes`. A version with no changelog
+  section fails the run **before** anything is published. ⚠ Capped at 20,000
+  characters, cut at a group or bullet boundary, with a link to the full
+  entry: measured on goreleaser v2.17.1, a body over 125,000 characters is
+  truncated *silently*, and what it cuts is the footer.
+
+- **The README's headline command left the reader in an empty file manager.**
+  `-v $(pwd)/data:/data` mounts filex's own state directory — database, search
+  index, thumbnail cache — so files dropped into `./data` were invisible and
+  the UI said *"No storage configured"*. The command now seeds a local storage
+  from `$PWD` and keeps `/data` in a named volume, which is also what
+  `docs/INSTALLATION.md` told people to run.
+
+### Changed
+
+- **filex.sh links to the documentation site.** 18 anchors, and
+  `docs.filex.sh` appeared in none of them: the nav "Docs" and the footer
+  "Documentation" both pointed at raw GitHub markdown while a 38-page
+  VitePress site sat unlinked.
+
 ## [0.35.0] - 2026-09-07
 
 ### Upgrade notes

@@ -105,10 +105,37 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+
+      # ⚠⚠ The release BODY. GoReleaser builds it from `git log`, and the
+      # filters in .goreleaser.yml drop `docs:`, `test:`, `chore:` and `ci:` —
+      # so a release whose work landed under those prefixes published a page
+      # with nothing on it. Measured on v0.34.2, this was the ENTIRE body:
+      #
+      #     ## Changelog
+      #     ### Others
+      #     * 99eb9eb… chore(release): v0.34.2
+      #
+      # while CHANGELOG.md carried 1,445 characters of prose for that same
+      # version. The Releases page is where a stranger decides whether the
+      # project is alive; it now carries the prose that already exists.
+      #
+      # ⚠ Measured on goreleaser v2.17.1: `--release-notes` replaces the
+      # GENERATED CHANGELOG ONLY — `release.header` and `release.footer` from
+      # .goreleaser.yml are still prepended and appended — so the file must not
+      # repeat the `## filex vX` title the header already prints.
+      #
+      # ⚠ The script exits non-zero when the tag has no CHANGELOG.md section.
+      # That stops the release HERE, before a single binary, image or package
+      # is published, rather than after.
+      - name: Release notes from CHANGELOG.md
+        run: |
+          set -euo pipefail
+          node scripts/release-notes.mjs --github "${GITHUB_REF_NAME}" > /tmp/release-notes.md
+          wc -c /tmp/release-notes.md
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

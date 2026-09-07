@@ -278,5 +278,18 @@ resources:
 nodeSelector: {}
 tolerations: []
 affinity: {}
+# ⚠ Empty means the container runs as ROOT, which is what the image has
+# always done. To run it as somebody else, set BOTH — `runAsUser` alone
+# leaves the PVC owned by root and filex cannot open its own database:
+#
+#   podSecurityContext:
+#     runAsUser: 1000
+#     runAsGroup: 1000
+#     fsGroup: 1000          # this is what re-owns the volume
+#
+# ⚠ On an EXISTING release whose PVC is full of root-owned files, the
+# simpler move is `extraEnv: { PUID: "1000", PGID: "1000" }`: the
+# entrypoint chowns the data directory once and then drops privilege,
+# whereas fsGroup only fixes the group. See docs/DOCKER.md.
 podSecurityContext: {}
 securityContext: {}

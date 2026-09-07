@@ -16,6 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** Max headlines carried into the store blurb. */
 const MAX_ITEMS = 5;
@@ -115,6 +116,136 @@ export function releaseNotes(changelog, version) {
 /** Convenience for callers that just have a repo root. */
 export function releaseNotesFromRepo(repo, version) {
   return releaseNotes(fs.readFileSync(path.join(repo, 'CHANGELOG.md'), 'utf8'), version);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The GitHub release body
+// ───────────────────────────────────────────────────────────────────────────
+//
+// ⚠⚠ Why this exists: the Releases page is where a stranger looks to decide
+// whether a project is alive, and ours said nothing. GoReleaser derives the
+// body from `git log`, and the filters in `.goreleaser.yml` drop `docs:`,
+// `test:`, `chore:` and `ci:` — so a release whose work landed under those
+// prefixes showed the release commit and nothing else. Measured on the
+// published v0.34.2 page, that was the ENTIRE body:
+//
+//   ## Changelog
+//   ### Others
+//   * 99eb9eb… chore(release): v0.34.2
+//
+// while CHANGELOG.md carried 1,445 characters of prose for the same version.
+// The prose is written for humans and already exists; the release page should
+// carry it rather than a hash.
+//
+// ⚠ How it reaches GoReleaser: `--release-notes=FILE`. Measured against
+// goreleaser v2.17.1 (2026-09-07), the file replaces the generated changelog
+// ONLY — `release.header` and `release.footer` from .goreleaser.yml are still
+// prepended and appended, so this must emit the changelog part alone and must
+// NOT repeat the "## filex vX" title the header already prints.
+
+/**
+ * Max characters of changelog carried into a GitHub release body.
+ *
+ * ⚠ Not a style preference. Measured on goreleaser v2.17.1: a body over
+ * 125,000 characters is truncated SILENTLY — no warning, the run reports
+ * success — and what gets cut is the END, which is where the footer's "Report
+ * a bug" link lives. v0.34.0's changelog section is 57,408 characters on its
+ * own, so this is a real ceiling and not a theoretical one. 20,000 leaves the
+ * footer five times its own length of headroom, and was measured accepted
+ * without complaint.
+ */
+const GITHUB_MAX = 20000;
+
+const CHANGELOG_FILE_URL = `${CHANGELOG_URL}#`;
+
+/**
+ * GitHub's heading-anchor rule, reused rather than re-derived — the same
+ * function docs.filex.sh slugifies with, so a link built here and a heading
+ * rendered there cannot drift. (Loaded lazily: this module is imported by a
+ * vitest suite that must not pay for a second file read at import time.)
+ */
+async function anchorFor(heading) {
+  const { githubSlug } = await import('../docs-site/.vitepress/github-slug.mjs');
+  return githubSlug(heading.replace(/^#+\s*/, ''));
+}
+
+/**
+ * Cuts a changelog section down to `max` characters at a boundary a reader
+ * would recognise — the start of a `### ` group or of a top-level `- ` bullet
+ * — rather than mid-sentence. Returns the kept text and whether anything was
+ * dropped.
+ */
+function clampSection(body, max) {
+  if (body.length <= max) return { text: body, truncated: false };
+  const window = body.slice(0, max);
+  // A `### ` boundary is the nicest cut — the page then ends on whole groups
+  // (Upgrade notes, Security, Fixed) instead of halfway through one — but only
+  // when it is not paying for that tidiness with a third of the text. Below
+  // that, the last top-level bullet; below that, a paragraph break.
+  const group = window.lastIndexOf('\n### ');
+  const cut =
+    group > max * 0.6
+      ? group
+      : Math.max(window.lastIndexOf('\n- '), window.lastIndexOf('\n\n'));
+  return { text: body.slice(0, cut > 0 ? cut : max).trimEnd(), truncated: true };
+}
+
+/**
+ * The markdown body for the GitHub release of `version`: that version's
+ * CHANGELOG.md section, capped, with a link to the full entry.
+ *
+ * Returns null when the changelog has no section for the version — the caller
+ * is expected to fail rather than publish an empty page, which is the whole
+ * point of deriving this instead of typing it.
+ */
+export async function githubReleaseBody(changelog, version, { max = GITHUB_MAX } = {}) {
+  const sec = changelogSection(changelog, version);
+  if (!sec) return null;
+  const anchor = await anchorFor(sec.heading);
+  const full = `${CHANGELOG_FILE_URL}${anchor}`;
+  const { text, truncated } = clampSection(sec.body.trim(), max);
+
+  const out = ['## What changed', '', text, ''];
+  if (truncated) {
+    out.push(
+      `**This release has more to it than fits on one page.** The rest of the`,
+      `entry — and every earlier release — is in [CHANGELOG.md](${full}).`,
+      '',
+    );
+  } else {
+    out.push(`[Full changelog entry](${full})`, '');
+  }
+  return out.join('\n');
+}
+
+// ── CLI ────────────────────────────────────────────────────────────────────
+//
+//   node scripts/release-notes.mjs --github 0.35.0 > notes.md
+//
+// Exits non-zero, loudly, when the version has no changelog section: the
+// release workflow runs this BEFORE goreleaser, so a missing entry stops the
+// release instead of publishing a page that says nothing.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [flag, version] = process.argv.slice(2);
+  if (flag !== '--github' || !version) {
+    console.error('usage: node scripts/release-notes.mjs --github <version>');
+    process.exit(2);
+  }
+  const v = version.replace(/^v/, '');
+  const repo = path.resolve(import.meta.dirname, '..');
+  const body = await githubReleaseBody(
+    fs.readFileSync(path.join(repo, 'CHANGELOG.md'), 'utf8'),
+    v,
+  );
+  if (!body) {
+    console.error(
+      `CHANGELOG.md has no "## [${v}]" section.\n` +
+        'Every release earns an entry; write one before tagging. Without it the\n' +
+        'release page would carry a commit hash and nothing else.',
+    );
+    process.exit(1);
+  }
+  process.stdout.write(body);
 }
 
 /**

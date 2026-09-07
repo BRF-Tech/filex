@@ -29,9 +29,23 @@ one local storage folder, nothing external.
 ```bash
 docker run -d --name filex -p 5212:5212 \
   -e FILEX_PUBLIC_URL=http://localhost:5212 \
+  -e FILEX_DEFAULT_STORAGE_DRIVER=local \
+  -e FILEX_DEFAULT_STORAGE_PATH=/srv/files \
   -v filex-data:/data \
+  -v "$PWD:/srv/files" \
   ghcr.io/brf-tech/filex:latest
 ```
+
+The two `FILEX_DEFAULT_STORAGE_*` variables are what make the explorer show
+something. Without them filex boots with no storage at all and the UI says
+*"No storage configured"* — correct, and a poor first minute. With them, the
+folder you bind at `/srv/files` is seeded as a **local** storage named `Files`
+on first boot, so your files are there when you log in.
+
+> `/data` and `/srv/files` are different things and should not be the same
+> directory: `/data` is filex's own state (SQLite database, search index,
+> thumbnail cache, first-run secret), `/srv/files` is content. A named volume
+> for the first and a bind mount for the second keeps them apart.
 
 Open <http://localhost:5212/admin> and grab the first‑run password from the logs
 (`docker logs filex`).
@@ -44,9 +58,10 @@ docker compose -f docker-compose.minimal.yml up -d
 docker compose -f docker-compose.minimal.yml logs -f      # first-run creds
 ```
 
-It also mounts `./files` into the container at `/srv/files` — after logging in,
-add a **local** storage in the UI pointing at `/srv/files` and drop files there
-(see [STORAGE.md](STORAGE.md)).
+It mounts `./files` into the container at `/srv/files` and seeds it as the
+default **local** storage, so anything you drop into `deploy/compose/files`
+shows up in the explorer with no setup at all. More drivers — S3, SFTP,
+WebDAV, FTP, SMB — are added from the admin UI (see [STORAGE.md](STORAGE.md)).
 
 > Set `FILEX_PUBLIC_URL` to the URL people actually open. Behind a reverse proxy
 > that's your `https://…` domain — it's baked into share links, the OIDC

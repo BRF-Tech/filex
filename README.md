@@ -25,11 +25,24 @@ natively.
 ## Try it now
 
 **Live demo:** [demo.filex.sh](https://demo.filex.sh) — sign in with `demo@demo.com` / `demo`
-(admin role, sandbox resets nightly). Or run your own in one line:
+(admin role, sandbox resets nightly). Or run your own:
 
 ```bash
-docker run -p 5212:5212 -v $(pwd)/data:/data ghcr.io/brf-tech/filex:latest
+docker run -p 5212:5212 \
+  -e FILEX_DEFAULT_STORAGE_DRIVER=local -e FILEX_DEFAULT_STORAGE_PATH=/srv/files \
+  -v filex-data:/data -v "$PWD:/srv/files" \
+  ghcr.io/brf-tech/filex:latest
 ```
+
+That serves **the folder you ran it in** — open the UI and your files are already
+there. `/data` is filex's own directory (SQLite database, search index, thumbnail cache),
+which is why it is a named volume and not the folder you drop files into; the two are
+separate on purpose. Point `$PWD` somewhere else, or add more storages from the admin
+panel later.
+
+The container runs as **root** by default, so what it writes into `/data` is root-owned;
+set `PUID`/`PGID` to run it as yourself
+([docs/DOCKER.md](docs/DOCKER.md#which-user-the-container-runs-as)).
 
 Open http://localhost:5212/admin — the first run prints admin credentials and embed
 instructions to the console. That URL is the operator's; the people you give accounts to
@@ -195,7 +208,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 ## Self-host with Compose or Helm
 
-The bare `docker run` above is enough to try filex out. For a real deployment,
+The `docker run` above is enough to try filex out. For a real deployment,
 ready-made stacks live in [`deploy/`](deploy/):
 
 - **[`deploy/compose/`](deploy/compose/)** — Docker Compose:

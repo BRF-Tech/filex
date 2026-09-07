@@ -144,12 +144,25 @@ release:
     docker pull ghcr.io/brf-tech/filex:slim-{{ .Tag }}
     docker pull ghcr.io/brf-tech/filex:full-{{ .Tag }}
     ```
+  # ⚠ Every URL here has to survive scripts/export-public.sh, which rewrites
+  # this file on the way to the public repo. A GitLab route (`/-/issues`) used
+  # to arrive on GitHub verbatim and 404 on every release page from v0.33.0 to
+  # v0.35.0 — the export now translates the route shape too, and refuses the
+  # export if a `github.com/.../-/...` survives anywhere in the tree. Write
+  # GitLab-canonical URLs here and let the export do the translation; do not
+  # hand-write github.com URLs, because then the GitLab side is the wrong one.
+  #
+  # ⚠ The four lines are indented under a `-` so Markdown renders them as a
+  # list. Bare `Issues: <url>` lines were joined into one paragraph by GitHub's
+  # renderer, which is why the release pages showed them run together.
   footer: |
     ---
     **Verify:** `sha256sum -c checksums.txt`
 
-    Issues: https://github.com/brf-tech/filex/-/issues
-    Docs:   https://github.com/brf-tech/filex/-/blob/main/docs/
+    - **Documentation** — <https://docs.filex.sh>
+    - **Report a bug** — <https://github.com/BRF-Tech/filex/issues>
+    - **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+    - **Every release** — <https://github.com/BRF-Tech/filex/releases>
 
 # --- Optional: SBOM (syft) ---
 # Uncomment after installing syft into the goreleaser CI image.

@@ -168,6 +168,73 @@ volumes for everything Docker itself creates.
 
 ---
 
+## Which user the container runs as
+
+**By default, as root.** That is the honest answer and it has consequences
+you should know before you bind-mount anything: everything under
+`FILEX_DATA_DIR` is created owned by `root:root`, so on the host you need
+`sudo` to read or delete your own `./data` directory.
+
+Two ways to change it. Both are opt-in, because a default that dropped
+privilege would leave every existing install unable to open a database it
+already owns as root.
+
+### `PUID` / `PGID` (the usual self-hosted way)
+
+```bash
+docker run -p 5212:5212 \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v filex-data:/data \
+  ghcr.io/brf-tech/filex:latest
+```
+
+The entrypoint takes ownership of the **data directory** once, writes a
+`.filex-uid` marker recording what it chowned to, and drops to that
+uid/gid with `su-exec`. Later boots read the marker and skip the walk, so
+the cost is paid on the first start and never again.
+
+This is safe to turn on for an install that has been running as root: the
+chown is what makes the existing database readable to the new user. It is
+one-way in practice — after it, removing `PUID` puts you back to root,
+which can still read files owned by anyone.
+
+### `--user` / `user:` / `runAsUser` (Docker's and Kubernetes' way)
+
+```yaml
+services:
+  filex:
+    image: ghcr.io/brf-tech/filex:latest
+    user: "1000:1000"
+```
+
+The container starts unprivileged, so there is nothing to drop and nothing
+it is allowed to chown. **You must make the data directory writable by that
+uid yourself** before the first start:
+
+```bash
+sudo chown -R 1000:1000 ./data
+```
+
+`PUID` is ignored here and the entrypoint says so in the log rather than
+pretending to honour it.
+
+### What is *not* chowned
+
+⚠ Only the data directory. The folders holding your files — a `local`
+storage root, an NFS or SMB mount, anything you bind at `/srv/files` — are
+left exactly as they are. They may be shared with other software, they may
+be enormous, and re-owning them is not a container's decision to make. If
+filex cannot write to a storage after you set `PUID`, fix that folder's
+permissions.
+
+| | runs as | chowns `/data` | you must prepare `/data` |
+|---|---|---|---|
+| default | `root` | no | no |
+| `PUID`/`PGID` | that uid | yes, once | no |
+| `--user` / `runAsUser` | that uid | no (cannot) | **yes** |
+
+---
+
 ## Reverse proxies
 
 filex always assumes a reverse-proxy in production and **honours
