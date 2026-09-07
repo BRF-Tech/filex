@@ -28,6 +28,9 @@ func NewReplicationTargets(store db.Store) *ReplicationTargets {
 }
 
 func (h *ReplicationTargets) List(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication targets are instance-wide backup sinks") {
+		return
+	}
 	out, err := h.Store.ListReplicationTargets(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -40,6 +43,9 @@ func (h *ReplicationTargets) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReplicationTargets) Get(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication targets are instance-wide backup sinks") {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -54,6 +60,9 @@ func (h *ReplicationTargets) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReplicationTargets) Create(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication targets are instance-wide backup sinks") {
+		return
+	}
 	var rt model.ReplicationTarget
 	if err := json.NewDecoder(r.Body).Decode(&rt); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -81,6 +90,9 @@ func (h *ReplicationTargets) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReplicationTargets) Update(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication targets are instance-wide backup sinks") {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -101,6 +113,9 @@ func (h *ReplicationTargets) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ReplicationTargets) Delete(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication targets are instance-wide backup sinks") {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})

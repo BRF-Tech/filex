@@ -163,7 +163,8 @@
     "modeLabel": {
       "fsnotify": "Canlı izleme",
       "poll": "Periyodik tarama",
-      "ondemand": "İstek üzerine"
+      "ondemand": "İstek üzerine",
+      "push": "Desteklenmiyor (yoklamaya düşüyor)"
     },
     "addNew": "Depo ekle",
     "newTitle": "Yeni depo ekle",
@@ -174,7 +175,8 @@
       "s3": "S3 / Hetzner / MinIO",
       "sftp": "SFTP",
       "ftp": "FTP / FTPS",
-      "webdav": "WebDAV"
+      "webdav": "WebDAV",
+      "smb": "SMB / CIFS (NAS)"
     },
     "advancedFields": "Gelişmiş ayarlar",
     "driverFieldsUnavailable": "\"{driver}\" sürücüsünün ayar alanları yüklenemedi.",
@@ -206,7 +208,10 @@
       "insecureSkipHostKey": "Sunucu anahtarı doğrulamasını atla (güvensiz)",
       "tls": "FTPS (açık AUTH TLS)",
       "passive": "Pasif mod (PASV)",
-      "url": "Temel URL"
+      "url": "Temel URL",
+      "share": "Paylaşım",
+      "domain": "Etki alanı / çalışma grubu",
+      "dialTimeout": "Bağlantı zaman aşımı (saniye)"
     },
     "fieldHelp": {
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
@@ -222,7 +227,10 @@
       "hostKey": "authorized_keys / known_hosts satır biçiminde tek bir açık anahtar.",
       "insecureSkipHostKey": "Her sunucu anahtarını kabul eder. Yalnızca geçici sunucular için.",
       "tls": "Düz FTP kimlik bilgilerini açık metin gönderir — sunucu destekliyorsa açın.",
-      "passive": "Kapatmak aktif moda geçirir; bu, sunucunun bu makineye geri bağlanmasını gerektirir."
+      "passive": "Kapatmak aktif moda geçirir; bu, sunucunun bu makineye geri bağlanmasını gerektirir.",
+      "smbShare": "Yalnızca paylaşım adı, sunucu olmadan: `media`, `\\nas\\media` değil.",
+      "smbDomain": "Yalnızca Windows etki alanı hesapları için. NAS kullanıyorsanız boş bırakın.",
+      "smbRoot": "Paylaşımın içindeki alt klasör. Tüm paylaşım için boş bırakın."
     },
     "actions": {
       "test": "Bağlantıyı test et",
@@ -311,13 +319,7 @@
     "title": "Ayarlar",
     "subtitle": "Sunucu geneli yapılandırma",
     "siteName": "Site adı",
-    "publicUrl": "Public URL",
-    "publicUrlHelp": "Paylaşım linkleri ve e-posta şablonlarında kullanılır.",
-    "syncInterval": "Senkron aralığı (saniye)",
-    "syncIntervalHelp": "Worker'ın her depoyu kaç saniyede bir tarayacağı.",
-    "logLevel": "Log seviyesi",
-    "defaultLocale": "Varsayılan dil",
-    "defaultTimezone": "Varsayılan zaman dilimi",
+    "envOnlyNote": "Genel URL, senkron aralığı, log seviyesi ve varsayılan dil bu sayfadan değil ortam değişkenlerinden ayarlanır (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE) — bkz. docs/CONFIGURATION.md.",
     "savedOk": "Ayarlar kaydedildi",
     "smtp": {
       "title": "E-posta (SMTP)",

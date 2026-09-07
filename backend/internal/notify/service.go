@@ -432,12 +432,53 @@ func (s *service) TargetStatuses() map[int64]TargetDeliveryStatus {
 	return out
 }
 
+// bellPrefs resolves the per-user display preferences that gate the in-app
+// bell: silenced is in_app_enabled=false, muted is the muted_events list.
+//
+// ⚠ userID nil is the admin/global view and is NEVER filtered. It is an audit
+// of everything the system recorded, and one admin's personal mute list must
+// not delete rows from it.
+//
+// ⚠ It fails OPEN. A settings row that cannot be read — none written yet, a DB
+// hiccup — resolves to "show everything", because the alternative is an
+// unreadable preference silently emptying a bell and hiding a real event (an
+// antivirus hit, a failed replica) behind a transient error.
+func (s *service) bellPrefs(ctx context.Context, userID *int64) (muted []string, silenced bool) {
+	if userID == nil {
+		return nil, false
+	}
+	st, err := s.store.GetNotificationSettings(ctx, *userID)
+	if err != nil {
+		slog.Warn("notify: read notification settings",
+			slog.Int64("user_id", *userID), slog.String("err", err.Error()))
+		return nil, false
+	}
+	if st == nil {
+		return nil, false
+	}
+	return st.MutedList(), !st.InAppEnabled
+}
+
+// List returns the user's bell history with their preferences applied.
+//
+// ⚠⚠ The preferences gate the READ, not the write. Send still records every
+// event, so muting one neither erases it from the audit nor touches webhook
+// delivery — that is global and configured in Admin → Webhooks. Muting
+// changes what a user sees, not what the system keeps.
 func (s *service) List(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
-	return s.store.ListNotifications(ctx, userID, onlyUnread, limit, offset)
+	muted, silenced := s.bellPrefs(ctx, userID)
+	if silenced {
+		return nil, 0, nil
+	}
+	return s.store.ListNotifications(ctx, userID, onlyUnread, muted, limit, offset)
 }
 
 func (s *service) UnreadCount(ctx context.Context, userID *int64) (int64, error) {
-	return s.store.UnreadNotificationCount(ctx, userID)
+	muted, silenced := s.bellPrefs(ctx, userID)
+	if silenced {
+		return 0, nil
+	}
+	return s.store.UnreadNotificationCount(ctx, userID, muted)
 }
 
 func (s *service) MarkRead(ctx context.Context, id int64, userID *int64) error {

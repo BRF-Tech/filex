@@ -193,7 +193,7 @@ storage:
 | `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`, or the name of an installed [plugin](PLUGINS.md). Required. |
 | `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
-| `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. |
+| `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. Anything else is **rejected on write** — see [Modes](#sync). |
 | `sync_interval_s` | int (seconds) | `900` | Poll cadence. **Values < 5 s are clamped to 15 min.** |
 | `enabled` | bool | `true` | Disabled storages are hidden and not synced. |
 | `read_only` | bool | `false` | Block all writes to this mount. |
@@ -497,6 +497,24 @@ uploaded straight to the S3 console).
   stale index.
 - **`ondemand`** — only syncs when explicitly triggered
   (`POST /api/admin/storages/{id}/sync`).
+
+Those three are the whole list, and the server enforces it: a `sync_mode` it
+does not implement is refused when the storage is created or changed, with a
+message naming the modes that exist. It used to be stored as typed — a
+`fsnotifiy` typo saved happily and the storage quietly ran the poll loop, so
+the page showed a mode nothing was doing.
+
+⚠ **`push` is not one of them.** It was declared as an enum value for "the
+backend pushes changes at us" and nothing was ever built behind it, so a
+storage set to `push` polled. It is now rejected like any other unsupported
+value; if you want an external writer to drive the sync, use `ondemand` and
+call `POST /api/admin/storages/{id}/sync` from that writer. **Rows that already
+say `push`** (only reachable by hand or by an API call made before this
+release) are left exactly as they are: they keep polling as they always did,
+they stay editable — a rename or a disable still saves — and the server now
+logs `sync: unsupported sync_mode, falling back to poll` once per storage at
+startup so the discrepancy is visible instead of silent. Changing such a row's
+mode to another unsupported value is what gets refused.
 
 **What a sync does:** new objects are indexed, changed objects are updated (see
 [Drift detection](#drift-detection-what-a-replaced-file-looks-like)), and

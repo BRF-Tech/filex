@@ -28,6 +28,9 @@ func NewQueue(driver queue.Driver) *Queue {
 //
 //	GET /api/admin/queue/stats
 func (h *Queue) Stats(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the job queue is instance-wide and its payloads name every tenant's paths") {
+		return
+	}
 	if h.Driver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue offline"})
 		return
@@ -44,6 +47,9 @@ func (h *Queue) Stats(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /api/admin/queue?status=pending&limit=50&offset=0
 func (h *Queue) List(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the job queue is instance-wide and its payloads name every tenant's paths") {
+		return
+	}
 	if h.Driver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue offline"})
 		return
@@ -77,6 +83,9 @@ func (h *Queue) List(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /api/admin/queue/{id}
 func (h *Queue) Get(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the job queue is instance-wide and its payloads name every tenant's paths") {
+		return
+	}
 	if h.Driver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue offline"})
 		return
@@ -102,6 +111,9 @@ func (h *Queue) Get(w http.ResponseWriter, r *http.Request) {
 //
 //	POST /api/admin/queue/{id}/retry
 func (h *Queue) Retry(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the job queue is instance-wide and its payloads name every tenant's paths") {
+		return
+	}
 	if h.Driver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue offline"})
 		return
@@ -126,6 +138,9 @@ func (h *Queue) Retry(w http.ResponseWriter, r *http.Request) {
 //
 //	DELETE /api/admin/queue/{id}
 func (h *Queue) Cancel(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the job queue is instance-wide and its payloads name every tenant's paths") {
+		return
+	}
 	if h.Driver == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue offline"})
 		return

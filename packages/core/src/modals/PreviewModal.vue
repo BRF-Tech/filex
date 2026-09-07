@@ -37,6 +37,9 @@ const props = defineProps<{
   onlyOfficeBase?: string | null;
   onlyOfficeConfigEndpoint?: string | null;
   saveTextEndpoint?: string | null;
+  /** Endpoint for the archive (zip/rar/7z/tar) member list. Forwarded to
+   *  ArchiveViewer, which otherwise assumes a same-origin path. */
+  archiveListEndpoint?: string | null;
   openMode?: 'edit' | 'view';
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
@@ -217,6 +220,7 @@ const viewerProps = computed(() => {
     // 500s for every non-default storage (sample.zip on fm s3-test).
     if (e === 'zip' || e === 'rar' || e === '7z' || e === 'tar' || e === 'gz' || e === 'tgz') {
       base.filePath = props.file.path;
+      if (props.archiveListEndpoint) base.archiveListUrl = props.archiveListEndpoint;
     }
   }
   if (e === 'drawio' || e === 'dio') {

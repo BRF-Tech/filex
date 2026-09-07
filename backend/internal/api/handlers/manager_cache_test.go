@@ -90,7 +90,60 @@ func newSlowFixture(t *testing.T) *slowFixture {
 	st.ConfigJSON = json.RawMessage(`{"root":"` + jsonEscape(f.rootDir) + `","slow":true}`)
 	require.NoError(t, f.store.UpdateStorage(context.Background(), st))
 
-	return &slowFixture{stagedFixture: f, reads: reads, dir: filepath.Join(dataDir, "cache")}
+	sf := &slowFixture{stagedFixture: f, reads: reads, dir: filepath.Join(dataDir, "cache")}
+
+	// ⚠⚠ A test here can end while the background copy is still writing into
+	// dataDir/cache, and t.TempDir's cleanup then fails the test that had
+	// already passed:
+	//
+	//   TempDir RemoveAll cleanup: unlinkat …/001/cache: directory not empty
+	//
+	// It never reproduces in isolation — only under the full suite, where the
+	// machine is busy enough for the writer to outlive the request. That makes
+	// it exactly the shape that turns a mandatory CI gate randomly red, so the
+	// fixture waits for the writer instead of racing it.
+	t.Cleanup(func() { sf.drainCache(t) })
+	return sf
+}
+
+// drainCache waits, bounded, for the cache directory to stop changing, so the
+// temp-dir cleanup does not race a background copy.
+//
+// ⚠ Deliberately not a fixed sleep: the whole point is that the duration is
+// the machine's, not ours. Two consecutive identical readings mean the writer
+// is done; the deadline means a stuck writer fails loudly rather than hanging
+// the suite.
+func (f *slowFixture) drainCache(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var last string
+	stable := 0
+	for time.Now().Before(deadline) {
+		now := cacheFingerprint(f.dir)
+		if now == last {
+			if stable++; stable >= 2 {
+				return
+			}
+		} else {
+			stable = 0
+			last = now
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Log("cache directory never settled; temp-dir cleanup may report leftovers")
+}
+
+// cacheFingerprint is the names+sizes of the cache tree, or "" when it is gone.
+func cacheFingerprint(dir string) string {
+	var b strings.Builder
+	_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		fmt.Fprintf(&b, "%s:%d;", p, info.Size())
+		return nil
+	})
+	return b.String()
 }
 
 // countingReadDriver counts whole-object reads that actually reached the

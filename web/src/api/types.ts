@@ -124,7 +124,10 @@ export interface StorageRef {
   rbac_enabled?: boolean;
   created_at: string;
   updated_at: string;
-  sync_mode?: 'poll' | 'fsnotify' | 'push' | 'ondemand';
+  /** `push` is LEGACY: the server refuses it on write (nothing implements a
+   *  push receiver) but still returns it for rows written before that check.
+   *  It stays in the union so such a row types cleanly and renders a label. */
+  sync_mode?: 'poll' | 'fsnotify' | 'ondemand' | 'push';
   // Cached stats (filled by backend, may be null right after creation)
   file_count?: number;
   total_bytes?: number;
@@ -137,7 +140,10 @@ export interface StorageRef {
     total_size_bytes: number;
   };
   last_sync_at?: string | null;
-  last_sync_state?: 'ok' | 'error' | 'running' | 'pending';
+  /** Raw `sync_runs.status` of the last run: the backend writes 'ok',
+   *  'running' or 'failed'. ('error' is the sync-runs list's translated
+   *  spelling — accepted here too so both round-trip.) */
+  last_sync_state?: 'ok' | 'failed' | 'error' | 'running' | 'pending';
   last_sync_error?: string | null;
   /** Replica fields. v0.1.18+: the canonical link is
    *  `replica_target_id` — a foreign key into the new
@@ -242,17 +248,21 @@ export interface Capabilities {
   oidc_auto_redirect?: boolean;
   demo_mode?: boolean;
   demo_user?: string;
+  /** Demo password (FILEX_DEMO_PASS). Sent by the server only when
+   *  demo_mode is on — the demo landing publishes these credentials. */
+  demo_pass?: string;
   default_locale?: string | null;
 }
 
 export interface SettingsMap {
   // free-form, but a few well-known keys
   site_name?: string;
-  public_url?: string;
-  sync_interval_seconds?: number;
-  log_level?: 'debug' | 'info' | 'warn' | 'error';
-  default_locale?: 'en' | 'tr';
-  default_timezone?: string;
+  // ⚠ `public_url`, `sync_interval_seconds`, `log_level`, `default_locale`
+  // and `default_timezone` were declared here and offered on the Settings
+  // page. Nothing on the server ever read those rows — the live values come
+  // from FILEX_PUBLIC_URL / FILEX_SYNC_INTERVAL / FILEX_LOG_LEVEL /
+  // FILEX_DEFAULT_LOCALE (and there is no timezone knob at all). Do not
+  // re-add a key here without a reader.
   [k: string]: unknown;
 }
 

@@ -31,6 +31,12 @@ Two layers combine, then a ceiling is applied:
      role** (a viewer account stays viewer even if granted higher).
    - Only an `owner` of an item (or an admin) may see/manage its permissions.
 
+⚠ One surface was missing until the release this note ships in:
+`/api/files/versions` had no ACL check
+at all, so a `viewer` account could restore an old version over any file's live
+bytes. Restore and snapshot now require **editor**; listing the timeline stays at
+**viewer**. See [TRASH-VERSIONING.md](TRASH-VERSIONING.md#versioning-endpoints).
+
 Enforcement is server-side at every `/api/files/*` chokepoint AND the `/api/ai`
 (REST + MCP) surface, keyed off the authenticated user — so cookie sessions are
 filtered too, not just tokens. `internal/confine` (the token `root:` scope hard

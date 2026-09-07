@@ -71,6 +71,22 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	// Tenancy FIRST, before the ACL — because the ACL cannot answer this
+	// question. `storage_id` and `dest_storage_id` arrive as bare integers in
+	// the request body and nothing between here and the worker looks them up
+	// against the caller's tenant; the only gate used to be aclAllowID, which
+	// is tenant-blind and, on an rbac_enabled=false storage (the migration
+	// default), answers *editor* for a plain user. So a member of one customer
+	// could queue a copy, a move or a DELETE naming another customer's storage
+	// and the queue would carry it out. Asking before the ACL also keeps the
+	// refusal uniform: a foreign id answers 404 whether or not grants happen to
+	// exist on it, so the endpoint cannot be used to enumerate the platform.
+	if !ownsStorage(w, r, req.StorageID, "storage") {
+		return
+	}
+	if destID := req.DestStorageID; destID != 0 && !ownsStorage(w, r, destID, "storage") {
+		return
+	}
 	// RBAC: require ≥editor on each source (and, for copy/move, the dest).
 	for _, s := range req.Sources {
 		_, rel := splitAdapterPath(s)
@@ -167,6 +183,14 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Tenancy before RBAC — see Submit. resolveBatch resolves the
+	// `<adapter>://` prefix through Store.GetStorageByName, which tenantstore
+	// does NOT wrap, so up to here a name is a name no matter whose storage it
+	// is. This is the door that made `POST /api/files/delete
+	// {"source":["<other tenant>://x"]}` a 202.
+	if !ownsStorage(w, r, storageID, "storage") {
+		return
+	}
 
 	// RBAC: require ≥editor on every source (the async worker runs userless,
 	// so authorize here at submit time).
@@ -233,6 +257,13 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 				return
 			}
 			destStorageID = st.ID
+			// The destination is the WRITE end, and it is named by the client
+			// exactly the way the sources are. Refuse before the read-only
+			// check below, so a foreign storage answers 404 rather than
+			// disclosing whether it happens to be writable.
+			if !ownsStorage(w, r, destStorageID, "storage") {
+				return
+			}
 			if st.ReadOnly {
 				writeJSON(w, http.StatusForbidden, map[string]string{
 					"error": "destination storage is read-only: " + st.Name,
@@ -344,7 +375,20 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := r.URL.Query().Get("status")
-	list, err := o.Service.List(r.Context(), status)
+	// The tray is a plain authenticated user route, and the rows it returns
+	// carry storage_id, dest_storage_id, sources_json and dest — another
+	// tenant's live file paths, spelled out. Restrict the query to the storages
+	// this caller can reach. `nil` (unscoped / supertenant) keeps the previous
+	// instance-wide query verbatim, so single-tenant installs are unchanged.
+	var scopeIDs []int64
+	if scope, confined := confinedScope(r.Context()); confined {
+		// Not scope.StorageIDs directly: a nil slice would read as "unscoped"
+		// in ListIn, and a tenant with no linked storage must see nothing
+		// rather than everything.
+		scopeIDs = make([]int64, len(scope.StorageIDs))
+		copy(scopeIDs, scope.StorageIDs)
+	}
+	list, err := o.Service.ListIn(r.Context(), status, scopeIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -368,6 +412,15 @@ func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	op, err := o.Service.Get(r.Context(), id)
 	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
+		return
+	}
+	// Ownership on the single-row read, matching the listing. The refusal wears
+	// the same "unknown op" the miss above already produces, so probing the id
+	// range cannot count another tenant's operations. An op is the caller's if
+	// EITHER end is in reach — a cross-storage copy belongs to both sides.
+	if scope, confined := confinedScope(r.Context()); confined &&
+		!scope.CanAccessStorage(op.StorageID) && !scope.CanAccessStorage(op.DestStorageID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
 	}

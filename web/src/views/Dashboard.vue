@@ -24,6 +24,7 @@ import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import { syncTone } from '@/lib/syncTone';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -81,20 +82,6 @@ async function syncOne(id: number) {
   }
 }
 
-const syncTone = (s: string | undefined) => {
-  switch (s) {
-    case 'ok':
-      return 'emerald';
-    case 'error':
-      return 'rose';
-    case 'running':
-      return 'sky';
-    case 'pending':
-      return 'amber';
-    default:
-      return 'zinc';
-  }
-};
 
 const totalBytesLabel = computed(() => formatBytes(stats.value?.total_bytes ?? 0, locale.value));
 const totalFilesLabel = computed(() => formatNumber(stats.value?.total_files ?? 0, locale.value));
@@ -197,8 +184,8 @@ onMounted(load);
               <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                 <span class="font-mono">{{ driverIcon(s.driver) }}</span>
                 · {{ s.driver }}
-                · {{ formatBytes(s.total_bytes ?? 0, locale) }}
-                · {{ formatNumber(s.file_count ?? 0, locale) }}
+                · {{ formatBytes(s.stats?.total_size_bytes ?? s.total_bytes ?? 0, locale) }}
+                · {{ formatNumber(s.stats?.file_count ?? s.file_count ?? 0, locale) }}
               </p>
             </div>
             <Badge :tone="syncTone(s.last_sync_state)" dot>

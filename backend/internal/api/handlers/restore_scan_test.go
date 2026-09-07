@@ -47,6 +47,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/testutil"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
 // infectedMarker is what the stand-in scanner condemns. A scanner that says
@@ -125,19 +126,33 @@ func newRestoreFixture(t *testing.T, scanOnRestore bool) *restoreFixture {
 	sc := &markerScanner{}
 	job := queue.NewAntivirusScanner(store, resolver, sc, nil, nil, 0)
 
+	// ⚠ TWO sinks, because the two restore paths reach the scanner through
+	// different seams and a fixture that wires only one measures only one.
+	// Trash restore calls handlers' own enqueue; VERSION restore goes through
+	// writehook — the single post-write gate every other write surface uses —
+	// which is also what makes a restore emit `file.updated`. Wiring just the
+	// handlers sink left the version half silently unscanned in this test
+	// while production scanned it.
 	if scanOnRestore {
-		handlers.SetAntivirusEnqueue(func(c context.Context, n *model.Node) {
+		enqueue := func(c context.Context, n *model.Node) {
 			_ = job.Handle(c, queue.Op{
 				Type:    queue.TypeAntivirusScan,
 				Payload: map[string]any{"node_id": n.ID},
 			})
-		})
+		}
+		handlers.SetAntivirusEnqueue(enqueue)
+		writehook.Configure(enqueue, nil)
 	} else {
 		// The pre-fix world: a sink is wired and works for uploads, and the
 		// restore paths simply never reach it.
 		handlers.SetAntivirusEnqueue(nil)
+		writehook.Configure(nil, nil)
 	}
-	t.Cleanup(func() { handlers.SetAntivirusEnqueue(nil) })
+	t.Cleanup(func() {
+		handlers.SetAntivirusEnqueue(nil)
+		writehook.Configure(nil, nil)
+		writehook.ConfigureOverwriteGuard(nil)
+	})
 
 	versSvc := versioning.New(store, resolver)
 	vh := handlers.NewVersions(store, versSvc)

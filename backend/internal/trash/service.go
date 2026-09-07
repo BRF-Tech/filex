@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // SettingKey is the settings table row that stores the retention days value.
@@ -104,13 +105,24 @@ type PurgeResult struct {
 func (s *Service) PurgeExpired(ctx context.Context) (PurgeResult, error) {
 	days := s.RetentionDays(ctx)
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-	return s.purgeOlderThan(ctx, cutoff)
+	// 0 = every storage: the nightly retention sweep is not narrowed.
+	return s.purgeOlderThan(ctx, cutoff, 0)
 }
 
 // EmptyOlderThan ignores the configured retention and purges anything older
 // than the supplied days value (admin "empty trash now" operation). Pass 0
-// to wipe every soft-deleted node regardless of age.
-func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int) (PurgeResult, error) {
+// for olderThanDays to wipe every soft-deleted node regardless of age.
+//
+// storageID limits the purge to one storage; 0 means every storage the caller
+// can reach.
+//
+// ⚠⚠ The parameter exists because it was MISSING while the UI claimed it was
+// there. `POST /api/admin/trash/empty` decoded `storage_id` into a struct
+// field nothing read, and the confirmation dialog said "If you picked a
+// storage, only that one is affected." An admin who narrowed the operation to
+// one storage and confirmed it permanently destroyed the trash of EVERY
+// storage — irreversibly, with the dialog telling them the opposite.
+func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int, storageID int64) (PurgeResult, error) {
 	cutoff := time.Now()
 	if olderThanDays > 0 {
 		cutoff = cutoff.Add(-time.Duration(olderThanDays) * 24 * time.Hour)
@@ -118,7 +130,7 @@ func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int) (PurgeR
 		// 0 days = purge everything currently in the trash.
 		cutoff = cutoff.Add(24 * time.Hour) // future cutoff matches everything in past
 	}
-	return s.purgeOlderThan(ctx, cutoff)
+	return s.purgeOlderThan(ctx, cutoff, storageID)
 }
 
 // Restore lifts the deleted_at flag on a node AND moves the underlying
@@ -292,7 +304,7 @@ func (s *Service) RunDailyLoop(ctx context.Context, interval time.Duration) {
 //  2. delete backing object via Deleter;
 //  3. decrement owner quota;
 //  4. hard-delete the row.
-func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time) (PurgeResult, error) {
+func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageID int64) (PurgeResult, error) {
 	if s == nil || s.Store == nil {
 		return PurgeResult{}, errors.New("trash: service not initialised")
 	}
@@ -307,6 +319,31 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time) (PurgeRe
 			return res, nil
 		}
 		for _, n := range batch {
+			// The storage the caller narrowed to, if any. Filtered here for
+			// the same reason tenancy is: the service walks the whole trash in
+			// batches, so the handler has no list it could filter instead.
+			if storageID != 0 && n.StorageID != storageID {
+				continue
+			}
+			// ⚠⚠ Tenancy, and it has to be inside the sweep rather than at the
+			// handler, because the handler has no list to filter — the service
+			// walks the whole trash itself in batches.
+			//
+			// POST /api/admin/trash/empty is a legitimate tenant feature
+			// ("empty my trash"), so it is scoped rather than gated. Unscoped
+			// it was permanent, irreversible destruction of EVERY tenant's
+			// deleted files by an admin of any one of them — the most damaging
+			// single request in the admin surface, and it answers 200.
+			//
+			// The context is the whole mechanism: a request carries the
+			// caller's scope, the nightly retention worker carries none, and
+			// "no scope" means unscoped — so the worker still sweeps every
+			// tenant exactly as before and single-tenant installs are
+			// untouched.
+			if scope, ok := tenant.FromContext(ctx); ok && scope != nil &&
+				!scope.IsSupertenant && !scope.CanAccessStorage(n.StorageID) {
+				continue
+			}
 			res.Scanned++
 			if err := s.purgeOne(ctx, n); err != nil {
 				slog.Warn("trash purge one failed",

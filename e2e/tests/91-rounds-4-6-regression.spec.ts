@@ -300,7 +300,11 @@ test.describe('Round 4 — list endpoint thumb hydration', () => {
     // Spot-check a known-good fixture: manager.jpg always has a thumb
     // because it's a real JPEG that the GD path handles unconditionally.
     const managerJpg = (body.files ?? []).find((f) => f.basename === 'manager.jpg');
-    expect(managerJpg?.thumb_url).toMatch(/^\/api\/files\/thumb\/\d+$/);
+    // ⚠ The URL is STAMPED (`?exp=…&sig=…`). An <img> in a third-party
+    // embed carries no header and, with a SameSite=Lax session cookie, no
+    // cookie either — the signature is the only proof it can carry. A
+    // listing that emitted a bare path again would blank every embed.
+    expect(managerJpg?.thumb_url).toMatch(/^\/api\/files\/thumb\/\d+\?exp=\d+&sig=[0-9a-f]{64}$/);
   });
 });
 
@@ -433,7 +437,7 @@ test.describe('Round 8 — pptx fixture', () => {
     const slides = (body.files ?? []).find((f) => f.basename === 'slides.pptx');
     expect(slides, 'slides.pptx should be in the example fixture set').toBeTruthy();
     expect(slides?.thumb_url, 'slides.pptx must have a populated thumb_url').toBeTruthy();
-    expect(slides?.thumb_url).toMatch(/^\/api\/files\/thumb\/\d+$/);
+    expect(slides?.thumb_url).toMatch(/^\/api\/files\/thumb\/\d+\?exp=\d+&sig=[0-9a-f]{64}$/);
   });
 });
 

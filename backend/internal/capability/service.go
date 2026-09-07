@@ -51,6 +51,7 @@ type Service struct {
 	build            string
 	demoMode         bool
 	demoUser         string
+	demoPass         string
 	defaultLocale    string
 	oidcAutoRedirect bool
 }
@@ -71,7 +72,7 @@ func (s *Service) SetStaticInventory(
 	dbDriver string,
 	searchEnabled bool,
 	version, build string,
-	demoMode bool, demoUser string,
+	demoMode bool, demoUser, demoPass string,
 	defaultLocale string,
 	oidcAutoRedirect bool,
 ) {
@@ -84,6 +85,7 @@ func (s *Service) SetStaticInventory(
 	s.build = build
 	s.demoMode = demoMode
 	s.demoUser = demoUser
+	s.demoPass = demoPass
 	s.defaultLocale = defaultLocale
 	s.oidcAutoRedirect = oidcAutoRedirect
 	s.cached = nil
@@ -183,6 +185,12 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.Build = s.build
 	caps.DemoMode = s.demoMode
 	caps.DemoUser = s.demoUser
+	// The demo password rides along ONLY on a demo instance. On a normal
+	// install this field stays empty, so a public capabilities response
+	// never carries a password that means anything.
+	if s.demoMode {
+		caps.DemoPass = s.demoPass
+	}
 	caps.DefaultLocale = s.defaultLocale
 	caps.OIDCAutoRedirect = s.oidcAutoRedirect
 	s.mu.RUnlock()

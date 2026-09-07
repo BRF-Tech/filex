@@ -4,7 +4,7 @@
   "services": [
     {
       "name": "filex",
-      "image": "ghcr.io/brf-tech/filex:v0.34.2",
+      "image": "ghcr.io/brf-tech/filex:v0.35.0",
       "isMain": true,
       "internalPort": 5212,
       "environment": [

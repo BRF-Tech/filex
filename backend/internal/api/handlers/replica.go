@@ -31,6 +31,9 @@ func NewReplica(store db.Store, svc *replica.Service, cron *replica.CronSchedule
 //
 //	GET /admin/api/replica/rules
 func (h *Replica) ListRules(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -47,6 +50,9 @@ func (h *Replica) ListRules(w http.ResponseWriter, r *http.Request) {
 //
 //	POST /admin/api/replica/rules
 func (h *Replica) CreateRule(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -69,6 +75,9 @@ func (h *Replica) CreateRule(w http.ResponseWriter, r *http.Request) {
 //
 //	PATCH /admin/api/replica/rules/{id}
 func (h *Replica) UpdateRule(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -96,6 +105,9 @@ func (h *Replica) UpdateRule(w http.ResponseWriter, r *http.Request) {
 //
 //	DELETE /admin/api/replica/rules/{id}
 func (h *Replica) DeleteRule(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -117,6 +129,9 @@ func (h *Replica) DeleteRule(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /admin/api/replica/failures?unresolved=true&limit=50&offset=0
 func (h *Replica) ListFailures(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -141,6 +156,9 @@ func (h *Replica) ListFailures(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /admin/api/replica/failures/count
 func (h *Replica) CountFailures(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -157,6 +175,9 @@ func (h *Replica) CountFailures(w http.ResponseWriter, r *http.Request) {
 //
 //	POST /admin/api/replica/fix
 func (h *Replica) FixAll(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica reconcile offline"})
 		return
@@ -174,6 +195,9 @@ func (h *Replica) FixAll(w http.ResponseWriter, r *http.Request) {
 //	POST /admin/api/replica/fix-one
 //	body: {path: "...", op: "write|delete|move|copy"}
 func (h *Replica) FixOne(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica reconcile offline"})
 		return
@@ -197,6 +221,9 @@ func (h *Replica) FixOne(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /admin/api/replica/report
 func (h *Replica) GetReport(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -217,6 +244,9 @@ func (h *Replica) GetReport(w http.ResponseWriter, r *http.Request) {
 //
 //	POST /admin/api/replica/report/run-now
 func (h *Replica) RunReportNow(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -232,6 +262,9 @@ func (h *Replica) RunReportNow(w http.ResponseWriter, r *http.Request) {
 //
 //	GET /admin/api/replica/settings
 func (h *Replica) GetSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return
@@ -250,6 +283,9 @@ func (h *Replica) GetSettings(w http.ResponseWriter, r *http.Request) {
 //	PATCH /admin/api/replica/settings
 //	body: {report_cron, report_enabled, default_mode}
 func (h *Replica) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if h.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "replica offline"})
 		return

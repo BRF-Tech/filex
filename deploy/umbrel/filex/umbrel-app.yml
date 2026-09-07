@@ -2,7 +2,15 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.34.2"
+version: "0.35.0"
+releaseNotes: |-
+  filex v0.35.0 — 2026-09-07
+  • Running FILEX_MULTI_TENANT?
+  • Everyone: thumbnails were readable without logging in.
+  • Emptying the trash for one storage used to empty all of them.
+  • Directory logins now refuse rather than mis-home.
+  • Version restore now requires editor.
+  Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
   filex is a fast, self-hosted file manager with a single-binary backend and a

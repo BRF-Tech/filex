@@ -19,13 +19,16 @@ const settings = useSettingsStore();
 const toast = useToastStore();
 const auth = useAuthStore();
 
+// ⚠ Only keys this page can actually change. `public_url`,
+// `sync_interval_seconds`, `log_level`, `default_locale` and
+// `default_timezone` used to live here: they saved, the row was written, the
+// form re-hydrated with the new value — and no code read any of them. Every
+// one of those is configured by environment variable (FILEX_PUBLIC_URL,
+// FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE) or does not
+// exist at all (there is no timezone knob). `site_name` is the one key on
+// this form with a reader (share-invite mail, handlers/grants.go).
 const form = reactive<SettingsMap>({
   site_name: '',
-  public_url: '',
-  sync_interval_seconds: 300,
-  log_level: 'info',
-  default_locale: 'en',
-  default_timezone: 'Europe/Istanbul',
 });
 
 watchEffect(() => {
@@ -40,11 +43,6 @@ async function save() {
     // store on every save. Patch the managed subset explicitly instead.
     await settings.update({
       site_name: form.site_name,
-      public_url: form.public_url,
-      sync_interval_seconds: form.sync_interval_seconds,
-      log_level: form.log_level,
-      default_locale: form.default_locale,
-      default_timezone: form.default_timezone,
     });
     toast.success(t('settings.savedOk'));
   } catch (e: unknown) {
@@ -128,18 +126,6 @@ async function sendSmtpTest() {
   }
 }
 
-const logLevels = [
-  { value: 'debug', label: 'debug' },
-  { value: 'info', label: 'info' },
-  { value: 'warn', label: 'warn' },
-  { value: 'error', label: 'error' },
-];
-
-const localeOptions = [
-  { value: 'en', label: 'English' },
-  { value: 'tr', label: 'Türkçe' },
-];
-
 onMounted(() => settings.fetch());
 </script>
 
@@ -157,45 +143,9 @@ onMounted(() => settings.fetch());
         :label="t('settings.siteName')"
         @update:model-value="(v) => (form.site_name = v as string)"
       />
-      <Input
-        :model-value="form.public_url as string | undefined"
-        :label="t('settings.publicUrl')"
-        :hint="t('settings.publicUrlHelp')"
-        placeholder="https://files.example.com"
-        monospace
-        @update:model-value="(v) => (form.public_url = v as string)"
-      />
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input
-          :model-value="form.sync_interval_seconds as number | undefined"
-          type="number"
-          :min="30"
-          :step="30"
-          :label="t('settings.syncInterval')"
-          :hint="t('settings.syncIntervalHelp')"
-          @update:model-value="(v) => (form.sync_interval_seconds = v as number)"
-        />
-        <Select
-          :model-value="form.log_level as string | undefined"
-          :options="logLevels"
-          :label="t('settings.logLevel')"
-          @update:model-value="(v) => (form.log_level = v as 'debug' | 'info' | 'warn' | 'error')"
-        />
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Select
-          :model-value="form.default_locale as string | undefined"
-          :options="localeOptions"
-          :label="t('settings.defaultLocale')"
-          @update:model-value="(v) => (form.default_locale = v as 'en' | 'tr')"
-        />
-        <Input
-          :model-value="form.default_timezone as string | undefined"
-          :label="t('settings.defaultTimezone')"
-          monospace
-          @update:model-value="(v) => (form.default_timezone = v as string)"
-        />
-      </div>
+      <p class="text-xs text-zinc-500 dark:text-zinc-400">
+        {{ t('settings.envOnlyNote') }}
+      </p>
       <div class="flex justify-end pt-2">
         <Button type="submit" :loading="settings.saving">
           <Save class="h-4 w-4" />

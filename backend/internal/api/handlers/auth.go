@@ -69,7 +69,14 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	user, token, err := h.LocalAuth.Login(r.Context(), req.Email, req.Password)
+	// ⚠ Stamp the Host onto the context before the login chain runs. A driver
+	// that provisions accounts just-in-time (LDAP) sees only a ctx —
+	// auth.LoginDriver.Login takes no *http.Request — and without the host it
+	// has no way to tell which tenant the new account belongs to, so it homed
+	// every one of them in the confine-exempt supertenant. See
+	// auth.WithLoginHost / auth.ProvisionUser.
+	ctx := auth.WithRequestLoginHost(r.Context(), r)
+	user, token, err := h.LocalAuth.Login(ctx, req.Email, req.Password)
 	if err != nil {
 		// ⚠ One answer for every failure, on purpose — see the comment on
 		// local.Driver.Login. The driver has already logged WHICH failure it

@@ -23,16 +23,24 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/quota"
 )
 
 // Quota wires quota HTTP routes.
 type Quota struct {
 	Service *quota.Service
+	// Store answers the tenancy question the quota service cannot: the
+	// admin routes take a raw user id, and in multi-tenant mode a tenant
+	// admin must not read or clamp another tenant's user. quota.Service
+	// knows about bytes, not about who owns the account.
+	Store db.Store
 }
 
 // NewQuota constructs the handler.
-func NewQuota(svc *quota.Service) *Quota { return &Quota{Service: svc} }
+func NewQuota(svc *quota.Service, store db.Store) *Quota {
+	return &Quota{Service: svc, Store: store}
+}
 
 // quotaUserID reads the target user id from whichever route mounted the
 // handler: /api/admin/quota/{user_id} or the nested, more discoverable
@@ -88,6 +96,9 @@ func (h *Quota) AdminGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !ownsUser(w, r, h.Store, id, "user") {
+		return
+	}
 	snap, err := h.Service.Get(r.Context(), id)
 	if err != nil {
 		writeJSON(w, quotaErrStatus(err), map[string]string{"error": err.Error()})
@@ -101,6 +112,9 @@ func (h *Quota) AdminSet(w http.ResponseWriter, r *http.Request) {
 	id, ok := quotaUserID(r)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if !ownsUser(w, r, h.Store, id, "user") {
 		return
 	}
 	var req setQuotaReq
@@ -125,6 +139,9 @@ func (h *Quota) AdminRecompute(w http.ResponseWriter, r *http.Request) {
 	id, ok := quotaUserID(r)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if !ownsUser(w, r, h.Store, id, "user") {
 		return
 	}
 	used, err := h.Service.Recompute(r.Context(), id)

@@ -235,6 +235,7 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_LDAP_START_TLS` | `true` to upgrade a plain connection with StartTLS |
 | `FILEX_LDAP_CA_FILE` | PEM bundle holding the CA that signed the directory certificate. Appended to the system trust store, not substituted for it. Needed for an internal/private CA on `ldaps://` **or** StartTLS. |
 | `FILEX_LDAP_PROTOCOL_LOGIN` | `false` to stop directory accounts from signing in over WebDAV/SFTP/FTPS/S3/NFS with their directory password. Default `true`. |
+| `FILEX_LDAP_PROVIDER` | **Multi-tenant only.** Tenant slug a newly created directory account is homed in when the login carries no Host that maps to a tenant — i.e. an SFTP/FTPS/NFS login. Unset ⇒ such a login **refuses to create** the account rather than falling back to the confine-exempt supertenant. See [LDAP.md](LDAP.md#which-tenant-a-new-account-lands-in). |
 
 > `FILEX_LDAP_USER_FILTER` may contain the placeholder more than once — every
 > `%s` is filled with the same escaped identifier, so the usual AD filter that
@@ -250,6 +251,7 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_HEADER_GROUP` | Header carrying roles/groups (e.g. `X-Auth-Roles`) |
 | `FILEX_HEADER_TRUSTED_IPS` | Comma list of proxy CIDRs allowed to set the headers |
 | `FILEX_HEADER_ADMIN_GROUP` | Group value that elevates a user to admin |
+| `FILEX_HEADER_PROVIDER` | **Multi-tenant only.** Tenant slug a newly created account is homed in when the request Host maps to no tenant. Unset ⇒ such a request **refuses to create** the account. See [LDAP.md](LDAP.md#which-tenant-a-new-account-lands-in). |
 
 > LDAP and proxy‑header can still be set under `auth.ldap.*` /
 > `auth.header_proxy.*` in [config.yaml](#configyaml); the env vars above override
@@ -646,6 +648,7 @@ regenerable, and a single folder-share archive can be tens of gigabytes.
 | `FILEX_THUMBS_ENABLED` | `true` | Master switch. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT` | — | Set `once` to backfill missing thumbnails on startup. |
 | `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). `0` disables it. |
+| `FILEX_THUMBS_URL_TTL` | `24h` | How long a stamped `thumb_url` (`?exp=&sig=`) stays valid. The stamp is what lets a bare `<img src>` fetch a preview with no header and no cookie; an authenticated caller never needs one. ⚠ `0` means *use the default*, not "never expires". See [thumbnails.md → Serving](thumbnails.md#serving). |
 
 Kinds and their tool requirements (auto‑detected on `PATH`; the full Docker
 image bundles them): images = built‑in; video/audio = `ffmpeg`; PDF = `gs` or
@@ -663,6 +666,7 @@ only (`thumbs.cache_dir`, `thumbs.formats`). See [thumbnails.md](thumbnails.md).
 | `FILEX_SEARCH_CONTENT` | `true` | Extract text from files into the index (content search). `0` stops enqueueing extraction; text already indexed keeps matching. |
 | `FILEX_SEARCH_CONTENT_MAX` | `5242880` | Source files larger than this are never content‑extracted. |
 | `FILEX_SEARCH_AUTO_REBUILD` | `true` | Rebuild the index in the background at startup when it was written by an older document schema. The replacement is built alongside the live index and swapped in, so search never goes dark. `0` leaves the index alone and reports `needs_rebuild` instead. |
+| `FILEX_TESSERACT_BIN` | unset (`tesseract` on `$PATH`) | Path to the `tesseract` binary used to OCR images (png/jpg/webp/tiff) into the content index. **When set it is authoritative:** a value that does not resolve turns OCR *off* rather than falling back to `$PATH` — an explicit path that is wrong is an operator mistake worth surfacing, not something to paper over. Unset, filex looks for `tesseract` on `$PATH`; if there is none, images are skipped silently and the capabilities endpoint reports `ocr: false`. |
 
 Index path is `config.yaml` only (`search.index_path`, default
 `<data_dir>/search.bleve`). See [SEARCH.md](SEARCH.md).
@@ -776,6 +780,17 @@ automatically, is in [UPDATES.md](./UPDATES.md).
 | `FILEX_UPDATE_PRE_COMMAND` | — | Shell command run immediately before a self-upgrade (database dump for postgres/mysql). **A non-zero exit aborts the upgrade.** sqlite is snapshotted by filex itself with `VACUUM INTO`. |
 | `FILEX_INSTALL_MODE` | auto-detected | `binary` or `docker`, when detection is wrong for your setup. Container installs never self-apply — the image layer is immutable, so a replaced binary reverts at the next `up`. |
 
+`FILEX_UPDATE_TARGET` is the one variable in this table filex **sets for you**
+rather than reads: it is exported into the environment of
+`FILEX_UPDATE_PRE_COMMAND` and holds the version about to be installed
+(e.g. `v0.34.2`). Setting it in the server's own environment changes nothing —
+it is overwritten for the child process. Use it to name your dump after the
+version it precedes:
+
+```sh
+FILEX_UPDATE_PRE_COMMAND='pg_dump -Fc filex > /backups/filex-pre-$FILEX_UPDATE_TARGET.dump'
+```
+
 ---
 
 ## Demo mode
@@ -783,8 +798,8 @@ automatically, is in [UPDATES.md](./UPDATES.md).
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_DEMO_MODE` | `false` | Renders an "Open the demo" CTA on the login page. |
-| `FILEX_DEMO_USER` | `demo@demo.com` | Demo credentials the CTA submits. |
-| `FILEX_DEMO_PASS` | `demo` | (Keep the DB user in sync.) |
+| `FILEX_DEMO_USER` | `demo@demo.com` | The account the CTA logs in as. |
+| `FILEX_DEMO_PASS` | `demo` | The password the CTA submits, and the one printed under the button. **These are published credentials** — on a demo instance the server returns them in `/api/capabilities` so the page can use them, which is the whole point of a demo. Neither variable creates or changes the account: keep the DB user in sync yourself. |
 
 ---
 
@@ -819,11 +834,13 @@ auth:
     start_tls: false
     ca_file: ""                    # PEM bundle for a private CA (optional)
     protocol_login: true           # directory passwords on WebDAV/SFTP/FTPS/S3/NFS
+    provider: ""                   # multi-tenant only — tenant slug for host-less logins
   header_proxy:                    # trust an auth proxy — also FILEX_HEADER_*
     email_header: X-Auth-Email
     group_header: X-Auth-Roles
     trusted_ips: ["10.0.0.0/8"]
     admin_group: admin
+    provider: ""                   # multi-tenant only — tenant slug when Host matches none
 
 external_services:
   onlyoffice: { url: https://office.example.com, jwt_secret: "…" }
@@ -831,7 +848,7 @@ external_services:
   convert:    { url: "" }
 
 sync:   { default_interval: 15m }   # ⚠ no `workers` key — see Storage sync
-thumbs: { enabled: true, formats: [image, video, pdf, office], cache_dir: "" }
+thumbs: { enabled: true, formats: [image, video, pdf, office], cache_dir: "", url_ttl: 24h }
 search: { enabled: true, index_path: "" }
 cors:
   allowed_origins: ["*"]

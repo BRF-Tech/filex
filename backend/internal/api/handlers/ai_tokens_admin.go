@@ -48,6 +48,20 @@ func (h *AITokens) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// A tenant admin sees only the tokens belonging to its own users. The
+	// rows carry no secret — only the sha256 hash is stored — but the
+	// inventory is still a map of another customer's integrations, and it is
+	// the input to the Update/Delete crossings below.
+	if scope, confined := confinedScope(r.Context()); confined {
+		kept := tokens[:0]
+		for _, t := range tokens {
+			if u, uerr := h.store.GetUser(r.Context(), t.UserID); uerr == nil && u != nil &&
+				u.ProviderID != nil && *u.ProviderID == scope.ProviderID {
+				kept = append(kept, t)
+			}
+		}
+		tokens = kept
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
 }
 
@@ -85,6 +99,20 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if userID == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id required"})
+		return
+	}
+	// ⚠⚠ The token is bound to `user_id`, and a token authenticates AS that
+	// user — with that user's tenant scope. So an unchecked `user_id` here is
+	// not "an admin managing somebody else's token", it is identity takeover:
+	// a tenant admin mints a credential that reads and writes every storage of
+	// the tenant they named. This is the same class that was found and fixed
+	// on POST /api/admin/users (handlers/users.go, olivov G1) — the user
+	// surface got the check and the token surface beside it did not, which is
+	// the worse half, because the token needs no password and no login.
+	//
+	// 404 rather than 403, and before the existence check, so a foreign
+	// user_id is indistinguishable from one that does not exist.
+	if !ownsUser(w, r, h.store, userID, "user") {
 		return
 	}
 	if _, err := h.store.GetUser(r.Context(), userID); err != nil {
@@ -161,6 +189,9 @@ func (h *AITokens) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !h.ownsToken(w, r, id) {
+		return
+	}
 	var body updateTokenBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -199,6 +230,9 @@ func (h *AITokens) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if !h.ownsToken(w, r, id) {
 		return
 	}
 	if err := h.store.DeleteAPIToken(r.Context(), id); err != nil {
@@ -291,4 +325,18 @@ func normalizeScopes(raw string) (string, error) {
 		out = append(out, p)
 	}
 	return strings.Join(out, ","), nil
+}
+
+// ownsToken resolves a token to its bound user and asks whether that user is
+// in the caller's tenant. A token id is a small integer, so without this a
+// tenant admin could relabel — or revoke — every integration on the platform.
+func (h *AITokens) ownsToken(w http.ResponseWriter, r *http.Request, id int64) bool {
+	// ⚠ Unconditional lookup, for the same reason as SharesAdmin.ownsShare:
+	// update and delete answered {"ok":true} for an id that names nothing, so
+	// a confined-only 404 would have been an existence oracle.
+	t, err := h.store.GetAPITokenByID(r.Context(), id)
+	if err != nil || t == nil {
+		return notFound(w, "token")
+	}
+	return ownsUser(w, r, h.store, t.UserID, "token")
 }

@@ -22,6 +22,7 @@ account.
 - [LDAP / Active Directory](#ldap--active-directory)
   - [Directory accounts on the file protocols](#directory-accounts-on-the-file-protocols)
 - [Reverse-proxy header auth](#reverse-proxy-header-auth)
+- [Which tenant a new account lands in](#which-tenant-a-new-account-lands-in)
 - [See also](#see-also)
 
 ---
@@ -94,6 +95,7 @@ error, not a login that fails hours later with a TLS message.
 | `start_tls` | no | `false` | Upgrade a plain `ldap://` connection via StartTLS. Ignored for `ldaps://`. |
 | `ca_file` | no | — | PEM bundle holding a private/internal CA, **appended** to the system trust store. Applies to `ldaps://` and StartTLS alike. Validated at boot. |
 | `protocol_login` | no | `true` | Let directory accounts sign in over WebDAV, SFTP, FTPS, S3 and NFS with their directory password. See [the protocols section](#directory-accounts-on-the-file-protocols). |
+| `provider` | no | — | **Multi-tenant installs only.** Tenant slug a newly created account is homed in when the login carries no Host that maps to a tenant — i.e. an SFTP/FTPS/NFS login. See [Which tenant a new account lands in](#which-tenant-a-new-account-lands-in). |
 
 `url` and `base_dn` are the only hard requirements; everything else has a working
 default.
@@ -118,7 +120,7 @@ user_filter: "(&(objectCategory=person)(objectClass=user)(|(mail=%s)(userPrincip
 ```yaml
 auth:
   drivers: [local, ldap]        # or set FILEX_AUTH_DRIVERS=local,ldap
-  ldap:                         # file-only — no env vars
+  ldap:                         # or the FILEX_LDAP_* env vars below
     url: ldaps://ldap.example.com
     bind_dn: "cn=filex-svc,ou=services,dc=example,dc=com"
     bind_password: "s3cr3t"
@@ -157,6 +159,7 @@ FILEX_LDAP_USER_FILTER=(&(objectCategory=person)(objectClass=user)(|(mail=%s)(us
 FILEX_LDAP_EMAIL_ATTR=mail
 FILEX_LDAP_START_TLS=true
 FILEX_LDAP_CA_FILE=/etc/filex/ad-root-ca.pem
+# FILEX_LDAP_PROVIDER=acme        # multi-tenant only; see "Which tenant …" below
 ```
 
 > Keep `local` in the driver list if you still want the built‑in `admin@local`
@@ -248,7 +251,9 @@ of truth on each request.
    `admin_group` (case‑insensitive) the user becomes **admin**, otherwise
    **user**. Re‑evaluated on every request.
 4. **Provision.** The user is looked up by email and created on first sight
-   (auto‑provision is on).
+   (auto‑provision is on). On a multi-tenant install the new account is homed in
+   the tenant whose host the request arrived on — see
+   [Which tenant a new account lands in](#which-tenant-a-new-account-lands-in).
 
 > **Security — trust is by the DIRECT peer IP, and `X-Forwarded-For` is
 > deliberately NOT honored.** If filex trusted XFF, any client could send
@@ -272,6 +277,7 @@ users is on and likewise not configurable here.
 | `email_header` | no | `X-Auth-Email` | Header carrying the user's email. |
 | `group_header` | no | `X-Auth-Roles` | Header carrying comma‑separated roles/groups. |
 | `admin_group` | no | `admin` | The value within `group_header` that elevates the user to admin. |
+| `provider` | no | — | **Multi-tenant installs only.** Tenant slug a newly created account is homed in when the request Host maps to no tenant. See [Which tenant a new account lands in](#which-tenant-a-new-account-lands-in). |
 
 > The **user identifier header is `X-Auth-User`** (fixed). A name header is
 > accepted but unused (filex's users table has no name field today).
@@ -281,7 +287,7 @@ users is on and likewise not configurable here.
 ```yaml
 auth:
   drivers: [proxy-header]       # or FILEX_AUTH_DRIVERS=proxy-header
-  header_proxy:                 # file-only — no env vars
+  header_proxy:                 # or the FILEX_HEADER_* env vars
     email_header: X-Auth-Email
     group_header: X-Auth-Roles
     admin_group: filex-admins
@@ -315,6 +321,64 @@ Your proxy must set, at minimum, `X-Auth-User`. Typical oauth2‑proxy config:
 | Any client can impersonate anyone | filex is reachable directly from within a trusted CIDR. Lock filex behind the proxy (private network / localhost bind); the header trust model assumes the proxy is the *only* way in. |
 
 ---
+
+## Which tenant a new account lands in
+
+Skip this on a single-tenant install: with `multi_tenant` off nothing here runs,
+and a directory login behaves exactly as it always has.
+
+On a [multi-tenant](MULTI-TENANCY.md) install it matters, because
+`CreateUser` homes a new account in the `default` provider and `default` is the
+**supertenant** — which is *confine-exempt*: it can reach every storage on the
+box. An account created there is not merely mis-filed, it is privileged.
+
+⚠ Both of these drivers did exactly that until the release this note ships in. If you ran either of them
+with auto-provisioning on a multi-tenant install, read the last paragraph of this
+section.
+
+**The signal is the request Host**, the same one that picks an OIDC realm:
+
+| Login arrives as | Host available? | Where the account is created |
+|---|---|---|
+| The browser login form (`POST /api/auth/login` → LDAP) | yes | the tenant whose `host` matches |
+| A reverse-proxy header request | yes | the tenant whose `host` matches |
+| SFTP / FTPS / NFS (`protocol_login`) | **no** — a password on a socket | the tenant named by `provider`, else **refused** |
+| Any of the above, host matches no tenant | — | the tenant named by `provider`, else **refused** |
+
+⚠ **"Refused" is the deliberate answer, not an oversight.** The only fallback
+available is `default`, and `default` is the supertenant — so provisioning anyway
+would hand a confine-exempt, every-storage account to whoever the directory says
+exists. Set `provider` (or `FILEX_LDAP_PROVIDER` / `FILEX_HEADER_PROVIDER`) to a
+tenant slug if you need just-in-time creation on a host-less login:
+
+```yaml
+auth:
+  ldap:
+    provider: acme          # SFTP/FTPS/NFS logins create accounts in tenant `acme`
+```
+
+⚠ Homing happens at **creation only**. An account that already belongs to a
+tenant is never moved by where it logged in — a login on another tenant's host
+does not migrate somebody between customers, it just signs them into their own
+account.
+
+⚠ **Accounts an older build already created are not moved for you.** They sit in
+the supertenant, and no upgrade can safely relocate them: nothing records which
+driver created a row, and the break-glass `admin@local` is deliberately in the
+supertenant too, so a blanket re-home would take an operator's own account away
+from them. A multi-tenant install with either driver enabled now prints one WARN
+at boot naming every non-admin account homed in the supertenant. Review them:
+
+```sql
+SELECT id, email FROM users WHERE provider_id = (SELECT id FROM providers WHERE is_supertenant = 1);
+```
+
+and re-home the ones that should move, as a supertenant admin:
+
+```
+PATCH /api/admin/users/{id}   {"provider_id": <tenant id>}
+```
+
 
 ## See also
 

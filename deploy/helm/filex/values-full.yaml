@@ -62,3 +62,12 @@ convert:
   url: ""
 
 # Mermaid needs nothing — it renders in the browser.
+
+# ── Antivirus ───────────────────────────────────────────────────────────
+# Left unset on purpose: this chart does not deploy ClamAV, and a filex told
+# to scan with nothing listening reports scanning unavailable rather than
+# scanning. Run `clamav/clamav` as its own Deployment + Service first, then
+# uncomment. ⚠ First-boot seeds — after that, Settings → Protection.
+# antivirus:
+#   mode: daemon
+#   address: "clamav:3310"

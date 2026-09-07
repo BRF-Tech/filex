@@ -189,13 +189,43 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the node ONCE, before anything decides what may be done to it.
+	//
+	// ⚠ This used to happen twice — once inside the RBAC branch, once inside
+	// the drop branch — and neither lookup asked whose node it was. `GetNode`
+	// is one of the pass-through methods tenantstore does NOT confine (it
+	// wraps exactly three list queries), so in multi-tenant mode a
+	// client-supplied `node_id` reached straight across the tenant boundary.
+	//
+	// The aclAllowID check below is not a boundary either, which is what let
+	// this survive a reading of the code: storages.rbac_enabled defaults
+	// FALSE, and with it off acl.Set.Effective returns the account-role base
+	// for every path — Editor for a plain `user`. The gate was satisfied by
+	// anyone with an account, on anyone's file.
+	//
+	// The {"path": …} shape of this same request was always safe, because it
+	// resolves through the CONFINED ListEnabledStorages (resolveNodeIDFromPath
+	// below). Two body shapes, one handler, different security properties —
+	// that difference is the tell.
+	//
+	// ⚠ The refusal is the same 404 "not found" a node id that never existed
+	// already produced. A distinct body (or a 403) would turn this into an
+	// oracle: repeated over an id range it enumerates the other customers'
+	// files. Written inline rather than through ownsNode for exactly that
+	// reason — ownsNode writes its own "<what> not found" body, which here
+	// would be distinguishable from the genuine miss beside it.
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if err != nil || node == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(node.StorageID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+
 	// RBAC: creating a public share is an outbound-access grant → ≥editor.
 	if h.ACL != nil {
-		node, err := h.Store.GetNode(r.Context(), nodeID)
-		if err != nil || node == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-			return
-		}
 		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return
@@ -205,17 +235,15 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// File-drop links mint a public UPLOAD endpoint into a folder — validate
 	// the target is a directory up front so a public uploader can never be
 	// pointed at (and made to overwrite) a single file.
+	//
+	// ⚠ This is also why the ownership check above is not merely a disclosure
+	// fix: a drop link over somebody else's folder is a public endpoint that
+	// DEPOSITS files into another tenant's storage. Same create path, so one
+	// check closes both halves.
 	isDrop := req.Kind == model.ShareKindDrop
-	if isDrop {
-		node, err := h.Store.GetNode(r.Context(), nodeID)
-		if err != nil || node == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-			return
-		}
-		if node.Type != model.NodeTypeDirectory {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "drop links require a folder target"})
-			return
-		}
+	if isDrop && node.Type != model.NodeTypeDirectory {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "drop links require a folder target"})
+		return
 	}
 
 	// PIN: explicit string wins; password=true generates one; otherwise empty.
@@ -290,7 +318,8 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		ExpiryClamped: expiryClamped,
 		MaxDownloads:  sh.MaxDownloads,
 	}
-	node, _ := h.Store.GetNode(r.Context(), nodeID)
+	// `node` was already resolved (and ownership-checked) at the top of the
+	// handler; re-reading it here would be a third lookup of the same row.
 	if node != nil {
 		inner.Filename = node.Name
 		inner.Path = node.Path
@@ -527,13 +556,30 @@ func (h *Share) HandleList(w http.ResponseWriter, r *http.Request) {
 		nodeID = resolved
 	}
 
+	// Whose node is it? Same hole as HandleCreate and the same reasoning: the
+	// `node_id` shape reaches GetNode unconfined while the `path` shape goes
+	// through ListEnabledStorages. What leaked here is worse than metadata —
+	// the rows below carry the share TOKEN in `url`, so a foreign node id
+	// handed the caller a working public link to somebody else's file.
+	//
+	// ⚠ The refusal is this endpoint's own "nothing here" answer — 200 with
+	// an empty list, exactly what an unresolvable path and a node id that
+	// does not exist already produce. A 404 would be MORE informative than
+	// the miss it is imitating, i.e. an existence oracle; that is the whole
+	// reason the refusals in this audit copy the shape of a genuine miss
+	// rather than announcing themselves.
+	node, err := h.Store.GetNode(r.Context(), nodeID)
+	if err != nil || node == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
+		return
+	}
+	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(node.StorageID) {
+		writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
+		return
+	}
+
 	// RBAC: seeing an item's links is the same bar as minting one (≥editor).
 	if h.ACL != nil {
-		node, err := h.Store.GetNode(r.Context(), nodeID)
-		if err != nil || node == nil {
-			writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
-			return
-		}
 		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return
@@ -654,9 +700,33 @@ func (h *Share) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sh, err := h.Store.GetShareByID(r.Context(), id)
-	if err != nil {
+	if err != nil || sh == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
+	}
+	// Whose share is it? The non-admin half of the check below was right all
+	// along — a plain user only manages the links they created. The admin
+	// half was `!user.IsAdmin() && …`, and under multi-tenancy "an admin" is
+	// the admin of EVERY tenant, so that early-out handed every share on the
+	// instance to any tenant's administrator.
+	//
+	// GetShareByID is another pass-through, so the row has to be walked back
+	// to its storage: share → node → storage. ⚠ Fails closed — an id whose
+	// node cannot be read is refused rather than treated as ownerless, which
+	// is the same choice ownsNode makes and for the same reason.
+	//
+	// Refusal is the 404 already used for a share id that does not exist —
+	// written inline rather than through ownsStorage, whose "<what> not
+	// found" body would be distinguishable from that miss. The pre-existing
+	// 403 stays for the case it was written for (a real share in your own
+	// tenant that you did not create): there the caller is allowed to know
+	// the row exists.
+	if scope, confined := confinedScope(r.Context()); confined {
+		n, nerr := h.Store.GetNode(r.Context(), sh.NodeID)
+		if nerr != nil || n == nil || !scope.CanAccessStorage(n.StorageID) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
 	}
 	if !user.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != user.ID) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})

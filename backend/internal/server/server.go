@@ -249,7 +249,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	enabled := []auth.Driver{}
 
 	for _, name := range cfg.Auth.Drivers {
-		switch strings.ToLower(name) {
+		switch normalizeDriverName(name) {
 		case "local":
 			d := authlocal.New(store)
 			if err := d.Init(ctx, nil); err != nil {
@@ -297,6 +297,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				"email_attr":    cfg.Auth.LDAP.EmailAttr,
 				"start_tls":     cfg.Auth.LDAP.StartTLS,
 				"ca_file":       cfg.Auth.LDAP.CAFile,
+				// Tenant homing for just-in-time accounts. Without these the
+				// driver falls back to db.CreateUser's hard-coded `default`
+				// provider, which is the confine-exempt supertenant.
+				"multi_tenant": cfg.MultiTenant,
+				"provider":     cfg.Auth.LDAP.Provider,
 			}); err != nil {
 				slog.Warn("ldap driver init failed", slog.String("err", err.Error()))
 				continue
@@ -306,7 +311,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			if cfg.Auth.LDAP.ProtocolLogin {
 				dirDrv = d
 			}
-		case "proxy-header", "proxyheader", "header_proxy":
+		case "proxy-header", "proxyheader", "header-proxy":
 			d := authproxyheader.New(store)
 			if err := d.Init(ctx, map[string]any{
 				"header_user":     "X-Auth-User",
@@ -314,6 +319,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				"header_roles":    cfg.Auth.Header.GroupHeader,
 				"trusted_proxies": cfg.Auth.Header.TrustedIPs,
 				"admin_role":      cfg.Auth.Header.AdminGroup,
+				"multi_tenant":    cfg.MultiTenant,
+				"provider":        cfg.Auth.Header.Provider,
 			}); err != nil {
 				slog.Warn("proxy-header driver init failed", slog.String("err", err.Error()))
 				continue
@@ -365,6 +372,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		oidcDrv = multioidc.New(store, oidcDrv)
 	}
 
+	// One boot line naming the accounts an earlier build stranded in the
+	// confine-exempt supertenant. Reports only -- see auditSupertenantAccounts
+	// for why moving them is the operator's call and not a migration's.
+	auditSupertenantAccounts(ctx, store, cfg.MultiTenant, cfg.Auth.Drivers)
+
 	// Search index.
 	var idx *search.Index
 	if cfg.Search.Enabled {
@@ -386,6 +398,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		"",
 		cfg.Demo.Mode,
 		cfg.Demo.User,
+		cfg.Demo.Pass,
 		cfg.DefaultLocale,
 		cfg.Auth.OIDC.AutoRedirect,
 	)
@@ -1593,4 +1606,18 @@ func (quotaMetrics) QuotaUsageDelta(_ int64, delta int64) {
 	} else {
 		metrics.QuotaAccountedBytes.WithLabelValues("released").Add(float64(-delta))
 	}
+}
+
+// normalizeDriverName folds one FILEX_AUTH_DRIVERS entry to the spelling the
+// loader switches on: lower case, trimmed, and `_` read as `-`.
+//
+// ⚠ The underscore rule is the whole point. `_` and `-` are the same separator
+// to the person typing a driver name, and treating them as different made a
+// DOCUMENTED driver impossible to enable: docs/CONFIGURATION.md,
+// docs/ARCHITECTURE.md and the Helm chart all say `proxy_header`, while the
+// switch only knew `proxy-header`. An install that followed the docs got one
+// `slog.Warn("unknown auth driver")` line and no proxy-header driver at all —
+// reverse-proxy SSO that reads as configured and silently is not.
+func normalizeDriverName(name string) string {
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "_", "-")
 }

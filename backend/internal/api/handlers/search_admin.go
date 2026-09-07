@@ -34,6 +34,9 @@ func NewSearchAdmin(idx *search.Index, store db.Store) *SearchAdmin {
 
 // Stats returns index document counts and size.
 func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the search index is one instance-wide index") {
+		return
+	}
 	if h.Index == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"enabled":          false,
@@ -73,6 +76,9 @@ func (h *SearchAdmin) Stats(w http.ResponseWriter, r *http.Request) {
 // added an extractor or raised FILEX_SEARCH_CONTENT_MAX and wants the text
 // derived again rather than copied.
 func (h *SearchAdmin) Rebuild(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "the search index is one instance-wide index") {
+		return
+	}
 	if h.Index == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search index disabled"})
 		return

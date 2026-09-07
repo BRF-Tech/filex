@@ -81,7 +81,7 @@ func TestEmptyTrash_ReclaimsEveryRowItPurges(t *testing.T) {
 		require.NoError(t, store.SoftDeleteNode(ctx, n.ID))
 		ids = append(ids, n.ID)
 	}
-	res, err := svc.EmptyOlderThan(ctx, 0)
+	res, err := svc.EmptyOlderThan(ctx, 0, 0)
 	require.NoError(t, err)
 	require.Equal(t, 3, res.Deleted)
 	require.ElementsMatch(t, ids, *reclaimed)

@@ -252,7 +252,11 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target, err := h.Store.GetUser(r.Context(), req.UserID)
-	if err != nil || target == nil {
+	// The PATH was gated by resolvePath; the RECIPIENT was not. Granting a
+	// foreign tenant's user into your own storage is a smaller harm than
+	// reading theirs, but it is still a cross-tenant write to their access
+	// graph, and the 404-vs-200 split made it a user-id existence oracle.
+	if err != nil || target == nil || !userInTenant(r.Context(), target) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
 	}
@@ -362,6 +366,16 @@ func (h *Grants) authorizeGrant(w http.ResponseWriter, r *http.Request, g *model
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
 		return nil, false
 	}
+	// ⚠⚠ Tenancy, and it has to be HERE rather than in requireOwner below.
+	// requireOwner short-circuits on u.IsAdmin(), and under multi-tenancy that
+	// is true for the admin of every tenant — so the ACL layer, which is
+	// tenant-blind by design, was the only thing standing between a tenant
+	// admin and another tenant's permission graph. GetStorage above is the
+	// unconfined lookup (tenantstore wraps only the three list queries), so
+	// the grant's storage resolves perfectly well for a foreign id.
+	if !ownsStorage(w, r, st.ID, "grant") {
+		return nil, false
+	}
 	if !h.requireOwner(w, r, st, acl.CleanRel(g.PathPrefix)) {
 		return nil, false
 	}
@@ -424,6 +438,32 @@ func (h *Grants) AdminDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	// AdminList beside this DOES filter by storage (see :389), so the grants
+	// a tenant admin could not see were exactly the ones they could still
+	// revoke by id.
+	//
+	// ⚠ An earlier draft of this comment claimed the user-facing sibling
+	// (Delete, above) was "already safe because authorizeGrant calls
+	// CanAccessStorage". That was wrong, and worth recording rather than
+	// quietly correcting: authorizeGrant resolves the storage with the
+	// UNCONFINED GetStorage and then defers to requireOwner, which returns
+	// true for any u.IsAdmin() — and in multi-tenant mode a tenant admin IS
+	// an admin. The confined lookup lives in resolvePath (:101-107), which is
+	// a different entry point serving the PATH-shaped routes. So the
+	// by-id routes were open too; authorizeGrant now carries the check.
+	// ⚠ The existence check is unconditional, not just for confined callers.
+	// DeleteFileGrant answers {"ok":true} for an id that names nothing, so if
+	// only a tenant's foreign id produced a 404 the status code would announce
+	// that the row exists. Both answers have to agree. (storages.Delete makes
+	// the same argument for the same reason.)
+	g, gerr := h.Store.GetFileGrant(r.Context(), id)
+	if gerr != nil || g == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "grant not found"})
+		return
+	}
+	if !ownsStorage(w, r, g.StorageID, "grant") {
+		return
+	}
 	if err := h.Store.DeleteFileGrant(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -474,7 +514,17 @@ func (h *Grants) Resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := h.Store.GetUserByEmail(r.Context(), email)
-	if err != nil || u == nil {
+	// ⚠ GetUserByEmail is not one of the three methods tenantstore confines,
+	// so this endpoint punched straight through the ListUsers directory gate
+	// that every picker beside it relies on: one query per address turned it
+	// into a membership oracle over the whole platform. Because e-mail is
+	// still globally unique (docs/MULTI-TENANCY.md §4), "this address exists"
+	// is exactly the question a competitor would ask.
+	//
+	// A foreign account answers `found:false` — the same shape as an address
+	// nobody has registered — rather than an error, so the refusal itself
+	// carries no signal.
+	if err != nil || u == nil || !userInTenant(r.Context(), u) {
 		writeJSON(w, http.StatusOK, map[string]any{"found": false})
 		return
 	}
@@ -543,7 +593,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Existing account → direct grant. ──
-	if u, err := h.Store.GetUserByEmail(r.Context(), email); err == nil && u != nil {
+	if u, err := h.Store.GetUserByEmail(r.Context(), email); err == nil && u != nil && userInTenant(r.Context(), u) {
 		if !st.RBACEnabled {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "enable RBAC on this storage first"})
 			return
@@ -607,6 +657,26 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		if cerr != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "could not create user: " + cerr.Error()})
 			return
+		}
+		// ⚠⚠ Home the account in the CALLER's tenant, or this invite is a
+		// privilege escalation rather than a convenience.
+		//
+		// db.Store.CreateUser hard-codes provider_id to the `default`
+		// provider, and `default` is seeded IS_SUPERTENANT. A supertenant
+		// scope is confine-exempt — CanAccessStorage returns true for every
+		// storage — so a tenant admin inviting one address would have minted
+		// an account that reads every other customer's files. The account
+		// creation is gated on caller.IsAdmin(), and under multi-tenancy that
+		// is the admin of any tenant. Same defect the POST /api/admin/users
+		// path was fixed for (handlers/users.go, olivov G1); this caller was
+		// missed because it does not look like user administration.
+		if scope, confined := confinedScope(r.Context()); confined {
+			if perr := h.Store.SetUserProvider(r.Context(), newU.ID, scope.ProviderID, ""); perr != nil {
+				// Do not leave a half-created supertenant account behind.
+				_ = h.Store.DeleteUser(r.Context(), newU.ID)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not home the new account in this tenant"})
+				return
+			}
 		}
 		if _, gerr := h.Store.CreateFileGrant(r.Context(), &model.FileGrant{
 			StorageID: st.ID, PathPrefix: rel, IsDir: isDir, UserID: newU.ID, Level: req.Level, CreatedBy: createdBy,

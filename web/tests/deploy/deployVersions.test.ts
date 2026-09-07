@@ -93,6 +93,26 @@ describe('app store manifests', () => {
     expect(cfg.tipi_version).toBeGreaterThan(1);
   });
 
+  it('Umbrel ships release notes, and they are the ones this release earned', async () => {
+    // ⚠ Not "has a releaseNotes field": one typed by hand and then forgotten
+    // is the exact failure this guards against — a frozen "what's new" carries
+    // no version number, so nothing about it looks stale. The blurb is derived
+    // from CHANGELOG.md, and this asserts the manifest still equals what the
+    // derivation produces, which is false the moment somebody releases without
+    // re-running scripts/sync-deploy-versions.mjs.
+    const { readNotesBlock, releaseNotes } = (await import(
+      '../../../scripts/release-notes.mjs'
+    )) as {
+      readNotesBlock: (yaml: string) => string | null;
+      releaseNotes: (changelog: string, version: string) => string | null;
+    };
+    const want = releaseNotes(read('CHANGELOG.md'), released);
+    expect(want, `CHANGELOG.md has no "## [${released}]" section`).toBeTruthy();
+    expect(readNotesBlock(read('deploy', 'umbrel', 'filex', 'umbrel-app.yml'))).toBe(want);
+    // It must name the release: that is what would make a stale one visible.
+    expect(want).toContain(`filex v${released}`);
+  });
+
   it('does not rewrite the compose schema version while doing it', () => {
     // The Umbrel compose file also carries `version: "3.7"`. A pattern loose
     // enough to hit the app version would break the app rather than update it.

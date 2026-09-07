@@ -13,6 +13,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -85,6 +86,9 @@ func (h *Meta) SetTags(w http.ResponseWriter, r *http.Request) {
 		}
 		cleaned = append(cleaned, t)
 	}
+	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
+		return
+	}
 	if err := h.Store.SetNodeTags(r.Context(), req.NodeID, cleaned); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -105,6 +109,9 @@ func (h *Meta) GetTags(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad node_id"})
 			return
 		}
+		if !ownsNode(w, r, h.Store, nodeID, "node") {
+			return
+		}
 		tags, err := h.Store.GetNodeTags(r.Context(), nodeID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -117,6 +124,9 @@ func (h *Meta) GetTags(w http.ResponseWriter, r *http.Request) {
 		storageID, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || storageID <= 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad storage_id"})
+			return
+		}
+		if !ownsStorage(w, r, storageID, "storage") {
 			return
 		}
 		tags, err := h.Store.ListAllTagsForStorage(r.Context(), storageID)
@@ -155,6 +165,12 @@ func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// ListNodesByTag has no storage predicate, so one `?tag=invoice` returned
+	// up to `limit` FULL node rows — path included — from every tenant on the
+	// box. This is the same filter handlers/search.go applies to search hits;
+	// the tag listing is the second door into the same catalogue and did not
+	// have it.
+	nodes = confineNodesToTenant(r.Context(), nodes)
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "tag": tag})
 }
 
@@ -179,6 +195,20 @@ func (h *Meta) SetStar(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NodeID <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad node_id"})
+		return
+	}
+	// ⚠⚠ The write is what makes this a leak, which is why the check is HERE
+	// and not only on the listing below.
+	//
+	// "user_node_meta rows are keyed by user_id, so a user only ever reads
+	// their own" is true of the SQL and false of the system: the caller
+	// chooses which node id enters their own keyset. Star an arbitrary id,
+	// list it back, read the joined node row's path/name/size/storage, unstar.
+	// That turns a bookmark into a universal node-id oracle — the
+	// reconnaissance step that aims every other id-addressed endpoint. The
+	// listing is filtered too (defence in depth, and it covers rows planted
+	// before this landed), but only the write closes the oracle.
+	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
 		return
 	}
 	var err error
@@ -211,6 +241,7 @@ func (h *Meta) ListStarred(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	nodes = confineNodesToTenant(r.Context(), nodes)
 	if v := r.URL.Query().Get("storage_id"); v != "" {
 		if storageID, err := strconv.ParseInt(v, 10, 64); err == nil && storageID > 0 {
 			nodes = filterByStorage(nodes, storageID)
@@ -244,6 +275,10 @@ func (h *Meta) SetRecent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad node_id"})
 		return
 	}
+	// Same oracle as SetStar, same reasoning — see the note there.
+	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
+		return
+	}
 	ts := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 	if err := h.Store.SetUserNodeMeta(r.Context(), u.ID, req.NodeID, userMetaKeyOpened, ts); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -265,6 +300,7 @@ func (h *Meta) ListRecent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	nodes = confineNodesToTenant(r.Context(), nodes)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
 		"limit": limit,
@@ -291,6 +327,30 @@ func filterByStorage(in []*model.Node, storageID int64) []*model.Node {
 	out := in[:0]
 	for _, n := range in {
 		if n.StorageID == storageID {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// confineNodesToTenant drops nodes whose storage the request's tenant cannot
+// reach. Unscoped (single-tenant mode) and supertenant callers get the slice
+// back untouched, so this is inert on the installs that are not multi-tenant.
+//
+// Deliberately a post-filter rather than a WHERE clause: these listings come
+// from three different store queries, none of which takes a storage set, and a
+// filter applied once at the handler cannot be forgotten by one of them. ⚠ The
+// cost is that `limit` is spent before the filter runs, so a tenant on a busy
+// instance can get fewer rows than it asked for — the same known trade-off
+// handlers/search.go makes.
+func confineNodesToTenant(ctx context.Context, in []*model.Node) []*model.Node {
+	scope, confined := confinedScope(ctx)
+	if !confined {
+		return in
+	}
+	out := in[:0]
+	for _, n := range in {
+		if n != nil && scope.CanAccessStorage(n.StorageID) {
 			out = append(out, n)
 		}
 	}

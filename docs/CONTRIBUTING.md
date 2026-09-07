@@ -479,6 +479,12 @@ Maintainer-only. Reproducible, automated by CI.
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
    node scripts/sync-deploy-versions.mjs    # Helm chart + CasaOS + Umbrel + Runtipi
    ```
+   ⚠ Run this **after** step 4, not before: the same script also derives
+   Umbrel's `releaseNotes` from the `## [X.Y.Z]` section of `CHANGELOG.md`, and
+   exits 2 saying so when that section does not exist yet. Those notes are
+   generated rather than typed because a hand-written "what's new" carries no
+   version number — a stale one describes a release the user is not getting and
+   nothing about it looks wrong.
    ⚠ None of these are labels — each decides which image a real installation
    pulls. The chart's `values.yaml` ships `tag: ""` and the image helper
    resolves that to `.Chart.appVersion`; the three store manifests pin the tag

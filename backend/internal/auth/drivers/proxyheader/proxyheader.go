@@ -51,6 +51,9 @@ type Driver struct {
 	trustedProxies []*net.IPNet
 	autoProvision  bool
 	adminRole      string // role string in headerRoles that elevates to admin (default "admin")
+	// homing decides which tenant a just-in-time account lands in. Zero value
+	// (MultiTenant=false) is the single-tenant install and does nothing.
+	homing auth.TenantHoming
 }
 
 // New constructs an empty driver — Init must be called.
@@ -77,6 +80,8 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	d.headerRoles = stringOr(cfg, "header_roles", defaultRolesHeader)
 	d.adminRole = stringOr(cfg, "admin_role", model.RoleAdmin)
 	d.autoProvision = boolOr(cfg, "auto_provision", true)
+	d.homing.MultiTenant = boolOr(cfg, "multi_tenant", false)
+	d.homing.Pin = stringOr(cfg, "provider", "")
 
 	raw := stringSlice(cfg, "trusted_proxies")
 	if len(raw) == 0 {
@@ -140,6 +145,7 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 	autoProvision := d.autoProvision
 	adminRole := d.adminRole
 	nets := d.trustedProxies
+	homing := d.homing
 	d.mu.RUnlock()
 
 	if !sourceTrusted(r, nets) {
@@ -172,13 +178,21 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 		}
 	}
 
-	ctx := r.Context()
+	// ⚠ The Host the client asked for, stamped so ProvisionUser can home a new
+	// account in that tenant. Unlike the LDAP driver this one runs INSIDE an
+	// *http.Request, so the signal is always there.
+	ctx := auth.WithRequestLoginHost(r.Context(), r)
 	user, err := d.store.GetUserByEmail(ctx, email)
 	if err != nil {
 		if !autoProvision {
 			return nil, auth.ErrUnauthorized
 		}
-		user, err = d.store.CreateUser(ctx, email, "", role, "en", "UTC")
+		// ⚠⚠ NOT store.CreateUser directly — that homes the account in
+		// `default`, which is seeded is_supertenant = 1 and therefore
+		// confine-EXEMPT. On a multi-tenant install, header-trust
+		// auto-provisioning was minting an account that could reach every
+		// storage on the box for anybody the upstream proxy named.
+		user, err = auth.ProvisionUser(ctx, d.store, homing, "proxyheader", email, role)
 		if err != nil {
 			return nil, fmt.Errorf("proxyheader: provision user: %w", err)
 		}

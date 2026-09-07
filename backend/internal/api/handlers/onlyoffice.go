@@ -132,6 +132,31 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		node = n
 	}
 
+	// Whose node is it? Both id-taking shapes above (POST body `node_id`, GET
+	// query `id`) call GetNode, which tenantstore does not confine, so a
+	// client-supplied node id crossed tenants. The `path` shape is safe and
+	// always was, because resolveNodeByPath goes through the CONFINED
+	// ListEnabledStorages — the same "two shapes, different security
+	// properties" split as /api/files/share.
+	//
+	// ⚠ docs/MULTI-TENANCY.md argued this endpoint was safe because "storage
+	// is derived server-side from the node". That is true and it is not a
+	// defence: the NODE ID is client-supplied, so deriving the storage from
+	// it derives nothing about the caller. The RBAC block below is not a
+	// boundary either — with storages.rbac_enabled off, which is the default,
+	// Effective() returns the account-role base for every path.
+	//
+	// ⚠ What this handed over is BYTES, not metadata: the config carries an
+	// HMAC-signed, credential-free fetch URL redeemed at the PUBLIC
+	// /api/files/onlyoffice/fetch, for every extension OnlyOffice opens.
+	// Refused with the same 404 an unknown node id already produced.
+	if node != nil {
+		if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(node.StorageID) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+	}
+
 	// RBAC: must be able to view the doc at all; an edit request without
 	// ≥editor is downgraded to a read-only view (viewers can preview office
 	// files but never edit/convert).

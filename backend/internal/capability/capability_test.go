@@ -115,13 +115,50 @@ func TestService_StaticInventory_OIDCAutoRedirect(t *testing.T) {
 		[]string{"local", "oidc"}, nil,
 		"sqlite", false,
 		"test", "",
-		false, "",
+		false, "", "",
 		"",
 		true,
 	)
 	caps, err = svc.Get(context.Background())
 	require.NoError(t, err)
 	assert.True(t, caps.OIDCAutoRedirect)
+}
+
+// TestService_StaticInventory_DemoCreds — FILEX_DEMO_PASS reaches the login
+// page. Before this wiring the CTA hardcoded "demo": an operator who set the
+// variable (it was parsed and documented) broke the demo button while
+// believing they had secured the instance. The password is published ONLY on
+// a demo instance — where the landing page prints it next to the CTA anyway.
+func TestService_StaticInventory_DemoCreds(t *testing.T) {
+	_, store := dbtest.NewTestDB(t)
+	svc := New(store)
+
+	svc.SetStaticInventory(
+		nil, nil,
+		"sqlite", false,
+		"test", "",
+		true, "demo@demo.com", "s3cret",
+		"",
+		false,
+	)
+	caps, err := svc.Get(context.Background())
+	require.NoError(t, err)
+	assert.True(t, caps.DemoMode)
+	assert.Equal(t, "demo@demo.com", caps.DemoUser)
+	assert.Equal(t, "s3cret", caps.DemoPass, "the CTA must submit the configured password, not a hardcoded one")
+
+	// A normal install never leaks it, whatever the config says.
+	svc.SetStaticInventory(
+		nil, nil,
+		"sqlite", false,
+		"test", "",
+		false, "demo@demo.com", "s3cret",
+		"",
+		false,
+	)
+	caps, err = svc.Get(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, caps.DemoPass, "demo_pass must not appear on a non-demo instance")
 }
 
 // TestExternalProbeURL — per-service health paths join onto the base URL

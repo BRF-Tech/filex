@@ -62,6 +62,9 @@ type Driver struct {
 	emailAttr  string // e.g. "mail"
 	startTLS   bool
 	caFile     string // optional PEM bundle for a private CA
+	// homing decides which tenant a just-in-time account lands in. Zero value
+	// (MultiTenant=false) is the single-tenant install and does nothing.
+	homing auth.TenantHoming
 
 	// dial is swapped in tests. Nil means the real dialer.
 	dial func(ctx context.Context) (conn, error)
@@ -92,6 +95,8 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	}
 	d.startTLS, _ = cfg["start_tls"].(bool)
 	d.caFile, _ = cfg["ca_file"].(string)
+	d.homing.MultiTenant, _ = cfg["multi_tenant"].(bool)
+	d.homing.Pin, _ = cfg["provider"].(string)
 	if d.url == "" || d.baseDN == "" {
 		return errors.New("ldap: url and base_dn required")
 	}
@@ -260,7 +265,21 @@ func (d *Driver) verify(ctx context.Context, identifier, password string) (*mode
 	em = strings.ToLower(strings.TrimSpace(em))
 	user, err := d.store.GetUserByEmail(ctx, em)
 	if err != nil {
-		user, err = d.store.CreateUser(ctx, em, "", model.RoleUser, "en", "UTC")
+		// ⚠⚠ NOT store.CreateUser directly. That call hard-codes provider_id
+		// to `default`, which is seeded is_supertenant = 1 and therefore
+		// confine-EXEMPT: on a multi-tenant install every directory user it
+		// created could reach every storage on the box. auth.ProvisionUser
+		// homes the account in the tenant this login arrived for — the request
+		// Host, which handlers.Auth.Login stamps onto the context (the same
+		// signal multioidc uses to pick a realm), or an operator's pinned
+		// `provider` slug.
+		//
+		// ⚠ A protocol login (SFTP/FTPS/NFS — internal/protocolauth) has no
+		// Host at all, so on a multi-tenant install with no pin this REFUSES
+		// rather than falling back to the supertenant. The account still works
+		// over those protocols the moment it exists; what it cannot do is come
+		// into existence there.
+		user, err = auth.ProvisionUser(ctx, d.store, d.homing, "ldap", em, model.RoleUser)
 		if err != nil {
 			return nil, err
 		}

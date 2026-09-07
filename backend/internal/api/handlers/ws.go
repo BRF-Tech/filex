@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
@@ -45,6 +46,15 @@ type WS struct {
 	// means it is the built-in guess, and wsURL then takes the origin from the
 	// request instead of announcing an address nothing is listening on.
 	PublicURLSet bool
+	// MultiTenant mirrors the config switch, and it is needed here for the same
+	// reason auth.TenantResolver takes it: a TICKETED upgrade authenticates
+	// after every middleware has run, so this handler is the only place that
+	// can attach the ticket user's tenant scope — and it must attach one ONLY
+	// when the resolver would have. auth.ScopeForUser fails closed
+	// (tenant.DenyAll) for a user with no provider, which is the normal shape
+	// on a single-tenant install; attaching that unconditionally would take
+	// every embedded client on every single-tenant install off the air.
+	MultiTenant bool
 }
 
 // AttachPublicURLConfigured records whether PublicURL was chosen rather than
@@ -55,6 +65,12 @@ func (h *WS) AttachPublicURLConfigured(set bool) { h.PublicURLSet = set }
 
 // AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
 func (h *WS) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
+
+// AttachMultiTenant records whether the instance runs in multi-tenant mode.
+// Kept out of NewWS for the same reason as AttachPublicURLConfigured: the
+// existing tests construct a WS directly and must keep the single-tenant
+// (zero-value) behaviour without knowing this exists.
+func (h *WS) AttachMultiTenant(on bool) { h.MultiTenant = on }
 
 // NewWS constructs the WebSocket handler. A nil hub makes Handle reply 503 so
 // the route can be registered unconditionally.
@@ -291,6 +307,24 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	if ticketed {
 		if u, err := h.Store.GetUser(baseCtx, ticket.UserID); err == nil && u != nil {
 			baseCtx = auth.WithUser(baseCtx, u)
+			// …and the TENANT the same user belongs to. Restoring only the user
+			// closed the RBAC half of the identity and left the tenancy half
+			// open: resolveSubscribe enumerates ListEnabledStorages, and on an
+			// unscoped context tenantstore hands back every storage on the
+			// instance — so a ticketed client could join ANY tenant's room and
+			// receive its change frames and its presence roster (other
+			// customers' display names, e-mail local-parts and avatars). The
+			// cookie door never had this, because the middleware chain had
+			// already attached the scope; the asymmetry between the two doors
+			// is what hid it.
+			//
+			// Gated on the mode because ScopeForUser fails closed: on a
+			// single-tenant install, where accounts normally carry no provider,
+			// it answers tenant.DenyAll and every embedded client would go
+			// dark. Off ⇒ nothing attached ⇒ byte-identical to before.
+			if h.MultiTenant {
+				baseCtx = tenant.WithScope(baseCtx, auth.ScopeForUser(baseCtx, h.Store, u))
+			}
 		}
 	}
 

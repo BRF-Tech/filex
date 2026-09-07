@@ -23,6 +23,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 // Shared serves the shared-with-me listing. Mounted inside the authenticated
@@ -30,10 +31,16 @@ import (
 // already in force.
 type Shared struct {
 	Store db.Store
+	// ThumbSigner stamps the `thumb_url` this listing hands out. Nil emits an
+	// unsigned URL, which authenticated clients still fetch fine.
+	ThumbSigner *thumb.Signer
 }
 
 // NewShared constructs the handler.
 func NewShared(store db.Store) *Shared { return &Shared{Store: store} }
+
+// AttachThumbSigner wires the thumbnail URL stamp.
+func (h *Shared) AttachThumbSigner(s *thumb.Signer) { h.ThumbSigner = s }
 
 // SharedWithMe lists the items the caller holds a grant on, newest grant
 // first, paginated with ?limit= (default 100, max 500) and ?offset=.
@@ -166,7 +173,7 @@ func (h *Shared) project(ctx context.Context, st *model.Storage, g *model.FileGr
 		// grant. Passing an acl.Set here would re-derive the same answer and
 		// stamp `perm` from it; the grant's own level is the more precise
 		// value and is written below.
-		if projected := projectFileNodes(st.Name, []*model.Node{node}, false, nil); len(projected) == 1 {
+		if projected := projectFileNodes(st.Name, []*model.Node{node}, false, nil, h.ThumbSigner); len(projected) == 1 {
 			entry = projected[0]
 		}
 	}

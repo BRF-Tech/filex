@@ -6,10 +6,16 @@
 > fixes in **v0.9.0** filed by a live ten-provider deployment. Every phase below
 > has its core artefacts on `main`; `feat/multi-tenant` is long gone.
 >
-> Four gaps remain, all narrow and all named in the roadmap at the end: no admin
-> SPA page for tenant lifecycle (the API is the surface), **one e-mail address
-> still cannot exist in two tenants** (§4), no per-tenant SMTP identity, and no
-> postgres/mysql migration CI job or live multi-realm OIDC end-to-end run.
+> A full isolation pass landed after this line was first written; §10 and §16
+> are the current record. ⚠ **§16 is not a formality** — it names gaps that are
+> open today, including one that is not a tenancy bug at all but an
+> unauthenticated content disclosure. Read it before deciding this feature is
+> finished.
+>
+> Longer-standing gaps: no admin SPA page for tenant lifecycle (the API is the
+> surface), **one e-mail address still cannot exist in two tenants** (§4), no
+> per-tenant SMTP identity, and no postgres/mysql migration CI job or live
+> multi-realm OIDC end-to-end run.
 >
 > This document is both the design rationale and the record of what was built.
 > It stayed on "Phase 1 landed" for two months after the feature shipped, which
@@ -48,15 +54,37 @@ head and in the code:
 
 1. **File data → storage confinement.** A request can only reach the storages
    its provider is linked to; every path is confined server-side (`confine.Root`,
-   node→storage derivation, client never supplies a storage id it doesn't own).
-   This is the *only* circuit that can leak file bytes.
+   node→storage derivation). This is the *only* circuit that can leak file bytes.
 2. **Directory → provider_id scoping.** User lists, share-pickers, grants, audit,
    search results are filtered by the requester's `provider_id`.
 
-**Consequence:** a bug in layer 2 leaks *at most a user's name*, never file data,
-because layer 1 is a separate circuit. That makes this "simple-layer" tenancy,
-not the scary kind — the worst realistic outcome is a name leak, small blast
-radius. Say this explicitly in user docs; it is the reason to trust the feature.
+⚠⚠ **This section used to end with a reassurance that was not true, and the
+correction is the most important sentence in the document.**
+
+It said: *"a bug in layer 2 leaks at most a user's name, never file data,
+because layer 1 is a separate circuit — the worst realistic outcome is a name
+leak, small blast radius. Say this explicitly in user docs; it is the reason to
+trust the feature."* It also said layer 1 holds because the *"client never
+supplies a storage id it doesn't own"*.
+
+Both were falsified by measurement. The client **did** supply a raw `storage_id`
+and a raw `node_id` on a number of `/api/files` endpoints, and those are layer-1
+surfaces: `read`, `stat`, the manager listing, share creation, version restore,
+the ops queue. The two circuits were only independent where somebody had written
+the check; there was no structural separation making layer 1 safe from a layer-2
+mistake, because most of these endpoints had no layer-1 check at all — their only
+gate was RBAC, which is tenant-blind and, on a default install, open to any
+authenticated user (see §16.6).
+
+The reassurance was also self-reinforcing in the worst way: it told the reader
+this was "not the scary kind" of tenancy and instructed them to repeat that to
+customers, which is exactly the sentence nobody re-derives.
+
+What is true now: both circuits are enforced, endpoint by endpoint, and the
+ownership predicate (`handlers/tenantown.go`) is shared so a new by-id endpoint
+has one obvious thing to call. What remains untrue is any claim that the
+architecture makes byte leaks *impossible* — it does not. It makes them
+checkable. §16 lists what is still open.
 
 ## 3. Mode gating (backward-compat is non-negotiable)
 
@@ -270,98 +298,152 @@ are unchanged.
 
 ## 10. Isolation checklist (the periphery that leaks if forgotten)
 
-- [ ] **Search (bleve + `tag:` filters)** — filter hits to the requester's accessible
-      `storage_id`s. *The #1 forgotten leak*; unfiltered search leaks content, not
-      just names.
-- [ ] **All pickers server-filtered** — user directory, storage-picker,
+- [x] **Search (bleve + `tag:` filters)** — hits are filtered to the requester's
+      accessible `storage_id`s in `handlers/search.go`, and the second search
+      box (`/api/files/manager?action=search`, which had its own unfiltered
+      cross-storage path) now shares that rule. The tag listings
+      (`/manager/tagged`, `/manager/tags*`) were a third door into the same
+      catalogue and are filtered too.
+- [x] **All pickers server-filtered** — user directory, storage-picker,
       share-picker, grant-picker (RBAC), audit, notifications, search. The
-      negative-test matrix walks exactly this list.
-- [ ] **Shared sidecars (OnlyOffice/convert)** — doc keys must be unguessable and
-      storage derived server-side from the node (not client-supplied). Shared JWT
-      secret means isolation rests entirely on doc-key→node→storage.
-- [ ] **`/api/capabilities`** (pre-auth, host-resolved) — return only *this*
-      tenant's branding/features; never reveal other tenants exist.
+      picker that was NOT filtered was
+      `GET /api/files/permissions/resolve?email=`: it calls `GetUserByEmail`,
+      which is not one of the three methods `tenantstore` confines, so one
+      query per address made it a membership oracle over the whole platform. It
+      now answers `found:false` for a foreign account — the same shape as an
+      address nobody has registered, so the refusal carries no signal.
+- [x] **Shared sidecars (OnlyOffice/convert)** — this bullet used to say the
+      storage is "derived server-side from the node (not client-supplied)".
+      That was true and beside the point: the **node id** is client-supplied, so
+      deriving the storage from it derived nothing. The `node_id` form of
+      `/api/files/onlyoffice/config` now checks ownership; the `path` form was
+      always safe, because it resolves through the confined storage list.
+- [ ] **`/api/capabilities`** (pre-auth, host-resolved) — the `tenant` block is
+      correctly host-derived, but the endpoint is built on the **raw** store and
+      its snapshot is process-global, so the enabled storage **ids** it returns
+      are instance-wide. Named in section 16.
 - [x] **Instance-wide admin surfaces are gated on the supertenant.** See
-      [Instance-wide admin surfaces](#instance-wide-admin-surfaces) below — it
-      lists what is gated, what is still open, and why the distinction is not
-      obvious from `/api/admin`.
-- [ ] **Public shares (`/s/{token}`) are intentionally host-agnostic to
+      [Instance-wide admin surfaces](#instance-wide-admin-surfaces) below.
+- [x] **Row-level ownership on every admin route that takes an `{id}`.** See
+      [Ownership, not supertenancy](#ownership-not-supertenancy) below.
+- [x] **Public shares (`/s/{token}`) are intentionally host-agnostic to
       *serve*** — a link is a link; the file stays confined via
-      token→node→storage. Drop/upload (`/d/{token}`) confines the same way;
-      client can't override storage. ⚠ Host-agnostic *serving* is not
-      host-agnostic *minting*: the link filex hands out names the tenant's
-      host (see "Absolute URLs" above), because a customer pasting the
-      operator's hostname into a mail to their own client is a leak even
-      though the token would still resolve.
+      token to node to storage, and the uploader supplies none of it for
+      `/d/{token}` either. Host-agnostic *serving* is not host-agnostic
+      *minting*: the link filex hands out names the tenant's host (see
+      "Absolute URLs" above). Share **creation** was the gap, not serving: the
+      `{node_id}` body shape accepted any node on the instance while the
+      `{path}` shape resolved through the confined list. Both shapes now agree.
+
+### Ownership, not supertenancy
+
+A second class, and the more dangerous one. These routes are legitimate tenant
+features — a tenant admin may reset **their own** user's password, revoke
+**their own** share, empty **their own** trash — so a supertenant gate would be
+a regression rather than a fix. The question is not "may you touch this
+surface" but "do you own the row you just named", and `tenantstore` answers it
+for exactly three list queries and nothing else. Every route taking an `{id}`
+looked the row up directly.
+
+Measured, not assumed: `TestOwnership_ForeignIdsAreRefused` runs an admin of one
+tenant at another tenant's ids over real HTTP. On the pre-fix build **fifteen of
+sixteen crossings succeeded.**
+
+| Route | What a foreign tenant admin could do | Now |
+|---|---|---|
+| `POST /users/{id}/reset-password` | **200, with the victim's new cleartext password in the response body.** One request, one other customer's account, credential included. `GET`/`PATCH`/`DELETE` on `/users/{id}` were gated; this sibling lives on a different handler type and was missed. | 404 |
+| `GET /storages/{id}` | Returned the storage's whole `config` blob — for an S3 or SFTP storage, the access key and secret | 404 |
+| `PATCH` / `DELETE` / `{id}/sync` on storages | Repoint, or **delete** (cascading the node rows), another tenant's storage | 404 |
+| `{id}/sync-runs`, `{id}/drift`, `sync-runs/{id}` | Another tenant's sync history and conflicting paths | 404 |
+| `quota/{user_id}` and the nested `users/{id}/quota` | Read, and clamp to one byte, another tenant's user | 404 |
+| `versions/{id}`, `trash/{id}`, `grants/{id}`, `shares/{id}` revoke + delete | Destroy another tenant's version history, trashed files, RBAC grants and live share links | 404 |
+| `ai-tokens` — `POST` with any `user_id`, plus list/patch/delete by id | **Identity takeover.** A token authenticates AS its bound user, with that user's scope, so an unchecked `user_id` mints a credential over another tenant's whole storage set — needing no password and no login | 404 |
+
+The refusal is **404, not 403**. A 403 confirms the row exists; repeated over an
+id range it becomes a census of the platform's other customers. The
+instance-wide gate below answers 403 because there the *surface* is refused and
+the operator needs to read why.
+
+The predicate is `handlers/tenantown.go` — `ownsStorage`, `ownsNode`,
+`ownsUser`, `userInTenant`. Same reasoning as `supertenant.go` for why it lives
+in the handler rather than on the chi route.
 
 ### Instance-wide admin surfaces
 
 Everything under `/api/admin` has already passed `auth.RequireAdmin`, and in
 mode-on that means **an admin of some tenant** — the resolver labels the
-request, it does not deny anything, and the scoped store filters exactly three
-list queries (storages, enabled storages, users). Most admin routes are fine
-with that because the rows they touch belong to a tenant. A handful are not:
-they read and write a single global row, or drive the process itself, and every
-tenant then lives with the result.
+request, it does not deny anything. Surfaces whose effect is one global row or
+one global process ask `requireSupertenant`
+(`backend/internal/api/handlers/supertenant.go`).
 
-Those ask `requireSupertenant` (`backend/internal/api/handlers/supertenant.go`),
-one predicate shared by every such surface. ⚠ The check is inside the HANDLER
-and not on the chi route, because the route is not the only door:
-`/api/ai/admin` mounts the same handler instances behind an `admin`-scoped API
-token, and the MCP admin tools drive those same methods in-process.
+The check is inside the HANDLER and not on the chi route, because the route is
+not the only door: `/api/ai/admin` mounts the same handler instances behind an
+`admin`-scoped API token, and the MCP admin tools drive those same methods
+in-process.
 
-⚠ **Single-tenant installs are unaffected by construction.** `TenantResolver`
+**Single-tenant installs are unaffected by construction.** `TenantResolver`
 attaches no scope when mode is off, absence means "unscoped", and unscoped
-passes. There is no flag to set and nothing to configure.
+passes. There is no flag to set and nothing to configure. Each change below has
+an explicit single-tenant test, and those pass on the pre-fix build too — which
+is the honest form of that proof.
 
-**Gated today:**
+**Gated (403 `supertenant_only`):**
 
 | Surface | What one tenant admin could otherwise do to everyone |
 |---|---|
-| `/api/admin/protection` | Turn antivirus **off** for the instance, or point clamd at a host they control. Also trash + version retention. The READ is gated too: it returns the clamd address and a live reachability probe. |
-| `/api/admin/external` | Repoint the shared OnlyOffice / converter at their own host **and overwrite the shared JWT secret** — every tenant's documents in transit. `POST /{name}/test` dials arbitrary addresses. |
-| `/api/admin/auth-providers` | Rewrite the global `auth.*` rows (OIDC issuer + client secret, LDAP bind) — who can sign in to the instance at all. ⚠ *Per-tenant* auth is a different surface: it lives on the provider row, under `/api/admin/providers`. |
-| `/api/admin/update` | Replace the binary every tenant is served by, and require a restart of the whole instance. |
-| `/api/admin/providers` | Tenant lifecycle. Gated since the feature shipped. |
-| `/api/admin/plugins` | Install a process filex runs. Gated since plugins shipped. ⚠ The tenancy check now runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether the operator has plugins switched on. |
+| `/api/admin/protection` | Turn antivirus **off** for the instance, or point clamd at a host they control. The READ is gated too: it returns the clamd address and a live reachability probe. |
+| `/api/admin/external` | Repoint the shared OnlyOffice / converter at their own host **and overwrite the shared JWT secret** — every tenant's documents in transit. |
+| `/api/admin/auth-providers` | Rewrite the global `auth.*` rows (OIDC issuer + client secret, LDAP bind) — who can sign in at all. |
+| `/api/admin/update` | Replace the binary every tenant is served by. |
+| `/api/admin/providers` | Tenant lifecycle. |
+| `/api/admin/plugins` | Install a process filex runs. The tenancy check runs **before** the `plugins_disabled` 503, so the refusal does not disclose whether plugins are switched on. |
+| `/api/admin/webhooks`, `/api/admin/notifications/webhook-config` | One target list receives **every tenant's** event stream, so a tenant admin adding a target subscribes to other customers' file paths. Per-tenant targets are a feature — the rows must carry a provider and the emitter must filter by it — not something a gate approximates. Same 503-ordering note as plugins. |
+| `/api/admin/replication-targets`, `/api/admin/replica/*` | Fan every tenant's writes at a backup sink of the caller's choosing. |
+| `/api/admin/search/stats`, `/api/admin/search/rebuild` | One instance-wide index: `stats` discloses other customers' document counts, `rebuild` re-enqueues extraction for every node of every tenant. The rebuild ITSELF must stay unscoped — it runs on a background context, and a scoped rebuild would silently evict every other tenant from the index. |
+| `/api/admin/queue` plus retry/cancel by id | Job payloads carry node ids and paths from every tenant. |
+| `/metrics` | One instance-wide series set — storage names, per-storage byte and file counts, user totals. Wrapped at the route because it is a plain `http.Handler`; answers 404 so a misaimed scraper sees no hint that a richer endpoint exists. |
 
-**Not gated, and a decision rather than an oversight.** Each of these is
-instance-wide too, and each needs an answer that is not simply "supertenant
-only" — so they are named here rather than half-closed:
+**Scoped rather than gated** — legitimate tenant features that were merely
+unfiltered. Gating these would have taken a real capability away:
 
-- **`/api/admin/settings`** (`PATCH`, `PUT /{key}`) — the same global `settings`
-  table, with an **unrestricted key namespace**: `auth.*`, `antivirus.*`, SMTP,
-  `share.max_ttl_days`. It cannot simply be gated, because `branding.*` keys
-  *are* tenant-namespaced today (`handlers/branding.go`) and a tenant admin is
-  meant to write those. The fix is a per-key classification, not a route gate.
-- **`/api/admin/webhooks`, `/api/admin/notifications/webhook-config`** — a
-  target list that receives **every tenant's** event stream. Arguably a tenant
-  admin should have their own targets; that is a per-tenant feature, not a
-  gate.
-- **`/api/admin/replication-targets`, `/api/admin/replica/{rules,settings}`** —
-  fan every tenant's writes at a backup sink. Same shape of question.
-- **`/api/admin/search/rebuild`, `/api/admin/queue`, `/api/admin/trash/empty`**
-  — one index, one queue, one trash sweep across all storages.
-- **Cross-tenant reads**: `/metrics` (inside the admin group), `/duplicates`,
-  `/sync-runs`, `/notifications` (list), and the dashboard's global counters +
-  `recent_activity`. Leaks other tenants' *paths and activity*, not their bytes.
+| Surface | Was | Now |
+|---|---|---|
+| `/api/admin/duplicates` | Walked every storage and returned path, name, size **and etag** — a content fingerprint, so it confirmed that a file you already hold exists in another tenant | Own storages only |
+| `/api/admin/sync-runs` (list) | A timeline of every tenant's sync activity | Own storages only |
+| `/api/admin/dashboard` | Storage rows were confined, but `total_users`, `active_sessions` and `recent_activity` were instance-wide aggregates | Own users. `active_sessions` is **zeroed** for a tenant rather than reported wrong: there is no count-by-provider query, and a zero is honest where the platform total is not |
+| `POST /api/admin/trash/empty` | Permanent, irreversible destruction of **every** tenant's trashed files, by an admin of any one of them, answering 200. The most damaging single request in the admin surface | Own storages only. Scoped inside the service sweep, because the handler has no list to filter; the nightly retention worker carries no scope and so still sweeps everything |
 
-**A different class, listed so it is not mistaken for the above.** These are
-tenant-scoped rows reachable by raw id with no scope check — the fix is a
-`CanAccessStorage`-style ownership check, not a supertenant gate:
-`storages/{id}` (`GET`/`PATCH`/`DELETE`/`sync`/`drift`/`sync-runs`),
-`users/{id}/reset-password`, `quota/{user_id}`, `versions/{id}`,
-`grants/{id}` (`DELETE`), `shares/{id}` (revoke/delete), `trash/{id}`,
-`sync-runs/{id}`, and `ai-tokens` (list is global; create accepts any
-`user_id`).
+**Classified per key** — `/api/admin/settings` (`PATCH`, `PUT /{key}`):
 
-⚠⚠ **Do not read the ungated lists as "safe".** Until they are answered, an
-`admin` role inside a tenant is still more authority than the tenant boundary
-suggests, so grant it only to people you would trust with the instance. What
-changed is narrower and worth having: the four surfaces that let one tenant
-admin **disarm or hijack the whole platform** — switch off scanning, repoint
-the document server, rewrite the login configuration, replace the binary — no
-longer do.
+One flat, global, unrestricted key/value table holds both the instance's OIDC
+issuer and a tenant's own logo, so neither a blanket gate nor a blanket pass is
+right. `allowSettingWrite` is an **allowlist**: a key is tenant-writable only if
+writing it lands somewhere that belongs to the tenant, which today means the
+bare `branding.*` namespace, because that is the only one `tenantBrandingKey`
+rewrites under a `tenant.<id>.` prefix.
+
+The direction of the default is the point. A denylist would make every key added
+after today silently tenant-writable until somebody remembered to list it. The
+failure mode of an allowlist is a supertenant having to make a change for a
+tenant; the failure mode of a denylist is a tenant rewriting the instance's OIDC
+issuer.
+
+Three details worth keeping:
+
+- The already-prefixed `tenant.<id>.branding.*` spelling is **refused**, because
+  `tenantBrandingKey` passes an already-prefixed key through unchanged — so
+  accepting it would let one tenant rebrand another's login page by typing their
+  id.
+- `PATCH` classifies the **whole batch before writing any of it**. Refusing
+  halfway would leave the allowed keys written and the rest not: a partial apply
+  the caller cannot distinguish from success.
+- This also closes `installation.pinned`, the escrow-adoption record, which is
+  boot-fatal if corrupted and is deliberately an environment decision rather
+  than one taken behind an HTTP session.
+
+The settings **read** is not restricted: a tenant admin still lists the global
+map, with secrets redacted and other tenants' branding stripped. Named in
+section 16.
 
 ## 11. Tenant lifecycle
 
@@ -406,6 +488,231 @@ tenant's branding. Ties into `FILEX_DEFAULT_LOCALE` (already shipped).
 - Per-tenant SMTP / webhook (v1 does per-tenant *sender identity* via branding).
 - DB-per-tenant option (stronger isolation, N× migrations/backups) vs the
   shared-DB default here.
+
+## 16. Audit findings — what is closed, what is open
+
+⚠ This section exists because a gap that is named is worth more than a gap that
+is silent. Everything here was found by measurement. ⚠⚠ Read the status column
+before you quote any of it to a customer: three of these were open when the
+section was written and are closed now, and the ones that are still open say so.
+
+| # | Finding | Status |
+|---|---|---|
+| 16.1 | `GET /api/files/thumb/{id}` served previews to unauthenticated callers | **closed** |
+| 16.2 | LDAP / proxy-header logins provisioned into the supertenant | **closed** (existing rows are an operator action, see below) |
+| 16.3 | Cross-tenant reads that remain (`/api/admin/settings`, `/api/capabilities`, `active_sessions`) | open |
+| 16.4 | Scope is frozen for the life of a protocol session | open |
+| 16.5 | Test coverage is uneven across the protocol servers | open |
+| 16.6 | RBAC is not a tenant boundary, and on a default install not a boundary at all | open (by design; recorded as context) |
+| 16.7 | `/api/files/versions` had no ownership or ACL check | **closed** |
+
+### 16.1 `GET /api/files/thumb/{id}` — CLOSED (was: unauthenticated on every install)
+
+**Was the single most severe finding of the isolation pass. It is fixed.**
+
+The route was registered at the top level, outside every auth group, and
+`Thumb.checkSig` returned `true` when the `sig` parameter was **absent** — while
+`manager.go` emitted `thumb_url` with no signature at all, so no deployment was
+ever on the signed path. Worse, nothing in the codebase ever wrote
+`settings.thumb_signing_key`, so the `key == ""` branch waved a supplied
+signature through too: `?sig=deadbeef` answered 200 with the JPEG.
+
+Measured then: an anonymous `curl` with no cookie and no token received **HTTP
+200, `Content-Type: image/jpeg` and the full body**, on the same server where an
+anonymous `GET /api/files/quota/me` correctly answered 401. Node ids are dense
+integers, so that was "anyone on the internet can walk the id range and collect
+the rendered first page of every file on the instance" — and it was equally true
+of a **single-tenant** install. Measured now: **401**, with no image bytes.
+
+**What it takes now.** One of exactly two proofs:
+
+1. **A live stamp on the URL** — `?exp=<unix>&sig=<hmac>`, an HMAC-SHA256 over
+   (node id, expiry) under `settings.thumb_signing_key`, which is generated on
+   first use instead of never. The listing stamps every `thumb_url` it emits,
+   and it can only do that for nodes the caller has already cleared tenancy and
+   ACL for — so the URL carries that decision forward.
+2. **An authenticated caller** — session cookie or bearer/API token — who passes
+   the node's tenancy scope, the token's `root:` confinement and an ACL check at
+   viewer level. This is the path every in-repo consumer actually takes: the
+   admin SPA, the desktop app and the embedded explorer all fetch thumbnails
+   through `useThumbs`, i.e. `fetch()` with credentials and auth headers.
+
+Neither proof → **401**.
+
+⚠ **Why "require auth" could not be the whole answer.** Thumbnails render into
+`<img src>`, which carries no `Authorization` header, and the session cookie is
+`SameSite=Lax` so it is not sent by an `<img>` inside a third-party embed
+either. A blunt auth requirement would have closed the hole and blanked every
+embedded explorer in production. The stamp is what an `<img>` can carry.
+
+⚠ The stamp is a **capability, not an identity**: whoever holds the URL can
+fetch that one node's preview until it expires — the same trade a share link
+makes. `FILEX_THUMBS_URL_TTL` (default `24h`, matching the endpoint's
+`Cache-Control: private, max-age=86400`) bounds it. The expiry is quantized to
+the hour so the URL string — the cache key for both the browser and
+`useThumbs` — is stable within a window.
+
+⚠ The public folder-share page never came through this endpoint and still does
+not: it serves the same cached artefact via `/s/{token}/f/<path>?thumb=1`,
+scoped to the share token. An anonymous share viewer is unaffected.
+
+### 16.2 Directory logins — CLOSED (was: provisioned into the supertenant)
+
+`db.Store.CreateUser` hard-codes `provider_id` to the `default` provider, and
+`default` is seeded `is_supertenant = 1`. A supertenant scope is confine-exempt
+— `CanAccessStorage` returns true for every storage — so any code path that
+created a user without immediately re-homing it minted a **cross-tenant**
+account.
+
+Measured then, on a multi-tenant install with two tenants: a header-trust login
+arriving on `diyetlif.local` created `ayse@diyetlif.local` with
+`provider_id = 1` (the supertenant), and that account's own storage listing came
+back as **both** tenants' storages. Measured now: `provider_id = 2` (its own
+tenant), and the listing is its own storage alone.
+
+**How the tenant is decided.** A login has no caller whose tenant could be
+inherited — the account being created *is* the caller. What it does have is the
+request **Host**, the same signal `multioidc.Dispatcher` already uses to pick a
+realm:
+
+- `handlers.Auth.Login` stamps the request Host onto the context
+  (`auth.WithLoginHost`), because `auth.LoginDriver.Login` takes only a `ctx` and
+  a driver in the login chain cannot see the request. The proxy-header driver
+  runs inside an `*http.Request` and stamps its own.
+- `auth.ProvisionUser` resolves that host to a provider row and homes the new
+  account there, deleting the half-created row if homing fails — the three beats
+  the invite path established.
+
+**Where a host genuinely cannot decide it.** The protocol logins: SFTP, FTPS and
+NFS reach `ldap.VerifyPassword` through `internal/protocolauth`, which presents a
+password on a socket and has no Host at all. There, on a multi-tenant install,
+the driver **refuses to create** rather than falling back to `default` — the only
+fallback available is the supertenant, so "provision anyway" is the bug rather
+than a convenience. An account that already exists authenticates over every
+protocol exactly as before; what it cannot do is come into existence with no
+tenant. An operator who needs JIT provisioning there names the tenant explicitly
+with `auth.ldap.provider` / `FILEX_LDAP_PROVIDER` (and
+`auth.header_proxy.provider` / `FILEX_HEADER_PROVIDER` for the header driver).
+
+⚠ Homing happens at **CREATE only**. An account that already belongs to a tenant
+is never moved by where it logged in — otherwise a login on the wrong host would
+migrate somebody between customers.
+
+⚠⚠ **Accounts an earlier build already stranded are NOT migrated.** Rows created
+before this change are still in the supertenant, and no migration can safely move
+them: nothing records which driver created a row, so there is no column that
+separates a mis-homed LDAP user from the platform operator, and the break-glass
+admin (`firstrun.go`) is deliberately in the supertenant. A blanket re-home would
+take an operator's own account away from them. Instead, a multi-tenant install
+with either directory driver enabled logs **one WARN at boot** naming every
+non-admin account homed in the supertenant, and the operator decides:
+
+```sql
+SELECT id, email FROM users WHERE provider_id = (SELECT id FROM providers WHERE is_supertenant = 1);
+```
+
+```
+PATCH /api/admin/users/{id}   {"provider_id": <tenant>}     # supertenant admin only
+```
+
+### 16.3 Cross-tenant reads that remain
+
+- **`/api/admin/settings` (read)** — a tenant admin still lists the global
+  settings map. Secrets are redacted and other tenants' branding is stripped,
+  but instance configuration (SMTP host, `public_url`, retention limits) is
+  visible. Restricting the read would blank the tenant admin's Settings page
+  without giving them a replacement, which is a UI decision rather than a
+  security one; the **writes** are what mattered and those are closed.
+- **`/api/capabilities`** — built on the raw store with a process-global
+  snapshot, so its enabled storage **ids** are instance-wide. The `tenant` block
+  itself is correctly host-derived. Per-request scoping is not expressible while
+  the snapshot is process-global.
+- **`active_sessions`** on the dashboard is zeroed for a tenant rather than
+  counted, because no count-by-provider query exists.
+
+### 16.4 Scope is frozen for the life of a protocol session
+
+`protocolauth.Recheck` refreshes the user, token, key and export on a live
+SFTP/FTPS/NFS session, but does **not** recompute `Scope` — and the context was
+built once and holds the original pointer. So unlinking a storage from a
+provider, or re-homing a user, does not reach an already-open session. NFS is
+the worst case: one filesystem is cached per export for the life of the process.
+WebDAV and S3 are unaffected — both re-derive the principal per request.
+
+### 16.5 Test coverage is uneven
+
+`internal/dav/tenant_test.go` is the only protocol-level tenant isolation test.
+`internal/s3api` has a `newHarness(t, multiTenant bool)` whose multi-tenant
+branch is never exercised — every call site passes `false`. SFTP, FTPS and NFS
+harnesses never set the flag at all. The protocol servers were verified by
+reading (each calls `CanAccessStorage` on the by-name path, and all five are
+constructed with the scoped store), but nothing pins that.
+
+⚠ Related, and fixed in this pass: `testutil.NewTestServerWith` was building the
+handler store **without** the `tenantstore` wrapper that `internal/server.New`
+applies, so every multi-tenant handler test in the package had been measuring an
+unscoped store. It was found by a dashboard assertion that expected another
+tenant's storage to be absent and watched it come back — the harness was wrong,
+not the product. A harness that quietly differs from production reports safety
+it never measured.
+
+### 16.6 RBAC is not a tenant boundary, and on a default install it is not a boundary at all
+
+Recorded here because it is the reason so many of the fixes above could not
+simply lean on the existing ACL check. `storages.rbac_enabled` defaults to
+**false**, and with RBAC off `acl.Set.Effective` returns `roleBase(role)` for
+every path in every storage — Editor for a plain `user`, Owner for any admin.
+So an `aclAllowID` / `aclAllowName` check satisfies *any authenticated caller*
+against *any storage on the box*. Wherever an endpoint's only gate was RBAC, it
+had no tenant boundary whatsoever.
+
+### 16.7 `/api/files/versions` — CLOSED (was: tenancy, but no ownership or ACL check)
+
+Found while closing the tenancy hole, and it was a **separate bug in the same
+place**: the `Versions` handler had no `ACL *acl.Resolver` field at all — the
+only file surface in `routes.go` with no `AttachACL` call — and the file
+contained no ACL reference. `versioning.Service` verifies only that the version
+belongs to the node it names, and then overwrites live bytes.
+
+Measured then, on a **single-tenant** install with a `viewer`-role account:
+`POST /api/files/versions/restore` answered **200** and the file's bytes were
+replaced; `POST /api/files/versions/snapshot` answered **200** and wrote a new
+version row. A read-only account could roll back, and force snapshots of, any
+file whose node id it could name. Measured now: **403 `insufficient permission`**
+with the bytes on disk unchanged.
+
+Every route in the file resolves the node first and applies four gates in order —
+existence, tenancy, `root:` confinement, then RBAC:
+
+| Route | Level required | Refusal |
+|---|---|---|
+| `GET /api/files/versions?node_id=N` | viewer | 404 (unreachable) / 403 |
+| `POST /api/files/versions/snapshot` | **editor** | 404 / 403 |
+| `POST /api/files/versions/restore` | **editor** | 404 / 403 |
+| `DELETE /api/admin/versions/{id}` | admin + editor | 404 `version not found` / 403 |
+
+⚠ A viewer keeps the **read**: they can already read the file, so refusing them
+its history would be a regression dressed up as a fix. Only the two writes moved.
+
+⚠ 404 and 403 are chosen deliberately. Existence, tenancy and confinement all
+answer the same 404 as a genuine miss, so the endpoint is not an enumeration
+oracle; the ACL refusal is a 403, because "this file exists and you may not write
+to it" is not a secret from somebody who can already read the folder.
+
+⚠⚠ Restore is a destructive **write**, and it was the one write surface in filex
+that went through neither half of `writehook`. It now calls
+`writehook.BeforeOverwrite` first — so the bytes it is about to destroy are
+snapshotted, and a snapshot that fails refuses the write with 503
+`SNAPSHOT_FAILED` instead of destroying them unrecoverably — and
+`writehook.OnFileWritten` after, which is also what finally makes a restore emit
+`file.updated` to webhook subscribers. `snapshot_current` is honoured only when
+the guard is switched off (`FILEX_VERSIONS_ON_OVERWRITE=0`), so the same bytes
+are never recorded twice.
+
+⚠ The admin hard-delete's RBAC check is redundant today: the route is behind
+`auth.RequireAdmin` and an admin's ceiling is Owner. It is there so the day that
+route stops being admin-only it cannot silently become unauthorized the way its
+`/api/files` siblings were.
 
 ---
 

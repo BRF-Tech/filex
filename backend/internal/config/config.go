@@ -505,6 +505,15 @@ type LDAPConfig struct {
 	// exactly as local passwords are — none of them has a second-factor
 	// channel. See internal/protocolauth.
 	ProtocolLogin bool `yaml:"protocol_login"`
+	// Provider is the tenant SLUG a just-in-time directory account is homed in
+	// when the login carries no Host that maps to one — i.e. the protocol
+	// logins (SFTP, FTPS, NFS), which present a password on a socket.
+	//
+	// ⚠ Multi-tenant installs only, and only for ACCOUNT CREATION. Empty means
+	// "refuse to create one", which is the safe default: the alternative
+	// fallback is `default`, and `default` is the confine-exempt supertenant.
+	// An account that already exists signs in over every protocol either way.
+	Provider string `yaml:"provider"`
 }
 
 // HeaderProxyConfig — accept Cloudflare Access / Authelia headers.
@@ -513,6 +522,10 @@ type HeaderProxyConfig struct {
 	GroupHeader string   `yaml:"group_header"`
 	TrustedIPs  []string `yaml:"trusted_ips"`
 	AdminGroup  string   `yaml:"admin_group"`
+	// Provider is the tenant SLUG a just-in-time account is homed in when the
+	// request Host maps to no tenant. See LDAPConfig.Provider — same rule, and
+	// on this driver the Host is almost always there, so it is rarely needed.
+	Provider string `yaml:"provider"`
 }
 
 // ExtServices — plug-and-play.
@@ -569,6 +582,18 @@ type ThumbsConfig struct {
 	// turns thumbnails OFF still has whatever the cache accumulated while they
 	// were on, and that is exactly when nobody is watching it.
 	SweepInterval time.Duration `yaml:"sweep_interval"`
+	// URLTTL is how long a stamped `thumb_url` stays valid
+	// (FILEX_THUMBS_URL_TTL, default 24h).
+	//
+	// The stamp is what lets a bare <img src> fetch a preview with no header
+	// and no cookie -- see internal/thumb/sign.go. Shortening it narrows the
+	// window in which a leaked URL still resolves; it never locks out the SPA,
+	// the desktop app or an embedded explorer, all of which fetch thumbnails
+	// with credentials and are authorized per request.
+	//
+	// ⚠ 0 means "use the default", not "never expires": an unbounded stamp
+	// would be a permanent bearer capability for that node's preview.
+	URLTTL time.Duration `yaml:"url_ttl"`
 }
 
 // SearchConfig — bleve index.
@@ -632,6 +657,7 @@ func Default() Config {
 			Enabled:       true,
 			Formats:       []string{"image", "video", "pdf", "office"},
 			SweepInterval: 6 * time.Hour,
+			URLTTL:        24 * time.Hour,
 		},
 		Search: SearchConfig{
 			Enabled:         true,
@@ -765,6 +791,11 @@ func Load(path string) (Config, error) {
 	// silently turn that kill switch back on.
 	if cfg.Thumbs.SweepInterval < 0 {
 		cfg.Thumbs.SweepInterval = 6 * time.Hour
+	}
+	// ⚠ <= 0 here, unlike SweepInterval above: there is no "never expire" for a
+	// signature, so zero is the default rather than a kill switch.
+	if cfg.Thumbs.URLTTL <= 0 {
+		cfg.Thumbs.URLTTL = 24 * time.Hour
 	}
 	return cfg, nil
 }
@@ -993,6 +1024,14 @@ func applyEnv(c *Config) {
 				slog.String("value", v))
 		}
 	}
+	if v := os.Getenv("FILEX_THUMBS_URL_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			c.Thumbs.URLTTL = d
+		} else {
+			slog.Warn("config: FILEX_THUMBS_URL_TTL is not a positive Go duration; keeping default",
+				slog.String("value", v))
+		}
+	}
 	if v := os.Getenv("FILEX_THUMBS_ENABLED"); v != "" {
 		c.Thumbs.Enabled = v == "1" || strings.EqualFold(v, "true")
 	}
@@ -1178,6 +1217,9 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_LDAP_PROTOCOL_LOGIN"); v != "" {
 		c.Auth.LDAP.ProtocolLogin = v == "1" || strings.EqualFold(v, "true")
 	}
+	if v := os.Getenv("FILEX_LDAP_PROVIDER"); v != "" {
+		c.Auth.LDAP.Provider = v
+	}
 
 	// Reverse-proxy header auth (previously YAML-only). Enable with
 	// FILEX_AUTH_DRIVERS=proxy_header.
@@ -1199,6 +1241,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_HEADER_ADMIN_GROUP"); v != "" {
 		c.Auth.Header.AdminGroup = v
+	}
+	if v := os.Getenv("FILEX_HEADER_PROVIDER"); v != "" {
+		c.Auth.Header.Provider = v
 	}
 
 	// ── Boot seeds (env → DB rows on first boot, only-if-absent) ──────

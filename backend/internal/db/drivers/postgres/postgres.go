@@ -84,6 +84,13 @@ func (s *Store) Close() error                   { return s.db.Close() }
 // ─────────────────── Storages ───────────────────
 
 func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.Storage, error) {
+	// ⚠ Last gate before the value is persisted. Every writer goes through
+	// here — the admin API, the config seed, the CLI — so a mode nothing
+	// implements cannot reach the column from any of them. Before this, a
+	// typo stored fine and the storage silently polled.
+	if err := model.ValidateSyncMode(st.SyncMode); err != nil {
+		return nil, err
+	}
 	cfg := st.ConfigJSON
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
@@ -140,6 +147,17 @@ func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, erro
 }
 
 func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
+	// Same gate as Create, with one allowance: a row that ALREADY carries an
+	// unsupported mode predates this check. Refusing to save an unrelated
+	// edit (a rename, a disable) would strand the operator with a row they
+	// cannot fix. Only a CHANGE to an unsupported mode is rejected.
+	if err := model.ValidateSyncMode(st.SyncMode); err != nil {
+		var prev string
+		_ = s.db.QueryRowContext(ctx, `SELECT sync_mode FROM storages WHERE id=$1`, st.ID).Scan(&prev)
+		if model.SyncMode(prev) != st.SyncMode {
+			return err
+		}
+	}
 	cfg := st.ConfigJSON
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
@@ -3018,8 +3036,30 @@ func (s *Store) GetNotification(ctx context.Context, id int64) (*model.Notificat
 	return scanNotificationPg(row)
 }
 
-// ListNotifications paginates either user or admin views.
-func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+// mutedEventsClause builds the `event NOT IN ($n,…)` fragment and its args for
+// a per-user mute list, starting numbering at idx. It returns the next free
+// placeholder index so the caller can keep numbering LIMIT/OFFSET after it.
+// Empty list ⇒ empty clause and idx unchanged.
+//
+// ⚠ Placeholders, never literals: the event ids come from a user-writable
+// JSON column.
+func mutedEventsClause(muted []string, idx int) (string, []any, int) {
+	if len(muted) == 0 {
+		return "", nil, idx
+	}
+	ph := make([]string, 0, len(muted))
+	args := make([]any, 0, len(muted))
+	for _, e := range muted {
+		ph = append(ph, fmt.Sprintf("$%d", idx))
+		args = append(args, e)
+		idx++
+	}
+	return "event NOT IN (" + strings.Join(ph, ",") + ")", args, idx
+}
+
+// ListNotifications paginates either user or admin views. mutedEvents drops
+// the event ids the user has muted; empty means no mute filter.
+func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, limit, offset int) ([]*model.Notification, int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -3038,6 +3078,11 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	}
 	if onlyUnread {
 		whereC = append(whereC, "read_at IS NULL")
+	}
+	if clause, muteArgs, next := mutedEventsClause(mutedEvents, idx); clause != "" {
+		whereC = append(whereC, clause)
+		args = append(args, muteArgs...)
+		idx = next
 	}
 	whereSQL := ""
 	if len(whereC) > 0 {
@@ -3104,12 +3149,18 @@ func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) err
 }
 
 // UnreadNotificationCount returns the bell badge number for a user.
-func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64) (int64, error) {
+func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string) (int64, error) {
 	q := `SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`
 	var args []any
+	idx := 1
 	if userID != nil {
 		q += ` AND (user_id IS NULL OR user_id = $1)`
 		args = append(args, *userID)
+		idx++
+	}
+	if clause, muteArgs, _ := mutedEventsClause(mutedEvents, idx); clause != "" {
+		q += ` AND ` + clause
+		args = append(args, muteArgs...)
 	}
 	var n int64
 	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {

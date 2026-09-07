@@ -308,7 +308,18 @@ two containers need **a network route and not a shared filesystem**. There is a
 ready `clamav` profile in
 [`deploy/compose/docker-compose.full.yml`](../deploy/compose/docker-compose.full.yml);
 on Kubernetes it is a Deployment plus a Service, with the address handed to
-filex through `extraEnv`. Details, including what an unreachable daemon does
+filex through the chart's `antivirus:` block:
+
+```yaml
+antivirus:
+  mode: daemon          # blank works too — a non-blank address seeds daemon
+  address: "clamav:3310"
+```
+
+⚠ Like every other zero-touch value in that chart these are **first-boot
+seeds**, not live switches: once the install has a stored row, the switch, the
+mode and the address are edited in *Settings → Protection* and editing the
+values file does nothing. Details, including what an unreachable daemon does
 (it fails the scan loudly; it never marks a file clean), are in
 [PROTECTION.md](PROTECTION.md#antivirus-clamav).
 

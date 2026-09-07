@@ -37,6 +37,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/tenantstore"
 
 	// Register drivers via init() blocks.
 	_ "github.com/brf-tech/filex/backend/internal/db/drivers/sqlite"
@@ -158,6 +159,21 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 	// creates accounts nobody named would let a dual-side-login test pass
 	// against a store production does not have (migration 00025).
 	var store db.Store = identitystore.New(accounting)
+	// …and the TENANT wrapper, which is the one this harness was missing.
+	//
+	// ⚠⚠ internal/server.New hands the HANDLERS `tenantstore.New(store)`
+	// (server.go:831) and keeps the raw store only for background services.
+	// This harness stopped one wrapper short, so every multi-tenant handler
+	// test in the package was measuring an UNSCOPED store: `ListStorages`,
+	// `ListEnabledStorages` and `ListUsers` returned every tenant's rows, and
+	// a test asserting "the tenant sees only its own" could only pass if the
+	// handler happened to filter a second time by itself. It was found by a
+	// dashboard test that expected the other tenant's storage to be absent and
+	// watched it come back — the harness, not the product, was wrong.
+	//
+	// The wrapper is inert unless the context carries a tenant scope, so
+	// single-tenant tests are unchanged by construction.
+	store = tenantstore.New(store)
 
 	// Local auth driver wired to the same store.
 	localDrv := authlocal.New(store)

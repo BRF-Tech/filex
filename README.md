@@ -91,6 +91,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 - **Multi-tenant by design** — storage-per-tenant with native tenancy mode, RBAC roles +
   per-item grants, confined API tokens, per-token identities for audit trails, and
   app-vs-user token kinds so a shared embed credential cannot manage anybody's keys.
+  The tenant boundary is enforced on every route that names a row, not only on the
+  ones that list them, and instance-wide settings are reserved to the supertenant.
 - **Boringly deployable** — one binary or one container; SQLite by default, Postgres/MySQL
   when you want them; every driver switched by env vars.
 

@@ -182,20 +182,27 @@ each target additionally persists its own last delivery — final HTTP status
 
 **Canonical events** filex emits itself:
 
-| Event | Typical severity | When |
-|---|---|---|
-| `replica_fail` | error | A replica write/op failed. |
-| `replica_fail_spike` | critical | Replica failures crossed a rate threshold. |
-| `replica_reconcile_done` | info | A reconcile pass finished. |
-| `replica_status_report` | info | Periodic replica health summary. |
-| `primary_read_fail` | error | A read from the primary backend failed. |
-| `quota_near_full` | warning | A storage is approaching its quota. |
-| `quota_full` | critical | A storage hit its quota. |
-| `queue_stuck` | warning | The op queue stopped making progress. |
-| `auth_fail_spike` | warning | A burst of failed logins. |
-| `disk_full` | critical | The host disk is out of space. |
-| `update_available` | info | A newer release was published. Fires **once** per release — the announcement is persisted, so a restart loop cannot turn it into a stream. |
-| `update_applied` | info | A self-upgrade replaced the binary. |
+⚠ Read the **Emitted** column before you build an alert on one of these. Seven
+of the twelve operational alert ids below are declared in
+`internal/notify/event.go` and **no code emits them** — the id is accepted by a
+webhook target's allow-list, the target saves, and the event never arrives. A
+subscription that can never fire looks exactly like a subsystem that never has
+a problem, which is the worst way to learn your monitoring was never wired.
+
+| Event | Typical severity | Emitted | When |
+|---|---|---|---|
+| `replica_fail` | error | yes | A replica write/op failed. |
+| `replica_fail_spike` | critical | **no** ⚠ | Replica failures crossed a rate threshold. |
+| `replica_reconcile_done` | info | yes | A reconcile pass finished. |
+| `replica_status_report` | info | yes | Periodic replica health summary. |
+| `primary_read_fail` | error | yes | A read from the primary backend failed. |
+| `quota_near_full` | warning | **no** ⚠ | A storage is approaching its quota. |
+| `quota_full` | critical | **no** ⚠ | A storage hit its quota. |
+| `queue_stuck` | warning | **no** ⚠ | The op queue stopped making progress. |
+| `auth_fail_spike` | warning | **no** ⚠ | A burst of failed logins. |
+| `disk_full` | critical | **no** ⚠ | The host disk is out of space. |
+| `update_available` | info | yes | A newer release was published. Fires **once** per release — the announcement is persisted, so a restart loop cannot turn it into a stream. |
+| `update_applied` | info | **no** ⚠ | A self-upgrade replaced the binary. |
 
 **File and share events** (webhook v2) — the subscribable catalogue, every one
 of them tickable on a target in **Admin → Webhooks**:
@@ -336,22 +343,33 @@ and its history, **Webhooks** for the targets.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `in_app_enabled` | bool | Whether this user wants the in-app bell at all. |
-| `muted_events` | array of event ids | Event types this user doesn't want to see. |
+| `in_app_enabled` | bool | `false` empties this user's bell: the list returns nothing and the unread badge is 0. |
+| `muted_events` | array of event ids | Event types dropped from this user's list **and** unread count. |
 
 A user with **no settings row** is treated as the default: `in_app_enabled=true`
 with **no** muted events. `PATCH` replaces the whole preference (send the full
 `muted_events` list each time; omitting it clears the mutes).
 
-> These are **per-user display preferences** for the bell — they do not change
-> what gets recorded, and they have **no effect on the webhook**. Webhook
-> delivery is global: `FILEX_WEBHOOK_URL` plus the targets in
-> **Admin → Webhooks**.
+> These are **per-user display preferences** for the bell, and they gate the
+> **read**, not the write:
 >
-> ⚠ Both fields are stored and returned faithfully, but **nothing applies them
-> yet**: the history endpoints filter on the user and the read flag only, and
-> `Send` does not consult the settings row. Treat them as a preference the bell
-> UI will honour, not as a filter that is in force today.
+> - **Nothing stops being recorded.** `Send` still inserts every event, so a
+>   muted one stays in the audit and reappears in full the moment the mute is
+>   lifted. Muting changes what a user sees, not what filex keeps.
+> - **The webhook is untouched.** Delivery is global — `FILEX_WEBHOOK_URL` plus
+>   the targets in **Admin → Webhooks** — and no per-user preference reaches
+>   it. To cut webhook volume, use a target's per-event allow-list instead.
+> - **The admin/global view is never filtered.** A listing with no user scope
+>   returns everything the system recorded; one admin's personal mute list
+>   cannot hide rows from the audit.
+>
+> ⚠ A settings row that cannot be read — none written yet, a DB error, a
+> hand-corrupted `muted_events` — **fails open**: the user sees everything. A
+> display preference must not be able to hide an antivirus hit behind a
+> transient error.
+>
+> ⚠ There is no admin-UI screen for these two fields yet; they are set over the
+> API. The filtering itself is in force regardless of how the row got written.
 
 ---
 

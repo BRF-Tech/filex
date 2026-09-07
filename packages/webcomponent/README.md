@@ -43,7 +43,7 @@ import '@brftech/filex';
   const el = document.querySelector('filex-explorer');
   el.config = {
     auth: { kind: 'bearer', token: '<jwt>' },
-    shareBase: 'https://files.example.com/shared',
+    rootPath: 'main://projects/acme',
   };
   el.addEventListener('error', (e) => console.error(e.detail));
   el.addEventListener('share-created', (e) => navigator.clipboard.writeText(e.detail.url));

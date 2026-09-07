@@ -170,8 +170,15 @@ volumes for everything Docker itself creates.
 
 ## Reverse proxies
 
-filex always assumes a reverse-proxy in production. Set
-`FILEX_TRUST_PROXY_HEADERS=true` so it honours `X-Forwarded-*`.
+filex always assumes a reverse-proxy in production and **honours
+`X-Forwarded-*` unconditionally** — there is nothing to switch on.
+
+⚠ Earlier revisions of this page told you to set `FILEX_TRUST_PROXY_HEADERS`.
+No such variable is read anywhere in filex; setting it to `true` changed
+nothing, and — the direction that matters — setting it to `false` did **not**
+stop the forwarded headers from being trusted. Terminate at a proxy you
+control, and do not expose filex directly to clients that can set
+`X-Forwarded-For` themselves.
 
 ### nginx
 
@@ -182,7 +189,7 @@ server {
   ssl_certificate     /etc/letsencrypt/live/files.example.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/files.example.com/privkey.pem;
 
-  client_max_body_size 5G;     # match FILEX_LIMITS_MAX_UPLOAD_BYTES
+  client_max_body_size 5G;     # big enough for one upload chunk; see FILEX_UPLOAD_CHUNK_SIZE
   proxy_request_buffering off;
   proxy_buffering off;
   proxy_read_timeout 600s;
@@ -250,12 +257,16 @@ stream at `/api/ai/mcp` needs the same. See
 Three options:
 
 1. **Reverse proxy terminates** (recommended) — set
-   `FILEX_PUBLIC_URL=https://...` and `FILEX_TRUST_PROXY_HEADERS=true`.
-   filex itself listens plain HTTP on 5212.
+   `FILEX_PUBLIC_URL=https://...`. filex itself listens plain HTTP on 5212 and
+   already honours the forwarded headers.
 2. **Cloudflare Tunnel** — same as above, but Cloudflare is the proxy.
-3. **filex direct TLS** (NOT recommended for prod) — set
-   `FILEX_TLS_CERT=/path/to/cert.pem` and `FILEX_TLS_KEY=/path/to/key.pem`.
-   Useful only for one-off or air-gapped deploys.
+
+⚠ There is no third option. This page used to offer "filex direct TLS" via
+`FILEX_TLS_CERT` / `FILEX_TLS_KEY`: **the HTTP server has no TLS listener** and
+neither variable is read, so an operator who set both got plain HTTP on 5212
+with no warning — the worst possible outcome for a setting whose entire purpose
+is encryption. (The `cert_file` / `key_file` pair that does exist belongs to the
+**FTPS** endpoint; see [PROTOCOLS.md](PROTOCOLS.md).) Put a proxy in front.
 
 ---
 

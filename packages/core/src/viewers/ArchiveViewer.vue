@@ -2,7 +2,8 @@
 /**
  * ArchiveViewer — minimal zip / archive contents preview.
  *
- * Hits `POST /api/files/archive/list` with the adapter-qualified path
+ * Hits the configured archive-list endpoint (`archiveListUrl`, default
+ * `POST /api/files/archive/list`) with the adapter-qualified path
  * and renders the member list as a flat table (name, size, mtime).
  * Read-only — extraction is exposed elsewhere (context menu / actions
  * panel). The viewer's job is just "what's inside?" so the user can
@@ -24,6 +25,12 @@ const props = defineProps<{
   t?: (key: string) => string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
+  /** ⚠ Where to ask. This used to be the literal '/api/files/archive/list',
+   *  which is the ONE thing an embed cannot assume: with `apiBase` pointing at
+   *  another origin the request went to the host page instead and 404'd, while
+   *  every other call in the package honoured the configured base. The default
+   *  keeps a same-origin install working unchanged. */
+  archiveListUrl?: string;
 }>();
 
 const entries = ref<ArchiveEntry[]>([]);
@@ -54,7 +61,7 @@ async function load(): Promise<void> {
     return;
   }
   try {
-    const res = await fetch('/api/files/archive/list', {
+    const res = await fetch(props.archiveListUrl || '/api/files/archive/list', {
       method: 'POST',
       credentials: props.authCredentials || 'same-origin',
       headers: {

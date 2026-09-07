@@ -163,7 +163,8 @@
     "modeLabel": {
       "fsnotify": "Live watch",
       "poll": "Periodic poll",
-      "ondemand": "On demand"
+      "ondemand": "On demand",
+      "push": "Unsupported (polling)"
     },
     "addNew": "Add storage",
     "newTitle": "Add new storage",
@@ -174,7 +175,8 @@
       "s3": "S3 / Hetzner / MinIO",
       "sftp": "SFTP",
       "ftp": "FTP / FTPS",
-      "webdav": "WebDAV"
+      "webdav": "WebDAV",
+      "smb": "SMB / CIFS (NAS)"
     },
     "advancedFields": "Advanced settings",
     "driverFieldsUnavailable": "Could not load the config fields for driver \"{driver}\".",
@@ -206,7 +208,10 @@
       "insecureSkipHostKey": "Skip host-key verification (insecure)",
       "tls": "FTPS (explicit AUTH TLS)",
       "passive": "Passive mode (PASV)",
-      "url": "Base URL"
+      "url": "Base URL",
+      "share": "Share",
+      "domain": "Domain / workgroup",
+      "dialTimeout": "Connect timeout (seconds)"
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
@@ -222,7 +227,10 @@
       "hostKey": "A single public key in authorized_keys / known_hosts line form.",
       "insecureSkipHostKey": "Accepts any host key. Only for throwaway hosts.",
       "tls": "Plain FTP sends credentials in the clear — turn this on whenever the server supports it.",
-      "passive": "Off switches to active mode, which needs the server to dial back into this host."
+      "passive": "Off switches to active mode, which needs the server to dial back into this host.",
+      "smbShare": "The share name alone, without the server: `media`, not `\\nas\\media`.",
+      "smbDomain": "Only for a Windows domain account. Leave empty for a NAS.",
+      "smbRoot": "Sub-folder inside the share. Leave empty for the whole share."
     },
     "actions": {
       "test": "Test connection",
@@ -311,13 +319,7 @@
     "title": "Settings",
     "subtitle": "Instance-wide configuration",
     "siteName": "Site name",
-    "publicUrl": "Public URL",
-    "publicUrlHelp": "Used for share links and email templates.",
-    "syncInterval": "Sync interval (seconds)",
-    "syncIntervalHelp": "How often the worker polls each storage for changes.",
-    "logLevel": "Log level",
-    "defaultLocale": "Default locale",
-    "defaultTimezone": "Default timezone",
+    "envOnlyNote": "The public URL, sync interval, log level and default language are set by environment variables (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE), not from this page — see docs/CONFIGURATION.md.",
     "savedOk": "Settings saved",
     "smtp": {
       "title": "Email (SMTP)",

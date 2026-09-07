@@ -21,6 +21,7 @@ const EMPTY: Capabilities = {
   oidc_auto_redirect: false,
   demo_mode: false,
   demo_user: '',
+  demo_pass: '',
 };
 
 export const useCapabilitiesStore = defineStore('capabilities', () => {

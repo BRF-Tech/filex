@@ -102,6 +102,22 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 
 	totalUsers, _ := h.Store.CountUsers(ctx)
 	activeSessions, _ := h.Store.CountActiveSessions(ctx)
+	// The storage rows above are already confined — they come from the scoped
+	// ListStorages. These two counters are not: they are instance-wide SQL
+	// aggregates, so a tenant admin's dashboard was quietly reporting the
+	// platform's total headcount and live sessions.
+	//
+	// ⚠ The user count is recomputed from the scoped directory. The session
+	// count has no per-tenant form (sessions carry a user, but there is no
+	// count-by-provider query), so a confined tenant is shown its OWN users'
+	// sessions only if that is cheap — it is not, so the field is zeroed
+	// rather than reported wrong. A zero is honest; the platform total is not.
+	if scope, confined := confinedScope(ctx); confined {
+		activeSessions = 0
+		if users, uerr := h.Store.ListUsersByProvider(ctx, scope.ProviderID); uerr == nil {
+			totalUsers = int64(len(users))
+		}
+	}
 
 	queueDepth := 0
 	if h.Worker != nil {
@@ -111,6 +127,25 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 	recent, _ := h.Store.ListAuditRecent(ctx, 10)
 	if recent == nil {
 		recent = []*model.AuditEntry{}
+	}
+	// Same filter the audit list itself applies (handlers/audit.go): a tenant
+	// admin sees its own users' activity, and system entries with no user stay
+	// supertenant-only. Without this the dashboard's "recent activity" panel
+	// was a live feed of other customers' file operations.
+	if scope, confined := confinedScope(ctx); confined {
+		allowed := map[int64]bool{}
+		if users, uerr := h.Store.ListUsersByProvider(ctx, scope.ProviderID); uerr == nil {
+			for _, u := range users {
+				allowed[u.ID] = true
+			}
+		}
+		kept := recent[:0]
+		for _, e := range recent {
+			if e != nil && e.UserID != nil && allowed[*e.UserID] {
+				kept = append(kept, e)
+			}
+		}
+		recent = kept
 	}
 
 	capShort := CapabilitiesShort{}

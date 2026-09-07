@@ -151,6 +151,9 @@ func (h *Storages) Get(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !ownsStorage(w, r, id, "") {
+		return
+	}
 	st, err := h.Store.GetStorage(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -230,6 +233,9 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !ownsStorage(w, r, id, "") {
+		return
+	}
 	cur, err := h.Store.GetStorage(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -270,6 +276,9 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !ownsStorage(w, r, id, "storage") {
+		return
+	}
 	// Existence check before destructive work (DeleteStorage swallows
 	// "no rows" for some drivers + RemoveStorage silently no-ops on
 	// unknown ids). Without this, DELETE on a bogus id returns
@@ -293,6 +302,9 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if !ownsStorage(w, r, id, "storage") {
 		return
 	}
 	if h.Worker == nil {

@@ -275,6 +275,18 @@ func (s *storageSyncer) Loop() {
 		// only Trigger() invocations.
 		<-s.ctx.Done()
 	default:
+		// ⚠ The default is the poll loop, which is right for "poll" and for
+		// an unset mode — and is a silent lie for anything else. A row
+		// written before ValidateSyncMode existed (notably `push`, an enum
+		// member that never had a branch) keeps working, but the operator
+		// reads their own configuration and believes something else is
+		// happening. Say it out loud once, at start, per storage.
+		if !s.storage.SyncMode.Implemented() {
+			slog.Warn("sync: unsupported sync_mode, falling back to poll",
+				slog.String("storage", s.storage.Name),
+				slog.String("sync_mode", string(s.storage.SyncMode)),
+				slog.String("fallback", string(model.SyncModePoll)))
+		}
 		s.loopPoll()
 	}
 }

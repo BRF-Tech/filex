@@ -7,6 +7,504 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-09-07
+
+### Upgrade notes
+
+- ⚠⚠ **Running `FILEX_MULTI_TENANT`? Upgrade.** The tenant boundary was enforced
+  on the routes that *list* rows and assumed on the routes that *name* one. An
+  administrator of any tenant, pointed at another tenant's ids, reached fifteen
+  of the sixteen such routes — including `POST /api/admin/users/{id}/reset-password`,
+  which answered 200 and returned the other customer's **new password in the
+  response body**, and `GET /api/admin/storages/{id}`, which returned the storage
+  config: for an S3 or SFTP storage, the access key and secret. `/api/files` was
+  worse still, because it serves bytes. All of it is closed. See **Security** below.
+
+- ⚠⚠ **Everyone: thumbnails were readable without logging in.** `GET /api/files/thumb/{id}`
+  sat outside every auth group and returned a rendered preview — the readable
+  content of a document — to anyone who could guess a node id. This is not
+  specific to multi-tenant installs. Thumbnail URLs now carry a short-lived
+  signature, and an authenticated caller is checked. **If you build thumbnail
+  URLs yourself**, take them from the listing rather than constructing them;
+  a hand-built URL without the stamp is now a 401.
+
+- ⚠ **Emptying the trash for one storage used to empty all of them.** If you
+  have used *Empty trash* with a storage selected on an earlier version, it
+  purged every storage's trash, permanently, while the dialog said otherwise.
+
+- ⚠ **Directory logins now refuse rather than mis-home.** On a multi-tenant
+  install, LDAP and proxy-header logins used to provision accounts into the
+  supertenant, which sees every tenant. They now inherit the tenant from the
+  request's host; where there is no host to read (LDAP over SFTP/FTPS/NFS) the
+  login is **refused** unless you set `auth.ldap.provider` / `FILEX_LDAP_PROVIDER`,
+  because the only alternative was the supertenant. Existing mis-homed accounts
+  are **not** moved automatically — the boot log now names them and points at
+  `PATCH /api/admin/users/{id}`.
+
+- ⚠ **Version restore now requires `editor`.** It required nothing before: a
+  read-only user could overwrite live file content with an old version.
+
+- **Five admin Settings controls were removed** (`public_url`, `sync_interval_seconds`,
+  `log_level`, `default_locale`, `default_timezone`). They wrote rows that
+  nothing read; the environment variables that do work are named in their place.
+
+- **`storage.sync_mode` is validated now.** An unsupported value is rejected
+  instead of stored and silently polled. Rows that already carry `push` keep
+  working (they poll, and say so once in the log); only a *change* to an
+  unsupported mode is refused.
+
+### Security
+
+- **`GET /api/files/thumb/{id}` served rendered previews to anyone who could
+  count.** The route sat outside every auth group, `checkSig` returned true when
+  the `sig` parameter was **absent**, `manager.go` emitted `thumb_url` with no
+  signature so no deployment was ever on the signed path, and nothing in the
+  codebase ever wrote `settings.thumb_signing_key` — so the `key == ""` branch
+  waved a supplied signature through too. Measured: an anonymous `curl` with no
+  cookie and no token got **200, `image/jpeg` and the full body**, and
+  `?sig=deadbeef` got the same, on a server where anonymous
+  `GET /api/files/quota/me` correctly answered 401. Node ids are dense integers,
+  so that was "walk the range and collect the rendered first page of every file
+  on the instance" — and it was **not** a tenancy bug: a single-tenant install
+  leaked exactly as much. This is the most widely exposed of the three fixed
+  here.
+
+  ⚠ The fix could not simply be "require auth". Thumbnails render into
+  `<img src>`, which sends no `Authorization` header, and filex's session cookie
+  is `SameSite=Lax`, so an `<img>` inside a third-party embed sends no cookie
+  either — a blunt auth requirement would have closed the hole and blanked every
+  embedded explorer in production, including a customer's. The endpoint now takes
+  **one of two proofs**: a short-lived stamp on the URL (`?exp=&sig=`, an
+  HMAC-SHA256 over node id + expiry under a key that is now actually generated),
+  which the listing puts on every `thumb_url` it emits and which an `<img>` can
+  carry; or an authenticated caller who clears the node's tenancy scope, the
+  token's `root:` confinement and an ACL check at viewer level. Neither → 401.
+
+  All four consumers were re-measured after the change: the admin SPA (cookie),
+  the desktop app (bearer), an `<img>` in an embedded `@brftech/filex` explorer
+  (the stamp, no credentials at all) and the public share page — which never used
+  this endpoint and still does not, since it serves the same artefact through
+  `/s/{token}/f/<path>?thumb=1`, scoped to the share token. A root-confined embed
+  token now also stops at its own subtree: previously it could read previews of
+  any node id on the instance, because a node id is not a path and
+  `confine.Middleware` had nothing to rewrite.
+
+  `FILEX_THUMBS_URL_TTL` (default `24h`, matching the endpoint's `Cache-Control`)
+  bounds the stamp; the expiry is quantized to the hour so the URL string — the
+  cache key for both the browser and `useThumbs` — stays stable within a window
+  instead of forcing a re-download on every listing.
+
+- **LDAP and proxy-header logins provisioned into the supertenant.**
+  `db.Store.CreateUser` hard-codes `provider_id` to the `default` provider, and
+  `default` is seeded `is_supertenant = 1` — which `CanAccessStorage` treats as
+  confine-**exempt**. Measured on a two-tenant install: a header-trust login
+  arriving on `diyetlif.local` created the account with `provider_id = 1`, and
+  that account's own storage listing came back as **both** tenants' storages. The
+  account was not mis-filed, it was privileged.
+
+  A login has no caller whose tenant could be inherited — the account being
+  created *is* the caller — so the signal is the request **Host**, the same one
+  `multioidc.Dispatcher` already uses to pick a realm. `handlers.Auth.Login`
+  stamps it onto the context (`auth.LoginDriver.Login` takes only a `ctx`, so a
+  driver in the chain cannot see the request), the proxy-header driver stamps its
+  own, and `auth.ProvisionUser` homes the new row — deleting it if homing fails,
+  as the invite path already did.
+
+  ⚠ The protocol logins (SFTP/FTPS/NFS, through `internal/protocolauth`) present
+  a password on a socket and have **no Host at all**. There, on a multi-tenant
+  install, the driver now **refuses to create** rather than falling back: the
+  only fallback available is the supertenant, so "provision anyway" is the bug
+  rather than a convenience. An account that already exists signs in over every
+  protocol exactly as before. New `auth.ldap.provider` / `FILEX_LDAP_PROVIDER`
+  (and `auth.header_proxy.provider` / `FILEX_HEADER_PROVIDER`, plus Helm
+  `auth.ldap.provider` and a `auth.headerProxy` block that did not exist) let an
+  operator name the tenant explicitly when they want it.
+
+  ⚠ **Rows an older build already stranded are not migrated.** Nothing records
+  which driver created a user, and the break-glass `admin@local` is deliberately
+  in the supertenant, so a blanket re-home would take an operator's own account
+  away from them. Instead a multi-tenant install with either driver enabled now
+  logs **one WARN at boot** naming every non-admin account homed in the
+  supertenant; re-homing stays `PATCH /api/admin/users/{id}` with `provider_id`.
+
+- **`/api/files/versions` had no ownership or ACL check on any install.** The
+  `Versions` handler had no `ACL *acl.Resolver` field at all — the only file
+  surface in `routes.go` with no `AttachACL` call — and `versioning.Service`
+  verifies only that a version belongs to the node it names before overwriting
+  live bytes. Measured on a **single-tenant** install with a `viewer`-role
+  account: `POST /api/files/versions/restore` answered 200 and `contract.txt` on
+  disk went from its current content to the old version's, and
+  `POST /api/files/versions/snapshot` answered 200 and wrote a version row. A
+  read-only account could roll back, and force snapshots of, any file whose node
+  id it could name.
+
+  Every route in the file now resolves the node first and applies four gates —
+  existence, tenancy, `root:` confinement, RBAC. Restore and snapshot require
+  **editor**; listing the timeline stays at **viewer**, because somebody who can
+  read the file is not being told its history is a secret. The admin hard-delete
+  gains the same check (redundant behind `RequireAdmin` today, deliberately, so
+  that un-admin-ing the route cannot silently drop authorization). The first
+  three gates answer 404, identical to a node that never existed; only the RBAC
+  refusal is 403.
+
+  ⚠ One behaviour change beyond the permission gate: a **trashed** node is no
+  longer reachable through these routes (404). A trashed row's live path is its
+  `storage_key` — where restore would put it back — so restoring a version onto
+  one wrote bytes to a path the catalogue says holds nothing. It is the same
+  exclusion the comments handler already makes.
+
+  ⚠ Restore is a destructive **write** and was the one write surface in filex
+  that went through neither half of `writehook`. It now calls
+  `BeforeOverwrite` first — so the bytes it replaces are snapshotted, and a
+  snapshot that fails answers 503 `SNAPSHOT_FAILED` instead of destroying them —
+  and `OnFileWritten` after, which is what finally makes a restore emit
+  `file.updated` to webhook subscribers. `snapshot_current` now does work only
+  when that guard is switched off, so the same bytes are never recorded twice.
+
+### Fixed
+
+- **A user could mute a notification event and keep receiving it.**
+  `muted_events` and `in_app_enabled` round-tripped through
+  `GET`/`PATCH /api/notifications/settings` from the day they were added and
+  **no read path applied either of them**: the history query filtered on the
+  user and the read flag only, so a muted event still appeared in the list and
+  still counted towards the unread badge. A preference that saves and does
+  nothing is worse than an absent one — the user believes the noise is handled.
+
+  Both now gate the **read**: `in_app_enabled: false` empties the bell,
+  `muted_events` drops those event ids from the list *and* the unread count.
+  What deliberately did **not** change is as important: `Send` still records
+  every event (the audit is not a preference), webhook delivery is untouched
+  (it is global), and the admin/global view is never filtered by one user's
+  mutes. The filter is applied in SQL rather than to the returned page, so a
+  filtered page comes back full and its total counts what the caller will
+  actually show. An unreadable settings row **fails open** — a display
+  preference must not be able to hide an antivirus hit behind a DB hiccup.
+
+  `docs/NOTIFICATIONS.md` said so in one place ("nothing applies them yet") and
+  contradicted itself in another, prescribing them under *Too many
+  notifications* as a live remedy. Both are now true.
+
+- **`FILEX_AUTH_DRIVERS=proxy_header` enabled nothing.** The loader matched
+  `proxy-header` with a hyphen; `docs/CONFIGURATION.md` (twice),
+  `docs/ARCHITECTURE.md` and the Helm chart all told people to write the
+  underscore. Following the documentation produced one
+  `unknown auth driver` log line and an install with reverse-proxy SSO that
+  reads as configured and silently is not. Driver names now fold `_` to `-`.
+
+- **The release pipeline could publish the 510 MB image as `:slim`.** The
+  default build was tagged `slim`/`slim-vX.Y.Z` and those tags were overwritten
+  by the slim build that followed — which is only true when the second build
+  runs. The job is `allow_failure` (the dind runner is unreliable) and pushed
+  with `--all-tags`, which is not selective. The full build no longer claims
+  those tags, and the push names the tags it built.
+
+- Helm `Chart.yaml` credited `scripts/sync-chart-version.mjs` for keeping
+  `appVersion` current. No such file exists; the script is
+  `scripts/sync-deploy-versions.mjs`.
+
+- The storage badge labelled a storage with no `sync_mode` as **On demand**,
+  while the backend defaults an unset mode to **poll** — the opposite of what
+  was running.
+
+- **`FILEX_DEMO_PASS` broke the demo button it was supposed to configure.**
+  The loader parsed it, `docs/CONFIGURATION.md` listed it, and no code read
+  `config.Demo.Pass` — while the demo landing's only button submitted the
+  literal string `demo` and the credentials hint under it printed the same
+  literal. An operator who set the variable therefore *broke* the demo login
+  while believing they had secured it, and the page went on advertising a
+  password that no longer worked.
+
+  The password now travels the same road the demo user already did: the
+  capabilities response carries it and the CTA submits what it is given.
+  ⚠ It is published **only when demo mode is on** — where the page prints the
+  credentials next to the button anyway, which is the entire point of a demo —
+  and a normal install returns nothing, whatever `FILEX_DEMO_PASS` says. Both
+  fallbacks stay `demo`, so an install that never set the variable (including
+  the public demo, whose account password is `demo` in the database) behaves
+  exactly as before. The documentation now also says the thing that was
+  missing: neither variable creates or changes the account.
+
+- **`sync_mode` was never validated, and `push` was a mode with nothing behind
+  it.** Any string the admin API decoded was persisted, and the sync worker's
+  switch has no branch for it, so `fsnotifiy` stored happily and the storage
+  ran the poll loop while the page displayed the typo back. `push` was the same
+  defect wearing a nicer costume: a declared enum member, no receiver, silently
+  polling.
+
+  The gate lives in the **store**, not in one handler, because three writers
+  reach that column — the admin API, the config seed and the CLI — and the
+  message names the modes that exist. `push` is rejected as unimplemented, with
+  a message pointing at `ondemand` + `POST /api/admin/storages/{id}/sync`,
+  which is what an external writer actually wants.
+
+  What happens to rows that already say `push`: **nothing is rewritten.** They
+  keep polling as they always did, they stay editable — an unrelated rename or
+  disable still saves, since refusing it would strand an operator with a row
+  they cannot fix — and only a *change* to an unsupported mode is refused. The
+  worker now logs `sync: unsupported sync_mode, falling back to poll` once per
+  storage at startup, so the discrepancy is visible instead of silent, and the
+  storages list labels such a row **Unsupported (polling)** instead of the raw
+  i18n key. ⚠ The rejection currently surfaces as HTTP 500 with the message in
+  the body; mapping it to 400 belongs in the storages handler.
+
+- **Two load-bearing environment variables were undocumented.**
+  `FILEX_TESSERACT_BIN` decides whether images are OCR'd into the content
+  index — and when set it is *authoritative*, so a wrong path turns OCR off
+  rather than falling back to `$PATH`, which is exactly the kind of thing an
+  operator must be told before they debug an empty index. `FILEX_UPDATE_TARGET`
+  is the one variable in `docs/CONFIGURATION.md` that filex **sets** rather than
+  reads: it is exported into `FILEX_UPDATE_PRE_COMMAND`'s environment with the
+  version about to be installed, so a backup command can name its dump after it.
+  Both are now in `docs/CONFIGURATION.md`, with what happens when they are unset.
+
+- **Helm `nameOverride` was rendered by every template and declared nowhere.**
+  `_helpers.tpl` has always read `.Values.nameOverride`, so it worked — for
+  anyone who read the templates. A value you can only discover by reading the
+  chart's internals is not configurable in practice; it is now declared in
+  `values.yaml` with what it changes (`helm template rel ./filex --set
+  nameOverride=custom` → `rel-custom-*`).
+
+- **Five of the six controls on the admin Settings page did nothing.**
+  `public_url`, `sync_interval_seconds`, `log_level`, `default_locale` and
+  `default_timezone` were PATCHed, written to the `settings` table, echoed back
+  and re-rendered in the form — and no code on the server ever read those rows.
+  The live values come from `FILEX_PUBLIC_URL`, `FILEX_SYNC_INTERVAL`,
+  `FILEX_LOG_LEVEL` and `FILEX_DEFAULT_LOCALE`; there is no timezone knob at
+  all. `site_name`, the one key with a reader (share-invite mail), sat on the
+  same form and made the page look trustworthy, and the hints promised
+  specifics — *"Used for share links and email templates"* under a field that
+  changed no link.
+
+  The five controls are gone, replaced by a line naming the variables that do
+  work. Nothing is migrated: the stale rows are harmless and were never read.
+
+- **A failed sync was painted the same grey as one that never ran.** The
+  backend writes `"failed"` (`internal/sync/poll.go`); both `syncTone` copies —
+  Storages and Dashboard — matched `'error'`, the spelling the *sync-runs* list
+  translates to. So the badge text said "failed" while the dot, which is what
+  an operator actually scans a list for, said "nothing to see". Both spellings
+  are now accepted, and there is one copy of the mapping
+  (`web/src/lib/syncTone.ts`) instead of two that drifted identically.
+
+- **The dashboard's storage cards always read "0 B · 0 files".** They render
+  the same rows as the storages list, which reads `stats.total_size_bytes`
+  with the flat legacy field as a fallback; the dashboard read only the flat
+  field, which the endpoint stopped filling when the nested `stats` object
+  arrived.
+
+- **The archive preview ignored `apiBase`.** `ArchiveViewer` hardcoded
+  `fetch('/api/files/archive/list')` while every other call in
+  `@brftech/filex-core` goes through the configured endpoints — so in the
+  package's headline use case, an embed on a host page pointed at
+  `https://files.example.com`, the zip preview posted to the *host page's*
+  origin and 404'd. It now takes the endpoint from the explorer's config and
+  falls back to the same-origin path.
+
+- **`showInfoPanel` was documented public API that nothing read.** An embedder
+  who set it false got the inspector toggle anyway. It now hides the toggle, as
+  documented; default (and every existing embed) unchanged.
+
+- **The SMB driver had no translations.** Seven i18n keys its descriptor names
+  (`storages.driver.smb`, `fields.share`, `fields.domain`,
+  `fields.dialTimeout`, `fieldHelp.smb{Share,Domain,Root}`) existed in neither
+  catalogue, so SMB was the one driver whose form rendered in English inside
+  the Turkish UI.
+
+- **Documentation that described features which do not exist.** Each of these
+  reads as configured and is not:
+  - `FILEX_TLS_CERT` / `FILEX_TLS_KEY` (`docs/DOCKER.md`) — presented as
+    "filex direct TLS". There is no TLS listener on the HTTP server and
+    neither variable is read: an operator who set both served **plain HTTP**
+    with no warning. The `cert_file`/`key_file` that do exist belong to FTPS.
+  - `FILEX_TRUST_PROXY_HEADERS` (`docs/DOCKER.md` twice, `demo/README.md` in a
+    copy-pasteable `docker run`) — never read. `X-Forwarded-*` is honoured
+    unconditionally, so the security-relevant direction, `=false`, was the one
+    that silently did nothing.
+  - `FILEX_LIMITS_MAX_ARCHIVE_BYTES` "default 1 GiB" (`docs/BACKEND.md`) —
+    neither the variable nor any archive size check exists.
+  - `FILEX_LIMITS_MAX_UPLOAD_BYTES` in the nginx snippet — not a filex
+    setting.
+  - The audit log's response shape and its "standard action values": the key
+    is `entries` (not `events`), rows wrap under `entry`, and eight of the
+    listed actions are never written by anything — including `storage.add`,
+    which is really `storage.create`, and `auth.login`/`auth.logout`, which
+    are not audited at all. Filtering is an exact match, so those returned an
+    empty page forever. The list is now the real one, generated from
+    `internal/auth/audit_middleware.go`.
+  - `POST /api/files/archive/extract` `"overwrite": false` — no such field;
+    extraction always overwrites. `POST /api/files/archive/add` was documented
+    with a `{paths, dest, compression}` body the handler rejects. `sourceDir`
+    on move/delete and `mime` on `upload/init` are accepted and ignored.
+
+- **Seven notification alert ids are declared and never emitted**:
+  `replica_fail_spike`, `quota_near_full`, `quota_full`, `queue_stuck`,
+  `auth_fail_spike`, `disk_full`, `update_applied`. A webhook target may name
+  one, the subscription saves, and it waits forever — which reads exactly like
+  a subsystem that never has a problem. The producers are not written here;
+  what changed is that `docs/NOTIFICATIONS.md` now carries an **Emitted**
+  column and `internal/notify/event.go` says which names have no producer, so
+  nobody builds an alert on one by accident.
+
+- **`acceptTypes`, `maxFileSizeMb` and `shareBase`** in `ExplorerConfig` are
+  marked `@deprecated`/ignored — all three are declared, documented and read by
+  nothing (there is no client-side size or type gate at all, and share URLs
+  come from the server). `shareBase` was the example value in the
+  webcomponent README, which is where an embedder would copy it from.
+
+### Added
+
+- **Helm: a first-class `antivirus:` block** (`enabled`, `mode`, `address`).
+  v0.34.0 made ClamAV reachable as a daemon over TCP or a unix socket — the
+  shape Kubernetes wants, since the filex image ships no scanner — but the
+  chart documented only the `extraEnv` route. `extraEnv` still works for
+  everything not modelled, including the deliberately env-only
+  `FILEX_CLAMAV_BIN`. ⚠ `enabled` is tri-state (`null` = do not seed) and is
+  tested for *presence*, not truth: `enabled: false`, the whole reason to write
+  the key, is falsey in a Helm template and a plain `{{ if }}` would have
+  dropped it silently. The chart's text says plainly that these are **first-boot
+  seeds**, not live switches.
+
+- **Umbrel's app card now carries `releaseNotes`, derived from `CHANGELOG.md`.**
+  Every other store surface tells the user what changed. It is generated by
+  `scripts/sync-deploy-versions.mjs` rather than typed, because a hand-written
+  "what's new" that nobody remembers to update carries no version number and so
+  never *looks* stale — the same failure that left three store manifests at
+  `v0.4.0` for twenty-nine releases. A release with no changelog section is now
+  a hard error, and `web/tests/deploy/deployVersions.test.ts` fails when the
+  manifest stops matching what the changelog says.
+
+### Removed
+
+- `backend/Dockerfile.full`. Nothing built it — not `.gitlab-ci.yml`, not
+  either GitHub workflow, which use `docker/Dockerfile` and
+  `docker/Dockerfile.slim` — and it could not be built: its base image
+  `brftech/filex:slim` does not exist (`pull access denied … repository does
+  not exist`), and its package list used Debian names (`fonts-liberation`,
+  `fonts-dejavu`) that Alpine's `apk` refuses. Its header also claimed
+  "~250 MB"; the same package set, with the Alpine names it should have used,
+  measures **1.43 GB**.
+
+- `backend/Dockerfile`, for the same reasons and measured the same way. Nothing
+  built it either — the real recipes are under `docker/` — it was last touched
+  on 2026-05-08, its header claimed "~40 MB", and its ldflags put `$(VERSION)`
+  inside single quotes with no `ARG`, so anything built from it would have
+  stamped that literal string as its version. It was the base the deleted
+  `Dockerfile.full` layered on; with that gone it had no remaining reader.
+
+### Security
+
+- **Multi-tenant isolation: the tenant boundary was enforced in about a dozen
+  places and assumed everywhere else.** This closes the rest of it. It matters
+  only to installs running `FILEX_MULTI_TENANT`; on a single-tenant install
+  `TenantResolver` attaches no scope at all, absence means "unscoped", and every
+  predicate added here passes — the ordinary admin still administers
+  everything. Each change carries a single-tenant test, and those pass on the
+  previous release too, which is the honest form of that claim.
+
+  **Row ownership on the admin routes that take an `{id}`.** `tenantstore`
+  confines three list queries; every route naming a row looked it up directly.
+  An admin of one tenant, pointed at another tenant's ids over real HTTP,
+  reached **fifteen of sixteen** of them. The worst was
+  `POST /api/admin/users/{id}/reset-password`, which answered 200 and returned
+  the other customer's **new cleartext password in the response body** — one
+  request, one account, credential included. `GET /api/admin/storages/{id}`
+  returned the storage's whole config blob, which for an S3 or SFTP storage is
+  the access key and secret; `DELETE` on the same route removed the storage and
+  cascaded its node rows. Also closed: storage `PATCH`/`sync`/`drift`/
+  `sync-runs`, `quota/{user_id}` (both spellings), `versions/{id}`,
+  `trash/{id}`, `grants/{id}`, `shares/{id}` revoke and delete,
+  `sync-runs/{id}`, and `ai-tokens` — where an unchecked `user_id` minted a
+  token bound to another tenant's user, which is not token management but
+  identity takeover, needing no password and no login.
+
+  Refusals are **404, not 403**: a 403 confirms the row exists, and repeated
+  over an id range that is a census of the platform's other customers.
+
+  **The same class on the user-facing API, which turned out to be worse.** The
+  admin namespace was the part that had been enumerated; the `/api/files` twins
+  never had been, and several of them leak bytes rather than names.
+  `GET /api/files/read` accepted a raw `storage_id` straight from the client;
+  `POST /api/files/share` minted a public link over any `node_id` on the
+  instance (the `{path}` form of the same handler was safe, which is the tell);
+  `POST /api/files/versions/restore` overwrote live bytes with no check of any
+  kind; `POST /api/files/ops` and the copy/move/delete verbs enqueued work
+  against another tenant's storage by id or by name; the OnlyOffice `node_id`
+  form handed back a signed fetch URL redeemable at a public endpoint. Also
+  closed: `stat`, the manager listing, share listing and deletion, drop-link
+  creation, comments, the tag endpoints, star/recent, trash listing and
+  restore, the ops queue listing, and the escrow challenge oracle.
+
+  ⚠ These could not lean on the existing ACL check, because RBAC is not a
+  tenant boundary: `storages.rbac_enabled` defaults to false, and with it off
+  `acl.Effective` returns Editor for any plain user and Owner for any admin, on
+  every storage. Where an endpoint's only gate was RBAC it had no tenant
+  boundary at all.
+
+  **`/api/admin/settings` is classified per key rather than gated.** One flat
+  global table holds both the instance's OIDC issuer and a tenant's own logo, so
+  neither a blanket gate nor a blanket pass is right. Tenant admins may write
+  the bare `branding.*` namespace — which is rewritten under their own
+  `tenant.<id>.` prefix — and nothing else. It is an **allowlist** on purpose:
+  a denylist would make every key added later silently tenant-writable until
+  somebody remembered to list it. The already-prefixed `tenant.<id>.branding.*`
+  spelling is refused too, since it names a tenant explicitly and the rewrite
+  passes it through unchanged. A mixed `PATCH` batch is classified in full
+  before anything is written, so a refusal cannot leave a partial apply.
+
+  **Newly gated on the supertenant**, because they drive one global row or
+  process and have no per-tenant form: `/api/admin/webhooks` and the legacy
+  `notifications/webhook-config` (one target list receives every tenant's event
+  stream), `/api/admin/replication-targets` and `/api/admin/replica/*`,
+  `/api/admin/search/{stats,rebuild}`, `/api/admin/queue`, and `/metrics`.
+
+  **Scoped rather than gated**, because they are legitimate tenant features
+  that were merely unfiltered — gating them would have removed a real
+  capability: `/api/admin/duplicates` (which returned etags, so it confirmed
+  that a file you already hold exists in another tenant), the `/api/admin/
+  sync-runs` list, the dashboard's counters and recent-activity feed, and
+  `POST /api/admin/trash/empty` — which was permanent, irreversible destruction
+  of **every** tenant's trashed files by an admin of any one of them, answering
+  200. The trash sweep is scoped inside the service, so the nightly retention
+  worker, which carries no scope, still sweeps everything.
+
+  **Ticketed WebSocket connections carried no tenant scope**, because the
+  ticket is redeemed before the auth middleware runs; the socket then listed
+  every storage on the instance and could subscribe to any tenant's folder,
+  receiving live change frames and a presence roster with other tenants' names,
+  e-mail local parts and avatars.
+
+  **`POST /api/files/permissions/invite` with `create_user` was a privilege
+  escalation.** `CreateUser` homes new accounts in the `default` provider, and
+  `default` is the supertenant — which is confine-exempt — so a tenant admin
+  inviting one address minted an account that could read every other customer's
+  files. New accounts are now homed in the caller's tenant, and the
+  half-created row is removed if that fails.
+  `GET /api/files/permissions/resolve?email=` was a membership oracle over the
+  whole platform for the same reason `ListUsers` could not catch it, and now
+  answers `found:false` for a foreign account — the same shape as an address
+  nobody has registered.
+
+  See `docs/MULTI-TENANCY.md` §10 and the new §16, which named what this pass
+  left open — including `GET /api/files/thumb/{id}`, which served rendered file
+  previews to entirely unauthenticated callers on any install, and the two
+  directory-login drivers that provisioned into the supertenant. ⚠ Those two,
+  and the missing authorization on `/api/files/versions`, are closed in
+  Unreleased above; §16 now carries a status column.
+
+### Fixed
+
+- **The handler test harness was missing the tenant-scoped store, so every
+  multi-tenant handler test had been measuring the wrong thing.**
+  `internal/server.New` hands handlers `tenantstore.New(store)` and keeps the
+  raw store for background services; `testutil.NewTestServerWith` stopped one
+  wrapper short, so `ListStorages`, `ListEnabledStorages` and `ListUsers`
+  returned every tenant's rows in tests. A test asserting "this tenant sees only
+  its own" could pass only if the handler happened to filter a second time by
+  itself. Found by a dashboard assertion that expected another tenant's storage
+  to be absent and watched it come back — the harness was wrong, not the
+  product.
+
 ## [0.34.2] - 2026-09-06
 
 ### Fixed

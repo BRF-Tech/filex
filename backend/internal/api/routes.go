@@ -52,6 +52,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -172,6 +173,20 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
 	}
+
+	// Thumbnail URL stamps: ONE signer per router, handed to both halves --
+	// the endpoint that verifies (handlers.Thumb) and the listings that mint
+	// (handlers.Manager, handlers.Shared).
+	//
+	// ⚠ Not a package-level variable: a process that builds two routers, which
+	// is exactly what a test binary does, would then have one instance's
+	// listing minting stamps the other's endpoint cannot verify -- and the
+	// failure is invisible, because every in-repo client falls back to its
+	// authenticated fetch and only a bare <img> in an embed goes blank.
+	var thumbSigner *thumb.Signer
+	if d.Store != nil {
+		thumbSigner = thumb.NewSigner(d.Store, d.Cfg.Thumbs.URLTTL)
+	}
 	if d.External == nil {
 		d.External = external.New(d.Store)
 	}
@@ -241,6 +256,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
 	mh.AttachACL(d.ACL)
+	mh.ThumbSigner = thumbSigner
 	// The per-user ceiling on the synchronous write paths (vfUpload, and the
 	// IngestFile fallback that drop/ShareX/AI take for small files). The staged
 	// path checks at `begin`; before this, everything below the staging
@@ -387,6 +403,8 @@ func BuildRouter(d *Deps) http.Handler {
 		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice))
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
+	th.AttachACL(d.ACL)
+	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
 	stg := handlers.NewStorages(d.Store, d.Worker)
@@ -423,7 +441,8 @@ func BuildRouter(d *Deps) http.Handler {
 	trashH.AttachACL(d.ACL)
 	metaH := handlers.NewMeta(d.Store)
 	sharedH := handlers.NewShared(d.Store)
-	quotaH := handlers.NewQuota(d.Quota)
+	sharedH.AttachThumbSigner(thumbSigner)
+	quotaH := handlers.NewQuota(d.Quota, d.Store)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 	saveTextH.AttachACL(d.ACL)
 	saveTextH.AttachSearchIndex(d.Index)
@@ -478,6 +497,7 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
 	versionsH.AttachSearchIndex(d.Index)
+	versionsH.AttachACL(d.ACL)
 	grantsH := handlers.NewGrants(d.Store, d.ACL)
 	grantsH.AttachInvite(d.Share, d.Mailer, d.Cfg.PublicURL)
 	grantsH.AttachTenants(tenants)
@@ -521,8 +541,26 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Post("/desktop/exchange", desktopAuthH.Exchange)
 	})
 
-	// ────── thumbs (auth-light: signed URL accepted without session) ──────
-	r.Get("/api/files/thumb/{id}", th.Serve)
+	// ────── thumbs ──────
+	// Authorized by EITHER a live URL signature (what a header-less <img> in a
+	// third-party embed can carry -- the session cookie is SameSite=Lax, so it
+	// is not sent cross-site) OR an authenticated caller who clears the node's
+	// tenancy, root confinement and ACL. See handlers.Thumb.
+	//
+	// ⚠ Optional auth, not required auth: the signed path has to work with no
+	// credentials at all, so a required-auth group would 401 a perfectly valid
+	// stamped URL before the handler ever saw it. The refusal for "neither
+	// proof" is the handler's own 401.
+	//
+	// ⚠ confine.Middleware runs so a `root:`-scoped token's ceiling is on the
+	// context; it rewrites nothing here (no ?path=, no JSON body) but the
+	// handler needs confine.RootFrom to filter by node.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.MiddlewareWithToken(d.Store, false))
+		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(confine.Middleware)
+		r.Get("/api/files/thumb/{id}", th.Serve)
+	})
 
 	// ────── public capabilities ──────
 	// Embedders + the SPA both call /api/files/capabilities; keep the
@@ -613,6 +651,10 @@ func BuildRouter(d *Deps) http.Handler {
 	wsh := handlers.NewWS(d.Store, d.ACL, hub, wsTickets, d.Cfg.PublicURL)
 	wsh.AttachPublicURLConfigured(d.Cfg.PublicURLSet)
 	wsh.AttachTenants(tenants)
+	// A ticketed upgrade authenticates after every middleware has run, so the
+	// handler has to attach the tenant scope itself — and only when
+	// auth.TenantResolver below would have. See handlers.WS.MultiTenant.
+	wsh.AttachMultiTenant(d.Cfg.MultiTenant)
 
 	// Live-collaboration WebSocket (folder change events + presence). OPTIONAL
 	// auth (required=false): a session cookie / API token sets the user for the
@@ -876,7 +918,16 @@ func BuildRouter(d *Deps) http.Handler {
 		// The scrape job authenticates as an admin — docs/METRICS.md has the
 		// job config. Not under /api/admin because scrapers and dashboards
 		// expect the conventional path.
-		r.Handle("/metrics", metrics.Handler())
+		//
+		// ⚠ Supertenant-only in multi-tenant mode. The exposition is one
+		// instance-wide series set — storage names, per-storage byte and file
+		// counts, user totals, request rates — with no per-tenant form, so a
+		// tenant admin scraping it reads every other customer's size and
+		// activity. A per-tenant /metrics would be a feature (the series would
+		// have to carry and be filtered by a provider label); refusing is the
+		// honest interim. Unscoped and single-tenant callers pass, so an
+		// ordinary install's scrape job is unaffected.
+		r.Handle("/metrics", metricsSupertenantOnly(metrics.Handler()))
 
 		r.Route("/api/admin", func(r chi.Router) {
 			r.Get("/dashboard", dashH.Get)
@@ -1581,4 +1632,20 @@ func envManagedExternal(cfg config.Config) map[string]bool {
 		external.Drawio:     cfg.ExternalServices.Drawio.URL != "",
 		external.Convert:    cfg.ExternalServices.Convert.URL != "",
 	}
+}
+
+// metricsSupertenantOnly wraps the Prometheus handler with the same tenancy
+// question handlers.requireSupertenant asks, expressed here because /metrics is
+// a plain http.Handler rather than one of our handler methods.
+//
+// ⚠ It answers 404 rather than 403 so a scraper pointed at the wrong account
+// sees "no such endpoint" instead of a hint that a richer one exists.
+func metricsSupertenantOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if scope, ok := tenant.FromContext(r.Context()); ok && scope != nil && !scope.IsSupertenant {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

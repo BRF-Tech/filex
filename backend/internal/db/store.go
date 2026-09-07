@@ -399,10 +399,17 @@ type Store interface {
 	// Notifications (in-app bell + webhook delivery audit)
 	InsertNotification(ctx context.Context, n *model.NotificationInput) (int64, error)
 	GetNotification(ctx context.Context, id int64) (*model.Notification, error)
-	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error)
+	// ListNotifications and UnreadNotificationCount take mutedEvents: the
+	// caller's already-resolved per-user mute list (see
+	// model.NotificationSettings.MutedList). It is applied IN SQL rather than
+	// by filtering the returned page, because a page filtered afterwards comes
+	// back short and its total still counts the rows the caller then hides.
+	// Nil/empty means "no mute filter", which is what the admin/global view
+	// (userID == nil) always passes.
+	ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, limit, offset int) ([]*model.Notification, int64, error)
 	MarkNotificationRead(ctx context.Context, id int64, userID *int64) error
 	MarkAllNotificationsRead(ctx context.Context, userID *int64) error
-	UnreadNotificationCount(ctx context.Context, userID *int64) (int64, error)
+	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string) (int64, error)
 	UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
 	UpsertNotificationSettings(ctx context.Context, s *model.NotificationSettings) error

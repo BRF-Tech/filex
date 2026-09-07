@@ -61,6 +61,23 @@ func (h *Comments) visibleNode(w http.ResponseWriter, r *http.Request, nodeID in
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return nil
 	}
+	// Whose node is it? `GetNode` above is a pass-through — tenantstore
+	// confines three list queries and nothing else — so a client-supplied
+	// node_id crossed tenants, and the aclAllowID call underneath is not a
+	// boundary: with storages.rbac_enabled off (the default) Effective()
+	// returns the account-role base for every path, which clears LevelViewer
+	// for anybody holding an account. What that leaked was thread TEXT plus
+	// the commenters' names, and on the POST side it wrote into another
+	// customer's thread.
+	//
+	// ⚠ Refused with the identical 404 the missing/trashed branch above
+	// produces, so a foreign node id cannot be told apart from one that never
+	// existed. (ownsNode would answer "<what> not found" — a different body
+	// sitting right next to the genuine miss, i.e. an oracle.)
+	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(node.StorageID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return nil
+	}
 	if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return nil
@@ -154,6 +171,34 @@ func (h *Comments) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := auth.UserFrom(r.Context())
+	// Whose comment is it? comments.CanDelete is author-or-admin, and under
+	// multi-tenancy "an admin" is the admin of EVERY tenant — so a tenant
+	// administrator could delete any comment on the instance, on files they
+	// have never been able to see. The row is reached by its own id, so it
+	// has to be walked back: comment → node → storage.
+	//
+	// ⚠ Fails closed (an id whose comment or node will not resolve is
+	// refused, not treated as ownerless), and refuses with the same 404 the
+	// ErrNotFound branch below already produces for an id that does not
+	// exist.
+	//
+	// ⚠ Deliberately NOT routed through visibleNode: that would also apply
+	// the ≥viewer ACL gate, which would make deletion behave differently on a
+	// multi-tenant install than on a single-tenant one. This asks only the
+	// tenancy question; author-or-admin stays the authorization rule it has
+	// always been, in both modes.
+	if scope, confined := confinedScope(r.Context()); confined {
+		c, cerr := h.Store.GetNodeComment(r.Context(), id)
+		if cerr != nil || c == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		n, nerr := h.Store.GetNode(r.Context(), c.NodeID)
+		if nerr != nil || n == nil || !scope.CanAccessStorage(n.StorageID) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+	}
 	if _, err := h.Service.Delete(r.Context(), id, user); err != nil {
 		switch {
 		case errors.Is(err, comments.ErrForbidden):

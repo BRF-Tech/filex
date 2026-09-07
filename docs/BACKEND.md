@@ -12,6 +12,7 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Archives](#archives)
 - [Sharing](#sharing)
 - [Thumbnails](#thumbnails)
+- [Versions](#versions)
 - [Realtime (WebSocket)](#realtime-websocket)
 - [Operations (long-running)](#operations-long-running)
 - [Admin: storages](#admin-storages)
@@ -29,6 +30,7 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 | ![public](https://img.shields.io/badge/-public-lightgrey) | No auth |
 | ![user](https://img.shields.io/badge/-user-blue)         | Any authenticated user |
 | ![admin](https://img.shields.io/badge/-admin-red)         | Admin role required |
+| ![signed](https://img.shields.io/badge/-signed-yellow)    | A session/token **or** a signed URL — see the route |
 
 Auth is provided either by a session cookie (`filex_session`) or a Bearer
 token (`Authorization: Bearer <jwt>`). Both are accepted on the same routes.
@@ -181,7 +183,7 @@ List the contents of a directory.
       "modified": "2026-04-22T10:00:00Z",
       "mime": "application/pdf",
       "etag": "abc123",
-      "is_image": false, "is_video": false, "thumb_url": "/api/files/thumb?token=...",
+      "is_image": false, "is_video": false, "thumb_url": "/api/files/thumb/42?exp=…&sig=…",
       "id": 4711
     },
     {
@@ -218,7 +220,12 @@ honours `Range:` for partial GETs (video / audio scrub).
 
 ### `POST /api/files/move` ![user](https://img.shields.io/badge/-user-blue)
 **Request** — sources and the destination FOLDER, both adapter-qualified.
-`sourceDir` is where the drag/cut came from (it stamps the undo).
+
+⚠ `sourceDir` is **accepted and ignored** by the server. It decodes into the
+request struct and no handler reads it; the undo it was said to "stamp" is
+built entirely in the client. Root-confined callers do have it rewritten by the
+confine layer, so it is not free to lie in — but nothing depends on it either.
+Send it or don't.
 ```json
 {
   "source": ["alpha://a.txt", "alpha://klasor"],
@@ -348,6 +355,11 @@ For files >5 MB. Smaller files can use `POST /api/files/upload` (single-shot
   "chunk_bytes": 16777216
 }
 ```
+⚠ `mime` is **accepted and ignored here.** The type is re-derived at finalize
+from the stored object and the extension, so sending a wrong one is harmless
+and sending a right one buys nothing. (The staged endpoint,
+`POST /api/files/upload/staged/init`, does honour it.)
+
 `storage_id` may be omitted when `path` carries an adapter prefix; `filename` is
 optional and folded onto `path` when both are sent (an upload to a storage root
 arrives as `path: "adapter://"` plus a filename). `chunk_bytes` is a request:
@@ -409,8 +421,13 @@ Cancels the upload and discards staged chunks.
 
 ## Archives
 
-Server-side zip handling. Limited to `FILEX_LIMITS_MAX_ARCHIVE_BYTES`
-(default 1 GiB).
+Server-side zip handling.
+
+⚠ **There is no archive size limit.** This page used to name a
+`FILEX_LIMITS_MAX_ARCHIVE_BYTES` "default 1 GiB"; no such variable is read and
+`internal/api/handlers/archive.go` performs no size check, so an operator who
+believed the cap existed had none. Bound it at the proxy, or with the storage
+quota, until the handler grows one.
 
 ### `POST /api/files/archive/list` ![user](https://img.shields.io/badge/-user-blue)
 **Request**
@@ -432,19 +449,35 @@ Server-side zip handling. Limited to `FILEX_LIMITS_MAX_ARCHIVE_BYTES`
 {
   "path": "/storage1/archive.zip",
   "dest": "/storage1/extracted/",
-  "overwrite": false
+  "members": ["sub/a.txt"]
 }
 ```
+`dest` defaults to the archive's own folder. `members` extracts just those
+entries; omit it for the whole archive.
+
+⚠ There is no `overwrite` flag. This page used to document `"overwrite": false`
+and extraction has always overwritten by name — no handler field, no check —
+so a caller who passed it got a 200 and the opposite of what they asked for.
+(No endpoint uses `DisallowUnknownFields`, which is why the key vanished
+silently.)
+
 Returns `202 + { operation_id: "op_..." }` and runs in background.
 
 ### `POST /api/files/archive/add` ![user](https://img.shields.io/badge/-user-blue)
 ```json
 {
-  "paths": ["/storage1/a.txt", "/storage1/sub/"],
-  "dest": "/storage1/bundle.zip",
-  "compression": "deflate"
+  "path": "/storage1/bundle.zip",
+  "files": [
+    { "source": "/storage1/a.txt", "name": "a.txt" },
+    { "source": "/storage1/sub/report.pdf", "name": "docs/report.pdf" }
+  ]
 }
 ```
+`path` is the archive to write, `files[].source` is what to read and
+`files[].name` is where it lands inside the zip. ⚠ The `{paths, dest,
+compression}` body this page used to show was never the contract — the handler
+requires `path` + `files` and answers `400 missing path or files` for anything
+else.
 Returns `202 + { operation_id: "op_..." }`.
 
 ---
@@ -515,16 +548,66 @@ Streams the file. Increments the download counter; rejects if exceeded.
 
 ## Thumbnails
 
-### `GET /api/files/thumb` ![public-signed](https://img.shields.io/badge/-public%2Fsigned-yellow)
+### `GET /api/files/thumb/{id}` ![signed](https://img.shields.io/badge/-signed-yellow)
 **Query**
-| Param   | Type   | Notes |
-|---------|--------|-------|
-| `token` | string | HMAC-signed `(file_id, size, exp)` |
-| `size`  | int    | `64 \| 128 \| 256 \| 512` |
+| Param | Type | Notes |
+|-------|------|-------|
+| `exp` | int  | Unix seconds the stamp expires at |
+| `sig` | hex  | HMAC-SHA256 of `"<id>.<exp>"` under `settings.thumb_signing_key` |
 
-Token is generated by the backend and embedded in the file listing payload —
-not user-craftable. Public so that `<img>` works without sending the session
-cookie.
+One rendered size (there is no `size` parameter). Serves `image/jpeg` with
+`Cache-Control: private, max-age=86400`, or **404** when the node's thumbnail
+state is not `ready`.
+
+Takes **one of two proofs**, and 401s with neither:
+
+- the stamp above, which the file listing already puts on every `thumb_url` it
+  emits — that is what lets a bare `<img src>` render, since it sends no
+  `Authorization` header and the `SameSite=Lax` session cookie is not sent by an
+  `<img>` in a third-party embed;
+- or an authenticated caller (cookie / bearer) who clears the node's tenancy,
+  the token's `root:` confinement and an ACL check at **viewer** level. An
+  unreachable node answers **404**, a readable-but-not-permitted one **403**.
+
+⚠ The stamp is a capability for one node's preview until `exp`, not an identity.
+`FILEX_THUMBS_URL_TTL` (default 24h) bounds it. See [thumbnails.md](thumbnails.md).
+
+⚠ The public folder-share page does not use this route; it serves the same
+artefact via `/s/{token}/f/<path>?thumb=1`, scoped to the share token.
+
+---
+
+## Versions
+
+Snapshots of a file's earlier content. Storage layout, retention and the
+overwrite guard are in [TRASH-VERSIONING.md](TRASH-VERSIONING.md).
+
+⚠ Every route here takes a raw `node_id`, so every one of them resolves the node
+and authorizes it **before** acting: existence → tenancy → `root:` confinement →
+RBAC. The first three answer **404** (indistinguishable from a node that does not
+exist); the RBAC refusal is **403 `insufficient permission`**.
+
+### `GET /api/files/versions` ![user](https://img.shields.io/badge/-user-blue)
+`?node_id=N` — the version timeline. Requires **viewer** on the file: a viewer
+can already read it, so its history is not withheld from them.
+
+### `POST /api/files/versions/snapshot` ![user](https://img.shields.io/badge/-user-blue)
+`{"node_id": N}` — record the current content as a new version. Requires
+**editor**: it writes an object into the node's storage.
+
+### `POST /api/files/versions/restore` ![user](https://img.shields.io/badge/-user-blue)
+`{"node_id": N, "version_id": V, "snapshot_current": false}` — copy version `V`
+back over the live file. Requires **editor**.
+
+⚠ A destructive write: it goes through the same pre-write guard as every other
+write surface, so the bytes it replaces are snapshotted first and a snapshot
+that cannot be taken answers **503 `SNAPSHOT_FAILED`** rather than destroying
+them. `snapshot_current` only does work when that guard is off
+(`FILEX_VERSIONS_ON_OVERWRITE=0`) — otherwise the guard has already taken it and
+recording the same bytes twice would spend a retention slot on a duplicate.
+
+### `DELETE /api/admin/versions/{id}` ![admin](https://img.shields.io/badge/-admin-red)
+Hard-delete one version row **and** its backing `.versions/…` object.
 
 ---
 
@@ -1041,21 +1124,54 @@ Includes per-error detail array.
 **Response 200**
 ```json
 {
-  "events": [
+  "entries": [
     {
-      "id": 9001, "ts": "...", "user_id": 1, "user_email": "admin@local",
-      "action": "share.create", "resource": "/storage1/x.pdf",
-      "ip": "1.2.3.4", "ua": "Mozilla/...",
-      "meta": { "ttl": "168h", "max_downloads": 10 }
+      "entry": {
+        "id": 9001,
+        "user_id": 1,
+        "action": "share.create",
+        "target_type": "share",
+        "target_id": "42",
+        "metadata": { "ttl": "168h", "max_downloads": 10 },
+        "ip": "1.2.3.4",
+        "created_at": "2026-09-05T10:11:12Z"
+      },
+      "user_email": "admin@local"
     }
-  ]
+  ],
+  "total": 1,
+  "limit": 100,
+  "offset": 0
 }
 ```
 
-Standard `action` values: `auth.login`, `auth.logout`, `auth.failed`,
-`file.upload`, `file.delete`, `file.move`, `file.copy`, `share.create`,
-`share.revoke`, `storage.add`, `storage.delete`, `user.create`,
-`user.disable`, `admin.config_change`.
+⚠ Both the envelope and the action list on this page used to be invented. The
+key is `entries` (not `events`), each row wraps the entry under `entry` with
+`user_email` beside it, and the fields are `target_type` / `target_id` /
+`metadata` / `created_at` — not `resource` / `meta` / `ts` / `ua`.
+
+`action` values are produced by exactly one place,
+`internal/auth/audit_middleware.go`, and this is the whole set:
+
+`auth_provider.test` · `auth_provider.update` · `external.test` ·
+`external.update` · `file.archive_add` · `file.archive_extract` ·
+`file.delete` · `file.restore` · `file.star` · `file.tags_set` ·
+`file.upload` · `file.upload_abort` · `profile.password_change` ·
+`profile.update` · `search.rebuild` · `settings.update` · `share.create` ·
+`share.delete` · `share.revoke` · `sharex.upload` · `storage.create` ·
+`storage.delete` · `storage.sync_trigger` · `storage.test` ·
+`storage.update` · `sync.action` · `totp.disable` · `totp.enroll` ·
+`totp.verify` · `trash.empty` · `user.create` · `user.delete` ·
+`user.password_reset` · `user.quota_recompute` · `user.quota_set` ·
+`user.update` · `version.delete` · `version.restore` — plus AI-admin calls,
+which carry the same names under an `ai.` prefix.
+
+⚠ Filtering by `?action=` is an exact match, so the eight values this page
+used to list and no code ever writes (`auth.login`, `auth.logout`,
+`auth.failed`, `file.move`, `file.copy`, `storage.add`, `user.disable`,
+`admin.config_change`) returned an empty page forever. Note in particular
+`storage.create`, **not** `storage.add`. Sign-in and sign-out are **not
+audited** at all today; do not build an alert on them.
 
 ---
 

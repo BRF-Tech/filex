@@ -75,6 +75,12 @@ type Capabilities struct {
 	// the demo" CTA that auto-submits the supplied creds.
 	DemoMode bool   `json:"demo_mode"`
 	DemoUser string `json:"demo_user,omitempty"`
+	// DemoPass is the password that CTA submits (FILEX_DEMO_PASS). It is
+	// emitted ONLY when DemoMode is on, where the credentials are published
+	// on the landing page anyway - that is what a demo is. Without it the
+	// button hardcodes "demo" and an operator who changes the password
+	// breaks the button while believing they secured the instance.
+	DemoPass string `json:"demo_pass,omitempty"`
 
 	// DefaultLocale, when set (FILEX_DEFAULT_LOCALE), pins the initial UI
 	// language for users who haven't picked one — overriding browser detection.

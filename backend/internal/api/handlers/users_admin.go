@@ -34,6 +34,15 @@ func (h *UsersAdmin) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	// ⚠⚠ Tenancy first. Measured on the pre-fix build, this route answered
+	// 200 to an admin of a DIFFERENT tenant and returned the victim's new
+	// cleartext password in the body — one request, one other customer's
+	// account, credential included. GET/PATCH/DELETE on /users/{id} were
+	// gated (handlers/users.go); this sibling handler was missed because it
+	// lives on UsersAdmin rather than Users.
+	if !ownsUser(w, r, h.Store, id, "user") {
+		return
+	}
 	// Existence check — without this the handler happily generates a
 	// password + updates 0 rows + returns 200, leaking the cleartext
 	// password into the caller's response for a user that does not

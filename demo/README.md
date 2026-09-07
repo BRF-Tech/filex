@@ -41,7 +41,6 @@ toolbar (default `http://localhost:5212`). Start one in a separate shell:
 
 ```bash
 docker run --rm -p 5212:5212 \
-  -e FILEX_TRUST_PROXY_HEADERS=false \
   ghcr.io/brf-tech/filex:latest
 ```
 

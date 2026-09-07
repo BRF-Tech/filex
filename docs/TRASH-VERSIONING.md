@@ -11,7 +11,7 @@ hidden `.versions/` prefix on the same disk/bucket. There is no separate trash
 server or version store to provision.
 
 - [Trash](#trash) — [how it works](#how-trash-works) · [retention & purge](#retention--purge) · [endpoints](#trash-endpoints) · [failure modes](#trash--failure-modes--troubleshooting)
-- [Versioning](#versioning) — [how it works](#how-versioning-works) · [retention](#version-retention) · [what triggers a snapshot](#what-triggers-a-snapshot) · [endpoints](#versioning-endpoints) · [failure modes](#versioning--failure-modes--troubleshooting)
+- [Versioning](#versioning) — [how it works](#how-versioning-works) · [retention](#version-retention) · [what triggers a snapshot](#what-triggers-a-snapshot) · [endpoints](#versioning-endpoints) · [restoring is a write](#restoring-is-a-write) · [failure modes](#versioning--failure-modes--troubleshooting)
 - [See also](#see-also)
 
 ---
@@ -318,17 +318,62 @@ non‑default state is visible without reading the config.
 
 **User (authenticated session/token):**
 
-| Method & path | Body / query | Notes |
-|---|---|---|
-| `GET /api/files/versions` | `?node_id=N` | Lists that node's snapshots, **newest first** (version number, size, etag, created). |
-| `POST /api/files/versions/restore` | `{ "node_id": N, "version_id": V, "snapshot_current": true }` | Copies version `V` back over the live file. `snapshot_current` (optional) snapshots the current content first so the restore can be undone. |
-| `POST /api/files/save-text` | `{ "path": "adapter://rel", "content": "…" }` | Saves text and snapshots the previous content first (see above). |
+| Method & path | Body / query | Permission | Notes |
+|---|---|---|---|
+| `GET /api/files/versions` | `?node_id=N` | **≥viewer** | Lists that node's snapshots, **newest first** (version number, size, etag, created). |
+| `POST /api/files/versions/snapshot` | `{ "node_id": N }` | **≥editor** | Records the current content as a new version on demand — the inspector's "take a version now" button. Writes an object into the node's storage. |
+| `POST /api/files/versions/restore` | `{ "node_id": N, "version_id": V, "snapshot_current": true }` | **≥editor** | Copies version `V` back over the live file. |
+| `POST /api/files/save-text` | `{ "path": "adapter://rel", "content": "…" }` | **≥editor** | Saves text and snapshots the previous content first (see above). |
 
 **Admin only:**
 
 | Method & path | Notes |
 |---|---|
 | `DELETE /api/admin/versions/{id}` | Hard‑delete one version row **and** its backing `.versions/…` object. |
+
+⚠ **The permission column is load-bearing, and it is new.** Before the release
+this note ships in, these
+routes had no ownership or ACL check of any kind: a `viewer`-role account could
+`POST /restore` and overwrite the live bytes of any file whose node id it could
+name, on **single-tenant installs too**. Restoring and snapshotting are writes,
+so they now need **editor**, exactly like `save-text` beside them; listing stays
+at **viewer**, because somebody who can read the file is not being told its
+history is a secret.
+
+⚠ Every one of these takes a raw `node_id`, so the node is resolved and
+authorized before anything happens: existence (and **not trashed** — a trashed
+row's live path is its `storage_key`, so restoring onto one wrote bytes to a
+path the catalogue says holds nothing) → tenancy → the token's `root:`
+confinement → RBAC. The first three answer **404**, identical to a node that
+never existed, so the endpoint cannot be used to discover which ids are real;
+only the RBAC refusal is **403 `insufficient permission`**.
+
+⚠ `snapshot_current` is honoured only when the pre-write guard is switched off
+(`FILEX_VERSIONS_ON_OVERWRITE=0`). With the guard on — the default — a restore
+already snapshots the bytes it is about to replace, and doing it twice would
+record identical content and spend a retention slot on the duplicate. See
+[Restoring is a write](#restoring-is-a-write) below.
+
+### Restoring is a write
+
+A restore replaces the live bytes at an unchanged path, so it is treated as one:
+
+- **It goes through the pre-write guard.** Before the copy, the bytes that are
+  about to be destroyed are snapshotted, and a snapshot that cannot be taken
+  refuses the restore with **503 `SNAPSHOT_FAILED`** instead of overwriting them
+  unrecoverably — the same contract every other write surface has. ⚠ Restore was
+  the one write in filex that skipped this until the release this note ships in, so rolling back twice in
+  a row destroyed whatever was live in between with nothing recorded.
+- **It emits `file.updated`.** Restores used to change a file's bytes and tell no
+  webhook subscriber; they now go through the same post-write gate as an upload.
+- **It enqueues a virus scan** of the restored file — see above.
+- **It needs `≥editor`** on the file, like every other write.
+
+⚠ Because the guard already snapshots the outgoing content, `snapshot_current`
+only does work when the guard is switched off
+([`FILEX_VERSIONS_ON_OVERWRITE=0`](CONFIGURATION.md#versioning-on-overwrite)).
+With the guard on, honouring both would record identical bytes twice and spend a
+retention slot on the duplicate.
 
 ### Versioning — failure modes & troubleshooting
 

@@ -43,6 +43,48 @@ type NotificationSettings struct {
 	MutedEventsRaw json.RawMessage `json:"muted_events"`
 }
 
+// MutedList decodes MutedEventsRaw into trimmed, non-empty event names.
+//
+// It is the read-side twin of WebhookTarget.EventList below: one place that
+// turns the stored form into a list, so every consumer agrees on what "muted"
+// means.
+//
+// ⚠ Malformed JSON resolves to "nothing muted" rather than to an error. The
+// column is written by the API as a marshalled []string and can only be
+// corrupt if somebody edited the row by hand. Failing open there shows a user
+// one notification they did not want; failing closed would silently hide every
+// notification they have — the wrong way round for a display preference.
+func (s *NotificationSettings) MutedList() []string {
+	if s == nil || len(s.MutedEventsRaw) == 0 {
+		return nil
+	}
+	var raw []string
+	if err := json.Unmarshal(s.MutedEventsRaw, &raw); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, e := range raw {
+		if e = strings.TrimSpace(e); e != "" {
+			out = append(out, e)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// IsMuted reports whether this user has muted the given event id. An empty
+// list mutes nothing — the inverse of MatchesEvent's empty-means-everything.
+func (s *NotificationSettings) IsMuted(event string) bool {
+	for _, e := range s.MutedList() {
+		if e == event {
+			return true
+		}
+	}
+	return false
+}
+
 // WebhookTarget is one row of webhook_targets (webhook v2, migration
 // 00017) — an additional POST destination next to the legacy single
 // global webhook. Events is a comma-separated allow-list of event names

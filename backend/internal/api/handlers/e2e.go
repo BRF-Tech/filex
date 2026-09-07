@@ -147,7 +147,24 @@ func (h *E2E) resolveDir(w http.ResponseWriter, r *http.Request, wire string) (*
 		adapter = storages[0].Name
 	}
 	st, err := h.Store.GetStorageByName(r.Context(), adapter)
-	if err != nil || st == nil {
+	// GetStorageByName is not one of the methods tenantstore confines, so the
+	// tenant gate has to be applied here — the same trap grants.go names in
+	// its own comment, and this file was on the wrong side of it.
+	//
+	// ⚠ Out-of-tenant must read as "unknown adapter": the identical answer a
+	// name that does not exist produces, because what leaked here is
+	// precisely the ability to TELL THOSE APART. No bytes and no key material
+	// ever crossed — what EscrowChallenge gave away is that a storage by that
+	// name exists (200, or "not an encrypted folder", versus "unknown
+	// adapter") and, for the ones that do, where the other customer's E2EE
+	// folders are. An oracle, not a disclosure, and it is closed by making
+	// the two answers the same string rather than by refusing louder.
+	//
+	// The aclAllowID(…LevelViewer) call below is not a substitute: with
+	// storages.rbac_enabled off, which is the default, Effective() returns
+	// the account-role base for every path and clears LevelViewer for anyone
+	// holding an account.
+	if err != nil || st == nil || !scopeOf(r.Context()).CanAccessStorage(st.ID) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown adapter: " + adapter})
 		return nil, ""
 	}

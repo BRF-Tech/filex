@@ -2,6 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -11,9 +13,57 @@ type SyncMode string
 const (
 	SyncModePoll     SyncMode = "poll"     // periodic remote scan
 	SyncModeFSNotify SyncMode = "fsnotify" // local FS event-driven
-	SyncModePush     SyncMode = "push"     // backend push (e.g. webhook)
 	SyncModeOnDemand SyncMode = "ondemand" // explicit user-triggered
+
+	// SyncModePush was declared for "the backend pushes changes at us"
+	// (a webhook receiver) and NOTHING WAS EVER BUILT BEHIND IT. The sync
+	// worker has no `push` branch, so such a storage falls through to the
+	// poll loop: it works, but it does not do what its own setting says.
+	//
+	// The constant stays so that legacy rows can still be recognised and
+	// named in a log line. It is rejected on write (ValidateSyncMode) and
+	// the worker warns about any row that still carries it.
+	SyncModePush SyncMode = "push"
 )
+
+// SyncModes lists the modes the sync worker actually implements — the set an
+// operator may choose from. Order is the order they appear in the docs.
+func SyncModes() []SyncMode {
+	return []SyncMode{SyncModePoll, SyncModeFSNotify, SyncModeOnDemand}
+}
+
+// Implemented reports whether the sync worker has a branch for this mode.
+// An unimplemented mode is not a harmless label: the storage silently polls,
+// so the operator reads their own configuration and believes something else
+// is happening.
+func (m SyncMode) Implemented() bool {
+	switch m {
+	case "", SyncModePoll, SyncModeFSNotify, SyncModeOnDemand:
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidateSyncMode rejects a sync_mode nothing implements — a typo (which
+// used to store and silently poll) and `push` (declared, never built).
+//
+// The empty string is accepted: it means "unset", and the write path defaults
+// it to poll, which is also the column default.
+func ValidateSyncMode(m SyncMode) error {
+	if m.Implemented() {
+		return nil
+	}
+	if m == SyncModePush {
+		return fmt.Errorf(`sync_mode %q is not implemented: nothing in filex receives backend pushes, so the storage would silently poll instead. Use %q and trigger POST /api/admin/storages/{id}/sync from whatever writes to the backend, or %q`,
+			string(SyncModePush), string(SyncModeOnDemand), string(SyncModePoll))
+	}
+	names := make([]string, 0, len(SyncModes()))
+	for _, v := range SyncModes() {
+		names = append(names, string(v))
+	}
+	return fmt.Errorf("invalid sync_mode %q (valid: %s)", string(m), strings.Join(names, ", "))
+}
 
 // Storage is a configured backend (local FS / S3 / SFTP / WebDAV / …).
 type Storage struct {

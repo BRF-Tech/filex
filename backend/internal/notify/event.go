@@ -37,6 +37,16 @@ type EventType string
 
 // Canonical events fired by filex itself. Subsystems may emit other
 // types; the webhook payload echoes whatever is given.
+//
+// ⚠ DECLARED IS NOT EMITTED. Seven of the operational alerts below have no
+// producer anywhere in the tree: replica_fail_spike, quota_near_full,
+// quota_full, queue_stuck, auth_fail_spike, disk_full, update_applied. A
+// webhook target may still name one — MatchesEvent accepts it — so the
+// subscription saves and then waits forever, which reads exactly like a
+// subsystem with no problems. They are kept (rather than deleted) because the
+// alarms are wanted; docs/NOTIFICATIONS.md carries an "Emitted" column so an
+// operator is not misled meanwhile. Wire the producer before removing a name
+// from that list.
 const (
 	EventReplicaFail          EventType = "replica_fail"
 	EventReplicaFailSpike     EventType = "replica_fail_spike"
@@ -195,9 +205,8 @@ const (
 	WebhookStatusSkipped WebhookStatus = "skipped"
 )
 
-// Settings is the per-user opt-in toggle.
-type Settings struct {
-	UserID       int64       `json:"user_id"`
-	InAppEnabled bool        `json:"in_app_enabled"`
-	MutedEvents  []EventType `json:"muted_events"`
-}
+// (A second, unused `notify.Settings` struct declaring the same three fields
+// as model.NotificationSettings lived here. Nothing constructed it and nothing
+// converted to it — the store, the API and the bell filter all use
+// model.NotificationSettings — so it was a decoy for anyone grepping for where
+// muting is decided. Deleted rather than kept in sync.)

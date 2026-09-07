@@ -93,6 +93,7 @@ Notes:
 | `thumbs.cache_dir` | `<data_dir>/thumbs` | **config.yaml only** | Directory the cached `<id>.jpg` files live in. No env override. |
 | `thumbs.formats` | `[image, video, pdf, office]` | **config.yaml only** | Declares the kind list. No env override. |
 | `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | env / `thumbs.sweep_interval` | How often the cache is reconciled against the node catalogue. `0` disables the sweeper entirely. See [Reclaiming the cache](#reclaiming-the-cache). |
+| `FILEX_THUMBS_URL_TTL` | `24h` | env / `thumbs.url_ttl` | How long a stamped `thumb_url` stays valid — see [Serving](#serving). Matches the endpoint's `Cache-Control: private, max-age=86400`. ⚠ `0` means *use the default*, **not** "never expires"; an unbounded stamp would be a permanent bearer capability for that preview. Shortening it never locks out the SPA, the desktop app or an embedded explorer — all three fetch with credentials and are authorized per request. |
 
 There is **no env var or config key for the external tools** — filex probes
 `PATH` at boot (`ffmpeg`, `gs`, `pdftoppm`, `libreoffice`/`soffice`,
@@ -181,11 +182,40 @@ GET /api/files/thumb/{id}
   JPEG exists on disk.
 - On success: `Content-Type: image/jpeg` and `Cache-Control: private, max-age=86400`
   (cache for **1 day**).
-- **Auth‑light.** The endpoint accepts either a normal authenticated **session**
-  (the SPA's grid uses this) **or** an optional **signed URL** — `?sig=<hex hmac>`,
-  an HMAC‑SHA256 of the id under the daily‑rotated `thumb_signing_key` setting.
-  A bad id returns **400**; a bad signature returns **403**.
-- File listings include a `thumb_url` per node so the grid knows where to fetch.
+- **Authorized, by one of two proofs.** A bad id returns **400**; no proof at all
+  returns **401**.
+
+  1. **A live stamp on the URL** — `?exp=<unix seconds>&sig=<hex hmac>`, an
+     HMAC‑SHA256 over `"<id>.<exp>"` under the `thumb_signing_key` setting
+     (generated on first use). This is what a bare `<img src>` can carry: it
+     sends no `Authorization` header, and the session cookie is `SameSite=Lax`
+     so it is not sent by an `<img>` inside a third‑party embed either.
+  2. **An authenticated caller** — session cookie or bearer/API token — who
+     passes the node's tenancy scope, the token's `root:` confinement and an
+     ACL check at **viewer** level. A node the caller cannot reach answers
+     **404** (the same answer as a node that does not exist, so the endpoint is
+     not an enumeration oracle); a node they can see but not read answers
+     **403**.
+
+- File listings include a `thumb_url` per node, already stamped — the listing is
+  the only place that knows the caller was allowed to see that node, so it
+  carries the decision forward into the URL.
+
+> ⚠ Before the release this note ships in, the `sig` parameter was **optional**
+> and the signing key was
+> never written, so `GET /api/files/thumb/{id}` served a rendered preview of any
+> file on the instance to any anonymous caller who could guess a node id — on
+> single‑tenant installs too. If you run an older build, put it behind
+> authentication at the reverse proxy or upgrade.
+
+> ⚠ The stamp is a **capability, not an identity**: whoever holds the URL can
+> fetch that one node's preview until `exp`. That is the same trade a share link
+> makes, and it is what makes a header‑less `<img>` possible at all.
+> `FILEX_THUMBS_URL_TTL` bounds it.
+
+> ⚠ The public folder‑share page does **not** use this endpoint. It serves the
+> same cached artefact through `/s/{token}/f/<path>?thumb=1`, scoped to the share
+> token, so an anonymous share viewer needs no stamp and no session.
 
 Capabilities (used by the UI and handy for debugging) are exposed at
 `GET /api/files/capabilities` (legacy alias `GET /api/capabilities`) under

@@ -79,6 +79,13 @@ func (s *Store) Close() error { return s.db.Close() }
 // ─────────────────── Storages ───────────────────
 
 func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.Storage, error) {
+	// ⚠ Last gate before the value is persisted. Every writer goes through
+	// here — the admin API, the config seed, the CLI — so a mode nothing
+	// implements cannot reach the column from any of them. Before this, a
+	// typo stored fine and the storage silently polled.
+	if err := model.ValidateSyncMode(st.SyncMode); err != nil {
+		return nil, err
+	}
 	cfg := st.ConfigJSON
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
@@ -139,6 +146,17 @@ func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, erro
 }
 
 func (s *Store) UpdateStorage(ctx context.Context, st *model.Storage) error {
+	// Same gate as Create, with one allowance: a row that ALREADY carries an
+	// unsupported mode predates this check. Refusing to save an unrelated
+	// edit (a rename, a disable) would strand the operator with a row they
+	// cannot fix. Only a CHANGE to an unsupported mode is rejected.
+	if err := model.ValidateSyncMode(st.SyncMode); err != nil {
+		var prev string
+		_ = s.db.QueryRowContext(ctx, `SELECT sync_mode FROM storages WHERE id=?`, st.ID).Scan(&prev)
+		if model.SyncMode(prev) != st.SyncMode {
+			return err
+		}
+	}
 	cfg := st.ConfigJSON
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
@@ -3150,11 +3168,29 @@ func (s *Store) GetNotification(ctx context.Context, id int64) (*model.Notificat
 	return scanNotification(row)
 }
 
+// mutedEventsClause builds the `event NOT IN (?,?,…)` fragment and its args
+// for a per-user mute list. Empty list ⇒ empty clause, so the caller appends
+// nothing and the query is byte-identical to the unfiltered one.
+//
+// ⚠ The list is interpolated as PLACEHOLDERS, never as literals: the event ids
+// arrive from a user-writable JSON column.
+func mutedEventsClause(muted []string) (string, []any) {
+	if len(muted) == 0 {
+		return "", nil
+	}
+	args := make([]any, 0, len(muted))
+	for _, e := range muted {
+		args = append(args, e)
+	}
+	return "event NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(muted)), ",") + ")", args
+}
+
 // ListNotifications paginates either a user's view (broadcasts +
 // user-scoped) or admin/global view (userID == nil).
 //
-// onlyUnread filters read_at IS NULL.
-func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
+// onlyUnread filters read_at IS NULL. mutedEvents drops the event ids the
+// user has muted; empty means no mute filter.
+func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread bool, mutedEvents []string, limit, offset int) ([]*model.Notification, int64, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -3171,6 +3207,10 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	}
 	if onlyUnread {
 		whereC = append(whereC, "read_at IS NULL")
+	}
+	if clause, muteArgs := mutedEventsClause(mutedEvents); clause != "" {
+		whereC = append(whereC, clause)
+		args = append(args, muteArgs...)
 	}
 	whereSQL := ""
 	if len(whereC) > 0 {
@@ -3237,12 +3277,16 @@ func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID *int64) err
 
 // UnreadNotificationCount returns the bell badge number for a user.
 // Pass nil for the global unread count (admin dashboard).
-func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64) (int64, error) {
+func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents []string) (int64, error) {
 	q := `SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`
 	var args []any
 	if userID != nil {
 		q += ` AND (user_id IS NULL OR user_id = ?)`
 		args = append(args, *userID)
+	}
+	if clause, muteArgs := mutedEventsClause(mutedEvents); clause != "" {
+		q += ` AND ` + clause
+		args = append(args, muteArgs...)
 	}
 	var n int64
 	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {

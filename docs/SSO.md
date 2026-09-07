@@ -214,7 +214,13 @@ and `admin@local` stays answerable while the directory is unreachable.
 ⚠ Driver configuration (`/api/admin/auth-providers`) is **instance-wide**: the
 `auth.*` settings rows decide who can sign in to filex at all. In multi-tenant
 mode the surface is therefore **supertenant-only**, reads included — a tenant
-admin gets `403 supertenant_only`. *Per-tenant* auth is a different thing: it
+admin gets `403 supertenant_only`. ⚠ On a multi-tenant install, `ldap` and `proxy-header` home a just-in-time
+account in the tenant whose host the login arrived on, and **refuse to create
+one** when no host can decide it (an SFTP/FTPS/NFS login) unless a tenant is
+named explicitly — see
+[LDAP.md → Which tenant a new account lands in](LDAP.md#which-tenant-a-new-account-lands-in).
+
+*Per-tenant* auth is a different thing: it
 lives on the provider row, under `/api/admin/providers`. Single-tenant installs
 are unaffected. See
 [MULTI-TENANCY.md](MULTI-TENANCY.md#instance-wide-admin-surfaces).

@@ -34,3 +34,14 @@ func BeforeOverwrite(ctx context.Context, storageID int64, rel string) error {
 	}
 	return overwriteGuard(ctx, storageID, rel)
 }
+
+// OverwriteGuarded reports whether a pre-write guard is installed.
+//
+// It exists for the one surface whose own API already offers to snapshot the
+// bytes it is about to replace: POST /api/files/versions/restore takes a
+// `snapshot_current` flag. With the guard installed, BeforeOverwrite takes that
+// same snapshot, and doing both would record the identical content twice and
+// spend a version slot on it. With the guard DISABLED
+// (FILEX_VERSIONS_ON_OVERWRITE=0) the flag has to keep working, or an operator
+// who turned the automatic guard off would silently lose the explicit one too.
+func OverwriteGuarded() bool { return overwriteGuard != nil }

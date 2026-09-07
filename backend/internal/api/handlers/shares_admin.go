@@ -112,6 +112,9 @@ func (h *SharesAdmin) Revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !h.ownsShare(w, r, id) {
+		return
+	}
 	if err := h.Store.RevokeShare(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -126,9 +129,33 @@ func (h *SharesAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !h.ownsShare(w, r, id) {
+		return
+	}
 	if err := h.Store.DeleteShare(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ownsShare resolves a share to the storage holding its node and asks whether
+// the caller's tenant may reach it.
+//
+// List (above) filters by storage name, so a tenant admin never SAW another
+// tenant's share; revoke and delete beside it took the id raw, and a share id
+// is a small integer. So the row you could not see was still one you could
+// destroy — and shares are how a customer's users hand files to people outside
+// the platform, so revoking them silently breaks a business process rather
+// than merely losing a row.
+func (h *SharesAdmin) ownsShare(w http.ResponseWriter, r *http.Request, id int64) bool {
+	// ⚠ The lookup is unconditional, not confined-only. RevokeShare and
+	// DeleteShare both answer {"ok":true} for an id that names nothing, so a
+	// 404 raised only for a foreign id would announce that the row exists.
+	// Both answers agree now, and the bogus-id 200 was misleading anyway.
+	sh, err := h.Store.GetShareByID(r.Context(), id)
+	if err != nil || sh == nil {
+		return notFound(w, "share")
+	}
+	return ownsNode(w, r, h.Store, sh.NodeID, "share")
 }

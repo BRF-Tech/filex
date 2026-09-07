@@ -24,6 +24,11 @@
 // So this script covers every target, and `web/tests/deploy/deployVersions.test.ts`
 // fails the build if any of them drifts again.
 //
+// It also keeps Umbrel's `releaseNotes` in step, DERIVED from CHANGELOG.md
+// (scripts/release-notes.mjs) rather than typed by hand — the field had no
+// version number in it, so a frozen one would have described February's
+// release with nothing to make that visible.
+//
 //   node scripts/sync-deploy-versions.mjs          # rewrite them
 //   node scripts/sync-deploy-versions.mjs --check  # exit 1 if any is behind
 //
@@ -36,6 +41,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { NOTES_BLOCK, readNotesBlock, releaseNotesFromRepo, renderNotesBlock } from './release-notes.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The release version, from the package the release step bumps. The repo root
@@ -109,8 +116,58 @@ for (const t of targets) {
   }
 }
 
-if (behind.length === 0) {
-  console.log(`every deployment target already names ${tag}`);
+// ── Umbrel release notes ─────────────────────────────────────────────────────
+// Every other store surface tells the user what changed; Umbrel's card had no
+// `releaseNotes` at all. It is DERIVED from CHANGELOG.md rather than typed,
+// for the same reason the version pins are: a hand-written field nobody
+// remembers to touch freezes, and a frozen "what's new" is worse than an
+// absent one — it describes a release the user is not getting, with no version
+// number in it to make the staleness visible.
+//
+// ⚠ No changelog section for the release version is a hard error, not a
+// shrug. A release with no changelog entry is the actual mistake.
+const umbrelPath = rel('deploy/umbrel/filex/umbrel-app.yml');
+const notes = releaseNotesFromRepo(REPO, version);
+if (!notes) {
+  console.error(
+    `sync-deploy-versions: CHANGELOG.md has no "## [${version}]" section, so the store ` +
+      'release notes cannot be derived. Add this release\'s changelog entry first.',
+  );
+  process.exit(2);
+}
+
+let notesDrifted = false;
+{
+  const src = wrote.get(umbrelPath) ?? read(umbrelPath);
+  const current = readNotesBlock(src);
+  // ⚠ "No block I can read" and "no block at all" must not be confused: the
+  // insert branch below would then append a SECOND releaseNotes key, which
+  // YAML resolves by silently keeping one of them. Refuse instead.
+  if (current === null && /^releaseNotes:/m.test(src)) {
+    console.error(
+      'sync-deploy-versions: umbrel-app.yml has a releaseNotes key this script cannot read.\n' +
+        '  It must be a literal block (`releaseNotes: |-`) with two-space indented LF lines.',
+    );
+    process.exit(2);
+  }
+  if (current !== notes) {
+    notesDrifted = true;
+    if (!check) {
+      const block = renderNotesBlock(notes);
+      // ⚠ Function replacements: the notes carry changelog prose, and `$&` or
+      // `$1` inside a replacement STRING would be substituted, not inserted.
+      wrote.set(
+        umbrelPath,
+        current === null
+          ? src.replace(/^(version:\s*"[^"\n]*"\n)/m, (_m, keep) => keep + block)
+          : src.replace(NOTES_BLOCK, () => block),
+      );
+    }
+  }
+}
+
+if (behind.length === 0 && !notesDrifted) {
+  console.log(`every deployment target already names ${tag}, release notes are current`);
   process.exit(0);
 }
 
@@ -118,9 +175,15 @@ if (check) {
   for (const b of behind) {
     console.error(`  ${b.label}: ${b.current}, the release is ${b.want}  (${b.file})`);
   }
+  if (notesDrifted) {
+    console.error(
+      `  umbrel releaseNotes: not what CHANGELOG.md [${version}] says  (deploy/umbrel/filex/umbrel-app.yml)`,
+    );
+  }
   console.error(
-    `\n${behind.length} deployment target(s) name an OLD version — anyone installing ` +
-      'from them would run the old image. Run: node scripts/sync-deploy-versions.mjs',
+    `\n${behind.length + (notesDrifted ? 1 : 0)} deployment target(s) are out of date — anyone ` +
+      'installing from them would run the old image or read the wrong notes. ' +
+      'Run: node scripts/sync-deploy-versions.mjs',
   );
   process.exit(1);
 }
@@ -159,4 +222,8 @@ if (wrote.has(runtipiPath)) {
 
 for (const [p, src] of wrote) fs.writeFileSync(p, src);
 for (const b of behind) console.log(`  ${b.label}: ${b.current} -> ${b.want}`);
-console.log(`${behind.length} deployment target(s) now name ${tag}`);
+if (notesDrifted) console.log(`  umbrel releaseNotes: rewritten from CHANGELOG.md [${version}]`);
+console.log(
+  `${behind.length} deployment target(s) now name ${tag}` +
+    (notesDrifted ? ', release notes refreshed' : ''),
+);

@@ -141,6 +141,14 @@ func (h *StoragesAdmin) SyncRuns(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	// ⚠ Not a 404. An id that names nothing answers 200 with an empty list
+	// here, so refusing a foreign id with a 404 would say "this one exists" —
+	// the opposite of the rule. The empty list is also the honest answer: this
+	// tenant has no sync runs for that storage.
+	if !ownsStorageQuiet(r, id) {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []any{}, "total": 0})
+		return
+	}
 	limit := 50
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
@@ -163,6 +171,12 @@ func (h *StoragesAdmin) Drift(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	// Same reasoning as SyncRuns above: an unknown id answers 200 with an
+	// empty list, so the refusal has to look like that and not like a 404.
+	if !ownsStorageQuiet(r, id) {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []any{}})
 		return
 	}
 	limit := 100

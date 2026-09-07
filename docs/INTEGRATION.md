@@ -393,6 +393,31 @@ anything about that; a host writing its own drop targets does.
   header passed through (the same-origin, cookie-authenticated upgrade is
   origin-checked). Without it the explorer still works and still shows changes
   — on a 12 s poll instead of instantly.
+- A path to `/api/files/thumb/{id}`, if you want thumbnails in the grid and
+  gallery views. See the note below.
+
+### Thumbnails and `<img>`
+
+The explorer does **not** put `thumb_url` straight into an `<img src>`. It fetches
+each thumbnail with the same `fetch()` machinery as every other API call — auth
+headers plus `credentials` — and hands the grid a `blob:` URL
+(`useThumbs`). That is what makes thumbnails work in an embed at all: an `<img>`
+sends no `Authorization` header, and filex's session cookie is `SameSite=Lax`, so
+a cross-site `<img>` sends no cookie either.
+
+If your host renders `thumb_url` itself, it still works: the backend stamps every
+`thumb_url` it emits with a short-lived signature (`?exp=…&sig=…`) that the
+endpoint accepts with no credentials at all. Two consequences worth knowing:
+
+- ⚠ **Pass the URL through verbatim.** Stripping the query string turns a
+  working image into a 401.
+- ⚠ **The stamp is a capability.** Anyone who gets that URL can fetch that one
+  preview until it expires (`FILEX_THUMBS_URL_TTL`, default 24 h) — treat it like
+  a share link, not like a private path.
+
+⚠ If your proxy injects a **root-confined** token (§4b/§4c), thumbnails obey the
+confinement too: a node outside the token's subtree answers 404 rather than
+rendering.
 
 That's it — drop the component in, give it `apiBase` + a token, and the file
 manager is live. See `demo/` for runnable references.

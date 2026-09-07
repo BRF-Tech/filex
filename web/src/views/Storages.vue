@@ -15,6 +15,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import { syncTone } from '@/lib/syncTone';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -59,20 +60,6 @@ async function confirmDelete() {
   }
 }
 
-const syncTone = (s: string | undefined) => {
-  switch (s) {
-    case 'ok':
-      return 'emerald';
-    case 'error':
-      return 'rose';
-    case 'running':
-      return 'sky';
-    case 'pending':
-      return 'amber';
-    default:
-      return 'zinc';
-  }
-};
 
 onMounted(load);
 </script>
@@ -139,7 +126,10 @@ onMounted(load);
             {{
               s.last_sync_state === 'running'
                 ? t('common.running')
-                : s.last_sync_state ?? t('storages.modeLabel.' + (s.sync_mode || 'ondemand'))
+                : // ⚠ `poll`, not `ondemand`: an unset sync_mode is defaulted to
+                  // poll by the backend (handlers/storages.go), so the badge was
+                  // naming the OPPOSITE mode to the one running.
+                  (s.last_sync_state ?? t('storages.modeLabel.' + (s.sync_mode || 'poll')))
             }}
           </Badge>
         </div>

@@ -167,6 +167,15 @@ func (h *Trash) announceRestore(ctx context.Context, nodeID int64) {
 // everything currently soft-deleted.
 func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 	older := 0
+	// ⚠ Read, not merely decoded: this field was parsed into a struct and
+	// dropped, while the admin UI's confirmation promised it narrowed the
+	// purge. Emptying "one storage" emptied all of them, permanently.
+	var storageID int64
+	if v := r.URL.Query().Get("storage_id"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			storageID = n
+		}
+	}
 	if v := r.URL.Query().Get("older_than_days"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			older = n
@@ -182,9 +191,12 @@ func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 			if body.OlderThanDays != nil && *body.OlderThanDays >= 0 {
 				older = *body.OlderThanDays
 			}
+			if body.StorageID != nil && *body.StorageID > 0 {
+				storageID = *body.StorageID
+			}
 		}
 	}
-	res, err := h.Service.EmptyOlderThan(r.Context(), older)
+	res, err := h.Service.EmptyOlderThan(r.Context(), older, storageID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -227,8 +239,33 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Tenancy: only surface trashed nodes from storages the caller's tenant can
+	// reach.
+	//
+	// ⚠ This is a DIFFERENT filter from the confine one below, and conflating
+	// the two is what left the listing instance-wide: the comment on that block
+	// used to claim "so a tenant never sees another tenant's deleted files",
+	// but `confine.RootFrom` answers about the EMBEDDED root (an X-Filex-Root
+	// header or a `root:`-scoped token), and an ordinary browser login has
+	// none — so the block was skipped and nothing filtered. Tenancy and root
+	// confinement are two independent boundaries; the code claimed one while
+	// implementing the other.
+	//
+	// `total` is recomputed the same way the two filters below do it, so the
+	// count never describes rows that were not returned.
+	if scope, confined := confinedScope(r.Context()); confined {
+		kept := entries[:0]
+		for _, e := range entries {
+			if scope.CanAccessStorage(e.StorageID) {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+		total = len(kept)
+	}
 	// Confinement: only surface trashed nodes whose original path is inside
-	// the caller's root, so a tenant never sees another tenant's deleted files.
+	// the caller's root — the embedded client's boundary, orthogonal to the
+	// tenant one above.
 	if root, ok := confine.RootFrom(r.Context()); ok {
 		kept := entries[:0]
 		for _, e := range entries {
@@ -265,6 +302,9 @@ func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if !ownsNode(w, r, h.Store, id, "trash entry") {
 		return
 	}
 	if err := h.Service.PurgeOne(r.Context(), id); err != nil {

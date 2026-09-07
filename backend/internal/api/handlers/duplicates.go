@@ -62,6 +62,21 @@ func (h *Duplicates) Report(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Scoped rather than gated: finding your own duplicates is a legitimate
+	// tenant feature, and a blanket supertenant gate would have taken it away.
+	// Unscoped the report walks every storage and returns path, name, size AND
+	// etag — and an etag is a content fingerprint, so it does not merely name
+	// another customer's files, it lets you confirm that a file you already
+	// hold is among them.
+	if scope, confined := confinedScope(r.Context()); confined {
+		kept := rows[:0]
+		for _, row := range rows {
+			if scope.CanAccessStorage(row.StorageID) {
+				kept = append(kept, row)
+			}
+		}
+		rows = kept
+	}
 
 	// Fold flat rows into groups. Key = "<size>-<etag>" per contract;
 	// insertion order preserved via the slice, lookup via the map.

@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
@@ -43,6 +44,10 @@ type Manager struct {
 	// ACL enforces per-user/per-item access control. nil disables
 	// enforcement (tests / list-only environments) → legacy all-access.
 	ACL *acl.Resolver
+	// ThumbSigner stamps the `thumb_url` this listing hands out, so a bare
+	// `<img src>` in an embed can fetch it with no header and no cookie. nil
+	// emits an unsigned URL, which authenticated clients still fetch fine.
+	ThumbSigner *thumb.Signer
 	// Staged, when wired, takes large whole-body uploads into filex's own
 	// staging area and lets the ops worker move them to the driver. nil (or a
 	// deployment with no staging directory configured) keeps the synchronous
@@ -240,6 +245,25 @@ func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		parentPtr = &pid
+	}
+	// Multi-tenant: `storage` is a raw id from the client and
+	// ListNodesByParent is not one of the three methods tenantstore confines,
+	// so nothing below asks whose storage this is. Unfixed, this returned
+	// another customer's whole catalogue — names, paths, sizes and the node
+	// ids that are the key to /api/files/read?id= and /api/files/stat?id=.
+	//
+	// ⚠ The refusal here is an EMPTY 200, not the 404 the id-taking admin
+	// routes use, and that is deliberate rather than sloppy. A storage id that
+	// names nothing already answers `200 {"nodes":[]}` on this route (the
+	// lookup simply finds no rows), and the handler's own existing "this
+	// storage is not yours to see" answer — `!set.StorageVisible()` three lines
+	// below — is the same empty 200. A 404 would therefore be the ONE answer
+	// that only a real-but-foreign id produces, turning the route into a census
+	// of how many storages the platform has. Borrowing the shape the handler
+	// already produces is what makes the refusal invisible.
+	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(storageID) {
+		writeJSON(w, http.StatusOK, map[string]any{"nodes": []any{}})
+		return
 	}
 	nodes, err := h.Store.ListNodesByParent(r.Context(), storageID, parentPtr)
 	if err != nil {
@@ -639,7 +663,7 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 			n.Thumb = t
 		}
 	}
-	files := projectFileNodes(s.Name, nodes, dirsOnly, set)
+	files := projectFileNodes(s.Name, nodes, dirsOnly, set, h.ThumbSigner)
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
@@ -862,8 +886,31 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		return
 	}
 
+	// Multi-tenant: in cross-storage mode `keep` used to accept every hit
+	// regardless of which storage it came from, and this file consulted no
+	// tenant scope at all — so the toolbar returned another customer's file
+	// names and paths. Worse, `projectFileNodes` stamps every hit with the
+	// CURRENT adapter's name, so the leaked rows arrived labelled as if they
+	// were the caller's own: nothing in the response even said where they came
+	// from.
+	//
+	// The filter goes here rather than at either call site because `keep` is
+	// the single choke point both entrances pass through — the index branch and
+	// the bare `tag:` branch (tags live on node_meta and are shared across
+	// users, so a shared label is its own way across). Same predicate the
+	// sibling handler already applies to /api/files/search
+	// (handlers/search.go): scope absent ⇒ unscoped ⇒ unchanged.
+	//
+	// ⚠ The SQL-LIKE fallback further down does not pass through here and does
+	// not need to: its cross-storage walk enumerates ListEnabledStorages, which
+	// tenantstore confines. That inconsistency — one path scoped by the store,
+	// the other not scoped at all — is what hid this for as long as it did.
+	scope, confined := confinedScope(r.Context())
 	keep := func(n *model.Node) bool {
 		if n == nil || n.DeletedAt != nil {
+			return false
+		}
+		if confined && !scope.CanAccessStorage(n.StorageID) {
 			return false
 		}
 		return crossStorage || n.StorageID == s.ID
@@ -970,7 +1017,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 	}
 
-	files := projectFileNodes(s.Name, nodes, false, nil)
+	files := projectFileNodes(s.Name, nodes, false, nil, h.ThumbSigner)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"adapter":   s.Name,
 		"storages":  storageNames,
@@ -1031,6 +1078,15 @@ func (h *Manager) Stat(w http.ResponseWriter, r *http.Request) {
 	}
 	node, err := h.Store.GetNode(r.Context(), id)
 	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// Multi-tenant: GetNode takes a raw id and tenantstore does not confine it,
+	// so without this a member of one customer could read the name, full path,
+	// size, mime and owner of any file on the instance by walking the id range.
+	// The refusal reuses the miss above BYTE FOR BYTE — same status, same body
+	// — so a foreign id is indistinguishable from one that never existed.
+	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(node.StorageID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1109,6 +1165,22 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		nodeName = path.Base(filePath)
 	}
 
+	// Multi-tenant: this is the FILE BYTES, and both ways in name their storage
+	// from the request — `?id=` through an unconfined GetNode, `?storage=` as a
+	// bare integer handed straight to StorageResolver. The only gate below is
+	// the ACL, and the ACL is tenant-blind: on an rbac_enabled=false storage
+	// (the migration default) acl.Effective answers roleBase(role), i.e. Editor
+	// for a plain `user`. So it stopped nobody, and one authenticated GET
+	// returned another customer's file byte for byte — with no audit row, since
+	// the audit middleware filters GETs.
+	//
+	// Asked BEFORE the ACL so the refusal is uniform whether or not grants
+	// happen to exist, and shaped like the by-id miss above so a foreign id
+	// cannot be told apart from one that never existed.
+	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(storageID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	// RBAC: reading file bytes needs ≥viewer on the logical path. This is
 	// where the session-user gap finally closes for direct byte access.
 	if !h.allowedByID(r.Context(), storageID, aclRel, acl.LevelViewer) {
@@ -1222,7 +1294,7 @@ func joinAdapterPath(adapter, rel string) string {
 // type, extension, size, last_modified, mime_type, thumb_url. We
 // always ship the adapter-qualified `path` so deep-link routing keeps
 // working.
-func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *acl.Set) []map[string]any {
+func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *acl.Set, signer *thumb.Signer) []map[string]any {
 	out := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		if n.DeletedAt != nil {
@@ -1281,7 +1353,10 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		// the UI optimistic; if the file isn't actually there the
 		// thumb endpoint 404s and the SFC falls back to its icon.
 		if !isDir && n.Thumb != nil && (n.Thumb.State == "ready" || n.Thumb.State == "") && n.Thumb.StorageKey != "" {
-			entry["thumb_url"] = "/api/files/thumb/" + strconv.FormatInt(n.ID, 10)
+			// Stamped with a short-lived signature (thumbURL): this listing is
+			// the only place that knows the caller was allowed to see the node,
+			// and an <img> cannot carry that decision in a header.
+			entry["thumb_url"] = thumbURL(signer, n.ID)
 		}
 		if n.BackendMtime != nil {
 			entry["last_modified"] = n.BackendMtime.UnixMilli()

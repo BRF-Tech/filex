@@ -57,6 +57,20 @@ func (h *SyncAdmin) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Scoped, not gated: a tenant admin watching its own storages sync is the
+	// point of this page. Unscoped it was a timeline of every tenant's sync
+	// activity, and Detail beside it (now ownership-checked) turned any run id
+	// into that tenant's conflicting paths.
+	if scope, confined := confinedScope(r.Context()); confined {
+		kept := runs[:0]
+		for _, run := range runs {
+			if run != nil && scope.CanAccessStorage(run.StorageID) {
+				kept = append(kept, run)
+			}
+		}
+		runs = kept
+		total = int64(len(runs))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": runs,
 		"total":   total,
@@ -73,8 +87,11 @@ func (h *SyncAdmin) Detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, err := h.Store.GetSyncRun(r.Context(), id)
-	if err != nil {
+	if err != nil || run == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if !ownsStorage(w, r, run.StorageID, "") {
 		return
 	}
 	conflicts, _ := h.Store.ListSyncConflictsByRun(r.Context(), id)

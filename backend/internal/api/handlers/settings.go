@@ -92,6 +92,9 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	if !allowSettingWrite(w, r, key) {
+		return
+	}
 	/* wiring:e1 — branding keys: validate + tenant-scope + cache bust */
 	if isBrandingSettingKey(key) {
 		if err := validateBrandingSetting(key, req.Value); err != nil {
@@ -120,6 +123,18 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
+	}
+	// ⚠ Classify the WHOLE batch before writing any of it. The loop below
+	// upserts as it goes, so refusing halfway would leave the tenant admin's
+	// allowed keys written and the instance-wide ones not — a partial apply
+	// the caller cannot tell from a success. One refusal, nothing written.
+	for k, v := range raw {
+		if k == "" || v == nil {
+			continue
+		}
+		if !allowSettingWrite(w, r, k) {
+			return
+		}
 	}
 	for k, v := range raw {
 		if k == "" || v == nil {
@@ -174,4 +189,65 @@ func isSecretSettingKey(key string) bool {
 		leaf = key[i+1:]
 	}
 	return isSecretKey(leaf)
+}
+
+// ─────────────────── per-key tenancy classification ───────────────────
+
+// allowSettingWrite decides whether this caller may write this settings key,
+// answering 403 itself when it may not.
+//
+// # Why this is an ALLOWLIST and not a list of forbidden keys
+//
+// `settings` is one flat, global, unrestricted key/value table. `auth.*` (OIDC
+// issuer, LDAP bind), `antivirus.*`, SMTP credentials, `share.max_ttl_days`,
+// `public_url` all live in it beside `branding.*`, and in multi-tenant mode
+// every tenant admin could PATCH any of them — the same class of takeover the
+// four gated surfaces in supertenant.go were closed for, reachable by spelling
+// a key instead of calling a route.
+//
+// It cannot be a blanket route gate, because `branding.*` is legitimately
+// per-tenant: `tenantBrandingKey` rewrites a tenant admin's `branding.name`
+// into `tenant.<id>.branding.name`, which is how a customer brands their own
+// login page. Taking that away would be a regression, not a fix.
+//
+// So the rule is: a key is tenant-writable only if writing it lands somewhere
+// that BELONGS to the tenant. Today exactly one namespace does — branding,
+// because it is the only one that gets rewritten under a `tenant.<id>.` prefix
+// on the way to the store. Everything else is one global row.
+//
+// ⚠⚠ The direction of the default is the whole point. A denylist would mean
+// every key added after today is silently tenant-writable until somebody
+// remembers to list it; this way a new key is instance-wide until somebody
+// deliberately gives it a per-tenant home. The failure mode of an allowlist is
+// a supertenant having to make a change for a tenant. The failure mode of a
+// denylist is a tenant rewriting the instance's OIDC issuer.
+//
+// Single-tenant installs and the supertenant pass everything, as everywhere
+// else: `confinedScope` reports false for both.
+func allowSettingWrite(w http.ResponseWriter, r *http.Request, key string) bool {
+	if _, confined := confinedScope(r.Context()); !confined {
+		return true
+	}
+	if tenantScopedSettingKey(key) {
+		return true
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{
+		"error":   "supertenant_only",
+		"message": "\"" + key + "\" is an instance-wide setting; a tenant may only write its own branding.* keys",
+	})
+	return false
+}
+
+// tenantScopedSettingKey reports whether writing key lands in a per-tenant
+// namespace rather than the single global row.
+//
+// ⚠ A tenant admin may only write the BARE `branding.*` form — that is what
+// `tenantBrandingKey` rewrites into their own prefix. The already-prefixed
+// `tenant.<id>.branding.*` spelling is refused, because it names a tenant
+// explicitly and nothing in the rewrite path would stop that id being somebody
+// else's: `isBrandingSettingKey` accepts both forms, and `tenantBrandingKey`
+// returns an already-prefixed key UNCHANGED. Accepting it here would let a
+// tenant admin rebrand another tenant's login page by typing their id.
+func tenantScopedSettingKey(key string) bool {
+	return strings.HasPrefix(key, "branding.")
 }

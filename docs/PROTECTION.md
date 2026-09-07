@@ -328,6 +328,12 @@ scan waited behind all of it.)
 Two operations put bytes back in front of users without going through an upload
 surface, and both now enqueue a scan of the restored file.
 
+⚠ Both also need **`≥editor`** on the file. That is new for the version restore:
+before the release this note ships in, `/api/files/versions/restore` had no
+permission check at all, so a
+read-only `viewer` account could roll any file back — see
+[TRASH-VERSIONING.md](TRASH-VERSIONING.md#versioning-endpoints).
+
 - **Restoring a version** (`POST /api/files/versions/restore`). Snapshots in
   `.versions/` are deliberately **not** scanned when they are taken: every
   destructive write takes one, so scanning each would multiply the scan load by

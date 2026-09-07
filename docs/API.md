@@ -328,7 +328,8 @@ export interface FileNode {
   etag?: string;
   isImage?: boolean;
   isVideo?: boolean;
-  /** Pre-signed thumbnail URL (HMAC token included). */
+  /** Thumbnail URL, stamped with `?exp=&sig=` so a bare `<img src>` can fetch
+   *  it with no header and no cookie. See docs/thumbnails.md. */
   thumbUrl?: string;
 }
 

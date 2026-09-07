@@ -166,7 +166,14 @@ export interface ExplorerConfig {
   /** E2E escrow use report — `POST { path, id, nonce }`. */
   e2eEscrowUsed?: string;
 
-  /** Public share base URL — `${shareBase}/${uuid}` */
+  /**
+   * Public share base URL.
+   *
+   * @deprecated IGNORED — declared, never read. Share URLs are used exactly as
+   * the server returns them (`share.url`), which is what makes a link work
+   * behind a reverse proxy; a client-side base could only disagree with it.
+   * Set `FILEX_PUBLIC_URL` on the server instead.
+   */
   shareBase?: string;
 
   /** Auth strategy (see AuthConfig). */
@@ -263,7 +270,10 @@ export interface ExplorerConfig {
    */
   rootPath?: string;
 
-  /** Whether the info panel toggle is visible. */
+  /**
+   * Whether the info-panel (inspector) toggle is shown in the toolbar.
+   * Default true. The inspector itself stays reachable from the context menu.
+   */
   showInfoPanel?: boolean;
 
   /**
@@ -380,10 +390,27 @@ export interface ExplorerConfig {
   /** Default view. */
   viewMode?: 'list' | 'grid';
 
-  /** Override max upload size (MB) — falls back to /limits otherwise. */
+  /**
+   * Max upload size in MB.
+   *
+   * @deprecated IGNORED — declared, never read. There is no client-side size
+   * check in the explorer at all (and the `/limits` fallback this comment used
+   * to promise is not called either), so an embedder who set it watched
+   * oversized uploads start anyway and fail at the server, which is the only
+   * place the limit is enforced (FILEX_UPLOAD_* / the storage's own limits).
+   * Left in place rather than removed so existing embeds keep compiling; do
+   * not add a reader without also adding the pre-flight rejection the name
+   * implies.
+   */
   maxFileSizeMb?: number;
 
-  /** Accept patterns (MIME or extension). Empty = unrestricted. */
+  /**
+   * Accept patterns (MIME or extension).
+   *
+   * @deprecated IGNORED — declared, never read. No `accept` attribute is
+   * rendered on any file input in the package and nothing filters a drop, so
+   * setting it restricts nothing. Same note as `maxFileSizeMb`.
+   */
   acceptTypes?: string[];
 
   /** Storage adapter to default to (avoids the initial flash). */

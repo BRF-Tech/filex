@@ -49,6 +49,12 @@ const localEnabled = computed(
 );
 const demoMode = computed(() => caps.data.demo_mode === true);
 const demoUser = computed(() => caps.data.demo_user || 'demo@demo.com');
+// ⚠ Both halves of the credentials come from the server (FILEX_DEMO_USER /
+// FILEX_DEMO_PASS). The password used to be hardcoded here, so an operator
+// who set FILEX_DEMO_PASS broke the CTA and the printed hint at once — the
+// button submitted "demo" against a user whose password was no longer that.
+// The fallback keeps installs that never set the variable working.
+const demoPass = computed(() => caps.data.demo_pass || 'demo');
 
 // SSO-first mode (FILEX_OIDC_AUTO_REDIRECT): unauthenticated visitors go
 // straight to the IdP; the password form hides behind a "sign in with
@@ -126,7 +132,7 @@ async function openDemo() {
   localError.value = null;
   const ok = await auth.login({
     email: demoUser.value,
-    password: 'demo',
+    password: demoPass.value,
     remember: true,
   });
   if (ok) {
@@ -181,7 +187,7 @@ function startOidc() {
           </button>
         </div>
         <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-500">
-          {{ t('demo.creds', { email: demoUser, password: 'demo' }) }}
+          {{ t('demo.creds', { email: demoUser, password: demoPass }) }}
         </p>
         <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
           {{ t('demo.sandbox') }}

@@ -730,6 +730,16 @@ const uiProfile = computed(() => props.config.uiProfile ?? 'standard');
  * on TOP.
  */
 const simpleUi = computed(() => uiProfile.value === 'simple' || uiProfile.value === 'drive');
+
+/**
+ * ⚠ `showInfoPanel` is documented public API ("whether the info panel toggle
+ * is visible") and until now nothing read it: an embedder who set it to false
+ * got the toggle anyway. Default stays TRUE, so every existing embed —
+ * including the admin SPA, which passes `showInfoPanel: true` — is unchanged.
+ * It hides the TOGGLE, exactly as documented; the inspector itself stays
+ * reachable from the context menu, which is what the option says.
+ */
+const infoPanelToggle = computed(() => props.config.showInfoPanel !== false);
 /* === surucu:d1 — the Drive shell (GitHub #14, the reporter's mockups) ===== */
 const driveShell = computed(() => uiProfile.value === 'drive');
 
@@ -4778,6 +4788,7 @@ function closeRecoveryKey() {
         @update:view-mode="setDisplayedViewMode($event)"
       />
       <button
+        v-if="infoPanelToggle"
         type="button"
         class="fe-btn fe-btn--icon-only fe-toolbar__inspector"
         :class="{ 'is-active': showInspector }"
@@ -5543,6 +5554,7 @@ function closeRecoveryKey() {
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
       :new-tab-enabled="!e2eActive /* wiring:e2 — the standalone route pulls raw bytes */"
       :save-text-endpoint="e2eActive ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
+      :archive-list-endpoint="api.endpoints.archiveList || null"
       :open-mode="previewMode"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
       :auth-credentials="api.credentialsMode()"

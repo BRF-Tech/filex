@@ -252,18 +252,54 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 // at 200 to keep the polling payload small. Used by the SPA's
 // PendingOpsTray which calls GET /api/files/ops?status=running every 2s.
 func (s *Service) List(ctx context.Context, status string) ([]*Op, error) {
+	return s.ListIn(ctx, status, nil)
+}
+
+// ListIn is List restricted to a set of storage ids — the multi-tenant form.
+// A nil set means "no restriction" (single-tenant mode, the supertenant, and
+// every background caller), which is why List delegates here rather than the
+// other way round.
+//
+// ⚠ The predicate is in the SQL, not applied to List's result, and that is the
+// whole point of the extra method: the 200-row cap is applied by the database.
+// Filtering afterwards would hand a tenant an EMPTY queue tray whenever another
+// tenant had 200 more recent ops — isolation that silently costs the neighbour
+// their own feature. A row matches on either end, because a cross-storage copy
+// belongs to the tenant on either side of it.
+func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64) ([]*Op, error) {
 	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at`
+	q := `SELECT ` + cols + ` FROM pending_ops`
 	var (
-		rows *sql.Rows
-		err  error
+		where []string
+		args  []any
 	)
 	if status != "" {
-		rows, err = s.db.QueryContext(ctx,
-			`SELECT `+cols+` FROM pending_ops WHERE status=? ORDER BY id DESC LIMIT 200`, status)
-	} else {
-		rows, err = s.db.QueryContext(ctx,
-			`SELECT `+cols+` FROM pending_ops ORDER BY id DESC LIMIT 200`)
+		where = append(where, `status=?`)
+		args = append(args, status)
 	}
+	if storageIDs != nil {
+		if len(storageIDs) == 0 {
+			// A scope that reaches no storage sees no ops. An empty `IN ()` is
+			// a syntax error on some drivers and, worse, an invitation to
+			// "just skip the clause" — which is the unscoped query again.
+			return []*Op{}, nil
+		}
+		ph := make([]string, len(storageIDs))
+		for i, id := range storageIDs {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		in := strings.Join(ph, ",")
+		where = append(where, `(storage_id IN (`+in+`) OR COALESCE(dest_storage_id,0) IN (`+in+`))`)
+		for _, id := range storageIDs {
+			args = append(args, id)
+		}
+	}
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
+	}
+	q += ` ORDER BY id DESC LIMIT 200`
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

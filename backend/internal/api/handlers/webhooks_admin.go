@@ -107,6 +107,9 @@ func validWebhookURL(u string) bool {
 //
 //	GET /api/admin/webhooks
 func (h *WebhooksAdmin) List(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "webhook targets receive every tenant's event stream") {
+		return
+	}
 	targets, err := h.Store.ListWebhookTargets(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -138,6 +141,9 @@ type webhookTargetCreateReq struct {
 //	POST /api/admin/webhooks
 //	body: {name, url, secret?, events?: ["file.uploaded",...], enabled?}
 func (h *WebhooksAdmin) Create(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "webhook targets receive every tenant's event stream") {
+		return
+	}
 	var req webhookTargetCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -186,6 +192,9 @@ type webhookTargetPatchReq struct {
 //
 //	PATCH /api/admin/webhooks/{id}
 func (h *WebhooksAdmin) Update(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "webhook targets receive every tenant's event stream") {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -237,6 +246,9 @@ func (h *WebhooksAdmin) Update(w http.ResponseWriter, r *http.Request) {
 //
 //	DELETE /api/admin/webhooks/{id}
 func (h *WebhooksAdmin) Delete(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "webhook targets receive every tenant's event stream") {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -259,6 +271,9 @@ func (h *WebhooksAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 //
 //	POST /api/admin/webhooks/{id}/test
 func (h *WebhooksAdmin) Test(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, "webhook targets receive every tenant's event stream") {
+		return
+	}
 	if h.Notify == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifications offline"})
 		return
