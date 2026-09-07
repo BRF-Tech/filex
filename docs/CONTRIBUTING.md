@@ -661,4 +661,102 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
     > `RELEASES.md`. A `release-highlights.json` that never reached the server
     > gives the Latest blurb as a bare em dash.
 
+12. **Check the shop window — what a stranger touches before they trust us.**
+    Everything above audits the product from the inside: prose, screenshots,
+    links, anchors, version manifests, and a test suite that runs against code.
+    This step looks at the surfaces a first-time reader actually receives.
+
+    ```bash
+    # before the tag — needs a binary, no network
+    pnpm run build:backend
+    node scripts/check-shop-window.mjs --instance --boot bin/filex
+
+    # after step 11 — needs the network, nothing else
+    node scripts/check-shop-window.mjs --published
+    ```
+
+    Three exit codes, and the last two are the point: **0** everything checked
+    passed, **1** a defect is present and the release does not go out, **2**
+    something *could not be checked* — no binary, no network, a GitHub rate
+    limit, a fixture that is not set up. ⚠ Exit 2 is deliberately not 1: a gate
+    that turns an outage into a failed build is an outage of its own. It is
+    also not 0 — the run says out loud which check did not happen, and you
+    re-run it before you tag rather than assuming.
+
+    The third of this gate that needs neither a server nor the network —
+    the URL grammar, the quickstart command, the publish paths that carry no
+    converter — is `web/tests/deploy/shopWindow.test.ts`, so it runs on every
+    push and in `pnpm test`, and step 6's CI gate already blocks the tag on it.
+    Nothing to run by hand.
+
+    ⚠ `--instance` boots a throwaway on port 5941 with demo mode on, an
+    external service host set as a sentinel and its own temp data directory,
+    interviews it and kills it. It never touches a live host: two of its
+    checks write. Point it at a URL instead (`--instance http://127.0.0.1:…`)
+    only for an instance you booted yourself, and expect `skip` rather than
+    `ok` on anything its fixture does not cover.
+
+    > Why this is a numbered step: on 2026-09-07, hours before the public
+    > launch, a person looking at filex from outside found seven defects — and
+    > **not one had been caught by a test, a lint, or any of the eleven steps
+    > above**. Several had been shipping for months. A dead `Issues` link on
+    > **104 of the 105** published release pages, because the export translated
+    > the host and not the URL grammar. A public demo that answered **all 101**
+    > admin routes with no refusal: reset the shared password, delete users,
+    > repoint a storage, make the server connect wherever a visitor pointed it.
+    > `GET /api/files/capabilities` handing anonymous callers the operator's
+    > internal hostname. docs.filex.sh built from the **private** tree, so the
+    > plugin guide published an import path that names an unreachable
+    > repository and does not compile. Release bodies that were a commit hash
+    > where the changelog had 1,445 characters of prose. A headline
+    > `docker run` that dropped the reader into an empty file manager with
+    > their files in the database directory. And the demo's own advertised
+    > search query returning zero results.
+    >
+    > The pattern is the reason this is a step and not a habit: **everything a
+    > stranger touches first is the least tested surface in the project**,
+    > precisely because everyone who works on it arrives from the inside.
+
+    The exhaustive half of the demo check is a **Go test**, not this script:
+    `backend/internal/api/shop_window_route_table_test.go` walks the whole chi
+    route table — 359 entries — and classifies every state-changing one by
+    asking the running server whether a role gate stands in front of it
+    (anonymous 401, signed-in non-admin 403). Every operator surface it finds
+    must be refused on a demo, and no route an ordinary user may use may be.
+    The six routes this script probes are the smoke test that the guard is
+    installed at all; the Go test is what makes a **fourth** guarded prefix
+    impossible to add unnoticed — it found `/metrics` on its first run. It runs
+    in `go test ./...`, so step 6 already blocks the tag on it. ⚠ Nothing in it
+    names a route, and it has to stay that way: the moment it becomes a list it
+    stops covering the surface nobody has written yet.
+
+    > ⚠ What this gate does **not** cover, so that nobody reads a green run as
+    > more than it is:
+    >
+    > * **It does not look at a picture.** It compares commit dates — a
+    >   screenshot older than the code that draws it cannot be showing that
+    >   code — and it fails only once a picture has been left behind through
+    >   six released versions, which is the distance `admin-plugins.png` had
+    >   actually drifted. A comment added to a component counts as a change; a
+    >   theme, font or browser change counts as nothing; and a picture that was
+    >   wrong the day it was taken is invisible to it. **Step 2 is still
+    >   opening the PNGs.**
+    > * **It does not read prose for staleness.** filex.sh is checked for the
+    >   hosts it must link and for private URLs, not for whether its sentences
+    >   are still true (step 3).
+    > * **A route with bespoke authorization can hide from the walk.** The
+    >   classification is behavioural: a route that answers an ordinary
+    >   signed-in user exactly as it answers an anonymous one reads as "not
+    >   role-gated". Anything mounted as an opaque all-method handler with its
+    >   own check, rather than behind `auth.RequireAdmin` or
+    >   `RequireScope("admin")`, is only as visible as its status codes make it.
+    > * **The About blurb is compared, not published.** GitHub has no deploy
+    >   step for it: the check prints the exact line and a person pastes it into
+    >   Settings → General → Description.
+    >
+    > The demo host's own corpus **is** covered now — `--published` signs in to
+    > demo.filex.sh with the credentials the demo publishes and types the
+    > queries the splash advertises — but only when the demo is reachable. An
+    > unreachable demo is a `2`, and a `2` means nobody proved anything.
+
 If something fails, fix forward — never delete a published tag.

@@ -196,3 +196,154 @@ func configToken(t *testing.T, h *extHarness, nodeID int64) string {
 	require.NotEmpty(t, tok)
 	return tok
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #17, second round. The fix above made the Test button tell the truth
+// about the thing it measured. It still measured only ONE of the three
+// addresses that have to work, and its green badge was read as an answer to
+// all three: the reporter typed his container name `http://onlyoffice`, filex
+// reached it, Test went green, and his browser could not resolve that name at
+// all. These tests pin the response shape that stops a reader assuming more
+// than was checked.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// docServerStub is a document server as far as the health probe is concerned.
+func docServerStub(t *testing.T) string {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(s.Close)
+	return s.URL
+}
+
+func (h *extHarness) Post(t *testing.T, path string) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, h.srv.URL+path, nil)
+	require.NoError(t, err)
+	resp, err := h.client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var out map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	return out
+}
+
+func advisoryCodes(v any) map[string]string {
+	out := map[string]string{}
+	list, _ := v.([]any)
+	for _, raw := range list {
+		m, _ := raw.(map[string]any)
+		if m == nil {
+			continue
+		}
+		code, _ := m["code"].(string)
+		sev, _ := m["severity"].(string)
+		out[code] = sev
+	}
+	return out
+}
+
+// The Test result must name its vantage point and the legs it did not cover.
+func TestExternalAdmin_TestSaysWhereItProbedFromAndWhatItDidNotCheck(t *testing.T) {
+	h, _ := liveExternalServer(t, func(c *config.Config) {
+		c.PublicURL = "https://files.example.com"
+		c.PublicURLSet = true
+	})
+	ds := docServerStub(t)
+	require.Equal(t, http.StatusOK, h.Patch(t, "/api/admin/external/onlyoffice", map[string]any{
+		"enabled": true, "url": ds, "secret": "s3cr3t",
+	}).StatusCode)
+
+	out := h.Post(t, "/api/admin/external/onlyoffice/test")
+	require.Equal(t, true, out["server_reachable"], "the stub answers /healthcheck")
+	require.Equal(t, "filex-server", out["checked_from"],
+		"the response must say which machine did the probing")
+	require.Equal(t, "https://files.example.com", out["public_url"],
+		"the third address is reported: nothing else shows it to the operator")
+
+	legs, _ := out["not_checked"].([]any)
+	require.ElementsMatch(t, []any{"browser-to-service", "service-to-filex"}, legs,
+		"a green probe must not stand for the legs it never made")
+}
+
+// The reporter's shape, and the pair that proves the warning is not noise.
+func TestExternalAdmin_WarnsWhenTheAddressCannotWorkInABrowser(t *testing.T) {
+	t.Run("published install, loopback document server", func(t *testing.T) {
+		h, _ := liveExternalServer(t, func(c *config.Config) {
+			c.PublicURL = "https://files.example.com"
+			c.PublicURLSet = true
+		})
+		// httptest listens on 127.0.0.1, so filex reaches it and the browser
+		// of anybody who opens files.example.com cannot. Green AND wrong.
+		ds := docServerStub(t)
+		h.Patch(t, "/api/admin/external/onlyoffice", map[string]any{
+			"enabled": true, "url": ds, "secret": "s3cr3t",
+		})
+		out := h.Post(t, "/api/admin/external/onlyoffice/test")
+		require.Equal(t, true, out["server_reachable"])
+		require.Equal(t, true, out["has_warnings"],
+			"reachable from the server is not the same as configured")
+		require.Equal(t, "warning", advisoryCodes(out["advisories"])["browser_loopback_host"])
+	})
+
+	t.Run("container name", func(t *testing.T) {
+		h, _ := liveExternalServer(t, func(c *config.Config) {
+			c.PublicURL = "https://files.example.com"
+			c.PublicURLSet = true
+		})
+		h.Patch(t, "/api/admin/external/onlyoffice", map[string]any{
+			"enabled": true, "url": "http://onlyoffice", "secret": "s3cr3t",
+		})
+		out := h.Post(t, "/api/admin/external/onlyoffice/test")
+		require.Equal(t, "warning", advisoryCodes(out["advisories"])["browser_bare_host"])
+	})
+
+	// ⚠ The red proof on the other side: a warning that fires on a working
+	// setup is worse than none. Everything on loopback is the developer
+	// running filex and the document server on one machine, and it works.
+	t.Run("everything on loopback stays quiet", func(t *testing.T) {
+		h, _ := liveExternalServer(t, func(c *config.Config) {
+			c.PublicURL = "http://localhost:5212"
+			c.PublicURLSet = true
+		})
+		ds := docServerStub(t)
+		h.Patch(t, "/api/admin/external/onlyoffice", map[string]any{
+			"enabled": true, "url": ds, "secret": "s3cr3t",
+		})
+		out := h.Post(t, "/api/admin/external/onlyoffice/test")
+		require.Equal(t, true, out["server_reachable"])
+		require.Equal(t, false, out["has_warnings"],
+			"filex is reached over localhost, so the browser IS on this host")
+	})
+}
+
+// ⚠ The badge has to be honest before anyone presses anything. The whole
+// defect was a control that read as verified without being asked.
+func TestExternalAdmin_ListCarriesAdvisoriesWithoutPressingTest(t *testing.T) {
+	h, _ := liveExternalServer(t, func(c *config.Config) {
+		c.PublicURL = "https://files.example.com"
+		c.PublicURLSet = true
+	})
+	ctx := context.Background()
+	require.NoError(t, h.Store.UpsertExternalService(ctx, "onlyoffice", true,
+		"http://onlyoffice", "s3cr3t", "{}", time.Time{}, "ok"))
+
+	resp := h.Get(t, "/api/admin/external")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var out struct {
+		Entries   []map[string]any `json:"entries"`
+		PublicURL string           `json:"public_url"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	resp.Body.Close()
+	require.Equal(t, "https://files.example.com", out.PublicURL)
+	for _, e := range out.Entries {
+		if e["Name"] == "onlyoffice" {
+			require.Equal(t, "warning", advisoryCodes(e["advisories"])["browser_bare_host"])
+			return
+		}
+	}
+	t.Fatal("onlyoffice row missing from the list response")
+}

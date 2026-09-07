@@ -309,16 +309,57 @@ function normalise(raw) {
 
 /**
  * Markdown is rendered by Vue: a bare `<` starts a tag and `{{` interpolates.
- * Inside a code span neither is true and entities are NOT decoded, so escaping
- * there would publish a literal `&lt;` — hence the split.
+ *
+ * ⚠⚠ Inside an inline code span `<` is inert but `{{` is NOT. An inline span
+ * becomes a plain `<code>` element in the template Vue compiles, and Vue
+ * interpolates inside it like any other element — this comment used to claim
+ * otherwise and the build proved it wrong: a release body quoting
+ * `` `{{ t('viewer.download') }}` `` took the whole site down with
+ * `TypeError: _ctx.t is not a function` (2026-09-07), and docs.filex.sh sat on
+ * the previous build until it was fixed.
+ *
+ * So `<` is still left alone inside a span — entities there would publish a
+ * literal `&lt;` — while `{{` is escaped everywhere. `&#123;` decodes back to
+ * `{` in the browser, so the reader sees what the release body wrote.
  */
 function esc(text) {
-  return String(text)
-    .split(/(`[^`]*`)/)
-    .map((part, i) =>
-      i % 2 === 1 ? part : part.replace(/</g, '&lt;').replace(/\{\{/g, '&#123;&#123;')
-    )
-    .join('')
+  return relativeLinks(
+    String(text)
+      .split(/(`[^`]*`)/)
+      .map((part, i) =>
+        i % 2 === 1
+          ? part.replace(/\{\{/g, '&#123;&#123;')
+          : part.replace(/</g, '&lt;').replace(/\{\{/g, '&#123;&#123;')
+      )
+      .join('')
+  )
+}
+
+/**
+ * Re-point the links inside a release body at this page.
+ *
+ * ⚠⚠ A release body is written for GitHub, where the reader is at the repo
+ * root, so it says `docs/PROTECTION.md`. This page IS `docs/RELEASES.md`, so
+ * the same text resolves to `docs/docs/PROTECTION.md` — and VitePress fails
+ * the whole build on a dead link rather than emitting one. It broke the site
+ * the first time a release body carried real changelog prose instead of a
+ * commit hash (2026-09-07): two links, and docs.filex.sh stayed frozen on the
+ * previous build until it was fixed.
+ *
+ * `docs/X.md` becomes `./X.md`, which is the same page on this site. Anything
+ * else relative — `backend/…`, `scripts/…`, a path with no counterpart here —
+ * becomes an absolute link to the repository, because it names a file the site
+ * does not publish and a dead link would take the build down again.
+ */
+function relativeLinks(text) {
+  const REPO = 'https://github.com/BRF-Tech/filex/blob/main/'
+  return String(text).replace(/\]\((?!https?:|\/|#|mailto:)([^)\s]+)\)/g, (_m, href) => {
+    const docs = href.match(/^(?:\.\/)?docs\/(.+)$/)
+    if (docs) return `](./${docs[1]})`
+    // Already relative to this directory and pointing at a page we publish.
+    if (/^(?:\.\/)?[A-Za-z0-9._-]+\.md(?:#.*)?$/.test(href)) return `](${href.startsWith('./') ? href : './' + href})`
+    return `](${REPO}${href.replace(/^\.\//, '')})`
+  })
 }
 
 /**

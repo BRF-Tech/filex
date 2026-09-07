@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.36.0"
+version: "0.37.0"
 releaseNotes: |-
-  filex v0.36.0 — 2026-09-07
-  • Running a public demo (FILEX_DEMO_MODE)?
-  • GET /api/files/capabilities no longer returns service URLs to anonymous callers.
-  • The container can drop root.
-  • docs.filex.sh was built from the private tree, so it published an import path that does not compile.
-  • PUID / PGID.
+  filex v0.37.0 — 2026-09-07
+  • If OnlyOffice or drawio "tests fine" but fails when you open a file, press Test again.
+  • GET /metrics was inside the admin group but registered with r.Handle, so chi bound it to every method and the demo guard refused none of them.
+  • The Test button now probes from the browser too, and says which machine answered.
+  • A release gate for the shop window — the surfaces a stranger touches before they trust us.
+  • The shop-window gate now walks the route table instead of sampling it, and covers four surfaces it had listed as gaps.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

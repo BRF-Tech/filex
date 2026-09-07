@@ -9,6 +9,16 @@ endpoint uses. filex is routinely reachable from the internet and its
 exposition names storages, counts accounts and shows traffic shape, so it is
 not public. The scrape job authenticates as an admin with an API token:
 
+> ⚠ On a **demo instance** (`FILEX_DEMO_MODE`) only `GET`, `HEAD` and `OPTIONS`
+> reach `/metrics`; every other method answers `403`. A scrape job is
+> unaffected — it uses `GET` — and an ordinary install is untouched, the demo
+> guard being a pass-through when demo mode is off. The reason is in
+> [DEMO.md](DEMO.md#the-read-only-guard): `/metrics` is registered for every
+> HTTP method chi knows, and a demo publishes its admin login, so it was the one
+> admin-gated path a visitor could reach with a verb the guard did not cover.
+> Nothing was exploitable — the exposition is read-only whatever the method —
+> but the guard's rule is exceptionless now.
+
 ```yaml
 scrape_configs:
   - job_name: filex

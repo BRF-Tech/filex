@@ -59,6 +59,21 @@ export { useFileApi, resolveEndpoints } from './composables/useFileApi';
 export type { FileApi, ManagerResponse, PendingOpDto } from './composables/useFileApi';
 /* bul:s3 — global-search contract types + snippet helpers */
 export type { GlobalSearchHit, GlobalSearchScope } from './composables/useFileApi';
+/* Browser-side reachability probe for external services (OnlyOffice, drawio).
+   Lives here, not in the admin app, because the admin page and every embedder
+   need the same answer to "can THIS browser reach the document server?" — see
+   lib/externalReach.ts for why a plain fetch() is the wrong mechanism. */
+export {
+  probeExternalFromBrowser,
+  browserProbeURL,
+  DEFAULT_PROBE_TIMEOUT_MS,
+} from './lib/externalReach';
+export type {
+  BrowserProbeState,
+  BrowserProbeResult,
+  BrowserProbeDeps,
+} from './lib/externalReach';
+
 export { snippetSegments, matchedInContent } from './lib/snippet';
 export type { SnippetSegment, SearchMatched } from './lib/snippet';
 

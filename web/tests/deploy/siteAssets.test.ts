@@ -33,14 +33,44 @@ const copies = sitePresent
       .filter((f) => existsSync(path.join(SRC, f)))
   : [];
 
-describe.skipIf(!sitePresent)('site assets', () => {
-  it('there are screenshots shared with the docs at all', () => {
-    // Guards against the list going empty through a rename and this whole
-    // suite passing vacuously. Only meaningful where site/ exists at all,
-    // which is why the whole block is skipped rather than this assertion.
-    expect(copies.length).toBeGreaterThan(0);
-  });
+// ⚠⚠ UNCONDITIONAL, and that is the whole reason it was moved out here.
+//
+// It used to sit inside the block below, where `describe.skipIf` skipped it
+// along with everything it was guarding — so the one assertion written to catch
+// "the list went empty through a rename" was switched off by the same condition
+// that would have emptied it. Measured 2026-09-07: in the published tree, which
+// CI runs this same suite against, this file reports its EIGHT tests as zero
+// and exits 0.
+//
+// The predicate is two-valued now. A checkout is either the source tree (site/
+// is here and shares pictures with docs/) or the published one (site/ was
+// withheld by the export, and `scripts/export-public.sh` went with it).
+// Anything else — site/assets renamed, moved or emptied — is neither, and says
+// so instead of quietly measuring nothing.
+it('this checkout is coherently one tree or the other', () => {
+  const exporterPresent = existsSync(path.join(REPO, 'scripts', 'export-public.sh'));
+  if (!exporterPresent) {
+    expect(
+      sitePresent,
+      'the exporter is absent, so this is the published tree — but site/assets is here. ' +
+        'The two are withheld together; a tree with one and not the other is a broken checkout, ' +
+        'and every assertion below would skip in silence.',
+    ).toBe(false);
+    return;
+  }
+  expect(
+    sitePresent,
+    'scripts/export-public.sh is here, so this is the source tree, but site/assets is missing',
+  ).toBe(true);
+  expect(
+    copies.length,
+    'site/assets exists and shares no picture with docs/screenshots. Either the sync stopped ' +
+      '(node scripts/sync-site-assets.mjs) or one of the two directories was renamed — and until ' +
+      'that is fixed the comparison below has nothing to compare.',
+  ).toBeGreaterThan(0);
+});
 
+describe.skipIf(!sitePresent)('site assets', () => {
   it.each(copies)('site/assets/%s is byte-identical to docs/screenshots', (name) => {
     const a = readFileSync(path.join(SRC, name));
     const b = readFileSync(path.join(DST, name));

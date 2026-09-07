@@ -8,6 +8,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -35,6 +36,15 @@ const redactedSecret = "***"
 // the Test button will dial whatever address it is given.
 const externalIsInstanceWide = "external services apply to the whole instance and are managed by the platform operator"
 
+// The vantage point of the server-side probe, and the names of the two legs it
+// does not cover. Callers (admin UI, MCP) key off these strings, so they are
+// constants rather than inline literals.
+const (
+	checkedFromServer   = "filex-server"
+	legBrowserToService = "browser-to-service"
+	legServiceToFilex   = "service-to-filex"
+)
+
 // ExternalAdmin handles /api/admin/external.
 type ExternalAdmin struct {
 	Store db.Store
@@ -46,6 +56,30 @@ type ExternalAdmin struct {
 	// re-asserted from the environment at every boot, so a change made here
 	// applies live but does not survive a restart — and the API says so.
 	EnvManaged map[string]bool
+	// PublicURL is the address filex hands to the document server for the
+	// document fetch and the save callback. It is the third address in the
+	// three-address problem (see internal/external/advisory.go) and the one
+	// nothing used to check, so it travels with every List and Test response.
+	PublicURL string
+	// PublicURLSet is false when nobody chose PublicURL and it defaulted to
+	// http://localhost:5212. Worth saying out loud: an operator who never set
+	// it does not know a default is in play.
+	PublicURLSet bool
+}
+
+// AttachPublicURL wires the process's public URL into the advisories. Kept out
+// of NewExternalAdmin so the two call sites (routes.go and the MCP admin
+// surface) cannot silently disagree about the constructor signature.
+func (h *ExternalAdmin) AttachPublicURL(publicURL string, set bool) {
+	h.PublicURL = publicURL
+	h.PublicURLSet = set
+}
+
+// advisories runs the shape checks for one row. The DNS note is only worth a
+// lookup when an operator is waiting (Test); List passes nil so opening the
+// admin page never blocks on a resolver.
+func (h *ExternalAdmin) advisories(ctx context.Context, name, url string, lookup external.LookupFunc) []external.Advisory {
+	return external.Advisories(name, url, h.PublicURL, h.PublicURLSet, lookup)
 }
 
 // NewExternalAdmin constructs the handler.
@@ -80,9 +114,17 @@ func (h *ExternalAdmin) List(w http.ResponseWriter, r *http.Request) {
 			"LastCheck":   row.LastCheck,
 			"LastState":   row.LastState,
 			"env_managed": h.EnvManaged[row.Name],
+			// ⚠ Advisories ride on List, not only on Test. The whole defect
+			// was a badge that looked settled without anyone pressing
+			// anything; an operator must be able to see a browser-unreachable
+			// address the moment the page paints.
+			"advisories": h.advisories(r.Context(), row.Name, row.URL, nil),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries":    out,
+		"public_url": h.PublicURL,
+	})
 }
 
 type extPatchReq struct {
@@ -177,19 +219,42 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":        false,
-			"reachable": false,
-			"error":     err.Error(),
-			"name":      name,
+			"ok":           false,
+			"reachable":    false,
+			"error":        err.Error(),
+			"name":         name,
+			"checked_from": checkedFromServer,
+			"public_url":   h.PublicURL,
 		})
 		return
 	}
+	// ⚠ Say WHAT was verified, and by whom. This probe left the filex
+	// process and nothing else: it says nothing about the browser that loads
+	// the editor, and nothing about the document server's route back to
+	// filex. A green light standing for three questions is exactly what sent
+	// issue #17 round a second time.
+	adv := h.advisories(r.Context(), name, state.URL, external.SystemLookup(r.Context(), 2*time.Second))
 	resp := map[string]any{
 		"ok":        true,
 		"name":      name,
 		"reachable": state.State == "ok",
 		"url":       state.URL,
 		"state":     state.State,
+		// checked_from is the vantage point of THIS result. The admin page
+		// runs its own probe from the browser and reports the two separately.
+		"checked_from": checkedFromServer,
+		// not_checked names the legs this endpoint cannot settle. The browser
+		// leg is answered by the admin page; the callback leg cannot be
+		// answered at all — filex has no way to make another container issue a
+		// request on demand — so it is covered by advisories instead.
+		"not_checked": []string{legBrowserToService, legServiceToFilex},
+		"public_url":  h.PublicURL,
+		"advisories":  adv,
+		// complete is false whenever anything is unsettled or wrong. It is
+		// deliberately NOT "the probe succeeded": that is the conflation this
+		// change exists to remove.
+		"server_reachable": state.State == "ok",
+		"has_warnings":     external.HasWarning(adv),
 	}
 	// ⚠ Say WHAT is missing. "unconfigured" on a service that has a URL means
 	// the other half of its configuration is absent, and the operator is

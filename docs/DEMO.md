@@ -45,6 +45,7 @@ makes that safe.
 | `/api/auth/password` | changes the *published* password — one visitor locks out every other reader |
 | `/api/auth/profile` | changes the e-mail those credentials sign in with |
 | `/api/auth/totp/…` | puts a second factor on the shared account |
+| `/metrics` | the Prometheus exposition, mounted inside the admin group with `r.Handle`, so chi registers it for **every** method. The exposition is read-only and answers the same bytes to any verb, so nothing here was ever exploitable — it is guarded so that "a demo refuses every state-changing method on every operator surface" holds with no exceptions. `GET`/`HEAD`/`OPTIONS` still pass: scrape jobs are untouched (`METRICS.md`) |
 
 Refusals answer `403` with a sentence a visitor can act on:
 
@@ -67,6 +68,28 @@ guard that enumerates handlers is one merge away from a hole; a guard on the
 prefix covers a route that does not exist yet. It is installed as router-level
 middleware in `BuildRouter`, above every auth chain, and is a pass-through
 with a single boolean test when demo mode is off.
+
+### How the prefix list is kept honest
+
+A prefix list has one failure mode of its own: a **fourth** prefix. `/api/admin`
+and `/api/ai/admin` were the same admin panel behind two front doors, and the
+second one was found only because somebody went looking.
+
+`backend/internal/api/shop_window_route_table_test.go` walks the entire chi
+route table and classifies every state-changing route by asking the running
+server: a route an anonymous caller is refused `401` on and a signed-in
+**non-admin** is refused `403` on is an operator surface, one that answers both
+identically is not role-gated at all, and everything else is the product. Every
+operator surface must be refused here — and, in a second test, no route an
+ordinary user is entitled to use may be, so the guard cannot be widened over the
+product to make the first test quiet.
+
+Nothing in that test names a route. It found `/metrics` on its first run, and it
+is the reason a fifth prefix cannot arrive unnoticed. ⚠ Its one blind spot: the
+classification is behavioural, so a route with its own bespoke authorization
+that answers an ordinary user exactly as it answers an anonymous one reads as
+"not role-gated". Use `auth.RequireAdmin` or `RequireScope("admin")` like the
+rest of the tree and it is visible.
 
 ### What is still writable on a demo, on purpose
 

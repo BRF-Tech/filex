@@ -437,6 +437,7 @@ func BuildRouter(d *Deps) http.Handler {
 	syncAdmH := handlers.NewSyncAdmin(d.Store)
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
 	externalH := handlers.NewExternalAdmin(d.Store, d.Caps, d.External, envManagedExternal(d.Cfg))
+	externalH.AttachPublicURL(d.Cfg.PublicURL, d.Cfg.PublicURLSet)
 	authProvH := handlers.NewAuthProviders(d.Store)
 	authProvH.DemoMode = d.Cfg.Demo.Mode
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
@@ -1186,6 +1187,8 @@ func BuildRouter(d *Deps) http.Handler {
 		External:           d.External,
 		EnvManagedExternal: envManagedExternal(d.Cfg),
 		DemoMode:           d.Cfg.Demo.Mode,
+		PublicURL:          d.Cfg.PublicURL,
+		PublicURLSet:       d.Cfg.PublicURLSet,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL, convertURL)
 	aiMCP.AttachTenants(tenants)

@@ -25,6 +25,57 @@ Fixed after v0.13.4 — see [Releases](RELEASES.md).
 
 ---
 
+## Three machines, three addresses
+
+⚠ **Read this before you fill in the Document Server URL.** Almost every
+"it tests fine and then does not work" report is this and only this:
+
+| Address | Who has to reach it | How it is checked |
+|---|---|---|
+| the **Document Server URL** | your **browser** — it loads the editor's JavaScript straight from there | the admin page probes it **from your browser** |
+| the same **Document Server URL** | the **filex process** — it polls `/healthcheck` | the **Test** button |
+| **`FILEX_PUBLIC_URL`** | the **Document Server** — it fetches the document and POSTs the save back | ⚠ **not checked** — see below |
+
+These are three different machines, and an address that works for one can be
+useless to another. The classic case: on Docker or podman you type the
+container name, `http://onlyoffice`. filex reaches it, **Test goes green**, and
+your browser cannot resolve that name at all — so the editor fails with the
+same message as a missing configuration.
+
+**A green Test means "the filex process reached that URL". Nothing more.**
+Since v0.37 the admin page says so, and probes the browser leg itself: it
+reports *From the filex server: …* and *From this browser: …* as two separate
+lines, and warns next to the field when the address is one a browser cannot
+load (a bare container name, or `localhost` on an install published elsewhere).
+
+The third leg cannot be probed at all — filex has no way to make the Document
+Server issue a request on demand — so filex only warns about the shapes that
+certainly cannot work: a `FILEX_PUBLIC_URL` of `localhost`, `127.0.0.1` or
+`0.0.0.0`, or a hostname filex itself cannot resolve.
+
+### Two commands that say which half is wrong
+
+```bash
+# the browser leg — run this from a workstation, not from the server
+curl -I <document-server-url>/web-apps/apps/api/documents/api.js
+
+# the callback leg — run this from INSIDE the document server container
+podman exec -it onlyoffice curl -I "$FILEX_PUBLIC_URL/healthz"
+```
+
+Both must answer `200`. The first failing while filex's own Test passes is
+exactly the container-name case above. The second failing means saves will be
+lost even though the editor opens.
+
+> **One public URL, not two.** filex has a single `FILEX_PUBLIC_URL`, and both
+> the Document Server callback and every share link are built from it. If your
+> Document Server can only reach filex by a container name
+> (`http://filex:5212`) while your users need a browser-facing address, filex
+> cannot express that today — the admin page raises a note when it sees a
+> container-name public URL, and the workaround is to give the Document Server
+> a route to the browser-facing name (a DNS entry, an `extra_hosts` line, or a
+> shared network).
+
 ## How it works
 
 Three pieces cooperate, all signed with one shared secret (HS256 / HMAC-SHA256):
@@ -119,11 +170,9 @@ with the text editor, not a second knob.
 ## Prerequisites
 
 - A reachable **OnlyOffice Document Server** (Community Edition is fine).
-- The Document Server and filex must be able to reach **each other over HTTP(S)**:
-  - the browser must reach the Document Server (iframe assets),
-  - the Document Server must reach filex's **public URL** (fetch + callback).
-- `FILEX_PUBLIC_URL` must be the URL the Document Server can actually resolve —
-  not `localhost` (see [Failure: document won't load / won't save](#failure-document-wont-load-or-save)).
+- Three addresses that each work from the machine that needs them — read
+  [Three machines, three addresses](#three-machines-three-addresses) first. It
+  is the single most common cause of "it tested fine and then did not work".
 
 ---
 
@@ -174,14 +223,25 @@ is reverted at the next boot — the card in the UI is labelled **"Set by the
 environment"** when that is the case. Leave the variables unset if you want the
 UI to own the setting.
 
-### 3. Make sure both sides are reachable
+### 3. Make sure all three addresses work
+
+The full picture is [Three machines, three
+addresses](#three-machines-three-addresses); the short version:
 
 - Serve both filex and the Document Server over **HTTPS** in production. Browsers
   block an HTTPS page from loading an HTTP iframe (mixed content), so an HTTP
-  Document Server behind an HTTPS filex will silently fail to load.
+  Document Server behind an HTTPS filex will silently fail to load. The admin
+  page names this case rather than reporting it as "unreachable".
+- The Document Server URL must be one **a browser** can open — not only one
+  filex can reach from inside the container network.
 - `FILEX_PUBLIC_URL` must be resolvable **from the Document Server container/host**
   (it fetches source + posts callbacks there). In Docker, that usually means a
   real hostname or the compose service name — never `http://localhost`.
+
+Then press **Test** on *Settings → External services* and read **both** lines it
+prints. *From the filex server: reachable* and *From this browser: not
+reachable* together mean the address is container-internal: the editor loads in
+the browser, so it will fail there.
 
 That's it — reopen an Office file in filex and it should launch the editor.
 
@@ -250,7 +310,11 @@ filex restart, while `FILEX_ONLYOFFICE_JWT` is re-asserted onto the row at boot
 and therefore needs one. The Document Server needs a restart either way.
 
 ### Failure: document won't load or save
-Almost always a **reachability / URL** problem:
+Almost always a **reachability / URL** problem — and which of the three
+addresses is wrong is the whole diagnosis. Open *Settings → External services*
+and read the two probe lines plus any warning next to the URL field; the
+[two commands](#two-commands-that-say-which-half-is-wrong) answer the same
+question from a shell.
 
 - **Won't load** (blank iframe / "editor cannot connect"): the browser can't
   reach `FILEX_ONLYOFFICE_URL`, or it's HTTP behind an HTTPS filex (mixed

@@ -361,7 +361,54 @@
     "testOk": "Reachable",
     "testFail": "Health check failed",
     "envManaged": "Set by the environment",
-    "envManagedHint": "Pinned by an environment variable. A change here applies immediately but is reset from the environment the next time filex restarts."
+    "envManagedHint": "Pinned by an environment variable. A change here applies immediately but is reset from the environment the next time filex restarts.",
+    "overall": {
+      "disabled": "Disabled",
+      "unconfigured": "Not configured",
+      "serverUnreachable": "Unreachable from the server",
+      "checking": "Checking from your browser…",
+      "serverOnly": "Server-reachable only",
+      "needsAttention": "Needs attention",
+      "serverReachable": "Reachable from the server",
+      "complete": "Complete"
+    },
+    "threeAddresses": {
+      "title": "Three machines, three addresses",
+      "browser": "Your browser loads the editor's JavaScript straight from the document server URL below, so that address has to work in a browser — not only inside the container network.",
+      "server": "The filex process fetches the document server's health endpoint from the same URL. This is what the Test button checks.",
+      "callback": "The document server fetches the document from filex and posts the save back to filex's public URL, so that address has to work from inside the document server's container:",
+      "publicUrlUnknown": "(not reported)",
+      "diagnose": "When something fails, these two commands say which half is wrong:",
+      "fromWorkstation": "from a workstation — the browser leg",
+      "fromDocumentServer": "from inside the document server container — the callback leg"
+    },
+    "legs": {
+      "server": "From the filex server:",
+      "browser": "From this browser:",
+      "callback": "From the document server back to filex:",
+      "reachable": "reachable",
+      "unreachable": "not reachable",
+      "notConfigured": "not configured",
+      "disabledLeg": "disabled",
+      "cannotCheck": "not checked — filex cannot make the document server issue a request on demand. The warnings below are the shapes that certainly cannot work.",
+      "disagree": "filex reaches this address and your browser does not. That is what a container-internal name looks like: the editor loads in the browser, so it will fail there."
+    },
+    "browserStates": {
+      "checking": "checking…",
+      "notChecked": "not checked yet",
+      "ok": "the editor loaded",
+      "wrongContent": "something answered, but it is not this service",
+      "unreachable": "not reachable from here",
+      "timeout": "timed out — nothing answered and nothing refused",
+      "mixedContent": "blocked: this admin page is HTTPS and that address is HTTP"
+    },
+    "advisories": {
+      "browser_bare_host": "“{host}” is a single-label host name. filex can reach it from inside the container network, but your browser loads this service directly and cannot resolve it. Use an address a browser can open.",
+      "browser_loopback_host": "This is a loopback address, but filex is published at {publicUrl} — the people who open it are not on this host, and to their browser “{host}” means their own machine.",
+      "public_url_loopback": "The document server fetches the document from filex and posts the save back to {publicUrl}. Inside its own container that address is the document server, not filex.",
+      "public_url_bare_host": "filex's public URL ({publicUrl}) is a container-network name. The document server can reach it, but share links and e-mails built from it will not open in a browser outside that network.",
+      "public_url_unresolved": "filex itself cannot resolve “{host}”. That is expected if your document server uses a different DNS view; otherwise the public URL points at a name nothing can look up."
+    }
   },
   "authProviders": {
     "title": "Auth providers",

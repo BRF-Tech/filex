@@ -27,6 +27,7 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import Modal from './Modal.vue';
 import { ensureMonaco, getMonaco, ensureHighlight } from '../composables/useMonacoLoader';
 import { useLocale } from '../composables/useLocale';
+import { browserProbeURL } from '../lib/externalReach';
 
 const props = defineProps<{
   open: boolean;
@@ -895,7 +896,10 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
     }
     const script = document.createElement('script');
     script.id = ONLYOFFICE_SCRIPT_ID;
-    script.src = `${base.replace(/\/$/, '')}/web-apps/apps/api/documents/api.js`;
+    // Same URL the admin page's browser probe attempts, from the same
+    // helper — a probe that tested a different address than the editor loads
+    // would be the old lie wearing a new badge.
+    script.src = browserProbeURL('onlyoffice', base);
     script.async = true;
     script.onload = () => resolve();
     script.onerror = () => reject(new Error('OnlyOffice api.js load failed'));

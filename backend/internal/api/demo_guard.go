@@ -39,12 +39,25 @@ import (
 // at POST /api/admin/ai-tokens (201), then drove PATCH /api/ai/admin/settings
 // with it (200) and the change read back through the normal admin API. Guard
 // one mount point and the other one is the bypass.
+//
+// ⚠ /metrics is the fourth front door onto the same surface, and it was found
+// the way a fourth one always will be: by WALKING the route table instead of
+// listing it (shop_window_route_table_test.go). It is mounted inside the
+// admin-only group with `r.Handle`, so chi registers it for every method it
+// knows, and every non-GET verb on it was an admin-gated route a demo did not
+// refuse. Nothing was ever going to break — the exposition is read-only and
+// answers the same bytes to any method — but guarding it is what lets that
+// walk state its rule with no exceptions at all, and "a demo refuses every
+// state-changing method on every operator surface" is a promise worth more
+// than the one route it costs. GET/HEAD/OPTIONS still pass, so a Prometheus
+// scrape job is untouched (docs/METRICS.md).
 var demoGuardedPrefixes = []string{
 	"/api/admin",
 	"/api/ai/admin",
 	"/api/auth/password",
 	"/api/auth/profile",
 	"/api/auth/totp",
+	"/metrics",
 }
 
 // demoGuardBlocks reports whether a demo instance must refuse this request.

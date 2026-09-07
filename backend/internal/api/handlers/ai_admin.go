@@ -95,6 +95,12 @@ type AIAdminDeps struct {
 	// same things they redact on the native /admin routes. The token surface
 	// is not a way around a demo's rules.
 	DemoMode bool
+	// PublicURL + PublicURLSet feed the external-service advisories: the MCP
+	// admin surface must report the same three-address picture the UI does,
+	// or an agent reading it back gets the narrower answer the UI stopped
+	// giving (issue #17).
+	PublicURL    string
+	PublicURLSet bool
 }
 
 // NewAIAdmin constructs the admin AI surface from shared deps. Each wrapped
@@ -114,7 +120,7 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		trash:       NewTrash(d.Trash, d.Store),
 		searchAdm:   NewSearchAdmin(d.Index, d.Store),
 		authProv:    newDemoAwareAuthProviders(d),
-		external:    NewExternalAdmin(d.Store, d.Caps, d.External, d.EnvManagedExternal),
+		external:    newExternalAdminWithPublicURL(d),
 		replica:     NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader),
 		repTargets:  NewReplicationTargets(d.Store),
 		queue:       NewQueue(d.Queue),
@@ -849,4 +855,14 @@ func filtersToQuery(m map[string]any) url.Values {
 		}
 	}
 	return q
+}
+
+// newExternalAdminWithPublicURL builds the external handler the MCP admin
+// surface wraps, with the same public-URL context the native /admin routes
+// give it. Without this the agent-facing surface would report a green probe
+// and none of the advisories the UI shows.
+func newExternalAdminWithPublicURL(d AIAdminDeps) *ExternalAdmin {
+	h := NewExternalAdmin(d.Store, d.Caps, d.External, d.EnvManagedExternal)
+	h.AttachPublicURL(d.PublicURL, d.PublicURLSet)
+	return h
 }

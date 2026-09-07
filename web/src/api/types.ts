@@ -266,6 +266,22 @@ export interface SettingsMap {
   [k: string]: unknown;
 }
 
+/**
+ * One thing the server can say about a configuration that no probe from the
+ * filex process can settle — a Document Server URL a browser cannot resolve, a
+ * FILEX_PUBLIC_URL the document server cannot post back to. `severity:
+ * 'warning'` withholds the "configuration complete" badge; `'note'` never
+ * does. Rendered by `code` (translated EN + TR); `message` is the English
+ * fallback for anything without a translation.
+ */
+export interface ExternalAdvisory {
+  code: string;
+  field: 'url' | 'public_url' | string;
+  severity: 'warning' | 'note';
+  detail?: string;
+  message: string;
+}
+
 export interface ExternalService {
   id: 'onlyoffice' | 'drawio';
   url: string | null;
@@ -279,6 +295,13 @@ export interface ExternalService {
   // survive a restart — the card says so rather than letting the operator find
   // out later.
   env_managed?: boolean;
+  /**
+   * ⚠ Present on the LIST response, not only after a Test. The whole defect
+   * behind issue #17's second round was a badge that looked settled without
+   * anyone pressing anything, so a browser-unreachable address has to be
+   * visible the moment the page paints.
+   */
+  advisories?: ExternalAdvisory[];
 }
 
 export interface AuthProvider {

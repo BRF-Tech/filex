@@ -19,20 +19,1050 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.33.0, 5 September 2026
-A release of things that were quietly wrong. A large upload to an S3 endpoint served over plain HTTP died inside the client and the storage sync then moved the file to the trash — reported from the outside, and worth knowing why it had never been seen here: SigV4 hashes the request body over `http` and does not over `https`, so filex was requiring a rewindable stream it never asked for, and the bug sat waiting for the first plaintext endpoint. Overwriting a file now keeps the old bytes: the snapshot happens before the write at every destructive surface, and if it cannot be taken the write is refused rather than losing the file — until now only the in-browser text editor versioned anything, so uploading over a file destroyed it. The S3 gateway stopped exposing filex's own `.versions/`, `.thumbs/` and `.filex-trash/` trees, which every other protocol had hidden since it was written. On a multi-tenant install every absolute URL now names the tenant's host rather than the operator's — share links, the WebSocket endpoint, and the account-created e-mail that carried a temporary password to somebody else's login page. And the product stopped speaking Turkish to people who never asked: the convert dialog, eighteen notifications, the file-request e-mail, and an embed that defaulted to Turkish now follow the locale, or the browser's, or English.
+::: tip Latest — v0.35.0, 7 September 2026
+A security release. On a multi-tenant install the tenant boundary was enforced on the routes that list rows and assumed on the routes that name one: an administrator of any tenant, pointed at another tenant's ids, reached fifteen of the sixteen such routes. Resetting a password returned the other customer's new password in the response body; reading a storage returned its S3 or SFTP secret; minting an API token bound it to somebody else's user. The file API was worse, because it serves bytes rather than JSON. Separately, and on every install rather than only multi-tenant ones, thumbnails were readable without logging in — a rendered preview of any document to anyone who could guess a node id — so thumbnail URLs now carry a short-lived signature that an &lt;img> tag can use and an anonymous request cannot forge. Emptying the trash for one storage emptied all of them, permanently, while the dialog promised otherwise. Restoring a version required no permission at all, so a read-only account could overwrite live files. Directory logins provisioned accounts into the tenant that sees every other one. And a family of controls that saved and were never read is gone or wired up: five admin settings that wrote rows nothing consulted, a demo password that broke the demo login it claimed to secure, and a storage sync mode that accepted typos and silently polled.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.33.0
-docker pull ghcr.io/brf-tech/filex:full-v0.33.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.35.0
+docker pull ghcr.io/brf-tech/filex:full-v0.35.0
 ```
+
+## v0.35.0
+
+<span class="filex-release-date">7 September 2026</span>
+
+A security release. On a multi-tenant install the tenant boundary was enforced on the routes that list rows and assumed on the routes that name one: an administrator of any tenant, pointed at another tenant's ids, reached fifteen of the sixteen such routes. Resetting a password returned the other customer's new password in the response body; reading a storage returned its S3 or SFTP secret; minting an API token bound it to somebody else's user. The file API was worse, because it serves bytes rather than JSON. Separately, and on every install rather than only multi-tenant ones, thumbnails were readable without logging in — a rendered preview of any document to anyone who could guess a node id — so thumbnail URLs now carry a short-lived signature that an &lt;img> tag can use and an anonymous request cannot forge. Emptying the trash for one storage emptied all of them, permanently, while the dialog promised otherwise. Restoring a version required no permission at all, so a read-only account could overwrite live files. Directory logins provisioned accounts into the tenant that sees every other one. And a family of controls that saved and were never read is gone or wired up: five admin settings that wrote rows nothing consulted, a demo password that broke the demo login it claimed to secure, and a storage sync mode that accepted typos and silently polled.
+
+## What changed
+
+### Upgrade notes
+
+- ⚠⚠ **Running `FILEX_MULTI_TENANT`? Upgrade.** The tenant boundary was enforced
+  on the routes that *list* rows and assumed on the routes that *name* one. An
+  administrator of any tenant, pointed at another tenant's ids, reached fifteen
+  of the sixteen such routes — including `POST /api/admin/users/{id}/reset-password`,
+  which answered 200 and returned the other customer's **new password in the
+  response body**, and `GET /api/admin/storages/{id}`, which returned the storage
+  config: for an S3 or SFTP storage, the access key and secret. `/api/files` was
+  worse still, because it serves bytes. All of it is closed. See **Security** below.
+
+- ⚠⚠ **Everyone: thumbnails were readable without logging in.** `GET /api/files/thumb/{id}`
+  sat outside every auth group and returned a rendered preview — the readable
+  content of a document — to anyone who could guess a node id. This is not
+  specific to multi-tenant installs. Thumbnail URLs now carry a short-lived
+  signature, and an authenticated caller is checked. **If you build thumbnail
+  URLs yourself**, take them from the listing rather than constructing them;
+  a hand-built URL without the stamp is now a 401.
+
+- ⚠ **Emptying the trash for one storage used to empty all of them.** If you
+  have used *Empty trash* with a storage selected on an earlier version, it
+  purged every storage's trash, permanently, while the dialog said otherwise.
+
+- ⚠ **Directory logins now refuse rather than mis-home.** On a multi-tenant
+  install, LDAP and proxy-header logins used to provision accounts into the
+  supertenant, which sees every tenant. They now inherit the tenant from the
+  request's host; where there is no host to read (LDAP over SFTP/FTPS/NFS) the
+  login is **refused** unless you set `auth.ldap.provider` / `FILEX_LDAP_PROVIDER`,
+  because the only alternative was the supertenant. Existing mis-homed accounts
+  are **not** moved automatically — the boot log now names them and points at
+  `PATCH /api/admin/users/{id}`.
+
+- ⚠ **Version restore now requires `editor`.** It required nothing before: a
+  read-only user could overwrite live file content with an old version.
+
+- **Five admin Settings controls were removed** (`public_url`, `sync_interval_seconds`,
+  `log_level`, `default_locale`, `default_timezone`). They wrote rows that
+  nothing read; the environment variables that do work are named in their place.
+
+- **`storage.sync_mode` is validated now.** An unsupported value is rejected
+  instead of stored and silently polled. Rows that already carry `push` keep
+  working (they poll, and say so once in the log); only a *change* to an
+  unsupported mode is refused.
+
+### Security
+
+- **`GET /api/files/thumb/{id}` served rendered previews to anyone who could
+  count.** The route sat outside every auth group, `checkSig` returned true when
+  the `sig` parameter was **absent**, `manager.go` emitted `thumb_url` with no
+  signature so no deployment was ever on the signed path, and nothing in the
+  codebase ever wrote `settings.thumb_signing_key` — so the `key == ""` branch
+  waved a supplied signature through too. Measured: an anonymous `curl` with no
+  cookie and no token got **200, `image/jpeg` and the full body**, and
+  `?sig=deadbeef` got the same, on a server where anonymous
+  `GET /api/files/quota/me` correctly answered 401. Node ids are dense integers,
+  so that was "walk the range and collect the rendered first page of every file
+  on the instance" — and it was **not** a tenancy bug: a single-tenant install
+  leaked exactly as much. This is the most widely exposed of the three fixed
+  here.
+
+  ⚠ The fix could not simply be "require auth". Thumbnails render into
+  `<img src>`, which sends no `Authorization` header, and filex's session cookie
+  is `SameSite=Lax`, so an `<img>` inside a third-party embed sends no cookie
+  either — a blunt auth requirement would have closed the hole and blanked every
+  embedded explorer in production, including a customer's. The endpoint now takes
+  **one of two proofs**: a short-lived stamp on the URL (`?exp=&sig=`, an
+  HMAC-SHA256 over node id + expiry under a key that is now actually generated),
+  which the listing puts on every `thumb_url` it emits and which an `<img>` can
+  carry; or an authenticated caller who clears the node's tenancy scope, the
+  token's `root:` confinement and an ACL check at viewer level. Neither → 401.
+
+  All four consumers were re-measured after the change: the admin SPA (cookie),
+  the desktop app (bearer), an `<img>` in an embedded `@brftech/filex` explorer
+  (the stamp, no credentials at all) and the public share page — which never used
+  this endpoint and still does not, since it serves the same artefact through
+  `/s/{token}/f/<path>?thumb=1`, scoped to the share token. A root-confined embed
+  token now also stops at its own subtree: previously it could read previews of
+  any node id on the instance, because a node id is not a path and
+  `confine.Middleware` had nothing to rewrite.
+
+  `FILEX_THUMBS_URL_TTL` (default `24h`, matching the endpoint's `Cache-Control`)
+  bounds the stamp; the expiry is quantized to the hour so the URL string — the
+  cache key for both the browser and `useThumbs` — stays stable within a window
+  instead of forcing a re-download on every listing.
+
+- **LDAP and proxy-header logins provisioned into the supertenant.**
+  `db.Store.CreateUser` hard-codes `provider_id` to the `default` provider, and
+  `default` is seeded `is_supertenant = 1` — which `CanAccessStorage` treats as
+  confine-**exempt**. Measured on a two-tenant install: a header-trust login
+  arriving on `diyetlif.local` created the account with `provider_id = 1`, and
+  that account's own storage listing came back as **both** tenants' storages. The
+  account was not mis-filed, it was privileged.
+
+  A login has no caller whose tenant could be inherited — the account being
+  created *is* the caller — so the signal is the request **Host**, the same one
+  `multioidc.Dispatcher` already uses to pick a realm. `handlers.Auth.Login`
+  stamps it onto the context (`auth.LoginDriver.Login` takes only a `ctx`, so a
+  driver in the chain cannot see the request), the proxy-header driver stamps its
+  own, and `auth.ProvisionUser` homes the new row — deleting it if homing fails,
+  as the invite path already did.
+
+  ⚠ The protocol logins (SFTP/FTPS/NFS, through `internal/protocolauth`) present
+  a password on a socket and have **no Host at all**. There, on a multi-tenant
+  install, the driver now **refuses to create** rather than falling back: the
+  only fallback available is the supertenant, so "provision anyway" is the bug
+  rather than a convenience. An account that already exists signs in over every
+  protocol exactly as before. New `auth.ldap.provider` / `FILEX_LDAP_PROVIDER`
+  (and `auth.header_proxy.provider` / `FILEX_HEADER_PROVIDER`, plus Helm
+  `auth.ldap.provider` and a `auth.headerProxy` block that did not exist) let an
+  operator name the tenant explicitly when they want it.
+
+  ⚠ **Rows an older build already stranded are not migrated.** Nothing records
+  which driver created a user, and the break-glass `admin@local` is deliberately
+  in the supertenant, so a blanket re-home would take an operator's own account
+  away from them. Instead a multi-tenant install with either driver enabled now
+  logs **one WARN at boot** naming every non-admin account homed in the
+  supertenant; re-homing stays `PATCH /api/admin/users/{id}` with `provider_id`.
+
+- **`/api/files/versions` had no ownership or ACL check on any install.** The
+  `Versions` handler had no `ACL *acl.Resolver` field at all — the only file
+  surface in `routes.go` with no `AttachACL` call — and `versioning.Service`
+  verifies only that a version belongs to the node it names before overwriting
+  live bytes. Measured on a **single-tenant** install with a `viewer`-role
+  account: `POST /api/files/versions/restore` answered 200 and `contract.txt` on
+  disk went from its current content to the old version's, and
+  `POST /api/files/versions/snapshot` answered 200 and wrote a version row. A
+  read-only account could roll back, and force snapshots of, any file whose node
+  id it could name.
+
+  Every route in the file now resolves the node first and applies four gates —
+  existence, tenancy, `root:` confinement, RBAC. Restore and snapshot require
+  **editor**; listing the timeline stays at **viewer**, because somebody who can
+  read the file is not being told its history is a secret. The admin hard-delete
+  gains the same check (redundant behind `RequireAdmin` today, deliberately, so
+  that un-admin-ing the route cannot silently drop authorization). The first
+  three gates answer 404, identical to a node that never existed; only the RBAC
+  refusal is 403.
+
+  ⚠ One behaviour change beyond the permission gate: a **trashed** node is no
+  longer reachable through these routes (404). A trashed row's live path is its
+  `storage_key` — where restore would put it back — so restoring a version onto
+  one wrote bytes to a path the catalogue says holds nothing. It is the same
+  exclusion the comments handler already makes.
+
+  ⚠ Restore is a destructive **write** and was the one write surface in filex
+  that went through neither half of `writehook`. It now calls
+  `BeforeOverwrite` first — so the bytes it replaces are snapshotted, and a
+  snapshot that fails answers 503 `SNAPSHOT_FAILED` instead of destroying them —
+  and `OnFileWritten` after, which is what finally makes a restore emit
+  `file.updated` to webhook subscribers. `snapshot_current` now does work only
+  when that guard is switched off, so the same bytes are never recorded twice.
+
+### Fixed
+
+- **A user could mute a notification event and keep receiving it.**
+  `muted_events` and `in_app_enabled` round-tripped through
+  `GET`/`PATCH /api/notifications/settings` from the day they were added and
+  **no read path applied either of them**: the history query filtered on the
+  user and the read flag only, so a muted event still appeared in the list and
+  still counted towards the unread badge. A preference that saves and does
+  nothing is worse than an absent one — the user believes the noise is handled.
+
+  Both now gate the **read**: `in_app_enabled: false` empties the bell,
+  `muted_events` drops those event ids from the list *and* the unread count.
+  What deliberately did **not** change is as important: `Send` still records
+  every event (the audit is not a preference), webhook delivery is untouched
+  (it is global), and the admin/global view is never filtered by one user's
+  mutes. The filter is applied in SQL rather than to the returned page, so a
+  filtered page comes back full and its total counts what the caller will
+  actually show. An unreadable settings row **fails open** — a display
+  preference must not be able to hide an antivirus hit behind a DB hiccup.
+
+  `docs/NOTIFICATIONS.md` said so in one place ("nothing applies them yet") and
+  contradicted itself in another, prescribing them under *Too many
+  notifications* as a live remedy. Both are now true.
+
+- **`FILEX_AUTH_DRIVERS=proxy_header` enabled nothing.** The loader matched
+  `proxy-header` with a hyphen; `docs/CONFIGURATION.md` (twice),
+  `docs/ARCHITECTURE.md` and the Helm chart all told people to write the
+  underscore. Following the documentation produced one
+  `unknown auth driver` log line and an install with reverse-proxy SSO that
+  reads as configured and silently is not. Driver names now fold `_` to `-`.
+
+- **The release pipeline could publish the 510 MB image as `:slim`.** The
+  default build was tagged `slim`/`slim-vX.Y.Z` and those tags were overwritten
+  by the slim build that followed — which is only true when the second build
+  runs. The job is `allow_failure` (the dind runner is unreliable) and pushed
+  with `--all-tags`, which is not selective. The full build no longer claims
+  those tags, and the push names the tags it built.
+
+- Helm `Chart.yaml` credited `scripts/sync-chart-version.mjs` for keeping
+  `appVersion` current. No such file exists; the script is
+  `scripts/sync-deploy-versions.mjs`.
+
+- The storage badge labelled a storage with no `sync_mode` as **On demand**,
+  while the backend defaults an unset mode to **poll** — the opposite of what
+  was running.
+
+- **`FILEX_DEMO_PASS` broke the demo button it was supposed to configure.**
+  The loader parsed it, `docs/CONFIGURATION.md` listed it, and no code read
+  `config.Demo.Pass` — while the demo landing's only button submitted the
+  literal string `demo` and the credentials hint under it printed the same
+  literal. An operator who set the variable therefore *broke* the demo login
+  while believing they had secured it, and the page went on advertising a
+  password that no longer worked.
+
+  The password now travels the same road the demo user already did: the
+  capabilities response carries it and the CTA submits what it is given.
+  ⚠ It is published **only when demo mode is on** — where the page prints the
+  credentials next to the button anyway, which is the entire point of a demo —
+  and a normal install returns nothing, whatever `FILEX_DEMO_PASS` says. Both
+  fallbacks stay `demo`, so an install that never set the variable (including
+  the public demo, whose account password is `demo` in the database) behaves
+  exactly as before. The documentation now also says the thing that was
+  missing: neither variable creates or changes the account.
+
+- **`sync_mode` was never validated, and `push` was a mode with nothing behind
+  it.** Any string the admin API decoded was persisted, and the sync worker's
+  switch has no branch for it, so `fsnotifiy` stored happily and the storage
+  ran the poll loop while the page displayed the typo back. `push` was the same
+  defect wearing a nicer costume: a declared enum member, no receiver, silently
+  polling.
+
+  The gate lives in the **store**, not in one handler, because three writers
+  reach that column — the admin API, the config seed and the CLI — and the
+  message names the modes that exist. `push` is rejected as unimplemented, with
+  a message pointing at `ondemand` + `POST /api/admin/storages/{id}/sync`,
+  which is what an external writer actually wants.
+
+  What happens to rows that already say `push`: **nothing is rewritten.** They
+  keep polling as they always did, they stay editable — an unrelated rename or
+  disable still saves, since refusing it would strand an operator with a row
+  they cannot fix — and only a *change* to an unsupported mode is refused. The
+  worker now logs `sync: unsupported sync_mode, falling back to poll` once per
+  storage at startup, so the discrepancy is visible instead of silent, and the
+  storages list labels such a row **Unsupported (polling)** instead of the raw
+  i18n key. ⚠ The rejection currently surfaces as HTTP 500 with the message in
+  the body; mapping it to 400 belongs in the storages handler.
+
+- **Two load-bearing environment variables were undocumented.**
+  `FILEX_TESSERACT_BIN` decides whether images are OCR'd into the content
+  index — and when set it is *authoritative*, so a wrong path turns OCR off
+  rather than falling back to `$PATH`, which is exactly the kind of thing an
+  operator must be told before they debug an empty index. `FILEX_UPDATE_TARGET`
+  is the one variable in `docs/CONFIGURATION.md` that filex **sets** rather than
+  reads: it is exported into `FILEX_UPDATE_PRE_COMMAND`'s environment with the
+  version about to be installed, so a backup command can name its dump after it.
+  Both are now in `docs/CONFIGURATION.md`, with what happens when they are unset.
+
+- **Helm `nameOverride` was rendered by every template and declared nowhere.**
+  `_helpers.tpl` has always read `.Values.nameOverride`, so it worked — for
+  anyone who read the templates. A value you can only discover by reading the
+  chart's internals is not configurable in practice; it is now declared in
+  `values.yaml` with what it changes (`helm template rel ./filex --set
+  nameOverride=custom` → `rel-custom-*`).
+
+- **Five of the six controls on the admin Settings page did nothing.**
+  `public_url`, `sync_interval_seconds`, `log_level`, `default_locale` and
+  `default_timezone` were PATCHed, written to the `settings` table, echoed back
+  and re-rendered in the form — and no code on the server ever read those rows.
+  The live values come from `FILEX_PUBLIC_URL`, `FILEX_SYNC_INTERVAL`,
+  `FILEX_LOG_LEVEL` and `FILEX_DEFAULT_LOCALE`; there is no timezone knob at
+  all. `site_name`, the one key with a reader (share-invite mail), sat on the
+  same form and made the page look trustworthy, and the hints promised
+  specifics — *"Used for share links and email templates"* under a field that
+  changed no link.
+
+  The five controls are gone, replaced by a line naming the variables that do
+  work. Nothing is migrated: the stale rows are harmless and were never read.
+
+- **A failed sync was painted the same grey as one that never ran.** The
+  backend writes `"failed"` (`internal/sync/poll.go`); both `syncTone` copies —
+  Storages and Dashboard — matched `'error'`, the spelling the *sync-runs* list
+  translates to. So the badge text said "failed" while the dot, which is what
+  an operator actually scans a list for, said "nothing to see". Both spellings
+  are now accepted, and there is one copy of the mapping
+  (`web/src/lib/syncTone.ts`) instead of two that drifted identically.
+
+- **The dashboard's storage cards always read "0 B · 0 files".** They render
+  the same rows as the storages list, which reads `stats.total_size_bytes`
+  with the flat legacy field as a fallback; the dashboard read only the flat
+  field, which the endpoint stopped filling when the nested `stats` object
+  arrived.
+
+- **The archive preview ignored `apiBase`.** `ArchiveViewer` hardcoded
+  `fetch('/api/files/archive/list')` while every other call in
+  `@brftech/filex-core` goes through the configured endpoints — so in the
+  package's headline use case, an embed on a host page pointed at
+  `https://files.example.com`, the zip preview posted to the *host page's*
+  origin and 404'd. It now takes the endpoint from the explorer's config and
+  falls back to the same-origin path.
+
+- **`showInfoPanel` was documented public API that nothing read.** An embedder
+  who set it false got the inspector toggle anyway. It now hides the toggle, as
+  documented; default (and every existing embed) unchanged.
+
+- **The SMB driver had no translations.** Seven i18n keys its descriptor names
+  (`storages.driver.smb`, `fields.share`, `fields.domain`,
+  `fields.dialTimeout`, `fieldHelp.smb{Share,Domain,Root}`) existed in neither
+  catalogue, so SMB was the one driver whose form rendered in English inside
+  the Turkish UI.
+
+**This release has more to it than fits on one page.** The rest of the
+entry — and every earlier release — is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0350---2026-09-07).
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.35.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.35.0`
+
+## v0.34.2
+
+<span class="filex-release-date">6 September 2026</span>
+
+Two things that only ever bit installs nobody had configured by hand. filex guesses http://localhost:5212 as its own address when FILEX_PUBLIC_URL is unset, and the realtime ticket handed that guess to the browser as fact -- so on any other port the socket connection was refused and the client fell back to twelve-second polling with nothing logged anywhere. It reads as "live updates do not work" while the server is entirely healthy. The socket address now follows the request when no public URL was chosen, which is safe there and nowhere else: that response goes back to the client that asked for it, while a share link is mailed to somebody else and still uses the configured origin. The startup banner had the same fault and printed a URL nothing was serving. Also two browser tests that asserted Turkish sentences and went red when English became the fallback language, without either feature having changed.
+
+## What changed
+
+### Fixed
+
+- **An instance that was never told its public URL sent every browser to
+  `localhost:5212`.** The realtime ticket built `ws_url` from `PublicURL`,
+  whose default is a guess — so filex on any other port advertised a socket
+  address nothing was listening on, the connection was refused, and the client
+  dropped to 12-second polling **with nothing logged**. It reads as "live
+  updates do not work" while the server is perfectly healthy, and it is the
+  default state of any install that has not set `FILEX_PUBLIC_URL`.
+
+  With no public URL configured the socket address now comes from the request,
+  which is safe *here and only here*: the ticket goes back to the client that
+  asked for it, so a forged `Host` can mislead nobody but its sender. Share
+  links are mailed to third parties and still use the configured origin — a
+  test pins that difference.
+
+  The startup banner had the same fault, printing the guess under "Listening
+  on". It prints the real listen address, and says so, when no public URL was
+  chosen.
+
+- Two browser tests asserted **translated strings** and so failed once English
+  became the fallback language in v0.33.0, with nothing about the features
+  having changed: `82-capability-gating` looked for the Turkish OnlyOffice
+  message (now a stable selector), and `17-theme-locale` was fixed in 0.34.1.
+  A test that fails when the UI is translated is testing the translation.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0342---2026-09-06)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.34.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.34.2`
+
+## v0.34.1
+
+<span class="filex-release-date">6 September 2026</span>
+
+A patch for two things v0.34.0 shipped over. A user who had chosen Turkish saw an English admin panel on any second device: the language stored on the account was written by Profile and never read, so it only ever worked in the browser you saved it in. It had been invisible while Turkish was the fallback for everybody, and surfaced when v0.33.0 correctly made that fallback English. And the release could not be stopped by a failing test suite -- CI ran on the branch push while the release ran on the tag two seconds later, in parallel and unaware of each other, with no required check anywhere. CI had been red since v0.31.0 and four releases went out over it, carrying exactly that locale bug. Nothing publishes now until the suite is green.
+
+## What changed
+
+### Fixed
+
+- **A user who had chosen Turkish saw an English admin panel on any second
+  device.** The language on the account (`users.locale`) was written by
+  Profile → Save and then **never read**. Saving also set it in this browser's
+  `localStorage`, so it looked right on the machine you saved it on; sign in
+  from another browser, another device or a private window and the account's
+  choice was ignored and the browser's language used instead.
+
+  It was invisible while `tr` was the fallback for everybody — a Turkish user
+  got Turkish either way, from the default rather than from their preference.
+  v0.33.0 made the fallback `en`, which was the right change, and this
+  never-read preference surfaced behind it.
+
+  The account's language is applied wherever the user is loaded, ranked below a
+  choice made on this device (the language switcher writes only locally, so it
+  is the newer decision) and above the instance default.
+
+- **A red CI suite could not stop a release, and had not.** `release.yml` now
+  calls `ci.yml` as its first job and nothing publishes until it is green.
+
+  Until now CI ran on the branch push and the release workflow on the tag
+  pushed two seconds later — in parallel, unaware of each other, with no
+  required status check anywhere in the repository. Measured 2026-09-06: **CI
+  had been red since v0.31.0 and four tags shipped over it**, carrying the
+  locale bug above. None of the release steps would have caught it: they check
+  the README, the screenshots, the links, the anchors and the version
+  manifests, and never run a test.
+
+- `17-theme-locale.cy.ts` asserted the account's language while measuring the
+  **browser's**: with no stored choice the app fell back to browser detection,
+  so it passed on a Turkish workstation and failed on an English CI runner. It
+  now pins the browser to English, so only the saved preference can satisfy it.
+
+- `siteAssets.test.ts` failed on every public CI run: `site/` is withheld from
+  the published tree, so the directory it compares does not exist there. It
+  skips where the directory is absent and still gates where it is present. The
+  failure also cascaded — the image-build job `needs` it, so v0.34.0's images
+  were never verified on main.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0341---2026-09-06)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.34.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.34.1`
+
+## v0.34.0
+
+<span class="filex-release-date">6 September 2026</span>
+
+The release where writes stopped being silent. Half of filex's write surfaces — WebDAV, SFTP, FTPS, NFS, the S3 gateway, the AI/MCP API, the archive extractor, the async copy worker and the built-in editor — put a file on the storage and told nothing else, so a browser with that folder open never showed it: an explorer with a live socket does not poll, and the periodic sync repairs rows without announcing anything. They all announce now, and a burst is merged into one frame per window instead of one per file, so extracting a five-thousand-file archive no longer leaves the folder empty for two minutes. Antivirus got the other half of the attention. ClamAV can now be a daemon in its own container reached over the network — the filex images ship no scanner, so under Docker or Kubernetes the previous answer was `build your own image` — and the switch, the mode, the address, the size ceiling and a new editor save-scan window moved onto Settings → Protection, with the `FILEX_CLAMAV*` variables demoted to first-boot seeds. Four write paths that were never scanned are now: the text editor, restoring a version, restoring from the trash, and the OnlyOffice save-back — which also announced nothing and re-indexed nothing, so an edited document kept its old text in search. So are files the storage sync finds on the backend rather than through filex, which is the case an operator most assumes is covered. ⚠ One behaviour change to check before upgrading: a write that **replaced** an existing file now emits `file.updated` rather than `file.uploaded`, so a webhook subscribed to the latter in order to see edits has to tick the new one as well. Four long-standing data bugs go with it. The storage sync used to un-delete files on every pass — and since quarantine is the same operation, it let infected files out of quarantine on a timer nobody set. A moved or renamed file lost its version history silently, because the row kept pointing at its old path. A deleted file never gave back its cached thumbnail or its upload staging bytes, so disk only grew. And on backends that report no ETag — local, SFTP, SMB, FTP — a file replaced outside filex was never noticed at all, so its size, its indexed text and its virus verdict stayed as they were forever. On a multi-tenant install, the instance-wide admin surfaces — antivirus and retention, the external editor, the auth providers, the self-upgrade — had no supertenant gate, so any tenant admin could turn scanning off for everybody or point the scanner at a host of their own; they are gated now. Finally the queue: all three drivers honour priority now, so an upload's scan is served ahead of a twenty-thousand-file first import; the Postgres driver, which could never claim a job at all, works; ⚠ and a Redis queue converts its pending list at startup, keeping every queued job, after which downgrading is not supported.
+
+## What changed
+
+### Upgrade notes
+
+- ⚠ **Webhook subscribers: a write that REPLACES a file now emits
+  `file.updated`, not `file.uploaded`.** Until this release every write
+  announced `file.uploaded` whether it had created a file or overwritten one,
+  because the post-write gate hard-coded the id — no filter could tell the two
+  apart. A target subscribed to `file.uploaded` in order to see edits will go
+  quiet; tick `file.updated` beside it on Settings → Webhooks. A target with an
+  empty event list still receives everything, and a target that only ever
+  wanted new files needs no change and now gets a quieter feed.
+
+- ⚠ **`FILEX_CLAMAV`, `FILEX_CLAMAV_BIN` and `FILEX_CLAMAV_MAX` are now
+  first-boot seeds, not live switches.** The antivirus on/off state, its mode
+  and the clamd address live in the settings table and are edited on
+  Settings → Protection. An existing `FILEX_CLAMAV=0` survives the upgrade —
+  it seeds the row — but changing it in `compose.yml` afterwards will have no
+  effect, which is a change in what that variable means.
+
+- **Redis queue users:** the pending queue converts from a list to an ordered
+  set on first boot so that priority is honoured. Every queued op is kept, in
+  the order the old build was about to serve them. Downgrading afterwards is
+  not supported.
+
+### Added
+
+- **Three events the server has been emitting all along are finally
+  subscribable, and a fourth that had no name at all now has one.** The
+  webhook subscription checkboxes were driven by a hand-written copy of the
+  backend's event list, and it had drifted: `file.upload_failed`,
+  `file.infected` and `comment.added` were being delivered to targets with an
+  empty allow-list but could not be ticked by anyone who wanted only those.
+  `file.infected` is the one that matters — filex scans uploads for viruses and
+  there was no way to ask it to tell you when it found one.
+
+  A fifth event was worse off. The escrow announcement — *an encrypted folder
+  was opened with the recovery key rather than its owner's passphrase*, about
+  as security-relevant as this product gets — was written as an inline
+  `notify.EventType("e2e.escrow_used")` inside a handler. It is emitted on
+  every escrow unlock, and because it was not a constant, nothing that reads
+  the event catalogue could see it. It is `EventE2EEscrowUsed` now and appears
+  in the list with the rest.
+
+  Every event in the list also gained a label an operator can read, in English
+  and Turkish, with the wire name kept underneath the checkbox — the checkbox
+  used to be labelled `file.trashed` and nothing else.
+
+- **`file.updated` — a write that replaced an existing file no longer claims a
+  new one arrived.** ⚠ **This is a behaviour change for existing webhook
+  subscribers.** Until now every write on every surface emitted
+  `file.uploaded`, whether the bytes created a file or overwrote one that was
+  already there, so nothing downstream could tell "a document arrived in this
+  folder" from "somebody edited that document" — and no filter could separate
+  them, because they were literally the same event id.
+
+  From this release the post-write gate splits them: **created →
+  `file.uploaded`, replaced → `file.updated`.** A target subscribed to
+  `file.uploaded` in order to see edits will go quiet and has to tick
+  `file.updated` as well (the admin UI lists it next to `file.uploaded`); a
+  target with an empty event list still receives everything, and one that only
+  ever wanted new files needs no change and gets a quieter feed.
+
+  It is one decision in one place — `writehook.OnFileWritten` now takes the
+  kind, so every surface answers the same question from the fact it already
+  had: the cache-row lookup it does anyway. That covers the browser upload
+  form, WebDAV `PUT`, S3 `PutObject`/`CopyObject`, SFTP, FTPS, NFS, the AI/MCP
+  write, the archive extractor and the ops-worker copy. Two paths are called
+  out because they answer it differently:
+
+  - The **staged (large-file) upload** asks the storage driver rather than the
+    catalogue, one statement before the overwrite. It has to: its node row is
+    published at commit time, before the bytes move, so by transfer time the DB
+    has a row either way and has forgotten whether it minted it — and unlike a
+    flag carried from commit, the driver's answer survives a restart in between.
+  - Where a surface genuinely **cannot tell** (the DB mirror was unreachable,
+    so there is no row to compare against) it reports `file.uploaded` — the
+    value the event carried before, rather than a wrong claim that a file was
+    edited.
+
+- **The text editor announced nothing at all.** `/api/files/save-text` wrote
+  the bytes, updated the row, re-indexed the file and scheduled the antivirus
+  scan — and never emitted an event, so a file created or rewritten in the
+  browser reached no webhook and no notification bell. It now goes through the
+  shared gate like every other write surface (`file.uploaded` on create,
+  `file.updated` on save), using the same `existing` lookup that already chose
+  between an immediate and a debounced scan. It keeps its own debounced scan:
+  the divergence is in the scan, never in the event.
+
+### Fixed
+
+- **The Office editor was the one write nothing looked at afterwards.** Every
+  other write surface in filex fans out through the shared post-write gate —
+  announce the change to open explorers, re-index for search, fire the webhook,
+  queue an antivirus scan — and this release *extended* that gate to two more
+  places. The OnlyOffice save-back was not one of them: it took its version
+  snapshot, wrote the revision, refreshed the node row, and stopped. So a
+  `.docx` edited in the browser kept its **pre-edit text in content search**,
+  never reached a `file.updated` subscriber, left another browser with the
+  folder open showing a stale listing, and — on an install where every upload
+  is scanned — **was never scanned**. Office documents are exactly the file
+  type macro-borne malware travels in, which is what made this the wrong gap to
+  ship a release about scan coverage with.
+
+  The callback now goes through the gate like everything else, as a
+  **replacement** (`file.updated`, never `file.uploaded` — a save-back
+  overwrites a document that was already there) stamped with a new
+  `meta.origin: "onlyoffice"`, because the bytes are assembled and posted by
+  the document server rather than by the browser that opened the file.
+
+  ⚠ **Whether the scan runs now or on the save window is decided by the
+  callback status, not by a rule of thumb.** The reason the browser's text
+  editor got a debounced window is that it cannot tell a mid-session Ctrl+S
+  from the last one. The document server does not make filex guess:
+
+  - **status 2** (ready for saving) arrives once per editing session, after
+    every editor has *closed* the document and the server has assembled the
+    final revision — roughly ten seconds after the last one disconnects. The
+    bytes are final and nobody is still typing, so it is scanned **immediately**,
+    like an upload. Deferring it would coalesce nothing (there is one save) and
+    would leave a finished document unscanned for up to a full window.
+  - **status 6** (force save) is an *interim* save with the document still
+    open. filex never asks for one and the document server does not send them
+    by default, but an operator can switch them on, and then they repeat for as
+    long as somebody keeps the document open — the shape of a Ctrl+S burst. It
+    takes the **debounced** window, the same one the text editor uses.
+
+  A session with force-save on therefore costs one scan per window while it is
+  open plus one immediate scan when it closes. That last one is deliberate: a
+  document server that dies mid-session never sends status 2, and then the
+  debounced scan of the interim bytes is the only one there will ever be.
+
+  ⚠ The driver `Stat` still lands on the row **before** the index runs, and
+  that ordering is load-bearing: content re-extraction is triggered by the
+  content fingerprint drifting, the fingerprint prefers the etag, and indexing
+  against the pre-edit etag would refresh the metadata while leaving the **old
+  text** searchable — most of the symptom being fixed.
+
+- **`/api/admin/protection` let any tenant admin turn antivirus off for every
+  tenant** — and three other instance-wide surfaces were open the same way.
+  Everything under `/api/admin` has passed `RequireAdmin`, and in multi-tenant
+  mode that means an admin of *some* tenant: the tenant resolver labels the
+  request without denying anything, and the scoped store filters three list
+  queries and nothing else. `/providers` and `/plugins` asked the extra
+  question. These did not:
+
+  - **`/protection`** — the antivirus switch, its mode and the clamd address
+    moved into the global settings table in this release, so one customer's
+    admin could disable scanning platform-wide or point the scanner at a host
+    they control. Trash and version retention sat beside it.
+  - **`/external`** — one document server, one converter, one shared JWT
+    secret: repointing it is enough to read and rewrite every tenant's office
+    documents in transit, and the Test button dials whatever it is given.
+  - **`/auth-providers`** — the global `auth.*` rows that decide who can sign
+    in to the instance at all (OIDC issuer and client secret, LDAP bind).
+  - **`/update`** — replaces the binary every tenant is served by.
+
+  All four now ask `requireSupertenant`, one predicate shared with `/providers`
+  and `/plugins` rather than a second mechanism. ⚠ The check lives in the
+  **handler**, not on the chi route, because the route is not the only door:
+  `/api/ai/admin` mounts the same handler instances behind an `admin`-scoped
+  API token, and the MCP admin tools drive those same methods in-process — a
+  route middleware would have closed one of three.
+
+  ⚠ **Reads are gated too, not only writes.** `/protection` returns the clamd
+  address in force and a live reachability probe; `/external` returns where the
+  document server lives. That is a map of the operator's internal
+  infrastructure, handed to somebody with no standing to act on it.
+
+  ⚠ **Single-tenant installs are unaffected, by construction.** The tenant
+  resolver attaches no scope when multi-tenant mode is off, absence means
+  "unscoped", and unscoped passes — there is no flag to set. The gate fails
+  *closed* the other way: an authenticated user whose provider cannot be
+  resolved already gets a deny-all scope, and it is refused rather than read as
+  "no scope, therefore single-tenant".
+
+  The surfaces that are still instance-wide and still ungated are now
+  **named** rather than half-closed — `/settings` (the same global table, but
+  `branding.*` keys are legitimately per-tenant, so it needs a per-key
+  classification and not a route gate), webhooks, replication targets and
+  rules, the search rebuild, the queue, the trash sweep, and a set of
+  cross-tenant metadata reads. See
+  [MULTI-TENANCY.md](./MULTI-TENANCY.md#instance-wide-admin-surfaces).
+
+- **A 403 that had a sentence to say showed a machine code instead.** The admin
+  SPA's error extractor preferred `data.error` over `data.message`, so a
+  response carrying both — the two `supertenant_only` and `plugins_disabled`
+  shapes — put `supertenant_only` on screen and threw away the explanation
+  written for the person reading it. `message` now wins when both are present;
+  the handlers that return only `error` are the majority and put the sentence
+  there, so they are unchanged.
+
+- **The plugins gate answered "plugins are disabled" before "not yours".** A
+  tenant admin who may not touch the surface at all could still learn whether
+  the operator had the subsystem switched on. The tenancy check runs first now.
+  Single-tenant installs see no difference: no scope is attached, the gate
+  passes, and a disabled subsystem still answers `503`.
+
+- **The docs-site build no longer hands you somebody else's diff.**
+  `cd docs-site && npm run build` is a mandatory release gate, so everybody
+  runs it — and it was `npm run releases && vitepress build`, which refetched
+  the GitHub releases and rewrote `docs/RELEASES.md` and
+  `docs-site/data/releases.json` every single time, restamping today's date
+  even when nothing had changed. Three people hit it in one day, each reverted
+  it by hand, and one release nearly committed the churn under an unrelated
+  message.
+
+  The build now runs an offline check instead (`check-releases.mjs`: the page
+  exists and lists at least one release, no network, no writes), and
+  regenerating is an explicit `npm run releases` at the release step that means
+  to do it. `docs/RELEASES.md` stays tracked and published — ignoring it was
+  never an option, readers see that page.
+
+  The generator is idempotent as well, which is the other half: `generatedAt`
+  only moves when the release list actually moved, and neither file is written
+  unless its bytes changed. So a curious `npm run releases` cannot dirty the
+  tree either — only a real new release can.
+
+- **Two gates now catch the drift that caused the above, instead of a user
+  reporting it.** The UI's event list stays a hand-maintained mirror on purpose
+  — the admin SPA is compiled into the server binary, so an endpoint listing
+  the events could never disagree with the bundled UI and would only add a way
+  for the checkbox list to render empty. What a mirror needs is a build-time
+  check, so it has one: `web/tests/webhooks/eventCatalog.test.ts` parses the Go
+  constants and fails when the two sets differ or an event is missing its
+  English or Turkish label, and `backend/internal/notify/catalog_test.go`
+  refuses an inline `EventType("x.y")` anywhere in the backend, so an event
+  cannot be born somewhere the catalogue does not look.
+
+- **The Redis queue driver ignored `Priority`.** Its pending set was a LIST
+  consumed with `BLMOVE`, and a list is positional: an op's priority was
+  persisted, returned by `Get` and rendered in the admin UI, and had no effect
+  whatsoever on the order ops came out. So the rule the SQLite and Postgres
+  drivers enforce — a scan the storage sync discovered sits one step below a
+  person's upload, `ORDER BY priority DESC, enqueued_at ASC` — simply did not
+  apply on Redis: a first import of 20 000 files was still FIFO and an upload's
+  scan still waited behind all of it. Measured on a real Redis with that
+  backlog, an interactive op waited **20.0 s** behind 18 000 sweep ops; it is
+  now served **first, in 1 ms**.
+
+  The pending set is a **sorted set** whose score encodes `priority DESC,
+  arrival ASC` exactly, and claiming is **one Lua script**: the removal from
+  pending, the move to running, the status write, the attempt bump and the
+  release of the coalescing key happen as one indivisible step. That is
+  stricter than what it replaces — `BLMOVE` moved the id and a *second*
+  transaction flipped the hash, and a process that died in the gap left an op
+  in no list at all, permanently `pending` in its own hash, which
+  `RecoverOrphans` then dropped. Type filtering no longer mutates anything
+  either: the script walks candidates in priority order and steps over the ones
+  this worker cannot handle, instead of popping them and pushing them back.
+  `Enqueue` is a script too, so it is one round trip rather than two and can no
+  longer leave a coalescing claim behind a write that failed.
+
+  ⚠ **What it costs:** the claim is no longer a blocking Redis command, because
+  a script cannot block. A worker with nothing to do now waits on a capped
+  doorbell list that every push into pending writes a token to, so an arriving
+  op still wakes a worker in about a millisecond. Two honest differences: a
+  token can be taken by a worker whose type filter does not match the op that
+  produced it, and a drained burst can leave a few stale tokens behind. Each
+  costs one extra script call, never a missed op.
+
+  ⚠ **Upgrading:** an install already running the Redis driver has a LIST at
+  the pending key, and `ZADD` against a list is a `WRONGTYPE` error. Startup
+  converts it, keeping every queued op and the order the old build was about to
+  serve them in — and improving it, since those ops now carry their priority.
+  Downgrading afterwards is not supported.
+
+- **A file replaced under a local storage was never noticed.** The storage sync
+  exists to find changes filex did not make; on the drivers that report no
+  etag — **local, SFTP, SMB, FTP**, and any WebDAV server that omits the header
+  — it found none, ever. Drift was an etag comparison, and comparing two empty
+  strings is never a difference, so a file swapped out underneath filex looked
+  unchanged on every pass: its size stayed stale in the catalogue, its extracted
+  text stayed stale in the search index (you found the old words, not the new
+  ones), and since the sync began queueing antivirus scans, a clean file could
+  be replaced with an infected one and nothing would ever read it again.
+
+  Where the backend reports no etag, drift is now the file's **size and
+  modification time** — the two fields every one of those drivers does report,
+  both already in the listing the walk just made, so a full walk costs what it
+  always did (20 000 files on local disk: 3.0–4.0 s per pass before, 3.0–4.0 s
+  after, with zero drift reported on three consecutive unchanged passes).
+
+  It catches an ordinary edit, a rewrite that keeps the same size, a file that
+  grew or shrank with its mtime preserved, and a restore whose mtime is *older*
+  than the row's. It does **not** catch a replacement that preserves both the
+  size and the modification time, or a rewrite landing in the same clock second
+  as the recorded mtime with the size unchanged — those need the content, and
+  hashing every file on every pass is not a walk anyone can run. See
+  [STORAGE.md → Drift detection](./STORAGE.md#drift-detection-what-a-replaced-file-looks-like).
+
+  Times are compared **to the second** deliberately: Postgres stores
+  microseconds, FTP's `MDTM` has no sub-second field and FAT keeps two-second
+  steps, so a finer comparison would report drift on every file on every pass —
+  which on an install with antivirus enabled is the whole storage re-scanned
+  every sync interval, forever. Directories are exempt for the same reason:
+  their row holds the cached *recursive* size, which a listing never reports.
+
+- **`Store.MoveNode` did not update `storage_key`, so a renamed or moved file
+  kept the key it had at its old path.** `storage_key` is not decoration:
+  versioning (`Snapshot` *and* `Restore`), the antivirus quarantine, the
+  id-addressed download in `Manager.Read` and the sync tombstone pass all hand
+  it to the storage driver **in preference to** `path`. Every one of them fails
+  *silently* on a miss, which is why this survived so long:
+
+  - `Snapshot` stats the stale key, gets `ErrNotFound`, and returns "nothing to
+    snapshot" — so the pre-overwrite guard passes with **zero versions written**
+    and the destructive write goes ahead. A moved file lost its history.
+  - The antivirus quarantine moves the stale key into `.filex-trash/`, tolerates
+    the `ErrNotFound`, marks the file quarantined and drops it from the search
+    index — **while the infected bytes stay live** at the real path, now
+    invisible to any future rescan.
+  - `Restore` writes the restored version to the stale path, leaving the real
+    file untouched, then stamps the node with the restored size and etag.
+  - A download by id 404s on a file the listing shows.
+  - `confirmGone` stats the stale key, gets a miss and tombstones a file that
+    is perfectly fine.
+
+**This release has more to it than fits on one page.** The rest of the
+entry — and every earlier release — is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0340---2026-09-06).
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.34.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.34.0`
 
 ## v0.33.0
 
 <span class="filex-release-date">5 September 2026</span>
 
 A release of things that were quietly wrong. A large upload to an S3 endpoint served over plain HTTP died inside the client and the storage sync then moved the file to the trash — reported from the outside, and worth knowing why it had never been seen here: SigV4 hashes the request body over `http` and does not over `https`, so filex was requiring a rewindable stream it never asked for, and the bug sat waiting for the first plaintext endpoint. Overwriting a file now keeps the old bytes: the snapshot happens before the write at every destructive surface, and if it cannot be taken the write is refused rather than losing the file — until now only the in-browser text editor versioned anything, so uploading over a file destroyed it. The S3 gateway stopped exposing filex's own `.versions/`, `.thumbs/` and `.filex-trash/` trees, which every other protocol had hidden since it was written. On a multi-tenant install every absolute URL now names the tenant's host rather than the operator's — share links, the WebSocket endpoint, and the account-created e-mail that carried a temporary password to somebody else's login page. And the product stopped speaking Turkish to people who never asked: the convert dialog, eighteen notifications, the file-request e-mail, and an embed that defaulted to Turkish now follow the locale, or the browser's, or English.
+
+## What changed
+
+### Added
+
+- An i18n key-parity test for the `@brftech/filex-core` catalogue
+  (`web/tests/i18n/coreKeys.test.ts`). `web` already had one for its own
+  `en.json`/`tr.json`; `packages/core` ships `en.ts`/`tr.ts` but has no test
+  runner of its own, so the gate lives in `web`, which depends on the package.
+  It also fails on an "English" value that is still Turkish — the shape the
+  bug above would take once it wears a key.
+- **Almost every absolute URL a multi-tenant install handed out was the
+  operator's hostname, not the customer's.** Exactly one place in the codebase
+  derived the origin per request — `Auth.redirectBase`, written for the OIDC
+  callback and never reused. Everything else concatenated the global
+  `FILEX_PUBLIC_URL`: the `/s/` and `/d/` links a tenant sends to their own
+  clients, the `wss://…/api/ws` endpoint handed to the browser and opened
+  verbatim, the `/s/` and `/u/` URLs returned to AI / MCP / ShareX clients, and
+  four e-mails. The worst was the account-created mail: a customer's brand-new
+  user received a temporary password next to a link to **someone else's** login
+  page — a flow that cannot succeed, and a disclosure of the operator's
+  hostname to every tenant that ever adds a user.
+
+  The rule now lives in one place, `internal/tenanturl`, and every builder
+  calls it. It has two entry points because not every URL is minted while a
+  browser waits: `FromRequest` for the request-driven sites, and
+  `ForStorage` / `ForProvider` for the ones reached only through a context (the
+  AI/MCP share link and the upload ticket), where the tenant is taken from the
+  node's storage rather than from a `Host` header that isn't there.
+
+  **Host-header injection**: the request host is resolved with
+  `GetProviderByHost`, which matches an *enabled* provider row exactly, and the
+  origin is then assembled from that row's own `host` column — never from the
+  request string. An unknown, disabled or absent host falls back to
+  `PublicURL`, so `Host: evil.example` mints the operator's configured URL and
+  `evil.example` never reaches a link or an e-mail.
+
+  **Single-tenant installs are unchanged.** With `FILEX_MULTI_TENANT` off the
+  resolver does not read the request at all (asserted, not assumed: the test
+  counts store lookups and requires zero), so the call sites that have no
+  request in scope lose nothing. Covered by a new multi-tenant suite that
+  drives the real handlers — and, for the four e-mails, a real in-process SMTP
+  server, so the assertion is on the bytes a recipient receives.- **The public export's link check had never run once.** `scripts/export-public.sh`
+  ends by running `scripts/check-links.mjs` over the tree it just built and
+  refusing the export if anything is dead — the guard added on 2026-09-05 after
+  two dead links sat in the public README. It was wrapped in
+  `if command -v node; else echo "node not found: skipped…"; fi`, and on the
+  maintainer's machine it took the `else` branch **every time**: the script is
+  invoked as `wsl bash -lc 'bash scripts/export-public.sh …'`, and that WSL had
+  nvm and three node versions installed but `node` on no shell's PATH — the
+  interactive guard in `~/.bashrc` returns before the nvm block for
+  non-interactive shells, and for interactive ones a hard-coded `export PATH=`
+  two lines later wiped what nvm had just added. The export succeeded, printed
+  its own excuse, and nobody read the line.
+
+  A guard that degrades to nothing is not a guard, so **no node is now fatal**,
+  and the script looks for one before giving up: `PATH`, then the newest
+  `$NVM_DIR/versions/node/*/bin/node`, then — under WSL — the Windows
+  `node.exe`. ⚠ That last one is a *Windows* binary: handed `/mnt/g/…` it
+  resolves the path against the current drive and dies with
+  `Cannot find module 'G:\mnt\c\…'`, so both the checker and the tree are
+  converted with `wslpath -w` first. All three branches were exercised:
+  nvm node → `410 relative links … all resolve`; Windows node → the same 410;
+  no node at all → exit 1 with a refusal. A deliberately dead link
+  (`README.md` → `docs/MIGRATION.md`, which the export withholds) is refused
+  with exit 1.
+
+### Fixed
+
+- **The admin UI named a private repository, and every published screenshot
+  showed it.** The footer and the About page linked
+  `github.com/brf-tech/filex` — the internal development repo, which
+  answers 404 to anybody who is not us. `scripts/export-public.sh` rewrites that
+  string on the way out, so the *shipped source* was right; a **screenshot** is
+  a PNG and no rewrite reaches inside one, so the images in the public README
+  showed the dead URL. They now name `github.com/BRF-Tech/filex`, which is where
+  the product actually lives — including on our own installs, where a link to a
+  repository the reader cannot open was never useful either.
+
+- **Uploads over 8 MiB never reached an S3 storage over plain HTTP, and the
+  sync then moved them to trash** (GitHub #16). Reported against a fresh Garage
+  deployment: every upload looked like it worked, the bucket stayed empty, and
+  the next storage sync put the files in the trash. Files under a few MB were
+  fine. Reproduced end to end against a real Garage instance.
+
+  Two independent defects, and the second is the one that cost the user data.
+
+  **1. The commit could not sign a multipart part.** The browser posts files
+  under 8 MiB in one request; above that they take the staged path, where the
+  commit re-chunks the staging area into a driver multipart upload. Each part
+  was cut with `io.LimitReader`, which drops the `Seek` method the staging
+  reader has. SigV4 signs the SHA256 of the payload, so the SDK reads a part to
+  hash it and then rewinds to send it — with nothing to rewind the request died
+  inside the client, before a byte left the process:
+  `upload part 1: operation error S3: UploadPart, failed to compute payload
+  hash: failed to seek body to start, request stream is not seekable`.
+
+  ⚠ It is the SCHEME that decides this, not the provider — measured, because
+  the obvious guesses are wrong. Over `https://` the SDK sends
+  `x-amz-content-sha256: UNSIGNED-PAYLOAD`: TLS already protects the body, it is
+  never hashed, and a plain reader has always worked. Over `http://` the payload
+  hash is what binds the body to the signature, so the body must be read twice.
+  Every S3 endpoint filex had previously been pointed at is `https://`; the
+  reporter's Garage, a container on a podman network, is not. The bug was
+  waiting for the first plaintext endpoint, and it would have hit AWS, MinIO or
+  Hetzner over plaintext just the same.
+
+  Parts are now cut with a rewindable, length-bounded window over the staging
+  reader, and `UploadPart` on the S3 driver makes any body rewindable before it
+  hands it to the SDK — small ones in memory, large ones through a temp file,
+  an already-seekable one passed through untouched. The driver's signature
+  promises `io.Reader` and now honours it, instead of silently requiring a
+  `Seeker` and failing with a message that names the SDK rather than the call.
+
+  **2. A failed upload was silent.** The commit endpoint answers `202` as soon
+  as the last chunk lands; the transfer happens afterwards in the ops worker. A
+  transfer that failed there produced one `WARN` line in the server log and
+  nothing else — the node stayed at `transfer_state="staged"`, which is
+  indistinguishable from still-in-flight, no notification fired, and the browser
+  had already drawn a finished upload. The client now waits for the transfer by
+  default (the `transferring` phase, which was implemented but which no caller
+  ever switched on) and reports the failure; the node moves to a new
+  `transfer_state="failed"`; and a `file.upload_failed` notification, carrying
+  the reason, goes to whoever uploaded.
+
+  ⚠ While turning that wait on, a latent bug in it surfaced: it told a real
+  verdict from an incidental fetch error by comparing the message to the literal
+  string `"transfer failed"`, which only matches when the server sends no error
+  text. Any real error message was swallowed and the poll span for ever. The two
+  are now told apart by type, and a run of unreadable polls ends the wait
+  instead of hanging.
+
+- **Uploading a file over an existing one destroyed the old bytes, and nothing
+  kept a copy anywhere.** `versioning.Service.Snapshot` documents its own
+  contract — *"callers should invoke this BEFORE a destructive write… if the
+  snapshot itself fails the caller should NOT proceed"* — and the package doc
+  stated as fact that snapshots were taken on upload finalize and archive
+  extract. Neither was true. Across the whole product `Snapshot` was reached
+  from exactly two places: `save-text` and the versions endpoints. No upload,
+  drop, ShareX, AI/MCP write, archive extract, OnlyOffice save-back, WebDAV
+  `PUT` or S3 gateway write ever called it. Measured on a clean instance:
+  uploading `up.txt` twice left `GET /api/files/versions?node_id=1` answering
+  `{"versions":null}` with no `.versions/` tree on disk at all, while editing
+  the *same* file in the browser recorded one — so version history looked like
+  it worked right until the moment you needed it.
+
+  Every destructive write now calls `writehook.BeforeOverwrite` first, which
+  snapshots whatever is about to be replaced and **refuses the write** if that
+  snapshot cannot be taken: 503 with `"code": "SNAPSHOT_FAILED"`, existing file
+  untouched. The covered surfaces are the browser upload (single-POST and
+  staged), the public drop link, the ticketed upload, the legacy presigned
+  multipart finalize, ShareX, the AI/REST and MCP write/zip/unzip tools,
+  archive extract and add, OnlyOffice's save-back, WebDAV `PUT`, and the S3
+  gateway's `PutObject`, `CompleteMultipartUpload` and `CopyObject`.
+
+  ⚠ On the staged path the guard runs at **commit**, not at the driver write.
+  Two reasons, and both are load-bearing. Publishing the staged node flips it
+  to `transfer_state="staged"`, after which `filebody` answers with the
+  *incoming* bytes — a snapshot taken later would record the wrong content.
+  And `transfer()` picks between two write mechanisms: on any driver
+  implementing `storage.PartUploader` — i.e. S3, which is what real
+  deployments run — it calls `streamMultipart` and never touches
+  `storage.Writer.Write` at all. A guard hung off the driver write would have
+  protected small uploads and silently skipped every large one on exactly the
+  backend where it matters most. There is a test pinning the S3-shaped case
+  that asserts the object really did arrive via `CompleteMultipart`.
+
+  `save-text` is brought under the same rule rather than left as the
+  exception: it used to log `snapshot failed (continuing with write)` and
+  overwrite anyway, directly contradicting the contract quoted two lines above
+  its own call.
+
+  Archive extract and the AI/MCP `unzip` tool differ deliberately: they skip
+  just the refused member and keep going, reporting a `refused` count distinct
+  from the permanent, user-caused skips in the same loop (a zip-slip entry, a
+  file/folder kind clash). If every member was refused they answer 503 rather
+  than a misleading `200 {"count":0}`.
+
+  `FILEX_VERSIONS_ON_OVERWRITE=0` turns the guard off for a deployment whose
+  storage cannot afford the extra write; `FILEX_VERSIONS_FAIL_OPEN=1` keeps
+  attempting the snapshot but lets a failed one through. Both default to the
+  safe value and log a WARN at boot when they are not at it — the fail-closed
+  default has a sharp edge worth naming, because if the object store fills up
+  then every overwrite on the instance is refused until an operator changes an
+  env var and restarts.
+
+- **The S3 gateway exposed filex's own internal trees.** `.versions/`,
+  `.thumbs/` and `.filex-trash/` were listable AND readable by known key
+  through `/s3` — measured, `GET .versions/42/1` answered 200 — while `/dav`,
+  `/sftp`, `/ftp`, `/nfs` and the browser listing had all hidden them since
+  they were written. They are now refused at any depth on listing, read and
+  write. This was always wrong and became urgent with the guard above: before
+  it, `.versions/` held a handful of text-editor snapshots; after it, it holds
+  a copy of every file any surface has ever replaced, so leaving it reachable
+  would hand any S3-key holder the prior contents of files whose folders they
+  may since have lost access to.
+
+- **A failed upload named neither the file nor the reason.** The access log
+  said only `method=POST path=/api/files/manager status=500`, and no
+  write-failure branch logged a filename, so "which file failed yesterday
+  afternoon" had no server-side answer. Both the browser upload path and the
+  staged transfer — whichever of its two driver write mechanisms fails — now
+  log `msg="upload failed"` with `storage`, `path`, `name`, `size` and
+  `reason`.
+
+- **`POST /api/files/archive/add` leaked a file descriptor on every error
+  path.** Only the success path closed the temp file it built the archive in;
+  each of the early returns dropped it. Closed with a `defer`, registered
+  after the `defer os.Remove` so the two unwind in the right order.
+
+- **filex spoke Turkish to English users, and no locale setting could stop
+  it.** ~45 strings across the explorer, the viewers, the admin UI and the
+  backend were hard-coded Turkish literals sitting *beside* the translation
+  layer, not inside it. They are now keys in `en`/`tr` and go through `t()`.
+
+  The widest one was the whole **convert modal**. It resolved its labels
+  through a private `tt(key, fallback)` helper backed by an optional `t?` prop
+  — and three separate things had to be true for it to ever produce English:
+  the caller had to pass `t` (`FileExplorer.vue` never did), the `convert.*`
+  keys had to exist (they existed in *neither* catalogue), and the prop's
+  signature had to match `useLocale`'s (it did not — it declared
+  `(key, fallback)` where the real `t` is `(key, vars)`, so passing the real
+  one would have rendered the raw key, or spliced the fallback's characters in
+  as `{0}`, `{1}` … substitutions). Every user in every locale read Turkish.
+  The helper is gone: the modal now takes `locale` and calls `useLocale`, like
+  every sibling modal, and its ten labels are real keys.
+
+  Also: ~20 explorer toasts and the drag-and-drop overlay
+  (`İşlem başarısız`, `Kopyalandı` / `Taşındı` / `Silindi`, `Kesildi`,
+  `Aynı klasöre kesilemez`, `… kuyruğa alındı`, `… öğe geri getirildi`, the
+  trash-retention notice, `Dosyaları buraya bırak`); the new-folder validation
+  error; the presence bar's people count; the CSV viewer's row count; five
+  strings in the preview modal (two of them sitting next to a correct
+  `&#123;&#123; t('viewer.download') }}`); and the SMTP password placeholder in
+  `Settings.vue`, whose `label` and `hint` on the same line were already
+  translated.
+
+  Where a key already said the same thing it was reused rather than
+  duplicated — the sharpest case being the paste toast, which was
+  `t('split.cross_copy')` on the cross-storage branch and a Turkish literal on
+  the same-storage branch of the *same expression*, while
+  `split.copy_queued` ('Copy queued' / 'Kopyalama kuyruğa alındı') already
+  existed and was exactly it.
+
+- **A file drop notified the folder's owner in Turkish regardless of their
+  language.** `Drop.notifyOwner` never consulted a locale, and its output is
+  not confined to one surface: the same title and body go to the in-app
+  notification bell, into the **webhook v2 `drop.received` payload** and into
+  the owner's **e-mail**. The `Gönderen:` header written into the persisted
+  `NOT.txt` beside the uploaded files had the same problem.
+
+  These now follow the same `mailLangEN` selection `mail_templates.go` next
+  door already used. The locale is the **folder owner's** (`users.locale`, via
+  the new `Drop.ownerLocale`), not the uploader's: a drop link is opened by an
+  anonymous visitor who has no account and therefore no locale, and the owner
+  is the only person who reads any of it.
+
+- The admin panel's SMTP **Test** mail sent a Turkish sentence followed by an
+  English one to whatever address was typed. It now follows the acting
+  admin's locale.
+
+- `DrawioViewer`'s untranslated fallbacks were Turkish where every sibling
+  fallback (e.g. `CsvViewer`'s `'Loading…'`) is English. The fallback is what
+  an embedder who does not pass `t` actually reads.
+
+- `desktop`: the drag-out diagnostic trail logged `'BULUNAMADI'` where every
+  neighbouring `dragLog` value is English. This one is **not** a translation
+  key — it is a developer log, and it is now `'not found'`.
+
+**This release has more to it than fits on one page.** The rest of the
+entry — and every earlier release — is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0330---2026-09-06).
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.33.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.33.0`
 
@@ -176,48 +1206,16 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.26.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.26.0`
 
-## v0.25.3
-
-<span class="filex-release-date">25 August 2026</span>
-
-**- file-request pages render their text; dead storage says so.**
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.3`
-
-## v0.25.2
-
-<span class="filex-release-date">23 August 2026</span>
-
-A patch for whoever reads the error tracker. Events forwarded from filex's log used to arrive as a bare message — "thumb generate failed" eleven times with no file and no error to act on. Every attribute of the log line now travels with the event, as searchable tags when short and in full under a log context, with anything named like a credential replaced by a marker. Two noisy lines were reclassified as well: a listener closed by a shutdown is an INFO line instead of an error filed on every deploy, and a failed driver-init attempt says which driver, which error and which attempt, with only the last attempt logged as an error.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.2`
-
-## v0.25.1
-
-<span class="filex-release-date">23 August 2026</span>
-
-A same-day fix for FTPS: the public host name is looked up when the listener starts, and a single DNS timeout in the container's first seconds used to leave FTPS off for good while everything else reported healthy. The lookup is now retried for up to two minutes before giving up.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.1`
-
-## v0.25.0
-
-<span class="filex-release-date">23 August 2026</span>
-
-Share links now have a ceiling on how long they live, and the admin holds it: a new Protection setting (default seven days) caps every new link and file request — a link created without an expiry gets one, a longer request is shortened, and the dialog only offers choices the server will keep, printing the real expiry under the fresh link. Links that already exist are left exactly as they are; the page and the log only tell you how many outlive the limit. The folder-ZIP cache is bounded the same way: the background warmer no longer pre-builds folders over 2 GiB (they are zipped when somebody actually clicks, never refused) and no cached archive outlives a week. FTPS re-reads its certificate when the files change, so a real, auto-renewing certificate can finally be mounted instead of the self-signed one — before, a renewal would have been served expired for weeks with the health check green. And the release pipeline builds the desktop installers alongside the Docker images instead of after them, which puts them on the release about twenty-five minutes earlier.
-
-**Other changes**
-
-- **Release** — Split the release job — binaries → docker + desktop in parallel; push the :slim tags.
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.25.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.25.0`
-
 ## Earlier releases
 
-The 81 releases before v0.25.0, in brief. Full notes are on GitHub.
+The 85 releases before v0.26.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.25.3](https://github.com/BRF-Tech/filex/releases/tag/v0.25.3) | 25 August 2026 | - file-request pages render their text; dead storage says so. |
+| [v0.25.2](https://github.com/BRF-Tech/filex/releases/tag/v0.25.2) | 23 August 2026 | A patch for whoever reads the error tracker. Events forwarded from filex's log used to arrive as a bare message — "thumb generate failed" eleven times with no file and no error to act on. |
+| [v0.25.1](https://github.com/BRF-Tech/filex/releases/tag/v0.25.1) | 23 August 2026 | A same-day fix for FTPS: the public host name is looked up when the listener starts, and a single DNS timeout in the container's first seconds used to leave FTPS off for good while everything else reported healthy. |
+| [v0.25.0](https://github.com/BRF-Tech/filex/releases/tag/v0.25.0) | 23 August 2026 | Share links now have a ceiling on how long they live, and the admin holds it: a new Protection setting (default seven days) caps every new link and file request — a link created without an expiry gets one, a longer request is… |
 | [v0.24.1](https://github.com/BRF-Tech/filex/releases/tag/v0.24.1) | 22 August 2026 | A follow-up to 0.24.0's resumable first run: it now covers uploads too. The engine writes its sync history while it works — every 50 transfers or 15 seconds — instead of only at the very end, so a run interrupted at file 9,000 of… |
 | [v0.24.0](https://github.com/BRF-Tech/filex/releases/tag/v0.24.0) | 22 August 2026 | A night of syncing a real 10,000-file tree, and what it taught the engine. Transfers and server listings now run several at a time, so a tree of small files is no longer priced at one round-trip each — the tree that crawled at… |
 | [v0.23.0](https://github.com/BRF-Tech/filex/releases/tag/v0.23.0) | 20 August 2026 | The rest of “keep on this computer”, the same day it shipped. Every row now says where it lives — ✓ on this computer, ◐ holding kept items below, ⟳ syncing right now, ☁ online-only — and a strip along the bottom of the window… |
@@ -302,4 +1300,4 @@ The 81 releases before v0.25.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-06 from 101 published releases.</small>
+<small>Last refreshed 2026-09-07 from 105 published releases.</small>

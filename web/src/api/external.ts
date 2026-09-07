@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ExternalService } from './types';
+import type { ExternalAdvisory, ExternalService } from './types';
 
 export interface ExternalServiceUpdate {
   url?: string | null;
@@ -28,9 +28,16 @@ interface BackendExternal {
   LastState?: string;
   last_state?: string;
   env_managed?: boolean;
+  advisories?: ExternalAdvisory[] | null;
 }
 interface ListResponse {
   entries: BackendExternal[] | null;
+  /**
+   * The address filex hands the document server for the fetch and the save
+   * callback. The third address in the three-address problem, and the one
+   * nothing used to show anywhere.
+   */
+  public_url?: string;
 }
 
 const KNOWN_IDS: ReadonlyArray<ExternalService['id']> = ['onlyoffice', 'drawio'];
@@ -78,7 +85,29 @@ function toExternal(b: BackendExternal): ExternalService {
     last_state: mapState(rawState),
     last_error: null,
     env_managed: b.env_managed === true,
+    advisories: b.advisories ?? [],
   };
+}
+
+/** What the server-side Test probe answered, plus what it did NOT cover. */
+export interface ExternalTestResult {
+  service: ExternalService['id'];
+  /** True when the filex PROCESS reached the service. Says nothing else. */
+  serverReachable: boolean;
+  state: ExternalService['last_state'];
+  error: string | null;
+  advisories: ExternalAdvisory[];
+  publicURL: string;
+}
+
+/**
+ * FILEX_PUBLIC_URL as the server reports it, captured on the last list()/test()
+ * call. The admin page shows it next to the document-server field because it
+ * is the address the operator has no other way to see.
+ */
+let lastPublicURL = '';
+export function externalPublicURL(): string {
+  return lastPublicURL;
 }
 
 export const ExternalApi = {
@@ -95,6 +124,7 @@ export const ExternalApi = {
           : toExternal(row as BackendExternal),
       );
     }
+    if (typeof data.public_url === 'string') lastPublicURL = data.public_url;
     return (data.entries ?? []).map(toExternal);
   },
 
@@ -122,11 +152,12 @@ export const ExternalApi = {
     };
   },
 
-  async test(id: ExternalService['id']): Promise<ExternalService> {
-    // Test handler returns {ok, name, reachable, url, state, error?},
-    // not a full ExternalService row. Use the response for last_state
-    // + error then re-fetch the list so jwt_secret_set/enabled stay
-    // accurate.
+  /**
+   * Run the SERVER-side probe. ⚠ This answers one of three questions — see
+   * `probeExternalFromBrowser` for the browser leg and `advisories` for the
+   * document-server-to-filex leg, which cannot be probed at all.
+   */
+  async test(id: ExternalService['id']): Promise<ExternalTestResult> {
     const { data } = await api.post<{
       ok: boolean;
       name: string;
@@ -134,26 +165,21 @@ export const ExternalApi = {
       url?: string;
       state?: string;
       error?: string;
+      checked_from?: string;
+      not_checked?: string[];
+      public_url?: string;
+      advisories?: ExternalAdvisory[] | null;
+      server_reachable?: boolean;
+      has_warnings?: boolean;
     }>(`/admin/external/${id}/test`);
-    const all = await ExternalApi.list();
-    const found = all.find((s) => s.id === id);
-    const mapped = data.state ? mapState(data.state) : undefined;
-    if (found) {
-      return {
-        ...found,
-        last_state: mapped ?? found.last_state,
-        last_error: data.error ?? null,
-        last_checked_at: new Date().toISOString(),
-      };
-    }
+    if (typeof data.public_url === 'string') lastPublicURL = data.public_url;
     return {
-      id,
-      url: data.url ?? null,
-      jwt_secret_set: false,
-      enabled: true,
-      last_checked_at: new Date().toISOString(),
-      last_state: mapped ?? 'unconfigured',
-      last_error: data.error ?? null,
+      service: id,
+      serverReachable: data.server_reachable ?? data.reachable === true,
+      state: data.state ? mapState(data.state) : 'unconfigured',
+      error: data.error ?? null,
+      advisories: data.advisories ?? [],
+      publicURL: data.public_url ?? lastPublicURL,
     };
   },
 };

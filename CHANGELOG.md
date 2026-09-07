@@ -7,6 +7,230 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-07
+
+### Upgrade notes
+
+- ⚠ **If OnlyOffice or drawio "tests fine" but fails when you open a file**,
+  press Test again. It now probes from **your browser** as well as from the
+  filex server and reports the two separately, because they answer different
+  questions and only one of them was ever asked. A container-internal address
+  like `http://onlyoffice` is reachable from filex and not from the browser
+  that has to load the editor — the green light said "configured" and meant
+  "the server can reach it". Reported from the outside, twice, by the same
+  person before we saw it.
+
+- ⚠ **`GET /metrics` was inside the admin group but registered with `r.Handle`**,
+  so chi bound it to *every* method and the demo guard refused none of them.
+  Read-only either way, so nothing was exposed that a GET did not already
+  expose — closed so the rule has no exceptions left.
+
+### Added
+
+- **The Test button now probes from the browser too, and says which machine
+  answered.** Issue #17's reporter came back: the v0.34.2 fix was real, and it
+  did not close his problem. Three different machines have to reach three
+  different addresses before the Office editor works — the **browser** loads
+  the editor's JavaScript from the Document Server URL, the **filex process**
+  polls the same URL, and the **Document Server** fetches the document and
+  POSTs the save back to `FILEX_PUBLIC_URL` — and only the middle one was ever
+  checked. So an operator on podman typed the container name
+  `http://onlyoffice`, filex reached it, **Test went green**, and his browser
+  could not resolve that name at all; the editor then failed with the same
+  message as a missing configuration. The defect was never the probe. It was
+  that the check was narrower than the badge implied — the same family as
+  everything else fixed this week: a control that reads as verified and is not.
+
+  - **Two probes, two results, one badge.** The admin page runs in the very
+    browser that will open the editor, so it now tests that leg directly
+    instead of disclaiming it. The result is reported as two separate
+    sentences — *From the filex server: reachable* / *From this browser: not
+    reachable* — plus a third line for the leg nobody can probe. When they
+    disagree the page says what it means: a container-internal address filex
+    can use and a browser cannot.
+  - **The mechanism is the one the real viewer uses**, not a `fetch`. ⚠ A
+    plain `fetch()` is blocked by CORS on a document server that is working
+    perfectly, so a naive `catch` would report failure for a healthy service.
+    OnlyOffice is probed with a `<script>` at
+    `/web-apps/apps/api/documents/api.js` — load detection is not subject to
+    CORS, and a successful load defines `window.DocsAPI`, which proves the
+    thing that answered really is a Document Server. drawio is probed with a
+    hidden `<iframe>` at `?embed=1&proto=json` and its `{"event":"init"}`
+    handshake, the same one `DrawioViewer.vue` uses. Both were verified
+    against **live** servers before being relied on. Each distinguishes
+    *could not reach* from *reached, wrong thing* with a second, `no-cors`
+    signal, and each is bounded by a timeout that reports as its own state.
+  - **The badge no longer conflates "reachable" with "configured".**
+    `Complete` is reserved for a service where both probes answered and
+    nothing is warned about; a service the server can reach and the browser
+    cannot reads `Server-reachable only`, in a different colour.
+  - **The reverse path gets the only honest treatment available.** filex
+    cannot make the Document Server issue a request on demand, so it does not
+    claim a check it cannot perform: it warns on the shapes that certainly
+    cannot work (a public URL of `localhost`, `127.0.0.1` or `0.0.0.0`) and
+    notes the ones that are merely suspicious (a container-name public URL, a
+    hostname filex itself cannot resolve). ⚠ A warning that fires on a working
+    setup is worse than none, so every trigger is paired with a test that
+    proves it stays silent on a setup that works — `https://office.example.com`,
+    `http://192.168.1.10:8080`, and `http://localhost:8080` when filex itself
+    is reached over localhost. That last suppression is the interesting one:
+    a loopback document server is *correct* for somebody browsing from the
+    same host, so it is never warned about there.
+  - **Advisories ride on the list, not only on Test**, because the whole
+    defect was a control that read as settled without anyone pressing
+    anything. Opening the page is enough to see a browser-unreachable address.
+  - **The three-address requirement moved to where the field is filled in** —
+    the top of the admin page and the top of `docs/ONLYOFFICE.md`, with the
+    two commands that tell an operator which half is wrong. It was already in
+    the docs, around a prerequisites list further down the page, and he hit it
+    anyway: a green Test outranks a prerequisites list.
+
+  - ⚠ **Known limitation, deliberately not fixed here: filex has one public
+    URL, and some setups need two.** `FILEX_PUBLIC_URL` is a single value that
+    the OnlyOffice fetch/callback and every share link, invite mail, drop link,
+    OIDC redirect and WebSocket ticket are all built from. An install whose
+    Document Server can only reach filex by a container-network name
+    (`http://filex:5212`), while its users need a browser-facing address,
+    cannot express that today. The admin page now raises a **note** when it
+    sees a container-name public URL rather than leaving it silent; splitting
+    the value is tracked separately.
+
+- **A release gate for the shop window — the surfaces a stranger touches
+  before they trust us.** On 2026-09-07, hours before the public launch, a
+  person looking at filex from outside found seven defects, and not one had
+  been caught by a test, a lint, or any of the eleven steps of the release
+  process. Several had been shipping for months: a dead `Issues` link on 104
+  of the 105 published release pages, a public demo that answered all 101
+  admin routes with no refusal, `GET /api/files/capabilities` handing
+  anonymous callers the operator's internal hostname, a docs site built from
+  the private tree, release bodies that were a commit hash, a headline
+  `docker run` that put the reader's files in the database directory, and the
+  demo's own advertised search returning nothing. The pattern is why this is
+  a gate and not a checklist: **everything a stranger touches first is the
+  least tested surface in the project.**
+
+  It is split by what each check needs, because a check that cannot say
+  *which* it is ends up either useless or dishonest:
+
+  - **Offline, repo-only** — `web/tests/deploy/shopWindow.test.ts`, so it runs
+    on every push, in `pnpm test`, and in CI, which already gates the tag. It
+    covers the URL grammar (nothing pastes a GitLab route onto a GitHub host,
+    and every GitLab route we link is one the export can *translate* — the
+    export's own guard cannot see a route it drops the `/-/` from and gets
+    wrong anyway), the headline `docker run` against the compose file it is a
+    shorthand for, `site/` — which reaches filex.sh verbatim with no converter
+    in the way — and the names the export does **not** rewrite, such as a bare
+    IP address.
+  - **Against a running instance** — `node scripts/check-shop-window.mjs
+    --instance --boot bin/filex`. It boots a throwaway in demo mode on a pinned
+    port with its own data directory, then proves a signed-in visitor is
+    refused on the state-changing admin routes *and still gets the read-only
+    ones*, that an anonymous capabilities call carries the feature flags and
+    not the operator's host, and that the searches the demo advertises return
+    the files they promise.
+  - **Against the published product** — `--published`. Release bodies carry no
+    `/-/` route and no bare commit hash where prose belongs, their links
+    answer, and docs.filex.sh serves the released build with no private
+    repository URL on it.
+
+  Three exit codes, and the last two are the point: `0` passed, `1` **checked
+  and wrong** — fail the release — and `2` **could not check** (no binary, no
+  network, a GitHub rate limit, a fixture that is not set up). ⚠ A gate that
+  turns an outage into a failed build is an outage of its own, so a network
+  failure is never `1`; it is also never `0`, and the run names the check that
+  did not happen. The same rule applies to a fixture: an instance with no
+  external service configured would satisfy "the anonymous answer names no
+  host" while leaking the moment an operator configured one, so that reports
+  `skip`, not `ok`.
+
+  Every check was proved against the defect it is for — the bug
+  re-introduced, the check watched going red, then green: a `/-/` link, an
+  unknown GitLab route, the old `docker run`, a production IP in a published
+  file, the private repo on the landing page, the runbook publishing from the
+  wrong tree, an advertised query nobody is shown, the redaction removed from
+  `capabilities.go`, the demo guard removed from the router, an advertised
+  query that answers nothing, and a fixture serving each published defect in
+  turn. Release process step 12 in `docs/CONTRIBUTING.md` says what it does
+  not cover.
+
+- **The shop-window gate now walks the route table instead of sampling it, and
+  covers four surfaces it had listed as gaps.** The gate above shipped with an
+  honest account of what it did *not* reach; this closes what could be closed
+  and says plainly what could not.
+
+  - **Every route, not six of them.** The live check probes six admin routes,
+    which proves the demo guard is installed and nothing more — a new operator
+    surface at a *fourth* prefix would have passed, and that is exactly how the
+    first hole appeared, because `/api/ai/admin` was the same admin panel behind
+    a different front door. `backend/internal/api/shop_window_route_table_test.go`
+    walks all 359 routes out of chi and classifies each one by **asking the
+    running server**: a route an anonymous caller gets 401 on and a signed-in
+    non-admin gets 403 on is an operator surface, one that answers both
+    identically is not role-gated at all, and everything else is the product.
+    Nothing in it names a route, so a new admin prefix goes red the day it is
+    added with no list to update — and a second test measures the other
+    direction, so the guard cannot be widened over the product to make the first
+    one quiet. (Middleware would have been the obvious signal and chi cannot
+    show it: `r.Group` bakes its chain into the handler before registration, and
+    all 359 entries report the same four top-level middlewares.)
+  - **`/metrics` was the fourth prefix**, found by that walk on its first run.
+    It is mounted inside the admin-only group with `r.Handle`, so chi registers
+    it for every method, and a public demo refused none of them. The exposition
+    is read-only, so nothing was ever going to break — it is guarded now because
+    that lets the walk state its rule with no exceptions at all.
+    `GET`/`HEAD`/`OPTIONS` still pass: a Prometheus scrape job is untouched.
+  - **All three external services are proved, not one.** The redaction covers
+    OnlyOffice, drawio and the converter through one loop *and* three flat
+    aliases blanked by name, so a single seeded host exercised the loop and left
+    two aliases unproved. The booted instance now carries a distinct sentinel
+    per service, and the anonymous payload is additionally asserted to carry
+    **no `url` key anywhere** under `external` — the only form that reaches a
+    service nobody has added yet (`mermaid` is already there, with no
+    environment variable and no alias).
+  - **The demo's own corpus, asked of the demo.** The instance check seeds the
+    file it then searches for, so it proves the query grammar and not what
+    demo.filex.sh holds — and the corpus is where the defect was. `--published`
+    now signs in to the live demo with the credentials the demo itself
+    publishes, and types the queries the splash advertises. Unreachable is a
+    `2`, never a false green.
+  - **GitHub's About box, and filex.sh.** Neither is code, so neither was ever
+    checked. The About blurb had no source of truth at all — it is typed into a
+    settings form and lived only in GitHub's database — so `REPO_ABOUT` in
+    `scripts/shop-window-data.mjs` is now that source: asserted offline to fit
+    GitHub's 350 characters, to **name every driver the backend registers**
+    (measured from the `storage.Register` calls, and the blurb that was
+    published when this was written still said five after SMB shipped), and to
+    punctuate the way every other surface does. `--published` compares it with
+    the live value and prints the exact line to paste, GitHub having no deploy
+    step for it. The front page is checked for the hosts it has to link —
+    docs.filex.sh above all, which `site/index.html` links in three places and
+    the deployed page did not link at all.
+  - **Screenshot staleness, with its limits written down.** A picture committed
+    before the last change to the code that draws it cannot be showing that
+    change. `SCREENSHOTS` declares what each README picture depicts — the one
+    thing here a person has to know — and the offline half asserts every
+    declared path still exists, so a renamed component cannot leave a picture
+    looking fresh for ever. The threshold is measured, not chosen:
+    `admin-plugins.png` shipped **six** releases stale, so six released versions
+    of unfollowed change is the line, and lesser drift is reported and passes.
+    ⚠ What it cannot see is whether a picture is actually *wrong*: it compares
+    commit dates, so a comment counts and a theme change does not. Looking is
+    still release step 2.
+
+### Fixed
+
+- **Two release-gate suites could report success while running no tests.**
+  `describe.skipIf` skips every assertion inside it — including the "this list
+  is not empty" guards written to stop those blocks passing vacuously, which had
+  been placed inside the very blocks they guard. Measured across the suite: in
+  the **published** tree, which CI runs, `siteAssets.test.ts` reported 0 of its
+  8 tests and `shopWindow.test.ts` 8 of its 17, both green. Both files now
+  assert the shape of the checkout *unconditionally*, and as one fact — the
+  export withholds `site/` and `scripts/export-public.sh` together, so a tree
+  holding exactly one of them is neither the source nor the published product,
+  and says so instead of skipping in silence.
+
+
 ## [0.36.0] - 2026-09-07
 
 ### Upgrade notes

@@ -361,7 +361,54 @@
     "testOk": "Erişilebilir",
     "testFail": "Sağlık kontrolü başarısız",
     "envManaged": "Ortam değişkeniyle ayarlı",
-    "envManagedHint": "Bir ortam değişkeniyle sabitlenmiş. Buradaki değişiklik hemen uygulanır ama filex bir sonraki açılışta ortamdaki değeri geri yazar."
+    "envManagedHint": "Bir ortam değişkeniyle sabitlenmiş. Buradaki değişiklik hemen uygulanır ama filex bir sonraki açılışta ortamdaki değeri geri yazar.",
+    "overall": {
+      "disabled": "Pasif",
+      "unconfigured": "Yapılandırılmamış",
+      "serverUnreachable": "Sunucudan erişilemiyor",
+      "checking": "Tarayıcınızdan denetleniyor…",
+      "serverOnly": "Yalnızca sunucudan erişilebilir",
+      "needsAttention": "Dikkat gerekiyor",
+      "serverReachable": "Sunucudan erişilebilir",
+      "complete": "Tam"
+    },
+    "threeAddresses": {
+      "title": "Üç makine, üç adres",
+      "browser": "Tarayıcınız editörün JavaScript dosyasını doğrudan aşağıdaki doküman sunucusu adresinden yükler; bu yüzden o adresin tarayıcıda çalışması gerekir — yalnızca container ağının içinde değil.",
+      "server": "filex süreci aynı adresten doküman sunucusunun sağlık ucunu çeker. Test düğmesinin denetlediği şey budur.",
+      "callback": "Doküman sunucusu belgeyi filex'ten çeker ve kaydı filex'in genel adresine geri gönderir; bu yüzden o adresin doküman sunucusunun container'ı içinden çalışması gerekir:",
+      "publicUrlUnknown": "(bildirilmedi)",
+      "diagnose": "Bir şey çalışmadığında hangi yarının bozuk olduğunu şu iki komut söyler:",
+      "fromWorkstation": "bir iş istasyonundan — tarayıcı ayağı",
+      "fromDocumentServer": "doküman sunucusu container'ının içinden — geri çağrı ayağı"
+    },
+    "legs": {
+      "server": "filex sunucusundan:",
+      "browser": "Bu tarayıcıdan:",
+      "callback": "Doküman sunucusundan filex'e geri:",
+      "reachable": "erişilebiliyor",
+      "unreachable": "erişilemiyor",
+      "notConfigured": "yapılandırılmamış",
+      "disabledLeg": "pasif",
+      "cannotCheck": "denetlenmedi — filex doküman sunucusuna istek attıramaz. Aşağıdaki uyarılar, kesinlikle çalışamayacak biçimlerdir.",
+      "disagree": "filex bu adrese erişiyor, tarayıcınız erişemiyor. Container ağına özel bir ad tam da böyle görünür: editör tarayıcıda yüklendiği için orada başarısız olur."
+    },
+    "browserStates": {
+      "checking": "denetleniyor…",
+      "notChecked": "henüz denetlenmedi",
+      "ok": "editör yüklendi",
+      "wrongContent": "bir şey cevap verdi ama bu servis değil",
+      "unreachable": "buradan erişilemiyor",
+      "timeout": "zaman aşımı — ne cevap geldi ne de reddedildi",
+      "mixedContent": "engellendi: bu yönetim sayfası HTTPS, o adres ise HTTP"
+    },
+    "advisories": {
+      "browser_bare_host": "“{host}” tek parçalı bir makine adı. filex ona container ağının içinden erişebilir, ama bu servisi doğrudan tarayıcınız yükler ve o adı çözemez. Tarayıcının açabileceği bir adres kullanın.",
+      "browser_loopback_host": "Bu bir loopback adresi, ama filex {publicUrl} adresinde yayında — orayı açan kişiler bu makinede değil ve onların tarayıcısında “{host}” kendi bilgisayarları demektir.",
+      "public_url_loopback": "Doküman sunucusu belgeyi filex'ten çeker ve kaydı {publicUrl} adresine geri gönderir. Kendi container'ının içinde o adres filex değil, doküman sunucusunun kendisidir.",
+      "public_url_bare_host": "filex'in genel adresi ({publicUrl}) container ağına ait bir ad. Doküman sunucusu ona erişebilir, ama bu adresten üretilen paylaşım linkleri ve e-postalar o ağın dışındaki bir tarayıcıda açılmaz.",
+      "public_url_unresolved": "filex'in kendisi “{host}” adını çözemiyor. Doküman sunucunuz farklı bir DNS görünümü kullanıyorsa bu beklenen bir durumdur; değilse genel adres hiçbir yerde bulunamayan bir adı gösteriyor."
+    }
   },
   "authProviders": {
     "title": "Kimlik sağlayıcılar",
