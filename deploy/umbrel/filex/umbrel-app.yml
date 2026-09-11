@@ -5,6 +5,7 @@ name: filex
 version: "0.38.1"
 releaseNotes: |-
   filex v0.38.1 — 2026-09-12
+  • MySQL: concurrent enqueues of one dedup key all failed.
   • Renaming a folder put its contents in the trash
   • Installs already in that state heal themselves.
   • "30000 milliseconds exceeded" when pressing Sync
