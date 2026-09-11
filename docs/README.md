@@ -10,6 +10,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 - [Installation](INSTALLATION.md) — minimal → full Compose → Helm → binary
 - [Configuration](CONFIGURATION.md) — every `FILEX_*` variable + `config.yaml`
+- [Databases](DATABASES.md) — SQLite, PostgreSQL, MySQL/MariaDB: which to pick,
+  what each needs, and what "supported" is checked to mean
 - [Releases](RELEASES.md) — every release with a plain‑English summary
   (generated from the GitHub releases when a release is cut, by
   `npm run releases`)

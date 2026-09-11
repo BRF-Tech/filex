@@ -431,7 +431,9 @@ type NotifyConfig struct {
 // or HA setups (see internal/queue/drivers/{postgres,redis}).
 type QueueConfig struct {
 	// Driver selects the queue backend: sqlite | postgres | redis.
-	// Empty defaults to "sqlite".
+	// Empty follows the DATABASE driver (sqlite→sqlite, postgres→postgres);
+	// on MySQL there is no shared-database driver, so empty means "no
+	// persistent queue" until an operator configures redis.
 	Driver string `yaml:"driver"`
 	// DSN is the connection string for postgres ("postgres://...") or
 	// redis ("redis://..."). For sqlite the application DB handle is
@@ -539,6 +541,15 @@ type ExtServices struct {
 type OnlyOfficeConfig struct {
 	URL       string `yaml:"url"`
 	JWTSecret string `yaml:"jwt_secret"`
+	// CallbackURL is the address the DOCUMENT SERVER uses to reach filex for
+	// the document bytes and the save. Empty means "the public URL", which is
+	// right wherever one address serves both the browser and the container.
+	//
+	// ⚠ It is not always the same address. FILEX_PUBLIC_URL also builds every
+	// share link a person receives, so an install whose document server cannot
+	// resolve the public hostname had no way to express the difference and its
+	// saves were silently lost (issue #17).
+	CallbackURL string `yaml:"callback_url"`
 }
 
 // DrawioConfig — embed URL.
@@ -666,7 +677,9 @@ func Default() Config {
 			AutoRebuild:     true,
 		},
 		Queue: QueueConfig{
-			Driver:  "sqlite",
+			// Empty, not "sqlite": the driver follows the database unless an
+			// operator names one. See server.queueDriverFor.
+			Driver:  "",
 			Workers: 4,
 			Enabled: true,
 		},
@@ -995,6 +1008,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.URL = v
+	}
+	if v := os.Getenv("FILEX_ONLYOFFICE_CALLBACK_URL"); v != "" {
+		c.ExternalServices.OnlyOffice.CallbackURL = v
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_JWT"); v != "" {
 		c.ExternalServices.OnlyOffice.JWTSecret = v

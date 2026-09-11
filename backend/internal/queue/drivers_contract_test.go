@@ -36,10 +36,32 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/queue"
 
+	mysqldsn "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/brf-tech/filex/backend/internal/queue/drivers/postgres"
 	_ "github.com/brf-tech/filex/backend/internal/queue/drivers/redis"
 )
+
+// mysqlSchema mirrors the same two migrations in the MySQL dialect. ⚠ There is
+// no partial unique index here — MySQL has none — so coalescing rests on the
+// guarded INSERT alone, which is precisely the claim this contract test is for.
+const mysqlSchema = `
+CREATE TABLE ops_queue (
+    id            VARCHAR(64) PRIMARY KEY,
+    type          VARCHAR(64) NOT NULL,
+    payload       JSON NOT NULL DEFAULT ('{}'),
+    status        VARCHAR(16) NOT NULL DEFAULT 'pending',
+    priority      INT NOT NULL DEFAULT 0,
+    attempts      INT NOT NULL DEFAULT 0,
+    max_attempts  INT NOT NULL DEFAULT 3,
+    last_error    TEXT,
+    enqueued_at   TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    started_at    TIMESTAMP(6) NULL DEFAULT NULL,
+    finished_at   TIMESTAMP(6) NULL DEFAULT NULL,
+    not_before    TIMESTAMP(6) NULL DEFAULT NULL,
+    dedup_key     VARCHAR(191) NULL,
+    INDEX idx_ops_queue_status_pri_at (status, priority, enqueued_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
 
 // pgSchema mirrors migrations 00006_queue.sql + 00031_ops_queue_dedup.sql. The
 // test owns its own table so it never depends on a migrated database.
@@ -84,6 +106,17 @@ func configuredDrivers(t *testing.T) map[string]func(*testing.T) queue.Driver {
 			drv, err := queue.Get("postgres")
 			require.NoError(t, err)
 			require.NoError(t, drv.Init(context.Background(), map[string]any{"db": conn, "dsn": dsn}))
+			return drv
+		}
+	}
+
+	if dsn := os.Getenv("FILEX_TEST_MYSQL_DSN"); dsn != "" {
+		out["mysql"] = func(t *testing.T) queue.Driver {
+			t.Helper()
+			conn := freshMySQLQueueDB(t, dsn)
+			drv, err := queue.Get("mysql")
+			require.NoError(t, err)
+			require.NoError(t, drv.Init(context.Background(), map[string]any{"db": conn}))
 			return drv
 		}
 	}
@@ -410,4 +443,45 @@ func TestDriverContract_EachOpIsClaimedExactlyOnce(t *testing.T) {
 			}
 		})
 	}
+}
+
+// freshMySQLQueueDB gives each subtest its own database on the configured
+// server, so a run leaves nothing behind and two runs cannot collide.
+func freshMySQLQueueDB(t *testing.T, admin string) *sql.DB {
+	t.Helper()
+
+	name := fmt.Sprintf("filex_queuetest_%d", time.Now().UnixNano())
+	adminDB, err := sql.Open("mysql", admin)
+	require.NoError(t, err)
+	defer adminDB.Close()
+	_, err = adminDB.Exec("CREATE DATABASE `" + name + "`")
+	require.NoError(t, err, "create scratch database")
+
+	cfg, err := mysqldsn.ParseDSN(admin)
+	require.NoError(t, err)
+	cfg.DBName = name
+	// The application opens its connection with these; the queue borrows that
+	// handle, so the test has to hand it the same shape.
+	cfg.ParseTime = true
+	cfg.Loc = time.UTC
+	if cfg.Params == nil {
+		cfg.Params = map[string]string{}
+	}
+	cfg.Params["time_zone"] = "'+00:00'"
+
+	conn, err := sql.Open("mysql", cfg.FormatDSN())
+	require.NoError(t, err)
+	_, err = conn.Exec(mysqlSchema)
+	require.NoError(t, err, "create ops_queue")
+
+	t.Cleanup(func() {
+		_ = conn.Close()
+		drop, err := sql.Open("mysql", admin)
+		if err != nil {
+			return
+		}
+		defer drop.Close()
+		_, _ = drop.Exec("DROP DATABASE IF EXISTS `" + name + "`")
+	})
+	return conn
 }

@@ -34,7 +34,7 @@ Fixed after v0.13.4 — see [Releases](RELEASES.md).
 |---|---|---|
 | the **Document Server URL** | your **browser** — it loads the editor's JavaScript straight from there | the admin page probes it **from your browser** |
 | the same **Document Server URL** | the **filex process** — it polls `/healthcheck` | the **Test** button |
-| **`FILEX_PUBLIC_URL`** | the **Document Server** — it fetches the document and POSTs the save back | ⚠ **not checked** — see below |
+| the **callback URL** (or `FILEX_PUBLIC_URL` when it is empty) | the **Document Server** — it fetches the document and POSTs the save back | the **Test** button asks the Document Server to download a one-shot URL from filex and reports whether it arrived |
 
 These are three different machines, and an address that works for one can be
 useless to another. The classic case: on Docker or podman you type the
@@ -48,10 +48,17 @@ reports *From the filex server: …* and *From this browser: …* as two separat
 lines, and warns next to the field when the address is one a browser cannot
 load (a bare container name, or `localhost` on an install published elsewhere).
 
-The third leg cannot be probed at all — filex has no way to make the Document
-Server issue a request on demand — so filex only warns about the shapes that
-certainly cannot work: a `FILEX_PUBLIC_URL` of `localhost`, `127.0.0.1` or
-`0.0.0.0`, or a hostname filex itself cannot resolve.
+Since v0.38 the third leg is measured too. filex hands the Document Server's
+conversion endpoint a one-shot URL of its own and watches for the request to
+arrive, so the admin page answers *the document server reached filex* or *it
+did not* instead of declining to say. A Document Server that refuses the
+request's signature is reported as **unmeasured**, not as a broken route — that
+is a JWT problem, and sending you to the wrong address would be worse than
+saying nothing.
+
+filex still warns about the shapes that certainly cannot work before you press
+anything: a callback address of `localhost`, `127.0.0.1` or `0.0.0.0`, or a
+hostname filex itself cannot resolve.
 
 ### Two commands that say which half is wrong
 
@@ -67,14 +74,25 @@ Both must answer `200`. The first failing while filex's own Test passes is
 exactly the container-name case above. The second failing means saves will be
 lost even though the editor opens.
 
-> **One public URL, not two.** filex has a single `FILEX_PUBLIC_URL`, and both
-> the Document Server callback and every share link are built from it. If your
-> Document Server can only reach filex by a container name
-> (`http://filex:5212`) while your users need a browser-facing address, filex
-> cannot express that today — the admin page raises a note when it sees a
-> container-name public URL, and the workaround is to give the Document Server
-> a route to the browser-facing name (a DNS entry, an `extra_hosts` line, or a
-> shared network).
+### When the Document Server needs a different address from your users
+
+`FILEX_PUBLIC_URL` builds two different things: every share link a person
+clicks, and the document URL the Document Server fetches. Those usually want
+the same address, and sometimes they cannot be the same — a Document Server on
+a container network may only reach filex as `http://filex:5212`, while your
+users need `https://files.example.com`.
+
+Set the **callback URL** for that. It is the address the Document Server uses,
+and nothing else reads it:
+
+```bash
+FILEX_PUBLIC_URL=https://files.example.com      # people, share links, e-mails
+FILEX_ONLYOFFICE_CALLBACK_URL=http://filex:5212 # the Document Server alone
+```
+
+The same field is in the admin page under the Document Server URL, and applies
+live. Leave it empty — which is the default and what every single-address
+install wants — and the public URL is used, exactly as before.
 
 ## How it works
 
@@ -253,6 +271,7 @@ That's it — reopen an Office file in filex and it should launch the editor.
 |---|---|---|---|
 | `FILEX_ONLYOFFICE_URL` | `external_services.onlyoffice.url` | yes | Document Server base URL (e.g. `https://office.example.com`) |
 | `FILEX_ONLYOFFICE_JWT` | `external_services.onlyoffice.jwt_secret` | yes | Shared HS256 secret — identical to the Document Server's `JWT_SECRET` |
+| `FILEX_ONLYOFFICE_CALLBACK_URL` | `external_services.onlyoffice.callback_url` | no | The address the **Document Server** uses to reach filex. Empty (the default) means `FILEX_PUBLIC_URL`. Set it only when those two must differ — see [When the Document Server needs a different address](#when-the-document-server-needs-a-different-address-from-your-users) |
 
 Both are optional in the sense that the **admin UI** can supply them instead —
 whichever way they arrive, the value the running process uses is the one in the
@@ -320,13 +339,18 @@ question from a shell.
   reach `FILEX_ONLYOFFICE_URL`, or it's HTTP behind an HTTPS filex (mixed
   content). Serve the Document Server over HTTPS on a real hostname.
 - **Won't fetch source** ("Download failed"): the Document Server can't reach
-  filex's `FILEX_PUBLIC_URL`. Make sure that URL resolves from the Document
-  Server's network, and that a reverse proxy forwards
-  `/api/files/onlyoffice/fetch` to filex.
+  the callback address (`FILEX_ONLYOFFICE_CALLBACK_URL`, or `FILEX_PUBLIC_URL`
+  when it is empty). Press **Test**: the third line now says whether the
+  Document Server managed to download a probe file from filex, and prints the
+  exact URL it was given. Make that URL resolve from the Document Server's
+  network — or, when it cannot, set the callback URL to one that does — and
+  check that a reverse proxy forwards `/api/files/onlyoffice/fetch` to filex.
+  ⚠ A filex log with **no** `GET /api/files/onlyoffice/fetch` line after the
+  editor opened is this failure: the request never arrived.
 - **Edits aren't saved**: the Document Server can't POST the callback to
-  `/api/files/onlyoffice/callback`. Same fix — the callback goes to
-  `FILEX_PUBLIC_URL`, so it must be reachable from the Document Server. Check the
-  filex logs for callback errors (`onlyoffice: ...`).
+  `/api/files/onlyoffice/callback`. Same address and same fix — the save goes
+  where the fetch came from. Check the filex logs for callback errors
+  (`onlyoffice: ...`).
 
 ### Failure: 415 on open
 Unsupported extension (see the type list above). Expected — use preview/download.

@@ -50,6 +50,26 @@ func NewOnlyOffice(svc *onlyoffice.Service, store db.Store, resolver func(int64)
 	return &OnlyOffice{Service: svc, Store: store, StorageResolver: resolver}
 }
 
+// Probe answers the reverse-path check: a one-shot, unguessable URL the
+// document server is asked to download so filex can see whether the request
+// arrives (see onlyoffice.VerifyReversePath).
+//
+// ⚠ Unauthenticated by necessity — the caller is another container, not a
+// person — and therefore it serves a fixed sentence and nothing else. An
+// unknown or expired token is a plain 404: a stranger who guesses at this
+// endpoint learns nothing, not even that it exists for something.
+func (h *OnlyOffice) Probe(w http.ResponseWriter, r *http.Request) {
+	body, ok := h.Service.ServeProbe(r.URL.Query().Get("t"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="filex-probe.txt"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, body)
+}
+
 // Config returns the editor descriptor for an iframe to render.
 //
 // Accepts both forms:

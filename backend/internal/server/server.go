@@ -542,6 +542,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 		return st.URL, st.Secret
 	}
+	// The address the document server comes BACK to. Read live like the rest,
+	// so an operator who discovers their container cannot resolve the public
+	// hostname fixes it in the admin page rather than in a restart.
+	ooSvc.LiveCallbackURL = func(ctx context.Context) string {
+		return extResolver.Get(ctx, external.OnlyOffice).CallbackURL
+	}
 
 	// Storage resolver — connects API handlers and pipeline to live drivers.
 	resolver := func(id int64) (storage.Driver, error) {
@@ -586,7 +592,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	ooSvc.StorageResolver = resolver
 
 	// Async ops queue — DB-backed, restart-safe.
-	opsSvc := ops.New(sqlDB, resolver)
+	opsSvc := ops.NewForDialect(sqlDB, cfg.DB.Driver, resolver)
 	if err := opsSvc.Migrate(ctx); err != nil {
 		slog.Warn("ops: migrate", slog.String("err", err.Error()))
 	}
@@ -596,10 +602,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// sqlite default; postgres/redis open their own connection from
 	// cfg.Queue.DSN. The Pool itself starts in Start().
 	if cfg.Queue.Enabled {
-		qDriverName := cfg.Queue.Driver
-		if qDriverName == "" {
-			qDriverName = "sqlite"
-		}
+		qDriverName := queueDriverFor(cfg)
 		qd, err := queue.Get(qDriverName)
 		if err != nil {
 			slog.Warn("queue: unknown driver, falling back to sqlite",
@@ -609,19 +612,25 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 		qcfg := map[string]any{}
 		switch qDriverName {
-		case "sqlite":
+		case "sqlite", "mysql":
 			// Re-use the application *sql.DB so the queue lives in the
 			// same file as the metadata store. Also avoids a second
 			// migration pipeline — db.Migrate already created ops_queue
 			// via 00006_queue.sql.
 			qcfg["db"] = sqlDB
-		case "postgres", "redis":
+		case "postgres":
+			// Same rule as sqlite: with no queue DSN of its own the queue
+			// lives in the application database, on the application's
+			// connection. ops_queue is already there — db.Migrate created it
+			// from 00006_queue.sql.
 			if cfg.Queue.DSN != "" {
-				if qDriverName == "redis" {
-					qcfg["url"] = cfg.Queue.DSN
-				} else {
-					qcfg["dsn"] = cfg.Queue.DSN
-				}
+				qcfg["dsn"] = cfg.Queue.DSN
+			} else {
+				qcfg["db"] = sqlDB
+			}
+		case "redis":
+			if cfg.Queue.DSN != "" {
+				qcfg["url"] = cfg.Queue.DSN
 			}
 		}
 		if err := qd.Init(ctx, qcfg); err != nil {
@@ -1213,22 +1222,24 @@ func migrateShareZipDir(legacy, dst string) {
 // `env_managed` so the operator is told that rather than finding out later.
 func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config) {
 	type defRow struct {
-		name   string
-		url    string
-		secret string
+		name     string
+		url      string
+		secret   string
+		callback string
 	}
 	defaults := []defRow{
-		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret},
+		{name: "onlyoffice", url: cfg.ExternalServices.OnlyOffice.URL, secret: cfg.ExternalServices.OnlyOffice.JWTSecret, callback: cfg.ExternalServices.OnlyOffice.CallbackURL},
 		{name: "drawio", url: cfg.ExternalServices.Drawio.URL, secret: ""},
 		{name: "convert", url: cfg.ExternalServices.Convert.URL, secret: ""},
 	}
 	for _, d := range defaults {
 		cur, _ := store.GetExternalService(ctx, d.name)
-		if cur != nil && d.url == "" {
+		if cur != nil && d.url == "" && d.callback == "" {
 			// Not pinned by the environment: the row is the operator's.
 			continue
 		}
-		if cur != nil && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) {
+		if cur != nil && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) &&
+			(d.callback == "" || external.CallbackURLFromOptions(cur.OptionsJSON) == d.callback) {
 			continue // already matches the environment; nothing to say
 		}
 		options := "{}"
@@ -1242,6 +1253,15 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 				slog.String("name", d.name),
 				slog.String("stored_url", cur.URL),
 				slog.String("env_url", d.url))
+		}
+		if d.callback != "" {
+			merged, err := external.WithCallbackURL(options, d.callback)
+			if err != nil {
+				slog.Warn("external service options are not an object; the callback URL was not applied",
+					slog.String("name", d.name), slog.String("err", err.Error()))
+			} else {
+				options = merged
+			}
 		}
 		enabled := d.url != ""
 		state := "unconfigured"
@@ -1620,4 +1640,32 @@ func (quotaMetrics) QuotaUsageDelta(_ int64, delta int64) {
 // reverse-proxy SSO that reads as configured and silently is not.
 func normalizeDriverName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "_", "-")
+}
+
+// queueDriverFor picks the persistent queue backend.
+//
+// ⚠ An unset driver follows the DATABASE rather than defaulting to "sqlite".
+// The sqlite queue driver shares the application connection and sends
+// SQLite-flavoured SQL down it, so on a PostgreSQL install the old default
+// made every worker log `queue/sqlite: select: syntax error` on every poll
+// while no queued job — content extraction, antivirus, replica retries — ever
+// ran (issue #19). An explicit driver in the config or the environment always
+// wins.
+//
+// ⚠ On MySQL the dedup index is a column only — MySQL has no partial indexes,
+// see db/migrations/mysql/00031_ops_queue_dedup.sql — so coalescing rests on
+// the guarded INSERT rather than on the constraint. That is a documented
+// difference in the backstop, not in the mechanism.
+func queueDriverFor(cfg config.Config) string {
+	if cfg.Queue.Driver != "" {
+		return cfg.Queue.Driver
+	}
+	switch cfg.DB.Driver {
+	case "postgres":
+		return "postgres"
+	case "mysql":
+		return "mysql"
+	default:
+		return "sqlite"
+	}
 }

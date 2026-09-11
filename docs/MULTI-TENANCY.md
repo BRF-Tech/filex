@@ -14,8 +14,10 @@
 >
 > Longer-standing gaps: no admin SPA page for tenant lifecycle (the API is the
 > surface), **one e-mail address still cannot exist in two tenants** (§4), no
-> per-tenant SMTP identity, and no postgres/mysql migration CI job or live
-> multi-realm OIDC end-to-end run.
+> per-tenant SMTP identity, and no live multi-realm OIDC end-to-end run. (The
+> postgres/mysql CI job landed in v0.38.0 — `test:go:engines` — so the
+> migrations, the schema comparison and the write paths now run on all three
+> engines on every change.)
 >
 > This document is both the design rationale and the record of what was built.
 > It stayed on "Phase 1 landed" for two months after the feature shipped, which
@@ -777,6 +779,7 @@ means the phase's core landed and a named piece did not.
       files — provider CRUD/host resolution, scoped storage + user directory,
       lifecycle guards, suspend, maintenance mode, tenant-admin user gate,
       tenant-host OIDC redirect and cookie domain, WebDAV scoping, branding
-      overlay; mode-off = the full pre-existing suite green. PENDING:
-      postgres/mysql migration CI job (`.gitlab-ci.yml` has no database service),
-      and a live multi-realm Keycloak E2E — `e2e/` has no tenant spec.
+      overlay; mode-off = the full pre-existing suite green. The
+      postgres/mysql migration job exists since v0.38.0 (`test:go:engines`,
+      with real service containers). PENDING: a live multi-realm Keycloak E2E —
+      `e2e/` has no tenant spec.

@@ -31,6 +31,8 @@ package external
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +52,60 @@ type Settings struct {
 	Enabled bool
 	URL     string
 	Secret  string
+	// CallbackURL is the address the SERVICE uses to reach filex — the third
+	// address in the three-address problem (see advisory.go). Empty means "use
+	// filex's public URL", which is right whenever one address serves both
+	// purposes.
+	//
+	// ⚠ It exists because that is not always true. filex has ONE public URL
+	// and it builds both the share links people click and the document URL it
+	// hands the document server; a container that cannot resolve the public
+	// hostname needs a different address for the second, and until this field
+	// there was no way to give it one — the document opened and the save never
+	// came back (issue #17, third round). Stored in options_json so no
+	// migration is needed and the row keeps one shape.
+	CallbackURL string
+}
+
+// OptionKeyCallbackURL is where CallbackURL lives inside options_json.
+const OptionKeyCallbackURL = "callback_url"
+
+// CallbackURLFromOptions reads the callback URL out of a row's options blob.
+// A malformed blob reads as empty rather than failing: this is configuration
+// the operator can retype, not a reason to refuse to serve documents.
+func CallbackURLFromOptions(optionsJSON string) string {
+	if strings.TrimSpace(optionsJSON) == "" {
+		return ""
+	}
+	var opts map[string]any
+	if err := json.Unmarshal([]byte(optionsJSON), &opts); err != nil {
+		return ""
+	}
+	v, _ := opts[OptionKeyCallbackURL].(string)
+	return strings.TrimRight(strings.TrimSpace(v), "/")
+}
+
+// WithCallbackURL returns optionsJSON with the callback URL set (or removed,
+// when url is empty), preserving every other key the blob carries.
+func WithCallbackURL(optionsJSON, rawURL string) (string, error) {
+	opts := map[string]any{}
+	if strings.TrimSpace(optionsJSON) != "" {
+		if err := json.Unmarshal([]byte(optionsJSON), &opts); err != nil {
+			// Do not silently drop an operator's other options.
+			return "", fmt.Errorf("external: options_json is not an object: %w", err)
+		}
+	}
+	clean := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	if clean == "" {
+		delete(opts, OptionKeyCallbackURL)
+	} else {
+		opts[OptionKeyCallbackURL] = clean
+	}
+	out, err := json.Marshal(opts)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // Resolver answers from the `external_services` table, with a short cache so a
@@ -120,9 +176,10 @@ func (r *Resolver) Get(ctx context.Context, name string) Settings {
 		}
 		url := strings.TrimRight(strings.TrimSpace(row.URL), "/")
 		next[row.Name] = Settings{
-			Enabled: row.Enabled && url != "",
-			URL:     url,
-			Secret:  row.SecretEnc,
+			Enabled:     row.Enabled && url != "",
+			URL:         url,
+			Secret:      row.SecretEnc,
+			CallbackURL: CallbackURLFromOptions(row.OptionsJSON),
 		}
 	}
 	r.mu.Lock()

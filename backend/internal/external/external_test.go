@@ -97,3 +97,25 @@ func (f *flakyStore) ListExternalServices(ctx context.Context) ([]*db.ExternalSe
 	}
 	return f.Store.ListExternalServices(ctx)
 }
+
+// TestCallbackURL_RoundTrip: the callback address lives in options_json, and
+// writing it must not cost the operator their other options.
+func TestCallbackURL_RoundTrip(t *testing.T) {
+	got, err := external.WithCallbackURL(`{"keep":"me"}`, "http://filex:5212/")
+	require.NoError(t, err)
+	require.Contains(t, got, `"keep":"me"`)
+	require.Equal(t, "http://filex:5212", external.CallbackURLFromOptions(got))
+
+	cleared, err := external.WithCallbackURL(got, "")
+	require.NoError(t, err)
+	require.Equal(t, "", external.CallbackURLFromOptions(cleared))
+	require.Contains(t, cleared, `"keep":"me"`)
+
+	// A blob that is not an object is the operator's typo, not something to
+	// overwrite in silence.
+	_, err = external.WithCallbackURL(`["nope"]`, "http://filex:5212")
+	require.Error(t, err)
+
+	// An unreadable blob still yields a working server, just no callback URL.
+	require.Equal(t, "", external.CallbackURLFromOptions(`{oops`))
+}

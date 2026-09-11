@@ -25,8 +25,10 @@ import { extractError } from '@/api/client';
  *  - `items[].last_state`  — the probe from the filex server.
  *  - `browserProbes[id]`   — the probe from THIS browser, which is the very
  *                            browser that will open the editor.
- * The third leg cannot be probed (filex cannot make another container issue a
- * request), so it is covered by `items[].advisories` from the server.
+ *  - `callbackProbes[id]` — the third leg, measured by asking the document
+ *                            server to download a one-shot URL from filex and
+ *                            watching for the request to arrive. It used to be
+ *                            written off as unmeasurable; it is not.
  */
 export const useExternalServicesStore = defineStore('external-services', () => {
   const items = ref<ExternalService[]>([]);
@@ -38,6 +40,12 @@ export const useExternalServicesStore = defineStore('external-services', () => {
   const browserProbes = ref<Record<string, BrowserProbeResult>>({});
   /** Service ids with a browser probe in flight. */
   const browserProbing = ref<Record<string, boolean>>({});
+  /**
+   * Per-service result of the document-server-to-filex probe, from the last
+   * Test. Absent means "not measured yet" — which the page must render as a
+   * question, never as a pass.
+   */
+  const callbackProbes = ref<Record<string, ExternalTestResult['serviceToFilex']>>({});
 
   async function fetch(): Promise<void> {
     loading.value = true;
@@ -61,6 +69,11 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     const next = { ...browserProbes.value };
     delete next[id];
     browserProbes.value = next;
+    // Same for the callback verdict: it was about the address that just
+    // changed.
+    const nextCb = { ...callbackProbes.value };
+    delete nextCb[id];
+    callbackProbes.value = nextCb;
   }
 
   /** Probe from THIS browser. Safe to call unawaited; it never throws. */
@@ -93,6 +106,7 @@ export const useExternalServicesStore = defineStore('external-services', () => {
   async function test(id: ExternalService['id']): Promise<ExternalTestResult> {
     const [server] = await Promise.all([ExternalApi.test(id), probeBrowser(id)]);
     publicUrl.value = server.publicURL || publicUrl.value;
+    callbackProbes.value = { ...callbackProbes.value, [id]: server.serviceToFilex };
     items.value = items.value.map((s) =>
       s.id === id
         ? {
@@ -114,6 +128,7 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     publicUrl,
     browserProbes,
     browserProbing,
+    callbackProbes,
     fetch,
     update,
     test,

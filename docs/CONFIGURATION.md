@@ -196,8 +196,12 @@ DSN examples:
 
 Migrations **run automatically on startup**; also `filex migrate up|down|status`.
 SQLite (pure Go, CGO‑free) is a fine default; **PostgreSQL is recommended for
-teams/HA**. MySQL is supported for read‑mostly use (a few upsert paths are
-SQLite/Postgres‑only). See [database drivers](#database) note above.
+teams/HA**. MySQL needs **8.0.13+** (MariaDB **10.5.2+**) and filex fills in
+`parseTime`, `loc=UTC` and `time_zone='+00:00'` when the DSN omits them.
+
+All three engines run the migrations, a schema comparison and the writes of a
+first install in CI on every change — see **[DATABASES.md](DATABASES.md)**,
+which also explains why the queue driver follows the database.
 
 ---
 
@@ -337,6 +341,7 @@ labels them.
 |---|---|
 | `FILEX_ONLYOFFICE_URL` | OnlyOffice Document Server URL (see [ONLYOFFICE.md](ONLYOFFICE.md)) |
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret — must match the Document Server |
+| `FILEX_ONLYOFFICE_CALLBACK_URL` | Address the Document Server uses to reach filex; empty means `FILEX_PUBLIC_URL`. Only needed when the browser's address and the container's address differ |
 | `FILEX_DRAWIO_URL` | Drawio embed URL (diagram editing) |
 | `FILEX_CONVERT_URL` | External universal converter URL |
 
@@ -677,16 +682,22 @@ Index path is `config.yaml` only (`search.index_path`, default
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_QUEUE_DRIVER` | `sqlite` | `sqlite` · `postgres` · `redis` |
-| `FILEX_QUEUE_DSN` | — | `postgres://…` or `redis://…` (ignored for sqlite — shares the app DB) |
+| `FILEX_QUEUE_DRIVER` | *(follows `FILEX_DB_DRIVER`)* | `sqlite` · `postgres` · `mysql` · `redis` |
+| `FILEX_QUEUE_DSN` | — | `postgres://…` or `redis://…` (ignored when the queue shares the app DB) |
 | `FILEX_QUEUE_WORKERS` | `4` | Worker pool size. |
 | `FILEX_QUEUE_ENABLED` | `true` | Disable to run without the persistent queue. |
 
-Use **redis** or **postgres** for multi‑node deployments (postgres uses
-`SELECT … FOR UPDATE SKIP LOCKED`; redis keeps its pending set in a sorted set
-and claims with a Lua script). sqlite is fine single‑node.
+⚠ Unset means **the queue follows the database**, not "sqlite". It used to mean
+sqlite whatever the database was, which on a Postgres install sent SQLite SQL
+down the Postgres connection: a syntax error on every poll and no background job
+ever run, on a server that looked healthy.
 
-All three serve ops in the same order — `priority DESC`, then oldest first —
+Use **redis** for multi‑node deployments, or **postgres** with its own DSN
+(postgres and mysql both claim with `SELECT … FOR UPDATE SKIP LOCKED`; redis
+keeps its pending set in a sorted set and claims with a Lua script). Sharing the
+application database is fine single‑node.
+
+All of them serve ops in the same order — `priority DESC`, then oldest first —
 so a background sweep never overtakes a person's request whichever one you
 run. ⚠ Switching **to** redis on an install that already ran the pre‑v0.34.0
 redis driver converts its pending list on startup, keeping every queued op;

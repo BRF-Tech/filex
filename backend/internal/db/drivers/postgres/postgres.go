@@ -1800,19 +1800,19 @@ func (s *Store) ListAuditRecent(ctx context.Context, limit int) ([]*model.AuditE
 
 func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 	var v string
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(value,'') FROM settings WHERE key=$1`, key).Scan(&v)
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(value,'') FROM settings WHERE setting_key=$1`, key).Scan(&v)
 	return v, err
 }
 
 func (s *Store) UpsertSetting(ctx context.Context, key, value string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO settings (key, value, updated_at) VALUES ($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=NOW()`,
+		`INSERT INTO settings (setting_key, value, updated_at) VALUES ($1,$2,NOW()) ON CONFLICT(setting_key) DO UPDATE SET value=excluded.value, updated_at=NOW()`,
 		key, value)
 	return err
 }
 
 func (s *Store) ListSettings(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT key, COALESCE(value,'') FROM settings ORDER BY key`)
+	rows, err := s.db.QueryContext(ctx, `SELECT setting_key, COALESCE(value,'') FROM settings ORDER BY setting_key`)
 	if err != nil {
 		return nil, err
 	}
@@ -1832,7 +1832,7 @@ func (s *Store) UpsertExternalService(ctx context.Context, name string, enabled 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO external_services (name, enabled, url, secret_enc, options_json, last_check, last_state) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
 		 ON CONFLICT(name) DO UPDATE SET enabled=excluded.enabled, url=excluded.url, secret_enc=excluded.secret_enc, options_json=excluded.options_json, last_check=excluded.last_check, last_state=excluded.last_state`,
-		name, enabled, urlS, secretEnc, optionsJSON, lastCheck, lastState)
+		name, enabled, urlS, secretEnc, optionsJSON, nullTime(lastCheck), lastState)
 	return err
 }
 
@@ -2797,23 +2797,23 @@ func (s *Store) LookupParentByPath(ctx context.Context, storageID int64, fullPat
 // SetUserNodeMeta upserts a (user, node, key) row.
 func (s *Store) SetUserNodeMeta(ctx context.Context, userID, nodeID int64, key, value string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO user_node_meta (user_id, node_id, key, value, updated_at)
+		`INSERT INTO user_node_meta (user_id, node_id, meta_key, value, updated_at)
 		 VALUES ($1,$2,$3,$4,NOW())
-		 ON CONFLICT (user_id, node_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+		 ON CONFLICT(user_id, node_id, meta_key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
 		userID, nodeID, key, value)
 	return err
 }
 
 // DeleteUserNodeMeta removes a single (user, node, key) row.
 func (s *Store) DeleteUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM user_node_meta WHERE user_id=$1 AND node_id=$2 AND key=$3`, userID, nodeID, key)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM user_node_meta WHERE user_id=$1 AND node_id=$2 AND meta_key=$3`, userID, nodeID, key)
 	return err
 }
 
 // GetUserNodeMeta fetches a single value (returns empty string + sql.ErrNoRows if absent).
 func (s *Store) GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error) {
 	var v sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM user_node_meta WHERE user_id=$1 AND node_id=$2 AND key=$3`, userID, nodeID, key).Scan(&v)
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM user_node_meta WHERE user_id=$1 AND node_id=$2 AND meta_key=$3`, userID, nodeID, key).Scan(&v)
 	if err != nil {
 		return "", err
 	}
@@ -2822,10 +2822,10 @@ func (s *Store) GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key s
 
 // ListUserNodeMetaForNode returns all (key,value) for one (user,node) pair.
 func (s *Store) ListUserNodeMetaForNode(ctx context.Context, userID, nodeID int64, prefix string) (map[string]string, error) {
-	q := `SELECT key, COALESCE(value,'') FROM user_node_meta WHERE user_id=$1 AND node_id=$2`
+	q := `SELECT meta_key, COALESCE(value,'') FROM user_node_meta WHERE user_id=$1 AND node_id=$2`
 	args := []any{userID, nodeID}
 	if prefix != "" {
-		q += ` AND key LIKE $3`
+		q += ` AND meta_key LIKE $3`
 		args = append(args, prefix+"%")
 	}
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -2853,7 +2853,7 @@ func (s *Store) ListNodesByUserMeta(ctx context.Context, userID int64, key strin
 		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
 		 FROM user_node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
-		 WHERE m.user_id=$1 AND m.key=$2 AND n.deleted_at IS NULL
+		 WHERE m.user_id=$1 AND m.meta_key=$2 AND n.deleted_at IS NULL
 		 ORDER BY m.updated_at DESC
 		 LIMIT $3`, userID, key, limit)
 	if err != nil {
@@ -2882,7 +2882,7 @@ func (s *Store) SetNodeTags(ctx context.Context, nodeID int64, tags []string) er
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_meta WHERE node_id=$1 AND key LIKE $2`, nodeID, tagPrefixPg+"%"); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_meta WHERE node_id=$1 AND meta_key LIKE $2`, nodeID, tagPrefixPg+"%"); err != nil {
 		return err
 	}
 	seen := map[string]struct{}{}
@@ -2896,8 +2896,8 @@ func (s *Store) SetNodeTags(ctx context.Context, nodeID int64, tags []string) er
 		}
 		seen[t] = struct{}{}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO node_meta (node_id, key, value) VALUES ($1,$2,$3)
-			 ON CONFLICT (node_id, key) DO UPDATE SET value=EXCLUDED.value`,
+			`INSERT INTO node_meta (node_id, meta_key, value) VALUES ($1,$2,$3)
+			 ON CONFLICT(node_id, meta_key) DO UPDATE SET value=EXCLUDED.value`,
 			nodeID, tagPrefixPg+t, "1"); err != nil {
 			return err
 		}
@@ -2907,7 +2907,7 @@ func (s *Store) SetNodeTags(ctx context.Context, nodeID int64, tags []string) er
 
 // GetNodeTags returns the tag list (without prefix) for one node.
 func (s *Store) GetNodeTags(ctx context.Context, nodeID int64) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT key FROM node_meta WHERE node_id=$1 AND key LIKE $2 ORDER BY key`, nodeID, tagPrefixPg+"%")
+	rows, err := s.db.QueryContext(ctx, `SELECT meta_key FROM node_meta WHERE node_id=$1 AND meta_key LIKE $2 ORDER BY meta_key`, nodeID, tagPrefixPg+"%")
 	if err != nil {
 		return nil, err
 	}
@@ -2926,11 +2926,11 @@ func (s *Store) GetNodeTags(ctx context.Context, nodeID int64) ([]string, error)
 // ListAllTagsForStorage returns every distinct tag used in a storage.
 func (s *Store) ListAllTagsForStorage(ctx context.Context, storageID int64) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT m.key
+		`SELECT DISTINCT m.meta_key
 		 FROM node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
-		 WHERE n.storage_id=$1 AND n.deleted_at IS NULL AND m.key LIKE $2
-		 ORDER BY m.key`, storageID, tagPrefixPg+"%")
+		 WHERE n.storage_id=$1 AND n.deleted_at IS NULL AND m.meta_key LIKE $2
+		 ORDER BY m.meta_key`, storageID, tagPrefixPg+"%")
 	if err != nil {
 		return nil, err
 	}
@@ -2949,11 +2949,11 @@ func (s *Store) ListAllTagsForStorage(ctx context.Context, storageID int64) ([]s
 // ListAllTags returns every distinct tag across all storages (alphabetical).
 func (s *Store) ListAllTags(ctx context.Context) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT m.key
+		`SELECT DISTINCT m.meta_key
 		 FROM node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
-		 WHERE n.deleted_at IS NULL AND m.key LIKE $1
-		 ORDER BY m.key`, tagPrefixPg+"%")
+		 WHERE n.deleted_at IS NULL AND m.meta_key LIKE $1
+		 ORDER BY m.meta_key`, tagPrefixPg+"%")
 	if err != nil {
 		return nil, err
 	}
@@ -2978,7 +2978,7 @@ func (s *Store) ListNodesByTag(ctx context.Context, tag string, limit int) ([]*m
 		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
 		 FROM node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
-		 WHERE m.key=$1 AND n.deleted_at IS NULL
+		 WHERE m.meta_key=$1 AND n.deleted_at IS NULL
 		 ORDER BY n.updated_at DESC
 		 LIMIT $2`, tagPrefixPg+tag, limit)
 	if err != nil {
@@ -3752,7 +3752,7 @@ func pgScanNodeComment(rs interface {
 
 // ─────────────────── Storage plugins (migration 00029) ───────────────────
 
-const pluginCols = `id, name, kind, binary, sha256, address, token_sealed, enabled, version, driver, last_error, created_at, updated_at`
+const pluginCols = `id, name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error, created_at, updated_at`
 
 func scanPlugin(r rowScanner) (*model.Plugin, error) {
 	p := &model.Plugin{}
@@ -3766,7 +3766,7 @@ func scanPlugin(r rowScanner) (*model.Plugin, error) {
 func (s *Store) CreatePlugin(ctx context.Context, p *model.Plugin) (*model.Plugin, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO plugins (name, kind, binary, sha256, address, token_sealed, enabled, version, driver, last_error)
+		`INSERT INTO plugins (name, kind, binary_path, sha256, address, token_sealed, enabled, version, driver, last_error)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
 		p.Name, p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError).Scan(&id)
 	if err != nil {
@@ -3802,7 +3802,7 @@ func (s *Store) ListPlugins(ctx context.Context) ([]*model.Plugin, error) {
 
 func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE plugins SET kind=$1, binary=$2, sha256=$3, address=$4, token_sealed=$5, enabled=$6, version=$7, driver=$8, last_error=$9, updated_at=NOW()
+		`UPDATE plugins SET kind=$1, binary_path=$2, sha256=$3, address=$4, token_sealed=$5, enabled=$6, version=$7, driver=$8, last_error=$9, updated_at=NOW()
 		 WHERE id=$10`,
 		p.Kind, p.Binary, p.SHA256, p.Address, p.TokenSealed, p.Enabled, p.Version, p.Driver, p.LastError, p.ID)
 	return err
@@ -3811,4 +3811,19 @@ func (s *Store) UpdatePlugin(ctx context.Context, p *model.Plugin) error {
 func (s *Store) DeletePlugin(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM plugins WHERE id=$1`, id)
 	return err
+}
+
+// nullTime binds a never-set time as NULL rather than as the zero instant.
+//
+// ⚠ A zero time.Time renders as year 0, which MySQL in its default strict
+// mode rejects outright ("Incorrect datetime value: '0000-00-00'"). A service
+// row seeded before its first health check has exactly that value, so on
+// MySQL the seed failed and OnlyOffice, drawio and the converter were absent
+// from a fresh install's settings (issue #19). NULL is also what the column
+// means: "not checked yet".
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
 }

@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS webhook_targets (
     name        VARCHAR(255) NOT NULL,
     url         TEXT NOT NULL,
     secret      VARCHAR(255) NOT NULL DEFAULT '',
-    events      TEXT NOT NULL,
+    events      TEXT NOT NULL DEFAULT (''),
     enabled     TINYINT(1) NOT NULL DEFAULT 1,
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

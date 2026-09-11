@@ -3,6 +3,14 @@
 // fast-path; SQLite's single-writer semantics make this race-free under
 // the typical single-node deployment. For HA setups switch to the
 // postgres driver via FILEMANAGER_QUEUE_DRIVER=postgres.
+//
+// It also serves MySQL/MariaDB, registered under the name "mysql". The
+// placeholder syntax and every statement here are shared; the three
+// expressions that ask the server for the current time are not, and go
+// through nowExpr/nowOffset. ⚠ Before issue #19 a MySQL install got this
+// driver in its SQLite spelling, so every poll logged a syntax error and no
+// queued job — content extraction, antivirus scans, replica retries — ever
+// ran, on a server that otherwise looked healthy.
 package sqlite
 
 import (
@@ -26,15 +34,57 @@ import (
 
 func init() {
 	queue.Register("sqlite", func() queue.Driver { return &Driver{} })
+	queue.Register("mysql", func() queue.Driver { return &Driver{mysql: true} })
 }
 
-// Driver is the SQLite-backed queue.
+// Driver is the SQLite-backed queue — and, in mysql mode, the MySQL/MariaDB
+// one.
 type Driver struct {
 	db *sql.DB
+	// mysql switches the dialect-specific time expressions. Everything else
+	// in this file is portable between the two engines.
+	mysql bool
 }
 
 // Name implements queue.Driver.
-func (Driver) Name() string { return "sqlite" }
+func (d *Driver) Name() string {
+	if d.mysql {
+		return "mysql"
+	}
+	return "sqlite"
+}
+
+// nowExpr is the server's idea of "now", in UTC.
+//
+// ⚠ UTC_TIMESTAMP, not CURRENT_TIMESTAMP, on MySQL: CURRENT_TIMESTAMP follows
+// the session time zone, and not_before is written by sqlTime as a UTC string.
+// A server in any other zone would make a scheduled op runnable hours early or
+// leave it invisible hours late — the same trap the sqlTime comment records
+// for SQLite.
+func (d *Driver) nowExpr() string {
+	if d.mysql {
+		return "UTC_TIMESTAMP(6)"
+	}
+	return "CURRENT_TIMESTAMP"
+}
+
+// nowOffset is "now" shifted by seconds (negative for the past).
+func (d *Driver) nowOffset(seconds int64) string {
+	if d.mysql {
+		unit := "SECOND"
+		n := seconds
+		if n < 0 {
+			return fmt.Sprintf("DATE_SUB(UTC_TIMESTAMP(6), INTERVAL %d %s)", -n, unit)
+		}
+		return fmt.Sprintf("DATE_ADD(UTC_TIMESTAMP(6), INTERVAL %d %s)", n, unit)
+	}
+	sign := "+"
+	n := seconds
+	if n < 0 {
+		sign, n = "-", -n
+	}
+	return fmt.Sprintf("DATETIME('now', '%s%d seconds')", sign, n)
+}
 
 // Init opens the queue's DB. cfg keys:
 //
@@ -47,6 +97,13 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	if v, ok := cfg["db"].(*sql.DB); ok && v != nil {
 		d.db = v
 		return nil
+	}
+	if d.mysql {
+		// MySQL mode is wired to the application's own connection, which
+		// already carries the parseTime/loc/time_zone settings the shared
+		// statements assume. Opening a second one from a bare DSN here would
+		// silently drop them.
+		return errors.New("queue/mysql: supply the application *sql.DB via cfg[\"db\"]")
 	}
 	dsn, _ := cfg["dsn"].(string)
 	if dsn == "" {
@@ -185,7 +242,7 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 		args  []any
 		where = []string{
 			"status = 'pending'",
-			"(not_before IS NULL OR not_before <= CURRENT_TIMESTAMP)",
+			"(not_before IS NULL OR not_before <= " + d.nowExpr() + ")",
 		}
 	)
 	if len(types) > 0 {
@@ -196,9 +253,19 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 		}
 		where = append(where, fmt.Sprintf("type IN (%s)", strings.Join(placeholders, ",")))
 	}
+	// ⚠ FOR UPDATE SKIP LOCKED on MySQL, nothing on SQLite. SQLite serializes
+	// writers, so the read-then-claim below cannot interleave; InnoDB's
+	// snapshot read happily hands the SAME row to every worker, which then all
+	// believe they claimed it. SKIP LOCKED is the same pattern the postgres
+	// driver uses, and the RowsAffected check under it is what makes the
+	// remaining race harmless on both engines.
+	lock := ""
+	if d.mysql {
+		lock = " FOR UPDATE SKIP LOCKED"
+	}
 	q := fmt.Sprintf(`SELECT id FROM ops_queue WHERE %s
 	                  ORDER BY priority DESC, enqueued_at ASC
-	                  LIMIT 1`, strings.Join(where, " AND "))
+	                  LIMIT 1%s`, strings.Join(where, " AND "), lock)
 
 	var id string
 	if err := tx.QueryRowContext(ctx, q, args...).Scan(&id); err != nil {
@@ -209,9 +276,9 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 	}
 
 	// Claim it.
-	if _, err := tx.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`UPDATE ops_queue
-		 SET status='running', started_at=CURRENT_TIMESTAMP, attempts=attempts+1,
+		 SET status='running', started_at=`+d.nowExpr()+`, attempts=attempts+1,
 		     dedup_key=NULL
 		 -- ⚠ dedup_key is cleared here, not when the op finishes. Two reasons,
 		 -- and both are correctness rather than tidiness:
@@ -223,8 +290,24 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 		 --      stranded in running for ever.
 		 -- Redis releases its claim at the same moment, so all three drivers
 		 -- agree on when a key becomes free.
-		 WHERE id=? AND status='pending'`, id); err != nil {
+		 WHERE id=? AND status='pending'`, id)
+	if err != nil {
+		// InnoDB can pick one of two workers racing for the same index gap and
+		// roll it back. That is contention, not failure: the op is still
+		// pending and the next poll takes it. Logging it as an error would
+		// print a deadlock line on a perfectly healthy MySQL install every
+		// time two workers reached for the queue at once.
+		if isLockContention(err) {
+			return queue.Op{}, queue.ErrEmpty
+		}
 		return queue.Op{}, fmt.Errorf("queue/sqlite: claim: %w", err)
+	}
+	// Somebody else got there first. Reporting "empty" rather than returning
+	// the op is the whole difference between one worker running a job and
+	// four: the claim used to be issued and its result discarded, so on MySQL
+	// every worker returned the same op and three of them failed the ack.
+	if n, _ := res.RowsAffected(); n == 0 {
+		return queue.Op{}, queue.ErrEmpty
 	}
 
 	// Read it back inside the same tx so the caller sees attempts++.
@@ -241,7 +324,7 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 // Ack marks the op done.
 func (d *Driver) Ack(ctx context.Context, id string) error {
 	res, err := d.db.ExecContext(ctx,
-		`UPDATE ops_queue SET status='done', finished_at=CURRENT_TIMESTAMP, last_error=''
+		`UPDATE ops_queue SET status='done', finished_at=`+d.nowExpr()+`, last_error=''
 		 WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("queue/sqlite: ack: %w", err)
@@ -255,14 +338,14 @@ func (d *Driver) Ack(ctx context.Context, id string) error {
 // Fail records the failure. retry=true requeues; retry=false terminates.
 func (d *Driver) Fail(ctx context.Context, id, errMsg string, retry bool) error {
 	q := `UPDATE ops_queue
-	      SET status=?, last_error=?, started_at=NULL, finished_at=CURRENT_TIMESTAMP
+	      SET status=?, last_error=?, started_at=NULL, finished_at=` + d.nowExpr() + `
 	      WHERE id=?`
 	target := queue.StatusFailed
 	if retry {
 		// Re-queue: status back to pending, finished_at NULL.
 		q = `UPDATE ops_queue
 		     SET status='pending', last_error=?, started_at=NULL, finished_at=NULL,
-		         not_before=DATETIME('now', '+30 seconds')
+		         not_before=` + d.nowOffset(30) + `
 		     WHERE id=?`
 		_, err := d.db.ExecContext(ctx, q, errMsg, id)
 		if err != nil {
@@ -371,7 +454,7 @@ func (d *Driver) Stats(ctx context.Context) (queue.Stats, error) {
 	}
 	if err := d.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM ops_queue
-		 WHERE status='done' AND finished_at >= DATETIME('now','-1 day')`,
+		 WHERE status='done' AND finished_at >= `+d.nowOffset(-24*60*60),
 	).Scan(&s.Done24h); err != nil {
 		return s, fmt.Errorf("queue/sqlite: done24h: %w", err)
 	}
@@ -381,7 +464,7 @@ func (d *Driver) Stats(ctx context.Context) (queue.Stats, error) {
 // Cancel transitions a pending op to cancelled.
 func (d *Driver) Cancel(ctx context.Context, id string) error {
 	res, err := d.db.ExecContext(ctx,
-		`UPDATE ops_queue SET status='cancelled', finished_at=CURRENT_TIMESTAMP
+		`UPDATE ops_queue SET status='cancelled', finished_at=`+d.nowExpr()+`
 		 WHERE id=? AND status='pending'`, id)
 	if err != nil {
 		return fmt.Errorf("queue/sqlite: cancel: %w", err)
@@ -423,9 +506,9 @@ func (d *Driver) RecoverOrphans(ctx context.Context, olderThan time.Duration) (i
 		cutoffSec = 0
 	}
 	res, err := d.db.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE ops_queue SET status='pending', started_at=NULL
-		             WHERE status='running'
-		               AND (started_at IS NULL OR started_at <= DATETIME('now','-%d seconds'))`, cutoffSec))
+		`UPDATE ops_queue SET status='pending', started_at=NULL
+		 WHERE status='running'
+		   AND (started_at IS NULL OR started_at <= `+d.nowOffset(-cutoffSec)+`)`)
 	if err != nil {
 		return 0, fmt.Errorf("queue/sqlite: recover: %w", err)
 	}
@@ -522,4 +605,19 @@ func newID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// isLockContention reports whether err is MySQL telling us two workers reached
+// for the same row: a deadlock victim (1213) or a lock-wait timeout (1205).
+// Both mean "try again", and the caller's next poll is that retry.
+//
+// Matched on text rather than on a driver error type so this file keeps its
+// one dependency — database/sql — and does not import the MySQL driver just to
+// read a number.
+func isLockContention(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "deadlock found") || strings.Contains(msg, "lock wait timeout")
 }

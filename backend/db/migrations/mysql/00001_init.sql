@@ -1,5 +1,10 @@
 -- +goose Up
--- +goose StatementBegin
+-- ⚠ Do not wrap these statements in a goose statement block: goose hands a
+-- wrapped block to the server as ONE query, and the MySQL driver refuses a
+-- query that carries several statements unless the DSN opts into
+-- multiStatements. A wrapper here is what made this migration fail on the
+-- FIRST boot of every MySQL install (issue #19). Leave the statements
+-- unwrapped, or wrap them one at a time.
 
 -- 1. storages
 CREATE TABLE IF NOT EXISTS storages (
@@ -7,7 +12,7 @@ CREATE TABLE IF NOT EXISTS storages (
     name VARCHAR(190) NOT NULL UNIQUE,
     driver VARCHAR(64) NOT NULL,
     mount_path VARCHAR(500) NOT NULL,
-    config_json JSON NOT NULL,
+    config_json JSON NOT NULL DEFAULT ('{}'),
     sync_mode VARCHAR(32) NOT NULL DEFAULT 'poll',
     sync_interval_s INT NOT NULL DEFAULT 900,
     last_sync_at DATETIME(6),
@@ -153,7 +158,7 @@ CREATE TABLE IF NOT EXISTS chunked_uploads (
     storage_key VARCHAR(2048) NOT NULL,
     upload_id VARCHAR(255) NOT NULL,
     total_size BIGINT NOT NULL,
-    parts_json JSON NOT NULL,
+    parts_json JSON NOT NULL DEFAULT ('[]'),
     expires_at DATETIME(6) NOT NULL,
     KEY idx_chunked_uploads_expires (expires_at),
     CONSTRAINT fk_upload_storage FOREIGN KEY (storage_id) REFERENCES storages(id) ON DELETE CASCADE
@@ -177,7 +182,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS roles (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(64) NOT NULL UNIQUE,
-    permissions_json JSON NOT NULL
+    permissions_json JSON NOT NULL DEFAULT ('[]')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 INSERT IGNORE INTO roles (name, permissions_json) VALUES
     ('admin', '["*"]'),
@@ -190,7 +195,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action VARCHAR(64) NOT NULL,
     target_type VARCHAR(64),
     target_id VARCHAR(64),
-    metadata_json JSON NOT NULL,
+    metadata_json JSON NOT NULL DEFAULT ('{}'),
     ip VARCHAR(64),
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     KEY idx_audit_log_user (user_id, created_at),
@@ -211,15 +216,13 @@ CREATE TABLE IF NOT EXISTS external_services (
     enabled TINYINT(1) NOT NULL DEFAULT 0,
     url VARCHAR(500),
     secret_enc TEXT,
-    options_json JSON NOT NULL,
+    options_json JSON NOT NULL DEFAULT ('{}'),
     last_check DATETIME(6),
     last_state VARCHAR(32)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 SET FOREIGN_KEY_CHECKS=0;
 DROP TABLE IF EXISTS external_services;
 DROP TABLE IF EXISTS settings;
@@ -237,4 +240,3 @@ DROP TABLE IF EXISTS nodes;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS storages;
 SET FOREIGN_KEY_CHECKS=1;
--- +goose StatementEnd

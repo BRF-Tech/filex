@@ -1,5 +1,10 @@
 -- +goose Up
--- +goose StatementBegin
+-- ⚠ Do not wrap these statements in a goose statement block: goose hands a
+-- wrapped block to the server as ONE query, and the MySQL driver refuses a
+-- query that carries several statements unless the DSN opts into
+-- multiStatements. A wrapper here is what made this migration fail on the
+-- FIRST boot of every MySQL install (issue #19). Leave the statements
+-- unwrapped, or wrap them one at a time.
 
 CREATE TABLE IF NOT EXISTS replica_rules (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -7,7 +12,7 @@ CREATE TABLE IF NOT EXISTS replica_rules (
     mode            VARCHAR(16) NOT NULL,
     priority        INT NOT NULL DEFAULT 100,
     enabled         TINYINT(1) NOT NULL DEFAULT 1,
-    description     TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT (''),
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_replica_rules_priority (priority, enabled)
@@ -32,7 +37,7 @@ CREATE TABLE IF NOT EXISTS replica_status_reports (
     total_files     BIGINT NOT NULL DEFAULT 0,
     failed_count    BIGINT NOT NULL DEFAULT 0,
     repaired_count  BIGINT NOT NULL DEFAULT 0,
-    summary_json    JSON NOT NULL,
+    summary_json    JSON NOT NULL DEFAULT ('{}'),
     CONSTRAINT replica_status_reports_singleton CHECK (id = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -49,10 +54,8 @@ ALTER TABLE storages ADD COLUMN role           VARCHAR(16) NOT NULL DEFAULT 'pri
 ALTER TABLE storages ADD COLUMN replica_of_id  BIGINT NULL;
 ALTER TABLE storages ADD COLUMN replica_mode   VARCHAR(16) NOT NULL DEFAULT 'async';
 
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 DROP TABLE IF EXISTS replica_settings;
 DROP TABLE IF EXISTS replica_status_reports;
 DROP TABLE IF EXISTS replica_failures;
@@ -60,4 +63,3 @@ DROP TABLE IF EXISTS replica_rules;
 ALTER TABLE storages DROP COLUMN replica_mode;
 ALTER TABLE storages DROP COLUMN replica_of_id;
 ALTER TABLE storages DROP COLUMN role;
--- +goose StatementEnd

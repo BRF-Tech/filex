@@ -302,6 +302,12 @@ export interface ExternalService {
    * visible the moment the page paints.
    */
   advisories?: ExternalAdvisory[];
+  /**
+   * The address the SERVICE uses to reach filex. Empty means "filex's public
+   * URL", which is right wherever one address serves both the browser and the
+   * container. Only OnlyOffice calls back, so only it shows the field.
+   */
+  callback_url?: string;
 }
 
 export interface AuthProvider {

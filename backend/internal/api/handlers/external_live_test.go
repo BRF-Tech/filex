@@ -21,8 +21,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +82,11 @@ func liveExternalServer(t *testing.T, cfgMutate func(*config.Config)) (*extHarne
 				return "", ""
 			}
 			return st.URL, st.Secret
+		}
+		// Mirrors server.New. Without it the harness would prove the callback
+		// address works while the product ignores it.
+		oo.LiveCallbackURL = func(ctx context.Context) string {
+			return d.External.Get(ctx, external.OnlyOffice).CallbackURL
 		}
 		d.OnlyOffice = oo
 	})
@@ -346,4 +353,86 @@ func TestExternalAdmin_ListCarriesAdvisoriesWithoutPressingTest(t *testing.T) {
 		}
 	}
 	t.Fatal("onlyoffice row missing from the list response")
+}
+
+// convertingDocServerStub is a document server that answers the conversion
+// endpoint and actually downloads the URL it is handed — which is what makes
+// the third leg measurable at all. It records the URL so a test can prove
+// WHICH address filex handed out.
+func convertingDocServerStub(t *testing.T, fetched *string) string {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/ConvertService.ashx") {
+			w.WriteHeader(http.StatusOK) // /healthcheck and friends
+			return
+		}
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		url, _ := req["url"].(string)
+		if fetched != nil {
+			*fetched = url
+		}
+		if resp, err := http.Get(url); err == nil { //nolint:noctx // test stand-in
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"endConvert": true, "fileUrl": "http://example/out.docx"})
+	}))
+	t.Cleanup(s.Close)
+	return s.URL
+}
+
+// The third leg stops being a disclaimer: when the document server can be
+// asked, the Test result says whether its request reached filex.
+func TestExternalAdmin_TestMeasuresTheDocumentServersRouteBack(t *testing.T) {
+	h, _ := liveExternalServer(t, func(c *config.Config) {
+		c.PublicURL = "https://files.example.com"
+		c.PublicURLSet = true
+	})
+	var handed string
+	ds := convertingDocServerStub(t, &handed)
+	require.Equal(t, http.StatusOK, h.Patch(t, "/api/admin/external/onlyoffice", map[string]any{
+		"enabled": true, "url": ds, "secret": "s3cr3t",
+	}).StatusCode)
+
+	out := h.Post(t, "/api/admin/external/onlyoffice/test")
+
+	leg, _ := out["service_to_filex"].(map[string]any)
+	require.NotNil(t, leg, "the third leg must be reported")
+	require.Equal(t, true, leg["checked"], "the document server answered, so the question WAS put")
+	// The public URL is https://files.example.com, which does not exist: the
+	// document server could not fetch it, and that is the real verdict rather
+	// than a shrug.
+	require.Equal(t, false, leg["ok"])
+	require.Contains(t, leg["url"], "files.example.com")
+	require.Contains(t, handed, "files.example.com")
+
+	legs, _ := out["not_checked"].([]any)
+	require.ElementsMatch(t, []any{"browser-to-service"}, legs,
+		"a leg that WAS measured must not still be listed as unchecked")
+}
+
+// And the field that makes the broken case fixable: the document server is
+// sent to the callback address, not to the browser-facing one.
+func TestExternalAdmin_CallbackURLIsWhereTheDocumentServerIsSent(t *testing.T) {
+	h, _ := liveExternalServer(t, func(c *config.Config) {
+		c.PublicURL = "https://files.example.com"
+		c.PublicURLSet = true
+	})
+	var handed string
+	ds := convertingDocServerStub(t, &handed)
+	require.Equal(t, http.StatusOK, h.Patch(t, "/api/admin/external/onlyoffice", map[string]any{
+		"enabled": true, "url": ds, "secret": "s3cr3t",
+		"callback_url": h.srv.URL,
+	}).StatusCode)
+
+	out := h.Post(t, "/api/admin/external/onlyoffice/test")
+	require.Equal(t, h.srv.URL, out["callback_url"], "the saved address must come back on Test")
+
+	leg, _ := out["service_to_filex"].(map[string]any)
+	require.Equal(t, true, leg["checked"])
+	require.Equal(t, true, leg["ok"], "the document server reached filex at the callback address: %v", leg["detail"])
+	require.Contains(t, handed, h.srv.URL)
+	require.NotContains(t, handed, "files.example.com")
 }

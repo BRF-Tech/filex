@@ -438,6 +438,12 @@ func BuildRouter(d *Deps) http.Handler {
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
 	externalH := handlers.NewExternalAdmin(d.Store, d.Caps, d.External, envManagedExternal(d.Cfg))
 	externalH.AttachPublicURL(d.Cfg.PublicURL, d.Cfg.PublicURLSet)
+	// The third leg. Without this the Test button can only say it did not
+	// check the document server's route back to filex — which is where the
+	// reporter of issue #17 spent two rounds.
+	if d.OnlyOffice != nil {
+		externalH.ReversePath = d.OnlyOffice.VerifyReversePath
+	}
 	authProvH := handlers.NewAuthProviders(d.Store)
 	authProvH.DemoMode = d.Cfg.Demo.Mode
 	storagesAdmH := handlers.NewStoragesAdmin(d.Store)
@@ -539,6 +545,7 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
 	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)
+	r.Get("/api/files/onlyoffice/probe", ooh.Probe)
 	r.Post("/api/files/onlyoffice/callback", ooh.Callback)
 
 	// ────── auth (always public) ──────

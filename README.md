@@ -107,7 +107,9 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   The tenant boundary is enforced on every route that names a row, not only on the
   ones that list them, and instance-wide settings are reserved to the supertenant.
 - **Boringly deployable** — one binary or one container; SQLite by default, Postgres/MySQL
-  when you want them; every driver switched by env vars.
+  when you want them; every driver switched by env vars. All three engines are
+  migrated, compared against each other and written to by CI on every change,
+  because "supported" used to mean "compiles" ([docs/DATABASES.md](docs/DATABASES.md)).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -118,7 +120,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 │  Storage Drivers:│  local · s3 · ftp · sftp · webdav · smb  │
 │  Served as:      │  s3 · sftp · ftps · nfs · webdav         │
 │  DB Drivers:     │  sqlite (default) · mysql · postgres     │
-│  Queue Drivers:  │  sqlite (default) · redis · postgres     │
+│  Queue Drivers:  │  follows the DB · redis                  │
 │  Realtime:       │  WebSocket presence + live updates       │
 │  RBAC:           │  roles + per-item grants + share invites │
 │  AI / MCP:       │  /api/ai REST + native MCP server        │
@@ -359,7 +361,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).
 - **LDAP / Active Directory** — directory accounts sign in on the same password form as local ones, and on WebDAV/SFTP/FTPS/S3/NFS too; private-CA support, and `local` stays first so `admin@local` works while the directory is down ([docs/LDAP.md](docs/LDAP.md)).
 - **Replica + reconciliation** — primary→replica fan-out (mirror / append-only / skip per path-glob rule), read fallback, scheduled status report, one-click "Fix all".
-- **Persistent op queue** — restart-safe queue (SQLite / Redis / Postgres), worker pool with retries + cancel + admin dashboard. All three drivers order by priority, so the antivirus scan for a file somebody just uploaded is served ahead of the twenty thousand a first import queued.
+- **Persistent op queue** — restart-safe queue in your own database (SQLite / Postgres / MySQL) or in Redis, worker pool with retries + cancel + admin dashboard. Every driver orders by priority, so the antivirus scan for a file somebody just uploaded is served ahead of the twenty thousand a first import queued. Unset, the driver follows the database rather than defaulting to SQLite — pointing SQLite statements at a Postgres server is a syntax error on every poll and no job ever runs.
 - **DB-backed file tree** — listings come from the DB cache (1-5 ms), not the storage backend (~100 ms); a periodic sync catches out-of-band changes, by etag where the backend reports one and by size + modification time where it does not.
 - **Viewers & editors** — image/video/audio, PDF, Markdown (split editor + preview), CSV, code (Monaco), Office via OnlyOffice, Drawio + Mermaid diagrams, 3D models.
 - **Universal converter** — optional side-car converts between document/image formats from the UI. It, OnlyOffice and drawio are configured in the admin panel and apply to the running server, with no restart ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md), [docs/CONVERT-INTEGRATION.md](docs/CONVERT-INTEGRATION.md)).

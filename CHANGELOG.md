@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-11
+
+### Upgrade notes
+
+- ⚠ **PostgreSQL and MySQL installs: this is the release where they work.**
+  Reported from the outside (#19): migration `00029` aborted the first boot of
+  every PostgreSQL install, because `binary` is a reserved word there — and in
+  MySQL, and only SQLite accepts it unquoted. That column was the first thing
+  that broke, not the only one. Nothing in the repository had ever run against
+  another engine, so every test stayed green while neither engine could finish
+  a first boot, and on PostgreSQL the file-operation queue and the background
+  job queue both failed silently on a server that reported itself healthy.
+
+- ⚠ **Three columns were renamed** to get out of the way of reserved words:
+  `plugins.binary` → `binary_path`, and `key` → `setting_key` / `meta_key` on
+  `settings`, `node_meta` and `user_node_meta`. Migrations 00034–00036 do it on
+  every engine; nothing in the API or the UI changes name. Existing SQLite and
+  PostgreSQL installs are migrated in place on the next start.
+
+- ⚠ **`FILEX_QUEUE_DRIVER` unset now follows the database** instead of meaning
+  `sqlite`. If you were relying on the old default while running PostgreSQL,
+  you were relying on a queue that logged a syntax error on every poll and ran
+  nothing; it now runs. An explicit driver still wins.
+
+- **MySQL/MariaDB minimum is now stated**: MySQL 8.0.13, MariaDB 10.5.2 — two
+  migrations need `DEFAULT` on a `TEXT`/`JSON` column and `RENAME COLUMN`.
+  filex also fills in `parseTime`, `loc=UTC` and `time_zone='+00:00'` when a
+  MySQL DSN omits them; without the third, the server's clock and filex's
+  disagree and a scheduled job becomes runnable hours early or late.
+
+### Added
+
+- **The document server gets its own address.**
+  `FILEX_ONLYOFFICE_CALLBACK_URL`, and the matching field under the Document
+  Server URL in *Settings → External services*, is the address the document
+  server uses to reach filex. Empty — the default — keeps using the public URL,
+  so installs where one address serves both are untouched. It exists because
+  `FILEX_PUBLIC_URL` builds two different things, the share links people click
+  and the document URL the document server fetches, and issue #17's reporter
+  needed those to be different addresses. Applies live, no restart.
+
+- **The third leg is measured, not disclaimed.** The Test button used to report
+  two legs and say the document server's route back to filex could not be
+  checked, "because filex has no way to make another container issue a request
+  on demand". It can: the document server's conversion endpoint takes a URL and
+  downloads it, so filex hands it a one-shot, unguessable URL of its own and
+  watches for the request to arrive. The admin page now answers *the document
+  server reached filex* or *it did not*, with the exact URL it was given. A
+  server that rejects the signature, or that does not answer the conversion
+  endpoint at all, is reported as **unmeasured** rather than as a broken route.
+
+- **[docs/DATABASES.md](docs/DATABASES.md)** — which engine to pick, what each
+  one needs, how the queue follows it, and exactly what "supported" is checked
+  to mean.
+
+- **CI runs against real PostgreSQL and MySQL service containers**
+  (`test:go:engines`). The suites skip themselves without a DSN, so nobody has
+  to keep two database servers running to work on filex.
+
+### Fixed
+
+- **PostgreSQL: the first boot.** `00029` used a reserved word as a column
+  name (#19). Renamed on every engine.
+- **MySQL: everything.** Five migrations wrapped many statements in one goose
+  block, which reaches the server as a single multi-statement query and is
+  refused — `00001` failed. Migration `00009` was missing from the dialect
+  entirely, so `CreateStorage` died on "Unknown column replica_target_id".
+  Seventeen columns were `NOT NULL` with no default where SQLite has one. Every
+  upsert in the shared store was SQLite-only syntax; they are rewritten into
+  `ON DUPLICATE KEY UPDATE` at query time rather than kept as a second copy.
+- **PostgreSQL: copy, move and delete.** The `pending_ops` table was created at
+  boot from hand-written SQLite DDL, so on PostgreSQL it never existed and every
+  file operation failed on "relation pending_ops does not exist" while the
+  server answered `/healthz` with 200. It is a migration now, and the queue's
+  statements are rebound to `$1…$n` with the id read back through `RETURNING`.
+- **PostgreSQL and MySQL: background jobs.** The queue driver defaulted to
+  `sqlite` regardless of the database. It follows the database now, and the
+  SQLite driver serves MySQL under its own name with UTC time expressions,
+  `FOR UPDATE SKIP LOCKED` and a claim whose result is actually checked — four
+  workers used to be handed the same op, three of which then failed the ack.
+- **MySQL: a fresh install had no external services.** Seeding a service that
+  has never been health-checked bound a zero timestamp, which MySQL rejects in
+  strict mode, so OnlyOffice, drawio and the converter were missing from the
+  settings page.
+- **Documentation that had stopped being true**: `CONFIGURATION.md` still said
+  MySQL was for "read-mostly use", `DEPLOYMENT.md` repeated it, and
+  `MULTI-TENANCY.md` listed the postgres/mysql CI job as pending.
+
 ## [0.37.0] - 2026-09-07
 
 ### Upgrade notes

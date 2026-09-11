@@ -349,7 +349,9 @@
     "fields": {
       "url": "Service URL",
       "jwtSecret": "JWT secret",
-      "jwtSecretHint": "Leave blank to keep the current secret"
+      "jwtSecretHint": "Leave blank to keep the current secret",
+      "callbackUrl": "Callback URL (the address the document server reaches filex at)",
+      "callbackUrlHint": "Leave empty to use filex's public URL. Fill it in when the document server cannot resolve that address — a container name such as http://filex:5212 belongs here, never in the public URL, which also builds every share link."
     },
     "states": {
       "healthy": "Healthy",
@@ -391,7 +393,11 @@
       "notConfigured": "not configured",
       "disabledLeg": "disabled",
       "cannotCheck": "not checked — filex cannot make the document server issue a request on demand. The warnings below are the shapes that certainly cannot work.",
-      "disagree": "filex reaches this address and your browser does not. That is what a container-internal name looks like: the editor loads in the browser, so it will fail there."
+      "disagree": "filex reaches this address and your browser does not. That is what a container-internal name looks like: the editor loads in the browser, so it will fail there.",
+      "callbackOk": "reached filex — the document server downloaded a test file from it",
+      "callbackBad": "did NOT reach filex. The document opens and the save never comes back.",
+      "callbackUnknown": "not measured yet — press Test",
+      "callbackUnchecked": "could not be measured; the warnings below are the shapes that certainly cannot work."
     },
     "browserStates": {
       "checking": "checking…",

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS nfs_exports (
     storage_name VARCHAR(190) NOT NULL DEFAULT '',
     prefix       VARCHAR(1024) NOT NULL DEFAULT '',
     read_only    TINYINT(1) NOT NULL DEFAULT 0,
-    allow_cidrs  TEXT NOT NULL,
+    allow_cidrs  TEXT NOT NULL DEFAULT (''),
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_used_at DATETIME NULL,
     expires_at   DATETIME NULL,

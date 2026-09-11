@@ -349,7 +349,9 @@
     "fields": {
       "url": "Servis URL",
       "jwtSecret": "JWT secret",
-      "jwtSecretHint": "Boş bırakırsan mevcut secret korunur"
+      "jwtSecretHint": "Boş bırakırsan mevcut secret korunur",
+      "callbackUrl": "Geri dönüş adresi (doküman sunucusunun filex'e ulaştığı adres)",
+      "callbackUrlHint": "Boş bırakılırsa filex'in genel adresi kullanılır. Doküman sunucusu o adresi çözemiyorsa burayı doldurun — http://filex:5212 gibi bir konteyner adı buraya yazılır, genel adrese asla: paylaşım bağlantıları da ondan üretiliyor."
     },
     "states": {
       "healthy": "Sağlıklı",
@@ -391,7 +393,11 @@
       "notConfigured": "yapılandırılmamış",
       "disabledLeg": "pasif",
       "cannotCheck": "denetlenmedi — filex doküman sunucusuna istek attıramaz. Aşağıdaki uyarılar, kesinlikle çalışamayacak biçimlerdir.",
-      "disagree": "filex bu adrese erişiyor, tarayıcınız erişemiyor. Container ağına özel bir ad tam da böyle görünür: editör tarayıcıda yüklendiği için orada başarısız olur."
+      "disagree": "filex bu adrese erişiyor, tarayıcınız erişemiyor. Container ağına özel bir ad tam da böyle görünür: editör tarayıcıda yüklendiği için orada başarısız olur.",
+      "callbackOk": "filex'e ulaştı — doküman sunucusu bir deneme dosyasını indirdi",
+      "callbackBad": "filex'e ULAŞAMADI. Belge açılır, kaydetme hiç geri dönmez.",
+      "callbackUnknown": "henüz ölçülmedi — Test'e basın",
+      "callbackUnchecked": "ölçülemedi; aşağıdaki uyarılar kesinlikle çalışamayacak biçimlerdir."
     },
     "browserStates": {
       "checking": "denetleniyor…",

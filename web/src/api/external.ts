@@ -5,6 +5,8 @@ export interface ExternalServiceUpdate {
   url?: string | null;
   jwt_secret?: string | null;
   enabled?: boolean;
+  /** The address the document server reaches filex at. '' clears it. */
+  callback_url?: string | null;
 }
 
 // Backend wire shape — Go struct without json tags, so fields land
@@ -29,6 +31,7 @@ interface BackendExternal {
   last_state?: string;
   env_managed?: boolean;
   advisories?: ExternalAdvisory[] | null;
+  callback_url?: string;
 }
 interface ListResponse {
   entries: BackendExternal[] | null;
@@ -86,6 +89,7 @@ function toExternal(b: BackendExternal): ExternalService {
     last_error: null,
     env_managed: b.env_managed === true,
     advisories: b.advisories ?? [],
+    callback_url: b.callback_url ?? '',
   };
 }
 
@@ -98,6 +102,18 @@ export interface ExternalTestResult {
   error: string | null;
   advisories: ExternalAdvisory[];
   publicURL: string;
+  /**
+   * The third leg: did the DOCUMENT SERVER's request actually reach filex?
+   * `checked: false` means the question could not be put — never render that
+   * as a broken route.
+   */
+  serviceToFilex: {
+    checked: boolean;
+    ok: boolean;
+    url?: string;
+    code?: number;
+    detail?: string;
+  };
 }
 
 /**
@@ -136,6 +152,7 @@ export const ExternalApi = {
     if (patch.enabled !== undefined) body.enabled = patch.enabled;
     if (patch.url !== undefined) body.url = patch.url;
     if (patch.jwt_secret !== undefined) body.secret = patch.jwt_secret;
+    if (patch.callback_url !== undefined) body.callback_url = patch.callback_url ?? '';
     await api.patch(`/admin/external/${id}`, body);
     const all = await ExternalApi.list();
     const found = all.find((s) => s.id === id);
@@ -153,9 +170,10 @@ export const ExternalApi = {
   },
 
   /**
-   * Run the SERVER-side probe. ⚠ This answers one of three questions — see
-   * `probeExternalFromBrowser` for the browser leg and `advisories` for the
-   * document-server-to-filex leg, which cannot be probed at all.
+   * Run the SERVER-side probe. ⚠ It answers the filex→service leg directly,
+   * and now carries the third leg with it: `serviceToFilex` is the document
+   * server's own attempt to fetch a one-shot URL from filex. The browser leg
+   * is separate — see `probeExternalFromBrowser`.
    */
   async test(id: ExternalService['id']): Promise<ExternalTestResult> {
     const { data } = await api.post<{
@@ -171,6 +189,14 @@ export const ExternalApi = {
       advisories?: ExternalAdvisory[] | null;
       server_reachable?: boolean;
       has_warnings?: boolean;
+      callback_url?: string;
+      service_to_filex?: {
+        checked?: boolean;
+        ok?: boolean;
+        url?: string;
+        code?: number;
+        detail?: string;
+      };
     }>(`/admin/external/${id}/test`);
     if (typeof data.public_url === 'string') lastPublicURL = data.public_url;
     return {
@@ -180,6 +206,13 @@ export const ExternalApi = {
       error: data.error ?? null,
       advisories: data.advisories ?? [],
       publicURL: data.public_url ?? lastPublicURL,
+      serviceToFilex: {
+        checked: data.service_to_filex?.checked === true,
+        ok: data.service_to_filex?.ok === true,
+        url: data.service_to_filex?.url,
+        code: data.service_to_filex?.code,
+        detail: data.service_to_filex?.detail,
+      },
     };
   },
 };

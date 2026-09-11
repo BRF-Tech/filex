@@ -90,6 +90,11 @@ onlyoffice:
   enabled: false
   url: ""                 # https://office.example.com — browser-facing
   jwtSecret: ""           # MUST equal the Document Server's JWT_SECRET
+  # The address the Document Server uses to reach filex back. Empty means
+  # publicURL, which is right whenever one address serves both the browser and
+  # the cluster. Set it when they differ, e.g. a Service DNS name:
+  #   callbackUrl: http://filex.default.svc.cluster.local:5212
+  callbackUrl: ""
 
 # Drawio / diagrams.net — diagram editing, embedded as an iframe.
 drawio:

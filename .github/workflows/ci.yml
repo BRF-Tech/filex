@@ -55,6 +55,51 @@ jobs:
         working-directory: backend
         run: go build ./...
 
+  engines:
+    # The databases the docs say you can install on. `backend` above runs on
+    # SQLite alone, which is how a column name PostgreSQL and MySQL both refuse
+    # shipped in a migration, and how a whole migration existed in two dialects
+    # out of three (issue #19). These suites skip themselves without the two
+    # DSNs, so they measure nothing unless the services below are really up.
+    name: Databases (PostgreSQL + MySQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: filex
+          POSTGRES_PASSWORD: filex
+          POSTGRES_DB: filex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U filex"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: filex
+          MYSQL_DATABASE: filex
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -pfilex"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/go.sum
+      - name: Embed placeholders
+        run: |
+          mkdir -p backend/embed/admin backend/embed/web
+          touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+      - name: Migrations, schema parity and the write paths, on every engine
+        working-directory: backend
+        env:
+          FILEX_TEST_PG_DSN: postgres://filex:filex@127.0.0.1:5432/filex?sslmode=disable
+          FILEX_TEST_MYSQL_DSN: root:filex@tcp(127.0.0.1:3306)/mysql
+        run: go test ./internal/db/ ./internal/queue/ ./internal/ops/
+
   frontend:
     name: Frontend (pnpm)
     runs-on: ubuntu-latest

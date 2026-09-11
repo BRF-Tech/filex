@@ -3,11 +3,17 @@
 -- admin's registration of an out-of-process storage driver (binary filex
 -- launches, or remote service it connects to); runtime state is derived, not
 -- stored. See internal/plugin and docs/PLUGINS.md.
+--
+-- ⚠ The column is binary_path, NOT `binary`: BINARY is a reserved word in
+-- PostgreSQL and in MySQL, and only SQLite accepts it unquoted. It shipped as
+-- `binary`, so this migration aborted the very first boot of every Postgres
+-- install (issue #19). Do not rename it back; the Go field is still
+-- Plugin.Binary and the JSON key is still "binary".
 CREATE TABLE IF NOT EXISTS plugins (
     id           BIGSERIAL PRIMARY KEY,
     name         TEXT NOT NULL UNIQUE,
     kind         TEXT NOT NULL DEFAULT 'binary',
-    binary       TEXT NOT NULL DEFAULT '',
+    binary_path  TEXT NOT NULL DEFAULT '',
     sha256       TEXT NOT NULL DEFAULT '',
     address      TEXT NOT NULL DEFAULT '',
     token_sealed TEXT NOT NULL DEFAULT '',

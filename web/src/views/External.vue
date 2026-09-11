@@ -40,6 +40,8 @@ interface Draft {
   url: string;
   jwt_secret: string;
   enabled: boolean;
+  /** Only OnlyOffice calls back, so only its card shows this. */
+  callback_url: string;
 }
 
 const drafts = reactive<Record<string, Draft>>({});
@@ -52,6 +54,7 @@ function ensureDraft(s: ExternalService): Draft {
       url: s.url ?? '',
       jwt_secret: '',
       enabled: s.enabled,
+      callback_url: s.callback_url ?? '',
     };
   }
   return drafts[s.id];
@@ -75,6 +78,7 @@ async function save(s: ExternalService) {
       url: d.url || null,
       enabled: d.enabled,
       jwt_secret: d.jwt_secret || undefined,
+      ...(callsBack(s) ? { callback_url: d.callback_url } : {}),
     });
     d.jwt_secret = ''; // never echo back
     toast.success(t('external.savedOk'));
@@ -113,6 +117,31 @@ async function test(s: ExternalService) {
 }
 
 // ─── verdicts ────────────────────────────────────────────────────────────────
+
+/**
+ * Services that fetch from filex and post back to it. Only OnlyOffice does, so
+ * only its card gets the callback address and the third leg — showing either
+ * on drawio would invent a question that service never asks.
+ */
+function callsBack(s: ExternalService): boolean {
+  return s.id === 'onlyoffice';
+}
+
+type LegTone = 'ok' | 'bad' | 'unknown';
+
+/** The third leg, as the last Test measured it. */
+function callbackLeg(s: ExternalService): { tone: LegTone; key: string } {
+  const res = ext.callbackProbes[s.id];
+  if (!res) return { tone: 'unknown', key: 'external.legs.callbackUnknown' };
+  if (!res.checked) return { tone: 'unknown', key: 'external.legs.callbackUnchecked' };
+  return res.ok
+    ? { tone: 'ok', key: 'external.legs.callbackOk' }
+    : { tone: 'bad', key: 'external.legs.callbackBad' };
+}
+
+function callbackDetail(s: ExternalService): string {
+  return ext.callbackProbes[s.id]?.detail ?? '';
+}
 
 function advisories(id: string): ExternalAdvisory[] {
   return ext.items.find((s) => s.id === id)?.advisories ?? [];
@@ -354,12 +383,23 @@ onMounted(load);
             </span>
           </div>
 
-          <div class="flex items-start gap-2">
-            <HelpCircle class="h-3.5 w-3.5 shrink-0 mt-px text-zinc-400" />
-            <span>
+          <div v-if="callsBack(s)" class="flex items-start gap-2">
+            <Check
+              v-if="callbackLeg(s).tone === 'ok'"
+              class="h-3.5 w-3.5 shrink-0 mt-px text-emerald-500"
+            />
+            <X
+              v-else-if="callbackLeg(s).tone === 'bad'"
+              class="h-3.5 w-3.5 shrink-0 mt-px text-rose-500"
+            />
+            <HelpCircle v-else class="h-3.5 w-3.5 shrink-0 mt-px text-zinc-400" />
+            <span :data-testid="`leg-callback-${s.id}`">
               <span class="text-zinc-600 dark:text-zinc-300">{{ t('external.legs.callback') }}</span>
-              <span class="text-zinc-500 dark:text-zinc-400">
-                {{ t('external.legs.cannotCheck') }}</span
+              <span :class="legClass(callbackLeg(s).tone)"> {{ t(callbackLeg(s).key) }}</span>
+              <span
+                v-if="callbackDetail(s)"
+                class="block font-mono text-[10px] text-zinc-400 break-all"
+                >{{ callbackDetail(s) }}</span
               >
             </span>
           </div>
@@ -410,6 +450,15 @@ onMounted(load);
           monospace
           :hint="s.jwt_secret_set ? t('external.fields.jwtSecretHint') : undefined"
         />
+        <Input
+          v-if="callsBack(s)"
+          v-model="ensureDraft(s).callback_url"
+          :label="t('external.fields.callbackUrl')"
+          monospace
+          :placeholder="publicUrlDisplay"
+          :hint="t('external.fields.callbackUrlHint')"
+        />
+
         <Toggle v-model="ensureDraft(s).enabled" :label="t('common.enabled')" />
 
         <div class="flex items-center justify-between gap-2 pt-1">

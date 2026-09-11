@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/external"
+	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 )
 
 // redactedSecret is what List puts in place of a stored secret. PATCH ignores
@@ -65,6 +66,11 @@ type ExternalAdmin struct {
 	// http://localhost:5212. Worth saying out loud: an operator who never set
 	// it does not know a default is in play.
 	PublicURLSet bool
+	// ReversePath measures the third leg — the document server's route BACK to
+	// filex — by asking it to download a one-shot URL of ours and watching for
+	// the request. Nil when OnlyOffice is not wired, and only meaningful for
+	// that service: nothing else calls filex back.
+	ReversePath func(ctx context.Context) onlyoffice.ReverseResult
 }
 
 // AttachPublicURL wires the process's public URL into the advisories. Kept out
@@ -78,8 +84,12 @@ func (h *ExternalAdmin) AttachPublicURL(publicURL string, set bool) {
 // advisories runs the shape checks for one row. The DNS note is only worth a
 // lookup when an operator is waiting (Test); List passes nil so opening the
 // admin page never blocks on a resolver.
-func (h *ExternalAdmin) advisories(ctx context.Context, name, url string, lookup external.LookupFunc) []external.Advisory {
-	return external.Advisories(name, url, h.PublicURL, h.PublicURLSet, lookup)
+func (h *ExternalAdmin) advisories(ctx context.Context, name, url, callbackURL string, lookup external.LookupFunc) []external.Advisory {
+	return external.Advise(external.AdvisoryInput{
+		Service: name, ServiceURL: url,
+		PublicURL: h.PublicURL, PublicURLSet: h.PublicURLSet,
+		CallbackURL: callbackURL, Lookup: lookup,
+	})
 }
 
 // NewExternalAdmin constructs the handler.
@@ -111,14 +121,17 @@ func (h *ExternalAdmin) List(w http.ResponseWriter, r *http.Request) {
 			"URL":         row.URL,
 			"SecretEnc":   secret,
 			"OptionsJSON": row.OptionsJSON,
-			"LastCheck":   row.LastCheck,
-			"LastState":   row.LastState,
-			"env_managed": h.EnvManaged[row.Name],
+			// The address the service comes back to, lifted out of the options
+			// blob so a client never has to parse it.
+			"callback_url": external.CallbackURLFromOptions(row.OptionsJSON),
+			"LastCheck":    row.LastCheck,
+			"LastState":    row.LastState,
+			"env_managed":  h.EnvManaged[row.Name],
 			// ⚠ Advisories ride on List, not only on Test. The whole defect
 			// was a badge that looked settled without anyone pressing
 			// anything; an operator must be able to see a browser-unreachable
 			// address the moment the page paints.
-			"advisories": h.advisories(r.Context(), row.Name, row.URL, nil),
+			"advisories": h.advisories(r.Context(), row.Name, row.URL, external.CallbackURLFromOptions(row.OptionsJSON), nil),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -132,6 +145,10 @@ type extPatchReq struct {
 	URL         *string `json:"url,omitempty"`
 	Secret      *string `json:"secret,omitempty"`       // plaintext from UI; will be encrypted server-side
 	OptionsJSON *string `json:"options_json,omitempty"` // raw JSON blob
+	// CallbackURL is the address the SERVICE reaches filex at. Sent as its own
+	// field rather than as a hand-assembled options blob so a client cannot
+	// wipe the row's other options by writing only this one.
+	CallbackURL *string `json:"callback_url,omitempty"`
 }
 
 // Update upserts a row and re-runs the health probe.
@@ -171,6 +188,14 @@ func (h *ExternalAdmin) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.OptionsJSON != nil {
 		options = *req.OptionsJSON
+	}
+	if req.CallbackURL != nil {
+		merged, err := external.WithCallbackURL(options, *req.CallbackURL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		options = merged
 	}
 	if err := h.Store.UpsertExternalService(r.Context(), name, enabled, url, secret, options, nowOrZero(), "unknown"); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -233,7 +258,22 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 	// the editor, and nothing about the document server's route back to
 	// filex. A green light standing for three questions is exactly what sent
 	// issue #17 round a second time.
-	adv := h.advisories(r.Context(), name, state.URL, external.SystemLookup(r.Context(), 2*time.Second))
+	callbackURL := ""
+	if row, err := h.Store.GetExternalService(r.Context(), name); err == nil && row != nil {
+		callbackURL = external.CallbackURLFromOptions(row.OptionsJSON)
+	}
+	adv := h.advisories(r.Context(), name, state.URL, callbackURL, external.SystemLookup(r.Context(), 2*time.Second))
+	// The third leg, measured rather than disclaimed — when there is something
+	// to measure. A service with no URL or no secret cannot be asked anything,
+	// and a failed ask is reported as unchecked, never as a broken route.
+	reverse := onlyoffice.ReverseResult{}
+	if name == external.OnlyOffice && h.ReversePath != nil && state.State == "ok" {
+		reverse = h.ReversePath(r.Context())
+	}
+	notChecked := []string{legBrowserToService}
+	if !reverse.Checked {
+		notChecked = append(notChecked, legServiceToFilex)
+	}
 	resp := map[string]any{
 		"ok":        true,
 		"name":      name,
@@ -243,13 +283,20 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		// checked_from is the vantage point of THIS result. The admin page
 		// runs its own probe from the browser and reports the two separately.
 		"checked_from": checkedFromServer,
-		// not_checked names the legs this endpoint cannot settle. The browser
-		// leg is answered by the admin page; the callback leg cannot be
-		// answered at all — filex has no way to make another container issue a
-		// request on demand — so it is covered by advisories instead.
-		"not_checked": []string{legBrowserToService, legServiceToFilex},
-		"public_url":  h.PublicURL,
-		"advisories":  adv,
+		// not_checked names the legs this response does not settle. The
+		// browser leg is answered by the admin page. The callback leg is
+		// answered right below — but only when the document server took the
+		// question, so it stays on this list whenever it did not.
+		"not_checked": notChecked,
+		// service_to_filex is the leg the document server has to walk. checked
+		// false means the question could not be put, which is not the same as
+		// a broken route and must not be rendered as one.
+		"service_to_filex": reverse,
+		"public_url":       h.PublicURL,
+		// The address the document server was sent to, so the admin page can
+		// show what it measured rather than what it assumed.
+		"callback_url": callbackURL,
+		"advisories":   adv,
 		// complete is false whenever anything is unsettled or wrong. It is
 		// deliberately NOT "the probe succeeded": that is the conflation this
 		// change exists to remove.

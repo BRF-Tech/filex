@@ -237,3 +237,39 @@ func contains(haystack, needle string) bool {
 		return false
 	})()
 }
+
+// TestAdvisories_JudgeTheCallbackAddress: once a callback URL is configured,
+// the public URL says nothing about the document server's route home, and
+// warning about it would fire on the very setup the field exists to make work.
+func TestAdvisories_JudgeTheCallbackAddress(t *testing.T) {
+	// The shape issue #17 ended on: a browser-facing public URL the document
+	// server cannot resolve, and a container address for the callback.
+	adv := external.Advise(external.AdvisoryInput{
+		Service:      external.OnlyOffice,
+		ServiceURL:   "https://office.example.com",
+		PublicURL:    "https://files.example.com",
+		PublicURLSet: true,
+		CallbackURL:  "http://filex:5212",
+	})
+	if external.HasWarning(adv) {
+		t.Errorf("a container-name callback is correct, not a warning: %+v", adv)
+	}
+	for _, a := range adv {
+		if a.Code == external.CodePublicURLBareHost {
+			t.Errorf("the share-link note belongs to the public URL, which is a real hostname here: %+v", a)
+		}
+	}
+
+	// And the opposite: a loopback CALLBACK address is judged, even though the
+	// public URL is fine — that is the address the document server dials.
+	adv = external.Advise(external.AdvisoryInput{
+		Service:      external.OnlyOffice,
+		ServiceURL:   "https://office.example.com",
+		PublicURL:    "https://files.example.com",
+		PublicURLSet: true,
+		CallbackURL:  "http://127.0.0.1:5212",
+	})
+	if !external.HasWarning(adv) {
+		t.Errorf("a loopback callback cannot reach filex from another container, got %+v", adv)
+	}
+}

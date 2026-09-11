@@ -176,6 +176,20 @@ var callsBack = map[string]bool{OnlyOffice: true}
 // a working setup, which is the failure mode this whole file exists to avoid.
 type LookupFunc func(host string) (definitelyNotFound bool)
 
+// AdvisoryInput is one service's addresses, as they are right now.
+type AdvisoryInput struct {
+	Service      string
+	ServiceURL   string
+	PublicURL    string
+	PublicURLSet bool
+	// CallbackURL is the separate address the service uses to reach filex,
+	// when the operator set one. It, not PublicURL, is what the callback
+	// advisories must judge: the whole point of the field is that the two can
+	// differ.
+	CallbackURL string
+	Lookup      LookupFunc
+}
+
 // Advisories returns everything worth saying about one service's addresses.
 //
 // serviceURL is the row's URL; publicURL and publicURLSet come from the
@@ -183,12 +197,33 @@ type LookupFunc func(host string) (definitelyNotFound bool)
 // to http://localhost:5212 — worth saying out loud, because the operator does
 // not know a default is in play). lookup may be nil, which skips the DNS note.
 func Advisories(service, serviceURL, publicURL string, publicURLSet bool, lookup LookupFunc) []Advisory {
+	return Advise(AdvisoryInput{
+		Service: service, ServiceURL: serviceURL,
+		PublicURL: publicURL, PublicURLSet: publicURLSet, Lookup: lookup,
+	})
+}
+
+// Advise is Advisories with the callback address included.
+func Advise(in AdvisoryInput) []Advisory {
+	service, serviceURL, publicURL, publicURLSet, lookup := in.Service, in.ServiceURL, in.PublicURL, in.PublicURLSet, in.Lookup
 	out := []Advisory{}
 	if strings.TrimSpace(serviceURL) == "" {
 		return out
 	}
 	svcClass := HostClass(serviceURL)
 	pubClass := HostClass(publicURL)
+
+	// The address the SERVICE actually comes back to. With a callback URL set,
+	// the public URL is only a browser-facing address and says nothing about
+	// this leg — judging it would raise warnings on the very setup the field
+	// exists to make work.
+	callbackURL := strings.TrimRight(strings.TrimSpace(in.CallbackURL), "/")
+	callbackSet := callbackURL != ""
+	if callbackSet {
+		publicURL = callbackURL
+		publicURLSet = true
+		pubClass = HostClass(callbackURL)
+	}
 
 	if browserLoaded[service] {
 		switch svcClass {
@@ -226,7 +261,7 @@ func Advisories(service, serviceURL, publicURL string, publicURLSet bool, lookup
 			// that fires on a working setup is worse than none.
 			severity := SeverityWarning
 			msg := fmt.Sprintf(
-				"The document server fetches the document from filex and posts the save back to %s. Inside its own container that address is the document server, not filex. Set FILEX_PUBLIC_URL to an address the document server can reach.",
+				"The document server fetches the document from filex and posts the save back to %s. Inside its own container that address is the document server, not filex. Set the callback URL — or FILEX_PUBLIC_URL — to an address the document server can reach.",
 				publicURL)
 			if !publicURLSet {
 				msg = fmt.Sprintf(
@@ -244,11 +279,17 @@ func Advisories(service, serviceURL, publicURL string, publicURLSet bool, lookup
 				Detail: publicURL, Message: msg,
 			})
 		case ClassBare:
+			if callbackSet {
+				// A container name is exactly right here: this address is read
+				// by the document server alone, and the share links are built
+				// from the public URL, which is a separate value now.
+				break
+			}
 			out = append(out, Advisory{
 				Code: CodePublicURLBareHost, Field: FieldPublicURL, Severity: SeverityNote,
 				Detail: publicURL,
 				Message: fmt.Sprintf(
-					"FILEX_PUBLIC_URL is %s, a container-network name. The document server can reach it, but every share link and e-mail filex builds from it will not open in a browser outside that network.",
+					"FILEX_PUBLIC_URL is %s, a container-network name. The document server can reach it, but every share link and e-mail filex builds from it will not open in a browser outside that network. Put the browser's address here and the container's address in the callback URL.",
 					publicURL),
 			})
 		case ClassDotted:

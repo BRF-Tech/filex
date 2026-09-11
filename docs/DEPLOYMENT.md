@@ -232,12 +232,13 @@ FILEX_DB_DRIVER=postgres
 FILEX_DB_DSN=postgres://filex:…@db:5432/filex?sslmode=require
 ```
 
-PostgreSQL is the recommended production driver (MySQL works for read‑mostly use;
-a few upsert paths are SQLite/Postgres‑only — see
-[CONFIGURATION.md → Database](CONFIGURATION.md#database)).
+PostgreSQL is the recommended production driver. MySQL/MariaDB is supported too
+— every engine's migrations, schema and first-install writes are exercised in CI
+(see **[DATABASES.md](DATABASES.md)**), which they were not before v0.38.0.
 
-**The queue must be shared too.** The default `sqlite` queue lives in the app DB.
-For multiple workers/nodes point it at Postgres or Redis:
+**The queue must be shared too.** With no `FILEX_QUEUE_DRIVER` the queue follows
+the database and lives in it. For multiple workers/nodes point it at Redis, or
+at a Postgres of its own:
 
 ```bash
 FILEX_QUEUE_DRIVER=postgres    # uses SELECT … FOR UPDATE SKIP LOCKED

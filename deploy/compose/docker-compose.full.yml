@@ -105,6 +105,10 @@ services:
       # filex hides an integration whose URL is blank or unreachable.
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
       FILEX_ONLYOFFICE_JWT: ${ONLYOFFICE_JWT_SECRET:-}
+      # Only when the document server cannot reach FILEX_PUBLIC_URL (a public
+      # hostname that does not resolve on the compose network, say). Empty
+      # keeps the public URL, which is right for this stack as written.
+      FILEX_ONLYOFFICE_CALLBACK_URL: ${FILEX_ONLYOFFICE_CALLBACK_URL:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
       FILEX_CONVERT_URL: ${FILEX_CONVERT_URL:-}
       # ── Zero-touch config (seeded on first boot; fill in .env) ──────────

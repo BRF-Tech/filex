@@ -36,6 +36,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -61,7 +62,22 @@ type Service struct {
 	// fields", which is what the unit tests and any no-DB caller want.
 	Live      func(ctx context.Context) (url, secret string)
 	PublicURL string // filex public base URL — used to build callbacks
-	FetchTTL  time.Duration
+	// LiveCallbackURL, when non-nil, returns the address the DOCUMENT SERVER
+	// should use to reach filex. Empty result means "the public URL".
+	//
+	// ⚠ These are two different addresses for two different readers. PublicURL
+	// is what a person's browser uses and what every share link is built from;
+	// this one is only ever read by the document server's container. They are
+	// usually the same string, and on podman or a private network they cannot
+	// be — which is why a document opened and its save never came back with
+	// nothing in filex's log to show for it (issue #17).
+	LiveCallbackURL func(ctx context.Context) string
+	FetchTTL        time.Duration
+
+	// probeReg holds the one-shot tokens VerifyReversePath hands the document
+	// server. Lazily built (see probes) so a zero Service still works.
+	probeOnce sync.Once
+	probeReg  *probeRegistry
 
 	// Sync is the shared post-write gate every other write surface in filex
 	// goes through: it upserts the node row, re-indexes the document,
@@ -107,6 +123,25 @@ func (s *Service) settings(ctx context.Context) (string, string) {
 		}
 	}
 	return s.DocumentServerURL, s.JWTSecret
+}
+
+// callbackBase is the base URL the document server is told to come back to:
+// the configured callback address, or filex's public URL when none is set.
+//
+// ⚠ Every URL handed to the document server — the document fetch and the save
+// callback — must go through here. One that reads PublicURL directly works on
+// every install where the two addresses agree, which is most of them, and
+// fails silently on exactly the install that needed the setting.
+func (s *Service) callbackBase(ctx context.Context) string {
+	if s == nil {
+		return ""
+	}
+	if s.LiveCallbackURL != nil {
+		if u := strings.TrimRight(s.LiveCallbackURL(ctx), "/"); u != "" {
+			return u
+		}
+	}
+	return s.PublicURL
 }
 
 // New constructs a Service. fetchTTL defaults to 1 hour when zero.
@@ -175,8 +210,9 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 	key := hex.EncodeToString(hash[:])
 
 	exp := time.Now().Add(s.FetchTTL).Unix()
-	fetchURL := s.signedFetchURL(node.ID, exp, secret)
-	callbackURL := fmt.Sprintf("%s/api/files/onlyoffice/callback?node=%d", s.PublicURL, node.ID)
+	base := s.callbackBase(ctx)
+	fetchURL := s.signedFetchURLBase(base, node.ID, exp, secret)
+	callbackURL := fmt.Sprintf("%s/api/files/onlyoffice/callback?node=%d", base, node.ID)
 
 	userID := "anon"
 	userName := "anonymous"
@@ -238,11 +274,15 @@ func (s *Service) SignedFetchURL(nodeID, exp int64) string {
 }
 
 func (s *Service) signedFetchURL(nodeID, exp int64, secret string) string {
+	return s.signedFetchURLBase(s.callbackBase(context.Background()), nodeID, exp, secret)
+}
+
+func (s *Service) signedFetchURLBase(base string, nodeID, exp int64, secret string) string {
 	v := url.Values{}
 	v.Set("n", strconv.FormatInt(nodeID, 10))
 	v.Set("exp", strconv.FormatInt(exp, 10))
 	v.Set("sig", fetchSignature(nodeID, exp, secret))
-	return s.PublicURL + "/api/files/onlyoffice/fetch?" + v.Encode()
+	return base + "/api/files/onlyoffice/fetch?" + v.Encode()
 }
 
 // VerifyFetchSignature validates a query against the fetch HMAC.
