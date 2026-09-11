@@ -3,6 +3,21 @@
   "generatedAt": "2026-09-11",
   "releases": [
     {
+      "tag": "v0.38.1",
+      "date": "2026-09-11T22:45:26Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.38.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **MySQL: concurrent enqueues of one dedup key all failed.** The coalescing\n  INSERT reads the rows every concurrent caller is about to write, so InnoDB\n  rolls one of them back as a deadlock victim — and without a retry every\n  caller lost: ten concurrent enqueues of one key produced ten `Error 1213`s\n  and no row at all, so the work nobody queued never happened. SQLite\n  serialises writers and never does this, which is why the statement had been\n  correct for years on the only engine anything ran against. Caught by the\n  cross-engine gate added in v0.38.0, on its second run.\n\n- **Renaming a folder put its contents in the trash** (#21, reported on\n  v0.38.0 against S3 + PostgreSQL). The rename moved a single row, so every\n  descendant kept the OLD path: the next storage sync could not find those\n  paths and tombstoned them, while the files it did find at the new path had\n  no row — and creating one collided with the live descendant still sitting\n  under the same parent with the same name, which is the\n  `duplicate key value violates unique constraint idx_nodes_storage_parent_name`\n  line, once per file, on every sync run. A rename at the storage **root** was\n  worse: `path.Dir(\"Leonid\")` is `.`, which no lookup can resolve, and the\n  failure branch soft-deleted the node it had been asked to move.\n\n  Both cases were already handled correctly by the shared mover every other\n  write surface uses (WebDAV, SFTP, S3, NFS, the AI/MCP tools). The HTTP\n  manager — the surface a person actually clicks — was the one that had never\n  been pointed at it.\n\n- **Installs already in that state heal themselves.** The sync walk now repairs\n  a live row that holds `(storage, parent, name)` but points at a path the\n  storage no longer has: it is, by that index, the same object, so it is\n  re-homed in place, keeping its id and with it its shares, comments and\n  version history. No operator action, no re-import.\n\n- **\"30000 milliseconds exceeded\" when pressing Sync** (same report). The run\n  happened inside the HTTP request, so a large storage outlived the browser's\n  own timeout: the operator was shown a failure for a sync that was fine, and\n  the abandoned request cancelled the context the walk was using, stopping it\n  halfway. `POST /api/admin/storages/{id}/sync` now answers **202** and the run\n  continues detached, with a ceiling so a stuck driver cannot leak a goroutine.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0381---2026-09-12)\n\n- **Documentation** — <https://docs.filex.sh>\n- **Report a bug** — <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** — <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.38.1",
+        "ghcr.io/brf-tech/filex:full-v0.38.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 25
+    },
+    {
       "tag": "v0.38.0",
       "date": "2026-09-11T18:00:54Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.38.0",

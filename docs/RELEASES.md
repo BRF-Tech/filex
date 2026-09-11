@@ -19,14 +19,69 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.38.0, 11 September 2026
-Reported from the outside (#19): migration `00029` aborted the first boot of
+::: tip Latest — v0.38.1, 11 September 2026
+INSERT reads the rows every concurrent caller is about to write, so InnoDB
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.38.0
-docker pull ghcr.io/brf-tech/filex:full-v0.38.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.38.1
+docker pull ghcr.io/brf-tech/filex:full-v0.38.1
 ```
+
+## v0.38.1
+
+<span class="filex-release-date">11 September 2026</span>
+
+## What changed
+
+### Fixed
+
+- **MySQL: concurrent enqueues of one dedup key all failed.** The coalescing
+  INSERT reads the rows every concurrent caller is about to write, so InnoDB
+  rolls one of them back as a deadlock victim — and without a retry every
+  caller lost: ten concurrent enqueues of one key produced ten `Error 1213`s
+  and no row at all, so the work nobody queued never happened. SQLite
+  serialises writers and never does this, which is why the statement had been
+  correct for years on the only engine anything ran against. Caught by the
+  cross-engine gate added in v0.38.0, on its second run.
+
+- **Renaming a folder put its contents in the trash** (#21, reported on
+  v0.38.0 against S3 + PostgreSQL). The rename moved a single row, so every
+  descendant kept the OLD path: the next storage sync could not find those
+  paths and tombstoned them, while the files it did find at the new path had
+  no row — and creating one collided with the live descendant still sitting
+  under the same parent with the same name, which is the
+  `duplicate key value violates unique constraint idx_nodes_storage_parent_name`
+  line, once per file, on every sync run. A rename at the storage **root** was
+  worse: `path.Dir("Leonid")` is `.`, which no lookup can resolve, and the
+  failure branch soft-deleted the node it had been asked to move.
+
+  Both cases were already handled correctly by the shared mover every other
+  write surface uses (WebDAV, SFTP, S3, NFS, the AI/MCP tools). The HTTP
+  manager — the surface a person actually clicks — was the one that had never
+  been pointed at it.
+
+- **Installs already in that state heal themselves.** The sync walk now repairs
+  a live row that holds `(storage, parent, name)` but points at a path the
+  storage no longer has: it is, by that index, the same object, so it is
+  re-homed in place, keeping its id and with it its shares, comments and
+  version history. No operator action, no re-import.
+
+- **"30000 milliseconds exceeded" when pressing Sync** (same report). The run
+  happened inside the HTTP request, so a large storage outlived the browser's
+  own timeout: the operator was shown a failure for a sync that was fine, and
+  the abandoned request cancelled the context the walk was using, stopping it
+  halfway. `POST /api/admin/storages/{id}/sync` now answers **202** and the run
+  continues detached, with a ceiling so a stuck driver cannot leak a goroutine.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0381---2026-09-12)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.38.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.38.1`
 
 ## v0.38.0
 
@@ -2638,34 +2693,13 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.2`
 
-## v0.27.1
-
-<span class="filex-release-date">29 August 2026</span>
-
-## What changed
-
-### Fixed
-
-- **A drag-out could fill in the wrong folder.** The drop watcher matched the
-  stand-in by NAME across the local drives, so any file that happened to appear
-  under the same name while a drag was in flight — a backup job, another
-  download — looked like the drop and the user's file was written into that
-  folder instead. What was handed to the shell is known exactly (an EMPTY
-  stand-in, created inside this drag's window), so anything with content of its
-  own is now ignored. Measured: with the guard off, a same-named decoy file
-  received the transfer; with it on, the decoy is untouched and the real drop
-  still lands.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0271---2026-08-29)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.1`
-
 ## Earlier releases
 
-The 88 releases before v0.27.1, in brief. Full notes are on GitHub.
+The 89 releases before v0.27.2, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.27.1](https://github.com/BRF-Tech/filex/releases/tag/v0.27.1) | 29 August 2026 | stand-in by NAME across the local drives, so any file that happened to appear |
 | [v0.27.0](https://github.com/BRF-Tech/filex/releases/tag/v0.27.0) | 28 August 2026 | the next now does what it says: the queue carries a destination storage of its |
 | [v0.26.1](https://github.com/BRF-Tech/filex/releases/tag/v0.26.1) | 27 August 2026 | endpoint answered bare codes — `{"error":"ticket_expired"}`, |
 | [v0.26.0](https://github.com/BRF-Tech/filex/releases/tag/v0.26.0) | 27 August 2026 | agent-facing write surface carried its bytes inside the call — `/api/ai/upload`'s |
@@ -2757,4 +2791,4 @@ The 88 releases before v0.27.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-11 from 108 published releases.</small>
+<small>Last refreshed 2026-09-11 from 109 published releases.</small>
