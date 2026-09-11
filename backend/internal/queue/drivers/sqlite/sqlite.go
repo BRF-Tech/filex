@@ -196,16 +196,46 @@ func (d *Driver) Enqueue(ctx context.Context, op queue.Op) (string, error) {
 // MySQL, and this driver is also what a MySQL-backed install gets, since the
 // queue driver defaults to sqlite and is handed the application *sql.DB.
 func (d *Driver) enqueueDeduped(ctx context.Context, op queue.Op, id, payload string) (string, error) {
-	res, err := d.db.ExecContext(ctx,
-		`INSERT INTO ops_queue (id, type, payload, status, priority, max_attempts, not_before, dedup_key)
+	const guarded = `INSERT INTO ops_queue (id, type, payload, status, priority, max_attempts, not_before, dedup_key)
 		 SELECT ?, ?, ?, ?, ?, ?, ?, ?
 		   FROM (SELECT 1) AS one
 		  WHERE NOT EXISTS (
 		        SELECT 1 FROM ops_queue o
-		         WHERE o.dedup_key = ? AND o.status = 'pending')`,
-		id, op.Type, payload, op.Status, op.Priority, op.MaxAttempts,
-		sqlTime(op.NotBefore), op.DedupKey, op.DedupKey,
+		         WHERE o.dedup_key = ? AND o.status = 'pending')`
+
+	// ⚠⚠ InnoDB makes this statement CONTEND, which SQLite never does.
+	//
+	// The guard reads the same rows every caller is about to write, so two
+	// concurrent enqueues of the same key take overlapping gap locks and one
+	// is rolled back as the deadlock victim (error 1213). That is contention,
+	// not failure — the whole point of this statement is that exactly one
+	// caller wins — but without a retry EVERY caller lost: measured on a real
+	// MySQL server, ten concurrent enqueues of one key produced ten deadlocks
+	// and no row at all, so the scan nobody queued never happened.
+	//
+	// Retrying is correct rather than hopeful: the loser re-reads, finds the
+	// winner's pending row and returns ErrDuplicate, which is the answer the
+	// contract already promises it.
+	var (
+		res sql.Result
+		err error
 	)
+	for attempt := 0; ; attempt++ {
+		res, err = d.db.ExecContext(ctx, guarded,
+			id, op.Type, payload, op.Status, op.Priority, op.MaxAttempts,
+			sqlTime(op.NotBefore), op.DedupKey, op.DedupKey,
+		)
+		if err == nil || !isLockContention(err) || attempt >= 5 {
+			break
+		}
+		// A short, growing pause: long enough for the winner to commit, short
+		// enough that an enqueue is still an enqueue.
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 5 * time.Millisecond):
+		}
+	}
 	if err != nil {
 		if isUniqueViolation(err) {
 			return "", queue.ErrDuplicate

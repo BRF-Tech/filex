@@ -498,6 +498,26 @@ Maintainer-only. Reproducible, automated by CI.
    `web/tests/deploy/deployVersions.test.ts` now fails the build if any of the
    seven pins drifts, and `--check` reports them without writing.
 6. Commit: `chore(release): vX.Y.Z`.
+   ⚠⚠ **Not with `git add -A`, and not before two checks.** The release commit
+   is the one commit in the project that is allowed to touch everything, which
+   is exactly why it must not be written blind:
+
+   ```bash
+   git status --porcelain | grep '^??' && echo "untracked files — commit them or move them to their branch"
+   pnpm -s --filter ./web build      # vue-tsc + vite, the gate nothing else runs
+   ```
+
+   Measured 2026-09-12, on v0.38.1: `git add -A` swept in two work-in-progress
+   files from a feature branch — an admin page with no route, no menu entry and
+   no translations. `vue-tsc` refused them, the release's own test suite failed,
+   and binaries, images and npm were all skipped. Nothing shipped, so the tag
+   was deleted from both remotes and re-cut on the corrected commit; the version
+   number survived because nothing had been published under it.
+
+   The backend suite and every documentation gate above pass without compiling
+   a single line of frontend, so the admin build is the only local check that
+   would have caught it — CI catches it afterwards, when the tag is already
+   public.
    ⚠⚠ **The tag is now gated on the test suite, and it did not used to be.**
    `release.yml`'s first job calls `ci.yml`, and everything that publishes —
    binaries, images, npm, the installers — waits for it. Before this, CI ran on

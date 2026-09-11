@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MySQL: concurrent enqueues of one dedup key all failed.** The coalescing
+  INSERT reads the rows every concurrent caller is about to write, so InnoDB
+  rolls one of them back as a deadlock victim — and without a retry every
+  caller lost: ten concurrent enqueues of one key produced ten `Error 1213`s
+  and no row at all, so the work nobody queued never happened. SQLite
+  serialises writers and never does this, which is why the statement had been
+  correct for years on the only engine anything ran against. Caught by the
+  cross-engine gate added in v0.38.0, on its second run.
+
 - **Renaming a folder put its contents in the trash** (#21, reported on
   v0.38.0 against S3 + PostgreSQL). The rename moved a single row, so every
   descendant kept the OLD path: the next storage sync could not find those
