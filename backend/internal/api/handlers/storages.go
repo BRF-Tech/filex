@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -311,18 +312,36 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "worker offline"})
 		return
 	}
-	if err := h.Worker.Trigger(r.Context(), id); err != nil {
-		// Worker.Trigger errors with "no syncer for storage" when the
-		// id doesn't match any registered driver — that's a 404, not
-		// an internal error.
-		msg := err.Error()
-		if strings.Contains(msg, "no syncer") || strings.Contains(msg, "not found") ||
-			strings.Contains(msg, "no rows in result set") {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
+	// ⚠⚠ The run is DETACHED from the request, and answered immediately.
+	//
+	// It used to run inside the HTTP handler, which made a manual sync of a
+	// large storage fail twice over: the browser gave up at its own 30-second
+	// timeout and showed the operator "30000 milliseconds exceeded" for a sync
+	// that was proceeding perfectly well — and, worse, the cancelled request
+	// cancelled the CONTEXT the walk was using, so the pass stopped halfway,
+	// leaving the catalogue half-updated and the tombstone pass with a partial
+	// view. Reported on a Garage/S3 storage in issue #21.
+	//
+	// The syncer serialises its own runs, so a second press while one is in
+	// flight is safe. Progress is where it already was: Storages → sync runs.
+	if !h.Worker.Known(id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	go func() {
+		// A background context with a generous ceiling: a walk of a large
+		// bucket is minutes, not seconds, and an unbounded goroutine is how a
+		// stuck driver becomes a leak.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 6*time.Hour)
+		defer cancel()
+		if err := h.Worker.Trigger(ctx, id); err != nil {
+			slog.Warn("storages: manual sync failed",
+				slog.Int64("storage", id), slog.String("err", err.Error()))
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":     true,
+		"status": "started",
+		"note":   "the sync runs in the background; watch its progress under sync runs",
+	})
 }

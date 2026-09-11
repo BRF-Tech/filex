@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-09-12
+
+### Fixed
+
+- **Renaming a folder put its contents in the trash** (#21, reported on
+  v0.38.0 against S3 + PostgreSQL). The rename moved a single row, so every
+  descendant kept the OLD path: the next storage sync could not find those
+  paths and tombstoned them, while the files it did find at the new path had
+  no row — and creating one collided with the live descendant still sitting
+  under the same parent with the same name, which is the
+  `duplicate key value violates unique constraint idx_nodes_storage_parent_name`
+  line, once per file, on every sync run. A rename at the storage **root** was
+  worse: `path.Dir("Leonid")` is `.`, which no lookup can resolve, and the
+  failure branch soft-deleted the node it had been asked to move.
+
+  Both cases were already handled correctly by the shared mover every other
+  write surface uses (WebDAV, SFTP, S3, NFS, the AI/MCP tools). The HTTP
+  manager — the surface a person actually clicks — was the one that had never
+  been pointed at it.
+
+- **Installs already in that state heal themselves.** The sync walk now repairs
+  a live row that holds `(storage, parent, name)` but points at a path the
+  storage no longer has: it is, by that index, the same object, so it is
+  re-homed in place, keeping its id and with it its shares, comments and
+  version history. No operator action, no re-import.
+
+- **"30000 milliseconds exceeded" when pressing Sync** (same report). The run
+  happened inside the HTTP request, so a large storage outlived the browser's
+  own timeout: the operator was shown a failure for a sync that was fine, and
+  the abandoned request cancelled the context the walk was using, stopping it
+  halfway. `POST /api/admin/storages/{id}/sync` now answers **202** and the run
+  continues detached, with a ceiling so a stuck driver cannot leak a goroutine.
+
 ## [0.38.0] - 2026-09-11
 
 ### Upgrade notes

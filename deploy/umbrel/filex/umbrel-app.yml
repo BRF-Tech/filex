@@ -2,14 +2,12 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.38.0"
+version: "0.38.1"
 releaseNotes: |-
-  filex v0.38.0 — 2026-09-11
-  • PostgreSQL and MySQL installs: this is the release where they work.
-  • Three columns were renamed to get out of the way of reserved words: plugins.binary → binary_path, and key → setting_key / meta_key on settings, node_meta and user_node_meta.
-  • FILEX_QUEUE_DRIVER unset now follows the database instead of meaning sqlite.
-  • MySQL/MariaDB minimum is now stated
-  • The document server gets its own address.
+  filex v0.38.1 — 2026-09-12
+  • Renaming a folder put its contents in the trash
+  • Installs already in that state heal themselves.
+  • "30000 milliseconds exceeded" when pressing Sync
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

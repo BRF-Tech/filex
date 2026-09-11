@@ -145,6 +145,15 @@ func (w *Worker) Trigger(ctx context.Context, storageID int64) error {
 	return syncer.RunOnce(ctx)
 }
 
+// Known reports whether a storage has a registered syncer — what Trigger would
+// otherwise only discover after the caller had stopped listening.
+func (w *Worker) Known(storageID int64) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, ok := w.syncers[storageID]
+	return ok
+}
+
 // Stop cancels every syncer and waits for them to exit.
 func (w *Worker) Stop() {
 	w.mu.Lock()

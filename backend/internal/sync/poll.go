@@ -158,11 +158,34 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 				n.Type = model.NodeTypeFile
 			}
 			created, err := s.store.CreateNode(ctx, n)
+			wasRepair := false
 			if err != nil {
-				slog.Warn("sync: create node failed", slog.String("path", obj.Path), slog.String("err", err.Error()))
-				continue
+				// ⚠⚠ A LIVE row may already sit at (storage, parent, name)
+				// carrying a DIFFERENT path — what a folder move that did not
+				// carry its subtree leaves behind (issue #21). The unique
+				// index refuses the insert, and the walk used to give up:
+				// every pass, for every file under the renamed folder, while
+				// the tombstone pass moved the stale rows into the trash. The
+				// operator saw `duplicate key value violates unique constraint
+				// idx_nodes_storage_parent_name` a hundred times and their
+				// files in the bin.
+				//
+				// That row is the same object by definition — one directory,
+				// one name — so the honest repair is to point it at the path
+				// the storage actually has, in place, keeping its id, its
+				// shares, its comments and its version history.
+				if repaired := s.repairStalePath(ctx, parent, obj, hash); repaired != nil {
+					created, err, wasRepair = repaired, nil, true
+				} else {
+					slog.Warn("sync: create node failed", slog.String("path", obj.Path), slog.String("err", err.Error()))
+					continue
+				}
 			}
-			*added++
+			if wasRepair {
+				*updated++
+			} else {
+				*added++
+			}
 			count++
 			if s.index != nil {
 				_ = s.index.IndexNode(ctx, created)
@@ -416,4 +439,44 @@ func timePtr(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// repairStalePath re-homes a live row that already holds (storage, parent,
+// name) but points at a path the storage no longer has.
+//
+// It is the recovery half of issue #21: the write path no longer produces
+// these rows, and this is what heals the installs that already have them, on
+// their next sync, with no operator action.
+//
+// ⚠ It repairs ONLY a row under the same parent with the same name, which the
+// unique index guarantees is at most one and which is the same object the walk
+// is looking at. A row anywhere else is somebody else's file and is left
+// alone. A row already at this path is not stale and is not touched.
+func (s *storageSyncer) repairStalePath(ctx context.Context, parent *int64, obj storage.Object, hash string) *model.Node {
+	siblings, err := s.store.ListNodesByParent(ctx, s.storage.ID, parent)
+	if err != nil {
+		return nil
+	}
+	for _, sib := range siblings {
+		if sib == nil || sib.Name != obj.Name || sib.DeletedAt != nil || sib.Path == obj.Path {
+			continue
+		}
+		if err := s.store.MoveNode(ctx, sib.ID, parent, obj.Name, obj.Path, hash); err != nil {
+			slog.Warn("sync: repair stale path failed",
+				slog.Int64("node", sib.ID), slog.String("from", sib.Path),
+				slog.String("to", obj.Path), slog.String("err", err.Error()))
+			return nil
+		}
+		slog.Info("sync: repaired a row left behind by a folder move",
+			slog.Int64("node", sib.ID),
+			slog.String("was", sib.Path), slog.String("now", obj.Path),
+			slog.String("storage", s.storage.Name))
+		fresh, _ := s.store.GetNode(ctx, sib.ID)
+		if fresh == nil {
+			sib.Path, sib.PathHash = obj.Path, hash
+			return sib
+		}
+		return fresh
+	}
+	return nil
 }

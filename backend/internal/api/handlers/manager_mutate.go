@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
@@ -937,43 +938,39 @@ func (h *Manager) walkDirID(ctx context.Context, storageID int64, rel string) (*
 	return parentPtr, nil
 }
 
-// applyDBMove updates the cache row for srcRel to point at dstRel. If
-// the destination changes parent dir, ParentID is updated too — store
-// helpers don't have a single-call cross-parent move, but MoveNode
-// already accepts a parent_id arg.
+// applyDBMove re-homes the cached rows for a move or rename.
+//
+// ⚠⚠ It moves the SUBTREE, through the same gate every other write surface
+// uses (protocolsync.Syncer.MoveRows). It used to move exactly one row, and
+// both halves of that were wrong in ways nothing reported:
+//
+//   - Descendants kept their OLD path. The next storage sync could not find
+//     those paths any more and tombstoned them — the contents of a renamed
+//     folder appeared in the TRASH — and the files it did find at the new path
+//     had no row, so it tried to create one and collided with the live
+//     descendant still sitting under the same parent with the same name:
+//     `duplicate key value violates unique constraint
+//     idx_nodes_storage_parent_name`, once per file, on every sync run.
+//   - A rename at the storage ROOT soft-deleted the row outright.
+//     `path.Dir("Leonid")` is ".", which is not a directory any lookup can
+//     find, and the failure branch here trashed the node it was asked to move.
+//
+// Both are issue #21, reported on v0.38.0 against S3 + PostgreSQL. The subtree
+// walk and the root case were already correct in MoveRows — whose own comment
+// says why — and WebDAV, SFTP, S3, NFS and the AI/MCP tools were pointed at it.
+// The HTTP manager, the surface a person actually clicks, was not.
 func (h *Manager) applyDBMove(ctx context.Context, storageID int64, srcRel, dstRel string) {
-	srcClean := normalizeDBPath(srcRel)
-	dstClean := normalizeDBPath(dstRel)
-	srcHash := pathkey.Hash(storageID, srcClean)
-	dstHash := pathkey.Hash(storageID, dstClean)
-
-	existing, err := h.Store.GetNodeByPath(ctx, storageID, srcHash)
-	if err != nil || existing == nil {
+	st, err := h.Store.GetStorage(ctx, storageID)
+	if err != nil || st == nil {
+		slog.Warn("manager: db move: storage lookup",
+			slog.Int64("storage", storageID),
+			slog.String("from", srcRel), slog.String("to", dstRel))
 		return
 	}
-
-	parentID, err := h.lookupDirID(ctx, storageID, path.Dir(strings.TrimPrefix(dstClean, "/")))
-	if err != nil {
-		// Soft-delete the stale row so a future index lists the new
-		// path under whichever parent the sync finds.
-		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
-		return
-	}
-
-	name := path.Base(dstClean)
-	if err := h.Store.MoveNode(ctx, existing.ID, parentID, name, dstClean, dstHash); err != nil {
-		slog.Warn("manager: db move",
-			slog.String("from", srcClean),
-			slog.String("to", dstClean),
-			slog.String("err", err.Error()))
-		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
-		h.removeFromIndex(ctx, existing.ID)
-		return
-	}
-	// Refresh + re-index the moved row so search hits the new path.
-	if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
-		h.indexNode(ctx, fresh)
-	}
+	// Thumbnails are deliberately not wired here: a move does not change the
+	// bytes, so there is nothing to regenerate.
+	protocolsync.New(h.Store, h.Index, nil, writehook.OriginManager).
+		MoveRows(ctx, st, srcRel, dstRel)
 }
 
 // mapDriverErr normalizes driver errors into HTTP statuses for the
