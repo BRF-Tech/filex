@@ -171,6 +171,15 @@ jobs:
       # Uploaded on failure only: a red assertion in a browser is far cheaper
       # to read as a screenshot and twenty seconds of video than as a stack
       # trace. `video` is on when CI=true (web/cypress.config.ts).
+      #
+      # ⚠ The server's own log is in there too, and it is the half that says
+      # WHY. On 2026-09-12 a run went red with 61 failures, all of them
+      # downstream of the admin login suddenly answering `401 invalid
+      # credentials` — a single answer the local driver deliberately gives for
+      # four different causes, each of which it names in ITS log. That log
+      # lived in a mkdtemp the runner deleted on the way out, so the run
+      # destroyed its own evidence and the same tree passed on the next
+      # trigger. `e2e/run.mjs` now keeps a copy.
       - name: Upload failure screenshots + video
         if: failure()
         uses: actions/upload-artifact@v4
@@ -179,6 +188,7 @@ jobs:
           path: |
             web/cypress/screenshots
             web/cypress/videos
+            e2e/.artifacts/server.log
           if-no-files-found: ignore
           retention-days: 7
 
