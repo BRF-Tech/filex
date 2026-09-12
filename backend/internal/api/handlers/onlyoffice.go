@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -260,6 +261,13 @@ func (h *OnlyOffice) resolveNodeByPath(ctx context.Context, raw string) (*model.
 // onlyoffice service.
 //
 // GET /api/files/onlyoffice/fetch?n=<id>&exp=<unix>&sig=<b64url>
+//
+// Every refusal here is logged with its reason. The only person who ever sees
+// this endpoint fail is an operator reading "Download failed" in the editor —
+// a message from the document server that says nothing about which of the five
+// things went wrong. Without a line naming the reason, the status code in the
+// access log is all they have, and a 500 from a bad signature and a 500 from
+// an unreachable bucket look identical (issue #17).
 func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 	if !h.Service.EnabledCtx(r.Context()) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
@@ -277,30 +285,42 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Service.VerifyFetchSignatureCtx(r.Context(), id, exp, q.Get("sig")); err != nil {
+		// Expiry and a wrong secret are the two shapes: a link the editor held
+		// on to for too long, or a JWT secret changed under a running editor.
+		ooFetchFailed(id, 0, "signature refused", err)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
 	node, err := h.Store.GetNode(r.Context(), id)
 	if err != nil {
+		ooFetchFailed(id, 0, "no catalogue row for this document", err)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
 	drv, err := h.StorageResolver(node.StorageID)
 	if err != nil {
+		// The storage this document lives on could not be opened at all —
+		// wrong endpoint, wrong credentials, backend down.
+		ooFetchFailed(id, node.StorageID, "the storage could not be opened", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no driver"})
 		return
 	}
 	src, err := h.Body.Resolve(r.Context(), drv, node.StorageID, node.Path, node)
 	if err != nil {
+		ooFetchFailed(id, node.StorageID, "the document body could not be located", err)
 		writeStagingGone(w, err)
 		return
 	}
 	rc, err := src.Open(r.Context())
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
+			// The catalogue has the row, the storage does not have the object:
+			// a stale catalogue, or the file moved behind filex's back.
+			ooFetchFailed(id, node.StorageID, "the object is not on the storage", err)
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
+		ooFetchFailed(id, node.StorageID, "reading the object failed", err)
 		writeStagingGone(w, err)
 		return
 	}
@@ -316,10 +336,21 @@ func (h *OnlyOffice) Fetch(w http.ResponseWriter, r *http.Request) {
 	// don't need a full rescan after the deploy.
 	mime = storage.RefineOfficeMime(mime, node.Name)
 	w.Header().Set("Content-Type", mime)
-	if node.Size > 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(node.Size, 10))
-	}
+	declareBodyLength(r.Context(), w, src, node)
 	_, _ = io.Copy(w, rc)
+}
+
+// ooFetchFailed writes the one line an operator needs to tell five different
+// "Download failed" errors apart.
+func ooFetchFailed(nodeID, storageID int64, why string, err error) {
+	attrs := []any{slog.Int64("node", nodeID), slog.String("reason", why)}
+	if storageID != 0 {
+		attrs = append(attrs, slog.Int64("storage", storageID))
+	}
+	if err != nil {
+		attrs = append(attrs, slog.String("err", err.Error()))
+	}
+	slog.Warn("onlyoffice: the document server could not download this file", attrs...)
 }
 
 // Callback receives save events from the OnlyOffice document server.

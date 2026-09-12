@@ -63,6 +63,26 @@ Sign in as an admin → **Storages → Add**. Pick a driver, fill in the config
 fields, click **Test connection**, then **Save**. The first sync starts
 automatically.
 
+### Editing a storage afterwards
+
+Saving takes effect on the running process: the cached driver is dropped, the
+syncer is stopped and a new one is started from the row you just wrote. No
+restart, and no stale connection left holding the previous credentials.
+
+⚠ **Renaming a storage changes its address on every file protocol.** The name
+is the first path segment:
+
+| Protocol | Address |
+|---|---|
+| WebDAV | `/dav/<storage name>/<path>` |
+| SFTP, NFS | `/<storage name>/<path>` |
+| S3-compatible API | the bucket is `<storage name>` |
+
+So a mount, a bookmark or a script that used the old name answers **404** until
+it is updated. The edit form warns while the name field differs from what is
+saved. Nothing inside filex breaks — shares, permissions and the catalogue are
+keyed by id, not by name.
+
 ### Admin API
 `POST /api/admin/storages` (admin session/token). Body is the storage config;
 `config` holds the per‑adapter map:
@@ -396,9 +416,24 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
 { "bucket": "my-bucket", "prefix": "filex", "region": "auto",
   "endpoint": "https://<account>.r2.cloudflarestorage.com",
   "access_key": "…", "secret_key": "…" }
+
+// Backblaze B2 (S3 endpoint). The region is part of the endpoint host;
+// `b2_authorize_account` reports yours as `s3ApiUrl`.
+{ "bucket": "my-bucket", "prefix": "filex", "region": "eu-central-003",
+  "endpoint": "https://s3.eu-central-003.backblazeb2.com",
+  "access_key": "003…", "secret_key": "K003…" }
 ```
 
 **Gotchas & failure modes**
+- ⚠ **Backblaze B2 refuses the MASTER application key on its S3 endpoint**, with
+  `InvalidAccessKeyId: Malformed Access Key Id` on the first write — which reads
+  like a typo in the key rather than the wrong *kind* of key. Create an ordinary
+  application key (Backblaze console → Application Keys → Add a New Application
+  Key) and use that. Scope it to the one bucket while you are there.
+  Measured 2026-09-12: with an application key, filex's whole storage surface
+  passes on B2 — write, prefix listing, ranged read, a 12 MiB multipart upload
+  read back byte-for-byte, rename, a presigned URL fetched by a browser, and
+  delete (`internal/storage/drivers/s3`, `TestLiveProviderConformance`).
 - **Hetzner Object Storage / Ceph RGW** reject some AWS‑SDK presigned URLs with
   `SignatureDoesNotMatch`. If downloads fail there, set
   `"disable_presign": true` — filex then streams the bytes itself.

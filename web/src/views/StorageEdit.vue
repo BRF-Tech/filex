@@ -43,6 +43,14 @@ const readOnly = ref(false);
 const rbacEnabled = ref(false);
 const config = ref<Record<string, unknown>>({});
 
+// Renaming is not cosmetic: the name is the first path segment on every file
+// protocol, so a mount or bookmark that used the old one stops resolving. The
+// warning is shown while the field differs from what is saved, which is the
+// only moment it can still be reconsidered.
+const nameChanged = computed(
+  () => !!item.value && name.value.trim() !== '' && name.value.trim() !== item.value.name,
+);
+
 const saving = ref(false);
 const showDelete = ref(false);
 const deleting = ref(false);
@@ -223,6 +231,9 @@ onMounted(load);
 
     <form class="card card-body space-y-3" @submit.prevent="save">
       <Input v-model="name" :label="t('storages.fields.name')" required />
+      <p v-if="nameChanged" class="-mt-1 text-xs text-amber-600 dark:text-amber-500">
+        {{ t('storages.fields.nameChangedWarning') }}
+      </p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Toggle v-model="enabled" :label="t('common.enabled')" />
         <Toggle v-model="readOnly" :label="t('storages.fields.readOnly')" />

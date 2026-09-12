@@ -587,6 +587,28 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	}
 	srvObj.resolver = resolver
 
+	// forgetStorage drops a cached driver so the next resolve rebuilds it from
+	// the row as it now stands. The cache above is keyed by storage id and
+	// never expires, which is right for a hot path and wrong the moment an
+	// operator edits the storage: without this, the endpoint, bucket and
+	// credentials a driver was built with outlive the admin page that changed
+	// them, and only a restart applies the fix (issue #21).
+	forgetStorage := func(id int64) {
+		srvObj.mu.Lock()
+		drv, ok := srvObj.storages[id]
+		delete(srvObj.storages, id)
+		srvObj.mu.Unlock()
+		if !ok {
+			return
+		}
+		// Drivers that hold a connection (sftp, ftp, smb) close it rather than
+		// leak one per edit. Driver does not require Close, so this is
+		// best-effort by contract, not by accident.
+		if c, ok := drv.(interface{ Close() error }); ok {
+			_ = c.Close()
+		}
+	}
+
 	// Now that resolver exists, fill in dependents that need it.
 	caps.AttachStorageResolver(resolver)
 	ooSvc.StorageResolver = resolver
@@ -991,6 +1013,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		ReplicaCron:     srvObj.replicaCron,
 		ReplicaReloader: srvObj.replicaReloader,
 		StorageResolver: resolver,
+		ForgetStorage:   forgetStorage,
 		Plugins:         pluginMgr,
 		Embed:           embedFS,
 		LocalAuth:       localDrv,

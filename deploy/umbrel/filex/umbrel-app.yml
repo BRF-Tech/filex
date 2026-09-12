@@ -2,13 +2,13 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.38.1"
+version: "0.38.2"
 releaseNotes: |-
-  filex v0.38.1 — 2026-09-12
-  • MySQL: concurrent enqueues of one dedup key all failed.
-  • Renaming a folder put its contents in the trash
-  • Installs already in that state heal themselves.
-  • "30000 milliseconds exceeded" when pressing Sync
+  filex v0.38.2 — 2026-09-12
+  • Editing a storage did not reach the running process
+  • Content-Length came from the catalogue, not from the storage
+  • The OnlyOffice fetch endpoint says why it refused.
+  • The storage edit form warns while the name field differs from what is saved.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

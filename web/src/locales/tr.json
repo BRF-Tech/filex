@@ -211,7 +211,8 @@
       "url": "Temel URL",
       "share": "Paylaşım",
       "domain": "Etki alanı / çalışma grubu",
-      "dialTimeout": "Bağlantı zaman aşımı (saniye)"
+      "dialTimeout": "Bağlantı zaman aşımı (saniye)",
+      "nameChangedWarning": "İstemciler bu depoya adıyla ulaşır. Adı değiştirmek WebDAV, SFTP, S3 ve NFS yollarını değiştirir — eski adı kullanan bir bağlama ya da yer imi, siz güncelleyene kadar 404 döner."
     },
     "fieldHelp": {
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",

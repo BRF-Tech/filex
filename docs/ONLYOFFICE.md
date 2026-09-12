@@ -319,7 +319,32 @@ button probes `/healthcheck` and answers "reachable" for a Document Server that
 is perfectly healthy, while the editor still refuses because filex has nothing to
 sign the descriptor with. Reachable is not the same as configured.
 
-### Failure: editor shows "Download failed" / "token" error
+### Failure: editor shows "Download failed"
+
+**Read the log first — it names the reason.** The Document Server's message is
+the same sentence for five different causes, so filex writes the cause on its
+own side. Open the document once and look for:
+
+```
+level=WARN msg="onlyoffice: the document server could not download this file"
+      node=42 storage=3 reason="..." err="..."
+```
+
+| `reason` | What it means |
+|---|---|
+| `signature refused` | The link expired, or the JWT secret changed under a running editor. See the token section below. |
+| `no catalogue row for this document` | The node was deleted between opening the editor and the download. |
+| `the storage could not be opened` | Wrong endpoint, wrong credentials, or the backend is down — this is about the **storage**, not about OnlyOffice. |
+| `the object is not on the storage` | The catalogue has the row, the bucket does not have the object. Run a sync. |
+| `reading the object failed` | The storage answered, then failed mid-read. `err` carries the driver's own message. |
+
+**No line at all** means the request never arrived, and the problem is the third
+address — the route from the Document Server back to filex. Press **Test** in
+*Settings → External services* and read the third leg: it reports *reached*,
+*did not reach*, or *could not be measured*, and the last of those is **not** a
+pass. See [Three machines, three addresses](#three-machines-three-addresses).
+
+### Failure: "token" error on open
 The two JWT secrets don't match. The secret filex holds — the `external_services`
 row, whatever put it there — **must** equal the Document Server's `JWT_SECRET`.
 A mismatch makes the Document Server reject the config (or filex reject the

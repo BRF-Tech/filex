@@ -85,6 +85,12 @@ type Deps struct {
 	ReplicaCron     *replica.CronScheduler
 	ReplicaReloader *replica.RulesReloader
 	StorageResolver func(int64) (storage.Driver, error)
+	// ForgetStorage drops the process-wide cached driver for a storage id.
+	// The resolver above builds a driver once and keeps it for the life of
+	// the process, so without this an edited storage keeps being served
+	// through the connection built from the configuration it had at boot.
+	// Nil is legal: it means nothing is cached (tests, embedders).
+	ForgetStorage func(int64)
 	// Plugins manages out-of-process storage drivers (internal/plugin). Nil
 	// when FILEX_PLUGINS_DISABLED — the admin routes then answer 503.
 	Plugins   *plugin.Manager
@@ -417,6 +423,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// The plugin conformance gate on storage save (handlers/plugin_gate.go).
 	stg.Plugins = d.Plugins
 	stg.StorageResolver = d.StorageResolver
+	stg.ForgetStorage = d.ForgetStorage
 	stg.DemoMode = d.Cfg.Demo.Mode
 	ush := handlers.NewUsers(d.Store)
 	seth := handlers.NewSettings(d.Store)

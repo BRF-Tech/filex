@@ -919,9 +919,7 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition(disposition, node.Name))
-	if node.Size > 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(node.Size, 10))
-	}
+	declareBodyLength(r.Context(), w, src, node)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// The slot is already claimed; a transfer that dies half-way still counts
 	// (the visitor got bytes, and a refund here would reopen the very gap this

@@ -42,6 +42,9 @@ type Storages struct {
 	// subsystem is off and nothing is probed.
 	Plugins         *plugin.Manager
 	StorageResolver func(int64) (storage.Driver, error)
+	// ForgetStorage drops the cached driver the resolver built for a storage.
+	// Set by the server; nil where nothing caches.
+	ForgetStorage func(int64)
 	// DemoMode marks a public playground, where "admin" is whoever read the
 	// credentials off the landing page. See denyOnDemo.
 	DemoMode bool
@@ -267,7 +270,44 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	h.applyLive(cur)
 	writeJSON(w, http.StatusOK, cur)
+}
+
+// applyLive makes an edited storage row the one the running process uses.
+//
+// Creating a storage starts a syncer; deleting one stops it. Editing one used
+// to do neither, and every live consumer went on holding the copy it had taken
+// when the process started: the syncer's snapshot — name, driver config, root
+// path, schedule, enabled flag, and the driver it initialised for itself — and
+// the resolver's cached driver behind every read, download and thumbnail.
+//
+// The operator was told the save succeeded, because it had; the database row
+// was correct. Only the restart nobody knew to perform applied it. So a fixed
+// bucket kept failing the old way, a disabled storage kept being walked, and a
+// renamed one kept writing its old name into the log (issue #21).
+//
+// Rebuilding is deliberately blunt — forget the driver, stop the syncer, start
+// a fresh one from the row just written. A syncer mid-walk is cancelled by the
+// stop; that is correct, since it is walking a configuration the operator has
+// just replaced, and the next run is a full pass anyway.
+func (h *Storages) applyLive(st *model.Storage) {
+	if h.ForgetStorage != nil {
+		h.ForgetStorage(st.ID)
+	}
+	if h.Worker == nil {
+		return
+	}
+	h.Worker.RemoveStorage(st.ID)
+	if !st.Enabled {
+		return
+	}
+	// Detached from the request: the caller's context dies with the response,
+	// and this syncer has to outlive it. Worker.Stop still cancels it.
+	if err := h.Worker.AddStorage(context.Background(), st); err != nil {
+		slog.Warn("storages: restarting the syncer after an edit failed",
+			slog.String("storage", st.Name), slog.String("err", err.Error()))
+	}
 }
 
 // Delete removes a storage and its descendant nodes (cascade).
@@ -290,6 +330,9 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.Worker != nil {
 		h.Worker.RemoveStorage(id)
+	}
+	if h.ForgetStorage != nil {
+		h.ForgetStorage(id)
 	}
 	if err := h.Store.DeleteStorage(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

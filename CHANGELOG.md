@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.2] - 2026-09-12
+
+### Fixed
+
+- **Editing a storage did not reach the running process** (#21). Creating a
+  storage starts a syncer for it and deleting one stops it; editing one did
+  neither. The row was written correctly — so the admin page reported a
+  successful save — while every live consumer kept the copy it had taken at
+  boot: the syncer's own snapshot of the storage (name, driver config, root
+  path, schedule, enabled flag, and the driver it had initialised for itself)
+  and the process-wide driver cache behind every read, download and thumbnail.
+
+  So a corrected bucket or endpoint kept failing the old way, a storage
+  switched off kept being walked on its schedule, and a renamed one kept
+  writing its old name into the log. Only a restart applied any of it, and
+  nothing said so. Saving a storage now drops the cached driver (closing it
+  when the driver holds a connection), stops the syncer and starts a fresh one
+  from the row just written. Deleting one drops the cached driver too, instead
+  of holding a dead storage's connection and credentials for the life of the
+  process.
+
+- **`Content-Length` came from the catalogue, not from the storage** (#17). The
+  OnlyOffice fetch endpoint and the public share download both declared the
+  response length from the node row — the size the last sync saw. Whenever the
+  catalogue is behind the object, that header is a lie the transport enforces:
+  Go truncates a body longer than the declared length, and a client reading one
+  shorter sees a short read. Either way the transfer dies inside the recipient's
+  program, which reports its own generic failure and names nothing — OnlyOffice
+  says `Download failed` while every reachability test passes, because the route
+  is fine and it is the body that does not match its header. The length now
+  comes from the storage (or the committed manifest for a file still in
+  staging), a disagreement is logged with both numbers, and an object the
+  storage cannot describe is served with no `Content-Length` at all rather than
+  an unverified one.
+
+### Added
+
+- **The OnlyOffice fetch endpoint says why it refused.** `Download failed` in
+  the editor is one sentence for five different causes, and the access log's
+  status code could not tell a rejected signature from an unreachable bucket.
+  Every refusal now writes `onlyoffice: the document server could not download
+  this file` with the node, the storage and a `reason`: signature refused · no
+  catalogue row · the storage could not be opened · the object is not on the
+  storage · reading the object failed.
+
+- **The storage edit form warns while the name field differs from what is
+  saved.** The storage name is the first path segment on WebDAV, SFTP, NFS and
+  the S3-compatible API, so renaming one makes every existing mount, bookmark
+  and script answer 404 until it is updated. Nothing had ever said so.
+
 ## [0.38.1] - 2026-09-12
 
 ### Fixed

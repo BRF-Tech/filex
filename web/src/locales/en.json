@@ -211,7 +211,8 @@
       "url": "Base URL",
       "share": "Share",
       "domain": "Domain / workgroup",
-      "dialTimeout": "Connect timeout (seconds)"
+      "dialTimeout": "Connect timeout (seconds)",
+      "nameChangedWarning": "Clients address this storage by name. Renaming it changes the WebDAV, SFTP, S3 and NFS paths — a mount or bookmark using the old name will start answering 404 until you update it."
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
