@@ -19,18 +19,85 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.38.1, 11 September 2026
-INSERT reads the rows every concurrent caller is about to write, so InnoDB
+::: tip Latest — v0.38.2, 12 September 2026
+Editing a storage now takes effect on the running process. Creating one started its syncer and deleting one stopped it, but editing one did neither: the row was written and the save reported as successful while the syncer and every download kept using the configuration loaded at boot. A corrected bucket went on failing, a disabled storage went on being scanned, and a renamed one went on logging its old name. Downloads also stopped declaring a length taken from the catalogue rather than from the storage, which is what made OnlyOffice report "Download failed" on an install whose catalogue was behind, and the fetch endpoint now says in the log which of five things went wrong.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.38.1
-docker pull ghcr.io/brf-tech/filex:full-v0.38.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.38.2
+docker pull ghcr.io/brf-tech/filex:full-v0.38.2
 ```
+
+## v0.38.2
+
+<span class="filex-release-date">12 September 2026</span>
+
+Editing a storage now takes effect on the running process. Creating one started its syncer and deleting one stopped it, but editing one did neither: the row was written and the save reported as successful while the syncer and every download kept using the configuration loaded at boot. A corrected bucket went on failing, a disabled storage went on being scanned, and a renamed one went on logging its old name. Downloads also stopped declaring a length taken from the catalogue rather than from the storage, which is what made OnlyOffice report "Download failed" on an install whose catalogue was behind, and the fetch endpoint now says in the log which of five things went wrong.
+
+## What changed
+
+### Fixed
+
+- **Editing a storage did not reach the running process** (#21). Creating a
+  storage starts a syncer for it and deleting one stops it; editing one did
+  neither. The row was written correctly — so the admin page reported a
+  successful save — while every live consumer kept the copy it had taken at
+  boot: the syncer's own snapshot of the storage (name, driver config, root
+  path, schedule, enabled flag, and the driver it had initialised for itself)
+  and the process-wide driver cache behind every read, download and thumbnail.
+
+  So a corrected bucket or endpoint kept failing the old way, a storage
+  switched off kept being walked on its schedule, and a renamed one kept
+  writing its old name into the log. Only a restart applied any of it, and
+  nothing said so. Saving a storage now drops the cached driver (closing it
+  when the driver holds a connection), stops the syncer and starts a fresh one
+  from the row just written. Deleting one drops the cached driver too, instead
+  of holding a dead storage's connection and credentials for the life of the
+  process.
+
+- **`Content-Length` came from the catalogue, not from the storage** (#17). The
+  OnlyOffice fetch endpoint and the public share download both declared the
+  response length from the node row — the size the last sync saw. Whenever the
+  catalogue is behind the object, that header is a lie the transport enforces:
+  Go truncates a body longer than the declared length, and a client reading one
+  shorter sees a short read. Either way the transfer dies inside the recipient's
+  program, which reports its own generic failure and names nothing — OnlyOffice
+  says `Download failed` while every reachability test passes, because the route
+  is fine and it is the body that does not match its header. The length now
+  comes from the storage (or the committed manifest for a file still in
+  staging), a disagreement is logged with both numbers, and an object the
+  storage cannot describe is served with no `Content-Length` at all rather than
+  an unverified one.
+
+### Added
+
+- **The OnlyOffice fetch endpoint says why it refused.** `Download failed` in
+  the editor is one sentence for five different causes, and the access log's
+  status code could not tell a rejected signature from an unreachable bucket.
+  Every refusal now writes `onlyoffice: the document server could not download
+  this file` with the node, the storage and a `reason`: signature refused · no
+  catalogue row · the storage could not be opened · the object is not on the
+  storage · reading the object failed.
+
+- **The storage edit form warns while the name field differs from what is
+  saved.** The storage name is the first path segment on WebDAV, SFTP, NFS and
+  the S3-compatible API, so renaming one makes every existing mount, bookmark
+  and script answer 404 until it is updated. Nothing had ever said so.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0382---2026-09-12)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.38.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.38.2`
 
 ## v0.38.1
 
 <span class="filex-release-date">11 September 2026</span>
+
+Renaming a folder no longer puts its contents in the trash. The rename moved one row and left every file and subfolder pointing at the old path, so the next sync tombstoned them and then collided with itself once per file; a rename at the root of a storage deleted the row it had been asked to move. Installs already in that state repair themselves on the next sync, keeping each file's identity and with it its shares, comments and versions. Pressing Sync now answers immediately and runs in the background, instead of dying with the browser's 30-second timeout and leaving the catalogue half updated.
 
 ## What changed
 
@@ -86,6 +153,8 @@ docker pull ghcr.io/brf-tech/filex:full-v0.38.1
 ## v0.38.0
 
 <span class="filex-release-date">11 September 2026</span>
+
+The release where PostgreSQL and MySQL started actually working. Both were listed as supported and neither had ever been run against a test: `binary` is a reserved word on both engines, one MySQL migration had never been written, the copy/move/delete queue was created at boot with SQLite DDL so every file operation failed on Postgres while the health endpoint answered 200, and the job queue sent SQLite statements down a Postgres connection so no background work ran at all. Every one of those is fixed, and a gate now boots filex against a real PostgreSQL 17 and a real MySQL 8 on every push. OnlyOffice also gained a callback address of its own, separate from the public URL, and the Test button now measures the document server's route back to filex instead of assuming it.
 
 ## What changed
 
@@ -2655,50 +2724,13 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.3`
 
-## v0.27.2
-
-<span class="filex-release-date">29 August 2026</span>
-
-## What changed
-
-### Fixed
-
-- **A file whose name is not ASCII no longer breaks a download — or the client
-  reading it.** `Content-Disposition` carried the filename raw, so a name like
-  `Türkçe adlı dosya.txt` put bytes over 127 in an HTTP header. Browsers guess
-  their way through that, which is why it went unnoticed for years; a strict
-  client does not. Electron's `net.fetch` threw
-  `Cannot convert argument to a ByteString … value of 305` from inside its
-  response handler — where no caller's try/catch can reach it — so the filex
-  desktop app took an uncaught exception and a folder being dragged out stopped
-  filling in halfway, silently. Every download now sends RFC 6266:
-  `filename="ascii-fallback"` plus `filename*=UTF-8''percent-encoded`, from one
-  shared helper used by the manager, share, share-browse and viewer endpoints.
-- **The desktop app survives a badly-formed header from any server.** Its
-  transfers moved from `net.fetch` (which validates response headers as
-  ByteStrings) to `net.request` (which does not), so an older filex — or
-  somebody else's server — can no longer stop a drag-out by naming a file in
-  Turkish.
-- **A failed drag-out no longer freezes the app.** The failure was reported with
-  `dialog.showErrorBox`, which is modal: the box sat in front of a frozen window
-  until it was clicked. It is a toast in the explorer now, plus an OS
-  notification when the window is not in front. An uncaught exception in the
-  main process is likewise logged and notified instead of ending in Electron's
-  raw JavaScript error box.
-- **Drag-outs leave a trail.** The transfer runs after the gesture is over, with
-  no window of its own; when it went wrong the only symptom was a folder that
-  stayed empty. Each step now prints one line (`[drag …]` / `[xfer …]`).
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0272---2026-08-29)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.2`
-
 ## Earlier releases
 
-The 89 releases before v0.27.2, in brief. Full notes are on GitHub.
+The 90 releases before v0.27.3, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.27.2](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) | 29 August 2026 | reading it.** `Content-Disposition` carried the filename raw, so a name like |
 | [v0.27.1](https://github.com/BRF-Tech/filex/releases/tag/v0.27.1) | 29 August 2026 | stand-in by NAME across the local drives, so any file that happened to appear |
 | [v0.27.0](https://github.com/BRF-Tech/filex/releases/tag/v0.27.0) | 28 August 2026 | the next now does what it says: the queue carries a destination storage of its |
 | [v0.26.1](https://github.com/BRF-Tech/filex/releases/tag/v0.26.1) | 27 August 2026 | endpoint answered bare codes — `{"error":"ticket_expired"}`, |
@@ -2791,4 +2823,4 @@ The 89 releases before v0.27.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-11 from 109 published releases.</small>
+<small>Last refreshed 2026-09-12 from 110 published releases.</small>

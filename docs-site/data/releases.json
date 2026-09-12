@@ -1,7 +1,22 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-09-11",
+  "generatedAt": "2026-09-12",
   "releases": [
+    {
+      "tag": "v0.38.2",
+      "date": "2026-09-12T00:37:56Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.38.2",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Fixed\n\n- **Editing a storage did not reach the running process** (#21). Creating a\n  storage starts a syncer for it and deleting one stops it; editing one did\n  neither. The row was written correctly — so the admin page reported a\n  successful save — while every live consumer kept the copy it had taken at\n  boot: the syncer's own snapshot of the storage (name, driver config, root\n  path, schedule, enabled flag, and the driver it had initialised for itself)\n  and the process-wide driver cache behind every read, download and thumbnail.\n\n  So a corrected bucket or endpoint kept failing the old way, a storage\n  switched off kept being walked on its schedule, and a renamed one kept\n  writing its old name into the log. Only a restart applied any of it, and\n  nothing said so. Saving a storage now drops the cached driver (closing it\n  when the driver holds a connection), stops the syncer and starts a fresh one\n  from the row just written. Deleting one drops the cached driver too, instead\n  of holding a dead storage's connection and credentials for the life of the\n  process.\n\n- **`Content-Length` came from the catalogue, not from the storage** (#17). The\n  OnlyOffice fetch endpoint and the public share download both declared the\n  response length from the node row — the size the last sync saw. Whenever the\n  catalogue is behind the object, that header is a lie the transport enforces:\n  Go truncates a body longer than the declared length, and a client reading one\n  shorter sees a short read. Either way the transfer dies inside the recipient's\n  program, which reports its own generic failure and names nothing — OnlyOffice\n  says `Download failed` while every reachability test passes, because the route\n  is fine and it is the body that does not match its header. The length now\n  comes from the storage (or the committed manifest for a file still in\n  staging), a disagreement is logged with both numbers, and an object the\n  storage cannot describe is served with no `Content-Length` at all rather than\n  an unverified one.\n\n### Added\n\n- **The OnlyOffice fetch endpoint says why it refused.** `Download failed` in\n  the editor is one sentence for five different causes, and the access log's\n  status code could not tell a rejected signature from an unreachable bucket.\n  Every refusal now writes `onlyoffice: the document server could not download\n  this file` with the node, the storage and a `reason`: signature refused · no\n  catalogue row · the storage could not be opened · the object is not on the\n  storage · reading the object failed.\n\n- **The storage edit form warns while the name field differs from what is\n  saved.** The storage name is the first path segment on WebDAV, SFTP, NFS and\n  the S3-compatible API, so renaming one makes every existing mount, bookmark\n  and script answer 404 until it is updated. Nothing had ever said so.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0382---2026-09-12)\n\n- **Documentation** — <https://docs.filex.sh>\n- **Report a bug** — <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** — <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.38.2",
+        "ghcr.io/brf-tech/filex:full-v0.38.2"
+      ],
+      "hasDesktop": true,
+      "assetCount": 25
+    },
     {
       "tag": "v0.38.1",
       "date": "2026-09-11T22:45:26Z",
