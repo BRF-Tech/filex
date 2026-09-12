@@ -2029,8 +2029,38 @@ useKeyboardShortcuts(rootEl, {
   onTabNext: () => nextTab(),
   onTabPrev: () => prevTab(),
   /* /wiring:d1 */
+  /* tus:t1 — the menu verbs, routed through the SAME dispatcher the right-click
+   * menu and the toolbar use (dispatchItemAction), so a key and a click cannot
+   * drift apart. The ones that act on a selection do nothing without one, which
+   * is what the menu does too. */
+  onNewFolder: () => {
+    showNewFolder.value = true;
+  },
+  onUpload: () => triggerUpload(),
+  onRefresh: () => void load(),
+  onDownload: () => void dispatchItemAction('download', shortcutTargets()),
+  onPreview: () => void dispatchItemAction('preview', shortcutTargets()),
+  onShare: () => void dispatchItemAction('access', shortcutTargets()),
+  onTags: () => void dispatchItemAction('tags', shortcutTargets()),
+  onConvert: () => void dispatchItemAction('convert', shortcutTargets()),
+  onOpenTab: () => void dispatchItemAction('open-tab', shortcutTargets()),
+  onCopyPath: () => {
+    const n = shortcutTargets()[0];
+    if (n) void onCopyPath(n.path);
+  },
+  onCopyId: () => void dispatchItemAction('copy-id', shortcutTargets()),
+  onRestore: () => void dispatchItemAction('restore', shortcutTargets()),
+  /* /tus:t1 */
   hasSelection: () => !selection.isEmpty.value,
 });
+
+/* tus:t1 — which rows a keyboard verb acts on: the active pane's selection when
+ * the split pane has focus, otherwise the main listing's. Same rule the delete
+ * and rename shortcuts have followed since wiring:d1. */
+function shortcutTargets(): FileNode[] {
+  if (paneIsActive.value) return splitPaneRef.value?.selectedNodes() ?? [];
+  return selection.nodes.value;
+}
 
 // --------------------------------------------------------------------
 // Actions

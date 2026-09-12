@@ -146,6 +146,11 @@ export {
   comboLabel,
   eventMatchesShortcut,
   isMacLike,
+  /* tus:t1 — menu/toolbar rows name their key from the same registry, and the
+   * combos a browser tab never receives are declared in one place. */
+  menuShortcutHint,
+  MENU_ACTION_SHORTCUTS,
+  isReservedCombo,
 } from './composables/useKeyboardShortcuts';
 export type {
   ShortcutActionDef,

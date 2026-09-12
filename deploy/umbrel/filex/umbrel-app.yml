@@ -2,11 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.39.1"
+version: "0.40.0"
 releaseNotes: |-
-  filex v0.39.1 — 2026-09-12
-  • Every key hint now reads the key that is actually bound.
-  • The quick-look key legend no longer fills the window
+  filex v0.40.0 — 2026-09-12
+  • The menus say which key does this.
+  • Twelve more verbs became remappable
+  • The settings modal refuses a combination the browser keeps for itself
+  • A ninth theme, Drive
+  • Dark mode put white text on the primary button
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

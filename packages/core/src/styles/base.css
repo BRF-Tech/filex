@@ -866,6 +866,22 @@ filex-explorer {
   width: 1.2em;
   text-align: center;
 }
+/* tus:t1 — the key that runs this row, pushed to the trailing edge. Muted and
+ * smaller: it is a reminder, not a second label, and it must never win the
+ * row's width from the label (hence auto margin + no shrink on the label). */
+.fe-ctx__label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-ctx__key {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--fe-text-muted);
+  font-size: 11px;
+  font-family: var(--fe-font-mono);
+  white-space: nowrap;
+}
 .fe-ctx__sep {
   height: 1px;
   background: var(--fe-border);
@@ -2587,6 +2603,16 @@ filex-explorer {
 .fe-shortset__btn {
   padding: 3px 9px;
   font-size: 12px;
+}
+/* tus:t1 — "Desktop app only" on a combo the browser keeps for itself. */
+.fe-shortset__reserved {
+  margin-left: 6px;
+  font-size: 10.5px;
+  color: var(--fe-text-muted);
+  border: 1px dashed var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  padding: 1px 6px;
+  white-space: nowrap;
 }
 .fe-shortset__fixed {
   font-size: 11px;

@@ -306,6 +306,7 @@ export const en: Record<string, string> = {
   'theme.name.contrast': 'High Contrast',
   'theme.name.gray': 'Soft Gray',
   'theme.name.terminal': 'Terminal Green',
+  'theme.name.drive': 'Drive',
   /* === wiring:c2 — customizable shortcuts + quick look === */
   'shortcuts.quicklook': 'Quick look',
   'shortcuts.customize': 'Customize',
@@ -395,6 +396,24 @@ export const en: Record<string, string> = {
   'shortcuts.tab_close': 'Close tab',
   'shortcuts.tab_next': 'Next tab',
   'shortcuts.tab_prev': 'Previous tab',
+  /* tus:t1 — the menu verbs */
+  'shortcuts.new_folder': 'New folder',
+  'shortcuts.upload': 'Upload files',
+  'shortcuts.refresh': 'Refresh the listing',
+  'shortcuts.download': 'Download',
+  'shortcuts.preview': 'Preview',
+  'shortcuts.share': 'Share / permissions',
+  'shortcuts.tags': 'Tags',
+  'shortcuts.convert': 'Convert',
+  'shortcuts.open_tab': 'Open in a new tab',
+  'shortcuts.copy_path': 'Copy path',
+  'shortcuts.copy_id': 'Copy id',
+  'shortcuts.restore': 'Restore from trash',
+  'shortcuts.settings.reserved':
+    'is taken by the browser before the page sees it, so it would do nothing here. Pick another key.',
+  'shortcuts.settings.reserved_badge': 'Desktop app only',
+  'shortcuts.settings.reserved_title':
+    'The browser handles this combination itself. It fires in the desktop app and in an installed PWA, not in a browser tab.',
   'cmd.tab_new': 'Open a new tab',
   'cmd.split_toggle': 'Toggle split view',
   'split.pane': 'Secondary pane',

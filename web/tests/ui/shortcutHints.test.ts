@@ -30,11 +30,15 @@ import { nextTick } from 'vue';
 
 import QuickLook from '@brftech/filex-core/src/components/QuickLook.vue';
 import Toolbar from '@brftech/filex-core/src/components/Toolbar.vue';
+import ContextMenu from '@brftech/filex-core/src/components/ContextMenu.vue';
 import {
   effectiveCombo,
+  isReservedCombo,
+  menuShortcutHint,
   resetAllShortcuts,
   setShortcutOverride,
   shortcutHint,
+  MENU_ACTION_SHORTCUTS,
   SHORTCUT_ACTIONS,
 } from '@brftech/filex-core/src/composables/useKeyboardShortcuts';
 import { en } from '@brftech/filex-core/src/locales/en';
@@ -114,6 +118,87 @@ describe('drive shell search chip', () => {
       'Ctrl+J',
     );
     wrapper.unmount();
+  });
+});
+
+describe('right-click menu', () => {
+  const actions = [
+    { key: 'rename', label: 'Rename' },
+    { key: 'access', label: 'Share' },
+    { key: 'keep-local', label: 'Always keep on this device' },
+  ];
+
+  it('every row that has a key prints it, and a remap reaches the row', async () => {
+    const wrapper = mount(ContextMenu, { props: { locale: 'en' as const, actions } });
+    await (wrapper.vm as unknown as { show: (e: object, n: unknown[]) => Promise<void> }).show(
+      { clientX: 10, clientY: 10 },
+      [],
+    );
+    await nextTick();
+
+    const rowText = () =>
+      [...document.querySelectorAll('.fe-ctx__item')].map((el) => el.textContent ?? '');
+    expect(rowText().find((t) => t.includes('Rename'))).toContain(effectiveCombo('rename')); // F2
+
+    // A verb with no registry action prints no key rather than an empty box.
+    const keepRow = [...document.querySelectorAll('.fe-ctx__item')].find((el) =>
+      (el.textContent ?? '').includes('Always keep'),
+    );
+    expect(keepRow?.querySelector('.fe-ctx__key')).toBeNull();
+
+    setShortcutOverride('rename', 'Shift+R');
+    await nextTick();
+    expect(rowText().find((t) => t.includes('Rename'))).toContain('Shift+R');
+    wrapper.unmount();
+  });
+
+  it('the menu vocabulary and the registry vocabulary stay joined', () => {
+    // `access` is the share dialog and `details` is the inspector: the two
+    // places where the menu's word and the registry's id differ. If either id
+    // is renamed, those rows would quietly stop naming their key.
+    for (const [menuKey, actionId] of Object.entries(MENU_ACTION_SHORTCUTS)) {
+      expect(
+        SHORTCUT_ACTIONS.some((a) => a.id === actionId),
+        `menu key "${menuKey}" maps to "${actionId}", which is not in the registry`,
+      ).toBe(true);
+    }
+    expect(menuShortcutHint('access')).toBe(shortcutHint('share'));
+    expect(menuShortcutHint('details')).toBe(shortcutHint('inspector'));
+  });
+});
+
+describe('browser-reserved combos', () => {
+  it('names the ones a browser tab never delivers', () => {
+    for (const c of ['Ctrl+W', 'Ctrl+T', 'Ctrl+Tab', 'F12']) {
+      expect(isReservedCombo(c), `${c} should be reserved`).toBe(true);
+    }
+    for (const c of ['F2', 'Ctrl+K', 'Shift+N', 'D']) {
+      expect(isReservedCombo(c), `${c} should be assignable`).toBe(false);
+    }
+  });
+
+  it('every action a browser can actually reach ships on a free combo', () => {
+    // The tab actions are the deliberate exception — they are declared on the
+    // browser's own combos and the settings modal badges them as such.
+    const offenders = SHORTCUT_ACTIONS.filter(
+      (a) => a.defaultCombo && isReservedCombo(a.defaultCombo) && !a.id.startsWith('tab-'),
+    ).map((a) => `${a.id}=${a.defaultCombo}`);
+    expect(
+      offenders,
+      'a default combo the browser eats gives the user a key that does nothing',
+    ).toEqual([]);
+  });
+
+  it('no two actions ship on the same default', () => {
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const a of SHORTCUT_ACTIONS) {
+      if (!a.defaultCombo) continue;
+      const prev = seen.get(a.defaultCombo);
+      if (prev) clashes.push(`${a.defaultCombo}: ${prev} + ${a.id}`);
+      else seen.set(a.defaultCombo, a.id);
+    }
+    expect(clashes, 'two actions answer the same key out of the box').toEqual([]);
   });
 });
 

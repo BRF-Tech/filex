@@ -17,7 +17,7 @@ import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import ContextMenu, { type ContextAction } from './ContextMenu.vue';
 import ViewSwitcher from './ViewSwitcher.vue';
 import { useLocale } from '../composables/useLocale';
-import { eventMatchesShortcut, shortcutHint } from '../composables/useKeyboardShortcuts';
+import { eventMatchesShortcut, menuShortcutHint, shortcutHint } from '../composables/useKeyboardShortcuts';
 
 export type SelectionMode = 'none' | 'single-file' | 'single-dir' | 'multi';
 
@@ -389,6 +389,14 @@ const moreActions = computed<ContextAction[]>(() => {
  * that key. */
 const paletteCombo = computed(() => shortcutHint('palette'));
 
+/* tus:t1 — a button's tooltip names its key. Same source as the right-click
+ * menu's key column, so the two can only ever say the same thing, and a verb
+ * with no binding gets its plain label back rather than an empty bracket. */
+function withKey(label: string, key: string): string {
+  const combo = menuShortcutHint(key);
+  return combo ? `${label} (${combo})` : label;
+}
+
 const drivePlaceholder = computed(() =>
   props.scopeLabel
     ? t('drive.search.placeholder', { scope: props.scopeLabel })
@@ -509,7 +517,7 @@ function onMoreSelect(a: ContextAction) {
         v-if="canGoUp"
         type="button"
         class="fe-btn fe-btn--icon-only"
-        :title="t('toolbar.go_up')"
+        :title="withKey(t('toolbar.go_up'), 'go-up')"
         :aria-label="t('toolbar.go_up')"
         @click="emit('go-up')"
       >
@@ -523,7 +531,7 @@ function onMoreSelect(a: ContextAction) {
         v-if="shell !== 'drive' && mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn fe-btn--primary"
-        :title="t('toolbar.new_folder')"
+        :title="withKey(t('toolbar.new_folder'), 'new-folder')"
         @click="emit('new-folder')"
       >
         <span class="fe-icon">📁</span>
@@ -537,7 +545,7 @@ function onMoreSelect(a: ContextAction) {
         class="fe-btn fe-btn--fold"
         :class="{ 'fe-btn--danger': a.danger, 'is-disabled': a.disabled }"
         :disabled="a.disabled"
-        :title="a.label"
+        :title="withKey(a.label, a.key)"
         @click="fire(a.key)"
       >
         <span class="fe-icon">{{ a.icon }}</span>
@@ -578,7 +586,7 @@ function onMoreSelect(a: ContextAction) {
         v-if="pasteEnabled && mode === 'none' && !trashActive && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn"
-        :title="t('ctx.paste')"
+        :title="withKey(t('ctx.paste'), 'paste')"
         @click="fire('paste')"
       >
         <span class="fe-icon">📋</span>
@@ -641,7 +649,7 @@ function onMoreSelect(a: ContextAction) {
         v-if="shell !== 'drive' && !atVirtualRoot && canWrite !== false"
         type="button"
         class="fe-btn fe-btn--icon-only"
-        :title="t('toolbar.upload')"
+        :title="withKey(t('toolbar.upload'), 'upload')"
         :aria-label="t('toolbar.upload') /* wiring:c4 */"
         @click="emit('upload')"
       >
@@ -650,7 +658,7 @@ function onMoreSelect(a: ContextAction) {
       <button
         type="button"
         class="fe-btn fe-btn--icon-only"
-        :title="t('toolbar.refresh')"
+        :title="withKey(t('toolbar.refresh'), 'refresh')"
         :aria-label="t('toolbar.refresh') /* wiring:c4 */"
         @click="emit('refresh')"
       >
@@ -722,7 +730,7 @@ function onMoreSelect(a: ContextAction) {
       class="fe-btn fe-btn--icon-only fe-toolbar__inspector"
       :class="{ 'is-active': inspectorOpen }"
       :aria-pressed="!!inspectorOpen"
-      :title="t('toolbar.inspector')"
+      :title="withKey(t('toolbar.inspector'), 'inspector')"
       :aria-label="t('toolbar.inspector')"
       @click="emit('toggle-inspector')"
     >
@@ -922,7 +930,7 @@ function onMoreSelect(a: ContextAction) {
           v-if="canGoUp"
           type="button"
           class="fe-btn fe-btn--icon-only"
-          :title="t('toolbar.go_up')"
+          :title="withKey(t('toolbar.go_up'), 'go-up')"
           :aria-label="t('toolbar.go_up')"
           @click="emit('go-up')"
         >
@@ -935,7 +943,7 @@ function onMoreSelect(a: ContextAction) {
           type="button"
           class="fe-btn fe-btn--icon-only fe-toolbar__search-toggle"
           :class="{ 'is-active': !!localSearch }"
-          :title="t('toolbar.search')"
+          :title="withKey(t('toolbar.search'), 'search')"
           :aria-label="t('toolbar.search')"
           @click="openSearch"
         >
@@ -945,7 +953,7 @@ function onMoreSelect(a: ContextAction) {
           v-if="!atVirtualRoot && canWrite !== false"
           type="button"
           class="fe-btn fe-btn--icon-only"
-          :title="t('toolbar.upload')"
+          :title="withKey(t('toolbar.upload'), 'upload')"
           :aria-label="t('toolbar.upload')"
           @click="emit('upload')"
         >

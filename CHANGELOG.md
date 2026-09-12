@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-12
+
+### Added
+
+- **The menus say which key does this.** Twenty actions were remappable and
+  four of them said so anywhere on screen. Rename has been `F2` since the
+  beginning; the right-click menu never mentioned it and neither did the
+  toolbar tooltip, so the only way to learn a key was to open the `?` sheet on
+  your own initiative — which is not how anybody learns a shortcut. Every
+  context-menu row now prints its key on the trailing edge and every toolbar
+  tooltip reads "Upload (U)", both from the registry, so a remap reaches them.
+  A verb with no binding prints nothing rather than an empty key cap.
+
+- **Twelve more verbs became remappable**: new folder, upload, refresh,
+  download, preview, share, tags, convert, open in a new tab, copy path, copy
+  id and restore. Seven ship on a free key (`Shift+N`, `U`, `R`, `D`, `P`,
+  `Shift+S`, `T`); the rare five ship unbound, which is a default the user can
+  change rather than a key taken from them. The cheat sheet and the settings
+  modal go from 20 rows to 32.
+
+- **The settings modal refuses a combination the browser keeps for itself** —
+  `Ctrl+W`, `Ctrl+T`, `Ctrl+Tab`, `F12` and friends — with the reason, instead
+  of storing a binding that could never fire. The tab actions, which ship on
+  exactly those combinations, are badged *Desktop app only*: they work in the
+  desktop app and in an installed PWA, not in a browser tab.
+
+- **A ninth theme, Drive**, measured off the end-user shell
+  [@alfatm](https://github.com/alfatm) built on filex and put up for review
+  (#14) — palette, radii and the per-file-type accents, mapped onto our own
+  tokens. It is one registry entry, so it dresses every surface the explorer
+  has rather than only the drive shell, and an embed picks it with one setting.
+  Inter leads its font stack because the demo uses it; nothing is downloaded,
+  so a machine without Inter falls back to the same system face as every other
+  theme.
+
+### Fixed
+
+- **Dark mode put white text on the primary button** (`#60a5fa`): 2.54:1,
+  against the 4.5 the palette file claims in its own header. Every primary
+  button in dark mode. It is dark ink now, which measures 7.28. The `default`
+  theme's gallery preview also still advertised `#3b82f6` after the stock
+  primary was darkened to `#2f6fe0` for the same reason. Both are checks now
+  rather than claims (`web/tests/api/themeContrast.test.ts`): every palette,
+  both variants, plus a drift check between the preview map and
+  `variables.css`.
+
 ## [0.39.1] - 2026-09-12
 
 ### Changed

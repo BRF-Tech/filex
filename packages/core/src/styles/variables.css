@@ -62,6 +62,10 @@
   --fe-border-strong: #3a4453;
   --fe-text: #e5e9f0;
   --fe-text-muted: #8b95a7;
+  /* Dark ink on the light-blue button. White measured 2.54:1 against it —
+   * the palette's own bar for text on a primary surface is 4.5, and every
+   * other themed palette clears it. #0f1419 measures 7.28. */
+  --fe-text-on-primary: #0f1419;
   --fe-primary: #60a5fa;
   --fe-primary-hover: #3b82f6;
   --fe-danger: #f87171;
@@ -83,6 +87,8 @@
     --fe-border-strong: #3a4453;
     --fe-text: #e5e9f0;
     --fe-text-muted: #8b95a7;
+    /* See the note on the class-based dark block above. */
+    --fe-text-on-primary: #0f1419;
     --fe-primary: #60a5fa;
     --fe-primary-hover: #3b82f6;
     --fe-danger: #f87171;

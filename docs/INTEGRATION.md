@@ -144,6 +144,46 @@ it (`GET /api/files/manager/tagged`). Notes for embedders:
   the ordinary folder load, which answered "folder not found" for a trash that
   was simply empty.
 
+### Keyboard shortcuts, and the keys the menus print
+
+Every verb the explorer has is one entry in a registry: an id, a default
+combination, a label. The right-click menu and the toolbar tooltips print the
+current combination beside the verb, so a user learns the key where they are
+already looking rather than by opening a cheat sheet on their own initiative.
+
+Nothing needs configuring for that. What an embedder can rely on:
+
+- the user remaps anything from **Shortcut settings** (the "⋯" menu, or the
+  `?` sheet's *Customize*). Overrides live in `localStorage` under
+  `filex.shortcuts` as `{ "<actionId>": "<combo>" }` — per browser, never sent
+  to the server.
+- an action can be left **unbound** (`""`), and a verb with no key prints none
+  rather than an empty key cap.
+- combinations the browser takes before the page sees them — `Ctrl+W`,
+  `Ctrl+T`, `Ctrl+Tab`, `F12` and friends — are refused with a reason. The tab
+  actions ship on exactly those, so their rows are badged *Desktop app only*:
+  they fire in the desktop app and in an installed PWA, not in a browser tab.
+- if your own UI names a key, read it rather than typing it:
+
+```ts
+import { shortcutHint, eventMatchesShortcut } from '@brftech/filex-core';
+
+shortcutHint('palette');             // 'Ctrl+K', '⌘+K' on a Mac, or the user's own
+eventMatchesShortcut(ev, 'palette'); // true when THIS event fires that action
+```
+
+`docs/API.md` has the full list; `SHORTCUT_ACTIONS` is the source of truth.
+
+### Themes
+
+A theme is a map of `--fe-*` custom properties in a light and a dark variant,
+not a second stylesheet — picking one is independent of light/dark mode, which
+keeps deciding which variant is active. Nine ship (Default, Night Blue, Forest,
+Amber, Lilac, High Contrast, Soft Gray, Terminal Green and Drive), and a host
+that wants its own look sets the same tokens on any scope above the explorer.
+Every shipped palette clears WCAG 2.1 contrast in both variants, which is a
+check in the test suite rather than a claim.
+
 ### The navigation panel and the simple profile
 
 Both are ordinary `config` keys, so all three wrappers set them the same way —

@@ -83,7 +83,11 @@ export const THEMES: ThemeDef[] = [
       '--fe-text': '#1a1e27',
       '--fe-text-muted': '#5a6475',
       '--fe-text-on-primary': '#ffffff',
-      '--fe-primary': '#3b82f6',
+      /* ⚠ Mirrors styles/variables.css. It drifted once: the stock primary was
+       * darkened to #2f6fe0 for WCAG AA against white text and this preview
+       * map kept the old #3b82f6, so the gallery card advertised a blue the
+       * product no longer used. */
+      '--fe-primary': '#2f6fe0',
       '--fe-primary-hover': '#2563eb',
       '--fe-danger': '#dc2626',
       '--fe-danger-hover': '#b91c1c',
@@ -97,7 +101,9 @@ export const THEMES: ThemeDef[] = [
       '--fe-border-strong': '#3a4453',
       '--fe-text': '#e5e9f0',
       '--fe-text-muted': '#8b95a7',
-      '--fe-text-on-primary': '#ffffff',
+      /* Dark ink, not white: white on #60a5fa measures 2.54 against the 4.5
+       * this file claims. Mirrors styles/variables.css. */
+      '--fe-text-on-primary': '#0f1419',
       '--fe-primary': '#60a5fa',
       '--fe-primary-hover': '#3b82f6',
       '--fe-danger': '#f87171',
@@ -353,6 +359,94 @@ export const THEMES: ThemeDef[] = [
       '--fe-danger': '#ff6b62',
       '--fe-danger-hover': '#ff8d86',
       '--fe-font': 'ui-monospace, "SF Mono", Consolas, Menlo, monospace',
+    },
+  },
+  {
+    /**
+     * Drive — the palette of the end-user shell alfatm built on top of filex
+     * and put on a demo stand for review (GitHub #14). The drive profile's
+     * layout came out of their mockups; this is the colour and shape half of
+     * the same look, mapped onto our own tokens so every surface the explorer
+     * has — not just the drive shell — can wear it.
+     *
+     * Measured from their demo rather than eyeballed: 43 custom properties,
+     * of which the ones with a home here are the palette, the radii (6/8/10)
+     * and the per-file-type accents. Inter leads the font stack because that
+     * is what the demo uses; nothing is downloaded for it, so a machine
+     * without Inter installed falls back to the same system face as every
+     * other theme.
+     */
+    id: 'drive',
+    nameKey: 'theme.name.drive',
+    light: {
+      '--fe-bg': '#ffffff',
+      '--fe-bg-elev': '#f7f8fb',
+      '--fe-bg-hover': '#f3f4f6',
+      '--fe-bg-selected': '#eef3ff',
+      '--fe-border': '#e5e7eb',
+      '--fe-border-strong': '#d1d5db',
+      '--fe-text': '#1f2937',
+      '--fe-text-muted': '#6b7280',
+      '--fe-text-on-primary': '#ffffff',
+      '--fe-primary': '#2f6ceb',
+      '--fe-primary-hover': '#2559c9',
+      '--fe-danger': '#dc2626',
+      '--fe-danger-hover': '#b91c1c',
+      '--fe-font': 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      '--fe-radius-sm': '6px',
+      '--fe-radius': '8px',
+      '--fe-radius-md': '10px',
+      '--fe-radius-lg': '12px',
+      '--fe-shadow': '0 20px 60px rgba(17, 24, 39, 0.18)',
+      '--fe-shadow-sm': '0 8px 24px rgba(17, 24, 39, 0.12)',
+      '--fe-icon-folder': '#f4b400',
+      '--fe-icon-image': '#2f6ceb',
+      '--fe-icon-video': '#7c3aed',
+      '--fe-icon-audio': '#0d9488',
+      '--fe-icon-pdf': '#dc2626',
+      '--fe-icon-doc': '#2f6ceb',
+      '--fe-icon-sheet': '#16a34a',
+      '--fe-icon-slides': '#ea580c',
+      '--fe-icon-archive': '#6b7280',
+      '--fe-icon-code': '#2f6ceb',
+      '--fe-icon-text': '#374151',
+      '--fe-icon-unknown': '#6b7280',
+    },
+    dark: {
+      '--fe-bg': '#15171c',
+      '--fe-bg-elev': '#1a1d23',
+      '--fe-bg-hover': '#1f232a',
+      '--fe-bg-selected': '#1c2740',
+      '--fe-border': '#2e333c',
+      '--fe-border-strong': '#3d444f',
+      '--fe-text': '#e6e8ec',
+      '--fe-text-muted': '#888f9b',
+      /* Dark ink on a light-blue button: white on #5b8cff measures 3.16, and
+       * the bar this file documents is 4.5. */
+      '--fe-text-on-primary': '#15171c',
+      '--fe-primary': '#5b8cff',
+      '--fe-primary-hover': '#7ba3ff',
+      '--fe-danger': '#f87171',
+      '--fe-danger-hover': '#ef4444',
+      '--fe-font': 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      '--fe-radius-sm': '6px',
+      '--fe-radius': '8px',
+      '--fe-radius-md': '10px',
+      '--fe-radius-lg': '12px',
+      '--fe-shadow': '0 20px 60px rgba(0, 0, 0, 0.6)',
+      '--fe-shadow-sm': '0 8px 24px rgba(0, 0, 0, 0.5)',
+      '--fe-icon-folder': '#f4b400',
+      '--fe-icon-image': '#4d7ff0',
+      '--fe-icon-video': '#9061f0',
+      '--fe-icon-audio': '#2dd4bf',
+      '--fe-icon-pdf': '#e05252',
+      '--fe-icon-doc': '#4d7ff0',
+      '--fe-icon-sheet': '#2eab63',
+      '--fe-icon-slides': '#fb923c',
+      '--fe-icon-archive': '#79808d',
+      '--fe-icon-code': '#4d7ff0',
+      '--fe-icon-text': '#5b6472',
+      '--fe-icon-unknown': '#79808d',
     },
   },
 ];

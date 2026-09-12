@@ -330,13 +330,18 @@ async function rightClick(page, name) {
   await sleep(350);
 }
 
-// ⚠ Strip the leading glyph. Every entry renders as "<icon><label>" in one
-// text node run ("☆Star"), so a naive /^Star$/ never matches and the
-// check fails on a menu that is perfectly correct.
+// ⚠ Read the LABEL element, not the row.
+//
+// A row renders as "<icon><label><key>" — the glyph was always there ("☆Star")
+// and tus:t1 added the shortcut on the trailing edge ("☆StarS"), so anything
+// that matches on the row's own textContent fails on a menu that is perfectly
+// correct. This is filex lesson #29, and it came back the moment a second
+// thing was added to the row: match on the stable child instead of stripping
+// the decorations one by one.
 const menuLabels = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll('.fe-ctx .fe-ctx__item')].map((b) =>
-      (b.textContent ?? '').trim().replace(/^[^\p{L}]+/u, ''),
+      (b.querySelector('.fe-ctx__label')?.textContent ?? b.textContent ?? '').trim(),
     ),
   );
 

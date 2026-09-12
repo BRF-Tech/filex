@@ -24,6 +24,7 @@ import {
   comboFromEvent,
   effectiveCombo,
   findShortcutConflict,
+  isReservedCombo,
   resetAllShortcuts,
   resetShortcut,
   setShortcutOverride,
@@ -66,6 +67,8 @@ const anyOverridden = computed(() => list.value.some((s) => s.overridden));
 
 const capturingId = ref<string | null>(null);
 const conflict = ref<{ id: string; combo: string; conflictId: string; fixed: boolean } | null>(null);
+/* tus:t1 — the user pressed something the browser keeps for itself. */
+const reserved = ref<{ id: string; combo: string } | null>(null);
 
 function labelOf(id: string): string {
   const def = SHORTCUT_ACTIONS.find((a) => a.id === id);
@@ -74,6 +77,7 @@ function labelOf(id: string): string {
 
 function beginCapture(id: string) {
   conflict.value = null;
+  reserved.value = null;
   capturingId.value = id;
 }
 
@@ -84,6 +88,13 @@ function cancelCapture() {
 function attemptAssign(id: string, combo: string) {
   capturingId.value = null;
   if (combo === effectiveCombo(id)) return; // unchanged
+  /* tus:t1 — a combo the browser takes before the page sees it would be a key
+   * that does nothing where the user is standing. Refuse it and say why,
+   * rather than storing a binding that never fires. */
+  if (isReservedCombo(combo)) {
+    reserved.value = { id, combo };
+    return;
+  }
   const clash = findShortcutConflict(combo, id);
   if (clash) {
     conflict.value = { id, combo, conflictId: clash.id, fixed: clash.fixed };
@@ -104,13 +115,19 @@ function dismissConflict() {
   conflict.value = null;
 }
 
+function dismissReserved() {
+  reserved.value = null;
+}
+
 function onReset(id: string) {
   conflict.value = null;
+  reserved.value = null;
   resetShortcut(id);
 }
 
 function onResetAll() {
   conflict.value = null;
+  reserved.value = null;
   capturingId.value = null;
   resetAllShortcuts();
 }
@@ -145,6 +162,7 @@ watch(
       window.removeEventListener('keydown', onWindowKeydown, true);
       capturingId.value = null;
       conflict.value = null;
+      reserved.value = null;
     }
   },
 );
@@ -201,6 +219,14 @@ function onClose() {
                 </span>
                 <template v-for="(combo, i) in s.keys" v-else :key="combo">
                   <kbd class="fe-kbd">{{ combo }}</kbd>
+                  <!-- tus:t1 — this combo never reaches a browser tab. Say so
+                       on the row rather than letting the user discover it by
+                       pressing the key and watching nothing happen. -->
+                  <span
+                    v-if="isReservedCombo(combo)"
+                    class="fe-shortset__reserved"
+                    :title="t('shortcuts.settings.reserved_title')"
+                  >{{ t('shortcuts.settings.reserved_badge') }}</span>
                   <span v-if="i < s.keys.length - 1" class="fe-shortcuts__or" aria-hidden="true">/</span>
                 </template>
               </template>
@@ -256,6 +282,17 @@ function onClose() {
                 {{ t('shortcuts.settings.conflict_take') }}
               </button>
               <button type="button" class="fe-btn fe-shortset__btn" @click="dismissConflict">
+                {{ t('shortcuts.settings.conflict_cancel') }}
+              </button>
+            </span>
+          </div>
+          <div v-if="reserved && reserved.id === s.id" class="fe-shortset__conflict" role="alert">
+            <span class="fe-shortset__conflict-msg">
+              <kbd class="fe-kbd">{{ reserved.combo }}</kbd>
+              {{ t('shortcuts.settings.reserved') }}
+            </span>
+            <span class="fe-shortset__conflict-actions">
+              <button type="button" class="fe-btn fe-shortset__btn" @click="dismissReserved">
                 {{ t('shortcuts.settings.conflict_cancel') }}
               </button>
             </span>

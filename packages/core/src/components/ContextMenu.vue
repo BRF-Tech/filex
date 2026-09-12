@@ -10,6 +10,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
+import { menuShortcutHint } from '../composables/useKeyboardShortcuts';
 
 export interface ContextAction {
   key: string;
@@ -19,6 +20,12 @@ export interface ContextAction {
   disabled?: boolean;
   hidden?: boolean;
   divider?: boolean;
+  /**
+   * tus:t1 — registry action id whose key this row should print. Optional:
+   * rows whose `key` already matches the registry (rename, delete, copy…)
+   * are resolved from the shared map and need nothing here.
+   */
+  shortcutId?: string;
 }
 
 const props = defineProps<{
@@ -47,6 +54,12 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useLocale(() => props.locale); // bag:b4 — sheet aria labels need t()
+
+/* tus:t1 — a row's key label. `shortcutId` wins when an embedder sets one;
+ * otherwise the row's own key is looked up in the shared menu map. */
+function hintFor(a: ContextAction): string {
+  return menuShortcutHint(a.shortcutId ?? a.key);
+}
 
 const open = ref(false);
 const x = ref(0);
@@ -320,6 +333,7 @@ defineExpose({ show, hide });
               >
                 <span v-if="a.icon" class="fe-ctx__icon" aria-hidden="true">{{ a.icon }}</span>
                 <span class="fe-ctx__label">{{ a.label }}</span>
+                <span v-if="hintFor(a)" class="fe-ctx__key" aria-hidden="true">{{ hintFor(a) }}</span>
               </button>
             </template>
           </div>
@@ -347,6 +361,10 @@ defineExpose({ show, hide });
             >
               <span v-if="a.icon" class="fe-ctx__icon" aria-hidden="true">{{ a.icon }}</span>
               <span class="fe-ctx__label">{{ a.label }}</span>
+              <!-- tus:t1 — the key that does this from the keyboard, read from
+                   the registry so a remap reaches it. Empty for a verb with no
+                   binding, and the span then does not render at all. -->
+              <span v-if="hintFor(a)" class="fe-ctx__key" aria-hidden="true">{{ hintFor(a) }}</span>
             </button>
           </template>
         </div>

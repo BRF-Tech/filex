@@ -306,6 +306,7 @@ export const tr: Record<string, string> = {
   'theme.name.contrast': 'Yüksek Kontrast',
   'theme.name.gray': 'Yumuşak Gri',
   'theme.name.terminal': 'Terminal Yeşili',
+  'theme.name.drive': 'Drive',
   /* === wiring:c2 — özelleştirilebilir kısayollar + hızlı bakış === */
   'shortcuts.quicklook': 'Hızlı bakış',
   'shortcuts.customize': 'Özelleştir',
@@ -395,6 +396,24 @@ export const tr: Record<string, string> = {
   'shortcuts.tab_close': 'Sekmeyi kapat',
   'shortcuts.tab_next': 'Sonraki sekme',
   'shortcuts.tab_prev': 'Önceki sekme',
+  /* tus:t1 — menü fiilleri */
+  'shortcuts.new_folder': 'Yeni klasör',
+  'shortcuts.upload': 'Dosya yükle',
+  'shortcuts.refresh': 'Listeyi yenile',
+  'shortcuts.download': 'İndir',
+  'shortcuts.preview': 'Önizle',
+  'shortcuts.share': 'Paylaş / izinler',
+  'shortcuts.tags': 'Etiketler',
+  'shortcuts.convert': 'Dönüştür',
+  'shortcuts.open_tab': 'Yeni sekmede aç',
+  'shortcuts.copy_path': 'Yolu kopyala',
+  'shortcuts.copy_id': 'Kimliği kopyala',
+  'shortcuts.restore': 'Çöp kutusundan geri al',
+  'shortcuts.settings.reserved':
+    'tarayıcı tarafından sayfaya ulaşmadan yakalanıyor, burada hiçbir şey yapmaz. Başka bir tuş seçin.',
+  'shortcuts.settings.reserved_badge': 'Yalnız masaüstü uygulamasında',
+  'shortcuts.settings.reserved_title':
+    'Bu kombinasyonu tarayıcının kendisi işliyor. Masaüstü uygulamasında ve kurulu PWA’da çalışır, tarayıcı sekmesinde çalışmaz.',
   'cmd.tab_new': 'Yeni sekme aç',
   'cmd.split_toggle': 'Görünümü böl / birleştir',
   'split.pane': 'İkincil panel',

@@ -47,6 +47,22 @@ export interface ShortcutHandlers {
   onTabNext?: () => void; // Ctrl+Tab
   onTabPrev?: () => void; // Ctrl+Shift+Tab
   /* /wiring:d1 */
+  /* tus:t1 — the verbs that were only ever reachable from the menus. Every
+   * one of them is remappable like the rest; the ones that ship unbound are
+   * there so the user can give them a key, not because they do less. */
+  onNewFolder?: () => void; // Shift+N
+  onUpload?: () => void; // U
+  onRefresh?: () => void; // R
+  onDownload?: () => void; // D
+  onPreview?: () => void; // P
+  onShare?: () => void; // Shift+S
+  onTags?: () => void; // T
+  onConvert?: () => void; // (unbound)
+  onOpenTab?: () => void; // (unbound)
+  onCopyPath?: () => void; // (unbound)
+  onCopyId?: () => void; // (unbound)
+  onRestore?: () => void; // (unbound)
+  /* /tus:t1 */
   hasSelection?: () => boolean; // disambiguates Backspace
 }
 
@@ -75,6 +91,33 @@ export interface ShortcutActionDef {
   prevent?: boolean;
   /** true → fires even when focus sits in a form control (Esc). */
   inForms?: boolean;
+}
+
+/**
+ * Combos the BROWSER takes before the page sees them. `preventDefault()`
+ * cannot stop these in an ordinary tab — Chrome and Firefox handle them at
+ * the window level — so an action bound to one of them only ever fires in
+ * the desktop app, an installed PWA or a kiosk window.
+ *
+ * They are not forbidden as DEFAULTS (the tab actions have shipped on
+ * Ctrl+T/W/Tab since wiring:d1 and work in the desktop app), but the
+ * settings modal refuses to let a user assign one: choosing a key that
+ * silently does nothing where you are standing is not a choice, it is a
+ * trap. `isReservedCombo` is the one place that list lives.
+ */
+const RESERVED_COMBOS = new Set([
+  'Ctrl+N', 'Ctrl+Shift+N',
+  'Ctrl+T', 'Ctrl+Shift+T',
+  'Ctrl+W', 'Ctrl+Shift+W',
+  'Ctrl+Tab', 'Ctrl+Shift+Tab',
+  'Ctrl+Q',
+  'Ctrl+Shift+I', 'Ctrl+Shift+J', 'Ctrl+Shift+C',
+  'F11', 'F12',
+]);
+
+/** Does the browser eat this combo before the page can see it? */
+export function isReservedCombo(combo: string): boolean {
+  return RESERVED_COMBOS.has(combo);
 }
 
 /** Registry order = help/settings display order. */
@@ -109,6 +152,25 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'tab-next', defaultCombo: 'Ctrl+Tab', labelKey: 'shortcuts.tab_next', groupKey: 'shortcuts.group.tabs' },
   { id: 'tab-prev', defaultCombo: 'Ctrl+Shift+Tab', labelKey: 'shortcuts.tab_prev', groupKey: 'shortcuts.group.tabs' },
   /* /wiring:d1 */
+  /* tus:t1 — the rest of the menu verbs. Until now these were reachable only
+   * by right-clicking, and the right-click menu named no keys at all, so 16 of
+   * the registry's actions were invisible unless somebody opened the `?` sheet
+   * on their own. The ones with no default are deliberate: they are rare
+   * enough that taking a key from the user by default is the wrong trade, and
+   * they are in the registry so the user can take one. */
+  { id: 'new-folder', defaultCombo: 'Shift+N', labelKey: 'shortcuts.new_folder', groupKey: 'shortcuts.group.file' },
+  { id: 'upload', defaultCombo: 'U', labelKey: 'shortcuts.upload', groupKey: 'shortcuts.group.file' },
+  { id: 'refresh', defaultCombo: 'R', labelKey: 'shortcuts.refresh', groupKey: 'shortcuts.group.nav' },
+  { id: 'download', defaultCombo: 'D', labelKey: 'shortcuts.download', groupKey: 'shortcuts.group.file' },
+  { id: 'preview', defaultCombo: 'P', labelKey: 'shortcuts.preview', groupKey: 'shortcuts.group.nav' },
+  { id: 'share', defaultCombo: 'Shift+S', labelKey: 'shortcuts.share', groupKey: 'shortcuts.group.file' },
+  { id: 'tags', defaultCombo: 'T', labelKey: 'shortcuts.tags', groupKey: 'shortcuts.group.file' },
+  { id: 'convert', defaultCombo: '', labelKey: 'shortcuts.convert', groupKey: 'shortcuts.group.file' },
+  { id: 'open-tab', defaultCombo: '', labelKey: 'shortcuts.open_tab', groupKey: 'shortcuts.group.tabs' },
+  { id: 'copy-path', defaultCombo: '', labelKey: 'shortcuts.copy_path', groupKey: 'shortcuts.group.file' },
+  { id: 'copy-id', defaultCombo: '', labelKey: 'shortcuts.copy_id', groupKey: 'shortcuts.group.file' },
+  { id: 'restore', defaultCombo: '', labelKey: 'shortcuts.restore', groupKey: 'shortcuts.group.file' },
+  /* /tus:t1 */
 ];
 
 /** action id → ShortcutHandlers callback name. */
@@ -134,6 +196,19 @@ const HANDLER_KEY: Record<string, keyof ShortcutHandlers> = {
   'tab-close': 'onTabClose',
   'tab-next': 'onTabNext',
   'tab-prev': 'onTabPrev',
+  /* tus:t1 */
+  'new-folder': 'onNewFolder',
+  upload: 'onUpload',
+  refresh: 'onRefresh',
+  download: 'onDownload',
+  preview: 'onPreview',
+  share: 'onShare',
+  tags: 'onTags',
+  convert: 'onConvert',
+  'open-tab': 'onOpenTab',
+  'copy-path': 'onCopyPath',
+  'copy-id': 'onCopyId',
+  restore: 'onRestore',
 };
 
 // --------------------------------------------------------------------
@@ -334,6 +409,53 @@ export function isMacLike(): boolean {
 export function comboLabel(combo: string): string {
   if (!combo) return '';
   return isMacLike() ? combo.replace(/\bCtrl\b/g, '⌘') : combo;
+}
+
+/**
+ * Menu action key → registry action id.
+ *
+ * The right-click menu, the toolbar and the keyboard all name the same verbs,
+ * but the menu's `key` and the registry's `id` are separate vocabularies and
+ * two of them genuinely differ (`access` is the share dialog, `details` is the
+ * inspector). One map, in one place: a second copy is a second chance to
+ * forget, and the symptom would be a menu row that silently stops naming its
+ * key while every other row keeps working.
+ */
+export const MENU_ACTION_SHORTCUTS: Record<string, string> = {
+  open: 'open',
+  'open-tab': 'open-tab',
+  preview: 'preview',
+  download: 'download',
+  convert: 'convert',
+  access: 'share',
+  details: 'inspector',
+  'copy-id': 'copy-id',
+  'copy-path': 'copy-path',
+  rename: 'rename',
+  cut: 'cut',
+  copy: 'copy',
+  paste: 'paste',
+  star: 'star',
+  tags: 'tags',
+  delete: 'delete',
+  restore: 'restore',
+  'new-folder': 'new-folder',
+  'toggle-hidden': 'toggle-hidden',
+  upload: 'upload',
+  refresh: 'refresh',
+};
+
+/**
+ * What a menu row or a toolbar button should print beside its label: the
+ * current combo for the verb it triggers, or '' when it has none (unbound, or
+ * not a registry action at all — `keep-local`, the E2E entries and so on).
+ */
+export function menuShortcutHint(menuKey: string): string {
+  /* Fall back to the key itself: the toolbar's own buttons (go-up, upload,
+   * refresh…) pass a registry id directly, and an id nothing knows returns ''
+   * rather than throwing. */
+  const id = MENU_ACTION_SHORTCUTS[menuKey] ?? menuKey;
+  return SHORTCUT_ACTIONS.some((a) => a.id === id) ? shortcutHint(id) : '';
 }
 
 /**
