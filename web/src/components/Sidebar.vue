@@ -31,6 +31,7 @@ import {
   Palette /* wiring:e1 */,
   ArrowUpCircle,
   Cable,
+  BarChart3,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -98,6 +99,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'notifications' }, label: t('nav.notifications'), icon: Bell, group: 'ops' },
   { to: { name: 'webhooks' }, label: t('nav.webhooks'), icon: Webhook, group: 'ops' } /* bag:b3 */,
   { to: { name: 'plugins' }, label: t('nav.plugins'), icon: Blocks, group: 'ops' },
+  { to: { name: 'usage' }, label: t('nav.usage'), icon: BarChart3, group: 'ops' },
   { to: { name: 'audit' }, label: t('nav.audit'), icon: ScrollText, group: 'ops' },
   { to: { name: 'updates' }, label: t('nav.updates'), icon: ArrowUpCircle, group: 'ops' },
 

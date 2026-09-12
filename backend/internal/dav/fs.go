@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
@@ -62,7 +63,7 @@ func (f *davFS) split(name string) (string, string) {
 // storageByName resolves an enabled storage the caller may see, plus its ACL
 // set. Invisible/unknown storages yield os.ErrNotExist (no exists-oracle).
 func (f *davFS) storageByName(ctx context.Context, name string) (*model.Storage, *acl.Set, error) {
-	st, err := f.h.cfg.Store.GetStorageByName(ctx, name)
+	st, err := storageref.Resolve(ctx, f.h.cfg.Store, name)
 	if err != nil || st == nil || !st.Enabled {
 		return nil, nil, os.ErrNotExist
 	}

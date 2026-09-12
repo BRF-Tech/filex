@@ -51,6 +51,18 @@ const nameChanged = computed(
   () => !!item.value && name.value.trim() !== '' && name.value.trim() !== item.value.name,
 );
 
+async function copyUID() {
+  if (!item.value?.uid) return;
+  try {
+    await navigator.clipboard.writeText(item.value.uid);
+    toast.success(t('common.copied'));
+  } catch {
+    // A page served without a secure context has no clipboard. The value is
+    // on screen and selectable, so there is nothing to rescue and nothing
+    // worth an error toast about.
+  }
+}
+
 const saving = ref(false);
 const showDelete = ref(false);
 const deleting = ref(false);
@@ -234,6 +246,22 @@ onMounted(load);
       <p v-if="nameChanged" class="-mt-1 text-xs text-amber-600 dark:text-amber-500">
         {{ t('storages.fields.nameChangedWarning') }}
       </p>
+
+      <div v-if="item.uid" class="rounded-md border border-zinc-200 dark:border-zinc-700 p-3 text-xs space-y-2">
+        <p class="font-medium text-zinc-700 dark:text-zinc-200">
+          {{ t('storages.fields.stableAddress') }}
+        </p>
+        <p class="text-zinc-500 dark:text-zinc-400">
+          {{ t('storages.fields.stableAddressHint') }}
+        </p>
+        <button
+          type="button"
+          class="font-mono break-all text-left w-full rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-1 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          :title="t('common.copy')"
+          @click="copyUID"
+        >{{ item.uid }}</button>
+        <p class="font-mono text-zinc-500 dark:text-zinc-400 break-all">/dav/{{ item.uid }}/</p>
+      </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Toggle v-model="enabled" :label="t('common.enabled')" />
         <Toggle v-model="readOnly" :label="t('storages.fields.readOnly')" />

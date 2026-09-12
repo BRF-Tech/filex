@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // SyncMode describes how a Storage is synced into the DB cache.
@@ -67,7 +69,15 @@ func ValidateSyncMode(m SyncMode) error {
 
 // Storage is a configured backend (local FS / S3 / SFTP / WebDAV / …).
 type Storage struct {
-	ID            int64           `json:"id"`
+	ID int64 `json:"id"`
+	// UID is the address that does not move. The Name is what people read and
+	// what the file protocols accept as the first path segment, which means
+	// renaming a storage re-addresses it and every mount written against the
+	// old name answers 404 (issue #21). The uid is assigned once, at creation,
+	// and the protocols resolve it too — so a mount written against it
+	// survives every rename. Empty only on a row from before the column
+	// existed that the migration somehow did not reach.
+	UID           string          `json:"uid,omitempty"`
 	Name          string          `json:"name"`
 	Driver        string          `json:"driver"`
 	MountPath     string          `json:"mount_path"`
@@ -143,3 +153,10 @@ type SyncConflict struct {
 	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
 	Resolution   string     `json:"resolution,omitempty"` // backend_wins, db_wins, manual
 }
+
+// NewStorageUID mints the identifier a storage keeps for life.
+//
+// A v4 uuid rather than a slug derived from the name: a slug looks like a name
+// and invites the assumption that it follows the name, which is the whole
+// problem this exists to solve. This one is visibly not a label.
+func NewStorageUID() string { return uuid.NewString() }

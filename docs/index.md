@@ -60,6 +60,11 @@ features:
     details: A backend filex has never heard of is a separate program you install from the admin panel — it describes its own config form, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. Every capability it claims is probed before anyone can build a storage on it.
     link: /PLUGINS
     linkText: Plugin docs
+  - icon: 📊
+    title: What your storage costs
+    details: filex does not meter your provider's bill — it reads the report the provider already writes and prices it with a table you can edit. Backblaze B2's daily report is read over the same S3 API filex already speaks, and the free allowances are shown beside the billable lines, because "your downloads were free this month" is usually the thing worth knowing.
+    link: /USAGE
+    linkText: Usage & cost docs
   - icon: 💾
     title: Mount it as a drive
     details: filex mount attaches a remote server over ordinary HTTPS — a folder on Linux, a drive letter on Windows. Not a sync — it opens one file out of a hundred thousand without downloading the rest.

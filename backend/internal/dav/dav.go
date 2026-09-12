@@ -45,6 +45,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -292,7 +293,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 	// the methods tenantstore confines). Without it the pre-gate stays an
 	// oracle even though the data path is closed: a foreign read-only storage
 	// would answer 403 "read-only" where a non-existent one answers 404.
-	st, err := h.cfg.Store.GetStorageByName(ctx, name)
+	st, err := storageref.Resolve(ctx, h.cfg.Store, name)
 	if err != nil || st == nil || !st.Enabled || !scopeOf(ctx).CanAccessStorage(st.ID) {
 		return http.StatusNotFound, "storage not found"
 	}
@@ -358,7 +359,7 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		}
 		dst := st
 		if dname != name {
-			if dst, err = h.cfg.Store.GetStorageByName(ctx, dname); err != nil || dst == nil || !dst.Enabled ||
+			if dst, err = storageref.Resolve(ctx, h.cfg.Store, dname); err != nil || dst == nil || !dst.Enabled ||
 				!scopeOf(ctx).CanAccessStorage(dst.ID) {
 				return http.StatusConflict, "destination storage not found"
 			}

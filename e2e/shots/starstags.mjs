@@ -144,7 +144,7 @@ async function makeStorage(token, name, root) {
       mount_path: root,
       // ⚠ The root of a local storage is `config.path` (e2e/README.md).
       config: { path: root },
-      sync_mode: 'manual',
+      sync_mode: 'ondemand',
       sync_interval_s: 0,
       enabled: true,
       read_only: false,

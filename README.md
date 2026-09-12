@@ -342,7 +342,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 
 ## Features
 
-- **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder. **Copy or cut in one and paste in another**: filex streams the tree between the two drivers, keeps each file's timestamp, and only removes the original once the copy is verified.
+- **Multi-storage** — mount many storages at once (local, S3, FTP, SFTP, WebDAV, SMB/NAS); each appears as a top-level folder. Each also carries an address that never moves: the storage's name is the first path segment on WebDAV, SFTP, NFS and the S3 API, so renaming one would re-address it — a mount written against its **uid** survives every rename. **Copy or cut in one and paste in another**: filex streams the tree between the two drivers, keeps each file's timestamp, and only removes the original once the copy is verified.
 - **Drag files out to your desktop** — in the desktop app, drag a selection into Explorer/Finder or another program and it lands as separate real files and folders, not an archive; in a browser, a single file drags out the same way ([docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)).
 - **Storage plugins** — a storage filex has never heard of is a **separate program** you install from the admin panel: it describes its own config form, filex speaks a small HTTP/JSON protocol to it, and its driver then behaves like any built-in one. Any language; a Go SDK makes it three methods. filex **probes every capability a plugin claims** — at install, and again against the configuration you type when you save a storage on it — and refuses one that cannot do what it says, because a half-working driver produces failures that look like filex being broken. Upgrades replace the binary in place and roll back if the new one does not come up ([docs/PLUGINS.md](docs/PLUGINS.md)).
 - **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate — it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
@@ -369,6 +369,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`) while numbers are matched literally (`2026` never means `2025`), `tag:` filters, exact matches ranked first.
 - **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware. A cached thumbnail is released when the file it belongs to is deleted for good, and a periodic reconciler reclaims the orphans an older install accumulated ([docs/thumbnails.md](docs/thumbnails.md)).
 - **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there.
+- **Usage & cost** — filex does not meter your provider's bill; it reads the report the provider already writes, normalises it and prices it with a table you can edit. Backblaze B2's daily CSVs are read over the same S3 API filex already speaks, so no new dependency and no new credential type. Free allowances are their own fields rather than constants in a formula, and the page keeps the provider's account-level row apart from its per-bucket rows — summing them counts the same transactions twice, by exactly the amount nobody notices ([docs/USAGE.md](docs/USAGE.md)).
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.
 - **CLI client** — the same binary reaches a remote server (`filex client`, `filex sync`) with no server-side plugin ([docs/CLI.md](docs/CLI.md)).
 - **Self-updating** — patch releases install themselves, minor ones are announced for one-click upgrade ([docs/UPDATES.md](docs/UPDATES.md)).
@@ -395,7 +396,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 `filex mount`)](docs/PROTOCOLS.md) · [WebDAV](docs/WEBDAV.md)
 
 **Storage & access** — [Storage](docs/STORAGE.md) · [Storage plugins](docs/PLUGINS.md) ·
-[Uploads & resume](docs/UPLOADS.md) ·
+[Usage & cost](docs/USAGE.md) · [Uploads & resume](docs/UPLOADS.md) ·
 [Quotas](docs/QUOTAS.md) · [SSO (OIDC)](docs/SSO.md) ·
 [LDAP & proxy auth](docs/LDAP.md) · [RBAC & permissions](docs/RBAC.md) ·
 [Multi-tenancy](docs/MULTI-TENANCY.md)

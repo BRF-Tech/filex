@@ -2,13 +2,11 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.38.2"
+version: "0.39.0"
 releaseNotes: |-
-  filex v0.38.2 — 2026-09-12
-  • Editing a storage did not reach the running process
-  • Content-Length came from the catalogue, not from the storage
-  • The OnlyOffice fetch endpoint says why it refused.
-  • The storage edit form warns while the name field differs from what is saved.
+  filex v0.39.0 — 2026-09-12
+  • Usage & cost
+  • Every storage now has an address that does not move.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

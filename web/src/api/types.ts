@@ -114,6 +114,12 @@ export interface StorageDriverDescriptor {
 export interface StorageRef {
   id: number;
   name: string;
+  /** The address that does not move. `name` is the first path segment on
+   *  WebDAV, SFTP, NFS and the S3 API, so renaming a storage re-addresses it
+   *  and every existing mount 404s; the protocols accept this in its place and
+   *  it is assigned once, at creation. Absent on a row written before the
+   *  column existed that the migration did not reach. */
+  uid?: string;
   driver: StorageDriver;
   enabled: boolean;
   config: Record<string, unknown>;

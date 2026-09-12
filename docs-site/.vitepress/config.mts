@@ -119,6 +119,7 @@ export default defineConfig({
         items: [
           { text: 'Storage', link: '/STORAGE' },
           { text: 'Storage plugins', link: '/PLUGINS' },
+          { text: 'Usage & cost', link: '/USAGE' },
           { text: 'Uploads & resume', link: '/UPLOADS' },
           { text: 'Quotas', link: '/QUOTAS' },
           { text: 'Search', link: '/SEARCH' },

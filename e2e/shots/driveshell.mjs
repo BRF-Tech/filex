@@ -164,7 +164,7 @@ async function makeStorage(token, name, root, rbac) {
       // the server's working dir, and two storages read each other's files
       // (e2e/README.md).
       config: { path: root },
-      sync_mode: 'manual',
+      sync_mode: 'ondemand',
       sync_interval_s: 0,
       enabled: true,
       read_only: false,

@@ -190,7 +190,7 @@ async function seed() {
       driver: 'local',
       mount_path: MOUNT,
       config: { root: MOUNT },
-      sync_mode: 'manual',
+      sync_mode: 'ondemand',
       sync_interval_s: 0,
       enabled: true,
       read_only: false,

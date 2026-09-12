@@ -83,6 +83,21 @@ it is updated. The edit form warns while the name field differs from what is
 saved. Nothing inside filex breaks — shares, permissions and the catalogue are
 keyed by id, not by name.
 
+**Use the stable address for anything automated.** Every storage also carries a
+`uid`, assigned once when it is created and never changed, and every protocol
+accepts it in place of the name:
+
+```
+/dav/7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/   WebDAV
+/7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/       SFTP, NFS
+s3://7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/   the S3-compatible API
+```
+
+It is on the storage's page in the admin UI, under **Stable address**, and in
+`GET /api/admin/storages` as `uid`. A mount written against it survives every
+rename. The name stays the address people type; the uid is the address a
+machine should be given.
+
 ### Admin API
 `POST /api/admin/storages` (admin session/token). Body is the storage config;
 `config` holds the per‑adapter map:

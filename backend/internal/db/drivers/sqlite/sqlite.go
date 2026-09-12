@@ -133,10 +133,15 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
 	}
+	// Assigned here rather than by the caller: a storage without one would be
+	// addressable only by a name that can change under its clients.
+	if st.UID == "" {
+		st.UID = model.NewStorageUID()
+	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled)
-		 VALUES (?,?,?,?,?,?,?,?,?)`,
-		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled))
+		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled, uid)
+		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled), st.UID)
 	if err != nil {
 		return nil, err
 	}
@@ -144,18 +149,38 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 	return s.GetStorage(ctx, id)
 }
 
+// storageCols is the one place the storage projection is spelled out. It was
+// repeated in four queries, and a column added to three of them would have
+// been scanned by scanStorage from a row that did not have it.
+//
+// ⚠ COALESCE on uid: the column is nullable so its UNIQUE index tolerates a
+// row that somehow arrives unfilled, and an empty string is what the rest of
+// the code treats as "not addressable by uid yet".
+const storageCols = `id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled, COALESCE(uid,'')`
+
 func (s *Store) GetStorage(ctx context.Context, id int64) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE id=?`, id)
 	return scanStorage(row)
 }
 
 func (s *Store) GetStorageByName(ctx context.Context, name string) (*model.Storage, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE name=?`, name)
+	row := s.db.QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE name=?`, name)
+	return scanStorage(row)
+}
+
+// GetStorageByUID resolves the address that does not move. ⚠ An empty uid
+// must never match: on an install migrated from before the column existed a
+// row could carry one, and "" would then resolve to whichever came first.
+func (s *Store) GetStorageByUID(ctx context.Context, uid string) (*model.Storage, error) {
+	if uid == "" {
+		return nil, sql.ErrNoRows
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT `+storageCols+` FROM storages WHERE uid=?`, uid)
 	return scanStorage(row)
 }
 
 func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+storageCols+` FROM storages ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +197,7 @@ func (s *Store) ListStorages(ctx context.Context) ([]*model.Storage, error) {
 }
 
 func (s *Store) ListEnabledStorages(ctx context.Context) ([]*model.Storage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, mount_path, config_json, sync_mode, sync_interval_s, last_sync_at, COALESCE(last_sync_token,''), enabled, read_only, created_at, COALESCE(role,'primary'), replica_of_id, COALESCE(replica_mode,'async'), replica_target_id, rbac_enabled FROM storages WHERE enabled=1 ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+storageCols+` FROM storages WHERE enabled=1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -2369,7 +2394,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 		&st.SyncMode, &st.SyncIntervalS, &st.LastSyncAt, &st.LastSyncToken,
 		&st.Enabled, &st.ReadOnly, &st.CreatedAt,
 		&role, &replicaOf, &replicaMode, &replicaTarget,
-		&st.RBACEnabled,
+		&st.RBACEnabled, &st.UID,
 	)
 	if err != nil {
 		return nil, err

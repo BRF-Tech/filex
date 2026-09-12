@@ -116,7 +116,8 @@
     "branding": "Branding",
     "updates": "Updates",
     "connections": "Connections",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "usage": "Usage & cost"
   },
   "login": {
     "title": "Sign in",
@@ -212,7 +213,9 @@
       "share": "Share",
       "domain": "Domain / workgroup",
       "dialTimeout": "Connect timeout (seconds)",
-      "nameChangedWarning": "Clients address this storage by name. Renaming it changes the WebDAV, SFTP, S3 and NFS paths — a mount or bookmark using the old name will start answering 404 until you update it."
+      "nameChangedWarning": "Clients address this storage by name. Renaming it changes the WebDAV, SFTP, S3 and NFS paths — a mount or bookmark using the old name will start answering 404 until you update it.",
+      "stableAddress": "Stable address",
+      "stableAddressHint": "Mounts and scripts can use this instead of the name. It is assigned once and never changes, so renaming the storage does not break them."
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
@@ -692,7 +695,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox — everything resets nightly, and adding storages or plugins is disabled here.",
     "adminHint": "Sign in with a non-demo account for full admin.",
-    "alsoIncluded": "Also included: RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through OnlyOffice · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue.",
+    "alsoIncluded": "Also included: RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through OnlyOffice · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree — then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
@@ -1247,6 +1250,52 @@
     "signature": {
       "label": "Signature",
       "required": "This instance only accepts signed plugins: paste the detached signature over the binary's SHA-256, hex or base64, made with a key the operator trusts. Without it the install is refused."
+    }
+  },
+  "usage": {
+    "title": "Usage & cost",
+    "subtitle": "What your storage provider reports you used, priced with the table below.",
+    "savedOk": "Saved.",
+    "unconfigured": "Nothing is configured yet. Pick a provider and tell filex where its daily report lands — until then there is nothing to read, which is not the same as spending nothing.",
+    "config": {
+      "title": "Where the report comes from",
+      "hint": "Backblaze B2 writes a usage report once a day into a bucket of its own. Attach that bucket as a read-only storage, then name it here."
+    },
+    "fields": {
+      "provider": "Provider",
+      "providerNone": "None",
+      "reportStorage": "Report storage",
+      "reportStorageHint": "The filex storage pointing at the provider's report bucket. Read-only is enough.",
+      "accountId": "Account ID",
+      "accountIdHint": "The provider's own account id. It is part of the report bucket's name.",
+      "prefix": "Path prefix",
+      "prefixHint": "Only needed when the reports do not sit at the root of that bucket.",
+      "range": "Range"
+    },
+    "ranges": {
+      "d7": "Last 7 days",
+      "d30": "Last 30 days",
+      "d90": "Last 90 days"
+    },
+    "cost": {
+      "title": "Estimated cost",
+      "storage": "Storage",
+      "egress": "Download",
+      "transactions": "Transactions",
+      "covered": "Covered by the free allowance",
+      "billableFree": "free"
+    },
+    "buckets": {
+      "title": "By bucket",
+      "bucket": "Bucket",
+      "stored": "Stored",
+      "uploaded": "Uploaded",
+      "downloaded": "Downloaded",
+      "ops": "Operations",
+      "accountOps": "Account-level row. Reported separately by the provider and NOT added to the buckets above — the same transactions appear in both."
+    },
+    "trend": {
+      "title": "Daily"
     }
   }
 }

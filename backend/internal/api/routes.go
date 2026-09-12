@@ -57,6 +57,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/update"
+	"github.com/brf-tech/filex/backend/internal/usage"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -443,6 +444,18 @@ func BuildRouter(d *Deps) http.Handler {
 	auditH.DemoMode = d.Cfg.Demo.Mode
 	syncAdmH := handlers.NewSyncAdmin(d.Store)
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
+	// Storage usage + cost (issue #20). The report bucket is an ordinary
+	// storage, looked up by name, so the credentials and the encryption are
+	// the ones the operator already configured rather than a second copy.
+	usageH := &handlers.Usage{Svc: usage.NewService(d.Store,
+		func(ctx context.Context, name string) (storage.Driver, error) {
+			st, err := d.Store.GetStorageByName(ctx, name)
+			if err != nil {
+				return nil, err
+			}
+			return d.StorageResolver(st.ID)
+		}, 0)}
+
 	externalH := handlers.NewExternalAdmin(d.Store, d.Caps, d.External, envManagedExternal(d.Cfg))
 	externalH.AttachPublicURL(d.Cfg.PublicURL, d.Cfg.PublicURLSet)
 	// The third leg. Without this the Test button can only say it did not
@@ -1103,6 +1116,8 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Route("/versions", func(r chi.Router) {
 				r.Delete("/{id}", versionsH.HardDelete)
 			})
+
+			r.Get("/usage", usageH.Report)
 
 			r.Route("/external", func(r chi.Router) {
 				r.Get("/", externalH.List)

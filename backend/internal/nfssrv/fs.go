@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
@@ -146,7 +147,7 @@ func (f *fs) resolve(p string) (target, error) {
 	if hiddenPath(rel) {
 		return target{}, os.ErrNotExist
 	}
-	st, err := f.srv.cfg.Store.GetStorageByName(f.ctx, name)
+	st, err := storageref.Resolve(f.ctx, f.srv.cfg.Store, name)
 	if err != nil || st == nil || !st.Enabled {
 		return target{}, os.ErrNotExist
 	}

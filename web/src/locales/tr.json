@@ -116,7 +116,8 @@
     "branding": "Kurumsal Kimlik",
     "updates": "Güncellemeler",
     "connections": "Bağlantılar",
-    "plugins": "Eklentiler"
+    "plugins": "Eklentiler",
+    "usage": "Kullanım ve maliyet"
   },
   "login": {
     "title": "Oturum aç",
@@ -212,7 +213,9 @@
       "share": "Paylaşım",
       "domain": "Etki alanı / çalışma grubu",
       "dialTimeout": "Bağlantı zaman aşımı (saniye)",
-      "nameChangedWarning": "İstemciler bu depoya adıyla ulaşır. Adı değiştirmek WebDAV, SFTP, S3 ve NFS yollarını değiştirir — eski adı kullanan bir bağlama ya da yer imi, siz güncelleyene kadar 404 döner."
+      "nameChangedWarning": "İstemciler bu depoya adıyla ulaşır. Adı değiştirmek WebDAV, SFTP, S3 ve NFS yollarını değiştirir — eski adı kullanan bir bağlama ya da yer imi, siz güncelleyene kadar 404 döner.",
+      "stableAddress": "Değişmeyen adres",
+      "stableAddressHint": "Bağlamalar ve betikler ad yerine bunu kullanabilir. Bir kez atanır ve hiç değişmez, böylece deponun adını değiştirmek onları bozmaz."
     },
     "fieldHelp": {
       "path": "Sunucudaki dizin. Yoksa oluşturulur; filex asla / dizinini mount etmez.",
@@ -692,7 +695,7 @@
     "creds": "Demo hesabı: {email} · şifre: {password}",
     "sandbox": "Ortak deneme alanı — her gece sıfırlanır; burada depolama ya da eklenti eklenemez.",
     "adminHint": "Tam yönetici yetkisi için demo dışı bir hesapla giriş yap.",
-    "alsoIncluded": "Ayrıca: dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, OnlyOffice ile Office belgeleri · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu.",
+    "alsoIncluded": "Ayrıca: dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, OnlyOffice ile Office belgeleri · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağla — sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri eriş.",
@@ -1247,6 +1250,52 @@
     "signature": {
       "label": "İmza",
       "required": "Bu kurulum yalnızca imzalı eklenti kabul eder: ikili dosyanın SHA-256 özeti üzerine, işletmecinin güvendiği bir anahtarla üretilmiş ayrık imzayı (hex ya da base64) yapıştırın. İmza olmadan kurulum reddedilir."
+    }
+  },
+  "usage": {
+    "title": "Kullanım ve maliyet",
+    "subtitle": "Depolama sağlayıcınızın bildirdiği kullanım, aşağıdaki fiyat tablosuyla hesaplanmış hâli.",
+    "savedOk": "Kaydedildi.",
+    "unconfigured": "Henüz hiçbir şey ayarlanmadı. Bir sağlayıcı seçin ve günlük raporunun nereye düştüğünü filex'e söyleyin — o zamana kadar okunacak bir şey yok, ki bu \"hiç harcamadınız\" demek değildir.",
+    "config": {
+      "title": "Rapor nereden geliyor",
+      "hint": "Backblaze B2 günde bir kez kendi kovasına kullanım raporu yazar. O kovayı salt okunur bir depo olarak bağlayın, sonra burada adını verin."
+    },
+    "fields": {
+      "provider": "Sağlayıcı",
+      "providerNone": "Yok",
+      "reportStorage": "Rapor deposu",
+      "reportStorageHint": "Sağlayıcının rapor kovasını gösteren filex deposu. Salt okunur yeterlidir.",
+      "accountId": "Hesap kimliği",
+      "accountIdHint": "Sağlayıcının kendi hesap kimliği. Rapor kovasının adının bir parçasıdır.",
+      "prefix": "Yol öneki",
+      "prefixHint": "Yalnızca raporlar o kovanın kökünde durmuyorsa gerekir.",
+      "range": "Aralık"
+    },
+    "ranges": {
+      "d7": "Son 7 gün",
+      "d30": "Son 30 gün",
+      "d90": "Son 90 gün"
+    },
+    "cost": {
+      "title": "Tahmini maliyet",
+      "storage": "Depolama",
+      "egress": "İndirme",
+      "transactions": "İşlem",
+      "covered": "Ücretsiz kotayla karşılandı",
+      "billableFree": "ücretsiz"
+    },
+    "buckets": {
+      "title": "Kova bazında",
+      "bucket": "Kova",
+      "stored": "Depolanan",
+      "uploaded": "Yüklenen",
+      "downloaded": "İndirilen",
+      "ops": "İşlem",
+      "accountOps": "Hesap düzeyi satır. Sağlayıcı bunu ayrıca bildirir ve yukarıdaki kovalara EKLENMEZ — aynı işlemler ikisinde birden görünür."
+    },
+    "trend": {
+      "title": "Günlük"
     }
   }
 }

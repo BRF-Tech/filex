@@ -30,6 +30,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   OS, serve it with `local`, and the three traps that come with it
 - [Slow storage](STORAGE.md#slow-storage) — what is already cached, and what is
   actually worth tuning
+- [Usage & cost](USAGE.md) — reading the provider's own daily report, pricing it
+  with a table you can edit, and the two rows that must never be added together
 - [Storage plugins](PLUGINS.md) — teaching filex a backend it does not ship:
   installing one, upgrading it in place, and writing one (the protocol, the Go
   SDK, presigned URLs and multipart) — plus **conformance**, the probes that

@@ -15,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -354,7 +355,7 @@ func (h *Handler) resolveBucket(ctx context.Context, p *protocolauth.Principal, 
 	if name == "" {
 		return nil, "NoSuchBucket", false
 	}
-	st, err := h.cfg.Store.GetStorageByName(ctx, name)
+	st, err := storageref.Resolve(ctx, h.cfg.Store, name)
 	if err != nil || st == nil {
 		return nil, "NoSuchBucket", false
 	}

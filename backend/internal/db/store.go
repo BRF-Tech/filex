@@ -36,6 +36,10 @@ type Store interface {
 	CreateStorage(ctx context.Context, s *model.Storage) (*model.Storage, error)
 	GetStorage(ctx context.Context, id int64) (*model.Storage, error)
 	GetStorageByName(ctx context.Context, name string) (*model.Storage, error)
+	// GetStorageByUID resolves a storage by the identifier it keeps for life.
+	// The file protocols accept it in place of the name so a mount survives a
+	// rename; see model.Storage.UID.
+	GetStorageByUID(ctx context.Context, uid string) (*model.Storage, error)
 	ListStorages(ctx context.Context) ([]*model.Storage, error)
 	ListEnabledStorages(ctx context.Context) ([]*model.Storage, error)
 	UpdateStorage(ctx context.Context, s *model.Storage) error

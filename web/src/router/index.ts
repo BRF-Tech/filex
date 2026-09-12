@@ -101,6 +101,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.storages' },
       },
       {
+        path: 'usage',
+        name: 'usage',
+        component: () => import('@/views/Usage.vue'),
+        meta: { breadcrumb: 'nav.usage' },
+      },
+      {
         path: 'storages/new',
         name: 'storages.new',
         component: () => import('@/views/StorageNew.vue'),

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-12
+
+### Added
+
+- **Usage & cost** (#20). filex does not meter your provider's bill; it reads
+  the report the provider already writes, normalises it and prices it with a
+  table you can edit. Backblaze B2 first: its daily CSVs land in a bucket of
+  its own, which you attach as a read-only storage, and filex reads them over
+  the same S3 API it already speaks — no new dependency and no new credential
+  type. Prices and free allowances are settings rather than constants in a
+  formula, so a price change is an edit.
+
+  Three things the page refuses to do, each because it is how a cost view
+  misleads: it never draws an empty chart for an unconfigured instance ("you
+  spent nothing" and "nothing is set up" are the same zero), it never adds the
+  provider's account-level row to its per-bucket rows (the same transactions
+  are in both, and the sum is wrong by exactly the amount nobody notices), and
+  it never presents the estimate as a bill. `GET /api/admin/usage`,
+  supertenant-only, and [docs/USAGE.md](docs/USAGE.md).
+
+- **Every storage now has an address that does not move.** A storage's name is
+  the first path segment on every file protocol — `/dav/<name>/`, `/<name>/`
+  over SFTP and NFS, the bucket over the S3-compatible API — so renaming one
+  silently re-addresses it and every mount, bookmark and script written against
+  the old name answers 404. The name has to stay editable, because it is the
+  label people read, so the fix is a second address rather than a frozen first
+  one: every storage carries a `uid`, assigned once when it is created, and all
+  five protocols accept it in place of the name. A mount written against it
+  survives every rename.
+
+  Existing storages are given one by the migration, on all three engines. The
+  admin page shows it under **Stable address**, and `GET /api/admin/storages`
+  returns it as `uid`. A storage whose name happens to be uuid-shaped still
+  resolves by name, so nothing that worked before this stops working.
+
+  The rule lives in one place (`internal/storageref`) rather than in each
+  server, and a test fails if any protocol goes back to resolving names on its
+  own — five copies of "which identifier is this" is how a product ends up
+  behaving differently depending on how you reach it.
+
 ## [0.38.2] - 2026-09-12
 
 ### Fixed
