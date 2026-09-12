@@ -3,6 +3,21 @@
   "generatedAt": "2026-09-12",
   "releases": [
     {
+      "tag": "v0.39.1",
+      "date": "2026-09-12T11:05:43Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.39.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Changed\n\n- **Every key hint now reads the key that is actually bound.** Shortcuts are\n  remappable, and several hints spelled a key out by hand: the quick-look\n  legend, the drive shell's search chip, and two steps of the onboarding tour.\n  Remap the command palette and the chip on the search field — the one control\n  whose whole job is to teach that key — kept naming `Ctrl+K`.\n\n  Worse than a stale label, the quick-look overlay also *compared* against the\n  default key. Remapping quick-look onto `Q` gave you three different answers\n  to one question: `Q` opened the peek, `Space` still closed it, and the pill\n  said \"Space\". The overlay and the search field now ask the registry, so the\n  key that is named, the key that opens and the key that closes are the same\n  key.\n\n  `shortcutHint(action)` and `eventMatchesShortcut(event, action)` are exported\n  for embedders who render their own hints ([docs/API.md](docs/API.md#naming-a-key-on-screen)).\n  Two gates keep it honest every release: one remaps an action and measures the\n  surface that names it, the other fails the build on a key typed into a\n  template or a locale string.\n\n### Fixed\n\n- **The quick-look key legend no longer fills the window** (#22). Pressing\n  Space over a file opens the preview with a small pill at the bottom edge\n  reading \"Space close · ↑↓ previous/next · Enter open\". In the web UI that\n  pill was drawn as a giant rounded shape across the whole viewport, on top of\n  the file being previewed.\n\n  Nothing was wrong with the component. The hint carries the explorer's root\n  class, which is how it reaches the theme variables, and the admin app sized\n  the embedded explorer with a rule that reached *every* descendant carrying\n  that class — a host selector, so it outranked the package's own. The pill\n  inherited the full viewport height. The desktop app wraps the explorer in\n  nothing of the sort, which is why the same build looked right there and\n  wrong in the browser.\n\n  The hint is now teleported under `<body>`, out of reach of any host\n  container, the package rule that sizes it no longer depends on source order\n  to win, and the admin app's own rule targets the explorer root alone instead\n  of anything below it. `e2e/tests/101-quicklook-hint.spec.ts` measures the\n  rendered pill in a real browser, because a cascade bug renders the same DOM\n  either way and no unit test can see it.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0391---2026-09-12)\n\n- **Documentation** — <https://docs.filex.sh>\n- **Report a bug** — <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** — <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.39.1",
+        "ghcr.io/brf-tech/filex:full-v0.39.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 16
+    },
+    {
       "tag": "v0.39.0",
       "date": "2026-09-12T02:04:17Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.39.0",

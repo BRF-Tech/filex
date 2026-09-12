@@ -19,14 +19,79 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.39.0, 12 September 2026
-Two things a storage was missing. First, an address that does not move: a storage's name is the first path segment on WebDAV, SFTP, NFS and the S3-compatible API, so renaming one silently re-addressed it and every mount written against the old name answered 404. Every storage now also carries a uid, assigned once and never changed, and all five protocols accept it in place of the name — the name stays the label people type, the uid is what you give a machine. Second, a usage and cost view: filex does not meter your provider's bill, it reads the daily report the provider already writes and prices it with a table you can edit, with the free allowances shown beside the billable lines. Backblaze B2 first, over the same S3 API filex already speaks.
+::: tip Latest — v0.39.1, 12 September 2026
+The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being previewed. The hint carries the explorer's root class so it can read the theme variables, and the admin UI sized the embedded explorer with a rule that reached every descendant carrying that class - a host selector outranks the package's own, so the pill inherited the window height. The desktop app has no such wrapper, which is why the same build looked right there.
+
+The same audit found the legend lying for a second reason. Shortcuts are remappable, and three surfaces spelled a key out by hand: this legend, the drive shell's search chip and two steps of the onboarding tour. The quick-look overlay also compared against the default key, so remapping it gave three different answers to one question - the new key opened the peek, the old one still closed it, and the pill named the old one. Every hint reads the binding now, and shortcutHint() is exported for embedders who draw their own.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.39.0
-docker pull ghcr.io/brf-tech/filex:full-v0.39.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.39.1
+docker pull ghcr.io/brf-tech/filex:full-v0.39.1
 ```
+
+## v0.39.1
+
+<span class="filex-release-date">12 September 2026</span>
+
+The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being previewed. The hint carries the explorer's root class so it can read the theme variables, and the admin UI sized the embedded explorer with a rule that reached every descendant carrying that class - a host selector outranks the package's own, so the pill inherited the window height. The desktop app has no such wrapper, which is why the same build looked right there.
+
+The same audit found the legend lying for a second reason. Shortcuts are remappable, and three surfaces spelled a key out by hand: this legend, the drive shell's search chip and two steps of the onboarding tour. The quick-look overlay also compared against the default key, so remapping it gave three different answers to one question - the new key opened the peek, the old one still closed it, and the pill named the old one. Every hint reads the binding now, and shortcutHint() is exported for embedders who draw their own.
+
+## What changed
+
+### Changed
+
+- **Every key hint now reads the key that is actually bound.** Shortcuts are
+  remappable, and several hints spelled a key out by hand: the quick-look
+  legend, the drive shell's search chip, and two steps of the onboarding tour.
+  Remap the command palette and the chip on the search field — the one control
+  whose whole job is to teach that key — kept naming `Ctrl+K`.
+
+  Worse than a stale label, the quick-look overlay also *compared* against the
+  default key. Remapping quick-look onto `Q` gave you three different answers
+  to one question: `Q` opened the peek, `Space` still closed it, and the pill
+  said "Space". The overlay and the search field now ask the registry, so the
+  key that is named, the key that opens and the key that closes are the same
+  key.
+
+  `shortcutHint(action)` and `eventMatchesShortcut(event, action)` are exported
+  for embedders who render their own hints ([docs/API.md](./API.md#naming-a-key-on-screen)).
+  Two gates keep it honest every release: one remaps an action and measures the
+  surface that names it, the other fails the build on a key typed into a
+  template or a locale string.
+
+### Fixed
+
+- **The quick-look key legend no longer fills the window** (#22). Pressing
+  Space over a file opens the preview with a small pill at the bottom edge
+  reading "Space close · ↑↓ previous/next · Enter open". In the web UI that
+  pill was drawn as a giant rounded shape across the whole viewport, on top of
+  the file being previewed.
+
+  Nothing was wrong with the component. The hint carries the explorer's root
+  class, which is how it reaches the theme variables, and the admin app sized
+  the embedded explorer with a rule that reached *every* descendant carrying
+  that class — a host selector, so it outranked the package's own. The pill
+  inherited the full viewport height. The desktop app wraps the explorer in
+  nothing of the sort, which is why the same build looked right there and
+  wrong in the browser.
+
+  The hint is now teleported under `<body>`, out of reach of any host
+  container, the package rule that sizes it no longer depends on source order
+  to win, and the admin app's own rule targets the explorer root alone instead
+  of anything below it. `e2e/tests/101-quicklook-hint.spec.ts` measures the
+  rendered pill in a real browser, because a cascade bug renders the same DOM
+  either way and no unit test can see it.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0391---2026-09-12)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.39.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.39.1`
 
 ## v0.39.0
 
@@ -2720,34 +2785,13 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.5) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.5`
 
-## v0.27.4
-
-<span class="filex-release-date">29 August 2026</span>
-
-## What changed
-
-### Fixed
-
-- **The Helm chart shipped a 23-release-old image.** `values.yaml` leaves the
-  image tag empty, which the chart resolves to `.Chart.appVersion` — so
-  appVersion is the version a Helm user actually runs, and it had been sitting
-  at `v0.4.0` since it was written. It now tracks the release, moved by
-  `scripts/sync-chart-version.mjs` as part of the release steps, and
-  `web/tests/deploy/chartVersion.test.ts` fails the build if the two ever drift
-  again — and the release workflow itself now refuses to publish a tag whose
-  chart is behind, before a single artefact is built. **Every release updates
-  the chart; it is a step of the process, not a chore to remember.**
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0274---2026-08-29)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.4`
-
 ## Earlier releases
 
-The 91 releases before v0.27.4, in brief. Full notes are on GitHub.
+The 92 releases before v0.27.5, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.27.4](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) | 29 August 2026 | image tag empty, which the chart resolves to `.Chart.appVersion` — so |
 | [v0.27.3](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) | 29 August 2026 | finds where a stand-in landed was started *after* `webContents.startDrag()` — |
 | [v0.27.2](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) | 29 August 2026 | reading it.** `Content-Disposition` carried the filename raw, so a name like |
 | [v0.27.1](https://github.com/BRF-Tech/filex/releases/tag/v0.27.1) | 29 August 2026 | stand-in by NAME across the local drives, so any file that happened to appear |
@@ -2842,4 +2886,4 @@ The 91 releases before v0.27.4, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-12 from 111 published releases.</small>
+<small>Last refreshed 2026-09-12 from 112 published releases.</small>

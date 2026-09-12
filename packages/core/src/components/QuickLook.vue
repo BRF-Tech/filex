@@ -6,11 +6,15 @@
  * mode), so every viewer the modal knows (image/video/pdf/office/code/
  * 3D/archive/…) works in quick-look for free. What this layer adds:
  *
- *   - Space closes again (macOS Quick Look convention)
+ *   - the quick-look key closes the peek again (Space by default — macOS
+ *     Quick Look convention), and the open key promotes it into the full
+ *     open flow (Enter by default, emit 'open-full'). Both come from the
+ *     shortcut registry rather than from a comparison against the default
+ *     key, so a remap reaches the overlay too
  *   - ← ↑ / → ↓ ask the host to move the selection; the host keeps the
- *     `file` prop in sync so the preview follows the selection
- *   - Enter promotes the peek into the full open flow (emit 'open-full')
- *   - a small floating hint bar with the key legend
+ *     `file` prop in sync so the preview follows the selection. These are
+ *     the peek's own arrows, not registry actions
+ *   - a small floating hint bar naming those keys, read from the registry
  *
  * Keys are handled in window CAPTURE phase with stopPropagation so the
  * global shortcut registry never double-handles them; events that
