@@ -19,14 +19,69 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.38.2, 12 September 2026
-Editing a storage now takes effect on the running process. Creating one started its syncer and deleting one stopped it, but editing one did neither: the row was written and the save reported as successful while the syncer and every download kept using the configuration loaded at boot. A corrected bucket went on failing, a disabled storage went on being scanned, and a renamed one went on logging its old name. Downloads also stopped declaring a length taken from the catalogue rather than from the storage, which is what made OnlyOffice report "Download failed" on an install whose catalogue was behind, and the fetch endpoint now says in the log which of five things went wrong.
+::: tip Latest — v0.39.0, 12 September 2026
+Two things a storage was missing. First, an address that does not move: a storage's name is the first path segment on WebDAV, SFTP, NFS and the S3-compatible API, so renaming one silently re-addressed it and every mount written against the old name answered 404. Every storage now also carries a uid, assigned once and never changed, and all five protocols accept it in place of the name — the name stays the label people type, the uid is what you give a machine. Second, a usage and cost view: filex does not meter your provider's bill, it reads the daily report the provider already writes and prices it with a table you can edit, with the free allowances shown beside the billable lines. Backblaze B2 first, over the same S3 API filex already speaks.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.38.2
-docker pull ghcr.io/brf-tech/filex:full-v0.38.2
+docker pull ghcr.io/brf-tech/filex:slim-v0.39.0
+docker pull ghcr.io/brf-tech/filex:full-v0.39.0
 ```
+
+## v0.39.0
+
+<span class="filex-release-date">12 September 2026</span>
+
+Two things a storage was missing. First, an address that does not move: a storage's name is the first path segment on WebDAV, SFTP, NFS and the S3-compatible API, so renaming one silently re-addressed it and every mount written against the old name answered 404. Every storage now also carries a uid, assigned once and never changed, and all five protocols accept it in place of the name — the name stays the label people type, the uid is what you give a machine. Second, a usage and cost view: filex does not meter your provider's bill, it reads the daily report the provider already writes and prices it with a table you can edit, with the free allowances shown beside the billable lines. Backblaze B2 first, over the same S3 API filex already speaks.
+
+## What changed
+
+### Added
+
+- **Usage & cost** (#20). filex does not meter your provider's bill; it reads
+  the report the provider already writes, normalises it and prices it with a
+  table you can edit. Backblaze B2 first: its daily CSVs land in a bucket of
+  its own, which you attach as a read-only storage, and filex reads them over
+  the same S3 API it already speaks — no new dependency and no new credential
+  type. Prices and free allowances are settings rather than constants in a
+  formula, so a price change is an edit.
+
+  Three things the page refuses to do, each because it is how a cost view
+  misleads: it never draws an empty chart for an unconfigured instance ("you
+  spent nothing" and "nothing is set up" are the same zero), it never adds the
+  provider's account-level row to its per-bucket rows (the same transactions
+  are in both, and the sum is wrong by exactly the amount nobody notices), and
+  it never presents the estimate as a bill. `GET /api/admin/usage`,
+  supertenant-only, and [docs/USAGE.md](./USAGE.md).
+
+- **Every storage now has an address that does not move.** A storage's name is
+  the first path segment on every file protocol — `/dav/<name>/`, `/<name>/`
+  over SFTP and NFS, the bucket over the S3-compatible API — so renaming one
+  silently re-addresses it and every mount, bookmark and script written against
+  the old name answers 404. The name has to stay editable, because it is the
+  label people read, so the fix is a second address rather than a frozen first
+  one: every storage carries a `uid`, assigned once when it is created, and all
+  five protocols accept it in place of the name. A mount written against it
+  survives every rename.
+
+  Existing storages are given one by the migration, on all three engines. The
+  admin page shows it under **Stable address**, and `GET /api/admin/storages`
+  returns it as `uid`. A storage whose name happens to be uuid-shaped still
+  resolves by name, so nothing that worked before this stops working.
+
+  The rule lives in one place (`internal/storageref`) rather than in each
+  server, and a test fails if any protocol goes back to resolving names on its
+  own — five copies of "which identifier is this" is how a product ends up
+  behaving differently depending on how you reach it.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0390---2026-09-12)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.39.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.39.0`
 
 ## v0.38.2
 
@@ -2687,49 +2742,13 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.4`
 
-## v0.27.3
-
-<span class="filex-release-date">29 August 2026</span>
-
-## What changed
-
-### Fixed
-
-- **A folder dragged out of the desktop app arrived empty.** The watcher that
-  finds where a stand-in landed was started *after* `webContents.startDrag()` —
-  and on Windows that call hands control to the operating system's own drag
-  loop, which does not return until the user lets go. The watcher therefore
-  went up after the drop had already happened. Worse, a recursive `fs.watch`
-  whose event loop is blocked does not deliver the change late; it misses it
-  outright (measured: a file created during a 4-second block was never
-  reported, before or after). Two changes: the watcher is armed **before** the
-  drag, and it runs in a **worker thread**, whose loop keeps running while the
-  main thread is inside the drag loop. Single files were never affected,
-  because a small selection is prepared in the background and handed to the OS
-  as a real file — which is why this only ever showed up on folders.
-- **The suite could not have caught it.** Its simulated drop happened after the
-  drag call returned, and its test hook skipped `startDrag` entirely rather than
-  blocking like the real one. Both are fixed: the drop is now performed *while*
-  the drag is in flight, and the hook blocks for the same reason the OS does.
-
-### Added
-
-- **The desktop app keeps a log** at `<userData>/logs/filex-desktop.log`
-  (rotated at 2 MB, one previous file kept). A packaged app has no console, so
-  `console.log` went nowhere: when a drag-out failed, the only evidence was an
-  empty folder. Every step of a drag and of a transfer is one line, and an
-  uncaught exception in the main process lands there too.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0273---2026-08-29)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.3`
-
 ## Earlier releases
 
-The 90 releases before v0.27.3, in brief. Full notes are on GitHub.
+The 91 releases before v0.27.4, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.27.3](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) | 29 August 2026 | finds where a stand-in landed was started *after* `webContents.startDrag()` — |
 | [v0.27.2](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) | 29 August 2026 | reading it.** `Content-Disposition` carried the filename raw, so a name like |
 | [v0.27.1](https://github.com/BRF-Tech/filex/releases/tag/v0.27.1) | 29 August 2026 | stand-in by NAME across the local drives, so any file that happened to appear |
 | [v0.27.0](https://github.com/BRF-Tech/filex/releases/tag/v0.27.0) | 28 August 2026 | the next now does what it says: the queue carries a destination storage of its |
@@ -2823,4 +2842,4 @@ The 90 releases before v0.27.3, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-12 from 110 published releases.</small>
+<small>Last refreshed 2026-09-12 from 111 published releases.</small>

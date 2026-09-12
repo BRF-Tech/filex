@@ -361,6 +361,24 @@ async function startServer(binary) {
     } catch {
       /* already gone */
     }
+    // ⚠ Keep the server's log before the data dir goes.
+    //
+    // The dir is a mkdtemp and this line used to delete it unconditionally, so
+    // the ONE file that says why a run went red was thrown away by the run
+    // itself. That is not hypothetical: the local auth driver carries a
+    // comment about a Cypress run where every login answered 401 with nothing
+    // in the log to say why and it could not be reproduced — the reasons are
+    // logged now, and this is what stops them being deleted before anyone
+    // reads them. CI uploads this path with the screenshots and video.
+    try {
+      const keepDir = path.join(REPO, 'e2e', '.artifacts');
+      fs.mkdirSync(keepDir, { recursive: true });
+      if (fs.existsSync(logFile)) {
+        fs.copyFileSync(logFile, path.join(keepDir, 'server.log'));
+      }
+    } catch (err) {
+      log(`could not keep the server log: ${err.message}`);
+    }
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 

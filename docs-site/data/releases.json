@@ -3,6 +3,21 @@
   "generatedAt": "2026-09-12",
   "releases": [
     {
+      "tag": "v0.39.0",
+      "date": "2026-09-12T02:04:17Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.39.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Added\n\n- **Usage & cost** (#20). filex does not meter your provider's bill; it reads\n  the report the provider already writes, normalises it and prices it with a\n  table you can edit. Backblaze B2 first: its daily CSVs land in a bucket of\n  its own, which you attach as a read-only storage, and filex reads them over\n  the same S3 API it already speaks — no new dependency and no new credential\n  type. Prices and free allowances are settings rather than constants in a\n  formula, so a price change is an edit.\n\n  Three things the page refuses to do, each because it is how a cost view\n  misleads: it never draws an empty chart for an unconfigured instance (\"you\n  spent nothing\" and \"nothing is set up\" are the same zero), it never adds the\n  provider's account-level row to its per-bucket rows (the same transactions\n  are in both, and the sum is wrong by exactly the amount nobody notices), and\n  it never presents the estimate as a bill. `GET /api/admin/usage`,\n  supertenant-only, and [docs/USAGE.md](docs/USAGE.md).\n\n- **Every storage now has an address that does not move.** A storage's name is\n  the first path segment on every file protocol — `/dav/<name>/`, `/<name>/`\n  over SFTP and NFS, the bucket over the S3-compatible API — so renaming one\n  silently re-addresses it and every mount, bookmark and script written against\n  the old name answers 404. The name has to stay editable, because it is the\n  label people read, so the fix is a second address rather than a frozen first\n  one: every storage carries a `uid`, assigned once when it is created, and all\n  five protocols accept it in place of the name. A mount written against it\n  survives every rename.\n\n  Existing storages are given one by the migration, on all three engines. The\n  admin page shows it under **Stable address**, and `GET /api/admin/storages`\n  returns it as `uid`. A storage whose name happens to be uuid-shaped still\n  resolves by name, so nothing that worked before this stops working.\n\n  The rule lives in one place (`internal/storageref`) rather than in each\n  server, and a test fails if any protocol goes back to resolving names on its\n  own — five copies of \"which identifier is this\" is how a product ends up\n  behaving differently depending on how you reach it.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0390---2026-09-12)\n\n- **Documentation** — <https://docs.filex.sh>\n- **Report a bug** — <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** — <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.39.0",
+        "ghcr.io/brf-tech/filex:full-v0.39.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 25
+    },
+    {
       "tag": "v0.38.2",
       "date": "2026-09-12T00:37:56Z",
       "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.38.2",

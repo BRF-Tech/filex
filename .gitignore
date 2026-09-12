@@ -114,3 +114,6 @@ NUL
 # seeded storage takes config.path, not root — a wrong key silently lands every
 # storage in the server working directory).
 /fileman/
+
+# The e2e runner keeps the server log here so CI can upload it.
+e2e/.artifacts/
