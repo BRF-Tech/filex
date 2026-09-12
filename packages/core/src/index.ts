@@ -139,6 +139,13 @@ export {
   resetAllShortcuts,
   findShortcutConflict,
   comboFromEvent,
+  /* Hint surfaces: the only sanctioned way to NAME a key on screen. A hint
+   * written by hand is true until the user remaps that action, and then the
+   * product is telling them to press something that does nothing. */
+  shortcutHint,
+  comboLabel,
+  eventMatchesShortcut,
+  isMacLike,
 } from './composables/useKeyboardShortcuts';
 export type {
   ShortcutActionDef,

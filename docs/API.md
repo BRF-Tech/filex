@@ -187,6 +187,25 @@ const { t, locale } = useLocale('tr');
 useKeyboardShortcuts({ Delete: () => remove(selected.value.map(x => x.path)) });
 ```
 
+#### Naming a key on screen
+
+Shortcuts are remappable (the user edits them in the shortcut settings; the
+overrides live in `filex.shortcuts` in `localStorage`), so a hint that spells a
+key out by hand is true only until somebody changes that key. Read the binding
+instead:
+
+```ts
+import { shortcutHint, eventMatchesShortcut } from '@brftech/filex-core';
+
+shortcutHint('palette');             // 'Ctrl+K' — or '⌘+K' on a Mac, or the
+                                     // user's own combo, or '' when unbound
+eventMatchesShortcut(ev, 'palette'); // true when THIS event fires that action
+```
+
+`shortcutHint` returns an empty string for an unbound action, so a caller can
+drop the whole segment rather than draw an empty key cap. Action ids come from
+`SHORTCUT_ACTIONS`.
+
 ---
 
 ## `<FileManager>` (React)

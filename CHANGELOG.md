@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-09-12
+
+### Changed
+
+- **Every key hint now reads the key that is actually bound.** Shortcuts are
+  remappable, and several hints spelled a key out by hand: the quick-look
+  legend, the drive shell's search chip, and two steps of the onboarding tour.
+  Remap the command palette and the chip on the search field — the one control
+  whose whole job is to teach that key — kept naming `Ctrl+K`.
+
+  Worse than a stale label, the quick-look overlay also *compared* against the
+  default key. Remapping quick-look onto `Q` gave you three different answers
+  to one question: `Q` opened the peek, `Space` still closed it, and the pill
+  said "Space". The overlay and the search field now ask the registry, so the
+  key that is named, the key that opens and the key that closes are the same
+  key.
+
+  `shortcutHint(action)` and `eventMatchesShortcut(event, action)` are exported
+  for embedders who render their own hints ([docs/API.md](docs/API.md#naming-a-key-on-screen)).
+  Two gates keep it honest every release: one remaps an action and measures the
+  surface that names it, the other fails the build on a key typed into a
+  template or a locale string.
+
+### Fixed
+
+- **The quick-look key legend no longer fills the window** (#22). Pressing
+  Space over a file opens the preview with a small pill at the bottom edge
+  reading "Space close · ↑↓ previous/next · Enter open". In the web UI that
+  pill was drawn as a giant rounded shape across the whole viewport, on top of
+  the file being previewed.
+
+  Nothing was wrong with the component. The hint carries the explorer's root
+  class, which is how it reaches the theme variables, and the admin app sized
+  the embedded explorer with a rule that reached *every* descendant carrying
+  that class — a host selector, so it outranked the package's own. The pill
+  inherited the full viewport height. The desktop app wraps the explorer in
+  nothing of the sort, which is why the same build looked right there and
+  wrong in the browser.
+
+  The hint is now teleported under `<body>`, out of reach of any host
+  container, the package rule that sizes it no longer depends on source order
+  to win, and the admin app's own rule targets the explorer root alone instead
+  of anything below it. `e2e/tests/101-quicklook-hint.spec.ts` measures the
+  rendered pill in a real browser, because a cascade bug renders the same DOM
+  either way and no unit test can see it.
+
 ## [0.39.0] - 2026-09-12
 
 ### Added

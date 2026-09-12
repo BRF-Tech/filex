@@ -378,7 +378,12 @@ onMounted(async () => {
   flex-direction: column;
   min-height: 0;
 }
-.explore-host :deep(.fe) {
+/* Direct child only. `.explore-host :deep(.fe)` reached every descendant
+ * carrying the root class — the modal backdrop and the quick-look hint
+ * both do — and beat the package's own rules on specificity, which is
+ * how the hint pill ended up stretched to the full viewport (#22). The
+ * explorer root is the only `.fe` we mean to size here. */
+.explore-host > :deep(.fe) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;

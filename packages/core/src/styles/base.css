@@ -2622,8 +2622,15 @@ filex-explorer {
 /* Quick-look hint bar — floats above the PreviewModal backdrop (z 70).
  * Carries the `.fe` class for the theme-variable cascade, so the `.fe`
  * root layout defaults (column flex, min-height 420px, 100% height)
- * must be explicitly neutralised here. */
-.fe-ql-hint {
+ * must be explicitly neutralised here.
+ *
+ * Written as `.fe.fe-ql-hint` on purpose: a single class ties with the
+ * `.fe` root rule and would be decided by source order alone, which is
+ * not something a host embed can be trusted to preserve. The hint is
+ * also Teleported under <body> (QuickLook.vue) so a host container's
+ * own `.fe` override cannot reach it by descendant — issue #22, where
+ * the pill grew to the full viewport height inside the admin UI. */
+.fe.fe-ql-hint {
   position: fixed;
   left: 50%;
   bottom: 14px;
@@ -2652,6 +2659,13 @@ filex-explorer {
 }
 .fe-ql-hint__sep {
   opacity: 0.5;
+}
+/* One key-cap group plus its label, kept together so the pill can only
+ * break between segments. */
+.fe-ql-hint__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 /* /wiring:c2 */
 /* =========================================================

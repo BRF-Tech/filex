@@ -17,6 +17,7 @@ import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import ContextMenu, { type ContextAction } from './ContextMenu.vue';
 import ViewSwitcher from './ViewSwitcher.vue';
 import { useLocale } from '../composables/useLocale';
+import { eventMatchesShortcut, shortcutHint } from '../composables/useKeyboardShortcuts';
 
 export type SelectionMode = 'none' | 'single-file' | 'single-dir' | 'multi';
 
@@ -381,10 +382,12 @@ const moreActions = computed<ContextAction[]>(() => {
  * what the hint says, and Ctrl+K from anywhere else still opens the palette
  * as it has since cila:c.
  */
-const macLike =
-  typeof navigator !== 'undefined' &&
-  /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
-const paletteCombo = computed(() => (macLike ? '⌘ K' : 'Ctrl K'));
+/* ⚠ Read from the registry, not written here. This chip used to print a
+ * hardcoded `⌘ K` / `Ctrl K`, which stopped being true the moment anyone
+ * remapped the palette in the shortcut settings — the chip then named a
+ * key that did nothing, on the one control whose whole job is to teach
+ * that key. */
+const paletteCombo = computed(() => shortcutHint('palette'));
 
 const drivePlaceholder = computed(() =>
   props.scopeLabel
@@ -396,7 +399,9 @@ const drivePlaceholder = computed(() =>
  *  keystrokes aimed at an input — which is correct, and it would otherwise
  *  make the hint on this very field a lie. */
 function onSearchKeydown(ev: KeyboardEvent) {
-  if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) {
+  // The registry decides, so the chip beside this field and the key that
+  // actually escalates stay the same key after a remap.
+  if (eventMatchesShortcut(ev, 'palette')) {
     ev.preventDefault();
     ev.stopPropagation();
     emit('open-palette', localSearch.value);

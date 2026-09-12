@@ -366,7 +366,7 @@ export const tr: Record<string, string> = {
     'Bu düğmeyle dosya seçebilirsin; dosyaları doğrudan pencereye sürükleyip bırakmak da çalışır.',
   'tour.step.search.title': 'Arama',
   'tour.step.search.desc':
-    'Bu kutu deponun tamamında ada göre arar; ayraçları ve bir harflik yazım hatasını affeder, yani "fatura 2026" yazdığında fatura_2026.pdf gelir. tag:fatura yazarak etikete göre süzebilirsin. Ctrl+K komut paleti ayrıca komut da çalıştırır.',
+    'Bu kutu deponun tamamında ada göre arar; ayraçları ve bir harflik yazım hatasını affeder, yani "fatura 2026" yazdığında fatura_2026.pdf gelir. tag:fatura yazarak etikete göre süzebilirsin. {palette} komut paleti ayrıca komut da çalıştırır.',
   'tour.step.view.title': 'Görünümü değiştir',
   'tour.step.view.desc':
     'Liste ve ızgara görünümü arasında geçiş yapabilirsin; seçimin hatırlanır.',
@@ -375,7 +375,7 @@ export const tr: Record<string, string> = {
     'Bir dosyaya sağ tıklayıp "Paylaş / İzinler" ile bağlantı oluşturabilir, PIN ve son kullanma süresi ekleyebilirsin.',
   'tour.step.help.title': 'Kısayollar',
   'tour.step.help.desc':
-    '? tuşu kısayol kartını, Ctrl+K komut paletini açar. Bu turu menüdeki "Turu tekrar başlat" ile dilediğinde yeniden izleyebilirsin.',
+    '{help} tuşu kısayol kartını, {palette} komut paletini açar. Bu turu menüdeki "Turu tekrar başlat" ile dilediğinde yeniden izleyebilirsin.',
   'error.hint': 'Bağlantı ya da sunucu kaynaklı geçici bir sorun olabilir. Yeniden deneyin.',
   'error.details': 'Teknik ayrıntılar',
   'col.star': 'Yıldız',

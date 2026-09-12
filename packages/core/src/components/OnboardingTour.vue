@@ -19,6 +19,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { shortcutHint } from '../composables/useKeyboardShortcuts';
 
 const props = defineProps<{
   open: boolean;
@@ -33,6 +34,15 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useLocale(() => props.locale);
+
+/* The tour teaches two keys by name, and both are remappable. Read them
+ * from the registry so the sentence stays true for whoever is taking the
+ * tour — a walkthrough that names the wrong key is worse than one that
+ * names none. */
+const hintCombos = computed(() => ({
+  palette: shortcutHint('palette'),
+  help: shortcutHint('help'),
+}));
 
 // ------------------------------------------------------------------
 // Step definitions. `target` returns the element to spotlight (null =
@@ -299,7 +309,7 @@ const themeClass = computed(() => `fe-ctx-backdrop--theme-${props.theme || 'auto
             {{ t('tour.progress', { n: stepIdx + 1, m: total }) }}
           </p>
           <h3 class="fe-tour__title">{{ t(step.titleKey) }}</h3>
-          <p class="fe-tour__desc">{{ t(step.descKey) }}</p>
+          <p class="fe-tour__desc">{{ t(step.descKey, hintCombos) }}</p>
           <div class="fe-tour__dots" aria-hidden="true">
             <span
               v-for="(s, i) in activeSteps"

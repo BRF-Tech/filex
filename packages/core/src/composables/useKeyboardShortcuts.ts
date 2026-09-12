@@ -314,6 +314,59 @@ export function useShortcutList(): ComputedRef<ShortcutView[]> {
   );
 }
 
+// --------------------------------------------------------------------
+// Hint surfaces
+// --------------------------------------------------------------------
+
+/**
+ * Is this a Mac-style keyboard? Only affects how a combo is PRINTED —
+ * the canonical form folds Meta into Ctrl, so one saved combo works on
+ * every platform and only the label differs.
+ */
+export function isMacLike(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '')
+  );
+}
+
+/** Canonical combo → what a human should see. '' stays ''. */
+export function comboLabel(combo: string): string {
+  if (!combo) return '';
+  return isMacLike() ? combo.replace(/\bCtrl\b/g, '⌘') : combo;
+}
+
+/**
+ * The one way a hint may name a key.
+ *
+ * ⚠ Never write a key into a hint by hand — not in a template, not in a
+ * locale string. Every combo in this registry is remappable, so a
+ * hardcoded "Ctrl+K" is true only until someone opens the shortcut
+ * settings, and then it is a label that tells the user to press a key
+ * that does nothing. Call this instead and interpolate the result;
+ * `web/tests/ui/shortcutHints.test.ts` fails the build on a literal.
+ *
+ * Returns '' when the action is unbound, so a caller can drop the whole
+ * segment rather than print an empty key cap.
+ */
+export function shortcutHint(id: string): string {
+  return comboLabel(effectiveCombo(id));
+}
+
+/**
+ * Does this event fire the given registry action? For overlays that
+ * handle their own keys (the quick-look peek) rather than going through
+ * the global binder — without this they keep answering to the DEFAULT
+ * key after the user has remapped the action.
+ */
+export function eventMatchesShortcut(e: KeyboardEvent, id: string): boolean {
+  const combo = effectiveCombo(id);
+  if (!combo) return false;
+  const fired = comboFromEvent(e);
+  if (fired === combo) return true;
+  return defOf(id)?.fixedCombos?.includes(fired ?? '') ?? false;
+}
+
 /**
  * @deprecated Legacy static cheat-sheet shape (pre-registry). Kept for
  * API compatibility; use `useShortcutList()` for the live, remap-aware

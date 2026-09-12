@@ -86,6 +86,9 @@ import {
   useFileApi, useUploadChunked, useSelection, useKeyboardShortcuts,
   useLocale, usePendingOps, useMonacoLoader,
   preloadEditor, ensureMonaco,
+  // naming a key on screen — read the binding, never type it out:
+  // shortcuts are remappable, so a hardcoded "Ctrl+K" stops being true
+  shortcutHint, eventMatchesShortcut,
   // types
   type ExplorerConfig, type AuthConfig, type FileNode, type ShareInfo,
   type Capabilities,
@@ -94,6 +97,12 @@ import {
 
 The composables are stable — feel free to compose your own UI without
 touching the SFC.
+
+If your own UI names a keyboard shortcut, render `shortcutHint('<action>')`
+rather than the key itself: the user may remap any action from the shortcut
+settings, and `''` comes back for one they unbound so you can drop the hint
+instead of drawing an empty key cap. See
+[docs/API.md](https://github.com/BRF-Tech/filex/blob/main/docs/API.md#naming-a-key-on-screen).
 
 ### Navigation panel
 

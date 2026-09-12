@@ -366,7 +366,7 @@ export const en: Record<string, string> = {
     'Pick files with this button — or simply drag & drop them anywhere in the window.',
   'tour.step.search.title': 'Search',
   'tour.step.search.desc':
-    'This box searches the whole storage by name — separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The Ctrl+K command palette also runs commands.',
+    'This box searches the whole storage by name — separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The {palette} command palette also runs commands.',
   'tour.step.view.title': 'Switch views',
   'tour.step.view.desc':
     'Toggle between the list and grid layout; your choice is remembered.',
@@ -375,7 +375,7 @@ export const en: Record<string, string> = {
     'Right-click any file and use "Share / Permissions" to create a link with an optional PIN and expiry.',
   'tour.step.help.title': 'Shortcuts',
   'tour.step.help.desc':
-    'Press ? for the shortcut cheat-sheet and Ctrl+K for the command palette. Replay this tour any time via "Restart the tour" in the menu.',
+    'Press {help} for the shortcut cheat-sheet and {palette} for the command palette. Replay this tour any time via "Restart the tour" in the menu.',
   'error.hint': 'This may be a temporary network or server problem. Please try again.',
   'error.details': 'Technical details',
   'col.star': 'Star',
