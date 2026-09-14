@@ -461,10 +461,16 @@ type DBConfig struct {
 
 // AuthConfig — enabled drivers and per-driver options.
 type AuthConfig struct {
-	Drivers []string          `yaml:"drivers"`
-	OIDC    OIDCConfig        `yaml:"oidc"`
-	LDAP    LDAPConfig        `yaml:"ldap"`
-	Header  HeaderProxyConfig `yaml:"header_proxy"`
+	Drivers []string `yaml:"drivers"`
+	// RecoveryLogin keeps password sign-in open for the bootstrap
+	// administrator — and nobody else — when no `local` driver is enabled, so
+	// an SSO-only installation whose identity provider is down can still be
+	// reached by the person who has to fix it (local.RecoveryLogin). ON by
+	// default; FILEX_AUTH_RECOVERY_LOGIN=false turns it off.
+	RecoveryLogin bool              `yaml:"recovery_login"`
+	OIDC          OIDCConfig        `yaml:"oidc"`
+	LDAP          LDAPConfig        `yaml:"ldap"`
+	Header        HeaderProxyConfig `yaml:"header_proxy"`
 }
 
 // OIDCConfig — Keycloak/Auth0/etc.
@@ -656,7 +662,8 @@ func Default() Config {
 			DSN:    "", // resolved at boot if empty
 		},
 		Auth: AuthConfig{
-			Drivers: []string{"local"},
+			Drivers:       []string{"local"},
+			RecoveryLogin: true,
 			LDAP: LDAPConfig{
 				ProtocolLogin: true,
 			},
@@ -984,6 +991,9 @@ func applyEnv(c *Config) {
 		if len(out) > 0 {
 			c.Auth.Drivers = out
 		}
+	}
+	if v := os.Getenv("FILEX_AUTH_RECOVERY_LOGIN"); v != "" {
+		c.Auth.RecoveryLogin = !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "no") || strings.EqualFold(v, "off"))
 	}
 	if v := getenvFirst("FILEX_OIDC_ISSUER", "FILEX_AUTH_OIDC_ISSUER"); v != "" {
 		c.Auth.OIDC.Issuer = v

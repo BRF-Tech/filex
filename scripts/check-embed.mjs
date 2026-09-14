@@ -1,0 +1,252 @@
+#!/usr/bin/env node
+// Does this filex binary serve the UI that is sitting in web/dist?
+//
+//   node scripts/check-embed.mjs [--binary bin/filex.exe]
+//
+// Exit 0 when every file of web/dist (served under /admin/) and of
+// packages/webcomponent/dist (served under /embed/) comes back from the running
+// binary byte for byte. Exit 1 otherwise, saying which step of the build chain
+// was skipped.
+//
+// ⚠⚠ Why this asks the BINARY and not the API. The interface is compiled into
+// the executable: `//go:embed` takes backend/embed/admin, which only
+// `pnpm run sync:embed` refreshes from web/dist. On 2026-09-14 a binary was
+// rebuilt without that step. It carried a new backend and a 16-hour-old
+// interface, passed every endpoint check anyone ran against it — the API WAS
+// new — and 71 screenshots were taken of a product that no longer existed,
+// then reported as product bugs. An endpoint cannot tell you which bundle a
+// page loads; the bytes of the bundle can.
+//
+// ⚠ Byte for byte, every file, not just the hashed names in index.html. A hash
+// in a file name is only as good as the build that named it. It costs about
+// 500 loopback requests.
+//
+// Used by `pnpm shots` (scripts/shots.mjs) before a single picture is taken.
+
+import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import { createServer } from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** The UI trees a binary embeds, and the URL each is served under (backend/internal/api/routes.go, wireStatic). */
+export const EMBEDDED_TREES = [
+  { dist: 'web/dist', embed: 'backend/embed/admin', route: '/admin/', label: 'admin UI' },
+  { dist: 'packages/webcomponent/dist', embed: 'backend/embed/web', route: '/embed/', label: 'web component' },
+];
+
+export function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+function walk(dir, base = dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) walk(full, base, acc);
+    else acc.push(path.relative(base, full).split(path.sep).join('/'));
+  }
+  return acc.sort();
+}
+
+/** The script and stylesheet URLs an index.html loads, in document order. */
+const entryAssets = (html) =>
+  [...String(html).matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="([^"]+\.(?:js|css))"/g)].map((m) => m[1]);
+
+/** Do two directories hold the same files with the same bytes? (Source maps: the same files, see below.) */
+function sameTree(a, b) {
+  if (!fs.existsSync(a) || !fs.existsSync(b)) return false;
+  const fa = walk(a);
+  const fb = walk(b);
+  if (fa.length !== fb.length || fa.some((f, i) => f !== fb[i])) return false;
+  return fa.every((f) => f.endsWith('.map') || sha(fs.readFileSync(path.join(a, f))) === sha(fs.readFileSync(path.join(b, f))));
+}
+
+/** When a file — or the newest file in a tree — was last written. */
+function stamp(p) {
+  if (!fs.existsSync(p)) return 'missing';
+  const times = fs.statSync(p).isDirectory() ? walk(p).map((f) => fs.statSync(path.join(p, f)).mtimeMs) : [fs.statSync(p).mtimeMs];
+  return new Date(Math.max(0, ...times)).toISOString().replace('T', ' ').slice(0, 19) + 'Z';
+}
+
+/**
+ * Boots `binary` on a free loopback port with a throwaway data dir, compares,
+ * and stops it again.
+ *
+ * @param {object} o
+ * @param {string} o.binary
+ * @param {string} [o.workDir]  where the data dir and log go (a run's private dir)
+ * @param {object} [o.env]      the environment to boot with (a run's TEMP and marker)
+ * @returns {Promise<{ ok: boolean, report: string }>}
+ */
+export async function checkEmbeddedUI({ binary, workDir, env = process.env, log = () => {} }) {
+  for (const t of EMBEDDED_TREES) {
+    const dir = path.join(REPO, t.dist);
+    if (!fs.existsSync(dir) || fs.readdirSync(dir).length === 0) {
+      return { ok: false, report: `  ${t.dist} has not been built — there is nothing to compare the binary against.` };
+    }
+  }
+  const base = workDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'filex-embed-check-'));
+  const dataDir = fs.mkdtempSync(path.join(base, 'embed-check-'));
+  const logFile = path.join(dataDir, 'server.log');
+  const logFd = fs.openSync(logFile, 'a');
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  // A password nobody else could know: an instance that accepts it is the one
+  // this function started, not a stranger already holding the port.
+  const password = randomBytes(18).toString('base64url');
+  let exited = null;
+  // ⚠ stdout/stderr to a FILE descriptor, never a pipe nobody drains
+  // (e2e/run.mjs has the measurement: a full pipe wedges filex mid-request).
+  const child = spawn(binary, ['serve'], {
+    env: {
+      ...env,
+      FILEX_LISTEN: `127.0.0.1:${port}`,
+      FILEX_DATA_DIR: dataDir,
+      FILEX_ADMIN_EMAIL: 'embed-check@local',
+      FILEX_ADMIN_PASSWORD: password,
+      FILEX_SECRET_KEY: 'embed-check-not-a-real-secret',
+    },
+    stdio: ['ignore', logFd, logFd],
+    windowsHide: true,
+  });
+  child.on('exit', (code, signal) => {
+    exited = signal ? `signal ${signal}` : `code ${code}`;
+  });
+  const tail = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').slice(-1500) : '');
+
+  try {
+    const until = Date.now() + 90_000;
+    for (;;) {
+      if (exited) throw new Error(`the binary exited before it answered (${exited})\n${tail()}`);
+      try {
+        const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2000) });
+        if (r.ok) break;
+      } catch {
+        /* not up yet */
+      }
+      if (Date.now() > until) throw new Error(`no /healthz from ${url} within 90s\n${tail()}`);
+      await sleep(300);
+    }
+    const login = await fetch(`${url}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'embed-check@local', password }),
+    });
+    if (!login.ok || exited) {
+      throw new Error(
+        `${url} answers, but not as the instance this check started (login ${login.status}` +
+          `${exited ? `, ours exited: ${exited}` : ''}) — another process holds the port`,
+      );
+    }
+
+    const lines = [];
+    let ok = true;
+    for (const t of EMBEDDED_TREES) {
+      const distDir = path.join(REPO, t.dist);
+      const files = walk(distDir);
+      const bad = [];
+      let next = 0;
+      const worker = async () => {
+        while (next < files.length) {
+          const f = files[next++];
+          const want = sha(fs.readFileSync(path.join(distDir, f)));
+          let got = null;
+          let status = '';
+          try {
+            const r = await fetch(url + t.route + f.split('/').map(encodeURIComponent).join('/'));
+            status = `HTTP ${r.status}`;
+            got = r.ok ? sha(Buffer.from(await r.arrayBuffer())) : null;
+          } catch (err) {
+            status = err.message;
+          }
+          if (got !== want) {
+            bad.push({ f, why: got === null ? `${status} — the binary has no such file` : 'served with different bytes' });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: 16 }, worker));
+      // The entry points first: they are what a browser loads, so they are the
+      // lines that say which UI a screenshot would show.
+      const entries = fs.existsSync(path.join(distDir, 'index.html'))
+        ? new Set(['index.html', ...entryAssets(fs.readFileSync(path.join(distDir, 'index.html'), 'utf8')).map((u) => u.slice(t.route.length))])
+        : new Set();
+      bad.sort((a, b) => Number(entries.has(b.f)) - Number(entries.has(a.f)) || a.f.localeCompare(b.f));
+      // ⚠ A source map that differs only in BYTES is not a different UI, and
+      // is not deterministic: vite-plugin-pwa writes the service worker's
+      // bundle through a random temp directory and that path lands in
+      // `sw.js.map` (measured 2026-09-14: two builds of the same tree, sw.js
+      // identical, sw.js.map differing in "sources"). A browser never runs a
+      // map, so a rebuild with nothing changed must not read as a stale
+      // binary. A map the binary does not HAVE at all still fails — that is a
+      // different build, not a different temp dir.
+      const mapOnly = bad.filter((b) => b.f.endsWith('.map') && b.why === 'served with different bytes');
+      const real = bad.filter((b) => !mapOnly.includes(b));
+      lines.push(
+        `  ${t.label.padEnd(14)} ${t.dist} → ${t.route}  ${files.length - bad.length}/${files.length} files identical` +
+          (mapOnly.length ? `, ${mapOnly.length} source map(s) differing only in bytes (not run by a browser)` : ''),
+      );
+      log(lines.at(-1).trim());
+      if (real.length === 0) continue;
+      ok = false;
+
+      if (fs.existsSync(path.join(distDir, 'index.html'))) {
+        const served = await (await fetch(`${url}${t.route}index.html`)).text();
+        const built = fs.readFileSync(path.join(distDir, 'index.html'), 'utf8');
+        lines.push(`      the binary's index.html loads   ${entryAssets(served).join(', ') || '(nothing recognisable)'}`);
+        lines.push(`      ${t.dist}/index.html loads  ${entryAssets(built).join(', ') || '(nothing recognisable)'}`);
+      }
+      const embedDir = path.join(REPO, t.embed);
+      lines.push(
+        sameTree(distDir, embedDir)
+          ? `      cause: ${t.embed} already matches ${t.dist}, so this binary was built BEFORE the last ` +
+              '`sync:embed` (or from another tree) — rebuild it: `pnpm run build:backend`'
+          : `      cause: ${t.embed} does not match ${t.dist} — \`pnpm run sync:embed\` did not run after the ` +
+              'last frontend build, and a binary built from it embeds the older UI',
+      );
+      lines.push(`      newest file: ${t.dist} ${stamp(distDir)} · ${t.embed} ${stamp(embedDir)} · binary ${stamp(binary)}`);
+      for (const b of real.slice(0, 8)) lines.push(`      ${b.f}: ${b.why}`);
+      if (real.length > 8) lines.push(`      … and ${real.length - 8} more`);
+    }
+    return { ok, report: lines.join('\n') };
+  } finally {
+    child.kill();
+    for (let n = 0; n < 50 && exited === null; n++) await sleep(100);
+    fs.closeSync(logFd);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    if (!workDir) fs.rmSync(base, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const i = process.argv.indexOf('--binary');
+  const binary = path.resolve(
+    i > -1 && process.argv[i + 1]
+      ? process.argv[i + 1]
+      : path.join(REPO, 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex'),
+  );
+  if (!fs.existsSync(binary)) {
+    console.error(`✗ no binary at ${binary}`);
+    process.exit(1);
+  }
+  try {
+    const { ok, report } = await checkEmbeddedUI({ binary });
+    console.log(`${ok ? '✓' : '✗'} ${binary} ${ok ? 'serves' : 'does NOT serve'} the UI that was built into this tree\n${report}`);
+    process.exit(ok ? 0 : 1);
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exit(1);
+  }
+}

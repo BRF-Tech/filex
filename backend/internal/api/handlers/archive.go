@@ -41,6 +41,10 @@ type Archive struct {
 	// optional.
 	Index  *search.Index
 	Thumbs *thumb.Pipeline
+	// Tickets holds the minted "download this selection as one archive"
+	// authorizations (archive_download.go). Nil disables that endpoint pair
+	// rather than crashing it.
+	Tickets *archiveTicketStore
 }
 
 // AttachSearchIndex / AttachThumbs wire the two optional halves of the

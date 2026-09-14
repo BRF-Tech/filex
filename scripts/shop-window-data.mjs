@@ -8,6 +8,8 @@
 // live check on a query nobody is shown proves nothing, and a copy check on a
 // query nobody runs proves nothing either.
 
+import { SHOTS_ROOT_REL } from '../e2e/shots/release.mjs';
+
 /**
  * The example searches the demo splash tells a visitor to type, and the file
  * each one promises them.
@@ -156,6 +158,10 @@ export const SITE_MUST_LINK = [
   { host: 'demo.filex.sh', why: 'the demo. It is the shortest path from "what is this" to "I have used it"' },
 ];
 
+// ⚠ The folder is not spelled here. Each release's pictures live in their own
+// `docs/screenshots/vX.Y.Z/`, named once in `e2e/shots/release.mjs`; the README
+// links that folder, and the test beside this declaration fails the moment the
+// two disagree — so bumping the release there moves every declaration here.
 /**
  * Every screenshot the README shows, and the sources of what is IN it.
  *
@@ -181,67 +187,67 @@ export const SITE_MUST_LINK = [
  */
 export const SCREENSHOTS = [
   {
-    file: 'docs/screenshots/explorer-grid-light.png',
+    file: `${SHOTS_ROOT_REL}/explorer-grid-light.png`,
     depicts: ['packages/core/src/components/GridView.vue', 'packages/core/src/components/Toolbar.vue', 'packages/core/src/components/ViewSwitcher.vue'],
   },
   {
-    file: 'docs/screenshots/explorer-grid-dark.png',
+    file: `${SHOTS_ROOT_REL}/explorer-grid-dark.png`,
     depicts: ['packages/core/src/components/GridView.vue', 'packages/core/src/components/Toolbar.vue', 'packages/core/src/styles'],
   },
   {
-    file: 'docs/screenshots/share-modal.png',
-    depicts: ['packages/core/src/modals/ShareModal.vue'],
+    file: `${SHOTS_ROOT_REL}/share-modal.png`,
+    depicts: ['packages/core/src/modals/PermissionsModal.vue'],
   },
   {
-    file: 'docs/screenshots/viewer-markdown.png',
+    file: `${SHOTS_ROOT_REL}/viewer-markdown.png`,
     depicts: ['packages/core/src/modals/PreviewModal.vue'],
   },
   {
-    file: 'docs/screenshots/admin-dashboard.png',
+    file: `${SHOTS_ROOT_REL}/admin-dashboard.png`,
     depicts: ['web/src/views/Dashboard.vue'],
   },
   {
-    file: 'docs/screenshots/demo-landing.png',
+    file: `${SHOTS_ROOT_REL}/demo-landing.png`,
     depicts: ['web/src/views/Login.vue'],
   },
   {
-    file: 'docs/screenshots/connections-guide.png',
+    file: `${SHOTS_ROOT_REL}/connections-guide.png`,
     depicts: ['packages/core/src/components/ConnectionGuideView.vue', 'packages/core/src/components/ConnectionsPanel.vue'],
   },
   {
-    file: 'docs/screenshots/admin-plugins.png',
+    file: `${SHOTS_ROOT_REL}/admin-plugins.png`,
     depicts: ['web/src/views/Plugins.vue'],
   },
   {
-    file: 'docs/screenshots/driveshell/driveshell-hero-1440.png',
+    file: `${SHOTS_ROOT_REL}/driveshell/driveshell-hero-1440.png`,
     depicts: ['packages/core/src/FileExplorer.vue', 'packages/core/src/components/SideNav.vue'],
   },
   {
-    file: 'docs/screenshots/driveshell/driveshell-search-1440.png',
+    file: `${SHOTS_ROOT_REL}/driveshell/driveshell-search-1440.png`,
     depicts: ['packages/core/src/components/FilterBar.vue', 'packages/core/src/components/CommandPalette.vue'],
   },
   {
-    file: 'docs/screenshots/sidenav/sidenav-expanded-1440.png',
+    file: `${SHOTS_ROOT_REL}/sidenav/sidenav-expanded-1440.png`,
     depicts: ['packages/core/src/components/SideNav.vue'],
   },
   {
-    file: 'docs/screenshots/sidenav/sidenav-rail-1440.png',
+    file: `${SHOTS_ROOT_REL}/sidenav/sidenav-rail-1440.png`,
     depicts: ['packages/core/src/components/SideNav.vue'],
   },
   {
-    file: 'docs/screenshots/sidenav/view-shared-1440.png',
+    file: `${SHOTS_ROOT_REL}/sidenav/view-shared-1440.png`,
     depicts: ['packages/core/src/components/SideNav.vue', 'packages/core/src/components/ListView.vue'],
   },
   {
-    file: 'docs/screenshots/sidenav/embed-webcomponent-1440.png',
+    file: `${SHOTS_ROOT_REL}/sidenav/embed-webcomponent-1440.png`,
     depicts: ['packages/webcomponent/src'],
   },
   {
-    file: 'docs/screenshots/sidenav/connect-1440.png',
+    file: `${SHOTS_ROOT_REL}/sidenav/connect-1440.png`,
     depicts: ['packages/core/src/components/ConnectionsPanel.vue'],
   },
   {
-    file: 'docs/screenshots/sidenav/apikeys-minted-1440.png',
+    file: `${SHOTS_ROOT_REL}/sidenav/apikeys-minted-1440.png`,
     depicts: ['packages/core/src/components/TokensPanel.vue'],
   },
 ];

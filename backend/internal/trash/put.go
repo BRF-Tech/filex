@@ -161,7 +161,12 @@ func putChildren(ctx context.Context, drv storage.Driver, rel, key string,
 	if len(files) == 0 {
 		return Outcome{}, nil
 	}
-	prefix := strings.TrimRight(rel, "/") + "/"
+	// walkFiles reports storage-relative paths with no leading slash, while
+	// `rel` carries whatever spelling the caller used (`nodes.path` has a
+	// leading slash, the protocol surfaces do not). Trimming only the right
+	// end made the prefix match nothing for the slashed spelling, and every
+	// object kept its whole path: the folder landed under `<key>/<rel>/…`.
+	prefix := strings.Trim(rel, "/") + "/"
 	moved := 0
 	for _, fp := range files {
 		dst := key + "/" + strings.TrimPrefix(fp, prefix)
@@ -210,12 +215,29 @@ func TakeBack(ctx context.Context, drv storage.Driver, trashKey, origPath string
 	if werr != nil || len(files) == 0 {
 		return err
 	}
-	prefix := trashKey + "/"
+	// Same spelling contract as putChildren. Restore passes `nodes.path`, which
+	// carries a leading slash the walk's paths do not; untrimmed, the strip
+	// was a no-op and a folder restored on an object store landed under
+	// `<orig>/.filex-trash/<key>/…` while the restore reported success.
+	prefix := strings.Trim(trashKey, "/") + "/"
+	moved := 0
 	for _, fp := range files {
 		dst := origPath + "/" + strings.TrimPrefix(fp, prefix)
-		if rerr := relocate(ctx, drv, fp, dst); rerr != nil && !errors.Is(rerr, storage.ErrNotFound) {
-			return fmt.Errorf("restore %q: %w", fp, rerr)
+		if rerr := relocate(ctx, drv, fp, dst); rerr != nil {
+			if !errors.Is(rerr, storage.ErrNotFound) {
+				return fmt.Errorf("restore %q: %w", fp, rerr)
+			}
+			// One object gone out of band is survivable; the rest is real.
+			continue
 		}
+		moved++
+	}
+	if moved == 0 {
+		// Every object the walk listed had already vanished. nil here told
+		// Restore the bytes were back, so it un-trashed the row over a path
+		// holding nothing. ErrNotFound is what the single-object path above
+		// already reports for an empty key, so both shapes read the same.
+		return fmt.Errorf("restore %q: %w", trashKey, storage.ErrNotFound)
 	}
 	if deleter, ok := drv.(storage.Deleter); ok {
 		_ = deleter.Delete(ctx, trashKey)
@@ -260,7 +282,10 @@ func cleanupMarkers(ctx context.Context, deleter storage.Deleter, ok bool, rel s
 	_ = deleter.Delete(ctx, strings.TrimRight(rel, "/")+"/")
 }
 
-// walkFiles returns every FILE object under root, recursively.
+// walkFiles returns every FILE object under root, recursively, as
+// storage-relative paths with NO leading slash — whatever spelling root used
+// and whatever the driver echoed back. Callers that strip a prefix from these
+// paths must trim both ends of theirs the same way.
 //
 // skipTrash controls whether filex's own trash bucket is stepped over. Put
 // passes true so a delete can never drag the trash into the trash; TakeBack
@@ -283,7 +308,7 @@ func walkFiles(ctx context.Context, drv storage.Driver, root string, skipTrash b
 		for _, o := range objs {
 			p := strings.Trim(o.Path, "/")
 			if p == "" {
-				p = path.Join(dir, o.Name)
+				p = strings.Trim(path.Join(dir, o.Name), "/")
 			}
 			if skipTrash && IsTrashPath(p) {
 				continue

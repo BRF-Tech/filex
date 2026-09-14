@@ -45,7 +45,7 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 | `src/preload-shell.cts` | The narrower bridge for the chrome (rail/settings) |
 | `src/preload-editor.cts` | One line, for the editor window: it gets no `filexApp` bridge, only the SPA's own "you are inside the desktop app" flag |
 | `build/installer.nsh` | Windows file-type registration, written by hand — see *Open with filex* |
-| `ui/app.html` | The app's own chrome — rail, settings, boot screens, string table |
+| `ui/app.html` | The app's own chrome — rail, settings, boot screens, string table, and the `config.brand` the explorer's top-bar mark comes from (a slot is unreachable in a web component) |
 | `scripts/sync-web.mjs` | Copies the built explorer bundle → `app/` for embedding |
 | `scripts/fetch-cli.mjs` | Puts the `filex` CLI into `build/bin` (fails the build if missing) |
 | `scripts/build-main.mjs` | Bundles the main process with esbuild (see *Packaging traps*) |
@@ -284,11 +284,21 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | `openwith-e2e.mjs` | A document double-clicked from outside every synced folder: second instance → editor window → server-side save → the bytes on the ORIGINAL local path change → the copy is gone after the window closes. Plus the synced-twin route, which makes no copy at all |
 | `plumbing-smoke.mjs` | `app://`, preload injection and `safeStorage`, without a server |
 
+And three that MEASURE rather than assert — they answer "is this presentable"
+and "does this window offer the same thing twice", which no pass/fail can:
+
+| Script | What it shows |
+|---|---|
+| `look-chrome.mjs` | Photographs every surface the app draws ITSELF — connect, waiting, rail, settings (English + Türkçe, light + dark + a palette), the folder picker, the sync-trash listing, storage connections. `LOOK_OUT` / `LOOK_TAG` name the files; `LOOK_DEAD_SERVER` adds the "can't reach the server" shot |
+| `diag-chrome-metrics.mjs` | Prints the chrome's control heights, type scale and colours beside the `--fe-*` tokens they are supposed to be — the measurement behind `test/chrome-tokens.test.ts` |
+| `diag-duplicates.mjs` | Lists the explorer's header cluster, its "⋯" menu, the rail and the settings surface side by side, so "two controls, one job" is read off two lists instead of remembered |
+
+
 Two more, which need neither a server nor Electron:
 
 | Command | What it proves |
 |---|---|
-| `pnpm test` | The parts of "Open with filex" that can lose a document, measured directly (`test/openwith.test.ts`, Node's own runner via type stripping) |
+| `pnpm test` | The parts of "Open with filex" that can lose a document, measured directly (`test/openwith.test.ts`, Node's own runner via type stripping); the notification and portable-data decisions; and `test/chrome-tokens.test.ts` — the shell's chrome states no colour of its own, sizes its controls from `--fe-h-*`, and never becomes a SECOND writer of a preference the file list already owns |
 | `pnpm test:red` | ⚠ The same cases against a deliberately naive implementation (`test/openwith-naive.ts`), and **fails if any of them passes there**. A case the first draft already satisfies measures nothing while looking like it does — this repo has shipped exactly that kind of test before |
 
 ⚠ `openwith-e2e.mjs` performs the editor's save the way OnlyOffice's callback

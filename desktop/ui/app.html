@@ -14,81 +14,131 @@
           switch), an "add account" button and a gear for the app's settings
         • everything else is the explorer for the active account
     -->
+    <!-- gorunum:v2-desktop — the product's stylesheet, loaded BEFORE this
+         window paints anything.
+
+         ⚠⚠ It is not here for the `.fe-*` rules (the explorer injects those
+         itself on first registration). It is here for the `:root` custom
+         properties. Without it the shell's first frame — the boot surface,
+         which is drawn before `filex.js` has even been parsed — resolves every
+         `var(--fe-*)` to nothing, and the window opens as a black-on-black
+         rectangle for as long as the bundle takes to load.
+
+         Same origin, same file the bundle carries (`sync-web.mjs` copies it
+         into app/), so this cannot drift from the tokens the explorer uses. -->
+    <link rel="stylesheet" href="style.css" />
+    <script>
+      // ── which variant paints, decided BEFORE the first frame ──────────
+      //
+      // The mode is the PRODUCT's preference, not the OS's: the explorer's
+      // theme gallery writes `filex.thememode` (packages/core/src/lib/themes.ts)
+      // and this window has to agree with the file list it wraps — measured on
+      // 2026-09-12, the explorer went dark and the app's settings surface
+      // stayed white.
+      //
+      // ⚠ Inline and synchronous on purpose. Doing this from the module below
+      // would paint one frame of the light palette first, which is the flash
+      // this file already fights in two other places.
+      //
+      // ⚠ `'host'` (the default) means "whatever the embedder passed" — this
+      // window passes `theme: 'auto'`, so host and auto resolve the same way
+      // here. Once the explorer is mounted, a MutationObserver copies whatever
+      // it actually resolved (see adoptExplorerTheme) rather than re-deriving
+      // it, so the two can never disagree.
+      (function () {
+        var mode = 'host';
+        try { mode = localStorage.getItem('filex.thememode') || 'host'; } catch (e) { /* blocked */ }
+        var dark = mode === 'dark'
+          || (mode !== 'light' && window.matchMedia
+              && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      })();
+    </script>
     <style>
+      /* gorunum:v2-desktop — the shell's own chrome, drawn with the PRODUCT's
+         tokens (packages/core/src/styles/variables.css) and nothing else.
+         There is no second palette in this file: `--fe-*` is the whole
+         vocabulary, so a theme or a palette picked in the file list repaints
+         the rail, the settings surface and the boot screen for free.
+
+         ⚠ The one thing that is NOT a token is `--rail`: the width of this
+         app's account rail is a layout constant of a surface the shared
+         package does not have, and inventing `--fe-rail-width` in a file the
+         package cannot see would be a token in name only. */
       :root {
-        color-scheme: light dark;
         --rail: 64px;
-        --bg: #ffffff;
-        --bg-2: #f6f7f9;
-        --line: #e3e6ea;
-        --fg: #14181d;
-        --muted: #6b7482;
-        --accent: #2f6df6;
-        --danger: #c0392b;
-        --scroll-thumb: rgba(20, 24, 29, .26);
-        --scroll-thumb-hover: rgba(20, 24, 29, .42);
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #14181d;
-          --bg-2: #1b2027;
-          --line: #2a313a;
-          --fg: #e8ecf1;
-          --muted: #97a1ae;
-          --scroll-thumb: rgba(232, 236, 241, .22);
-          --scroll-thumb-hover: rgba(232, 236, 241, .38);
-        }
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
 
       /* ── scrollbars ───────────────────────────────────────────────
          The platform default is a wide light-grey bar that ignores the theme
-         entirely: on the dark rail-side chrome it reads as a bright stripe
-         glued to the edge of a dark panel. Chromium honours BOTH the standard
-         properties and the -webkit pseudo-elements; the standard ones are
-         declared first so the rules survive a future engine that drops the
-         prefixed set, and the pseudo-elements do the fine work (rounded thumb,
-         transparent track, no arrow buttons) that `scrollbar-width` cannot
-         express. Tokenised, so the dark palette above repaints them for free. */
+         entirely: on the chrome it reads as a bright stripe glued to the edge
+         of a themed panel. Chromium honours BOTH the standard properties and
+         the -webkit pseudo-elements; the standard ones are declared first so
+         the rules survive a future engine that drops the prefixed set, and the
+         pseudo-elements do the fine work (rounded thumb, transparent track, no
+         arrow buttons) that `scrollbar-width` cannot express.
+
+         ⚠ Mixed from `--fe-text` rather than written as a grey: the thumb has
+         to stay legible on every palette, and a fixed rgba() that reads
+         correctly on the stock white is invisible on Terminal Green. */
       * {
         scrollbar-width: thin;
-        scrollbar-color: var(--scroll-thumb) transparent;
+        scrollbar-color: color-mix(in srgb, var(--fe-text) 26%, transparent) transparent;
       }
       *::-webkit-scrollbar { width: 10px; height: 10px; }
       *::-webkit-scrollbar-track { background: transparent; }
       *::-webkit-scrollbar-thumb {
-        background: var(--scroll-thumb);
+        background: color-mix(in srgb, var(--fe-text) 26%, transparent);
         /* Inset by a transparent border rather than by width: a narrower thumb
            would sit in a wider gutter and drift away from the content edge. */
         border: 2px solid transparent;
         background-clip: padding-box;
-        border-radius: 8px;
+        border-radius: var(--fe-radius);
       }
-      *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+      *::-webkit-scrollbar-thumb:hover {
+        background: color-mix(in srgb, var(--fe-text) 42%, transparent);
+        background-clip: padding-box;
+      }
       /* Where a vertical and a horizontal bar meet — unstyled, it paints as a
          white square in the corner of a dark panel. */
       *::-webkit-scrollbar-corner { background: transparent; }
       body {
         display: flex;
-        font: 14px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--fg);
+        /* The explorer's scale, not the platform's: 13px on the product's own
+           stack. A 14px system-ui shell around a 13px Inter file list is the
+           two-applications look this pass exists to remove. */
+        font: var(--fe-text-md) / 1.5 var(--fe-font);
+        background: var(--fe-bg);
+        color: var(--fe-text);
         overflow: hidden;
       }
 
       /* ── account rail ──────────────────────────────────────────
-         Dark in both themes, on purpose. A rail that matches the content area
-         reads as an empty margin with a square floating in it — which is what
-         the first attempt looked like. The contrast is what makes it a rail. */
+         The outermost band of the window's chrome, on the SAME elevated ground
+         as the explorer's own sidebar beside it, with one hairline against it.
+
+         ⚠ It used to be a fixed near-black (#171c26) in both variants, on the
+         argument that contrast is what makes a rail a rail. Measured on
+         2026-09-12 that argument had stopped being true in the dark palette:
+         #171c26 sits BETWEEN --fe-bg (#15171c) and --fe-bg-elev (#1a1d23), so
+         the rail and the sidebar beside it were the same colour and the band
+         had no edge at all. In the light palette the same value was a black
+         stripe against a white product. A permanently-dark chrome band would
+         need a token the shared package does not declare, and inventing a hex
+         here is what produced the problem — so the rail follows the ground the
+         rest of the chrome uses, and the ACTIVE MARKER carries the contrast. */
       #rail {
         width: var(--rail);
         flex: 0 0 var(--rail);
-        background: #171c26;
+        background: var(--fe-bg-elev);
+        border-right: 1px solid var(--fe-border);
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 12px 0 10px;
+        padding: var(--fe-gap) 0 10px;
         gap: 10px;
         -webkit-app-region: drag;      /* the rail doubles as the title bar */
       }
@@ -96,11 +146,14 @@
 
       .slot { position: relative; display: flex; justify-content: center; width: 100%; }
       /* Slack's active marker: a bar on the rail's own edge, not a ring around
-         the avatar. It survives any avatar colour. */
+         the avatar. It survives any avatar colour — and on a light rail it is
+         the one thing that has to be the accent, because the ground no longer
+         supplies the contrast. */
       .slot.active::before {
         content: '';
         position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-        width: 4px; height: 26px; border-radius: 0 3px 3px 0; background: #fff;
+        width: 3px; height: 26px; border-radius: 0 3px 3px 0;
+        background: var(--fe-primary);
       }
       .avatar {
         width: 40px; height: 40px;
@@ -108,31 +161,32 @@
         display: grid;
         place-items: center;
         font-weight: 700;
-        font-size: 14px;
+        font-size: var(--fe-text-md);
         letter-spacing: .02em;
         cursor: pointer;
-        color: #fff;
+        color: var(--fe-text-on-primary);
         position: relative;
         border-radius: 50%;
-        opacity: .62;
+        opacity: .68;
         transition: border-radius .14s ease, opacity .14s ease;
       }
-      .avatar:hover { border-radius: 14px; opacity: 1; }
-      .slot.active .avatar { border-radius: 14px; opacity: 1; }
+      .avatar:hover { border-radius: var(--fe-radius-lg); opacity: 1; }
+      .slot.active .avatar { border-radius: var(--fe-radius-lg); opacity: 1; }
       /* Whether the background work is actually working, visible without
-         opening anything. */
+         opening anything. The ring is the rail's own ground, so the dot reads
+         as cut out of it rather than stuck on top. */
       .avatar .dot {
         position: absolute; right: -1px; bottom: -1px;
         width: 12px; height: 12px; border-radius: 50%;
-        border: 2.5px solid #171c26;
+        border: 2.5px solid var(--fe-bg-elev);
       }
-      .dot.ok { background: #2eb872; }
-      .dot.err { background: #ef4444; }
+      .dot.ok { background: var(--fe-ok); }
+      .dot.err { background: var(--fe-danger); }
 
       .rail-btn {
         width: 40px; height: 40px; border-radius: 50%; border: 0;
-        background: rgba(255, 255, 255, .08);
-        color: rgba(255, 255, 255, .72);
+        background: var(--fe-bg-hover);
+        color: var(--fe-text-muted);
         cursor: pointer;
         display: grid; place-items: center;
         padding: 0;
@@ -143,20 +197,32 @@
          still sits low and slightly left — visibly off in a 40px circle. An
          icon with its own viewBox has no baseline to fight. */
       .rail-btn svg { width: 18px; height: 18px; display: block; }
-      .rail-btn:hover { background: rgba(255, 255, 255, .16); color: #fff; border-radius: 14px; }
-      .rail-sep { width: 28px; height: 1px; background: rgba(255, 255, 255, .12); margin: 2px 0; }
+      .rail-btn:hover {
+        background: var(--fe-primary-soft);
+        color: var(--fe-primary);
+        border-radius: var(--fe-radius-lg);
+      }
+      .rail-sep { width: 28px; height: 1px; background: var(--fe-border); margin: 2px 0; }
       .spacer { flex: 1; }
 
-      /* ── the application's own mark ───────────────────────────────
-         Fixed, at the top, above the servers. filex is what the window IS; the
-         rows below are WHERE you are signed in. A badge here that changed with
-         the selected account would leave nothing on screen naming the app. */
-      .appmark {
-        width: 32px; height: 32px; flex: 0 0 auto;
-        display: grid; place-items: center;
-        margin-bottom: 2px;
-      }
-      .appmark svg { width: 32px; height: 32px; display: block; }
+      /* ── the application's own mark — NOT HERE ANY MORE ───────────
+         It used to lead the rail, on the rule that something must always name
+         the app and it must not be the selected account's badge. That rule is
+         intact; the mark moved to where the product puts it.
+
+         gorunum:v3-shell gave the explorer's top bar a brand corner, and this
+         window fills it (`config.brand`, see brandMarkUrl). Photographed
+         2026-09-13 with BOTH drawn: the rail's 32px mark and the top bar's
+         22px mark + "filex" wordmark sat about 60px apart on the same row —
+         the same logo twice, which is the duplicate this wave removes, and the
+         most visible kind because it is the product's identity.
+
+         The top bar's keeps the job: it carries the WORDMARK as well, it is
+         the shared component's own corner rather than this app's copy of it,
+         and it cannot fold away here — it hides only below 560px of explorer
+         width, and this window's 720px minimum leaves 656px after the rail.
+         The boot surfaces still draw the mark full size, so the states that
+         replace the explorer name the app too. */
 
       /* ── a server's own logo, ON its row ──────────────────────────
          Each row is a server (a tenant), so the logo its admin set under
@@ -166,14 +232,15 @@
          `contain` on a light plate: logos are authored for white pages, and a
          dark-on-dark mark against the rail would render as an empty square. */
       .avatar--brand {
-        background: rgba(255, 255, 255, .94);
+        background: #ffffff;
         padding: 4px;
         overflow: hidden;
+        border: 1px solid var(--fe-border);
         /* ⚠ Always the rounded square, never the circle the initials use.
            Logo artwork is authored square: a 50% radius eats its corners, and
            a mark that only looks right while its row is selected is not a mark.
            Which row is active is already said by the bar on the rail's edge. */
-        border-radius: 12px;
+        border-radius: var(--fe-radius-lg);
       }
       .avatar--brand img {
         max-width: 100%; max-height: 100%;
@@ -199,39 +266,42 @@
         position: absolute; inset: 0;
         display: none;
         place-items: center;
-        background: var(--bg);
+        background: var(--fe-bg);
         padding: 24px;
         text-align: center;
       }
       #boot.on { display: grid; }
       .boot__inner { max-width: 380px; display: grid; justify-items: center; gap: 6px; }
+      /* ⚠ The mark is the app's own logo, drawn at its own size — not a glyph
+         on a coloured plate. The plate was a second blue behind a white
+         outline, which is two marks for one application. */
       .boot__mark {
-        width: 56px; height: 56px; margin-bottom: 12px;
+        width: 56px; height: 56px; margin-bottom: var(--fe-gap);
         display: grid; place-items: center;
-        border-radius: 16px;
-        background: linear-gradient(160deg, var(--accent), #1e4fd0);
-        box-shadow: 0 6px 18px rgba(47, 109, 246, .28);
       }
-      .boot__mark svg { width: 30px; height: 30px; color: #fff; }
-      /* The server's own logo replaces the generic mark. No gradient behind it:
-         a brand mark on top of somebody else's brand colour is two logos. */
+      .boot__mark svg { width: 56px; height: 56px; display: block; }
+      /* The server's own logo replaces the generic mark. A white plate with a
+         hairline, like the rail's: a brand mark on top of somebody else's
+         brand colour is two logos. */
       .boot__mark--brand {
-        background: rgba(255, 255, 255, .94);
-        box-shadow: 0 4px 14px rgba(0, 0, 0, .16);
+        background: #ffffff;
+        border: 1px solid var(--fe-border);
+        border-radius: var(--fe-radius-lg);
+        box-shadow: var(--fe-shadow-sm);
         padding: 8px;
       }
       .boot__mark--brand img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
       .boot__title { font-size: 15px; font-weight: 600; }
-      .boot__sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+      .boot__sub { color: var(--fe-text-muted); font-size: var(--fe-text-md); overflow-wrap: anywhere; }
       /* An indeterminate bar, not a spinner: it fills the same width as the
          text above it, so the surface stays a single centred column. */
       .boot__bar {
-        margin-top: 16px; width: 190px; height: 3px; border-radius: 2px;
-        background: var(--line); overflow: hidden; position: relative;
+        margin-top: var(--fe-gap-lg); width: 190px; height: 3px; border-radius: 2px;
+        background: var(--fe-border); overflow: hidden; position: relative;
       }
       .boot__bar::after {
         content: ''; position: absolute; inset: 0 auto 0 0; width: 40%;
-        border-radius: 2px; background: var(--accent);
+        border-radius: 2px; background: var(--fe-primary);
         animation: boot-slide 1.15s ease-in-out infinite;
       }
       @keyframes boot-slide {
@@ -242,11 +312,11 @@
         .boot__bar::after { animation: none; width: 100%; opacity: .5; }
       }
       .boot__err {
-        margin-top: 14px; padding: 10px 12px; border-radius: 8px;
-        background: rgba(192, 57, 43, .09); border: 1px solid rgba(192, 57, 43, .28);
-        color: var(--danger); font-size: 13px; overflow-wrap: anywhere; text-align: left;
+        margin-top: 14px; padding: var(--fe-gap-sm) var(--fe-gap); border-radius: var(--fe-radius);
+        background: var(--fe-bg-elev); border: 1px solid var(--fe-danger);
+        color: var(--fe-danger); font-size: var(--fe-text-sm); overflow-wrap: anywhere; text-align: left;
       }
-      .boot__actions { margin-top: 16px; display: flex; gap: 8px; }
+      .boot__actions { margin-top: var(--fe-gap-lg); display: flex; gap: var(--fe-gap-sm); }
 
       /* ── storage connections ─────────────────────────────────────
          A full surface, not a card inside Settings: the shared panel
@@ -258,7 +328,7 @@
          folder picker below already made exactly this mistake once: the
          dialog was there, just underneath the surface that launched it. */
       #conn {
-        position: absolute; inset: 0; background: var(--bg);
+        position: absolute; inset: 0; background: var(--fe-bg);
         overflow: auto; padding: 26px 30px 40px; display: none;
         z-index: 210;
       }
@@ -268,8 +338,8 @@
       #conn-host { max-width: 940px; }
 
       #settings {
-        position: absolute; inset: 0; background: var(--bg);
-        overflow: auto; padding: 26px 30px 40px; display: none;
+        position: absolute; inset: 0; background: var(--fe-bg);
+        overflow: auto; display: none;
         /* ⚠ Above anything the explorer puts on the page. Its onboarding tour is
            appended to document.body at z-index 96 and its menus are fixed too,
            so a panel in the normal stacking order gets covered by them. */
@@ -281,47 +351,224 @@
          the middle of Settings — measured, twice. */
       body.settings-open .fe-tour { display: none !important; }
 
-      h1 { font-size: 19px; margin: 0 0 4px; }
-      h2 { font-size: 14px; margin: 26px 0 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-      .sub { color: var(--muted); margin: 0 0 18px; }
+      /* ── the app's settings ──────────────────────────────────────
+         Same control vocabulary as the product's user-settings dialog
+         (web/src/components/UserSettingsModal.vue): grouped cards on the
+         elevated ground, 34px controls, 12/12.5/13px text, a segmented strip
+         for a choice and a real switch for a yes/no. The two surfaces answer
+         different questions — that one owns the PERSON's preferences, this one
+         owns what this COMPUTER does — but a person moving between them should
+         not be able to tell they were built by different hands.
+
+         ⚠ One scrolling column, not the dialog's rail-and-panes. Two measured
+         reasons: this surface has fourteen rows where the dialog has forty, so
+         four panes in a 1280px window would each be mostly empty; and four
+         end-to-end suites (openwith, portable, connections, lang) assert
+         against `#settings` innerText, which excludes text in a hidden pane —
+         splitting it would have made them report missing cards that are one
+         click away. The reading width is capped instead, which is what the
+         panes were for. */
+      .set {
+        max-width: 760px;
+        padding: 26px 30px 48px;
+      }
+      .set__head {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--fe-gap);
+        padding-bottom: var(--fe-gap);
+        margin-bottom: var(--fe-gap-lg);
+        border-bottom: 1px solid var(--fe-border-soft);
+      }
+      .set__head-text { flex: 1 1 auto; min-width: 0; }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fe-text);
+      }
+      .sub {
+        margin: 2px 0 0;
+        font-size: var(--fe-text-xs);
+        color: var(--fe-text-muted);
+      }
+      h2 {
+        margin: 26px 0 var(--fe-gap-sm);
+        font-size: var(--fe-text-xs);
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: var(--fe-text-muted);
+      }
       .card {
-        border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
-        margin-bottom: 10px; background: var(--bg-2);
+        border: 1px solid var(--fe-border);
+        border-radius: var(--fe-radius);
+        padding: var(--fe-gap) 14px;
+        margin-bottom: var(--fe-gap-sm);
+        background: var(--fe-bg-elev);
       }
       .between { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-      .row { display: flex; gap: 8px; align-items: center; }
-      .muted { color: var(--muted); font-size: 13px; }
-      .err { color: var(--danger); }
-      .ok { color: #2eb872; }
-      code { background: rgba(127,127,127,.16); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
-      button {
-        font: inherit; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--line);
-        background: var(--bg); color: var(--fg); cursor: pointer;
+      .row { display: flex; gap: var(--fe-gap-sm); align-items: center; }
+      .label { font-size: var(--fe-text-sm); font-weight: 500; color: var(--fe-text); }
+      .muted { color: var(--fe-text-muted); font-size: var(--fe-text-xs); }
+      .err { color: var(--fe-danger); }
+      .ok { color: var(--fe-ok); }
+      code {
+        background: var(--fe-bg-hover);
+        padding: 1px 5px;
+        border-radius: var(--fe-radius-sm);
+        font-family: var(--fe-font-mono);
+        font-size: var(--fe-text-xs);
       }
-      button:hover { border-color: var(--muted); }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-      button.danger { color: var(--danger); }
-      button.link { border: 0; background: none; color: var(--accent); padding: 4px 2px; text-decoration: underline; }
-      input[type="text"] {
-        font: inherit; padding: 7px 10px; border-radius: 8px;
-        border: 1px solid var(--line); background: var(--bg); color: var(--fg); min-width: 260px;
-      }
-      .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 10px; }
-      .close { position: absolute; top: 18px; right: 22px; }
 
-      /* remote folder browser */
-      /* ⚠ Above #settings (200). This picker is opened FROM settings, so a
-         lower stacking order put it behind the panel that launched it —
-         the dialog was there, just invisible under a full-screen surface. */
-      #picker { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; place-items: center; z-index: 300; }
-      #picker.open { display: grid; }
-      #picker .panel {
-        width: min(520px, 92vw); max-height: 76vh; background: var(--bg);
-        border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column;
+      /* ── controls, in the dialog's exact metrics ─────────────────── */
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--fe-gap-xs);
+        height: var(--fe-h-md);
+        padding: 0 var(--fe-gap);
+        border: 1px solid var(--fe-border-strong);
+        border-radius: var(--fe-radius);
+        background: var(--fe-bg);
+        color: var(--fe-text);
+        font: inherit;
+        font-size: var(--fe-text-sm);
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
       }
-      #picker ul { list-style: none; margin: 10px 0; padding: 0; overflow: auto; flex: 1; }
-      #picker li { padding: 7px 9px; border-radius: 7px; cursor: pointer; }
-      #picker li:hover { background: var(--bg-2); }
+      button:hover:not(:disabled) { background: var(--fe-bg-hover); }
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      button.primary {
+        border-color: var(--fe-primary);
+        background: var(--fe-primary);
+        color: var(--fe-text-on-primary);
+      }
+      button.primary:hover:not(:disabled) { background: var(--fe-primary-hover); }
+      button.danger { border-color: var(--fe-border-strong); color: var(--fe-danger); }
+      button.danger:hover:not(:disabled) { background: var(--fe-bg-hover); }
+      button.link {
+        height: auto;
+        border: 0;
+        background: none;
+        color: var(--fe-primary);
+        padding: 4px 2px;
+        text-decoration: underline;
+      }
+      button.link:hover:not(:disabled) { background: none; color: var(--fe-primary-hover); }
+      .icon-btn {
+        flex: 0 0 auto;
+        width: var(--fe-h-sm);
+        height: var(--fe-h-sm);
+        padding: 0;
+        border: 0;
+        border-radius: var(--fe-radius-md);
+        background: transparent;
+        color: var(--fe-text-muted);
+      }
+      .icon-btn:hover:not(:disabled) { background: var(--fe-bg-hover); color: var(--fe-text); }
+      input[type="text"] {
+        height: var(--fe-h-md);
+        padding: 0 10px;
+        border-radius: var(--fe-radius);
+        border: 1px solid var(--fe-border);
+        background: var(--fe-bg);
+        color: var(--fe-text);
+        font: inherit;
+        font-size: var(--fe-text-sm);
+        min-width: 260px;
+      }
+      input[type="text"]:focus { outline: none; border-color: var(--fe-primary); }
+      .empty {
+        color: var(--fe-text-muted);
+        font-size: var(--fe-text-sm);
+        padding: 14px;
+        border: 1px dashed var(--fe-border-strong);
+        border-radius: var(--fe-radius);
+        margin-bottom: var(--fe-gap-sm);
+      }
+
+      /* A choice between three named answers — the dialog's segmented strip,
+         not three loose buttons where the selected one happens to be blue. */
+      .segmented {
+        display: inline-flex;
+        align-self: flex-start;
+        border: 1px solid var(--fe-border);
+        border-radius: var(--fe-radius);
+        overflow: hidden;
+      }
+      .segmented button {
+        height: var(--fe-h-md);
+        border: 0;
+        border-right: 1px solid var(--fe-border);
+        border-radius: 0;
+        background: var(--fe-bg);
+        color: var(--fe-text-muted);
+      }
+      .segmented button:last-child { border-right: 0; }
+      .segmented button.is-active {
+        background: var(--fe-primary-soft);
+        color: var(--fe-primary);
+      }
+
+      /* A yes/no is a switch. It used to be a button reading "On" — which is a
+         control that states the current value where every other one states the
+         verb, so nobody could tell whether "On" was the state or the action. */
+      .switch {
+        flex: 0 0 auto;
+        position: relative;
+        width: 34px;
+        height: 20px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: var(--fe-border-strong);
+        cursor: pointer;
+        transition: background 120ms ease;
+      }
+      .switch:hover:not(:disabled) { background: var(--fe-border-strong); }
+      .switch.is-on { background: var(--fe-primary); }
+      .switch.is-on:hover:not(:disabled) { background: var(--fe-primary); }
+      .switch:disabled { opacity: .55; cursor: not-allowed; }
+      .switch__knob {
+        position: absolute;
+        top: 2px; left: 2px;
+        width: 16px; height: 16px;
+        border-radius: 999px;
+        background: var(--fe-bg);
+        transition: transform 120ms ease;
+      }
+      .switch.is-on .switch__knob { transform: translateX(14px); }
+
+      /* ── dialogs (folder picker, the sync trash listing) ──────────
+         ⚠ Above #settings (200). Both are opened FROM settings, so a lower
+         stacking order put them behind the panel that launched them — the
+         dialog was there, just invisible under a full-screen surface. */
+      .dlg { position: fixed; inset: 0; background: rgba(17, 24, 39, .55); display: none; place-items: center; z-index: 300; }
+      .dlg.open { display: grid; }
+      .dlg .panel {
+        width: min(520px, 92vw); max-height: 76vh;
+        background: var(--fe-bg);
+        border: 1px solid var(--fe-border);
+        border-radius: var(--fe-radius-lg);
+        box-shadow: var(--fe-shadow);
+        padding: var(--fe-gap-lg);
+        display: flex; flex-direction: column; gap: var(--fe-gap-sm);
+      }
+      .dlg .panel > .between > strong { font-size: var(--fe-text-md); }
+      .dlg ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+      .dlg li {
+        display: flex; align-items: center; gap: var(--fe-gap-sm);
+        min-height: var(--fe-h-md);
+        padding: 0 var(--fe-gap-sm);
+        border-radius: var(--fe-radius-sm);
+        font-size: var(--fe-text-sm);
+      }
+      #pk-list li { cursor: pointer; }
+      #pk-list li:hover { background: var(--fe-bg-hover); }
+      .dlg li .muted { margin-left: auto; }
     </style>
   </head>
   <body>
@@ -335,14 +582,24 @@
       </section>
     </div>
 
-    <div id="picker"><div class="panel">
-      <div class="between"><strong id="pk-title">Choose a folder on the server</strong><button id="pk-close">✕</button></div>
-      <div class="muted" id="pk-path" style="margin-top:6px"></div>
+    <div id="picker" class="dlg"><div class="panel">
+      <div class="between"><strong id="pk-title">Choose a folder on the server</strong><button class="icon-btn" id="pk-close" aria-label="Close"></button></div>
+      <div class="muted" id="pk-path"></div>
       <ul id="pk-list"></ul>
       <div class="row" style="justify-content:flex-end">
         <button id="pk-up">Up</button>
         <button class="primary" id="pk-use">Sync this folder</button>
       </div>
+    </div></div>
+
+    <!-- What the sync engine removed from THIS computer and is still holding.
+         It used to be an `alert()` — a native modal box printing a plain-text
+         list, which is both the one surface in this window the product cannot
+         theme and a blocking call on the renderer. -->
+    <div id="trash" class="dlg"><div class="panel">
+      <div class="between"><strong id="tr-title"></strong><button class="icon-btn" id="tr-close" aria-label="Close"></button></div>
+      <div class="muted" id="tr-sub"></div>
+      <ul id="tr-list"></ul>
     </div></div>
 
     <script type="module">
@@ -362,6 +619,136 @@
         navigator.share = (d) => window.filexApp.share(d);
       }
 
+      // ── the shell follows the PRODUCT's theme, it does not choose one ──
+      //
+      // ⚠⚠ The rule here is "copy the answer", not "work out the answer
+      // again". The explorer resolves the light/dark mode from the preference
+      // the theme gallery writes (`filex.thememode`), the host's `theme` prop
+      // and the OS, in that order (packages/core/src/lib/themes.ts), and it
+      // publishes the result as `fe--theme-dark` / `fe--theme-light` on its own
+      // root. Re-deriving it here would be a second implementation of a
+      // three-way precedence rule, and the two would disagree on exactly the
+      // cases that are hard to see.
+      //
+      // Measured on 2026-09-12, before this existed: with the preference set to
+      // Dark the file list went dark and the app's own settings surface stayed
+      // white — a full-window white page inside a dark application.
+      //
+      // The palette needs no code at all: core injects `:root,.fe{…}` into
+      // <head> (syncThemeStyle), so a palette picked in the gallery is already
+      // on this document's root by the time anything repaints.
+      let reportedGround = null;
+      /** The --fe-primary the top bar's mark was last baked with. */
+      let brandedWith = null;
+      function setDark(dark) {
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        // ⚠ Tell the main process what we ended up painting. It cannot work it
+        // out: the mode and the palette live in THIS window's localStorage, and
+        // `BrowserWindow.backgroundColor` is fixed at construction — before any
+        // page exists to ask. Remembering the last ground is what stops the
+        // next launch opening as a white rectangle on a dark palette.
+        //
+        // Read AFTER the class flip and on the next frame, so the value is the
+        // variant that is actually live rather than the one being replaced.
+        requestAnimationFrame(() => {
+          // ⚠ The top bar's mark is an <img>, so its blue is BAKED IN and does
+          // not follow the palette on its own — unlike the rail's, which is
+          // inline SVG. Re-bake it here or the window goes dark around a mark
+          // that stays on the light blue. Guarded on the colour actually
+          // changing: reassigning `config` re-renders the explorer.
+          const primary = getComputedStyle(document.documentElement)
+            .getPropertyValue('--fe-primary').trim();
+          if (explorer && primary && primary !== brandedWith) {
+            brandedWith = primary;
+            explorer.config = {
+              ...explorer.config,
+              brand: { ...(explorer.config?.brand ?? {}), markUrl: brandMarkUrl() },
+            };
+          }
+          const bg = getComputedStyle(document.documentElement).getPropertyValue('--fe-bg').trim();
+          if (!bg || bg === reportedGround) return;
+          reportedGround = bg;
+          void window.filexApp.setSettings({ themeBg: bg });
+        });
+      }
+      /** What the stored preference resolves to with no explorer on screen —
+       *  the boot surfaces draw before one is mounted, and the sign-in window
+       *  never has one. Same precedence as core's, for the two values that can
+       *  be answered without it. */
+      function darkFromPreference() {
+        let mode = 'host';
+        try { mode = localStorage.getItem('filex.thememode') || 'host'; } catch { /* blocked */ }
+        if (mode === 'dark') return true;
+        if (mode === 'light') return false;
+        return !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+      }
+      let themeWatch = null;
+      let themeWatchTimer = null;
+      /** Mirror the mounted explorer's resolved mode onto <html>, and keep
+       *  mirroring it — the gallery repaints in place, with no reload. */
+      function adoptExplorerTheme(el) {
+        themeWatch?.disconnect();
+        themeWatch = null;
+        clearTimeout(themeWatchTimer);
+        themeWatchTimer = null;
+        if (!el) { setDark(darkFromPreference()); return; }
+
+        // ⚠⚠ ONE node, its `class` attribute, and nothing else.
+        //
+        // The first version of this observed the host element with
+        // `{ subtree: true, childList: true }`, because the `.fe` root does not
+        // exist until Vue has mounted. That is a watcher on every row the file
+        // list renders: the callback ran on each listing repaint, each menu
+        // open, each keystroke in the search field, and its read forced a style
+        // recalculation every time. Measured 2026-09-12 — keep-e2e, which
+        // drives long listings and waits on a real sync, went from green to 16
+        // failures on timeouts alone.
+        //
+        // So: find `.fe` once, by polling for it, then watch that node and only
+        // that node. `class` on `.fe` is exactly where the explorer publishes
+        // its resolved mode, and it changes only when somebody changes the
+        // theme.
+        const apply = (fe) => {
+          // ⚠ The explorer publishes a class only for an EXPLICIT mode; in auto
+          // it leaves both off and lets its own media query decide, so the OS
+          // is the answer in that case.
+          if (fe.classList.contains('fe--theme-dark')) setDark(true);
+          else if (fe.classList.contains('fe--theme-light')) setDark(false);
+          else setDark(!!window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+        };
+        // Until it exists, the stored preference is the best answer — and it is
+        // the same one core will reach for every value except 'host'.
+        setDark(darkFromPreference());
+        let tries = 0;
+        const attach = () => {
+          const fe = el.querySelector('.fe');
+          if (!fe) {
+            // ~10s at 100ms. A window that never mounts an explorer has bigger
+            // problems than its chrome's palette, and the fallback above is
+            // already on screen.
+            if (++tries > 100) return;
+            themeWatchTimer = setTimeout(attach, 100);
+            return;
+          }
+          apply(fe);
+          themeWatch = new MutationObserver(() => apply(fe));
+          themeWatch.observe(fe, { attributes: true, attributeFilter: ['class'] });
+        };
+        attach();
+      }
+      // The OS flipping while the explorer is in auto, and another window of
+      // this app changing the preference.
+      window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (themeWatch) return;            // the observer's read() already covers it
+        setDark(darkFromPreference());
+      });
+      window.addEventListener('storage', (e) => {
+        if (e.key === null || e.key === 'filex.thememode') {
+          if (!themeWatch) setDark(darkFromPreference());
+        }
+      });
+
       // Both drawn on a 24-unit grid so they optically match at 18px.
       const ICON_PLUS =
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
@@ -371,6 +758,14 @@
         'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
         '<circle cx="12" cy="12" r="3.2"/>' +
         '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+      // ⚠ The same reason as the two above: a `✕` character is drawn against
+      // the font's baseline, so it sits low and left in a square button. The
+      // dialog and the settings head both use it, and the product's own dialogs
+      // draw the same 16px stroke cross.
+      const ICON_X =
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+        '<path d="M6 6l12 12M18 6L6 18"/></svg>';
 
       // ── language ──────────────────────────────────────────────
       // The explorer inside this window already speaks the user's language. A
@@ -430,7 +825,11 @@
         'set.connections_sub':  ['Connect this server to a bucket, a share or another server — and see how to mount it from this computer.',
                                  'Bu sunucuyu bir bucket, bir paylaşım ya da başka bir sunucuya bağlayın — ve bu bilgisayardan nasıl bağlanacağınızı görün.'],
         'set.connections_open': ['Manage storages', 'Depoları yönet'],
-        'set.connections_guide':['How to connect', 'Nasıl bağlanılır'],
+        'set.close':            ['Close settings', 'Ayarları kapat'],
+        // ⚠ Names the rail's + rather than drawing a second one. See the note
+        // over settingsHtml().
+        'set.add_hint':         ['Use + on the left to sign in to another server.',
+                                 'Başka bir sunucuya giriş yapmak için soldaki + düğmesini kullan.'],
         'set.accounts':         ['Accounts', 'Hesaplar'],
         'set.admin':            ['Admin panel ↗', 'Yönetim paneli ↗'],
         'set.signout':          ['Sign out', 'Çıkış yap'],
@@ -448,13 +847,23 @@
         'set.sync_root_none':   ['Not chosen yet — you will be asked at the first "Keep on this computer".',
                                  'Henüz seçilmedi — ilk "Bilgisayarda tut" dediğinde sorulur.'],
         'set.sync_root_change': ['Change…', 'Değiştir…'],
-        'set.trash':            ['Recently deleted', 'Son silinenler'],
+        // ⚠ Named for the ACTOR, not for the act. "Recently deleted" is what
+        // the file list's own Trash holds — the server's — and two entries in
+        // one window called the same thing are two entries nobody can tell
+        // apart. This one holds local copies the SYNC ENGINE removed from this
+        // computer, which is a different thing kept in a different place.
+        'set.trash':            ['Removed by sync', 'Eşitlemenin sildikleri'],
+        'set.trash_sub':        ['Files sync removed from this computer. Kept for 30 days.',
+                                 'Eşitlemenin bu bilgisayardan kaldırdığı dosyalar. 30 gün saklanır.'],
         'set.sync_note':        ['The first sync of a folder merges both sides and deletes nothing. After that deletes carry across; anything removed from this computer is kept for 30 days.',
                                  'Bir klasörün ilk eşitlemesi iki tarafı birleştirir, hiçbir şeyi silmez. Sonrasında silmeler karşı tarafa geçer; bu bilgisayardan silinen her şey 30 gün saklanır.'],
         'set.this_app':         ['This app', 'Bu uygulama'],
         'set.background':       ['Keep running in the background', 'Arka planda çalışmaya devam et'],
         'set.background_sub':   ['Closing the window leaves filex in the tray so folders keep syncing.',
                                  'Pencereyi kapatınca filex sistem tepsisinde kalır, klasörler eşitlenmeye devam eder.'],
+        'set.notifications':    ['Notifications', 'Bildirimler'],
+        'set.notifications_sub':['Show a notification when something new lands in your bell. Clicking it opens the file, folder or share it is about.',
+                                 'Çanınıza yeni bir şey düştüğünde bildirim göster. Bildirime tıklayınca konusu olan dosya, klasör ya da paylaşım açılır.'],
         'set.autostart':        ['Start when I sign in', 'Oturum açtığımda başlat'],
         'set.autostart_refused':['Requested, but the system did not accept it.', 'İstendi ama sistem kabul etmedi.'],
         'set.autostart_sub':    ['Launches minimised to the tray.', 'Sistem tepsisine küçültülmüş olarak açılır.'],
@@ -533,6 +942,7 @@
         'pick.empty':           ['No folders here.', 'Burada klasör yok.'],
         'pick.up':              ['Up', 'Üst klasör'],
         'pick.use':             ['Sync this folder', 'Bu klasörü eşitle'],
+        'pick.close':           ['Close', 'Kapat'],
         'pick.pick_storage':    ['Open a storage first, then choose a folder inside it.',
                                  'Önce bir depo aç, sonra içindeki klasörü seç.'],
       };
@@ -563,21 +973,59 @@
       // The application's own mark — the same folder-and-check the web app uses
       // (web/src/components/LogoMark.vue), so the desktop and the browser are
       // recognisably one product. Fixed: it says filex, never which server.
+      // gorunum:v1 — flat product blue, not the old indigo→violet gradient.
+      // The fill is the palette's own `--fe-primary`, exactly as
+      // web/src/components/LogoMark.vue does it, so the mark is #2f6ceb on the
+      // light variant and #5b8cff on the dark one and it follows any theme the
+      // product ever ships.
+      //
+      // ⚠ The literal after the comma is a floor, not the value in use: `fill`
+      // has no inherited value to fall back to, so a context where the
+      // stylesheet has not loaded would paint the mark BLACK rather than blue.
+      // This window loads it in <head> (see the <link> above), so the token
+      // always wins — measured 2026-09-12, computed fill rgb(47,108,235).
       const ICON_APP =
         '<svg viewBox="0 0 32 32" aria-hidden="true">' +
-        '<defs><linearGradient id="filex-rail-grad" x1="0" y1="0" x2="1" y2="1">' +
-        '<stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#4338ca"/>' +
-        '</linearGradient></defs>' +
-        '<rect width="32" height="32" rx="8" fill="url(#filex-rail-grad)"/>' +
+        '<rect width="32" height="32" rx="8" fill="var(--fe-primary, #2f6ceb)"/>' +
         '<path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" ' +
         'fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>' +
         '<path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" ' +
         'stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-      const ICON_MARK =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
-        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-        '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.4h9A1.5 1.5 0 0 1 21 9.9v7.6a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>';
+      /**
+       * The SAME mark, as something an `<img src>` can load — for the
+       * explorer's own top bar (`config.brand`, gorunum:v3-shell).
+       *
+       * ⚠⚠ Why config and not a slot: a host that mounts `<filex-explorer>`
+       * cannot fill ANY slot in it. Vue projects light DOM into a custom
+       * element only through a native `<slot>` inside a shadow root, and this
+       * element is deliberately `shadowRoot: false` because the whole product
+       * look is one global stylesheet. Measured from this window before the
+       * config field existed: the trailing cluster's `header-actions` slot
+       * counted 0 children no matter what was put in the element.
+       *
+       * Derived from ICON_APP rather than pasted as a second blob, so the boot
+       * surface and the top bar cannot drift into two different logos.
+       *
+       * ⚠ Three things an inline SVG gets for free and a data: URI does not:
+       *   · `xmlns` — the HTML parser supplies it for inline SVG; a standalone
+       *     SVG document without it does not render at all.
+       *   · custom properties — an SVG loaded as an IMAGE is its own document
+       *     and cannot see this page's `--fe-primary`, so the fill has to be
+       *     the RESOLVED colour, baked in, and re-baked when the mode changes
+       *     (see setDark). Left as `var()` it would silently paint the light
+       *     blue on a dark window.
+       *   · a literal `#` — it opens a fragment inside a data: URI, and the
+       *     colour is `#2f6ceb`. base64 sidesteps that entirely.
+       */
+      function brandMarkUrl() {
+        const primary = getComputedStyle(document.documentElement)
+          .getPropertyValue('--fe-primary').trim() || '#2f6ceb';
+        const svg = ICON_APP
+          .replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
+          .replace('var(--fe-primary, #2f6ceb)', primary);
+        return 'data:image/svg+xml;base64,' + btoa(svg);
+      }
 
       // ── the server's identity ─────────────────────────────────
       // Branding (logo + name) is a property of the SERVER, so it is fetched per
@@ -614,7 +1062,11 @@
         // way to say it.
         const mark = brand
           ? `<div class="boot__mark boot__mark--brand"><img src="${esc(brand.logoUrl)}" alt=""></div>`
-          : `<div class="boot__mark">${ICON_MARK}</div>`;
+          // ⚠ The application's real logo, not a white glyph on a blue plate.
+          // The plate was drawn from the shell's own accent, which made it a
+          // SECOND blue mark for an application that already has one — and one
+          // that changed colour with the palette, which a logo must not.
+          : `<div class="boot__mark">${ICON_APP}</div>`;
         const b = $('#boot');
         b.innerHTML = `<div class="boot__inner">${mark}${html}</div>`;
         b.classList.add('on');
@@ -630,11 +1082,57 @@
         $('#boot').innerHTML = '';
       }
 
+      /**
+       * Where a clicked notification asked us to land: `{ storage, folder,
+       * select }` from the shared resolver (web/src/lib/notificationTarget.ts,
+       * imported by the main process — this page never works it out itself).
+       * Consumed by the next mountExplorer() and then cleared.
+       */
+      let pendingReveal = null;
+
+      /**
+       * Select one row inside the listing that is already on screen.
+       *
+       * ⚠ Compared attribute-by-attribute rather than through a
+       * `[data-fe-path="…"]` selector: a real file name may contain a quote or
+       * a backslash, and a selector built by concatenation breaks on exactly
+       * those names. The click goes through the component's own row handler,
+       * so the selection behaves afterwards as if a hand had made it.
+       */
+      async function revealRow(qualified) {
+        if (!qualified) return false;
+        const deadline = Date.now() + 8000;
+        // ⚠⚠ The selection has to STICK. The listing clears it when its load
+        // finishes, which is after the first rows are on screen — so a reveal
+        // that returns on the first success is a coin toss (measured in the
+        // browser; same fix as web/src/views/Explore.vue). Re-click whenever
+        // it is found unselected, stop once it has survived three checks.
+        let stable = 0;
+        while (Date.now() < deadline) {
+          const row = Array.from(document.querySelectorAll('[data-fe-path]'))
+            .find((el) => el.getAttribute('data-fe-path') === qualified);
+          if (row && row.getAttribute('aria-selected') === 'true') {
+            if (++stable >= 3) return true;
+          } else {
+            stable = 0;
+            if (row) {
+              row.scrollIntoView({ block: 'center' });
+              row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }
+          }
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        return false;
+      }
+
       async function mountExplorer(account) {
         const slot = $('#explorer-host');
         if (!account) {
           slot.innerHTML = '';
           explorer = null; mountedFor = null;
+          // No explorer to copy from — fall back to the stored preference so
+          // the boot surface is still the right variant.
+          adoptExplorerTheme(null);
           showBoot(
             `<div class="boot__title">${esc(T('boot.no_account'))}</div>` +
             `<div class="boot__sub">${esc(T('boot.no_account_sub'))}</div>` +
@@ -665,11 +1163,13 @@
             `<div class="boot__title">${esc(T('boot.unreachable', { host: host(account.serverUrl) }))}</div>` +
             `<div class="boot__sub">${esc(T('boot.unreachable_sub'))}</div>` +
             `<div class="boot__err">${esc(e.message || e)}</div>` +
-            `<div class="boot__actions"><button class="primary" id="boot-retry">${esc(T('boot.retry'))}</button>` +
-            `<button id="boot-settings">${esc(T('rail.settings'))}</button></div>`,
+            // ⚠ One action. This surface used to offer "Settings" beside it,
+            // 40px from the rail's gear, which is on screen in this exact state
+            // — two controls for one job, in one view. The gear survives
+            // because it is there in every other state too.
+            `<div class="boot__actions"><button class="primary" id="boot-retry">${esc(T('boot.retry'))}</button></div>`,
           );
           $('#boot-retry').addEventListener('click', () => { mountedFor = null; void mountExplorer(account); });
-          $('#boot-settings').addEventListener('click', () => toggleSettings(true));
           return;
         }
         if (mountedFor !== account.id) return;   // switched away while loading
@@ -683,9 +1183,21 @@
           auth: { kind: 'bearer', token: () => window.filexApp.token(account.id) },
           storages,
           multiStorageRoot: storages.length > 1,
+          // gorunum:v3-shell — the product mark and wordmark at the far left
+          // of the top bar. Without this the desktop window's top-left corner
+          // is blank while the web app's is not: the same product, shipped two
+          // ways, with a logo in only one of them. See brandMarkUrl().
+          brand: { name: 'filex', markUrl: brandMarkUrl() },
           // One storage does not deserve a drive-picker in front of it: open the
           // files. More than one, and the root listing is the useful landing.
-          initialPath: storages.length === 1 ? `${storages[0].name}://` : undefined,
+          // ⚠ A notification click wins over the default landing folder. The
+          // component reads initialPath once, at construction, and this window
+          // persists no path (below) — so "go there" means mounting there,
+          // which is why openNotification() below remounts rather than poking
+          // a live component.
+          initialPath: pendingReveal
+            ? `${pendingReveal.storage}://${pendingReveal.folder ?? ''}`
+            : storages.length === 1 ? `${storages[0].name}://` : undefined,
           // ⚠ Deliberately not persisted. The stored path is a single global
           // key, so remembering it would try to open account A's folder after a
           // switch to account B.
@@ -723,6 +1235,35 @@
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
         slot.appendChild(explorer);
+        // From here on the explorer is the authority on light/dark, and the
+        // chrome copies it. Re-pointed on every mount: a rail switch replaces
+        // the element, and an observer left on the old one watches a node that
+        // is no longer in the document.
+        adoptExplorerTheme(explorer);
+        if (pendingReveal) {
+          const want = pendingReveal.select;
+          pendingReveal = null;
+          if (want) void revealRow(want);
+        }
+      }
+
+      /**
+       * A native notification was clicked (src/notifications.ts → preload
+       * `onNotificationOpen`). The payload is the RESOLVED destination; this
+       * function only carries it out. A share never reaches here — the main
+       * process sends those to the system browser.
+       */
+      async function openNotification(payload) {
+        const dest = payload && payload.dest;
+        if (!dest || dest.kind !== 'folder') return;
+        const active = (state.accounts || []).find((a) => a.id === state.activeId);
+        // The account may have been switched between the toast and the click.
+        if (!active || (payload.accountId && payload.accountId !== active.id)) return;
+        pendingReveal = dest;
+        // Force a remount: mountExplorer() is a no-op while the same account is
+        // already mounted, and the component has no "navigate to" input.
+        mountedFor = null;
+        await mountExplorer(active);
       }
 
       // ── rail ──────────────────────────────────────────────────
@@ -759,17 +1300,9 @@
         const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
         rail.innerHTML = '';
 
-        // ── the app's own mark, fixed ─────────────────────────
-        // filex is what this WINDOW is; the rows underneath are servers. The
-        // two identities must not trade places: a rail whose top badge changed
-        // with the selected account left nothing on screen that said which
-        // application you were looking at.
-        const appMark = document.createElement('div');
-        appMark.className = 'appmark';
-        appMark.title = 'filex';
-        appMark.innerHTML = ICON_APP;
-        rail.appendChild(appMark);
-        rail.appendChild(Object.assign(document.createElement('div'), { className: 'rail-sep' }));
+        // ⚠ No app mark here — the top bar carries it, with the wordmark.
+        // See the note where `.appmark` used to be styled. The rail is servers
+        // and nothing else now: the rows, the "+", and the gear at the bottom.
 
         for (const a of state.accounts) {
           const st = statusOf[a.id];
@@ -835,15 +1368,41 @@
       }
 
       // ── settings (the APP's settings, not the server's) ───────
+      //
+      // ⚠⚠ WHAT IS NOT HERE, AND WHY. This surface owns what this COMPUTER
+      // does — the accounts signed in on it, the folders it mirrors, whether it
+      // starts with the OS, how it updates. It deliberately carries NO copy of
+      // a preference that belongs to the PERSON: theme, palette, density and
+      // the row height already have exactly one control each, in the file
+      // list's "⋯" menu (Theme, Compact view — measured: they are reachable in
+      // this window, packages/core Toolbar.vue `utilityActions`). A second
+      // switch here would be a second answer to a question the product has
+      // already answered once, which is the thing this whole pass is removing.
+      //
+      // Language is the exception and it is not a copy: the TRAY MENU is a
+      // native menu built in the main process, and nothing in the file list can
+      // tell it what language to speak. One control, in the one place that can
+      // reach all three surfaces (this window, the tray, the explorer).
       function settingsHtml() {
         const active = state.accounts.find((a) => a.id === state.activeId);
         const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
 
+        /** A yes/no row: the label, what it means, and a switch that shows the
+         *  state instead of a button whose text is the state. */
+        const toggle = (id, on, label, sub, disabled) => `
+          <div class="card"><div class="between">
+            <div><div class="label">${esc(label)}</div>
+              <div class="muted">${esc(sub)}</div></div>
+            <button id="${id}" class="switch${on ? ' is-on' : ''}" role="switch"
+              aria-checked="${on ? 'true' : 'false'}" aria-label="${esc(label)}"
+              ${disabled ? 'disabled' : ''}><span class="switch__knob"></span></button>
+          </div></div>`;
+
         const accounts = state.accounts.length ? state.accounts.map((a) => `
           <div class="card"><div class="between">
-            <div>
-              <div><strong>${esc(a.email)}</strong></div>
-              <div class="muted">${esc(a.serverUrl)}</div>
+            <div style="min-width:0">
+              <div class="label">${esc(a.email)}</div>
+              <div class="muted" style="overflow-wrap:anywhere">${esc(a.serverUrl)}</div>
             </div>
             <div class="row">
               <button class="link" data-admin="${a.id}">${esc(T('set.admin'))}</button>
@@ -864,7 +1423,7 @@
               <div><code>${esc(f.remotePath)}</code></div>
               <div class="muted" style="overflow-wrap:anywhere">↔ ${esc(f.localPath)}</div>
               <div class="muted">${esc(acc ? acc.email : T('set.unknown_account'))}</div>
-              <div class="${cls}" style="font-size:13px">${esc(line)}</div>
+              <div class="muted ${cls}">${esc(line)}</div>
             </div>
             <div class="row">
               <button data-openlocal="${esc(f.localPath)}">${esc(T('set.open_folder'))}</button>
@@ -874,32 +1433,47 @@
         }).join('') : `<div class="empty">${esc(T('set.no_folders'))}</div>`;
 
         const engineWarning = state.syncEngine === 'missing'
-          ? `<div class="card err">${esc(T('set.no_engine'))}</div>` : '';
+          ? `<div class="card"><div class="err">${esc(T('set.no_engine'))}</div></div>` : '';
 
         return `
-          <button class="close" id="close-settings">✕</button>
-          <h1>${esc(T('set.title'))}</h1>
-          <p class="sub">${esc(T('set.sub'))}</p>
+        <div class="set">
+          <div class="set__head">
+            <div class="set__head-text">
+              <h1>${esc(T('set.title'))}</h1>
+              <p class="sub">${esc(T('set.sub'))}</p>
+            </div>
+            <button class="icon-btn" id="close-settings" aria-label="${esc(T('set.close'))}"
+              title="${esc(T('set.close'))}">${ICON_X}</button>
+          </div>
 
           <h2>${esc(T('set.accounts'))}</h2>
           ${accounts}
-          <div class="row"><button id="add-account">${esc(T('boot.add'))}</button></div>
+          <!-- ⚠ No "Add an account" button here. The rail's + is the app's one
+               door to adding one and it is on screen at every moment, including
+               this one; a second button in the list would be the duplicate this
+               pass is removing. The hint names the survivor so nobody has to
+               hunt for it. -->
+          <p class="muted">${esc(T('set.add_hint'))}</p>
 
           <h2>${esc(T('set.connections'))}</h2>
+          <!-- ⚠ ONE button, not two. "How to connect" used to sit beside it and
+               open the same shared panel on its other tab — and the file list's
+               own sidebar already has a "How to connect" entry that opens that
+               exact component (packages/core SideNav → open-connections). The
+               sidebar entry is always on screen and belongs to the shared
+               package, so it keeps the job; this button keeps the half the
+               sidebar does not name. -->
           <div class="card"><div class="between">
-            <div><strong>${esc(T('set.connections'))}</strong>
+            <div><div class="label">${esc(T('set.connections'))}</div>
               <div class="muted">${esc(T('set.connections_sub'))}</div></div>
-            <div class="row">
-              <button id="conn-open" ${active ? '' : 'disabled'}>${esc(T('set.connections_open'))}</button>
-              <button id="conn-guide" ${active ? '' : 'disabled'}>${esc(T('set.connections_guide'))}</button>
-            </div>
+            <button id="conn-open" ${active ? '' : 'disabled'}>${esc(T('set.connections_open'))}</button>
           </div></div>
 
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
           ${active ? `<div class="card"><div class="between">
             <div style="min-width:0">
-              <div><strong>${esc(T('set.sync_root'))}</strong></div>
+              <div class="label">${esc(T('set.sync_root'))}</div>
               <div class="muted" style="overflow-wrap:anywhere">${
                 active.syncRoot ? esc(active.syncRoot) : esc(T('set.sync_root_none'))}</div>
               <div class="muted">${esc(T('set.sync_root_sub'))}</div>
@@ -918,39 +1492,33 @@
 
           <h2>${esc(T('set.this_app'))}</h2>
           <div class="card"><div class="between">
-            <div><strong>${esc(T('set.language'))}</strong>
+            <div><div class="label">${esc(T('set.language'))}</div>
               <div class="muted">${esc(T('set.language_sub'))}</div></div>
-            <div class="row">${
+            <div class="segmented">${
               // The names stay in their own language — a Turkish speaker looking
               // for Turkish scans for "Türkçe", not for "Turkish".
               [['system', T('set.language_system')], ['en', 'English'], ['tr', 'Türkçe']]
                 .map(([code, label]) => `<button data-locale="${code}"${
-                  (state.locale || 'system') === code ? ' class="primary"' : ''
+                  (state.locale || 'system') === code ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
                 }>${esc(label)}</button>`).join('')
             }</div>
           </div></div>
-          <div class="card"><div class="between">
-            <div><strong>${esc(T('set.background'))}</strong>
-              <div class="muted">${esc(T('set.background_sub'))}</div></div>
-            <button id="bg">${esc(T(state.runInBackground ? 'set.on' : 'set.off'))}</button>
-          </div></div>
-          <div class="card"><div class="between">
-            <div><strong>${esc(T('set.autostart'))}</strong>
-              <div class="muted">${esc(T(
-                // A dev run refuses to write a login item at all (it could only
-                // register the bare electron binary), so the row says that
-                // rather than offering a switch that silently does nothing.
-                state.launchAtLoginSupported === false ? 'set.autostart_dev'
-                : state.launchAtLoginEffective === false && state.launchAtLogin
-                  ? 'set.autostart_refused' : 'set.autostart_sub'))}</div></div>
-            <button id="login-item" ${state.launchAtLoginSupported === false ? 'disabled' : ''}>${
-              esc(T(state.launchAtLogin ? 'set.on' : 'set.off'))}</button>
-          </div></div>
+          ${toggle('bg', state.runInBackground, T('set.background'), T('set.background_sub'))}
+          ${toggle('notifs', state.notifications !== false, T('set.notifications'), T('set.notifications_sub'))}
+          ${toggle('login-item', state.launchAtLogin, T('set.autostart'), T(
+            // A dev run refuses to write a login item at all (it could only
+            // register the bare electron binary), so the row says that rather
+            // than offering a switch that silently does nothing.
+            state.launchAtLoginSupported === false ? 'set.autostart_dev'
+            : state.launchAtLoginEffective === false && state.launchAtLogin
+              ? 'set.autostart_refused' : 'set.autostart_sub'),
+            state.launchAtLoginSupported === false)}
           ${portableCard()}
           ${openWithCard()}
           <h2>${esc(T('upd.title'))}</h2>
           ${updateCard()}
-          <p class="muted">filex ${esc(state.appVersion || '')}</p>`;
+          <p class="muted" style="margin-top:14px">filex ${esc(state.appVersion || '')}</p>
+        </div>`;
       }
 
       // ── "Open with filex" ─────────────────────────────────────
@@ -989,7 +1557,7 @@
         return `
           <h2>${esc(T('ow.title'))}</h2>
           <div class="card">
-            <div>${esc(T('ow.idea'))}</div>
+            <div class="label">${esc(T('ow.idea'))}</div>
             <div class="muted" style="margin-top:6px">${
               esc(T('ow.types', { types: (ow.extensions || []).map((e) => '.' + e).join('  ') }))}</div>
             <div class="muted">${esc(T(ow.registered ? 'ow.registered' : 'ow.dev'))}</div>
@@ -1002,7 +1570,7 @@
             <button id="ow-default">${esc(T(btn))}</button>
           </div></div>
           ${live ? `<div class="card">
-            <div><strong>${esc(T('ow.open_now'))}</strong></div>${live}</div>` : ''}`;
+            <div class="label">${esc(T('ow.open_now'))}</div>${live}</div>` : ''}`;
       }
 
       /**
@@ -1019,7 +1587,7 @@
         const p = state.portable;
         if (!p) return '';
         return `<div class="card"><div class="between">
-            <div style="min-width:0"><strong>${esc(T('set.portable'))}</strong>
+            <div style="min-width:0"><div class="label">${esc(T('set.portable'))}</div>
               <div class="muted">${esc(T(p.besideExe ? 'set.portable_sub' : 'set.portable_stuck'))}</div>
               <div class="muted"><code>${esc(p.dataDir || '')}</code></div></div>
             <button id="portable-show">${esc(T('set.portable_show'))}</button>
@@ -1051,7 +1619,7 @@
             ? `<button class="primary" id="upd-download">${esc(T('upd.download'))}</button>`
             : `<button id="upd-check" ${supported ? '' : 'disabled'}>${esc(T('upd.check'))}</button>`;
         return `<div class="card"><div class="between">
-            <div><strong>${esc(line)}</strong>
+            <div><div class="label">${esc(line)}</div>
               <div class="muted">${esc(T(
                 !(manual && supported) ? 'upd.idea'
                 : portable ? 'upd.portable_idea' : 'upd.manual_idea'))}</div></div>
@@ -1086,11 +1654,8 @@
           catch (e) { alert(String(e.message || e)); }
           render(); renderSettings();
         }));
-        $('#add-account', el).addEventListener('click', () => window.filexApp.addAccount());
         const connOpen = $('#conn-open', el);
         if (connOpen) connOpen.addEventListener('click', () => openConnections('storages'));
-        const connGuide = $('#conn-guide', el);
-        if (connGuide) connGuide.addEventListener('click', () => openConnections('connect'));
         const addSync = $('#add-sync', el);
         if (addSync) addSync.addEventListener('click', () => openPicker());
         const rootChange = $('#sync-root-change', el);
@@ -1098,14 +1663,13 @@
           state = await window.filexApp.setSyncRoot(state.activeId);
           renderSettings();
         });
-        $('#sync-trash', el).addEventListener('click', async () => {
-          const items = await window.filexApp.syncTrash();
-          alert(items.length
-            ? `${T('sync.trash_kept')}\n\n${items.slice(0, 25).map((i) => `${i.rel}  (${new Date(i.deleted).toLocaleDateString()})`).join('\n')}`
-            : T('sync.trash_empty'));
-        });
+        $('#sync-trash', el).addEventListener('click', () => void openTrash());
         $('#bg', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ runInBackground: !state.runInBackground });
+          renderSettings();
+        });
+        $('#notifs', el).addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ notifications: state.notifications === false });
           renderSettings();
         });
         el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
@@ -1255,6 +1819,52 @@
         } catch (e) { alert(String(e.message || e)); }
       });
 
+      // ── what sync removed from THIS computer ──────────────────
+      // A surface, not an alert(). The native box is the one thing in this
+      // window the product's palette cannot reach, it blocks the renderer
+      // while it is up, and it was printing a date-stamped list as plain text
+      // in a proportional system font.
+      async function openTrash() {
+        const dlg = $('#trash');
+        const list = $('#tr-list');
+        dlg.classList.add('open');
+        list.innerHTML = `<li class="muted">${esc(T('pick.loading'))}</li>`;
+        try {
+          const items = await window.filexApp.syncTrash();
+          list.innerHTML = '';
+          if (!items.length) {
+            list.innerHTML = `<li class="muted">${esc(T('sync.trash_empty'))}</li>`;
+            return;
+          }
+          for (const i of items.slice(0, 200)) {
+            const li = document.createElement('li');
+            const name = document.createElement('code');
+            name.textContent = i.rel;
+            const when = document.createElement('span');
+            when.className = 'muted';
+            when.textContent = new Date(i.deleted).toLocaleDateString();
+            li.append(name, when);
+            list.appendChild(li);
+          }
+        } catch (e) {
+          list.innerHTML = `<li class="err">${esc(e.message || e)}</li>`;
+        }
+      }
+      $('#tr-close').addEventListener('click', () => $('#trash').classList.remove('open'));
+      // Both dialogs close on the backdrop and on Escape, like every other
+      // dialog in the product.
+      for (const id of ['#picker', '#trash']) {
+        $(id).addEventListener('mousedown', (e) => {
+          if (e.target === $(id)) $(id).classList.remove('open');
+        });
+      }
+      window.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        for (const id of ['#picker', '#trash']) {
+          if ($(id).classList.contains('open')) { $(id).classList.remove('open'); return; }
+        }
+      });
+
       // ── boot ──────────────────────────────────────────────────
       function render() {
         const active = state.accounts.find((a) => a.id === state.activeId);
@@ -1286,6 +1896,14 @@
         $('#pk-title').textContent = T('pick.title');
         $('#pk-up').textContent = T('pick.up');
         $('#pk-use').textContent = T('pick.use');
+        $('#tr-title').textContent = T('set.trash');
+        $('#tr-sub').textContent = T('set.trash_sub');
+        for (const id of ['#pk-close', '#tr-close']) {
+          const b = $(id);
+          b.innerHTML = ICON_X;
+          b.title = T('pick.close');
+          b.setAttribute('aria-label', T('pick.close'));
+        }
       }
       relabelStatic();
 
@@ -1297,6 +1915,7 @@
         if (explorerDragCb) explorerDragCb(p);
       });
       window.filexApp.onOpenSettings(() => toggleSettings(true));
+      window.filexApp.onNotificationOpen((p) => void openNotification(p));
       refresh();
     </script>
   </body>

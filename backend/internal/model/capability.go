@@ -67,6 +67,12 @@ type Capabilities struct {
 	// ?local=1.
 	OIDCAutoRedirect bool `json:"oidc_auto_redirect"`
 
+	// AuthRecoveryLogin is true when password sign-in is off (no `local`
+	// driver) but the bootstrap administrator may still use it, for recovery.
+	// The login page then keeps the password form behind a recovery link
+	// instead of hiding it altogether.
+	AuthRecoveryLogin bool `json:"auth_recovery_login"`
+
 	// Build metadata.
 	Version string `json:"version"`
 	Build   string `json:"build"`

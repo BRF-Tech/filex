@@ -33,8 +33,26 @@ import { useLocale } from '../composables/useLocale';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import ContextMenu, { type ContextAction } from './ContextMenu.vue';
 
-/** The virtual listings the panel can open. '' = an ordinary folder. */
-export type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
+/** The virtual listings the panel can open. '' = an ordinary folder.
+ *  ⚠ `home` is not a listing: it is the overview (storages · recent · starred)
+ *  the reference shell lands on, and the explorer renders it instead of a file
+ *  list. It is in this union because the panel's selected-row logic, the
+ *  address bar and the tab strip all key off ONE type — a second mechanism for
+ *  "which destination am I on" is how two of them end up disagreeing. */
+export type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
+
+/**
+ * A row in the panel's first group — what `open-view` carries.
+ *
+ * ⚠ It is NOT `NavView`. "My files" is a destination without being a view: it
+ * opens the root LISTING, so the explorer answers it with an ordinary
+ * navigation and `activeView` goes back to `''`. Giving it a NavView value
+ * would mean a mode that every `if (navView)` in the explorer — "is this a
+ * cross-folder view?", "is there a folder to upload into?", "what does Up do?"
+ * — would answer wrongly, for a row whose whole job is to be an ordinary
+ * folder again.
+ */
+export type NavDest = Exclude<NavView, '' | 'tag'> | 'myfiles';
 
 export interface NavStorage {
   name: string;
@@ -99,24 +117,28 @@ const props = defineProps<{
   /** RBAC/root state — false hides the write affordances. */
   canWrite?: boolean;
   locale: LocaleCode;
-  /* === surucu:d1 — the Drive shell ==================================== */
+  /* === surucu:d1 — the shell ========================================== */
   /**
-   * Fold the primary actions into ONE "+ New" menu (`uiProfile: 'drive'`).
+   * ⚠ There is no `newMenu` prop any more. The two-button block (Upload as the
+   * primary, New folder one step quieter) is gone and the "+ New" menu is what
+   * this panel draws, everywhere — it is the shell, not a profile. Nothing was
+   * removed: the menu holds what the explorer could already do — upload files,
+   * make a folder (the modal offers the encrypted variant from inside itself),
+   * and ask somebody else for files.
    *
-   * Absent/false keeps the two-button block every other profile has had since
-   * v0.30.1 — Upload as the primary, New folder one step quieter — so this is
-   * additive and nothing that mounts the package today moves.
-   *
-   * ⚠ The menu holds what the explorer can ALREADY do: upload files, make a
-   * folder (the modal offers the encrypted variant from inside itself), and
-   * ask somebody else for files. There is deliberately no "Upload folder": the
-   * upload path takes a flat `File[]` and would have to create the intermediate
-   * directories itself, and an entry that quietly flattens someone's folder into
-   * one heap is worse than an entry that is not there.
+   * There is deliberately no "Upload folder": the upload path takes a flat
+   * `File[]` and would have to create the intermediate directories itself, and
+   * an entry that quietly flattens someone's folder into one heap is worse
+   * than an entry that is not there.
    */
-  newMenu?: boolean;
   /** Offer "Request files" in that menu — a folder we may write to and share. */
   canRequestFiles?: boolean;
+  /**
+   * belge:n1 — offer "New document" in that menu. False on a server that
+   * publishes no `newdoc_types`, and on one where every type it publishes
+   * needs an editor service this deployment has not got.
+   */
+  canNewDocument?: boolean;
   /**
    * The signed-in person's storage line, from `GET /api/files/quota/me`. Null
    * (the default) renders nothing at all.
@@ -134,12 +156,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
-  (e: 'open-view', view: Exclude<NavView, '' | 'tag'>): void;
+  (e: 'open-view', view: NavDest): void;
   (e: 'open-tag', tag: string): void;
   (e: 'open-storage', name: string): void;
   (e: 'open-root'): void;
   (e: 'upload'): void;
   (e: 'new-folder'): void;
+  (e: 'new-document'): void;
   (e: 'open-connections'): void;
   (e: 'open-tokens'): void;
   /* surucu:d1 — "Request files": the access modal on THIS folder, drop tab. */
@@ -148,7 +171,7 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
-const { t } = useLocale(() => props.locale);
+const { t, formatSize } = useLocale(() => props.locale);
 
 // In drawer mode "expanded" is the only meaningful state: a rail inside an
 // overlay would be an overlay that shows nothing but icons while covering the
@@ -160,11 +183,54 @@ const sharedSet = computed(() => new Set(props.sharedStorages ?? []));
 /** The views that answer "what did *I* do" — dropped for an app token. */
 const IDENTITY_VIEWS = new Set<string>(['recent', 'starred', 'shared']);
 
+/**
+ * gorunum:v3-shell — the destinations, and their ORDER.
+ *
+ * Home · My files · Shared with me · Recent · Starred · Trash. The order is
+ * not a taste: it runs from the widest answer to the narrowest — everything
+ * you have, then your own tree, then somebody else's, then two slices of your
+ * own, then what you threw away. The panel used to open with Recent, which
+ * put a slice of the tree above the tree.
+ *
+ * ⚠⚠ "My files" is drawn ONLY where it can honestly mean "my files" — a
+ * deployment whose caller can see at most ONE storage. There it opens that
+ * storage's root and the label is the truth (measured: `soleStorageName` in
+ * FileExplorer sends `load('')` straight to the storage, so the row lands on
+ * the file list, exactly as the reference build's own "My files" does).
+ *
+ * With SEVERAL storages it cannot mean that, and what it actually did was open
+ * the multi-storage root — a listing OF THE DRIVES. Owner, 2026-09-13: "my
+ * files kısmında yüklediğimiz dosyalar gelmesi lazım ama onun yerine storages
+ * gösteren ana bölge geliyor… direk silebiliriz." Three reasons it goes rather
+ * than gets repointed:
+ *
+ *   1. it was the THIRD copy of that list. Home's "Storages" section draws the
+ *      same drives as cards with a size caption, and this panel's own STORAGES
+ *      group draws them one click away — and all three are on screen together.
+ *      "Aynı işlevi yapan iki buton olmaması lazım."
+ *   2. it was the worst of the three. The drives are synthesized rows, so the
+ *      listing shows them under Type / Modified / Size columns that are all
+ *      "—", owner "System", and with no filter row at all.
+ *   3. nothing is stranded. Measured in the browser: the breadcrumb's house
+ *      crumb (`crumbs[0]`, `adapterPath: ''`) and Alt+↑ from a storage root
+ *      both land on exactly that listing, and both leave the panel in the same
+ *      state this row used to.
+ *
+ * ⚠ `<= 1`, not `=== 1`: a caller who can see NO storage keeps the row, so an
+ * account with nothing mounted still has a door back to the root listing and
+ * its "no storages" message, rather than a panel of views with no files in it.
+ * ⚠ It is still not an identity view — where it IS drawn it stays drawn for an
+ * app token, which has no Recent and no Starred to escape through.
+ */
 const views = computed(() => {
-  const list: Array<{ key: Exclude<NavView, '' | 'tag'>; label: string }> = [
+  const list: Array<{ key: NavDest; label: string }> = [
+    { key: 'home', label: t('sidenav.home') },
+    ...(props.storages.length <= 1
+      ? [{ key: 'myfiles' as NavDest, label: t('sidenav.myfiles') }]
+      : []),
+    { key: 'shared', label: t('sidenav.shared') },
     { key: 'recent', label: t('sidenav.recent') },
     { key: 'starred', label: t('sidenav.starred') },
-    { key: 'shared', label: t('sidenav.shared') },
   ];
   if (props.trashVisible !== false) list.push({ key: 'trash', label: t('sidenav.trash') });
   // Filtered at the end rather than built conditionally: Trash is shared by
@@ -175,6 +241,21 @@ const views = computed(() => {
 });
 
 const writable = computed(() => props.canWrite !== false);
+
+/**
+ * Which row reads as the one you are standing on.
+ *
+ * Every view answers for itself. "My files" is the exception, because it has
+ * no view value to compare against: it is lit when the explorer is showing the
+ * ROOT of the tree and nothing else — no virtual view, and no storage opened,
+ * which is the state where the storage rows below all read as inactive too.
+ * Inside a storage the storage's own row is the active one, so lighting both
+ * would claim the selection is in two places.
+ */
+function isActiveDest(key: NavDest): boolean {
+  if (key === 'myfiles') return !props.activeView && !props.activeStorage;
+  return props.activeView === key;
+}
 
 /* === etiket:t1 — an unbounded list in a fixed panel ====================
  * A user with sixty tags must not push Storages and Connections off the
@@ -212,9 +293,29 @@ const newMenuRef = ref<InstanceType<typeof ContextMenu> | null>(null);
 
 const newActions = computed<ContextAction[]>(() => {
   const list: ContextAction[] = [
-    { key: 'upload', label: t('drive.new.upload'), icon: '⬆', disabled: !writable.value },
-    { key: 'new-folder', label: t('drive.new.folder'), icon: '📁', disabled: !writable.value },
+    /* ⚠ NO `icon:` on any of these three, and that is the fix rather than an
+       omission. `ContextMenu.iconFor` resolves `actionIconSvg(a.icon || a.key)`,
+       so an `icon` string is an OVERRIDE — and `'⬆'` / `'📁'` / `'🔗'` are not
+       keys, so the lookup missed, the component fell through to its literal
+       branch and printed the emoji. Meanwhile `new-document`, which carries no
+       override, resolved by key and drew a proper glyph: one menu, two icon
+       systems, three rows apart. All three keys have had stroked glyphs in
+       `lib/actionIcons.ts` the whole time (`upload`, `new-folder`,
+       `request-files`); dropping the override is what reaches them.
+       ⚠ Emoji in markup is forbidden here for a reason that is visible in this
+       very menu: they are rendered by whatever font the OS ships, so the row
+       came out flat-grey on one machine and full-colour on another, at a weight
+       that matched nothing beside it. */
+    { key: 'upload', label: t('drive.new.upload'), disabled: !writable.value },
+    { key: 'new-folder', label: t('drive.new.folder'), disabled: !writable.value },
   ];
+  // belge:n1 — DROPPED rather than disabled when unavailable, unlike
+  // "Request files": a disabled row invites the question "why?" and cannot
+  // answer it. The dialog behind it explains what is missing; a greyed row
+  // in a menu has nowhere to say so.
+  if (props.canNewDocument) {
+    list.push({ key: 'new-document', label: t('drive.new.document'), disabled: !writable.value });
+  }
   // Only when there is a real folder to hang a drop link on. Rendered as a
   // disabled row rather than dropped, so the menu does not change height
   // between folders — a menu whose items move is a menu people misclick.
@@ -222,7 +323,6 @@ const newActions = computed<ContextAction[]>(() => {
   list.push({
     key: 'request-files',
     label: t('drive.new.request'),
-    icon: '🔗',
     disabled: !props.canRequestFiles,
   });
   return list;
@@ -238,23 +338,17 @@ function openNewMenu() {
 
 function onNewSelect(a: ContextAction) {
   if (a.key === 'upload') emit('upload');
+  else if (a.key === 'new-document') emit('new-document');
   else if (a.key === 'new-folder') emit('new-folder');
   else if (a.key === 'request-files') emit('request-files');
 }
 
-/* === surucu:d1 — the storage line =================================== */
-function formatBytes(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '—';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  const digits = v < 10 && i > 0 ? 1 : 0;
-  return `${v.toFixed(digits)} ${units[i]}`;
-}
+/* === surucu:d1 — the storage line ===================================
+ * The size comes from `useLocale.formatSize`, the same call `HomeView` makes
+ * for the same `drive.storage.*` string. There was a private byte formatter
+ * here with hardcoded English units and its own rounding, so one quota
+ * rendered two ways — "9.3 GB" in this rail, "9.31 GB" on the home screen,
+ * and "10 GB" in the admin panel that set it. */
 
 const quotaPercent = computed(() => {
   const q = props.quota;
@@ -266,17 +360,12 @@ const quotaText = computed(() => {
   const q = props.quota;
   if (!q) return '';
   return q.unlimited || q.total <= 0
-    ? t('drive.storage.used_unlimited', { used: formatBytes(q.used) })
-    : t('drive.storage.used', { used: formatBytes(q.used), total: formatBytes(q.total) });
+    ? t('drive.storage.used_unlimited', { used: formatSize(q.used) })
+    : t('drive.storage.used', { used: formatSize(q.used), total: formatSize(q.total) });
 });
 
-const toggleLabel = computed(() =>
-  props.narrow
-    ? t('sidenav.close')
-    : props.expanded
-      ? t('sidenav.collapse')
-      : t('sidenav.expand'),
-);
+/** Only the drawer draws this control now (see the template). */
+const toggleLabel = computed(() => t('sidenav.close'));
 </script>
 
 <template>
@@ -290,7 +379,16 @@ const toggleLabel = computed(() =>
     :aria-label="t('sidenav.title')"
     data-testid="sidenav"
   >
-    <div class="fe-sidenav__head">
+    <!-- gorunum:v3-shell — the panel's own edge control is now the DRAWER's
+         close button and nothing else.
+         ⚠ At 560px and up it is gone, deliberately: the collapse button lives
+         at the far left of the top bar (`.fe-toolbar__brand`), above the panel
+         rather than inside it, which is where the reference puts it and where
+         it still exists when the panel is a 56px rail. Two buttons for one
+         verb, one of them inside the thing it collapses, was the duplicate
+         this removed. At 390px the panel is an overlay ON TOP of the files, so
+         it keeps a dismiss of its own — the same reason a dialog has one. -->
+    <div v-if="narrow" class="fe-sidenav__head">
       <button
         type="button"
         class="fe-sidenav__toggle"
@@ -298,13 +396,8 @@ const toggleLabel = computed(() =>
         :title="toggleLabel"
         :aria-label="toggleLabel"
         data-testid="sidenav-toggle"
-        @click="narrow ? emit('close') : emit('toggle')"
+        @click="emit('close')"
       >
-        <!-- The glyph says what the control does NEXT, and each state gets
-             its own: an expanded panel closes (arrow into the sidebar), a rail
-             opens (arrow out of it), a drawer dismisses (cross). One hamburger
-             for all three reads as decoration — and this toolbar already
-             carries two other three-line glyphs. -->
         <svg
           class="fe-ficon"
           viewBox="0 0 24 24"
@@ -316,34 +409,23 @@ const toggleLabel = computed(() =>
           aria-hidden="true"
           focusable="false"
         >
-          <template v-if="narrow">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </template>
-          <template v-else-if="expanded">
-            <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
-            <path d="M9.5 4.5v15" />
-            <path d="M17 9.5L14.5 12l2.5 2.5" />
-          </template>
-          <template v-else>
-            <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
-            <path d="M9.5 4.5v15" />
-            <path d="M14.5 9.5L17 12l-2.5 2.5" />
-          </template>
+          <path d="M6 6l12 12M18 6L6 18" />
         </svg>
       </button>
     </div>
 
-    <!-- Primary action. Upload is the thing people come here to do, so in the
-         panel it reads as the main button rather than one toolbar icon among
-         fourteen. New folder stays, one step quieter. -->
+    <!-- Primary action. Making something is what people come to this panel to
+         do, so it reads as the main button rather than one toolbar icon among
+         fourteen. -->
     <!-- Rendered even with nowhere to write, and disabled instead. A block
          that appears and disappears makes every row below it jump by 90px each
          time the user opens a view, which reads as the panel reloading. -->
     <div class="fe-sidenav__primary">
-      <!-- surucu:d1 — one primary action, the shape #14's mockups draw. The
-           two-button block below is what every other profile still renders. -->
+      <!-- surucu:d1 — ONE primary action, the shape #14's mockups draw, in
+           every profile and every embed. The two-button block that used to
+           stand here behind `v-if="!newMenu"` (Upload + New folder) is gone:
+           both verbs are the first two rows of this menu. -->
       <button
-        v-if="newMenu"
         ref="newBtnEl"
         type="button"
         class="fe-sidenav__new"
@@ -353,72 +435,49 @@ const toggleLabel = computed(() =>
         data-testid="sidenav-new"
         @click="openNewMenu"
       >
-        <svg
-          class="fe-ficon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        <span v-if="showLabels" class="fe-sidenav__text">{{ t('drive.new') }}</span>
-      </button>
-      <button
-        v-if="!newMenu"
-        type="button"
-        class="fe-sidenav__upload"
-        :disabled="!writable"
-        :title="t('toolbar.upload')"
-        :aria-label="t('toolbar.upload')"
-        data-testid="sidenav-upload"
-        @click="emit('upload')"
-      >
-        <svg
-          class="fe-ficon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.9"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path d="M12 16V4" />
-          <path d="M7 9l5-5 5 5" />
-          <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
-        </svg>
-        <span v-if="showLabels" class="fe-sidenav__text">{{ t('toolbar.upload') }}</span>
-      </button>
-      <button
-        v-if="!newMenu"
-        type="button"
-        class="fe-sidenav__secondary"
-        :disabled="!writable"
-        :title="t('toolbar.new_folder')"
-        :aria-label="t('toolbar.new_folder')"
-        data-testid="sidenav-new-folder"
-        @click="emit('new-folder')"
-      >
-        <svg
-          class="fe-ficon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5z" />
-          <path d="M12 11.5v5M9.5 14h5" />
-        </svg>
-        <span v-if="showLabels" class="fe-sidenav__text">{{ t('toolbar.new_folder') }}</span>
+        <!-- ⚠⚠ TWO SPANS AND A DIVIDER, NOT A SPLIT BUTTON. The reference draws
+             a label half, a hairline and a chevron half; the owner asked twice
+             for the chevron ("new tuşunun yanına caret koymamışsın, onu koymanı
+             istiyorum") because a button that opens a menu has to look like
+             one. But it stays ONE `<button aria-haspopup="menu">`: a real split
+             button needs two focusable regions with two different actions, and
+             here both halves do the same thing. Copying the shape without
+             copying the mechanism is deliberate — two tab stops that lead to
+             one menu is a keyboard user counting controls that do not exist.
+             ⚠ The divider is `aria-hidden` decoration; it is 16px inset inside
+             a 34px pill, not full height, or it reads as a seam between two
+             buttons — which is exactly the thing this is not. -->
+        <span class="fe-sidenav__new-main">
+          <svg
+            class="fe-ficon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span v-if="showLabels" class="fe-sidenav__text">{{ t('drive.new') }}</span>
+        </span>
+        <span v-if="showLabels" class="fe-sidenav__new-rule" aria-hidden="true"></span>
+        <span v-if="showLabels" class="fe-sidenav__new-caret" aria-hidden="true">
+          <svg
+            class="fe-ficon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M7 10l5 5 5-5" />
+          </svg>
+        </span>
       </button>
     </div>
 
@@ -428,8 +487,8 @@ const toggleLabel = computed(() =>
           <button
             type="button"
             class="fe-sidenav__item"
-            :class="{ 'is-active': activeView === v.key }"
-            :aria-current="activeView === v.key ? 'page' : undefined"
+            :class="{ 'is-active': isActiveDest(v.key) }"
+            :aria-current="isActiveDest(v.key) ? 'page' : undefined"
             :title="v.label"
             :aria-label="v.label"
             :data-testid="`sidenav-view-${v.key}`"
@@ -446,7 +505,15 @@ const toggleLabel = computed(() =>
               aria-hidden="true"
               focusable="false"
             >
-              <template v-if="v.key === 'recent'">
+              <template v-if="v.key === 'home'">
+                <path d="M4 10.5L12 4l8 6.5" />
+                <path d="M6 9.8V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.8" />
+                <path d="M10 20v-5.5h4V20" />
+              </template>
+              <template v-else-if="v.key === 'myfiles'">
+                <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v7.5A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5z" />
+              </template>
+              <template v-else-if="v.key === 'recent'">
                 <circle cx="12" cy="12" r="8.5" />
                 <path d="M12 7.5V12l3 2" />
               </template>
@@ -721,7 +788,6 @@ const toggleLabel = computed(() =>
     </div>
 
     <ContextMenu
-      v-if="newMenu"
       ref="newMenuRef"
       :locale="locale"
       :theme="theme"

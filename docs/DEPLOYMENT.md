@@ -257,7 +257,7 @@ are fixed. The redis pending set changes from a LIST to a SORTED SET, converted
 at startup with every queued operation preserved — ⚠ after which **downgrading
 is not supported**.
 
-**`/data` is per‑instance.** Beyond the SQLite DB, each node keeps four things
+**`/data` is per‑instance.** Beyond the SQLite DB, each node keeps five things
 on local disk under `FILEX_DATA_DIR`:
 
 - `search.bleve/` — the full‑text index (its embedded store takes an **exclusive
@@ -266,7 +266,12 @@ on local disk under `FILEX_DATA_DIR`:
   for orphans every `FILEX_THUMBS_SWEEP_INTERVAL`),
 - `cache/` — the read cache for slow storages,
 - `uploads/` — staging for chunked and resumable uploads. ⚠ Not rebuildable
-  while a transfer is in flight: until it commits, this is the file's only copy.
+  while a transfer is in flight: until it commits, this is the file's only copy,
+- `ssh/` + `ftps/` — the SFTP host keys and the FTPS certificate, generated on
+  first boot. ⚠ Per-node local `/data` means each replica generates its **own**,
+  so a client load-balanced across them sees the host key change from
+  connection to connection. Put the protocol listeners on one node, or hand
+  every replica the same key material.
 
 The first three are **rebuildable** (see [Backup & restore](#backup--restore)), so for a
 multi‑replica deployment you have two honest options:
@@ -435,7 +440,8 @@ filex migrate down       # roll back exactly one migration
       confinement** to lock a token to one sub‑folder. Confinement is enforced in
       the backend, so a confined token can't escape its root even if it knows
       other paths.
-- [ ] **TOTP 2FA for admins.** Enable it per admin under **Profile → Security**.
+- [ ] **TOTP 2FA for admins.** Enable it per admin in **user settings →
+      Security** (the dialog behind the avatar menu).
 - [ ] **Keep the proxy the sole ingress.** If you use proxy‑header auth
       (`auth.header_proxy`), filex trusts identity headers like `X-Auth-Email` —
       so bind filex to localhost / the internal network (`FILEX_LISTEN` on

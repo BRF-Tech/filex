@@ -28,6 +28,7 @@ are **file‑only** (noted below). Individual storages are **not** configured he
 - [Downloads from slow storage (prepared copies)](#downloads-from-slow-storage-prepared-copies)
 - [Thumbnails](#thumbnails)
 - [Search](#search)
+- [Usage & cost](#usage--cost)
 - [Queue](#queue)
 - [Notifications](#notifications)
 - [CORS](#cors)
@@ -196,7 +197,7 @@ DSN examples:
 
 Migrations **run automatically on startup**; also `filex migrate up|down|status`.
 SQLite (pure Go, CGO‑free) is a fine default; **PostgreSQL is recommended for
-teams/HA**. MySQL needs **8.0.13+** (MariaDB **10.5.2+**) and filex fills in
+teams/HA**. MySQL needs **8.0.17+** (MariaDB **11.4+**) and filex fills in
 `parseTime`, `loc=UTC` and `time_zone='+00:00'` when the DSN omits them.
 
 All three engines run the migrations, a schema comparison and the writes of a
@@ -213,6 +214,7 @@ wins). The **API‑token driver is always on** regardless.
 | Env var | Default | Description |
 |---|---|---|
 | `FILEX_AUTH_DRIVERS` | `local` | e.g. `local,oidc`, `local,ldap`, `proxy_header` |
+| `FILEX_AUTH_RECOVERY_LOGIN` | `true` | **Recovery sign-in.** When no `local` driver is enabled — SSO or a directory only — the administrator filex created at installation can still sign in with its password, and nobody else can. The login page offers it behind an *Administrator recovery sign-in* link (`/admin/login?local=1`); two-factor still applies, and every such sign-in is logged at WARN. It exists for the day the identity provider is down. Set `false` if your policy forbids any password sign-in. |
 
 **OIDC / SSO** (see [SSO.md](SSO.md)):
 
@@ -309,7 +311,8 @@ for the storage model.)
 
 | Env var | Applies to | Description |
 |---|---|---|
-| `FILEX_DEFAULT_STORAGE_DRIVER` | both | `local` · `s3` (empty = seed no storage). |
+| `FILEX_DEFAULT_STORAGE_DRIVER` | all | Which driver to seed; empty = seed no storage. `local` and `s3` have dedicated variables below; **any other built-in driver** (`sftp`, `webdav`, `ftp`, `smb`) is seeded by supplying its configuration as JSON in `FILEX_DEFAULT_STORAGE_CONFIG`. |
+| `FILEX_DEFAULT_STORAGE_CONFIG` | all | The driver's configuration as **raw JSON**, e.g. `{"host":"…","user":"…"}`. Required for a driver that has no dedicated variables, and accepted for `local`/`s3` too, where it **replaces** them rather than merging. Invalid JSON seeds nothing and logs a warning. |
 | `FILEX_DEFAULT_STORAGE_NAME` | both | Display name / top‑level folder label. |
 | `FILEX_DEFAULT_STORAGE_MOUNT` | both | Logical mount point (default `/`). |
 | `FILEX_DEFAULT_STORAGE_PATH` | local | On‑disk directory to serve. |
@@ -390,7 +393,7 @@ Drivers that live outside the binary — see [PLUGINS.md](PLUGINS.md).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FILEX_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the whole subsystem off: nothing under `<data-dir>/plugins` is launched, no remote plugin is contacted, and the admin API answers 503 saying so. On by default, because a plugin is only ever installed by an admin — but an operator hardening a shared instance may not want the admin role to include “run a program on the server”. | ⚠⚠ **`FILEX_DEMO_MODE` flips this default to off.** A demo publishes an admin login — that is what a demo is — and this API is admin-only, so on a demo "admin-only" means anybody; installing a plugin runs an uploaded program on the host. Set `FILEX_PLUGINS_DISABLED=0` to override that deliberately.
+| `FILEX_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the whole subsystem off: nothing under `<data-dir>/plugins` is launched, no remote plugin is contacted, and the admin API answers 503 saying so. The subsystem is on by default, because a plugin is only ever installed by an admin — but an operator hardening a shared instance may not want the admin role to include “run a program on the server”. ⚠⚠ **`FILEX_DEMO_MODE` moves the default to `1`, so plugins are off on a demo.** A demo publishes an admin login — that is what a demo is — and this API is admin-only, so on a demo "admin-only" means anybody; installing a plugin runs an uploaded program on the host. Setting the variable yourself wins in either direction: `FILEX_PLUGINS_DISABLED=0` turns them back on for a demo, deliberately. |
 | `FILEX_PLUGIN_CONFORMANCE` | `enforce` | `enforce` · `warn` · `off`. filex **probes every capability a plugin declares** — at install against the plugin's own throwaway area, and again when a storage on it is saved, against that real configuration. `enforce` refuses a plugin that fails its own claims and refuses to save a storage on it. `warn` registers it anyway and keeps the report — for somebody *writing* a plugin, never for a shared instance: the cost of a broken claim is paid by the user, who meets an operation the UI offered and reads the failure as filex being broken. `off` skips both gates. Anything unrecognised falls back to `enforce`. |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | — | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
 | `FILEX_PLUGIN_MAX_INFLIGHT` | `10` | Concurrent operations allowed **per plugin**. A caller that waits 5 s for a slot is refused rather than queued, and counted as `outcome="busy"` in [the metrics](METRICS.md#storage-plugins) — a sizing signal, not a bug. Raise it for a fast local plugin, lower it to keep a slow remote one from occupying the server. `0` or nonsense keeps the default. |
@@ -655,10 +658,13 @@ regenerable, and a single folder-share archive can be tens of gigabytes.
 | `FILEX_THUMBS_SWEEP_INTERVAL` | `6h` | How often cached thumbnails whose node no longer exists are deleted (also once at boot). `0` disables it. |
 | `FILEX_THUMBS_URL_TTL` | `24h` | How long a stamped `thumb_url` (`?exp=&sig=`) stays valid. The stamp is what lets a bare `<img src>` fetch a preview with no header and no cookie; an authenticated caller never needs one. ⚠ `0` means *use the default*, not "never expires". See [thumbnails.md → Serving](thumbnails.md#serving). |
 
-Kinds and their tool requirements (auto‑detected on `PATH`; the full Docker
-image bundles them): images = built‑in; video/audio = `ffmpeg`; PDF = `gs` or
-`pdftoppm`; office = `libreoffice`; SVG = `rsvg-convert`. Missing tool → that
-kind gets a generic placeholder card. Cache dir + formats are `config.yaml`
+Kinds and their tool requirements (auto‑detected on `PATH`; the default Docker
+image bundles all of them, `Dockerfile.slim` deliberately none): images =
+built‑in; video/audio = `ffmpeg`; PDF = `gs` or `pdftoppm`; office =
+`libreoffice`; SVG = `rsvg-convert`. A missing tool turns that kind off — its
+files get a plain type tile — and the server says so **once at boot**, at WARN,
+naming each unavailable kind and the package that draws it
+(`thumbs: some previews will fall back to a plain type tile…`). Cache dir + formats are `config.yaml`
 only (`thumbs.cache_dir`, `thumbs.formats`). See [thumbnails.md](thumbnails.md).
 
 ---
@@ -675,6 +681,18 @@ only (`thumbs.cache_dir`, `thumbs.formats`). See [thumbnails.md](thumbnails.md).
 
 Index path is `config.yaml` only (`search.index_path`, default
 `<data_dir>/search.bleve`). See [SEARCH.md](SEARCH.md).
+
+---
+
+## Usage & cost
+
+⚠ **This one has no environment variables and no `config.yaml` block.** The
+*Admin → Usage & cost* page is configured entirely from the settings table —
+`usage.provider`, `usage.report_storage`, `usage.account_id`, `usage.prefix`
+and `usage.pricing` — written from that page or through
+`PATCH /api/admin/settings`. Unlike the [ClamAV family](#antivirus-clamav), nothing seeds them
+at first boot, so a compose file cannot bring this page up configured. See
+[USAGE.md](USAGE.md).
 
 ---
 
@@ -737,6 +755,12 @@ See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 headers: `Authorization, Content-Type, X-Filex-Pin`. If you use API‑token root
 confinement from a browser, add `X-Filex-Token` / `X-Filex-Root`.
 
+⚠ A page on **another origin** that uploads files larger than the chunk size
+(8 MiB by default) needs **`Content-Range`** in that list too: every chunk is a
+`PUT` carrying it, the default preflight does not allow it, and the browser
+refuses the chunk — small uploads keep working, which makes it look like a size
+limit rather than CORS. A same-origin deployment is unaffected.
+
 ---
 
 ## Error reporting
@@ -790,6 +814,7 @@ automatically, is in [UPDATES.md](./UPDATES.md).
 | `FILEX_UPDATE_INTERVAL` | `24h` | Time between checks. Anything under `1h` is raised to `1h`. |
 | `FILEX_UPDATE_PRE_COMMAND` | — | Shell command run immediately before a self-upgrade (database dump for postgres/mysql). **A non-zero exit aborts the upgrade.** sqlite is snapshotted by filex itself with `VACUUM INTO`. |
 | `FILEX_INSTALL_MODE` | auto-detected | `binary` or `docker`, when detection is wrong for your setup. Container installs never self-apply — the image layer is immutable, so a replaced binary reverts at the next `up`. |
+| `FILEX_SYSTEMD_UNIT` | auto-detected | The unit `systemctl restart` is run against after a self-upgrade, e.g. `filex.service`. Consulted only when the process runs under systemd; left unset, the unit is read from `/proc/self/cgroup`. Set it when that detection names the wrong unit. |
 
 `FILEX_UPDATE_TARGET` is the one variable in this table filex **sets for you**
 rather than reads: it is exported into the environment of
@@ -888,6 +913,7 @@ seed:                              # first-boot only-if-absent (see Zero-touch s
   share_max_ttl_days: ""           # FILEX_SHARE_MAX_TTL — "7", "7d", "0" = no ceiling
   smtp:    { host: "", port: "", username: "", password: "", from: "", tls: starttls }
   storage: { driver: "", name: "", mount_path: "/", path: "",
+             config: "",                # raw JSON for drivers with no fields of their own
              bucket: "", prefix: "", endpoint: "", region: "",
              access_key: "", secret_key: "", path_style: false }
 ```

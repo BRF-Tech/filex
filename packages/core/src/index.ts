@@ -28,6 +28,47 @@ export { default as PreviewModal } from './modals/PreviewModal.vue';
 export { default as StarButton } from './components/StarButton.vue';
 export { default as TagPicker } from './components/TagPicker.vue';
 export { default as RecentlyOpened } from './components/RecentlyOpened.vue';
+// belge:n1 — the "New document" picker. Exported because the entry belongs
+// on every surface, not just the admin app: a host that draws its own
+// "+ New" menu mounts this and gets the same dialog.
+export { default as NewDocumentModal } from './modals/NewDocumentModal.vue';
+/* tasi:m1 — the destination picker. Exported for the same reason and one
+ * more: it is the folder chooser the product did not have, and it is meant to
+ * be the ONLY one. "Move to", "Copy to" and (next) the new-document flow all
+ * mount this rather than growing a private browser each. Its rules are pure
+ * functions in lib/destinationTree so a host can reuse the decisions without
+ * the dialog. */
+export { default as DestinationPickerModal } from './modals/DestinationPickerModal.vue';
+export {
+  DRIVES,
+  blockedReason,
+  crumbsOfWire,
+  destinationRows,
+  driveRows,
+  initialLocation,
+  isAtOrInside,
+  joinWire,
+  labelOfWire,
+  parentOfWire,
+  permAllowsWrite,
+  splitWire,
+} from './lib/destinationTree';
+export type { DestinationRow } from './lib/destinationTree';
+
+/* tasi:m1 — "download the selection as one archive". Exported so a host that
+ * draws its own selection bar gets the real two-step flow (authorized mint,
+ * then a navigation that streams) instead of reaching for window.open per
+ * file, which is what the explorer could not do and why Download used to
+ * disappear the moment a second row was selected. */
+export {
+  DOWNLOAD_FRAME_TTL_MS,
+  absoluteTicketUrl,
+  archiveTicketUrl,
+  downloadArchive,
+  requestArchive,
+  triggerFileNavigation,
+} from './lib/downloadSelection';
+export type { ArchiveTicket } from './lib/downloadSelection';
 
 // ——— Types ———
 export type {
@@ -44,6 +85,7 @@ export type {
   ShareInfo,
   UploadLimits,
   Capabilities,
+  NewDocType,
   ExternalServiceState,
   ExternalServiceStatus,
   UploadInitResponse,
@@ -74,6 +116,18 @@ export type {
   BrowserProbeDeps,
 } from './lib/externalReach';
 
+/* gorunum:v4-hostmenu — the ACTION glyph vocabulary.
+ *
+ * Exported because a host draws rows that belong to this explorer: the web
+ * app's account menu now carries the explorer's own settings rows (see
+ * Toolbar.vue's `fe:header-menu` claim), and an "Restart the tour" row drawn
+ * with somebody else's icon set is the emoji problem lib/actionIcons.ts was
+ * written to end — a dozen sets, whatever weight and colour the OS shipped,
+ * four pixels from a column of stroked grey ones. One vocabulary, one voice.
+ * `actionIconSvg` returns '' for an unknown key, so a host can call it for
+ * every row and draw nothing where there is nothing. */
+export { actionIconSvg, actionIconKeys } from './lib/actionIcons';
+
 export { snippetSegments, matchedInContent } from './lib/snippet';
 export type { SnippetSegment, SearchMatched } from './lib/snippet';
 
@@ -100,7 +154,8 @@ export type { ResumeRecord, ResumeStorage } from './lib/uploadResume';
 export { useSelection } from './composables/useSelection';
 export { useKeyboardShortcuts } from './composables/useKeyboardShortcuts';
 export type { ShortcutHandlers } from './composables/useKeyboardShortcuts';
-export { useLocale } from './composables/useLocale';
+export { useLocale, localeTag, formatByteSize, formatInstant } from './composables/useLocale';
+export type { ByteSizeOptions, ByteUnitKey } from './composables/useLocale';
 export { usePendingOps } from './composables/usePendingOps';
 export type { PendingOp, UsePendingOpsOptions } from './composables/usePendingOps';
 export {
@@ -126,9 +181,51 @@ export {
   applyThemeToEl,
   syncThemeStyle,
   generateThemeCss,
+  /* The light/dark MODE half — a different question from which palette paints
+   * (see themes.ts). Exported because the appearance controls now live in the
+   * host's own settings surface, and a host that can pick a palette but cannot
+   * un-pin the mode the explorer's old strip wrote would leave the user with a
+   * switch that visibly does nothing. */
+  THEME_MODE_LS_KEY,
+  useThemeModeState,
+  setThemeMode,
 } from './lib/themes';
-export type { ThemeDef, ThemeTokenMap } from './lib/themes';
+export type { ThemeDef, ThemeTokenMap, ThemeModePref } from './lib/themes';
 export { default as ThemeGallery } from './components/ThemeGallery.vue';
+/* The palette grid without the modal around it — for hosts that show
+ * appearance settings in a pane of their own (the filex admin app does). */
+export { default as ThemePalette } from './components/ThemePalette.vue';
+
+/* zaman:z1 / z3 — whose clock an instant is read on. ONE resolver ranks the
+ * tiers (`TIME_ZONE_TIERS`: the viewer's own pick in this browser, the host's
+ * `config.timeZone`, the account behind a PERSON's credential, the device) and
+ * every surface formats through it — the explorer, and a host's own dates
+ * outside it (the filex admin app's `lib/format` reads `activeTimeZone()`), so
+ * an admin page and an embed cannot disagree about one file's time again. */
+export {
+  TIME_ZONE_TIERS,
+  resolveTimeZone,
+  activeTimeZone,
+  resolvedTimeZone,
+  timeZoneSources,
+  TIMEZONE_VIEWER_LS_KEY,
+  viewerTimeZone,
+  setViewerTimeZone,
+  setHostTimeZone,
+  TIMEZONE_ACCOUNT_LS_KEY,
+  setAccountTimeZone,
+  accountTimeZoneOf,
+  rememberedAccountTimeZone,
+  releaseTimeZoneOwner,
+  deviceTimeZone,
+  isValidTimeZone,
+  supportedTimeZones,
+  zonedDayNumber,
+} from './lib/timezone';
+export type { TimeZoneTier, TimeZoneSources, ResolvedTimeZone } from './lib/timezone';
+/* The picker itself — a host with a settings surface of its own (the filex
+ * admin app) mounts this rather than writing a second one. */
+export { default as TimeZonePicker } from './components/TimeZonePicker.vue';
 /* wiring:c2 — customizable shortcut registry + settings/quick-look UI */
 export {
   SHORTCUT_ACTIONS,
@@ -175,7 +272,7 @@ export { default as OperationsCenter } from './components/OperationsCenter.vue';
 export { useTabs } from './composables/useTabs';
 export type { TabState, TabSplit, TabsApi } from './composables/useTabs';
 export { default as TabBar } from './components/TabBar.vue';
-export { default as SecondaryPane } from './components/SecondaryPane.vue';
+export { default as FilePane } from './components/FilePane.vue';
 /* /wiring:d1 */
 /* wiring:e2 — end-to-end encrypted folders (WebCrypto; docs/E2E-ENCRYPTION.md) */
 export {
@@ -288,3 +385,80 @@ export type {
   StorageWrite,
 } from './types/Connections';
 /* /connections */
+
+/* tablo:t1 — per-folder view memory + the table configuration.
+ *
+ * Exported because the HOST owns two things this module cannot reach: the
+ * settings control that turns the memory on (`folderMemoryEnabled` /
+ * `setFolderMemoryEnabled`), and the transport that reads and writes the
+ * document (`attachViewPrefsStore` — the explorer wires its own, but a host
+ * embedding the views directly has to). The rest is exported so the gates in
+ * `web/tests/lib/viewPrefs.test.ts` drive the real module rather than a copy. */
+export {
+  COLUMNS,
+  FOLDER_CAP,
+  NAME_AUTO,
+  NAME_MIN,
+  __flushViewPrefs,
+  __resetViewPrefs,
+  attachViewPrefsStore,
+  canMoveColumn,
+  columnHidden,
+  columnOrder,
+  columnWidth,
+  columnsCustomised,
+  folderIsRemembered,
+  folderKey,
+  folderMemoryEnabled,
+  folderPrefs,
+  forgetAllFolders,
+  forgetFolder,
+  freezeWidths,
+  moveColumn,
+  moveColumnBy,
+  rememberFolder,
+  rememberedCount,
+  resetColumns,
+  setColumnHidden,
+  setColumnWidth,
+  setFolderMemoryEnabled,
+  tableLayout,
+  touchFolder,
+  viewPrefsSlot,
+  widthsAreAuto,
+} from './lib/viewPrefs';
+export type {
+  ColumnId,
+  ColumnSpec,
+  FolderPrefs,
+  TableLayout,
+  ViewPrefsSlot,
+  ViewPrefsTransport,
+} from './lib/viewPrefs';
+
+/* gruplama — the date ladder every listing view draws its headings from.
+ *
+ * Exported so the gate in `web/tests/lib/dateGroups.test.ts` measures the real
+ * rungs rather than a copy of them, and so a host that mounts ListView /
+ * GridView / GalleryView itself can label a listing of its own with the same
+ * words the explorer uses. */
+export { dateBucketFor, groupByDate, groupingActive } from './lib/dateGroups';
+export type {
+  DateBucket,
+  DateGroupLabels,
+  DateGrouping,
+  DateRun,
+} from './lib/dateGroups';
+
+/* uiProfile — the two profiles, and the rule for everything that is not one of
+ * them. Exported because the web component resolves the `ui-profile` ATTRIBUTE
+ * with it: a string off the DOM needs the same answer the `config` object gets,
+ * and two copies of that answer is how the element and the SFC come to disagree
+ * about what an unknown value means. */
+export {
+  DEFAULT_UI_PROFILE,
+  UI_PROFILES,
+  __resetUiProfileWarnings,
+  resolveUiProfile,
+} from './lib/uiProfile';
+export type { UiProfile } from './lib/uiProfile';

@@ -51,7 +51,10 @@ services:
       FILEX_DB_DSN: ${FILEX_DB_DSN:-/data/filex.db}
 
       # --- Storage defaults ---
+      # Seeds one local storage on the first boot, at the ./storage-local mount
+      # above. The driver alone seeds nothing: `local` needs its path too.
       FILEX_DEFAULT_STORAGE_DRIVER: ${FILEX_DEFAULT_STORAGE_DRIVER:-local}
+      FILEX_DEFAULT_STORAGE_PATH: ${FILEX_DEFAULT_STORAGE_PATH:-/var/lib/filex/local-storage}
 
       # --- Plug & play services (URL = enabled) ---
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
@@ -103,6 +106,8 @@ services:
       FILEX_INSTALLATION_E2E_ESCROW_ADOPT: ${FILEX_INSTALLATION_E2E_ESCROW_ADOPT:-}
       FILEX_DB_DRIVER: ${FILEX_DB_DRIVER:-sqlite}
       FILEX_DB_DSN: ${FILEX_DB_DSN:-/data/filex.db}
+      FILEX_DEFAULT_STORAGE_DRIVER: ${FILEX_DEFAULT_STORAGE_DRIVER:-local}
+      FILEX_DEFAULT_STORAGE_PATH: ${FILEX_DEFAULT_STORAGE_PATH:-/var/lib/filex/local-storage}
       FILEX_THUMBS_ENABLED: "true"
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
       FILEX_ONLYOFFICE_JWT: ${FILEX_ONLYOFFICE_JWT:-}

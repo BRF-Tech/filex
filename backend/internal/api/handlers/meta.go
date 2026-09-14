@@ -89,6 +89,9 @@ func (h *Meta) SetTags(w http.ResponseWriter, r *http.Request) {
 	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
 		return
 	}
+	if !rootNodeAllowed(w, r, h.Store, req.NodeID) {
+		return
+	}
 	if err := h.Store.SetNodeTags(r.Context(), req.NodeID, cleaned); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -110,6 +113,9 @@ func (h *Meta) GetTags(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !ownsNode(w, r, h.Store, nodeID, "node") {
+			return
+		}
+		if !rootNodeAllowed(w, r, h.Store, nodeID) {
 			return
 		}
 		tags, err := h.Store.GetNodeTags(r.Context(), nodeID)
@@ -171,7 +177,21 @@ func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 	// the tag listing is the second door into the same catalogue and did not
 	// have it.
 	nodes = confineNodesToTenant(r.Context(), nodes)
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nonNilNodes(nodes), "tag": tag})
+	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
+	// ⚠⚠ THE TAG VIEW WAS EMPTY IN EVERY MULTI-STORAGE INSTALL WITHOUT THIS, and
+	// silently: a node row carries only `storage_id`, the client cannot build
+	// `name://path` from a number, and `nodeRowToFileNode` therefore DROPS every
+	// row it cannot address (guessing the drive would open somebody else's).
+	// So "Nothing is tagged X" was drawn over three files that were tagged X
+	// (measured 2026-09-13: `?tag=test` answered with 3 nodes, the view showed
+	// 0 rows). Starred and Recently-opened — the two sibling handlers above,
+	// and the very case attachStorageNames was written for — have always called
+	// it; the tag listing is the third door into the same catalogue and was the
+	// one that missed it.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
+		"tag":   tag,
+	})
 }
 
 // ─────────────────── Starred ───────────────────
@@ -211,6 +231,9 @@ func (h *Meta) SetStar(w http.ResponseWriter, r *http.Request) {
 	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
 		return
 	}
+	if !rootNodeAllowed(w, r, h.Store, req.NodeID) {
+		return
+	}
 	var err error
 	if req.Starred {
 		err = h.Store.SetUserNodeMeta(r.Context(), u.ID, req.NodeID, userMetaKeyStarred, "1")
@@ -242,6 +265,7 @@ func (h *Meta) ListStarred(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes = confineNodesToTenant(r.Context(), nodes)
+	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
 	if v := r.URL.Query().Get("storage_id"); v != "" {
 		if storageID, err := strconv.ParseInt(v, 10, 64); err == nil && storageID > 0 {
 			nodes = filterByStorage(nodes, storageID)
@@ -279,6 +303,9 @@ func (h *Meta) SetRecent(w http.ResponseWriter, r *http.Request) {
 	if !ownsNode(w, r, h.Store, req.NodeID, "node") {
 		return
 	}
+	if !rootNodeAllowed(w, r, h.Store, req.NodeID) {
+		return
+	}
 	ts := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 	if err := h.Store.SetUserNodeMeta(r.Context(), u.ID, req.NodeID, userMetaKeyOpened, ts); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -301,6 +328,7 @@ func (h *Meta) ListRecent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes = confineNodesToTenant(r.Context(), nodes)
+	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
 		"limit": limit,

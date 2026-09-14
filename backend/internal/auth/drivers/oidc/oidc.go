@@ -225,7 +225,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 			return nil, "", fmt.Errorf("oidc: lookup user: %w", err)
 		}
 		if user == nil {
-			user, err = d.store.CreateUser(ctx, lower, "", role, "en", "UTC")
+			user, err = d.store.CreateUser(ctx, lower, "", role, "en", model.TimezoneUnset)
 			if err != nil {
 				return nil, "", fmt.Errorf("oidc: this email is registered to another tenant: %w", err)
 			}
@@ -242,7 +242,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	} else {
 		user, err = d.store.GetUserByEmail(ctx, lower)
 		if err != nil {
-			user, err = d.store.CreateUser(ctx, lower, "", role, "en", "UTC")
+			user, err = d.store.CreateUser(ctx, lower, "", role, "en", model.TimezoneUnset)
 			if err != nil {
 				return nil, "", fmt.Errorf("oidc: upsert user: %w", err)
 			}

@@ -17,7 +17,21 @@
     "desktopTitle": "filex masaüstü uygulamasını edinin",
     "desktopSubtitle": "Klasörleri bu bilgisayara eşitleyin, arka planda güncel kalsınlar. {platform} için mevcut.",
     "desktopDownload": "{platform} için indir",
-    "desktopAllDownloads": "Tüm indirmeler ve sürüm notları"
+    "desktopAllDownloads": "Tüm indirmeler ve sürüm notları",
+    "expand": "Ayrıntıları göster",
+    "collapse": "Ayrıntıları gizle",
+    "dl": {
+      "win_setup": "Windows kurulumu (.exe)",
+      "win_setup_hint": "filex'i kurar, Başlat menüsüne ekler ve kendini günceller · ~92 MB",
+      "win_portable": "Windows taşınabilir (.exe)",
+      "win_portable_hint": "Her yerden çalışır — USB bellek, İndirilenler — ve dosyalarını yanında tutar. Kendini güncellemez · ~92 MB",
+      "appimage": "Linux (.AppImage)",
+      "appimage_hint": "Taşınabilir — kurulum yok, çalıştırılabilir yapıp açmanız yeterli · ~140 MB",
+      "deb": "Debian / Ubuntu (.deb)",
+      "deb_hint": "apt ile sistem geneline kurar · ~99 MB",
+      "dmg": "macOS (.dmg, Apple Silicon)",
+      "dmg_hint": "İmzasız — ilk açılışta: Sistem Ayarları → Gizlilik ve Güvenlik → Yine de Aç"
+    }
   },
   "common": {
     "save": "Kaydet",
@@ -105,7 +119,6 @@
     "webhooks": "Webhook'lar",
     "about": "Hakkında",
     "adminFiles": "Dosya geçmişi",
-    "profile": "Profilim",
     "logout": "Çıkış yap",
     "language": "Dil",
     "theme": "Tema",
@@ -123,13 +136,20 @@
     "title": "Oturum aç",
     "subtitle": "Bu sunucudaki hesabınla giriş yap",
     "identifier": "E-posta ya da kullanıcı adı",
-    "remember": "30 gün boyunca beni hatırla",
+    "remember": "Oturumum açık kalsın",
     "submit": "Giriş yap",
     "or": "veya",
     "oidc": "SSO ile giriş yap (Keycloak)",
     "local": "Parola ile giriş yap",
+    "recovery": "Yönetici kurtarma girişi",
+    "recoveryNote": "Bu sunucuda parolayla giriş kapalı. Burada yalnızca kurulumda oluşturulan yönetici, kurtarma amacıyla giriş yapabilir.",
     "redirecting": "SSO girişine yönlendiriliyorsun…",
     "totpHint": "Authenticator uygulamandaki 6 haneli kodu gir",
+    "use2fa": "2FA kodu kullan",
+    "hide2fa": "2FA kodunu gizle",
+    "totpLabel": "2FA kodu",
+    "showChars": "Yazılanları göster",
+    "hideChars": "Yazılanları gizle",
     "errInvalid": "E-posta, kullanıcı adı ya da şifre yanlış",
     "errLocked": "Hesap kilitli. Yöneticiyle iletişime geç.",
     "errGeneric": "Bir şeyler ters gitti. Tekrar dene.",
@@ -285,13 +305,6 @@
     }
   },
   "profile": {
-    "title": "Profilim",
-    "subtitle": "Hesabına özel ayarlar",
-    "section": {
-      "account": "Hesap",
-      "security": "Güvenlik",
-      "preferences": "Tercihler"
-    },
     "saved": "Profil kaydedildi",
     "passwordChanged": "Şifre değiştirildi",
     "totp": {
@@ -305,7 +318,6 @@
       "recoveryTitle": "Kurtarma kodları",
       "recoveryHint": "Bunları şimdi kaydedin — doğrulayıcınızı kaybederseniz her biri bir kez giriş yapmanızı sağlar. Yalnızca bu sefer gösterilir."
     },
-    "timezone": "Zaman dilimi",
     "locale": "Dil",
     "username": {
       "label": "Kullanıcı adı",
@@ -316,7 +328,8 @@
       "upload": "Fotoğraf yükle",
       "help": "Adınızın yanında ve dosya yöneticisinin işbirliği çubuğunda görünür — hesabınızla açılan her istemcide. Otomatik olarak 160 piksele küçültülür.",
       "notImage": "Lütfen bir görsel dosyası seçin.",
-      "failed": "Bu görsel işlenemedi — başka bir tane deneyin."
+      "failed": "Bu görsel işlenemedi — başka bir tane deneyin.",
+      "change": "Fotoğrafı değiştir"
     }
   },
   "settings": {
@@ -345,6 +358,14 @@
       "testTo": "Test e-postası gönderilecek adres",
       "send": "Gönder",
       "enterEmail": "Geçerli bir e-posta adresi girin."
+    },
+    "customCss": {
+      "title": "Özel CSS",
+      "help": "Seçili temanın üstüne kendi stil dosyanızı yapıştırarak filex’in görünümünü değiştirin. Desteklenen yüzey --fe-* özel özellikleridir (aşağıdaki örneğe bakın); sınıf adları içeriye aittir ve sürümler arasında değişebilir.",
+      "scope": "Bu stil dosyası, bu kurulumu kullanan herkeste ve her sayfada geçerlidir — giriş ekranı dahil.",
+      "hint": "Sayfanın son stil dosyası olarak eklenir, böylece eşitlikte sizin kurallarınız kazanır. Kaldırmak için kutuyu boş bırakın.",
+      "count": "{used} / {max} bayt",
+      "tooBig": "Stil dosyası en fazla 64 KB olabilir."
     }
   },
   "external": {
@@ -643,6 +664,7 @@
     "restore": "Geri yükle",
     "purge": "Kalıcı sil",
     "restored": "{name} geri yüklendi",
+    "restore_taken": "“{name}” geri yüklenmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.",
     "purged": "{name} kalıcı olarak silindi",
     "purge_confirm": "{name} kalıcı silinecek. Emin misin?",
     "empty_modal_title": "Çöpü boşalt",
@@ -652,6 +674,11 @@
     "empty_done": "{count} öğe silindi",
     "total_count": "Toplam: {n}"
   },
+  "home": {
+    "title": "Ana sayfa",
+    "allFiles": "Tüm dosyalar",
+    "storagesEmpty": "Henüz sürücü yok"
+  },
   "explore": {
     "tagline": "dosya yöneticisi",
     "loading": "Yükleniyor…",
@@ -659,6 +686,7 @@
     "noAccess": "Seninle henüz hiçbir şey paylaşılmadı. Erişim için sunucuyu yönetene sor.",
     "addStorage": "Depo ekle",
     "gotoAdmin": "Admin paneli",
+    "account": "Hesap",
     "root": "Kök",
     "empty": "Bu klasör boş.",
     "download": "İndir",
@@ -695,7 +723,7 @@
     "creds": "Demo hesabı: {email} · şifre: {password}",
     "sandbox": "Ortak deneme alanı — her gece sıfırlanır; burada depolama ya da eklenti eklenemez.",
     "adminHint": "Tam yönetici yetkisi için demo dışı bir hesapla giriş yap.",
-    "alsoIncluded": "Ayrıca: dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, OnlyOffice ile Office belgeleri · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
+    "alsoIncluded": "Ayrıca: dosya ve klasör bazında yetkilerle RBAC · çok kiracılık · OIDC SSO ve LDAP / Active Directory · yerinde görüntüleyiciler ve düzenleyiciler, OnlyOffice ile Office belgeleri · + Yeni menüsünden belge oluşturma — Markdown, metin, CSV ve kod her yerde; Word, Excel, PowerPoint ve OpenDocument ise OnlyOffice bağlıyken · tüm seçimi tek akışlı arşiv olarak indirme · çöp kutusu ve sürümleme · replikasyon · kotalar · denetim kaydı · webhook ve uygulama içi bildirimler · depolama eklentileri · kalıcı işlem kuyruğu · depolama sağlayıcınızın kendi günlük raporundan üretilen kullanım ve maliyet görünümü.",
     "features": {
       "storageTitle": "6 depolama sürücüsü, iki yönde",
       "storageBody": "Yerel diskleri, S3'ü, SFTP'yi, WebDAV'ı, FTP/FTPS'i ve SMB/NAS paylaşımlarını tek bir ağaçta yan yana bağla — sonra aynı ağaca S3, SFTP, FTPS, NFSv3 ya da WebDAV olarak geri eriş.",
@@ -740,6 +768,22 @@
   },
   "notifications": {
     "title": "Bildirimler",
+    "openTarget": "Bildirimin konusunu aç",
+    "prefs": {
+      "title": "Bildirimleriniz",
+      "inApp": "Uygulama içi çan",
+      "inAppHint": "Kapatırsanız çanınız boşalır. Hiçbir kayıt silinmez — yönetici tüm olayları görmeye devam eder.",
+      "browser": "Tarayıcı bildirimleri",
+      "browserHint": "Yeni bir şey geldiğinde sekmenin dışında bildirim göster. Bildirime tıklayınca konusu olan dosya, klasör ya da paylaşım açılır.",
+      "enableBrowser": "Bildirimlere izin ver",
+      "permGranted": "Bu tarayıcıda izin verildi",
+      "permDenied": "Bu tarayıcıda engellendi",
+      "permDeniedHint": "Tarayıcı ayarlarından bu siteye bildirim iznini yeniden verin.",
+      "permDefault": "İzin henüz istenmedi",
+      "permUnsupported": "Bu tarayıcı bildirim gösteremiyor",
+      "desktopHandled": "Masaüstü uygulaması bunları kendisi gösteriyor",
+      "saved": "Tercih kaydedildi"
+    },
     "adminTitle": "Bildirim Yönetimi",
     "bell": "Bildirim çanı",
     "empty": "Henüz bildirim yok",
@@ -766,6 +810,12 @@
       "scope": "Kapsam",
       "webhook": "Webhook",
       "createdAt": "Oluşturuldu"
+    },
+    "severity": {
+      "info": "Bilgi",
+      "warning": "Uyarı",
+      "error": "Hata",
+      "critical": "Kritik"
     }
   },
   "replica": {
@@ -831,7 +881,7 @@
       "fixAll": "Tümünü onar",
       "fixOne": "Onar",
       "unresolvedOnly": "Sadece çözülmeyenler",
-      "queued": "{n} retry kuyruğa alındı",
+      "queued": "{n} yeniden deneme kuyruğa alındı",
       "queuedOne": "Retry kuyruğa alındı",
       "fields": {
         "path": "Yol",
@@ -978,7 +1028,7 @@
       "share_created": "Paylaşım bağlantısı oluşturuldu",
       "drop_received": "Herkese açık istek bağlantısından dosya alındı",
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
-      "e2e_escrow_used": "Şifreli klasör parolası yerine kurtarma anahtarıyla açıldı"
+      "e2e_escrow_used": "Şifreli klasör parolası yerine emanet anahtarıyla açıldı"
     },
     "secretSet": "Secret tanımlı",
     "secretUnset": "Secret yok",
@@ -1090,7 +1140,7 @@
     "logoTooBig": "Görsel 256 KB satır içi sınırını aşıyor — daha küçük bir dosya kullanın ya da URL olarak barındırın.",
     "accent": "Vurgu rengi",
     "accentHelp": "Herkese açık sayfalarda buton ve bağlantılarda kullanılan hex renk (#rrggbb).",
-    "accentInvalid": "#4f46e5 gibi geçerli bir hex renk girin.",
+    "accentInvalid": "#2f6ceb gibi geçerli bir hex renk girin.",
     "footerText": "Alt bilgi metni",
     "footerHelp": "Herkese açık sayfaların alt bilgisinde gösterilen serbest metin (örn. telif satırı).",
     "hidePoweredBy": "\"filex ile paylaşıldı\" satırını gizle",
@@ -1296,6 +1346,84 @@
     },
     "trend": {
       "title": "Günlük"
+    }
+  },
+  "userSettings": {
+    "title": "Ayarlar",
+    "open": "Kullanıcı ayarları",
+    "saveChanges": "Değişiklikleri kaydet",
+    "demoReadOnly": "Bu ortak bir demo hesabı; profili, parolası ve ikinci faktörü değiştirilemez.",
+    "tabs": {
+      "profile": "Profil",
+      "preferences": "Tercihler",
+      "notifications": "Bildirimler",
+      "security": "Güvenlik",
+      "ai": "AI asistanı"
+    },
+    "subtitle": {
+      "profile": "Adınız, e-postanız ve fotoğrafınız — başkalarının gördüğü bilgiler.",
+      "preferences": "Uygulamanın cihazlarınızda nasıl göründüğü ve okunduğu.",
+      "notifications": "Zilinize ve masaüstünüze neyin ulaşacağı.",
+      "security": "Parolanız ve ikinci faktörünüz.",
+      "ai": "Burada henüz ayarlayabileceğiniz bir şey yok."
+    },
+    "footNote": {
+      "profile": "Bu sekmedeki değişiklikler Kaydet'e bastığınızda kaydedilir.",
+      "preferences": "Değiştirdiğiniz anda kaydedilir.",
+      "notifications": "Değiştirdiğiniz anda kaydedilir.",
+      "security": "Buradaki her işlem kendi başına uygulanır.",
+      "ai": "Bu sekmede kaydedilecek bir şey yok."
+    },
+    "prefs": {
+      "languageHint": "Burada hemen uygulanır; bir sonraki tarayıcıda da açılsın diye hesabınıza kaydedilir.",
+      "compact": "Sıkışık dosya listesi kullan",
+      "compactHint": "Dosya gezgininde daha dar satırlar.",
+      "timezone": "Saat dilimi",
+      "timezoneHint": "Tarihler bir an olarak saklanır ve burada seçtiğiniz saatle gösterilir; böylece herkes aynı anı kendi saatiyle görür. Hesabınıza kaydedilir, başka bir tarayıcıda da geçerli olur.",
+      "timezoneNow": "{zone} bölgesinde şu an: {time}",
+      "startPage": "Açılış sayfası",
+      "startPage_home": "Giriş",
+      "startPage_files": "Dosyalar",
+      "startPage_admin": "Yönetim paneli",
+      "startPageHint": "Oturum açtığınızda ya da ana adrese geldiğinizde filex burayı açar. Doğrudan bir sayfanın bağlantısına tıkladığınızda yine o sayfaya gidersiniz.",
+      "appearance": "Görünüm",
+      "mode": "Aydınlık ya da karanlık",
+      "modeHint": "Hangi sürümün çizileceği. Otomatik, işletim sisteminizi izler.",
+      "palette": "Renk paleti",
+      "paletteHint": "O sürümün hangi renklerden oluştuğu. Her paletin aydınlık ve karanlık bir sürümü vardır; bu ayarla üstteki ayar birlikte çalışır.",
+      "folderMemory": "Her klasörün görünümünü hatırla",
+      "folderMemoryHint": "Bir klasör, onu en son bıraktığınız gibi açılır — liste ya da ızgara, ve sıralaması. Varsayılan kapalı; kapalıyken son seçiminiz her yerde geçerlidir.",
+      "desktopApp": "Masaüstü uygulaması",
+      "desktopAppHint": "Uygulamanın köşesindeki hatırlatmayı kapattığınızda bir daha çıkmaz — indirmeler burada kalır."
+    },
+    "notifications": {
+      "eventsTitle": "Nelerden haberdar olayım",
+      "eventsHint": "Birini kapatmak onu zilinizin dışında tutar. Hiçbir şey kaydedilmekten çıkmaz — yönetici her olayı görmeye devam eder.",
+      "events": {
+        "file_uploaded": "Yeni bir dosya geldiğinde",
+        "file_updated": "Bir dosya değiştiğinde",
+        "file_upload_failed": "Bir yükleme tamamlanmadığında",
+        "file_infected": "Bir dosyada virüs bulunduğunda",
+        "file_deleted": "Bir dosya kalıcı olarak silindiğinde",
+        "file_trashed": "Bir dosya çöp kutusuna taşındığında",
+        "file_moved": "Bir dosya taşındığında ya da adı değiştiğinde",
+        "share_created": "Biri paylaşım bağlantısı oluşturduğunda",
+        "drop_received": "İstek bağlantısıyla bir dosya geldiğinde",
+        "comment_added": "Biri bir dosyaya yorum yaptığında",
+        "e2e_escrow_used": "Şifreli bir klasör emanet anahtarıyla açıldığında"
+      }
+    },
+    "security": {
+      "passwordTitle": "Parolayı değiştir",
+      "totpEnabled": "İki adımlı doğrulama açık",
+      "totpDisabled": "İki adımlı doğrulama kapalı"
+    },
+    "heading": "Kullanıcı ayarları",
+    "headingSub": "Profilinizi, tercihlerinizi ve güvenliğinizi yönetin.",
+    "adminBadge": "Yönetici",
+    "ai": {
+      "soon": "Yakında",
+      "body": "Bu sürümde kullanıcıya özel asistan ayarı yok. filex'in sunduğu AI özellikleri tüm kurulum için yönetici tarafından yapılandırılır; bu yüzden burada sizin açıp kapatacağınız bir şey henüz bulunmuyor."
     }
   }
 }

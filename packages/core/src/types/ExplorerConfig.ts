@@ -17,6 +17,10 @@
  * keeping the auto-derived rest).
  */
 
+import type { UiProfile } from '../lib/uiProfile';
+
+export type { UiProfile };
+
 /**
  * Auth strategy. Discriminated union so request building is type-safe.
  *
@@ -185,6 +189,21 @@ export interface ExplorerConfig {
   /** UI dil kodu */
   locale?: LocaleCode;
 
+  /**
+   * The clock this embed's visitors read dates on by default — an IANA id,
+   * `'Asia/Tokyo'`, `'Europe/Istanbul'`, `'UTC'`.
+   *
+   * Only which clock an instant is READ on changes; the instant itself does
+   * not. Unset, a visitor sees the zone of the account behind the credential
+   * when that credential is a person's, and otherwise their browser's own.
+   *
+   * ⚠ A default, not a lock. A visitor who picks a zone in the explorer's own
+   * "⋯" → Time zone keeps their pick, in their browser. The whole order, and
+   * why it is that order, is `TIME_ZONE_TIERS` in `lib/timezone`. An id the
+   * browser does not accept is ignored rather than guessed at.
+   */
+  timeZone?: string;
+
   /** OnlyOffice iframe base (e.g. `https://docs.example.com`). */
   onlyOfficeBase?: string;
 
@@ -259,7 +278,21 @@ export interface ExplorerConfig {
    */
   tabStrip?: 'auto' | 'always';
 
-  /** Initial path (storage-prefix included: `local://`). Default: root. */
+  /**
+   * Initial path (storage-prefix included: `local://`). Default: root.
+   *
+   * gorunum:v3-shell — a VIEW is addressable here too, by its sentinel:
+   * `'.home'` opens the overview (storages · recent · starred), and
+   * `'.recent'` / `'.starred'` / `'.shared'` / `'.trash'` / `'.tag~invoices'`
+   * open theirs. That is how our own `/home` route opens Home without a second
+   * mechanism — the sentinels are the same strings the address-bar hash, the
+   * tab strip and a restored session already speak (lib/listing
+   * VIRTUAL_SEGMENTS), so there is one answer to "where does this explorer
+   * start" rather than a path answer and a view answer that can disagree.
+   *
+   * ⚠ A sentinel this build does not know keeps going to the backend as a
+   * folder name, so a host cannot invent views by passing strings.
+   */
   initialPath?: string;
 
   /**
@@ -271,50 +304,84 @@ export interface ExplorerConfig {
   rootPath?: string;
 
   /**
+   * gorunum:v3-shell — the product mark at the far left of the top bar: the
+   * wordmark beside it, and an image for the mark itself.
+   *
+   * ⚠⚠ This exists because a `<slot>` IS NOT REACHABLE from a host that mounts
+   * `<filex-explorer>`, and that is not a bug anybody can fix in a line.
+   * Measured, 2026-09-13, in a real browser with Vue's own
+   * `defineCustomElement`: a `<span slot="brand">` placed inside the element
+   * leaves `Object.keys(slots)` EMPTY in the element's `setup` — with the
+   * wrapper forwarding slots, without it, when the node is added after mount,
+   * and with `shadowRoot: true` as well. Vue projects light DOM into a custom
+   * element only through a NATIVE `<slot>` element inside a shadow root, which
+   * this package cannot have: its entire look is one global stylesheet
+   * (`styles/base.css`), and a shadow root would leave every embed unstyled.
+   *
+   * So the slot is for hosts that mount the Vue SFC (our admin app does, and
+   * its `#brand` still wins when it is filled); this is for everybody else —
+   * and "everybody else" includes OUR OWN DESKTOP APP, which mounts the web
+   * component. A logo the web app has and the desktop app silently lacks is
+   * exactly the one-surface split this package exists to prevent.
+   *
+   * ⚠ An `<img src>`, not markup. The mark is drawn from a URL — a file, or a
+   * `data:image/svg+xml;base64,…` URI for an inline logo — so a host never
+   * hands this package a string to inject. There is no `v-html` on the path.
+   *
+   * ⚠ Both halves are optional and independent: a name with no mark renders
+   * the wordmark alone, a mark with no name renders the glyph alone, and
+   * neither renders nothing at all (the collapse control still sits there).
+   */
+  brand?: {
+    /** Wordmark text, e.g. `'filex'`. Printed verbatim, never translated. */
+    name?: string;
+    /** URL of the mark: a path, an absolute URL, or a `data:` URI. */
+    markUrl?: string;
+  };
+
+  /**
    * Whether the info-panel (inspector) toggle is shown in the toolbar.
    * Default true. The inspector itself stays reachable from the context menu.
    */
   showInfoPanel?: boolean;
 
   /**
-   * Which set of chrome the explorer presents. A PRESET, not a feature switch:
-   * nothing is removed from the code, and every capability stays reachable —
-   * `'simple'` only changes what is on screen by default.
+   * How much of the explorer to put on screen. A REDUCTION, and only that.
    *
-   *   'standard' (default) — everything: tab strip, split pane, all three view
-   *                          modes. The tool the explorer has always been.
-   *   'simple'             — one pane, one folder, list/grid only. The
-   *                          navigation panel starts expanded, the tab strip
-   *                          and split pane are off, the gallery view mode and
-   *                          the host's "How to connect" surface are hidden.
-   *   'drive'              — everything `simple` does, plus the shell an end
-   *                          user already knows: one primary "New" menu, one
-   *                          search field in the header (with its ⌘K/Ctrl+K
-   *                          escalation into the command palette), a filter row
-   *                          under the breadcrumb, Folders and Files as
-   *                          labelled sections in grid view, the details panel
-   *                          split into Details / Activity, and a storage line
-   *                          under the navigation.
+   *   'standard' (default) — everything: the tab strip, the split pane and all
+   *                          three view modes, on top of the shell below.
+   *   'simple'             — one pane, one folder, list and grid only. The tab
+   *                          strip and the split pane are off, the gallery view
+   *                          mode is hidden, and the "How to connect" /
+   *                          "API keys" entries default to off.
    *
-   * ⚠ `drive` is a SUPERSET of `simple`, not a sibling: everything `simple`
-   * turns off stays off, and the code asks `simpleUi` for those questions so a
-   * later change to `simple` cannot silently miss `drive`. It is a third value
-   * rather than a second boolean because "which chrome" is ONE question with
-   * three answers — a `driveShell: true` next to `uiProfile: 'standard'` would
-   * be a combination nobody can describe, and keeping that question single is
-   * why `uiProfile` was a preset to begin with.
+   * There is no third value and no alias. ⚠ Anything else that arrives here —
+   * a typo, or the `'drive'` profile that was REMOVED after v0.40.0 —
+   * resolves to `'standard'` and logs one console line naming it
+   * (`lib/uiProfile.resolveUiProfile`, which explains why that direction and
+   * not the other). **If you passed `'drive'`, pass `'simple'`.**
    *
-   * Why it exists (GitHub #14): the reporter's users are not in IT and read
-   * split panes, tabs and mount instructions as a file manager they would have
-   * to relearn. The answer was NOT a second UI — one explorer, configured, so
-   * a fix lands in one place for every surface that mounts this package.
+   * ⚠⚠ IT DOES NOT DECIDE THE LOOK, and that is the whole of this option.
+   * The header with its one wide search field, the "+ New" menu, the filter
+   * row, the Folders/Files sections, the Details/Activity tabs and the storage
+   * line USED to be gated behind a profile. They are what filex is now — the
+   * admin panel, the desktop app and every `<filex-explorer>` embed draw them,
+   * with no string passed. Owner's decision, 2026-09-12, verbatim (translated
+   * from Turkish): "their app and our app will be one to one. The admin gets
+   * one extra button, nothing else. The things we have over them — tabs, split
+   * pane, theme choice, icon choice — stay."
    *
-   * ⚠ It does not gate the navigation panel. The panel ships in both profiles,
-   * for administrators too; only its default expanded/collapsed state and the
-   * rest of the chrome differ. A viewer's own collapse choice, once made,
-   * outranks the profile — it is a per-viewer preference, not a policy.
+   * Why the reduction exists at all (GitHub #14): the reporter's users are not
+   * in IT and read split panes, tabs and mount instructions as a file manager
+   * they would have to relearn. The answer was NOT a second UI — one explorer,
+   * configured, so a fix lands in one place for every surface that mounts this
+   * package.
+   *
+   * ⚠ It does not gate the navigation panel. The panel ships in every profile,
+   * for administrators too; only a viewer's own collapse choice moves it, and
+   * that is a per-viewer preference, not a policy.
    */
-  uiProfile?: 'standard' | 'simple' | 'drive';
+  uiProfile?: UiProfile;
 
   /**
    * Render the navigation panel (Upload · Recent / Starred / Shared with me /
@@ -449,11 +516,49 @@ export interface ExplorerConfig {
    * + (optional) display label / read-only flag. The SFC mirrors
    * each entry as a virtual `dir` row at "/".
    */
+  /**
+   * tablo:t1 — remember how each folder was last viewed (view mode + sort),
+   * Windows Explorer style. Default ON.
+   *
+   * ⚠ The opt-out exists for embeds. A product mounting filex in a two-inch
+   * panel has one shape it wants and no room to argue with a gallery view
+   * arriving from the person's main window; setting this false makes every
+   * folder open in the host's chosen default and writes nothing. The columns
+   * are NOT covered by this flag — their widths are a global preference about
+   * the reader's screen, and a panel that narrow sheds them for want of room
+   * before any preference is consulted.
+   */
+  rememberFolderView?: boolean;
   storages?: Array<{
     name: string;
+    /**
+     * tablo:t1 — the storage's immutable uid, when the host knows it.
+     *
+     * ⚠ A storage's NAME is editable — that is the point of a name — so it is
+     * not a stable address, which is why every protocol also accepts the uid
+     * as a path's first segment (`backend/internal/storageref`, filex issue
+     * #21). Anything keyed on a storage for the long term should prefer this:
+     * per-folder view memory does (`lib/viewPrefs.folderKey`), and folders
+     * under a renamed storage keep their remembered view the moment a host
+     * starts filling it in. Absent = the name is used and a rename loses the
+     * memory, which is a mild, self-healing loss.
+     */
+    uid?: string;
     label?: string;
     driver?: string;
     readOnly?: boolean;
+    /**
+     * gorunum:v3-shell — bytes this storage holds, when the host knows. Drawn
+     * as the caption on the Home view's storage card; absent means the card
+     * names the kind of thing instead.
+     *
+     * ⚠ It must be the SAME quantity for every caller who gets it (in our own
+     * app: `/api/admin/storages` for an operator, the RBAC-filtered
+     * `/api/files/quota/storages` for everybody else). The per-USER quota is a
+     * sum across every storage, so passing that here would print a number
+     * about the person under a label about the drive.
+     */
+    usedBytes?: number;
   }>;
 
   /**

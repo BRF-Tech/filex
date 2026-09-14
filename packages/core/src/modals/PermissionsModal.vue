@@ -1,15 +1,41 @@
 <script setup lang="ts">
-// Access modal — one popup combining "Permissions" (per-user RBAC grants,
-// owner-only) and "Share by link" (public share link, editor+). Opened
-// from the explorer's unified "Share / Permissions" action. The layout is a fixed
-// header/tabs with a single scrollable body so the popup never grows into one
-// long scroll. Styling uses the SFC's --fe-* theme variables (light/dark).
+/**
+ * Access modal — "Share / Permissions", the popup behind the explorer's
+ * `access` action.
+ *
+ * gorunum:v2-share — the LOOK changed, the capabilities did not.
+ *
+ * It used to open as three peer tabs (People · Link · Request files), each a
+ * grid of controls competing for the first glance. Nine times in ten the
+ * person who opened it wants one thing: turn the link on and copy it. So the
+ * dialog now leads with exactly that — one switch, one plain sentence saying
+ * who can open the item right now, and the link with its Copy button — and
+ * everything else sits underneath in a **named** second tier:
+ *
+ *   · "Bağlantı seçenekleri" — PIN, expiry, download cap, the one-line curl,
+ *     e-mail delivery, the OS share sheet, and every existing download link.
+ *   · "Erişimi olanlar"      — the per-user/per-group grants (owner only).
+ *   · "Dosya İste"           — the inbound drop link (folders only).
+ *
+ * ⚠ Second tier, not "Advanced": each section says what is in it and carries a
+ * one-glance summary of its own state ("PIN · 7 gün · 3 indirme"), because a
+ * control nobody can find is a control that does not exist. `initialTab` still
+ * decides which section opens with the dialog, so "Request files" still lands
+ * on the drop link.
+ *
+ * ⚠ No `<style>` block: the CSS lives in `styles/base.css`
+ * (`gorunum:v2-share`). A scoped style block here is silently dropped in the
+ * web-component build — see web/tests/api/scopedStyles.test.ts.
+ */
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
 import { shareCliCommand } from '../lib/shareCli';
 import { STOCK_EXPIRY_DAYS, clampExpiryOptions, defaultExpiryDays, ttlCeilingHint, validUntilLine } from '../lib/shareTtl';
 import { resolveLocale } from '../locales/resolve';
+import { formatByteSize, useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons';
+import { fileIconTile } from '../lib/fileIcons';
 
 const props = defineProps<{
   api: FileApi;
@@ -21,23 +47,24 @@ const props = defineProps<{
    *  undefined/0 = no ceiling. The expiry choices are derived from it. */
   shareMaxTtlDays?: number;
   /**
-   * surucu:d1 — which tab this modal opens on. Absent = 'perms', the behaviour
-   * every existing caller has.
+   * surucu:d1 — which part of the dialog the caller wants opened. Absent =
+   * 'perms', the behaviour every existing caller has.
    *
-   * The drive shell's "Request files" needs 'drop': the file-drop link already
-   * lives in this modal, and a menu entry that opens it on the permissions tab
-   * and leaves the user to find the third tab is a menu entry that lied about
-   * what it does.
+   * The drive shell's "Request files" needs 'drop': the file-drop link lives
+   * in this dialog, and a menu entry that opened it anywhere else would be a
+   * menu entry that lied about what it does.
    *
-   * ⚠ A hint, not a lock: `load()` still falls back to 'share' when the caller
-   * turns out not to be an owner, because the permissions tab is not theirs to
-   * see.
+   * ⚠ A hint, not a lock: `load()` still falls back to the link tier when the
+   * caller turns out not to be an owner, because the grants section is not
+   * theirs to see.
    */
   initialTab?: 'perms' | 'share' | 'drop';
 }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
-const tr = computed(() => (resolveLocale(props.locale)) !== 'en');
+const localeCode = computed(() => resolveLocale(props.locale));
+const { t } = useLocale(() => localeCode.value);
+const tr = computed(() => localeCode.value !== 'en');
 function L(t: string, e: string): string {
   return tr.value ? t : e;
 }
@@ -50,10 +77,23 @@ const pathParts = computed(() => {
   const segs = rel.split('/').filter(Boolean);
   return { adapter, name: segs.length ? segs[segs.length - 1] : adapter, rel };
 });
+// The type tile beside the title — the same badge the listing draws, so the
+// dialog is visibly about the row the user right-clicked.
+const titleTile = computed(() => {
+  const name = pathParts.value.name;
+  const dot = name.lastIndexOf('.');
+  return fileIconTile({
+    type: props.isDir ? 'dir' : 'file',
+    extension: !props.isDir && dot > 0 ? name.slice(dot + 1) : '',
+  });
+});
 
-type Tab = 'perms' | 'share' | 'drop';
-const tab = ref<Tab>(props.initialTab ?? 'perms');
-const canManage = ref(false); // owner/admin → can see the permissions tab
+type Section = 'link' | 'people' | 'drop';
+const open = ref<Record<Section, boolean>>({ link: false, people: false, drop: false });
+function toggleSection(s: Section) {
+  open.value = { ...open.value, [s]: !open.value[s] };
+}
+const canManage = ref(false); // owner/admin → can see the grants section
 
 // ── permissions state ──
 const loading = ref(true);
@@ -93,6 +133,23 @@ const copied = ref('');
 const shareMailTo = ref('');
 const shareMailBusy = ref(false);
 const shareMailNotice = ref('');
+
+/**
+ * ⚠ `listShares` returns BOTH kinds of link — a download link (`/s/…`) and a
+ * file-drop link (`/d/…`) are the same row with a different `kind`. They used
+ * to be listed together under "Existing links", which meant an upload link
+ * appeared in the download tab and the "link sharing" state could not be read
+ * off the list at all. Split at the source: each section owns its own kind.
+ *
+ * `kind` is absent from the `ShareInfo` type but present on the wire (see
+ * backend/internal/api/handlers/share.go), so it is read through a narrow cast
+ * rather than by widening a shared type this dialog does not own.
+ */
+function shareKind(s: ShareInfo): string {
+  return (s as ShareInfo & { kind?: string }).kind ?? 'download';
+}
+const downloadShares = computed(() => shares.value.filter((s) => shareKind(s) !== 'drop'));
+const dropShares = computed(() => shares.value.filter((s) => shareKind(s) === 'drop'));
 
 // ⚠ Derived from the server's ceiling, never a fixed list: offering "30 days"
 // on a server that keeps links for 7 would show a choice that is not one.
@@ -195,14 +252,15 @@ async function reload() {
     storageRbac.value = r.storage_rbac;
     canManage.value = true;
   } catch (e) {
-    // 403 = caller is editor (not owner): no permissions tab, share only.
+    // 403 = caller is editor (not owner): no grants section, link only.
     const st = (e as { status?: number }).status;
     if (st === 403) {
       canManage.value = false;
-      // Editor (not owner): no permissions tab → fall back to the link tab.
-      // ⚠ Unless the caller asked for a specific one: "Request files" opens
-      // 'drop', which an editor may perfectly well use.
-      if (!props.initialTab || props.initialTab === 'perms') tab.value = 'share';
+      // Editor (not owner): the grants section is not theirs — close it and
+      // leave the link tier, which is the whole dialog for them.
+      // ⚠ Unless the caller asked for the drop link, which an editor may
+      // perfectly well mint.
+      open.value = { ...open.value, people: false };
     } else {
       err.value = e instanceof Error ? e.message : String(e);
     }
@@ -218,12 +276,29 @@ async function reloadShares() {
     shares.value = [];
   }
 }
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') emit('close');
+}
 onMounted(async () => {
+  // surucu:d1 — the caller's entry point decides which section opens with the
+  // dialog.
+  //
+  // ⚠ The DEFAULT (no `initialTab`, i.e. the plain "Share / Permissions"
+  // action) now opens NOTHING. It used to land on the permissions tab, which
+  // meant the common case — turn the link on, copy it — arrived buried under a
+  // grant editor. The link tier is the answer to the default question; the
+  // grants are one click away with their own state ("2 people") readable from
+  // the closed heading. A caller that explicitly wants the grants still says
+  // so, and "Request files" still lands on the drop link.
+  if (props.initialTab === 'drop') open.value = { ...open.value, drop: true };
+  else if (props.initialTab === 'perms') open.value = { ...open.value, people: true };
+  document.addEventListener('keydown', onKey);
   await reload();
   await reloadShares();
 });
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer);
+  document.removeEventListener('keydown', onKey);
 });
 
 function onEmailInput() {
@@ -315,13 +390,14 @@ async function inviteCreateUser() {
     busy.value = false;
   }
 }
-// "Just send a share link" → jump to the share tab with the address prefilled so the
-// owner creates a link (with their chosen expiry/PIN) and mails it there.
+// "Just send a share link" → open the link options with the address prefilled
+// so the owner creates a link (with their chosen expiry/PIN) and mails it
+// from there.
 function gotoShareWithMail() {
   shareMailTo.value = email.value.trim().toLowerCase();
   noAccount.value = false;
   notice.value = '';
-  tab.value = 'share';
+  open.value = { ...open.value, link: true };
 }
 async function changeLevel(g: Grant, newLevel: string) {
   if (newLevel === g.level) return;
@@ -375,6 +451,39 @@ async function createLink() {
     shareBusy.value = false;
   }
 }
+
+/**
+ * gorunum:v2-share — the switch.
+ *
+ * ON with nothing minted mints one with whatever the options tier currently
+ * says (that is the default: the server's ceiling as the expiry, no PIN, no
+ * cap). OFF revokes every DOWNLOAD link on this item, because that is what
+ * "link sharing is off" has to mean — a switch that left a live link behind
+ * would be the most dangerous control in the dialog.
+ *
+ * ⚠ Drop links are deliberately untouched: they are an inbound door managed by
+ * its own section, and revoking someone's upload invitation because the owner
+ * turned off downloads is not what either control says.
+ */
+async function toggleLink() {
+  if (shareBusy.value) return;
+  if (linkOn.value) {
+    shareBusy.value = true;
+    shareErr.value = '';
+    try {
+      for (const s of downloadShares.value) await props.api.revokeShare(s.uuid);
+      shareResult.value = null;
+      await reloadShares();
+    } catch (e) {
+      shareErr.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      shareBusy.value = false;
+    }
+    return;
+  }
+  await createLink();
+}
+
 async function sendShareMail() {
   const list = splitEmails(shareMailTo.value);
   if (!list.length) {
@@ -437,6 +546,7 @@ async function createDropLink() {
       expiresAt: r.share.expires_at ?? null,
       clamped: !!r.share.expiry_clamped,
     };
+    await reloadShares();
   } catch (e) {
     dropErr.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -475,8 +585,15 @@ async function sendDropMail() {
 }
 async function revoke(s: ShareInfo) {
   shareBusy.value = true;
-  try { await props.api.revokeShare(s.uuid); await reloadShares(); }
-  catch (e) { shareErr.value = e instanceof Error ? e.message : String(e); }
+  try {
+    await props.api.revokeShare(s.uuid);
+    // ⚠ The lead tier reads `shareResult` first. Revoking the link that is
+    // showing up there has to clear it too, or the dialog goes on offering a
+    // Copy button — and a switch reading ON — for a link the server has just
+    // thrown away.
+    if (shareResult.value && shareResult.value.url === s.url) shareResult.value = null;
+    await reloadShares();
+  } catch (e) { shareErr.value = e instanceof Error ? e.message : String(e); }
   finally { shareBusy.value = false; }
 }
 function copy(text: string, tag = 'url') {
@@ -493,15 +610,24 @@ function copy(text: string, tag = 'url') {
 // same as an emailed link.
 const canShare = computed(() => typeof navigator !== 'undefined' && typeof navigator.share === 'function');
 
-// humanSize mirrors the Go humanSize() used in the email body (1.4 MB).
+/**
+ * The size line in the share message, spelled the way the SERVER spells it.
+ *
+ * ⚠ This one really does have to mirror `humanSize()` in
+ * backend/internal/api/handlers/mail_templates.go — the same file forwarded
+ * by e-mail and by the OS share sheet must not carry two different sizes. So
+ * the mirroring is stated as arguments to the one formatter (1024, always one
+ * decimal, a dot and English letters, because that is what Go's `%.1f %cB`
+ * prints) instead of being a fifth private copy of the arithmetic.
+ *
+ * ⚠ It is therefore the one place in the UI that is NOT decimal, so a share
+ * message reads "1.4 MB" where the listing row reads "1.5 MB". The register
+ * entry for this was right about the real fix: the e-mail should render from
+ * one source rather than the UI copying its rounding.
+ */
 function humanSize(b?: number): string {
   if (!b || b <= 0) return '';
-  const unit = 1024;
-  if (b < unit) return `${b} B`;
-  const units = ['K', 'M', 'G', 'T', 'P', 'E'];
-  let div = unit, exp = 0;
-  for (let n = b / unit; n >= unit; n /= unit) { div *= unit; exp++; }
-  return `${(b / div).toFixed(1)} ${units[exp]}B`;
+  return formatByteSize(b, { base: 1024, digits: 'fixed1', numberLocale: null });
 }
 
 function expiryLine(days: number): string {
@@ -513,6 +639,60 @@ function expiryLine(days: number): string {
 function validUntil(r: { expiresAt?: string | null } | null): string {
   return validUntilLine(r?.expiresAt ?? null, tr.value ? 'tr' : 'en');
 }
+
+/* ── the top tier: one switch, one sentence, one link ──────────────────── */
+
+/** The link the header row shows: the one just minted, else the oldest live one. */
+const primaryLink = computed(() => shareResult.value?.url ?? downloadShares.value[0]?.url ?? '');
+const linkOn = computed(() => !!primaryLink.value);
+
+/**
+ * The plain sentence. It says who can open the item RIGHT NOW, which is the
+ * question the dialog exists to answer.
+ *
+ * ⚠ The PIN claim is only made about a link this dialog minted: `listShares`
+ * does not return `password_pin` (by design — the server will not re-serve a
+ * PIN), so for a link that was already there we say how many exist rather than
+ * guessing at its protection. A confident wrong sentence about who can read a
+ * file is worse than a vaguer true one.
+ */
+const whoLine = computed(() => {
+  if (!linkOn.value) return t('access.who.private');
+  if (shareResult.value) return shareResult.value.pin ? t('access.who.pin') : t('access.who.link');
+  return t('access.who.existing', { n: downloadShares.value.length });
+});
+
+/** The muted second line under it: what the server actually stored. */
+const linkDetail = computed(() => {
+  const bits: string[] = [];
+  if (shareResult.value) {
+    bits.push(validUntil(shareResult.value));
+    if (shareResult.value.clamped) bits.push(L('(sunucu sınırı uygulandı)', '(server limit applied)'));
+    if (shareMaxDl.value) bits.push(maxDlOptions.find((o) => o.v === shareMaxDl.value)?.l ?? '');
+  } else if (downloadShares.value[0]) {
+    const s = downloadShares.value[0];
+    bits.push(validUntilLine(s.expires_at ?? null, tr.value ? 'tr' : 'en'));
+    if (s.max_downloads) bits.push(maxDlOptions.find((o) => o.v === s.max_downloads)?.l ?? String(s.max_downloads));
+  }
+  return bits.filter(Boolean).join(' · ');
+});
+
+/* Section summaries — a named section still has to say what is inside it, or
+   the reader has to open all three to find the control they came for. */
+const linkSummary = computed(() => {
+  const bits: string[] = [];
+  bits.push(sharePwd.value ? t('access.sum.pin_on') : t('access.sum.pin_off'));
+  bits.push(expiryLabel(shareExpiry.value));
+  if (shareMaxDl.value) bits.push(maxDlOptions.find((o) => o.v === shareMaxDl.value)?.l ?? '');
+  return bits.filter(Boolean).join(' · ');
+});
+const peopleSummary = computed(() => {
+  const n = direct.value.length + inherited.value.length;
+  return n ? t('access.sum.people', { n }) : t('access.sum.people_none');
+});
+const dropSummary = computed(() =>
+  dropShares.value.length ? t('access.sum.drop', { n: dropShares.value.length }) : t('access.sum.drop_none'),
+);
 
 // Text + title for a download-share link, mirroring shareMailText().
 function shareBody(): { title: string; text: string } {
@@ -573,478 +753,368 @@ async function nativeShare(body: { title: string; text: string }) {
 </script>
 
 <template>
-  <div class="fx-perm-overlay" @click.self="emit('close')">
-    <div class="fx-perm-modal">
-      <header class="fx-perm-head">
-        <div class="fx-perm-title">
-          <span class="fx-perm-ico" aria-hidden="true">{{ isDir ? '📁' : '📄' }}</span>
-          <div class="fx-perm-titletext">
-            <h3>{{ L('Paylaş / İzinler', 'Share / Permissions') }}</h3>
-            <span class="fx-perm-sub" :title="path">{{ pathParts.name }}<span class="fx-perm-subdim"> · {{ pathParts.adapter }}</span></span>
-          </div>
+  <div class="fx-perm-overlay fe-share__scrim" @click.self="emit('close')">
+    <!-- ⚠ `fx-perm-modal` is kept alongside the new class: e2e/shots/capture.mjs
+         and the embedders' own harnesses address the dialog by it. -->
+    <div class="fx-perm-modal fe-share" role="dialog" aria-modal="true" :aria-label="t('access.title', { name: pathParts.name })">
+      <header class="fe-share__head">
+        <span class="fe-share__tile" aria-hidden="true" v-html="titleTile"></span>
+        <div class="fe-share__headtext">
+          <h3 class="fe-share__title">{{ t('access.title', { name: pathParts.name }) }}</h3>
+          <span class="fe-share__path" :title="path">{{ pathParts.adapter }}</span>
         </div>
-        <button class="fx-perm-x" @click="emit('close')" aria-label="close">✕</button>
+        <button type="button" class="fe-share__close" :aria-label="t('access.close')" :title="t('access.close')" @click="emit('close')">
+          <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
+        </button>
       </header>
 
-      <div class="fx-perm-tabs">
-        <button
-          v-if="canManage"
-          class="fx-perm-tab"
-          :class="{ 'is-active': tab === 'perms' }"
-          @click="tab = 'perms'"
-        >{{ L('Kişiler', 'People') }}</button>
-        <button
-          class="fx-perm-tab"
-          :class="{ 'is-active': tab === 'share' }"
-          @click="tab = 'share'"
-        >{{ L('Bağlantı', 'Link') }}</button>
-        <button
-          v-if="isDir"
-          class="fx-perm-tab"
-          :class="{ 'is-active': tab === 'drop' }"
-          @click="tab = 'drop'"
-        >{{ L('Dosya İste', 'Request files') }}</button>
-      </div>
-
-      <div class="fx-perm-body">
-        <!-- ───────── Permissions tab ───────── -->
-        <template v-if="tab === 'perms' && canManage">
-          <div v-if="!storageRbac" class="fx-perm-warn">
-            {{ L('Bu diskte RBAC kapalı — izinler yalnızca RBAC açık disklerde geçerli.', 'RBAC is off on this storage — grants only apply when RBAC is enabled.') }}
+      <div class="fe-share__body">
+        <!-- ───────── tier 1: the link, the whole reason people open this ───── -->
+        <div class="fe-share__lead">
+          <div class="fe-share__switchrow">
+            <span class="fe-share__leadicon" aria-hidden="true" v-html="actionIconSvg('access')"></span>
+            <span class="fe-share__leadlabel">{{ t('access.link.switch') }}</span>
+            <button
+              type="button"
+              class="fe-share__switch"
+              role="switch"
+              :aria-checked="linkOn ? 'true' : 'false'"
+              :aria-label="t('access.link.switch')"
+              data-testid="share-switch"
+              :disabled="shareBusy"
+              @click="toggleLink"
+            ><span class="fe-share__knob"></span></button>
           </div>
-          <div v-if="err" class="fx-perm-warn">{{ err }}</div>
-          <div v-if="loading" class="fx-perm-muted">{{ L('Yükleniyor…', 'Loading…') }}</div>
-          <template v-else>
-            <!-- Add person (primary action, on top) -->
-            <div class="fx-perm-addcard">
-              <div class="fx-perm-add">
-                <div class="fx-perm-emailwrap">
-                  <input v-model="email" type="email" class="fx-perm-input" autocomplete="off"
-                    :placeholder="L('İsim veya e-posta', 'Name or email')"
-                    @input="onEmailInput" @keyup.enter="submitEmail" @focus="onEmailInput" />
-                  <ul v-if="showSuggest" class="fx-perm-suggest">
-                    <li v-for="u in suggestions" :key="u.id" @mousedown.prevent="pickUser(u)">
-                      <span class="fx-perm-suggest-av">{{ (u.display_name || u.email).charAt(0).toUpperCase() }}</span>
-                      <span class="fx-perm-suggest-txt">
-                        <span class="fx-perm-suggest-name">{{ u.display_name || u.email }}</span>
-                        <span class="fx-perm-suggest-meta">{{ u.email }} · {{ u.role }}</span>
-                      </span>
-                    </li>
-                  </ul>
-                </div>
-                <select v-model="level" class="fx-perm-sel" :title="levels.find(o => o.v === level)?.d">
-                  <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
-                </select>
-                <button class="fx-perm-btn fx-perm-btn--primary" :disabled="busy" @click="submitEmail">
-                  {{ L('Ekle', 'Add') }}
-                </button>
-              </div>
+          <p class="fe-share__who" data-testid="share-who">{{ whoLine }}</p>
 
-              <div v-if="noAccount" class="fx-perm-invite">
-                <p class="fx-perm-muted">{{ L('Bu e-postada hesap yok. Ne yapmak istersiniz?', 'No account for this email — what next?') }}</p>
-                <div class="fx-perm-invite-actions">
-                  <div class="fx-perm-invite-row">
-                    <select v-model="createRole" class="fx-perm-sel">
+          <template v-if="linkOn">
+            <div class="fe-share__linkrow">
+              <a :href="primaryLink" target="_blank" rel="noopener" class="fe-share__url" :title="primaryLink">{{ primaryLink }}</a>
+              <button type="button" class="fe-share__copy" data-testid="share-copy" @click="copy(primaryLink, 'new')">
+                <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                <span>{{ copied === 'new' ? t('access.copied') : t('access.copy') }}</span>
+              </button>
+            </div>
+            <p v-if="linkDetail" class="fe-share__detail" data-testid="share-valid-until">{{ linkDetail }}</p>
+            <div v-if="shareResult?.pin" class="fe-share__pinrow">
+              <span class="fe-share__pinlabel">PIN</span>
+              <code class="fe-share__pin">{{ shareResult?.pin }}</code>
+              <button type="button" class="fe-share__mini" @click="copy(shareResult?.pin ?? '', 'sharepin')">
+                {{ copied === 'sharepin' ? t('access.copied') : t('access.copy') }}
+              </button>
+            </div>
+          </template>
+          <div v-if="shareErr" class="fe-share__warn">{{ shareErr }}</div>
+        </div>
+
+        <!-- ───────── tier 2: named sections, one click each ───────────────── -->
+        <div class="fe-share__sections">
+          <!-- Link options: PIN · expiry · download cap · curl · e-mail · links -->
+          <section class="fe-share__section">
+            <button
+              type="button"
+              class="fe-share__sechead"
+              :aria-expanded="open.link ? 'true' : 'false'"
+              data-testid="share-options-toggle"
+              @click="toggleSection('link')"
+            >
+              <svg class="fe-share__caret" :class="{ 'is-open': open.link }" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" /></svg>
+              <span class="fe-share__seclabel">{{ t('access.section.link') }}</span>
+              <span class="fe-share__secmeta">{{ linkSummary }}</span>
+            </button>
+            <div v-if="open.link" class="fe-share__panel">
+              <div class="fe-share__opts">
+                <label class="fe-share__check">
+                  <input type="checkbox" v-model="sharePwd" />
+                  <span>{{ L('PIN ile koru', 'Protect with a PIN') }}</span>
+                </label>
+                <label class="fe-share__field">
+                  <span class="fe-share__fieldlabel">{{ L('Süre', 'Expiry') }}</span>
+                  <select v-model.number="shareExpiry" class="fe-share__select" data-testid="share-expiry">
+                    <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+                  </select>
+                </label>
+                <label class="fe-share__field">
+                  <span class="fe-share__fieldlabel">{{ L('İndirme limiti', 'Download limit') }}</span>
+                  <select v-model.number="shareMaxDl" class="fe-share__select">
+                    <option v-for="o in maxDlOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+                  </select>
+                </label>
+              </div>
+              <p v-if="ttlHint" class="fe-share__hint" data-testid="share-ttl-hint">{{ ttlHint }}</p>
+              <button type="button" class="fx-perm-create fe-share__btn fe-share__btn--primary fe-share__btn--wide" :disabled="shareBusy" @click="createLink">
+                {{ L('Bağlantı oluştur', 'Create link') }}
+              </button>
+
+              <p v-if="!shareResult && shareMailTo" class="fe-share__hint">
+                {{ L('Bir bağlantı oluşturun, ardından', 'Create a link, then it will be sent to') }}
+                <strong>{{ shareMailTo }}</strong> {{ L('adresine gönderin.', '.') }}
+              </p>
+
+              <template v-if="shareResult">
+                <!-- one-line download command, for pulling the file onto a server -->
+                <div class="fx-perm-cli fe-share__cli">
+                  <span class="fe-share__fieldlabel">{{ L('Komut satırı', 'Command line') }}</span>
+                  <div class="fe-share__clirow">
+                    <code class="fe-share__clicmd" :title="shareCli">{{ shareCli }}</code>
+                    <button type="button" class="fe-share__mini" @click="copy(shareCli, 'sharecli')">
+                      {{ copied === 'sharecli' ? t('access.copied') : t('access.copy') }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- send by email (one or more, comma/space separated) -->
+                <div class="fe-share__mailrow">
+                  <input v-model="shareMailTo" type="text" class="fe-share__input" autocomplete="off"
+                    :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendShareMail" />
+                  <button type="button" class="fe-share__btn" :disabled="shareMailBusy" @click="sendShareMail">
+                    {{ L('Gönder', 'Send') }}
+                  </button>
+                </div>
+                <div v-if="shareMailNotice" class="fe-share__notice">{{ shareMailNotice }}</div>
+
+                <!-- native share (OS share sheet) — same as the fishapp Share button -->
+                <button v-if="canShare" type="button" class="fe-share__btn fe-share__btn--wide" @click="nativeShare(shareBody())">
+                  <span aria-hidden="true" v-html="actionIconSvg('access')"></span>
+                  <span>{{ L('Paylaş', 'Share') }}</span>
+                </button>
+              </template>
+
+              <div class="fe-share__list">
+                <h4 class="fe-share__listhead">{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
+                <p v-if="!downloadShares.length" class="fe-share__empty">{{ L('Yok', 'None') }}</p>
+                <div v-for="s in downloadShares" :key="s.uuid" class="fe-share__row">
+                  <span class="fe-share__url" :title="s.url">{{ s.url }}</span>
+                  <button type="button" class="fe-share__mini" @click="copy(s.url, s.uuid)">
+                    {{ copied === s.uuid ? t('access.copied') : t('access.copy') }}
+                  </button>
+                  <button type="button" class="fe-share__del" :disabled="shareBusy" :title="L('İptal', 'Revoke')"
+                    :aria-label="L('İptal', 'Revoke')" @click="revoke(s)">
+                    <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- People with access: the per-user / inherited grants -->
+          <section v-if="canManage" class="fe-share__section">
+            <button
+              type="button"
+              class="fe-share__sechead"
+              :aria-expanded="open.people ? 'true' : 'false'"
+              data-testid="share-people-toggle"
+              @click="toggleSection('people')"
+            >
+              <svg class="fe-share__caret" :class="{ 'is-open': open.people }" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" /></svg>
+              <span class="fe-share__seclabel">{{ t('access.section.people') }}</span>
+              <span class="fe-share__secmeta">{{ peopleSummary }}</span>
+            </button>
+            <div v-if="open.people" class="fe-share__panel">
+              <div v-if="!storageRbac" class="fe-share__warn">
+                {{ L('Bu diskte RBAC kapalı — izinler yalnızca RBAC açık disklerde geçerli.', 'RBAC is off on this storage — grants only apply when RBAC is enabled.') }}
+              </div>
+              <div v-if="err" class="fe-share__warn">{{ err }}</div>
+              <p v-if="loading" class="fe-share__hint">{{ L('Yükleniyor…', 'Loading…') }}</p>
+              <template v-else>
+                <div class="fe-share__add">
+                  <div class="fe-share__emailwrap">
+                    <input v-model="email" type="email" class="fe-share__input" autocomplete="off"
+                      :placeholder="L('İsim veya e-posta', 'Name or email')"
+                      @input="onEmailInput" @keyup.enter="submitEmail" @focus="onEmailInput" />
+                    <ul v-if="showSuggest" class="fe-share__suggest">
+                      <li v-for="u in suggestions" :key="u.id" @mousedown.prevent="pickUser(u)">
+                        <span class="fe-share__av fe-share__av--sm">{{ (u.display_name || u.email).charAt(0).toUpperCase() }}</span>
+                        <span class="fe-share__suggesttxt">
+                          <span class="fe-share__suggestname">{{ u.display_name || u.email }}</span>
+                          <span class="fe-share__suggestmeta">{{ u.email }} · {{ u.role }}</span>
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+                  <select v-model="level" class="fe-share__select" :title="levels.find(o => o.v === level)?.d">
+                    <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
+                  </select>
+                  <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" @click="submitEmail">
+                    {{ L('Ekle', 'Add') }}
+                  </button>
+                </div>
+
+                <div v-if="noAccount" class="fe-share__invite">
+                  <p class="fe-share__hint">{{ L('Bu e-postada hesap yok. Ne yapmak istersiniz?', 'No account for this email — what next?') }}</p>
+                  <div class="fe-share__inviterow">
+                    <select v-model="createRole" class="fe-share__select">
                       <option value="user">{{ L('Kullanıcı', 'User') }}</option>
                       <option value="viewer">{{ L('Görüntüleyen', 'Viewer') }}</option>
                     </select>
-                    <button class="fx-perm-btn fx-perm-btn--primary" :disabled="busy" @click="inviteCreateUser">
+                    <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" @click="inviteCreateUser">
                       {{ L('Kullanıcı oluştur + yetki ver', 'Create user + grant') }}
                     </button>
                   </div>
-                  <button class="fx-perm-btn fx-perm-btn--ghost" :disabled="busy" @click="gotoShareWithMail">
+                  <button type="button" class="fe-share__linkbtn" :disabled="busy" @click="gotoShareWithMail">
                     {{ L('Sadece paylaşım linki gönder →', 'Just send a share link →') }}
                   </button>
                 </div>
-              </div>
-              <div v-if="notice" class="fx-perm-notice">{{ notice }}</div>
-              <div v-if="inviteResult?.tempPassword" class="fx-perm-reveal">
-                {{ L('Geçici parola:', 'Temp password:') }} <code>{{ inviteResult.tempPassword }}</code>
-              </div>
-            </div>
+                <div v-if="notice" class="fe-share__notice">{{ notice }}</div>
+                <div v-if="inviteResult?.tempPassword" class="fe-share__notice">
+                  {{ L('Geçici parola:', 'Temp password:') }} <code class="fe-share__pin">{{ inviteResult.tempPassword }}</code>
+                </div>
 
-            <!-- People with access -->
-            <div class="fx-perm-section">
-              <h4>{{ L('Erişimi olanlar', 'People with access') }}</h4>
-              <div v-if="!direct.length && !inherited.length" class="fx-perm-empty">
-                {{ L('Henüz kimseyle paylaşılmadı.', 'Not shared with anyone yet.') }}
-              </div>
-              <div v-for="g in direct" :key="'d' + g.id" class="fx-perm-person">
-                <span class="fx-perm-av">{{ ginitial(g) }}</span>
-                <span class="fx-perm-user" :title="g.user_email">{{ glabel(g) }}</span>
-                <select class="fx-perm-sel fx-perm-sel--sm" :value="g.level"
-                  @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
-                  <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
-                </select>
-                <button class="fx-perm-del" :disabled="busy" :title="L('Kaldır', 'Remove')" @click="removeGrant(g)">✕</button>
-              </div>
-              <div v-for="g in inherited" :key="'i' + g.id" class="fx-perm-person fx-perm-inh">
-                <span class="fx-perm-av fx-perm-av--dim">{{ ginitial(g) }}</span>
-                <span class="fx-perm-user" :title="g.user_email">{{ glabel(g) }}</span>
-                <span class="fx-perm-badge">{{ levelLabel(g.level) }}</span>
-                <span class="fx-perm-from" :title="L('Üst klasörden gelir', 'Inherited from') + ': ' + (g.path_prefix || '/')">
-                  ↳ {{ g.path_prefix || '/' }}
-                </span>
-              </div>
+                <div class="fe-share__list">
+                  <h4 class="fe-share__listhead">{{ L('Erişimi olanlar', 'People with access') }}</h4>
+                  <p v-if="!direct.length && !inherited.length" class="fe-share__empty">
+                    {{ L('Henüz kimseyle paylaşılmadı.', 'Not shared with anyone yet.') }}
+                  </p>
+                  <div v-for="g in direct" :key="'d' + g.id" class="fe-share__row">
+                    <span class="fe-share__av">{{ ginitial(g) }}</span>
+                    <span class="fe-share__person" :title="g.user_email">{{ glabel(g) }}</span>
+                    <select class="fe-share__select fe-share__select--sm" :value="g.level"
+                      @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
+                      <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
+                    </select>
+                    <button type="button" class="fe-share__del" :disabled="busy" :title="L('Kaldır', 'Remove')"
+                      :aria-label="L('Kaldır', 'Remove')" @click="removeGrant(g)">
+                      <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
+                    </button>
+                  </div>
+                  <div v-for="g in inherited" :key="'i' + g.id" class="fe-share__row fe-share__row--dim">
+                    <span class="fe-share__av fe-share__av--dim">{{ ginitial(g) }}</span>
+                    <span class="fe-share__person" :title="g.user_email">{{ glabel(g) }}</span>
+                    <span class="fe-share__badge">{{ levelLabel(g.level) }}</span>
+                    <span class="fe-share__from" :title="L('Üst klasörden gelir', 'Inherited from') + ': ' + (g.path_prefix || '/')">
+                      {{ g.path_prefix || '/' }}
+                    </span>
+                  </div>
+                </div>
+              </template>
             </div>
-          </template>
-        </template>
+          </section>
 
-        <!-- ───────── Share tab ───────── -->
-        <template v-if="tab === 'share'">
-          <div class="fx-perm-addcard">
-            <div class="fx-perm-share-opts">
-              <label class="fx-perm-check">
-                <input type="checkbox" v-model="sharePwd" />
-                {{ L('PIN ile koru', 'Protect with a PIN') }}
-              </label>
-              <label class="fx-perm-field">
-                <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
-                <select v-model.number="shareExpiry" class="fx-perm-sel fx-perm-sel--sm" data-testid="share-expiry">
-                  <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
-                </select>
-              </label>
-              <label class="fx-perm-field">
-                <span class="fx-perm-muted">{{ L('İndirme limiti', 'Download limit') }}</span>
-                <select v-model.number="shareMaxDl" class="fx-perm-sel fx-perm-sel--sm">
-                  <option v-for="o in maxDlOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
-                </select>
-              </label>
-            </div>
-            <p v-if="ttlHint" class="fx-perm-hint fx-perm-ttlhint" data-testid="share-ttl-hint">{{ ttlHint }}</p>
-            <button class="fx-perm-btn fx-perm-btn--primary fx-perm-create" :disabled="shareBusy" @click="createLink">
-              {{ L('Bağlantı oluştur', 'Create link') }}
+          <!-- Request files: the inbound drop link (folders only) -->
+          <section v-if="isDir" class="fe-share__section">
+            <button
+              type="button"
+              class="fe-share__sechead"
+              :aria-expanded="open.drop ? 'true' : 'false'"
+              data-testid="share-drop-toggle"
+              @click="toggleSection('drop')"
+            >
+              <svg class="fe-share__caret" :class="{ 'is-open': open.drop }" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" /></svg>
+              <span class="fe-share__seclabel">{{ t('access.section.drop') }}</span>
+              <span class="fe-share__secmeta">{{ dropSummary }}</span>
             </button>
+            <div v-if="open.drop" class="fe-share__panel">
+              <p class="fe-share__hint">
+                {{ L('Bu klasöre herkesin dosya YÜKLEYEBİLECEĞİ herkese açık bir bağlantı. Yükleyenler klasördeki mevcut dosyaları göremez.', 'A public link that lets anyone UPLOAD files into this folder. Uploaders never see the folder\'s existing files.') }}
+              </p>
+              <div class="fe-share__opts">
+                <label class="fe-share__check">
+                  <input type="checkbox" v-model="dropPwd" />
+                  <span>{{ L('PIN ile koru', 'Protect with a PIN') }}</span>
+                </label>
+                <label class="fe-share__field">
+                  <span class="fe-share__fieldlabel">{{ L('Süre', 'Expiry') }}</span>
+                  <select v-model.number="dropExpiry" class="fe-share__select" data-testid="drop-expiry">
+                    <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+                  </select>
+                </label>
+              </div>
+              <p v-if="ttlHint" class="fe-share__hint">{{ ttlHint }}</p>
+              <button type="button" class="fe-share__btn fe-share__btn--primary fe-share__btn--wide" data-testid="drop-create" :disabled="dropBusy" @click="createDropLink">
+                {{ L('Bağlantı oluştur', 'Create link') }}
+              </button>
 
-            <div v-if="shareErr" class="fx-perm-warn">{{ shareErr }}</div>
+              <button type="button" class="fe-share__linkbtn" :aria-expanded="dropShowAdv ? 'true' : 'false'" @click="dropShowAdv = !dropShowAdv">
+                {{ dropShowAdv ? L('Yükleme sınırlarını gizle', 'Hide upload limits') : L('Yükleme sınırları', 'Upload limits') }}
+              </button>
+              <div v-if="dropShowAdv" class="fe-share__adv">
+                <label class="fe-share__advrow">
+                  <span class="fe-share__fieldlabel">{{ L('En fazla dosya', 'Max files') }}</span>
+                  <input v-model="dropMaxFiles" type="number" min="1" class="fe-share__input fe-share__input--sm" placeholder="20" />
+                </label>
+                <label class="fe-share__advrow">
+                  <span class="fe-share__fieldlabel">{{ L('Dosya başı MB', 'MB / file') }}</span>
+                  <input v-model="dropMaxSizeMB" type="number" min="1" class="fe-share__input fe-share__input--sm" placeholder="500" />
+                </label>
+                <label class="fe-share__advrow">
+                  <span class="fe-share__fieldlabel">{{ L('İzinli türler', 'Allowed types') }}</span>
+                  <input v-model="dropAllowedExt" type="text" class="fe-share__input fe-share__input--sm" :placeholder="L('hepsi (örn. pdf, jpg)', 'all (e.g. pdf, jpg)')" />
+                </label>
+                <label class="fe-share__check">
+                  <input type="checkbox" v-model="dropAskName" />
+                  <span>{{ L('Yükleyenin adını sor', 'Ask uploader name') }}</span>
+                </label>
+              </div>
 
-            <div v-if="shareResult" class="fx-perm-result">
-              <div class="fx-perm-linkrow">
-                <a :href="shareResult.url" target="_blank" rel="noopener" class="fx-perm-link">{{ shareResult.url }}</a>
-                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareResult.url, 'new')">
-                  {{ copied === 'new' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+              <div v-if="dropErr" class="fe-share__warn">{{ dropErr }}</div>
+
+              <template v-if="dropResult">
+                <div class="fe-share__linkrow">
+                  <a :href="dropResult.url" target="_blank" rel="noopener" class="fe-share__url" :title="dropResult.url">{{ dropResult.url }}</a>
+                  <button type="button" class="fe-share__copy" data-testid="drop-copy" @click="copy(dropResult.url, 'drop')">
+                    <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                    <span>{{ copied === 'drop' ? t('access.copied') : t('access.copy') }}</span>
+                  </button>
+                </div>
+                <p class="fe-share__detail">
+                  {{ validUntil(dropResult) }}
+                  <span v-if="dropResult.clamped">{{ L('(sunucu sınırı uygulandı)', '(server limit applied)') }}</span>
+                </p>
+                <div v-if="dropResult.pin" class="fe-share__pinrow">
+                  <span class="fe-share__pinlabel">PIN</span>
+                  <code class="fe-share__pin">{{ dropResult.pin }}</code>
+                  <button type="button" class="fe-share__mini" @click="copy(dropResult.pin, 'droppin')">
+                    {{ copied === 'droppin' ? t('access.copied') : t('access.copy') }}
+                  </button>
+                </div>
+
+                <!-- email the upload link to one or more people -->
+                <div class="fe-share__mailrow">
+                  <input v-model="dropMailTo" type="text" class="fe-share__input" autocomplete="off"
+                    :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendDropMail" />
+                  <button type="button" class="fe-share__btn" :disabled="dropMailBusy" @click="sendDropMail">
+                    {{ L('Gönder', 'Send') }}
+                  </button>
+                </div>
+                <div v-if="dropMailNotice" class="fe-share__notice">{{ dropMailNotice }}</div>
+
+                <!-- native share (OS share sheet) — same as the fishapp Share button -->
+                <button v-if="canShare" type="button" class="fe-share__btn fe-share__btn--wide" @click="nativeShare(dropBody())">
+                  <span aria-hidden="true" v-html="actionIconSvg('access')"></span>
+                  <span>{{ L('Paylaş', 'Share') }}</span>
                 </button>
-              </div>
-              <div class="fx-perm-muted fx-perm-validuntil" data-testid="share-valid-until">
-                {{ validUntil(shareResult) }}
-                <span v-if="shareResult.clamped">{{ L('(sunucu sınırı uygulandı)', '(server limit applied)') }}</span>
-              </div>
-              <div v-if="shareResult.pin" class="fx-perm-pin">
-                <span>PIN: <code>{{ shareResult.pin }}</code></span>
-                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareResult.pin, 'sharepin')">
-                  {{ copied === 'sharepin' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
-                </button>
-              </div>
+              </template>
 
-              <!-- one-line download command, for pulling the file onto a server -->
-              <div class="fx-perm-cli">
-                <span class="fx-perm-clilabel">{{ L('Komut satırı', 'Command line') }}</span>
-                <div class="fx-perm-clirow">
-                  <code class="fx-perm-clicmd" :title="shareCli">{{ shareCli }}</code>
-                  <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(shareCli, 'sharecli')">
-                    {{ copied === 'sharecli' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
+              <div class="fe-share__list">
+                <h4 class="fe-share__listhead">{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
+                <p v-if="!dropShares.length" class="fe-share__empty">{{ L('Yok', 'None') }}</p>
+                <div v-for="s in dropShares" :key="s.uuid" class="fe-share__row">
+                  <span class="fe-share__url" :title="s.url">{{ s.url }}</span>
+                  <button type="button" class="fe-share__mini" @click="copy(s.url, s.uuid)">
+                    {{ copied === s.uuid ? t('access.copied') : t('access.copy') }}
+                  </button>
+                  <button type="button" class="fe-share__del" :disabled="shareBusy" :title="L('İptal', 'Revoke')"
+                    :aria-label="L('İptal', 'Revoke')" @click="revoke(s)">
+                    <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
                   </button>
                 </div>
               </div>
-
-              <!-- send by email (one or more, comma/space separated) -->
-              <div class="fx-perm-mailrow">
-                <input v-model="shareMailTo" type="text" class="fx-perm-input" autocomplete="off"
-                  :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendShareMail" />
-                <button class="fx-perm-btn" :disabled="shareMailBusy" @click="sendShareMail">
-                  {{ L('Gönder', 'Send') }}
-                </button>
-              </div>
-              <div v-if="shareMailNotice" class="fx-perm-notice">{{ shareMailNotice }}</div>
-
-              <!-- native share (OS share sheet) — same as the fishapp Share button -->
-              <button v-if="canShare" type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-sharebtn" @click="nativeShare(shareBody())">
-                <span aria-hidden="true">📤</span> {{ L('Paylaş', 'Share') }}
-              </button>
             </div>
-            <p v-else-if="shareMailTo" class="fx-perm-hint">
-              {{ L('Aşağıdan bir bağlantı oluşturun, ardından', 'Create a link below, then it will be sent to') }}
-              <strong>{{ shareMailTo }}</strong> {{ L('adresine gönderin.', '.') }}
-            </p>
-          </div>
-
-          <div class="fx-perm-section">
-            <h4>{{ L('Mevcut bağlantılar', 'Existing links') }}</h4>
-            <div v-if="!shares.length" class="fx-perm-empty">{{ L('Yok', 'None') }}</div>
-            <div v-for="s in shares" :key="s.uuid" class="fx-perm-person">
-              <span class="fx-perm-user fx-perm-link" :title="s.url">{{ s.url }}</span>
-              <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(s.url, s.uuid)">
-                {{ copied === s.uuid ? L('✓', '✓') : L('Kopyala', 'Copy') }}
-              </button>
-              <button class="fx-perm-del" :disabled="shareBusy" :title="L('İptal', 'Revoke')" @click="revoke(s)">✕</button>
-            </div>
-          </div>
-        </template>
-
-        <!-- ───────── File-drop (upload link) tab ───────── -->
-        <template v-if="tab === 'drop'">
-          <div class="fx-perm-addcard">
-            <p class="fx-perm-muted fx-perm-dropintro">
-              {{ L('Bu klasöre herkesin dosya YÜKLEYEBİLECEĞİ herkese açık bir bağlantı. Yükleyenler klasördeki mevcut dosyaları göremez.', 'A public link that lets anyone UPLOAD files into this folder. Uploaders never see the folder\'s existing files.') }}
-            </p>
-            <div class="fx-perm-share-opts">
-              <label class="fx-perm-check">
-                <input type="checkbox" v-model="dropPwd" />
-                {{ L('PIN ile koru', 'Protect with a PIN') }}
-              </label>
-              <label class="fx-perm-field">
-                <span class="fx-perm-muted">{{ L('Süre', 'Expiry') }}</span>
-                <select v-model.number="dropExpiry" class="fx-perm-sel fx-perm-sel--sm" data-testid="drop-expiry">
-                  <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
-                </select>
-              </label>
-            </div>
-            <p v-if="ttlHint" class="fx-perm-hint fx-perm-ttlhint">{{ ttlHint }}</p>
-            <button class="fx-perm-btn fx-perm-btn--primary fx-perm-create" :disabled="dropBusy" @click="createDropLink">
-              {{ L('Bağlantı oluştur', 'Create link') }}
-            </button>
-
-            <button type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-advtoggle" @click="dropShowAdv = !dropShowAdv">
-              {{ dropShowAdv ? L('Gelişmiş ▲', 'Advanced ▲') : L('Gelişmiş ▼', 'Advanced ▼') }}
-            </button>
-            <div v-if="dropShowAdv" class="fx-perm-adv">
-              <label class="fx-perm-adv-row">
-                <span class="fx-perm-muted">{{ L('En fazla dosya', 'Max files') }}</span>
-                <input v-model="dropMaxFiles" type="number" min="1" class="fx-perm-input fx-perm-input--sm" placeholder="20" />
-              </label>
-              <label class="fx-perm-adv-row">
-                <span class="fx-perm-muted">{{ L('Dosya başı MB', 'MB / file') }}</span>
-                <input v-model="dropMaxSizeMB" type="number" min="1" class="fx-perm-input fx-perm-input--sm" placeholder="500" />
-              </label>
-              <label class="fx-perm-adv-row">
-                <span class="fx-perm-muted">{{ L('İzinli türler', 'Allowed types') }}</span>
-                <input v-model="dropAllowedExt" type="text" class="fx-perm-input fx-perm-input--sm" :placeholder="L('hepsi (örn. pdf, jpg)', 'all (e.g. pdf, jpg)')" />
-              </label>
-              <label class="fx-perm-check">
-                <input type="checkbox" v-model="dropAskName" />
-                {{ L('Yükleyenin adını sor', 'Ask uploader name') }}
-              </label>
-            </div>
-
-            <div v-if="dropErr" class="fx-perm-warn">{{ dropErr }}</div>
-
-            <div v-if="dropResult" class="fx-perm-result">
-              <div class="fx-perm-linkrow">
-                <a :href="dropResult.url" target="_blank" rel="noopener" class="fx-perm-link">{{ dropResult.url }}</a>
-                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(dropResult.url, 'drop')">
-                  {{ copied === 'drop' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
-                </button>
-              </div>
-              <div class="fx-perm-muted fx-perm-validuntil">
-                {{ validUntil(dropResult) }}
-                <span v-if="dropResult.clamped">{{ L('(sunucu sınırı uygulandı)', '(server limit applied)') }}</span>
-              </div>
-              <div v-if="dropResult.pin" class="fx-perm-pin">
-                <span>PIN: <code>{{ dropResult.pin }}</code></span>
-                <button class="fx-perm-btn fx-perm-btn--sm" @click="copy(dropResult.pin, 'droppin')">
-                  {{ copied === 'droppin' ? L('Kopyalandı ✓', 'Copied ✓') : L('Kopyala', 'Copy') }}
-                </button>
-              </div>
-
-              <!-- email the upload link to one or more people -->
-              <div class="fx-perm-mailrow">
-                <input v-model="dropMailTo" type="text" class="fx-perm-input" autocomplete="off"
-                  :placeholder="L('e-posta(lar) — virgülle ayırın', 'email(s) — comma separated')" @keyup.enter="sendDropMail" />
-                <button class="fx-perm-btn" :disabled="dropMailBusy" @click="sendDropMail">
-                  {{ L('Gönder', 'Send') }}
-                </button>
-              </div>
-              <div v-if="dropMailNotice" class="fx-perm-notice">{{ dropMailNotice }}</div>
-
-              <!-- native share (OS share sheet) — same as the fishapp Share button -->
-              <button v-if="canShare" type="button" class="fx-perm-btn fx-perm-btn--ghost fx-perm-sharebtn" @click="nativeShare(dropBody())">
-                <span aria-hidden="true">📤</span> {{ L('Paylaş', 'Share') }}
-              </button>
-            </div>
-          </div>
-        </template>
+          </section>
+        </div>
       </div>
+
+      <footer class="fe-share__foot">
+        <button type="button" class="fe-share__btn fe-share__btn--primary" data-testid="share-done" @click="emit('close')">
+          {{ t('access.done') }}
+        </button>
+      </footer>
     </div>
   </div>
 </template>
-
-<style>
-/* ⚠ NOT `scoped`, deliberately. Vue's scoped styles compile to
-   `.cls[data-v-HASH]`, and in the web-component build the hash baked into
-   this CSS does not match the one Vue stamps onto the DOM — so every rule
-   here silently stopped applying. Measured in the desktop app: the share
-   dialog had `position: static`, no background and no radius, i.e. raw
-   unstyled HTML, in EVERY embedded surface.
-   Safe to drop: every selector below is prefixed (fx-/fe-/filex-), so
-   there is nothing here that can leak into a host page. */
-.fx-perm-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
-  display: flex; align-items: center; justify-content: center; z-index: 10000;
-  font-family: var(--fe-font);
-}
-.fx-perm-modal {
-  display: flex; flex-direction: column;
-  background: var(--fe-bg); color: var(--fe-text);
-  width: min(520px, 94vw); max-height: 86vh;
-  border: 1px solid var(--fe-border); border-radius: var(--fe-radius-lg, 14px);
-  box-shadow: var(--fe-shadow); font-size: 14px; overflow: hidden;
-}
-/* header + tabs are fixed; only the body scrolls */
-.fx-perm-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 16px 18px 12px; flex: none;
-}
-.fx-perm-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.fx-perm-ico { font-size: 22px; line-height: 1; }
-.fx-perm-titletext { display: flex; flex-direction: column; min-width: 0; }
-.fx-perm-title h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--fe-text); }
-.fx-perm-sub {
-  font-size: 12px; color: var(--fe-text); max-width: 340px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.fx-perm-subdim { color: var(--fe-text-muted); }
-.fx-perm-x {
-  background: none; border: none; font-size: 17px; cursor: pointer;
-  color: var(--fe-text-muted); flex: none; line-height: 1; padding: 2px 4px; border-radius: 6px;
-}
-.fx-perm-x:hover { color: var(--fe-text); background: var(--fe-bg-hover); }
-.fx-perm-tabs { display: flex; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--fe-border); flex: none; }
-.fx-perm-tab {
-  background: none; border: none; border-bottom: 2px solid transparent;
-  padding: 8px 12px; cursor: pointer; color: var(--fe-text-muted); font-size: 13px;
-  font-family: inherit; font-weight: 500;
-}
-.fx-perm-tab:hover { color: var(--fe-text); }
-.fx-perm-tab.is-active { color: var(--fe-primary); border-bottom-color: var(--fe-primary); }
-.fx-perm-body { flex: 1 1 auto; overflow-y: auto; padding: 14px 18px 18px; }
-
-.fx-perm-addcard {
-  padding: 12px; border-radius: var(--fe-radius-md);
-  background: var(--fe-bg-elev); border: 1px solid var(--fe-border);
-}
-.fx-perm-section { margin-top: 16px; }
-.fx-perm-section h4 {
-  margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fe-text-muted);
-}
-.fx-perm-empty { color: var(--fe-text-muted); font-size: 13px; padding: 8px 2px; }
-
-/* person rows */
-.fx-perm-person { display: flex; align-items: center; gap: 10px; padding: 7px 2px; }
-.fx-perm-person + .fx-perm-person { border-top: 1px solid var(--fe-border); }
-.fx-perm-inh { color: var(--fe-text-muted); }
-.fx-perm-av {
-  width: 28px; height: 28px; flex: none; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--fe-primary); color: var(--fe-text-on-primary, #fff);
-  font-size: 12px; font-weight: 600;
-}
-.fx-perm-av--dim { background: var(--fe-bg-hover); color: var(--fe-text-muted); }
-.fx-perm-user { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fe-text); min-width: 0; }
-.fx-perm-from { font-size: 11px; color: var(--fe-text-muted); white-space: nowrap; }
-.fx-perm-badge {
-  font-size: 11px; padding: 2px 9px; border-radius: 999px;
-  background: var(--fe-bg-hover); color: var(--fe-text);
-}
-
-/* inputs / selects / buttons */
-.fx-perm-sel, .fx-perm-input {
-  padding: 7px 9px; border-radius: var(--fe-radius-sm, 7px); border: 1px solid var(--fe-border);
-  background: var(--fe-bg); color: var(--fe-text); font-size: 13px; font-family: inherit;
-}
-.fx-perm-sel--sm { padding: 5px 7px; font-size: 12px; }
-.fx-perm-sel:focus, .fx-perm-input:focus { outline: none; border-color: var(--fe-primary); }
-.fx-perm-add { display: flex; gap: 8px; align-items: stretch; }
-.fx-perm-emailwrap { position: relative; flex: 1; min-width: 120px; }
-.fx-perm-input { width: 100%; box-sizing: border-box; }
-.fx-perm-suggest {
-  position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 5; margin: 0; padding: 4px;
-  list-style: none; background: var(--fe-bg); border: 1px solid var(--fe-border);
-  border-radius: var(--fe-radius-sm, 7px); box-shadow: var(--fe-shadow); max-height: 210px; overflow: auto;
-}
-.fx-perm-suggest li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
-.fx-perm-suggest li:hover { background: var(--fe-bg-hover); }
-.fx-perm-suggest-av {
-  width: 24px; height: 24px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  background: var(--fe-bg-hover); color: var(--fe-text); font-size: 11px; font-weight: 600;
-}
-.fx-perm-suggest-txt { display: flex; flex-direction: column; min-width: 0; }
-.fx-perm-suggest-name { color: var(--fe-text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fx-perm-suggest-meta { color: var(--fe-text-muted); font-size: 11px; }
-.fx-perm-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--fe-text); cursor: pointer; }
-.fx-perm-btn {
-  padding: 7px 13px; border-radius: var(--fe-radius-sm, 7px); border: 1px solid var(--fe-border);
-  background: var(--fe-bg); color: var(--fe-text); font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap;
-}
-.fx-perm-btn:hover:not(:disabled) { background: var(--fe-bg-hover); }
-.fx-perm-btn:disabled { opacity: 0.55; cursor: default; }
-.fx-perm-btn--sm { padding: 5px 10px; font-size: 12px; }
-.fx-perm-btn--primary { background: var(--fe-primary); border-color: var(--fe-primary); color: var(--fe-text-on-primary, #fff); }
-.fx-perm-btn--primary:hover:not(:disabled) { background: var(--fe-primary-hover, var(--fe-primary)); filter: brightness(1.05); }
-.fx-perm-btn--ghost { background: none; border-color: transparent; color: var(--fe-primary); padding-left: 2px; }
-.fx-perm-btn--ghost:hover:not(:disabled) { background: none; text-decoration: underline; }
-.fx-perm-del { background: none; border: none; color: var(--fe-danger); cursor: pointer; font-size: 14px; flex: none; padding: 2px 4px; }
-.fx-perm-del:hover:not(:disabled) { filter: brightness(1.15); }
-
-/* invite sub-flow */
-.fx-perm-invite {
-  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--fe-border);
-}
-.fx-perm-invite-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.fx-perm-invite-row { display: flex; gap: 8px; align-items: stretch; }
-.fx-perm-invite-row .fx-perm-btn--primary { flex: 1; }
-
-/* share options + result
-   ⚠ These options used to be one wrapping flex row with the primary button
-   pushed to its right end by `margin-left: auto`. That works with two controls
-   and breaks with three: at the modal's 520px the row wraps and the button
-   drops onto a line of its own, right-aligned and looking dislodged — which is
-   exactly what adding the download limit did. A two-column grid of fields with
-   the action underneath holds its shape whatever we add next. */
-.fx-perm-share-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: end; }
-.fx-perm-share-opts > .fx-perm-check { grid-column: 1 / -1; }
-.fx-perm-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
-.fx-perm-field .fx-perm-sel { width: 100%; }
-.fx-perm-create { width: 100%; margin-top: 10px; }
-@media (max-width: 380px) { .fx-perm-share-opts { grid-template-columns: 1fr; } }
-.fx-perm-result { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--fe-border); }
-.fx-perm-linkrow { display: flex; gap: 8px; align-items: center; }
-.fx-perm-link { color: var(--fe-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-decoration: none; }
-.fx-perm-link:hover { text-decoration: underline; }
-.fx-perm-pin { margin: 8px 0 0; font-size: 13px; color: var(--fe-text); display: flex; align-items: center; gap: 8px; }
-.fx-perm-pin code, .fx-perm-reveal code { font-family: var(--fe-font-mono, monospace); background: var(--fe-bg-hover); padding: 1px 6px; border-radius: 5px; }
-/* one-line curl for the fresh link */
-.fx-perm-cli { margin-top: 10px; }
-.fx-perm-clilabel { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fe-text-muted); margin-bottom: 4px; }
-.fx-perm-clirow { display: flex; gap: 8px; align-items: center; }
-.fx-perm-clicmd {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--fe-font-mono, monospace); font-size: 12px;
-  background: var(--fe-bg-hover); color: var(--fe-text);
-  padding: 6px 8px; border-radius: var(--fe-radius-sm, 7px);
-}
-.fx-perm-mailrow { display: flex; gap: 8px; margin-top: 10px; }
-.fx-perm-mailrow .fx-perm-input { flex: 1; }
-.fx-perm-hint { font-size: 13px; color: var(--fe-text-muted); margin: 10px 0 0; }
-.fx-perm-ttlhint { margin: 4px 0 8px; }
-.fx-perm-validuntil { margin: 4px 0 6px; }
-/* native "Share" button — sits under the mail row, full width */
-.fx-perm-sharebtn { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
-
-/* file-drop tab */
-.fx-perm-dropintro { margin: 0 0 12px; line-height: 1.4; }
-.fx-perm-advtoggle { margin-top: 10px; padding-left: 2px; }
-.fx-perm-adv {
-  margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--fe-border);
-  display: flex; flex-direction: column; gap: 8px;
-}
-.fx-perm-adv-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
-.fx-perm-input--sm { width: 130px; padding: 5px 8px; font-size: 12px; }
-
-.fx-perm-warn {
-  background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.4);
-  border-radius: var(--fe-radius-sm, 7px); padding: 8px 10px; font-size: 13px; margin-bottom: 10px; color: var(--fe-text);
-}
-.fx-perm-notice { margin-top: 8px; font-size: 13px; color: var(--fe-text-muted); }
-.fx-perm-reveal { margin-top: 8px; font-size: 13px; word-break: break-all; color: var(--fe-text); }
-.fx-perm-muted { color: var(--fe-text-muted); font-size: 13px; }
-</style>

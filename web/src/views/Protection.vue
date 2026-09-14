@@ -411,7 +411,7 @@ async function saveVersions() {
           class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200"
           data-testid="shares-over-max"
         >
-          {{ t('protection.share.overMax', { n: sharesOverMax }) }}
+          {{ t('protection.share.overMax', { n: sharesOverMax }, sharesOverMax) }}
         </p>
         <div class="flex justify-end pt-1">
           <Button type="submit" :loading="savingShare">

@@ -81,32 +81,38 @@ function submit() {
 
 <template>
   <Modal :open="open" :title="t('e2e.create.title')" size="sm" @close="emit('close')">
+    <!-- ⚠ Every field carries a visible <label>. They had placeholders only
+         (v0.41.0 screenshot pass): the name of a field vanished the moment
+         anything was typed into it, and on the two password fields — where
+         what is typed is dots — nothing on screen said which box was which.
+         A placeholder is a hint, not a name; the length rule stays one. -->
     <form class="fe-e2e-form" @submit.prevent="submit">
-      <input
-        v-model="name"
-        type="text"
-        class="fe-input"
-        :placeholder="t('modal.newfolder.placeholder')"
-        autocomplete="off"
-        :disabled="busy"
-      />
-      <input
-        v-model="password"
-        type="password"
-        class="fe-input"
-        :placeholder="t('e2e.create.pw_placeholder')"
-        autocomplete="new-password"
-        :disabled="busy"
-      />
-      <input
-        v-model="password2"
-        type="password"
-        class="fe-input"
-        :placeholder="t('e2e.create.pw2_placeholder')"
-        autocomplete="new-password"
-        :disabled="busy"
-        @keydown.enter.prevent="submit"
-      />
+      <label class="fe-field">
+        <span class="fe-field__label">{{ t('modal.newfolder.placeholder') }}</span>
+        <input v-model="name" type="text" class="fe-input" autocomplete="off" :disabled="busy" />
+      </label>
+      <label class="fe-field">
+        <span class="fe-field__label">{{ t('e2e.create.pw_label') }}</span>
+        <input
+          v-model="password"
+          type="password"
+          class="fe-input"
+          :placeholder="t('e2e.create.pw_placeholder')"
+          autocomplete="new-password"
+          :disabled="busy"
+        />
+      </label>
+      <label class="fe-field">
+        <span class="fe-field__label">{{ t('e2e.create.pw2_label') }}</span>
+        <input
+          v-model="password2"
+          type="password"
+          class="fe-input"
+          autocomplete="new-password"
+          :disabled="busy"
+          @keydown.enter.prevent="submit"
+        />
+      </label>
       <div class="fe-e2e-warn" role="alert">
         <strong>{{ t('e2e.create.warn_title') }}</strong>
         <p>{{ t('e2e.create.warn_body') }}</p>

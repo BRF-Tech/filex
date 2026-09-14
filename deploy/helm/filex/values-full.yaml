@@ -58,8 +58,8 @@ drawio:
   url: https://draw.example.com     # self-host jgraph/drawio
 
 convert:
-  enabled: false                    # no public image yet — see docs/CONVERT-INTEGRATION.md
-  url: ""
+  enabled: false                    # run ghcr.io/brf-tech/converter-filex yourself, then
+  url: ""                           # point url at it — see docs/CONVERT-INTEGRATION.md
 
 # Mermaid needs nothing — it renders in the browser.
 

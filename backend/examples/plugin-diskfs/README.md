@@ -58,7 +58,7 @@ What it proves, in order:
 | 18 | **Signed plugins**: filex is restarted with `FILEX_PLUGIN_TRUSTED_KEYS` set, and from then on an unsigned upload is refused (400, naming the setting), a bogus signature is refused as a *client* error, and the plugins installed before the key was set keep running |
 
 > ⚠ Step 11 is the one worth understanding. filex decides what a storage can do
-> by type-asserting `storage.Writer` at forty-odd call sites, so a read-only
+> by type-asserting `storage.Writer` wherever a write can happen, so a read-only
 > plugin is handed to filex as a value that **has no write methods at all**. A
 > driver that merely returned an error would be offered an upload button, a
 > trash move and a version snapshot that each fail at the last moment.

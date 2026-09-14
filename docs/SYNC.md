@@ -6,8 +6,8 @@ offline, and catch up when you reconnect.
 
 It is available two ways, and they are the same engine:
 
-- **The desktop app** — Settings → *Sync folders*. Runs in the background while
-  the app sits in the tray.
+- **The desktop app** — Settings ⚙ → *Synced folders*. Runs in the background
+  while the app sits in the tray.
 - **The CLI** — `filex sync`, for servers, scripts and headless machines.
 
 Both read and write `~/.filex/sync/pairs.json`, so a folder paired in the app is

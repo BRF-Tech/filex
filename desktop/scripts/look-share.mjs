@@ -82,10 +82,11 @@ await w.evaluate(() => {
 });
 await w.waitForTimeout(1200);
 
-// The LINK tab — this is where a shareable URL lives.
+// gorunum:v2-share — the link itself is now the dialog's lead; its OPTIONS
+// (PIN, expiry, download cap, the curl, the existing links) sit in the named
+// "Link options" section. (It used to be a `Bağlantı` / `Link` tab.)
 await w.evaluate(() => {
-  const t = [...document.querySelectorAll('button, [role=tab]')].find((b) => /^Ba[gğ]lant[iı]$|^Link$/i.test(b.textContent?.trim() ?? ''));
-  t?.click();
+  document.querySelector('[data-testid="share-options-toggle"]')?.click();
 });
 await w.waitForTimeout(1200);
 await w.screenshot({ path: path.join(SHOTS, '20-share-link-tab.png') });

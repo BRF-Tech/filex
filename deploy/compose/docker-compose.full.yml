@@ -102,7 +102,9 @@ services:
       # FILEX_FTPS_KEY:  /certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${FILEX_DOMAIN}/${FILEX_DOMAIN}.key
       FILEX_NFS: ${FILEX_NFS:-0}
       # External integrations — each is blank unless you enable it (see header).
-      # filex hides an integration whose URL is blank or unreachable.
+      # filex offers an integration as soon as its URL is set; it does not hide
+      # one that is down. Settings -> External services -> Test says whether
+      # filex AND your browser can actually reach it.
       FILEX_ONLYOFFICE_URL: ${FILEX_ONLYOFFICE_URL:-}
       FILEX_ONLYOFFICE_JWT: ${ONLYOFFICE_JWT_SECRET:-}
       # Only when the document server cannot reach FILEX_PUBLIC_URL (a public
@@ -111,8 +113,10 @@ services:
       FILEX_ONLYOFFICE_CALLBACK_URL: ${FILEX_ONLYOFFICE_CALLBACK_URL:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
       FILEX_CONVERT_URL: ${FILEX_CONVERT_URL:-}
-      # ── Zero-touch config (seeded on first boot; fill in .env) ──────────
-      # SSO: set FILEX_AUTH_DRIVERS=local,oidc + the FILEX_OIDC_* vars.
+      # ── Zero-touch config (fill in .env) ────────────────────────────────
+      # SSO: set FILEX_AUTH_DRIVERS=local,oidc + the FILEX_OIDC_* vars. These
+      # are read on EVERY boot; the admin, SMTP, site name, trash retention and
+      # default storage below are seeded on the FIRST boot only.
       FILEX_AUTH_DRIVERS: ${FILEX_AUTH_DRIVERS:-local}
       FILEX_OIDC_ISSUER: ${FILEX_OIDC_ISSUER:-}
       FILEX_OIDC_CLIENT_ID: ${FILEX_OIDC_CLIENT_ID:-}

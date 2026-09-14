@@ -2,7 +2,8 @@
 //
 // Endpoints:
 //
-//	GET   /api/auth/me/quota                             (auth)
+//	GET   /api/files/quota/me                            (auth)
+//	GET   /api/files/quota/storages                      (auth, quota_storages.go)
 //	GET   /api/admin/users/{id}/quota                    (admin)
 //	POST  /api/admin/users/{id}/quota                    (admin)
 //	PATCH /api/admin/users/{id}/quota                    (admin)
@@ -22,6 +23,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -35,11 +37,18 @@ type Quota struct {
 	// admin must not read or clamp another tenant's user. quota.Service
 	// knows about bytes, not about who owns the account.
 	Store db.Store
+	// ACL answers the other tenancy question, the per-user one: which
+	// storages this caller may see at all. Wired by AttachACL (quota_storages.go);
+	// nil means no RBAC enforcement, as everywhere else.
+	ACL *acl.Resolver
+
+	// usage memoises per-storage (files, bytes) for storageUsageTTL.
+	usage *storageUsageCache
 }
 
 // NewQuota constructs the handler.
 func NewQuota(svc *quota.Service, store db.Store) *Quota {
-	return &Quota{Service: svc, Store: store}
+	return &Quota{Service: svc, Store: store, usage: newStorageUsageCache(storageUsageTTL)}
 }
 
 // quotaUserID reads the target user id from whichever route mounted the

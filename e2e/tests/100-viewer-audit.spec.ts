@@ -175,12 +175,20 @@ test.describe('Viewer audit — per-extension UI mount', () => {
       if (DRAWIO_EXTS.has(f.ext) && !CAPS.drawioReachable) {
         test.skip(true, `Drawio not reachable — fallback covered by 82-capability-gating`);
       }
+      // Login once per worker — the auth state lives in the browser
+      // context Playwright spins up per test. Cheap enough at this
+      // suite size and avoids cookie-share gotchas between contexts.
+      await loginAs(page);
+      // ⚠ Leave Home BEFORE arming the sink. Signing in lands on Home, which
+      // is the explorer, and the explorer warms Monaco on mount
+      // (useMonacoLoader.preloadEditor). Navigating away aborts those
+      // in-flight chunks, and a sink armed while they were still loading
+      // recorded every one as "failed to load" — for all 25 viewers, none of
+      // which had anything wrong with it. about:blank takes the aborts before
+      // anyone is listening; the session is in sessionStorage and survives it.
+      await page.goto('about:blank');
       const sink = instrumentPage(page);
       try {
-        // Login once per worker — the auth state lives in the browser
-        // context Playwright spins up per test. Cheap enough at this
-        // suite size and avoids cookie-share gotchas between contexts.
-        await loginAs(page);
 
         const adapterPath = `${STORAGE}://${f.name}`;
         const url =

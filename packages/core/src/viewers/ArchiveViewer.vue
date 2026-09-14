@@ -10,6 +10,8 @@
  * decide whether to extract or download.
  */
 import { computed, onMounted, ref, watch } from 'vue';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 
 interface ArchiveEntry {
   name: string;
@@ -22,7 +24,7 @@ const props = defineProps<{
   url: string;
   filePath?: string;
   ext: string;
-  t?: (key: string) => string;
+  t?: (key: string, vars?: Record<string, string | number>) => string;
   authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   authCredentials?: RequestCredentials;
   /** ⚠ Where to ask. This used to be the literal '/api/files/archive/list',
@@ -37,8 +39,11 @@ const entries = ref<ArchiveEntry[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
-function tt(key: string, fallback: string): string {
-  return props.t ? props.t(key) : fallback;
+/** ⚠ `vars` go THROUGH `t()`, not into a `.replace()` afterwards: `t()` is what
+ *  picks the singular (`viewer.archive.entries_one`) from the count, and it can
+ *  only do that if it is told the count. Same shape CsvViewer's helper has. */
+function tt(key: string, fallback: string, vars?: Record<string, string | number>): string {
+  return props.t ? props.t(key, vars) : fallback;
 }
 
 function fmtSize(n: number): string {
@@ -87,25 +92,54 @@ watch(() => props.filePath, load);
 
 const totalSize = computed(() => entries.value.reduce((sum, e) => sum + (e.size || 0), 0));
 const fileCount = computed(() => entries.value.filter((e) => !e.is_dir).length);
+
+/* === ikon:emoji — the fallback screen's mark ==========================
+ * Every viewer opened its "cannot show this" / "still loading" screen with a
+ * 48px colour emoji, one per format, each from whatever emoji font the OS
+ * shipped. The format mark is `lib/fileIcons`'s tile — the SAME tile the row
+ * the person just clicked is wearing, so the fallback is recognisably about
+ * that file — and "loading" is the stroked ring, spun by CSS, because no
+ * still picture can say "still going". */
+const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
+
+/** A row inside the archive, drawn the way the listing draws the same kind. */
+function entryTile(e: ArchiveEntry): string {
+  const name = e.name || '';
+  const dot = name.lastIndexOf('.');
+  return fileIconTile({
+    type: e.is_dir ? 'dir' : 'file',
+    extension: dot > 0 ? name.slice(dot + 1) : '',
+    basename: name,
+  });
+}
 </script>
 
 <template>
   <div class="filex-viewer-archive">
     <div v-if="error" class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">🗜️</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
       <p>{{ error }}</p>
     </div>
     <div v-else-if="loading" class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">⏳</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span
+        class="filex-viewer-fallback__icon filex-viewer-fallback__icon--spin"
+        aria-hidden="true"
+        v-html="actionIconSvg('progress')"
+      ></span>
       <p>{{ tt('viewer.loading', 'Loading…') }}</p>
     </div>
     <div v-else-if="entries.length === 0" class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">🗜️</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
       <p>{{ tt('viewer.archive.empty', 'Archive is empty.') }}</p>
     </div>
     <div v-else class="filex-viewer-archive__pane">
       <div class="filex-viewer-archive__summary">
-        {{ fileCount }} {{ tt('viewer.archive.entries', '{n} files').replace('{n}', String(fileCount)) }}
+        <!-- ⚠ The count is IN the message ("{n} files"). A `{{ fileCount }}`
+             printed in front of it read "3 3 files". -->
+        {{ tt('viewer.archive.entries', `${fileCount} files`, { n: fileCount }) }}
         · {{ fmtSize(totalSize) }}
       </div>
       <table class="filex-viewer-archive__table">
@@ -118,7 +152,11 @@ const fileCount = computed(() => entries.value.filter((e) => !e.is_dir).length);
         <tbody>
           <tr v-for="(e, i) in entries" :key="i" :data-dir="e.is_dir ? '1' : '0'">
             <td>
-              <span class="filex-viewer-archive__icon">{{ e.is_dir ? '📁' : '📄' }}</span>
+              <!-- ikon:emoji — the same tile the listing draws for the same
+                   kind of file, so an archive's contents and the folder it
+                   came from read as one product. -->
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+              <span class="filex-viewer-archive__icon" aria-hidden="true" v-html="entryTile(e)"></span>
               {{ e.name }}
             </td>
             <td class="filex-viewer-archive__size">{{ e.is_dir ? '' : fmtSize(e.size) }}</td>

@@ -54,6 +54,7 @@ type Service struct {
 	demoPass         string
 	defaultLocale    string
 	oidcAutoRedirect bool
+	recoveryLogin    bool
 }
 
 // New constructs a Service.
@@ -88,6 +89,15 @@ func (s *Service) SetStaticInventory(
 	s.demoPass = demoPass
 	s.defaultLocale = defaultLocale
 	s.oidcAutoRedirect = oidcAutoRedirect
+	s.cached = nil
+	s.mu.Unlock()
+}
+
+// SetRecoveryLogin records whether recovery sign-in is active (see
+// model.Capabilities.AuthRecoveryLogin).
+func (s *Service) SetRecoveryLogin(on bool) {
+	s.mu.Lock()
+	s.recoveryLogin = on
 	s.cached = nil
 	s.mu.Unlock()
 }
@@ -193,6 +203,7 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	}
 	caps.DefaultLocale = s.defaultLocale
 	caps.OIDCAutoRedirect = s.oidcAutoRedirect
+	caps.AuthRecoveryLogin = s.recoveryLogin
 	s.mu.RUnlock()
 	if has("magick") || has("convert") {
 		caps.Thumbs.ImageMagick = true

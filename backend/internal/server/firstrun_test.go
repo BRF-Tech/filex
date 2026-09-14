@@ -94,6 +94,19 @@ func TestFirstRun_BootstrapsAdmin(t *testing.T) {
 	assert.NotEmpty(t, v)
 }
 
+// TestFirstRun_AdminHasNoTimezone — the first account of a fresh instance has
+// not chosen a clock, so it must not be handed one. It was created with "UTC",
+// which the web app honours: a brand-new install drew every date in UTC while
+// an embed of the same explorer drew the browser's clock (2026-09-14).
+func TestFirstRun_AdminHasNoTimezone(t *testing.T) {
+	_, store := testutil.NewTestDB(t)
+	creds, err := FirstRun(context.Background(), store, t.TempDir(), "", "")
+	require.NoError(t, err)
+	user, err := store.GetUserByEmail(context.Background(), creds.AdminEmail)
+	require.NoError(t, err)
+	assert.Equal(t, "", user.Timezone, "the literal, so a constant set back to UTC cannot pass")
+}
+
 // TestFirstRun_NoOpWhenUsersPresent — already-bootstrapped DB → no-op.
 func TestFirstRun_NoOpWhenUsersPresent(t *testing.T) {
 	_, store := testutil.NewTestDB(t)

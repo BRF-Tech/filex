@@ -63,10 +63,17 @@ func FirstRun(ctx context.Context, store db.Store, dataDir, adminEmail, adminPas
 	if err != nil {
 		return FirstRunCredentials{}, err
 	}
-	if _, err := store.CreateUser(ctx, email, hash, model.RoleAdmin, "en", "UTC"); err != nil {
+	admin, err := store.CreateUser(ctx, email, hash, model.RoleAdmin, "en", model.TimezoneUnset)
+	if err != nil {
 		return FirstRunCredentials{}, fmt.Errorf("firstrun: create user: %w", err)
 	}
 	_ = store.UpsertSetting(ctx, "first_run_at", time.Now().UTC().Format(time.RFC3339))
+	// The account recovery sign-in answers for when password sign-in is off
+	// (local.RecoveryLogin). Recorded by id, not by e-mail: the address can be
+	// changed in user settings, and the recovery account must not change with it.
+	if err := local.RecordBootstrapAdmin(ctx, store, admin.ID); err != nil {
+		return FirstRunCredentials{}, fmt.Errorf("firstrun: record bootstrap administrator: %w", err)
+	}
 
 	if preset {
 		// Operator supplied the password via env — don't spill it to disk.
@@ -77,7 +84,7 @@ func FirstRun(ctx context.Context, store db.Store, dataDir, adminEmail, adminPas
 		return FirstRunCredentials{}, fmt.Errorf("firstrun: mkdir datadir: %w", err)
 	}
 	path := filepath.Join(dataDir, ".first-run.txt")
-	body := fmt.Sprintf("filex first-run credentials\nWritten: %s\nEmail:    %s\nPassword: %s\n\nThis file is shown ONCE — change the password at /admin/profile.\n",
+	body := fmt.Sprintf("filex first-run credentials\nWritten: %s\nEmail:    %s\nPassword: %s\n\nThis file is shown ONCE — change the password at /admin/dashboard?settings=1.\n",
 		time.Now().UTC().Format(time.RFC3339), email, pw)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		return FirstRunCredentials{}, fmt.Errorf("firstrun: write file: %w", err)

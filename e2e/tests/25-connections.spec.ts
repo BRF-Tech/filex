@@ -56,6 +56,22 @@ async function dropTestStorage(request: import('@playwright/test').APIRequestCon
   }
 }
 
+/**
+ * Switch the signed-in account's language the way a person does: the user
+ * settings dialog, opened over the current admin page by its `?settings=1`
+ * deep link, then closed again.
+ */
+async function switchLanguage(page: import('@playwright/test').Page, code: 'en' | 'tr') {
+  const here = new URL(page.url());
+  await page.goto(`${here.pathname}?settings=1`);
+  await expect(page.getByTestId('user-settings-dialog')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('user-settings-tab-preferences').click();
+  await page.getByTestId(`user-settings-locale-${code}`).click();
+  await expect(page.getByTestId(`user-settings-locale-${code}`)).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('user-settings-close').click();
+  await expect(page.getByTestId('user-settings-dialog')).toBeHidden();
+}
+
 test.describe('storage connections', () => {
   test.beforeAll(async ({ request }) => {
     await dropTestStorage(request);
@@ -182,9 +198,10 @@ test.describe('storage connections', () => {
     // still in the other language, because the component merges
     // `{...attributes, ...config}` and config wins — the property said
     // what nothing rendered from.
-    await page.getByTitle(/Language|Dil/i).click();
-    await page.getByRole('menuitem', { name: 'Türkçe' }).click();
-    await page.waitForTimeout(500);
+    // ⚠ Language lives in user settings since 0.41.0 — the header's own
+    // switcher is gone, so no preference has two controls. The dialog opens
+    // over this page and the panel behind it must follow without a reload.
+    await switchLanguage(page, 'tr');
 
     const panel = page.getByTestId('connections-panel');
     await expect(panel).toContainText('Depo bağlantıları');
@@ -205,8 +222,7 @@ test.describe('storage connections', () => {
     await expect(page.locator('.fe-guide__body')).toContainText('Dosya Gezgini');
 
     // Put it back so the next test in this file is not surprised.
-    await page.getByTitle(/Language|Dil/i).click();
-    await page.getByRole('menuitem', { name: 'English' }).click();
+    await switchLanguage(page, 'en');
   });
 
 
@@ -438,15 +454,41 @@ test.describe('storage connections', () => {
       data: { email: USER_EMAIL, password: USER_PASSWORD, role: 'user' },
     });
 
+    // gorunum:v2-topbar — the onboarding tour has to be off for this test now,
+    // and this is not belt-and-braces: it was MEASURED.
+    //
+    // `FileExplorer` auto-starts the tour on a first mount with no
+    // `filex.tourDone`, which is every fresh browser context — i.e. every run
+    // of this file. The door this test uses moved from the Explore page's own
+    // top bar (outside `.fe`, which the tour's card never covered) to the
+    // explorer's navigation panel (inside it, which it does). Measured
+    // 2026-09-12 against the live build: with the tour open, clicking
+    // `sidenav-connect` times out — the card sits over it. Without this line
+    // the selector swap below would simply have turned a green test red.
+    await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
+
     await page.goto('/admin/login');
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(USER_EMAIL);
     await page.getByLabel(/password|şifre/i).fill(USER_PASSWORD);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    // Non-admins are bounced out of the panel to the chrome-less explorer.
-    await page.waitForURL(/\/explore/, { timeout: 15_000 });
+    // Non-admins land in the explorer — on Home since 0.41.0.
+    await page.waitForURL(/\/(home|explore)([?#]|$)/, { timeout: 15_000 });
 
     await dismissInstallBanner(page);
-    await page.getByTestId('explore-connect').click();
+    // gorunum:v2-topbar — the door moved, the room did not.
+    //
+    // This used to click `explore-connect`, a button in the Explore page's own
+    // top bar that opened the page's OWN copy of the connections overlay. That
+    // bar is gone, and with it the second copy: the navigation panel has
+    // carried `sidenav-connect` since gezinti:g1 and mounts the very same
+    // `ConnectionsPanel` with the same `initial-tab="connect"` and `closable`,
+    // so every assertion below is unchanged.
+    // ⚠ Wait for the panel to exist first. `sidenav-connect` is inside the
+    // explorer, which mounts only after storage discovery resolves — clicking
+    // straight after the URL settles races that, where the old page-bar button
+    // was in the page's own chrome and was there immediately.
+    await expect(page.getByTestId('sidenav')).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId('sidenav-connect').click();
     const panel = page.getByTestId('connections-panel');
     await expect(panel).toBeVisible();
 

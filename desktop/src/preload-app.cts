@@ -63,6 +63,12 @@ contextBridge.exposeInMainWorld('filexApp', {
   setSyncRoot: (accountId: string) => ipcRenderer.invoke('sync:setRoot', accountId),
   onOpenSettings: (fn: () => void) => ipcRenderer.on('app:open-settings', () => fn()),
 
+  // A native notification was clicked. The payload is the ALREADY RESOLVED
+  // destination (see src/notifications.ts) — the page navigates to it, it does
+  // not work out where "it" is. One resolver, three surfaces.
+  onNotificationOpen: (fn: (p: unknown) => void) =>
+    ipcRenderer.on('notify:open', (_e, p) => fn(p)),
+
   // drag-out — handing real files to the OS. Two calls on purpose: the bytes
   // must be on disk before the drag can start (see src/dragout.ts), so the
   // explorer prepares first and only switches to the native drag once this

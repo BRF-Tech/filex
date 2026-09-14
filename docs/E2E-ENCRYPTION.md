@@ -500,7 +500,7 @@ read content is **off or limited** inside an encrypted folder:
 |---------|----------------------------------|
 | **Name search** | **Works** — names are not encrypted (a deliberate leak, see [threat model](#what-it-does-not-hide)). The `.filex-e2e.json` marker is filtered out of results |
 | **Content search** | **Does not work** — the indexer skips extraction under a marked subtree and for anything starting with the magic, and indexes empty content instead. Nothing is indexed, so nothing can match |
-| **Thumbnails** | **Not generated** — the thumbnail pipeline marks files under a marked subtree `skipped`; grid and gallery views show a generic icon |
+| **Thumbnails** | **Not generated** — the thumbnail pipeline marks files under a marked subtree `skipped`; grid, list and gallery all show a generic icon |
 | **Preview** (text, images, media, PDF) | **Works while unlocked** — the client downloads the ciphertext, decrypts it in memory and hands a blob URL to the normal viewers |
 | **Text editing / saving** | **Off** — preview is read-only. Saving would write plaintext through the server, so the save-text endpoint is not wired up inside an encrypted folder |
 | **Open in a new tab** | **Off** — the standalone viewer route fetches raw bytes from the server, which would show ciphertext |
@@ -603,11 +603,11 @@ plaintext on disk.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](screenshots/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/e2e-recovery/recovery-key-shown-once.png) |
+| ![Creating an encrypted folder](screenshots/v0.41.0/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.41.0/e2e-recovery/recovery-key-shown-once.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
-| ![The lock screen](screenshots/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/e2e-recovery/unlock-with-recovery-key.png) |
+| ![The lock screen](screenshots/v0.41.0/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.41.0/e2e-recovery/unlock-with-recovery-key.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](screenshots/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/e2e-recovery/legacy-folder-upgrade-offer.png) |
+| ![The escrow tab](screenshots/v0.41.0/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.41.0/e2e-recovery/legacy-folder-upgrade-offer.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with

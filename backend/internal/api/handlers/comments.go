@@ -78,6 +78,13 @@ func (h *Comments) visibleNode(w http.ResponseWriter, r *http.Request, nodeID in
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return nil
 	}
+	// Root confinement: the `node_id` shape skips confine.Middleware, so a
+	// confined token read (and wrote) another folder's comment threads. Same
+	// 404 as the missing/trashed branch above.
+	if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return nil
+	}
 	if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return nil
@@ -151,11 +158,18 @@ func (h *Comments) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		excerpt = string(runes)
 	}
+	// A comment can hang on a folder as well as a file, and the node row
+	// already says which — so the kind is read, never assumed.
+	commentTarget := notify.FileTarget(node.Path)
+	if node.Type == model.NodeTypeDirectory {
+		commentTarget = notify.DirTarget(node.Path)
+	}
 	emitFileEvent(r.Context(), notify.Event{
-		Event: notify.EventCommentAdded,
-		Body:  node.Path,
-		Node:  &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name, Size: node.Size},
-		Meta:  map[string]any{"comment_id": c.ID, "body": excerpt},
+		Event:  notify.EventCommentAdded,
+		Body:   node.Path,
+		Node:   &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name, Size: node.Size},
+		Meta:   map[string]any{"comment_id": c.ID, "body": excerpt},
+		Target: commentTarget,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{"comment": c})

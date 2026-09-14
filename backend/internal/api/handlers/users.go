@@ -148,8 +148,11 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Locale == "" {
 		req.Locale = "en"
 	}
-	if req.Timezone == "" {
-		req.Timezone = "UTC"
+	// ⚠ No zone given stays NO zone (model.TimezoneUnset), never "UTC": an
+	// operator creating an account is not choosing that person's clock, and
+	// a stored "UTC" is read by every client as a deliberate choice.
+	if strings.TrimSpace(req.Timezone) == "" {
+		req.Timezone = model.TimezoneUnset
 	}
 	// Resolve the tenant BEFORE creating anything, so a rejected provider_id
 	// doesn't leave a half-provisioned user behind.

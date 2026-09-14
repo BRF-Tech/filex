@@ -432,7 +432,8 @@ rather than refusing to boot. Search keeps working, just slower and name-only.
 
 ### `POST /api/files/search` — canonical
 
-Body-carrying form used by the app. Requires a normal user session.
+Body-carrying form used by the app. Accepts a signed-in session or an API
+token, like every other `/api/files` route.
 
 ```bash
 curl -X POST https://files.example.com/api/files/search \
@@ -450,6 +451,20 @@ curl -X POST https://files.example.com/api/files/search \
 Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ] }`,
 already RBAC-filtered and in [rank order](#ranking). `snippet` is `""` for
 name-only hits.
+
+Each hit also says what a bare node row cannot say about itself, so a client
+can open and label a hit from any storage without a second request:
+
+| Field | Meaning |
+|---|---|
+| `storage` | the **name** of the storage the hit lives on, beside the numeric `storage_id` — what a client needs to build the `name://path` that opens it |
+| `owner_id` / `owner_name` | who put the file there. Absent means **System**: nothing in filex put it there (the sync found it, or the row predates ownership) |
+| `last_actor_id` / `last_actor_name` | who touched it last, with the same meaning for absent |
+| `owner_self` | `true` when the **caller** is the owner; omitted otherwise |
+
+The names are resolved after the tenant and RBAC filters have run, so a hit
+that was dropped never discloses who owns it. A name the server could not
+resolve leaves the id without its `_name` rather than failing the response.
 
 ```bash
 # free text plus a tag filter

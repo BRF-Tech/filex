@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
@@ -69,6 +71,12 @@ type Op struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	// ActorID is who asked for this op. The worker runs on a server-lifetime
+	// context long after the request that queued the work is gone, so the only
+	// way a pasted file can be attributed to the person who pasted it is for
+	// the queue row to carry them (migration 00038). nil is SYSTEM — a row
+	// queued before the column existed, or by something that is not a person.
+	ActorID *int64 `json:"actor_id,omitempty"`
 }
 
 // Service is the queue + worker bundle.
@@ -243,6 +251,11 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 	if destStorageID == 0 {
 		destStorageID = storageID
 	}
+	if kind == OpCopy || kind == OpMove {
+		if err := refuseSelfDescendant(storageID, destStorageID, sources, dest); err != nil {
+			return nil, err
+		}
+	}
 	if kind == OpDelete || kind == OpUploadCommit {
 		// Neither has a destination; a stray id here would only be able to lie.
 		destStorageID = storageID
@@ -263,15 +276,22 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 // INSERT itself for the id with RETURNING, which in turn is not valid on
 // MySQL.
 func (s *Service) insertOp(ctx context.Context, kind string, storageID, destStorageID int64, srcJSON, dest string, total int) (int64, error) {
-	const cols = `INSERT INTO pending_ops (kind, storage_id, dest_storage_id, sources_json, dest, total, status) VALUES (?,?,?,?,?,?,?)`
+	// Read the acting identity HERE, where a request context still exists. By
+	// the time the worker picks the row up there is nobody to ask.
+	var actor *int64
+	if u := auth.UserFrom(ctx); u != nil && u.ID > 0 {
+		id := u.ID
+		actor = &id
+	}
+	const cols = `INSERT INTO pending_ops (kind, storage_id, dest_storage_id, sources_json, dest, total, status, actor_id) VALUES (?,?,?,?,?,?,?,?)`
 	if s.dialect == "postgres" {
 		var id int64
 		err := s.db.QueryRowContext(ctx, s.q(cols+` RETURNING id`),
-			kind, storageID, destStorageID, srcJSON, dest, total, StatusPending).Scan(&id)
+			kind, storageID, destStorageID, srcJSON, dest, total, StatusPending, actor).Scan(&id)
 		return id, err
 	}
 	res, err := s.db.ExecContext(ctx, cols,
-		kind, storageID, destStorageID, srcJSON, dest, total, StatusPending)
+		kind, storageID, destStorageID, srcJSON, dest, total, StatusPending, actor)
 	if err != nil {
 		return 0, err
 	}
@@ -281,7 +301,7 @@ func (s *Service) insertOp(ctx context.Context, kind string, storageID, destStor
 // Get returns the current state of an op.
 func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	row := s.db.QueryRowContext(ctx, s.q(
-		`SELECT id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at
+		`SELECT id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at, actor_id
 		 FROM pending_ops WHERE id=?`), id)
 	return scanOp(row)
 }
@@ -306,7 +326,7 @@ func (s *Service) List(ctx context.Context, status string) ([]*Op, error) {
 // their own feature. A row matches on either end, because a cross-storage copy
 // belongs to the tenant on either side of it.
 func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64) ([]*Op, error) {
-	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at`
+	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at, actor_id`
 	q := `SELECT ` + cols + ` FROM pending_ops`
 	var (
 		where []string
@@ -347,7 +367,7 @@ func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64)
 	for rows.Next() {
 		op := &Op{}
 		var srcJSON string
-		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
+		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt, &op.ActorID); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
@@ -463,7 +483,18 @@ func (s *Service) claimNext(ctx context.Context) (*Op, bool, error) {
 }
 
 // execute runs a single Op against the storage driver and persists progress.
+//
+// ⚠ The first thing it does is put the person who asked back on the context.
+// Everything downstream — the DB mirror that creates the pasted row, the actor
+// stamp on a moved one — resolves identity from the context, and this worker
+// has none of its own. Both keys are set: WithOwner because a COPY is a new
+// file and the copier owns it, WithActor because a MOVE is the same file being
+// moved BY somebody without becoming theirs.
 func (s *Service) execute(ctx context.Context, op *Op) {
+	if op != nil && op.ActorID != nil && *op.ActorID > 0 {
+		ctx = quotastore.WithOwner(ctx, *op.ActorID)
+		ctx = quotastore.WithActor(ctx, *op.ActorID)
+	}
 	if s.storageResolver == nil {
 		s.fail(ctx, op, "no storage resolver")
 		return
@@ -584,7 +615,10 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		if !ok {
 			return errors.New("driver not movable")
 		}
-		dst := joinIntoDir(op.Dest, src)
+		dst := MoveDest(ctx, drv, src, joinIntoDir(op.Dest, src))
+		if normOpPath(dst) == normOpPath(src) {
+			return nil
+		}
 		if err := m.Move(ctx, src, dst); err != nil {
 			if !errors.Is(err, storage.ErrNotFound) {
 				return err
@@ -645,7 +679,7 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 // (sweep-2026-05-09 bug 25 — "Kopyasını Oluştur" (Duplicate) was sending
 // source == destination and the S3 driver was 400ing the self-copy.)
 func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) string {
-	if dst != src && !pathExists(ctx, drv, dst) {
+	if dst != src && !storage.Exists(ctx, drv, dst) {
 		return dst
 	}
 	// Split base + ext for `<base>-copy<ext>` pattern. We rename the
@@ -671,7 +705,7 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) st
 		} else {
 			candidate = fmt.Sprintf("%s%s-copy-%d%s", dir, stem, i, ext)
 		}
-		if candidate != src && !pathExists(ctx, drv, candidate) {
+		if candidate != src && !storage.Exists(ctx, drv, candidate) {
 			return candidate
 		}
 	}
@@ -679,17 +713,6 @@ func uniqueCopyDest(ctx context.Context, drv storage.Driver, src, dst string) st
 	// instead of looping forever. Caller's error-message path will
 	// surface this to the user via the failed-step log.
 	return dst
-}
-
-// pathExists returns true if Stat resolves the path to anything other
-// than ErrNotFound. Any other error is treated as "exists" out of an
-// abundance of caution: better to pick the next candidate than to
-// stomp a file we couldn't probe.
-func pathExists(ctx context.Context, drv storage.Driver, p string) bool {
-	if _, err := drv.Stat(ctx, p); err != nil {
-		return !errors.Is(err, storage.ErrNotFound)
-	}
-	return true
 }
 
 func (s *Service) fail(ctx context.Context, op *Op, msg string) {
@@ -734,10 +757,74 @@ func joinIntoDir(dest, src string) string {
 	return path.Join(strings.TrimRight(dest, "/"), base)
 }
 
+// ErrIntoOwnDescendant is "you asked to put this folder inside itself".
+//
+// ⚠ Measured on a local storage 2026-09-13, before this guard existed: the
+// submit answered 202, the row went to the queue, and the WORKER failed a
+// moment later with `rename /srv/data/x /srv/data/x/child/x: invalid argument`.
+// Three things wrong with that. The person is told nothing at click time; the
+// reason they eventually see is an OS errno and a SERVER path, which is both
+// meaningless to them and more than they should be shown; and the refusal is
+// the local driver's, not ours — an object store has no rename, so the same
+// request there walks the tree and copies it into a destination that is inside
+// the tree it is walking.
+//
+// The answer belongs here, synchronously, in the one funnel both the unified
+// endpoint and the per-verb wrappers pass through. A destination picker can
+// (and does) grey the folder out, but a picker is a courtesy: the API is
+// reachable without it.
+var ErrIntoOwnDescendant = errors.New("ops: a folder cannot be moved or copied into itself or into one of its own subfolders")
+
+// refuseSelfDescendant rejects a copy/move whose real destination lands inside
+// one of its own sources.
+//
+// It computes the FINAL target with joinIntoDir — the same function the worker
+// uses — rather than comparing the raw dest, because "into this directory"
+// (trailing slash) and "to this exact path" (no slash) mean different things
+// and only one of them appends the basename.
+//
+// Two deliberate narrowings:
+//   - Only within ONE storage. `a://x` into `b://x/sub` is two different trees
+//     that happen to share a name; refusing it would break a legitimate paste.
+//   - Only a STRICT descendant. A target equal to its source is a rename to
+//     the same name (a no-op) or a self-copy, both of which the existing
+//     de-collision path already handles.
+func refuseSelfDescendant(storageID, destStorageID int64, sources []string, dest string) error {
+	if storageID != destStorageID {
+		return nil
+	}
+	for _, src := range sources {
+		s := normOpPath(src)
+		if s == "" {
+			// The storage root. Everything is inside it, so a copy of the
+			// root into any path under it is the same trap.
+			if normOpPath(joinIntoDir(dest, src)) != "" {
+				return ErrIntoOwnDescendant
+			}
+			continue
+		}
+		if strings.HasPrefix(normOpPath(joinIntoDir(dest, src))+"/", s+"/") &&
+			normOpPath(joinIntoDir(dest, src)) != s {
+			return ErrIntoOwnDescendant
+		}
+	}
+	return nil
+}
+
+// normOpPath puts a source or destination into one comparable form: no leading
+// or trailing slash, traversal collapsed, "" for the storage root.
+func normOpPath(p string) string {
+	p = strings.Trim(path.Clean("/"+strings.Trim(p, "/")), "/")
+	if p == "." {
+		return ""
+	}
+	return p
+}
+
 func scanOp(row *sql.Row) (*Op, error) {
 	op := &Op{}
 	var srcJSON string
-	if err := row.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt); err != nil {
+	if err := row.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt, &op.ActorID); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(srcJSON), &op.Sources)

@@ -17,18 +17,90 @@ import '@brftech/filex'; // side-effect: registers `<filex-explorer>`
 import type { ExplorerConfig } from '@brftech/filex';
 
 /**
- * Resolve the registered class. We do this lazily inside a getter so
- * tree-shaking-time evaluation in some bundlers doesn't trip the
- * `customElements.get(…)` lookup before the side-effect import has run
- * (it has, but TS analysers can be jumpy). At runtime this evaluates
- * once at module load.
+ * Property names `<filex-explorer>` accepts, taken from the component
+ * definition the element was built from.
+ *
+ * ⚠⚠ This list is the entire bridge, and handing `createComponent` the
+ * registered class instead of it is why this package did not work at all.
+ * `createComponent` decides prop-by-prop with `k in elementClass.prototype`:
+ * a name it finds there is ASSIGNED to the element (`node[k] = value`),
+ * everything else is handed to `React.createElement` and lands as an
+ * attribute. Vue's `defineCustomElement` defines its props on each
+ * INSTANCE (`_resolveProps`, at connectedCallback), so the class prototype
+ * carries nothing but `constructor` — measured 2026-09-13 in a real
+ * browser: `Object.getOwnPropertyNames(cls.prototype)` is `['constructor']`.
+ *
+ * Every prop therefore took the attribute path, and `config` — an object —
+ * was stringified by React on the way: the element ended up with
+ * `config="[object Object]"` and `el.config === '[object Object]'`. The
+ * explorer never received a config, never mounted, and `<FileManager>`
+ * rendered an empty page.
+ *
+ * The names come from `elementClass.def.props`, i.e. from the wrapper
+ * component itself, so adding a prop to `@brftech/filex` cannot leave this
+ * package one behind. FALLBACK_PROPS is only for an environment with no
+ * custom-element registry (SSR) or a future Vue that stops exposing `def`;
+ * `packages/react` is pinned to the wrapper's own list by
+ * `web/tests/deploy/packageLook.test.ts`.
  */
-const FilexElementClass =
-  (typeof customElements !== 'undefined' && customElements.get('filex-explorer')) ||
-  // Fallback for SSR — the element class is irrelevant on the server
-  // because createComponent only renders the tag string. Provide an
-  // empty class shim so types resolve.
-  (class {} as unknown as CustomElementConstructor);
+const FALLBACK_PROPS = [
+  'config',
+  'apiBase',
+  'endpoint',
+  'locale',
+  'theme',
+  'timeZone',
+  'trashVisible',
+  'sidenav',
+  'connections',
+  'uiProfile',
+] as const;
+
+function elementPropNames(): readonly string[] {
+  const registered =
+    typeof customElements !== 'undefined'
+      ? (customElements.get('filex-explorer') as
+          | (CustomElementConstructor & { def?: { props?: unknown } })
+          | undefined)
+      : undefined;
+  const declared = registered?.def?.props;
+  if (Array.isArray(declared) && declared.length) return declared as string[];
+  if (declared && typeof declared === 'object') {
+    const keys = Object.keys(declared as Record<string, unknown>);
+    if (keys.length) return keys;
+  }
+  return FALLBACK_PROPS;
+}
+
+/**
+ * A stand-in class whose PROTOTYPE carries those names, which is the only
+ * thing `createComponent` reads it for (that, and `.name` for the devtools
+ * label — we pass `displayName` instead).
+ *
+ * It extends HTMLElement where there is one so the native properties keep
+ * behaving exactly as they did: `id`, `title`, `hidden` and friends stay on
+ * the property path, `style`/`className`/`children`/`ref` stay React's.
+ * Nothing ever constructs it — an unregistered `class extends HTMLElement`
+ * is only illegal to `new`, not to declare.
+ */
+function propBridgeClass(): CustomElementConstructor {
+  const Base = (
+    typeof HTMLElement !== 'undefined' ? HTMLElement : class {}
+  ) as CustomElementConstructor;
+  class FilexExplorerProps extends Base {}
+  for (const name of elementPropNames()) {
+    if (name in FilexExplorerProps.prototype) continue;
+    Object.defineProperty(FilexExplorerProps.prototype, name, {
+      value: undefined,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
+  return FilexExplorerProps;
+}
+
+const FilexElementClass = propBridgeClass();
 
 /**
  * Idiomatic React component — used like a normal JSX tag with native
@@ -44,6 +116,7 @@ export const FileManager = createComponent({
   react: React,
   tagName: 'filex-explorer',
   elementClass: FilexElementClass,
+  displayName: 'FileManager',
   events: {
     onError: 'error',
     onShareCreated: 'share-created',

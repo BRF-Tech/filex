@@ -32,7 +32,7 @@ for this path.
 | Client | Small files | Large files | Resumes across… |
 |---|---|---|---|
 | Web explorer / desktop explorer / embeds (`@brftech/filex-core`) | `?action=upload` | staged, chunked | a dropped connection, **and a page reload** (see *Resuming in a browser*) |
-| CLI (`filex upload`, `filex upload -r`) | `?action=upload` | staged, chunked | a dropped connection **and a process restart** |
+| CLI (`filex client upload`, `filex client upload -r`) | `?action=upload` | staged, chunked | a dropped connection **and a process restart** |
 | `filex sync` / the desktop app's folder sync | same code as the CLI — `cliclient.uploadFile` | | |
 | Public drop links (`/d/{token}`) | synchronous write | staged ingest | — (one request; staging removes the *wait*, not the retry) |
 | ShareX (`/api/sharex/upload`) | synchronous write | staged ingest | — |
@@ -209,9 +209,10 @@ transfer is running; wait for the op or let it fail.
 ```
 
 **Numbered parts, not one append-only file.** A single `<id>.part` plus a byte
-offset would serve a sequential resumable client and nothing else. An
-S3-compatible `UploadPart` API — planned directly on top of this layer — receives
-parts out of order, numbered, each needing its own ETag. The numbered store
+offset would serve a sequential resumable client and nothing else. The
+[S3-compatible endpoint](PROTOCOLS.md)'s `UploadPart` is built directly on this
+layer — its upload id *is* the staging id — and it receives parts out of order,
+numbered, each needing its own ETag. The numbered store
 serves both: the sequential protocol is the special case where parts arrive in
 order, and the per-part md5 makes the S3 composite ETag
 (`md5(concat(part md5s))-N`) computable from the manifest alone, without
@@ -393,11 +394,11 @@ stay in staging and `commit` can be called again.
 
 A `staged` node is readable. Every read surface resolves its byte source through
 one helper (`internal/filebody`), which answers "staging" while
-`transfer_state = "staged"` and "the driver" otherwise:
+`transfer_state` is `"staged"` or `"failed"`, and "the driver" otherwise:
 
 | Surface | Route |
 |---|---|
-| App download / preview, including `Range` | `GET /api/files/manager?action=download|preview` |
+| App download / preview, including `Range` | `GET /api/files/manager?action=download` · `?action=preview` |
 | Raw node read | `GET /api/files/read?id=…` |
 | Public share link | `GET /s/{token}` |
 | Folder-share browse | `GET /s/{token}/f/*` |
@@ -414,12 +415,12 @@ Three rules decide what a reader sees:
   let a client holding the old file revalidate, get a `304` and keep the version
   it was just told had been replaced.
 * **A failed transfer keeps serving.** The staging directory is kept on failure
-  so the transfer can be retried without re-sending a byte, and the node stays
-  `staged` — so reads keep coming out of staging, exactly as they did while the
-  transfer was running.
+  so the transfer can be retried without re-sending a byte. The node moves to
+  `failed`, and a `failed` node reads from staging exactly like a `staged` one —
+  those bytes are the only copy, and the driver has nothing.
 * **Staged with no staging is an error, never a body.** A `failed` session that
-  the sweeper removes after a full idle TTL leaves a node claiming `staged` with
-  no bytes behind it. Reads then answer `503` with `code: STAGING_GONE` and a
+  the sweeper removes after a full idle TTL leaves a `failed` node with no bytes
+  behind it. Reads then answer `503` with `code: STAGING_GONE` and a
   message naming the file. There is no fallback to the driver: on an overwrite
   it holds the previous version at that exact path, and serving that would be a
   silent wrong answer rather than a visible failure.

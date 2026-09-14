@@ -10,9 +10,11 @@ Pick the path that matches how far you want to go:
 | [**App stores**](#app-stores) | Ready-made packages for Umbrel, CasaOS, Runtipi, Unraid, Portainer. | Home servers / NAS |
 | [**Binary**](#binary) | A single static binary. | No Docker, systemd, edge devices |
 
-All paths end at the same place: the admin UI at `…/admin` (and the same app without
-the panel, for the accounts you hand out, at `…/drive`), with a first‑run
-admin account (see [First run](#first-run)).
+All paths end at the same place: the app at `…/admin` (the operator's door) or at
+`…/drive` (the neutral door, for the accounts you hand out). Both open **Home** —
+your storages, what you opened last, what you starred — with the admin panel one
+click away from the explorer's header for whoever is allowed it, and both start
+with a first‑run admin account (see [First run](#first-run)).
 
 **Images.** `ghcr.io/brf-tech/filex:latest` is the full‑featured image
 (thumbnails for image/video/pdf/office included). `…:slim` is a smaller image
@@ -246,21 +248,25 @@ On the very first start (empty user table) filex creates an admin account and
 prints the password **once**:
 
 ```
-First run detected. Initial admin user created:
-    Email:    admin@local
-    Password: <generated 16-char password>
-  Saved to:  <data-dir>/.first-run.txt  (mode 0600, shown ONCE)
+  ─── First run detected ─────────────────────────────────────
+  Admin user created:
+    Email:     admin@local
+    Password:  <generated 16-char password>
+  Saved to:  <data-dir>/.first-run.txt (mode 0600, shown ONCE)
+  Change at: /admin/dashboard?settings=1
 ```
 
-Sign in at `…/admin`, then change the password at **Profile**. Lost it? Reset
-from the CLI:
+That last line is a deep link, not a page: the account fields live in the
+**user-settings dialog** behind the avatar menu, and a dialog has no address of
+its own to print. Sign in at `…/admin`, open it, and change the password under
+**Account**. Lost the password? Reset from the CLI:
 
 ```bash
 filex admin random-password --email admin@local
 # in Docker:  docker exec filex filex admin random-password --email admin@local
 ```
 
-Enable TOTP 2FA per user under **Profile → Security**. Add SSO/LDAP via
+Enable TOTP 2FA per user under **user settings → Security**. Add SSO/LDAP via
 [SSO.md](SSO.md) / [CONFIGURATION.md](CONFIGURATION.md).
 
 ---
@@ -299,6 +305,12 @@ Everything filex owns lives under `FILEX_DATA_DIR` (`/data` in Docker):
 - `uploads/` — staging for chunked and resumable uploads. ⚠ Until a transfer
   commits, this is the file's only copy — it is not disposable while one is in
   flight,
+- `ssh/` and `ftps/` — the SFTP host keys and the FTPS self-signed certificate,
+  generated on the first boot that enables those listeners. Regenerable, but
+  regenerating them is a **changed host key**: every client that has connected
+  before refuses the next connection until somebody clears it,
+- `plugins/`, `dav/` — installed storage-plugin binaries and the WebDAV lock
+  store,
 - `.first-run.txt` — the initial admin secret.
 
 Back up the **database** (the SQLite file, or your Postgres), your **storage

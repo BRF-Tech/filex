@@ -47,6 +47,7 @@ import { beginBrowserAuth, exchangeCode, parseAuthDeepLink, type PendingAuth } f
 import { DragOutCache, createPlaceholders, fulfilDrop, type DragItem } from './dragout.js';
 import { localDriveRoots, watchForDrop } from './dropwatch.js';
 import { log, logPath } from './log.js';
+import { DesktopNotifier, type NotificationRow } from './notifications.js';
 import {
   OFFICE_EXTENSIONS,
   OFFICE_MIME_TYPES,
@@ -146,7 +147,9 @@ const HIDDEN_FLAG = '--hidden';
 // of whatever they were doing. See applyUpdateQuietly().
 const UPDATED_FLAG = '--updated';
 
-let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false, locale: 'system' };
+let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false, locale: 'system', notifications: true };
+/** Watches the active account's bell and raises native notifications. */
+let notifier: DesktopNotifier | null = null;
 let mainWindow: BrowserWindow | null = null;
 let shellWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -295,6 +298,29 @@ function preload(name: string): string {
   return path.join(__dirname, name);
 }
 
+/**
+ * The colour Electron paints the window with before the document has rendered
+ * a single pixel.
+ *
+ * ⚠ It has to be a literal, and it must not be a colour of our own choosing.
+ * Both are satisfied by remembering what the RENDERER last resolved
+ * `--fe-bg` to (state.themeBg): that is the active palette's own ground in the
+ * active variant, so a person on Forest Dark opens onto Forest Dark rather
+ * than onto a white rectangle that repaints a beat later.
+ *
+ * The fallback is the stock palette's two grounds, straight out of
+ * packages/core/src/styles/variables.css, and it is reached exactly once — on
+ * a first-ever launch, before any page has had a chance to report.
+ */
+function windowGround(): string {
+  const remembered = state.themeBg;
+  // A CSS colour, from our own renderer, but validated anyway: this string is
+  // handed to a native API, and an unparseable value makes Electron throw at
+  // window construction — an app that will not open.
+  if (remembered && /^#[0-9a-fA-F]{3,8}$/.test(remembered)) return remembered;
+  return nativeTheme.shouldUseDarkColors ? '#15171c' : '#ffffff';
+}
+
 function openShell(route: string, title: string, width = 720, height = 620): void {
   if (shellWindow && !shellWindow.isDestroyed()) {
     shellWindow.loadURL(`app://shell/#${route}`);
@@ -308,8 +334,13 @@ function openShell(route: string, title: string, width = 720, height = 620): voi
     title,
     icon: ICON_PATH,
     autoHideMenuBar: true,
+    // The sign-in window had no ground at all, so it opened as Electron's
+    // default white and then repainted — on the product's FIRST screen.
+    show: false,
+    backgroundColor: windowGround(),
     webPreferences: { preload: preload('preload-shell.cjs'), contextIsolation: true, sandbox: true },
   });
+  shellWindow.once('ready-to-show', () => shellWindow?.show());
   shellWindow.on('closed', () => {
     shellWindow = null;
   });
@@ -337,7 +368,12 @@ function openMainWindow(): void {
     // made "Connecting…" the first thing anyone saw. Show it once it has
     // something to show, on a ground that matches the app.
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14181d' : '#ffffff',
+    // ⚠ Was `nativeTheme.shouldUseDarkColors ? '#14181d' : '#ffffff'` — which
+    // asked the OS a question the PRODUCT answers (somebody on a light desktop
+    // who picked Dark opened onto a white flash), and whose dark value was not
+    // a background in this product at all: #14181d was the old shell's text
+    // colour. See windowGround().
+    backgroundColor: windowGround(),
     webPreferences: { preload: preload('preload-app.cjs'), contextIsolation: true, sandbox: true },
   });
   mainWindow.once('ready-to-show', () => mainWindow?.show());
@@ -377,6 +413,77 @@ function openMainWindow(): void {
 function route(): void {
   if (activeAccount(state)) openMainWindow();
   else openShell('/connect', 'filex — Connect');
+}
+
+// ─────────────────────── native notifications ───────────────────────
+//
+// ⚠ The DESTINATION of a click is not decided here. It is resolved by
+// web/src/lib/notificationTarget.ts — the same module the browser bell uses —
+// and handed to the page as a structured destination. That is what stops the
+// desktop notification from opening one place while the bell opens another.
+
+function startNotifier(): void {
+  if (notifier) return;
+  notifier = new DesktopNotifier({
+    account: () => {
+      const acc = activeAccount(state);
+      return acc ? { id: acc.id, serverUrl: acc.serverUrl, token: acc.token } : null;
+    },
+    enabled: () => state.notifications !== false,
+    fetchRows: async (acc, limit) => {
+      const url = new URL('/api/notifications', acc.serverUrl);
+      url.searchParams.set('unread', 'true');
+      url.searchParams.set('limit', String(limit));
+      const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${acc.token}` } });
+      if (!res.ok) throw new Error(`server said ${res.status}`);
+      const body = (await res.json()) as { items?: NotificationRow[] };
+      return body.items ?? [];
+    },
+    // The reader's language, read per row — see DesktopNotifierOptions.locale.
+    locale: () => effectiveLocale(),
+    show: (row, text, onClick) => {
+      if (!Notification.isSupported()) return;
+      const n = new Notification({
+        // ⚠ Composed from the row's event + metadata by the SHARED renderer
+        // (web/src/lib/notificationText.ts), in this window's language — not
+        // taken from the server's `title`, which is written once in whatever
+        // language the server was configured with and, for most file events,
+        // is not written at all (`row.title` is then the literal event id).
+        title: text.title,
+        // ⚠ A notification carries a name, a count and a target — never file
+        // content, never a credential. The renderer interpolates only paths,
+        // names, counts and a comment excerpt, all of which the row already
+        // carries in plain sight.
+        body: text.body,
+      });
+      n.on('click', onClick);
+      n.show();
+    },
+    onOpen: (accountId, dest) => {
+      // ⚠ A share opens in the SYSTEM BROWSER. The app window is a file
+      // manager pointed at one account with a bearer token; a public share
+      // page is an anonymous web page, and loading it in here would replace
+      // the app with a page it has no way back from.
+      if (dest.kind === 'share') {
+        const acc = state.accounts.find((a) => a.id === accountId);
+        if (acc) void shell.openExternal(new URL(`/s/${encodeURIComponent(dest.token)}`, acc.serverUrl).toString());
+        return;
+      }
+      // The window may be closed (running in the tray) — a notification the
+      // user clicks has to be able to bring the app back, not silently do
+      // nothing. openMainWindow() shows and focuses an existing one.
+      openMainWindow();
+      if (dest.kind !== 'folder') return; // nothing to open beyond the window
+      const send = () => mainWindow?.webContents.send('notify:open', { accountId, dest });
+      if (mainWindow && mainWindow.webContents.isLoading()) {
+        mainWindow.webContents.once('did-finish-load', send);
+      } else {
+        send();
+      }
+    },
+    log: (msg, extra) => log('notify', msg, extra),
+  });
+  notifier.start();
 }
 
 // ─────────────────────────── tray ───────────────────────────
@@ -495,7 +602,7 @@ async function handleDeepLink(raw: string): Promise<void> {
   try {
     await completeAuth(parsed.state, parsed.code);
   } catch (err) {
-    dialog.showErrorBox('filex — sign-in failed', String((err as Error)?.message ?? err));
+    await tellUser('error', 'filex — sign-in failed', String((err as Error)?.message ?? err));
     openShell('/connect', 'filex — Connect');
   }
 }
@@ -858,6 +965,7 @@ function publicState() {
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
     locale: state.locale,
+    notifications: state.notifications !== false,
     // What 'system' currently resolves to, so the window does not have to
     // re-derive it from navigator.language and disagree with the tray.
     effectiveLocale: effectiveLocale(),
@@ -1588,7 +1696,11 @@ function openEditorWindow(
     icon: ICON_PATH,
     autoHideMenuBar: true,
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14181d' : '#ffffff',
+    // The same remembered ground the other two windows open on. It used to be
+    // `nativeTheme… ? '#14181d' : '#ffffff'` — the OS's answer to a question
+    // the product answers, with a dark value (#14181d) that is not a background
+    // anywhere in filex. See windowGround().
+    backgroundColor: windowGround(),
     webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
   });
   win.once('ready-to-show', () => win.show());
@@ -1624,7 +1736,20 @@ function openEditorWindow(
 
 /** The persistent strip along the bottom of the editor window. Self-contained
  *  and idempotent: the page is not ours, so it gets one element with one id and
- *  no stylesheet of its own. */
+ *  no stylesheet of its own.
+ *
+ *  ⚠ Drawn from the PAGE's own tokens, with a literal only as a floor. The
+ *  page this lands on is the filex editor route, which loads
+ *  packages/core's stylesheet and therefore publishes `--fe-*` on :root — so
+ *  the strip is the palette's elevated surface in the variant the page is
+ *  already in. It used to be a fixed near-black (#14181d / #e8ecf1 / #2a313a),
+ *  which is the desktop shell's OLD palette: a dark bar pinned across the
+ *  bottom of a white document, in three colours the product no longer uses
+ *  anywhere.
+ *
+ *  The fallbacks are CSS SYSTEM COLOURS rather than hexes, so a page that
+ *  somehow has no tokens still gets a strip that follows the OS's own light or
+ *  dark setting instead of a guess. */
 function bannerScript(text: string): string {
   return `(() => {
     const id = 'filex-openwith-banner';
@@ -1634,10 +1759,13 @@ function bannerScript(text: string): string {
       el.id = id;
       el.style.cssText = [
         'position:fixed','left:0','right:0','bottom:0','z-index:2147483647',
-        'padding:6px 12px','font:12px/1.4 system-ui,-apple-system,Segoe UI,sans-serif',
-        'background:#14181d','color:#e8ecf1','border-top:1px solid #2a313a',
+        'padding:6px 12px',
+        'font:var(--fe-text-xs, 12px)/1.4 var(--fe-font, system-ui), sans-serif',
+        'background:var(--fe-bg-elev, Canvas)',
+        'color:var(--fe-text-muted, GrayText)',
+        'border-top:1px solid var(--fe-border, GrayText)',
         'white-space:nowrap','overflow:hidden','text-overflow:ellipsis',
-        'pointer-events:none','opacity:.94',
+        'pointer-events:none',
       ].join(';');
       document.body.appendChild(el);
     }
@@ -1921,6 +2049,10 @@ function wireIpc(): void {
       state.activeId = id;
       saveState(state);
       accountsChanged();
+      // ⚠ Forget the bell baseline. Without this, switching to a server whose
+      // bell has older ids than the last one would announce its whole backlog
+      // — or, the other way round, stay silent about everything new.
+      notifier?.reset();
       // No window reload: the page re-mounts the explorer against the new
       // account itself. Tearing the window down would throw away the whole
       // explorer state on every click of the rail.
@@ -2142,9 +2274,15 @@ function wireIpc(): void {
 
   ipcMain.handle('settings:set', (_e, patch: Partial<DesktopState>) => {
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
+    if (typeof patch.notifications === 'boolean') state.notifications = patch.notifications;
     if (typeof patch.launchAtLogin === 'boolean') {
       state.launchAtLogin = patch.launchAtLogin;
       setLoginItem(patch.launchAtLogin);
+    }
+    // Not a preference — the ground the window is painting right now, so the
+    // NEXT launch can open on it instead of flashing. See windowGround().
+    if (typeof patch.themeBg === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(patch.themeBg)) {
+      state.themeBg = patch.themeBg;
     }
     if (patch.locale === 'system' || patch.locale === 'en' || patch.locale === 'tr') {
       state.locale = patch.locale;
@@ -2426,7 +2564,10 @@ function wireIpc(): void {
           await pruneEmptyDirsUpTo(path.dirname(pair.local), acc.syncRoot);
         }
       } catch (e) {
-        dialog.showErrorBox(
+        // Same rule as the nested-root refusal above: a modal box here freezes
+        // the reply the settings panel is waiting on.
+        await tellUser(
+          'error',
           syncText('unkeepTitle'),
           syncText('trashFailed', { err: String((e as Error)?.message ?? e) }),
         );
@@ -2501,7 +2642,15 @@ function wireIpc(): void {
     // own child fails, and the sweep afterwards would be walking the tree it
     // just filled. Say so instead of half-moving.
     if (oldRoot && (isInsideDir(oldRoot, newRoot) || isInsideDir(newRoot, oldRoot))) {
-      dialog.showErrorBox(syncText('rootTitle'), syncText('rootNested'));
+      // ⚠⚠ tellUser, NOT dialog.showErrorBox — the rule this file already
+      // states 200 lines up and this call site broke. showErrorBox is
+      // SYNCHRONOUS and modal on the main process: it blocks the IPC reply the
+      // renderer is awaiting until a human clicks OK. Measured 2026-09-12 — the
+      // keep suite drives exactly this refusal, and the run stopped dead with an
+      // "Error" window on the operator's desktop that nothing could dismiss.
+      // tellUser logs, honours the FILEX_NO_BROWSER hook the rest of this file
+      // uses, and does not freeze anything.
+      await tellUser('error', syncText('rootTitle'), syncText('rootNested'));
       return publicState();
     }
     if (oldRoot) {
@@ -2587,7 +2736,8 @@ function wireIpc(): void {
           } else if (!arrived && fs.existsSync(dest) && fs.existsSync(p.local)) {
             await fs.promises.rm(dest, { recursive: true, force: true }).catch(() => {});
           }
-          dialog.showErrorBox(
+          await tellUser(
+            'error',
             syncText('rootTitle'),
             syncText('moveFailed', { name: p.remote, err: String((e as Error)?.message ?? e) }),
           );
@@ -2740,6 +2890,10 @@ if (!app.requestSingleInstanceLock()) {
     sessionStore = new SessionStore(path.join(app.getPath('userData'), 'openwith'));
     wireIpc();
     buildTray();
+    // The bell, read by a process that can put something on screen. Started
+    // with the app rather than with the window: the point is to reach somebody
+    // who is NOT looking at filex.
+    startNotifier();
     // Whether this build can swap itself decides WHICH updater to wire, so it
     // runs first.
     void detectManualUpdates().then(wireAutoUpdate);

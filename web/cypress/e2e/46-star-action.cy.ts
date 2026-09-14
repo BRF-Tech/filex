@@ -91,6 +91,27 @@ function switchTo(mode: 'list' | 'grid' | 'gallery') {
   }
 }
 
+/** Every action the selection bar OFFERS for the current selection, as the
+ *  labels a person reads: the icon row's keys (read from the measuring strip,
+ *  which the fold never touches) plus every row of its "⋯" menu. Since 0.41.0
+ *  the selection actions live on this bar, not on the top toolbar, and an
+ *  action that is not an icon is only ever a menu row. The menu is closed
+ *  again before this yields. */
+function selectionOffers(): Cypress.Chainable<string[]> {
+  cy.get('[data-testid="selection-bar"]', { timeout: 10000 }).should('be.visible');
+  return cy.get('.fe-selbar__measure [data-key]').then(($icons) => {
+    const offers = $icons.toArray().map((e) => e.getAttribute('data-key') || '');
+    return cy.get('body').then(($body) => {
+      if ($body.find('[data-testid="selbar-more"]').length === 0) return offers;
+      cy.get('[data-testid="selbar-more"]').click();
+      return cy.get('.fe-ctx__item .fe-ctx__label').then(($l) => {
+        const rows = $l.toArray().map((e) => (e.textContent || '').trim());
+        return cy.get('body').type('{esc}').then(() => [...offers, ...rows]);
+      });
+    });
+  });
+}
+
 /** The fixture's card in whichever view is on screen. */
 function fixtureCard(mode: 'list' | 'grid' | 'gallery') {
   return mode === 'gallery'
@@ -163,17 +184,12 @@ describe('star action', () => {
     });
   });
 
-  it('offers the star in the toolbar for a selection', () => {
+  it('offers the star on the selection bar for a selection', () => {
     openStorage();
     cy.get(`[data-fe-path$="${FIXTURE}"]`).click();
-    // ⚠ `.fe-toolbar__measure` and not the visible strip: the toolbar folds
-    // whatever does not fit into a "⋯" menu, so which buttons are on screen
-    // is a function of the viewport. The measurement strip always renders
-    // EVERY entry of `toolbarActions`, which is the list under test.
-    cy.get('.fe-toolbar__measure .fe-btn__label').should(($l) => {
-      const labels = $l.toArray().map((e) => (e.textContent || '').trim());
-      expect(labels, 'toolbar offers star/unstar').to.satisfy((ls: string[]) =>
-        ls.some((s) => /^(Star|Unstar)$/.test(s)),
+    selectionOffers().then((offers) => {
+      expect(offers, 'selection bar offers star/unstar').to.satisfy((ls: string[]) =>
+        ls.some((s) => /^(star|unstar|Star|Unstar)$/.test(s)),
       );
     });
   });
@@ -262,15 +278,14 @@ describe('star action', () => {
       });
     });
 
-    it('no star in the toolbar', () => {
+    it('no star on the selection bar', () => {
       openStorage();
       cy.get(`[data-fe-path$="${FIXTURE}"]`).click();
-      cy.get('.fe-toolbar__measure .fe-btn__label').should(($l) => {
-        const labels = $l.toArray().map((e) => (e.textContent || '').trim());
-        expect(labels, 'toolbar still shows the other selection actions').to.have.length
+      selectionOffers().then((offers) => {
+        expect(offers, 'the bar still offers the other selection actions').to.have.length
           .greaterThan(2);
-        expect(labels, 'toolbar offers no star').to.satisfy((ls: string[]) =>
-          ls.every((s) => !/^(Star|Unstar)$/.test(s)),
+        expect(offers, 'selection bar offers no star').to.satisfy((ls: string[]) =>
+          ls.every((s) => !/^(star|unstar|Star|Unstar)$/.test(s)),
         );
       });
     });

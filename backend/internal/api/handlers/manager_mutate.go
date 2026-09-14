@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -62,6 +63,8 @@ func (h *Manager) Mutate(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "newfolder":
 		h.vfNewFolder(w, r)
+	case "newfile":
+		h.vfNewFile(w, r)
 	case "rename":
 		h.vfRename(w, r)
 	case "move":
@@ -317,7 +320,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + it.Path})
 			return
 		}
-		dstRel := path.Join(destRel, path.Base(srcRel))
+		dstRel := ops.MoveDest(r.Context(), drv, srcRel, path.Join(destRel, path.Base(srcRel)))
 		if dstRel == srcRel {
 			continue
 		}

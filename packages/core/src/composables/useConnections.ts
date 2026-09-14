@@ -53,11 +53,25 @@ export function connectionsBase(config: ExplorerConfig): string {
  * The origin a client program should be pointed at.
  *
  * The instruction pages are only worth anything if they name the real
- * deployment, so this resolves to an absolute origin: the configured
- * apiBase when there is one (the desktop app, embeds), otherwise the page's
- * own origin (the admin SPA, which is served by the same binary).
+ * deployment, so this resolves to an absolute address, best evidence first:
+ *
+ *   1. `publicUrl` — what the SERVER says it is reached at
+ *      (`/api/files/capabilities` → `public_url`, published only when the
+ *      operator configured it or the request came in on a tenant's own host);
+ *   2. the configured apiBase when it is absolute (the desktop app, embeds
+ *      that talk to filex directly);
+ *   3. the page's own origin (the admin SPA, which the same binary serves).
+ *
+ * ⚠⚠ The first rung is new and it is the fix. Without it an explorer embedded
+ * in ANOTHER app — which proxies `/api` to filex under its own origin, the way
+ * work.example.com and fishapp do — printed `https://<that app>/dav/`: an address
+ * that reaches the host application, never filex. It also left one guide page
+ * speaking with two voices, because its S3 endpoint and SFTP host were always
+ * the server's and only the WebDAV / mount lines were the page's.
  */
-export function connectionsOrigin(config: ExplorerConfig): string {
+export function connectionsOrigin(config: ExplorerConfig, publicUrl?: string | null): string {
+  const told = String(publicUrl ?? '').trim();
+  if (/^https?:\/\/[^/]/i.test(told)) return told.replace(/\/+$/, '');
   const base = connectionsBase(config);
   if (/^https?:\/\//i.test(base)) {
     try {
@@ -80,6 +94,8 @@ export function useConnections(config: ExplorerConfig) {
   /** Storage names a non-admin may see (manager root). */
   const visible = shallowRef<string[]>([]);
   const me = ref<ConnectionsUser | null>(null);
+  /** The server's own public address, when it has one to give (see connectionsOrigin). */
+  const publicUrl = ref<string | null>(null);
 
   const loading = ref(false);
   const loaded = ref(false);
@@ -102,6 +118,19 @@ export function useConnections(config: ExplorerConfig) {
     loading.value = true;
     error.value = null;
     try {
+      // Where the server says it lives. Best-effort and in parallel: a server
+      // older than `public_url`, or one that has none to give, leaves the
+      // guides on the address the page loaded from — exactly as before.
+      const told = api
+        .capabilities()
+        .then((c) => {
+          const v = (c as { public_url?: unknown } | null)?.public_url;
+          publicUrl.value = typeof v === 'string' && v ? v : null;
+        })
+        .catch(() => {
+          publicUrl.value = null;
+        });
+
       // Identity first: the guides need the caller's own e-mail (it IS the
       // WebDAV username), and it is the one call every role may make.
       try {
@@ -152,6 +181,7 @@ export function useConnections(config: ExplorerConfig) {
           visible.value = [];
         }
       }
+      await told;
       loaded.value = true;
     } finally {
       loading.value = false;
@@ -249,6 +279,7 @@ export function useConnections(config: ExplorerConfig) {
     storages,
     visible,
     me,
+    publicUrl,
     loading,
     loaded,
     error,

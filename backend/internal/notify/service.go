@@ -168,6 +168,7 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	if e.Title == "" {
 		e.Title = string(e.Event)
 	}
+	e.Target = s.resolveTarget(ctx, e)
 	metaJSON, err := marshalMeta(e)
 	if err != nil {
 		return 0, fmt.Errorf("notify: marshal meta: %w", err)
@@ -191,10 +192,11 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 // persisted meta_json next to the free-form Meta map, so the in-app
 // history keeps the event context without extra columns.
 func marshalMeta(e Event) ([]byte, error) {
-	if len(e.Meta) == 0 && e.Node == nil && e.Share == nil && e.Actor == nil {
+	hasTarget := e.Target != nil && e.Target.Kind != "" && e.Target.Kind != TargetNone
+	if len(e.Meta) == 0 && e.Node == nil && e.Share == nil && e.Actor == nil && !hasTarget {
 		return []byte("{}"), nil
 	}
-	m := make(map[string]any, len(e.Meta)+3)
+	m := make(map[string]any, len(e.Meta)+4)
 	for k, v := range e.Meta {
 		m[k] = v
 	}
@@ -207,7 +209,80 @@ func marshalMeta(e Event) ([]byte, error) {
 	if e.Actor != nil {
 		m["actor"] = e.Actor
 	}
+	// ⚠ Only a REAL target is persisted. A `{"kind":"none"}` blob in every
+	// row would be a field that is always present and never useful, and the
+	// read side (model.TargetFromMeta) already treats "absent" and "none" as
+	// the same answer — so writing it would only make every historical row
+	// look different from a new one for no gain.
+	if hasTarget {
+		m["target"] = e.Target
+	}
 	return json.Marshal(m)
+}
+
+// resolveTarget produces the ONE target the event ships with — the backend
+// half of the single-resolver rule.
+//
+// Two jobs, both of which have to happen in exactly one place:
+//
+//  1. Fill in the storage NAME. Emitters know a numeric storage id (it is what
+//     their node row carries) and the clients cannot turn one into a name —
+//     /api/admin/storages is admin-only, and the explorer addresses storages
+//     by name. Resolving it here means one DB lookup per event on a path the
+//     caller has already left, instead of a lookup (or a guess) in every
+//     emitter.
+//  2. Refuse to ship half an address. A target whose storage cannot be
+//     resolved — the row is gone, the store errored — is downgraded to
+//     TargetNone, which every surface renders as "opens the notifications
+//     page". A path with no storage would otherwise resolve, client-side, to
+//     whatever storage happened to be open, which is how a click lands
+//     somebody in a folder that is not the one the event is about.
+//
+// An emitter that set no target at all still gets one: a share ref means the
+// share, a node means the file. That default is what stops a new emitter from
+// silently producing unclickable notifications.
+func (s *service) resolveTarget(ctx context.Context, e Event) *Target {
+	t := e.Target
+	if t == nil {
+		switch {
+		case e.Share != nil && strings.TrimSpace(e.Share.Token) != "":
+			t = ShareTarget(e.Share.Token)
+		case e.Node != nil && strings.TrimSpace(e.Node.Path) != "":
+			t = FileTarget(e.Node.Path)
+		default:
+			return &Target{Kind: TargetNone}
+		}
+	}
+	switch t.Kind {
+	case TargetShare:
+		if strings.TrimSpace(t.ID) == "" {
+			return &Target{Kind: TargetNone}
+		}
+		return &Target{Kind: TargetShare, ID: t.ID}
+	case TargetFile, TargetDir:
+	default:
+		return &Target{Kind: TargetNone}
+	}
+	out := &Target{Kind: t.Kind, Storage: strings.TrimSpace(t.Storage), Path: t.Path, ID: t.ID}
+	if out.Storage == "" && e.Node != nil && e.Node.StorageID != 0 && s.store != nil {
+		if st, err := s.store.GetStorage(ctx, e.Node.StorageID); err == nil && st != nil {
+			out.Storage = st.Name
+		} else if err != nil {
+			slog.Warn("notify: resolve target storage",
+				slog.Int64("storage_id", e.Node.StorageID),
+				slog.String("err", err.Error()))
+		}
+	}
+	if out.Storage == "" {
+		// A file target with no storage is not a location. Say "nothing to
+		// open" rather than let a client pick a storage for us.
+		return &Target{Kind: TargetNone}
+	}
+	// A file target whose path is only the storage root names no file.
+	if out.Kind == TargetFile && out.Path == "" {
+		out.Kind = TargetDir
+	}
+	return out
 }
 
 // dispatch fires off the webhook fan-out. The function returns
@@ -470,7 +545,14 @@ func (s *service) List(ctx context.Context, userID *int64, onlyUnread bool, limi
 	if silenced {
 		return nil, 0, nil
 	}
-	return s.store.ListNotifications(ctx, userID, onlyUnread, muted, limit, offset)
+	rows, total, err := s.store.ListNotifications(ctx, userID, onlyUnread, muted, limit, offset)
+	// One hydrate for every reader: the user bell and the admin-global list
+	// both come through here, so `target` cannot be present on one surface
+	// and missing on the other.
+	for _, n := range rows {
+		n.HydrateTarget()
+	}
+	return rows, total, err
 }
 
 func (s *service) UnreadCount(ctx context.Context, userID *int64) (int64, error) {

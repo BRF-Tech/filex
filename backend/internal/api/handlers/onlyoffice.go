@@ -176,6 +176,14 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
+		// Root confinement: both id-taking shapes (GET ?id=, POST node_id) skip
+		// confine.Middleware. The config carries an HMAC-signed, credential-free
+		// fetch URL for the file's BYTES, so an out-of-root leak here is byte
+		// access. The `path` shape was already confined by the middleware.
+		if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
 	}
 
 	// RBAC: must be able to view the doc at all; an edit request without

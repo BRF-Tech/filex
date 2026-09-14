@@ -13,7 +13,9 @@ configured it simply records to the bell and skips the outbound call.
 - [Configuration](#configuration)
 - [The webhook](#the-webhook) — [payload](#payload) · [headers](#headers) · [delivery--retry](#delivery--retry)
 - [Event types & severities](#event-types--severities)
+- [Click target](#click-target) — [the field](#the-field) · [which events carry one](#which-events-carry-one) · [where a click goes](#where-a-click-goes)
 - [In-app bell (endpoints)](#in-app-bell-endpoints)
+- [Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell)
 - [Admin endpoints](#admin-endpoints)
 - [Per-user settings](#per-user-settings)
 - [Failure modes & troubleshooting](#failure-modes--troubleshooting)
@@ -44,7 +46,14 @@ that call fans out to two independent channels:
 
 The two channels are independent: a webhook failure never affects the bell row,
 and having no destination at all simply means the outbound call is skipped while
-the bell keeps recording. Webhook errors are recorded **against the notification row**, never
+the bell keeps recording.
+
+The bell row is then **read** by three surfaces — the bell itself, a browser
+notification while a tab is open, and the desktop app's native OS notification
+— all of which take a person to the event's
+[click target](#click-target). They are readers of the one feed, not channels
+of their own: nothing extra is sent and nothing extra is polled (see
+[Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell)). Webhook errors are recorded **against the notification row**, never
 bubbled up to break the action that triggered the event.
 
 > **Master switch.** `FILEX_NOTIFY_ENABLED` (default **true**) toggles the whole
@@ -107,7 +116,8 @@ document:
   "body": "team-bucket is at 92% of its 100 GB quota.",
   "meta": { "storage": "team-bucket", "used_pct": 92 },
   "ts": "2026-07-04T09:15:00Z",
-  "at": "2026-07-04T09:15:00Z"
+  "at": "2026-07-04T09:15:00Z",
+  "target": { "kind": "none" }
 }
 ```
 
@@ -123,6 +133,7 @@ document:
 | `node` | object | The file/folder the event is about: `storage_id`, `path`, `name`, `size` (`size` omitted when zero). Present on the file events. |
 | `share` | object | The public link the event is about: `token`, `path`. Present on `share.created`. |
 | `actor` | object | Who triggered it, best-effort: `id`, `email`. Omitted on anonymous surfaces such as a public drop. |
+| `target` | object | **Where a click on this notification goes** — `kind` (`file`/`dir`/`share`/`none`) plus `storage`, `path`, `id`. **Always present**; see [Click target](#click-target). |
 
 > The per-user routing field (`UserID`) is **internal only** — it scopes the
 > in-app bell row and is **never** included in the webhook payload.
@@ -219,7 +230,7 @@ of them tickable on a target in **Admin → Webhooks**:
 | `share.created` | A public share link was created. |
 | `drop.received` | A file arrived through a public "request files" link. |
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
-| `e2e.escrow_used` | An encrypted folder was opened with the **recovery (escrow) key** instead of its passphrase. `meta` carries `escrow_kid`, `storage`, `folder` and, when the caller was signed in, `actor_email`. |
+| `e2e.escrow_used` | An encrypted folder was opened with the operator's **escrow key** instead of its owner's passphrase — not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` and, when the caller was signed in, `actor_email`. |
 
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
 `file.deleted`, `file.moved`, `file.trashed`) come from one shared post-write
@@ -254,6 +265,162 @@ string, but the bell UI only colour-codes these four — stick to them.
 
 ---
 
+## Click target
+
+A notification that tells you a file arrived and then cannot show you the file
+is half a notification. Every event therefore carries a **typed target**: what
+it is about, in a form a client can act on.
+
+### The field
+
+`target` is present on **every** notification — in the webhook body, in the
+bell item, and in the row the admin list returns.
+
+```json
+"target": { "kind": "file", "storage": "team-bucket", "path": "Documents/report.pdf" }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `kind` | string | `file` · `dir` · `share` · `none`. A **closed set** — clients switch on these four and nothing else. |
+| `storage` | string | The storage **NAME**, not its numeric id. Present on `file`/`dir`. |
+| `path` | string | Path **inside that storage**, relative, never carrying a `<storage>://` prefix. The file itself for `file`, the folder for `dir`. |
+| `id` | string | The share **token**, for `kind: "share"`. |
+
+Three rules the field is built on, each of which is a bug somebody would
+otherwise hit:
+
+- **`none` is an answer, not a gap.** An event about the whole instance — a
+  replica failure, an available update — has nothing to open, and says so.
+  On the **webhook** the field is always there (`{"kind":"none"}`); on a **bell
+  item** it is simply **absent**, because it is not stored for those rows. Treat
+  an absent `target` and `{"kind":"none"}` as the same thing.
+- **The storage is a NAME because a client cannot turn an id into one.**
+  `/api/admin/storages` is admin-only, and the explorer addresses storages by
+  name. It is resolved once, centrally, when the event is sent — no emitter
+  looks it up and no two emitters can resolve it differently.
+- **Half an address is refused.** If the storage cannot be resolved (the row is
+  gone, the store errored) the target is downgraded to `none`. A path with no
+  storage would otherwise be resolved by the client against whatever storage
+  the user happened to have open — a click that lands somewhere plausible and
+  wrong.
+
+> **Not the same thing as `node` / `share`.** Those stay what they always were:
+> descriptive context for a receiver. `target` is the **address**, and the two
+> genuinely differ — `file.trashed` describes the file at its original path and
+> has to open the copy in the trash; `share.created` carries both a node and a
+> share while only one of them is the thing to open.
+
+> **Rows written before this field existed** have no target and read as `none`.
+> Nothing is backfilled: the target is derived from what the emitter knew at
+> the time, and there is no way to recover that afterwards.
+
+### Which events carry one
+
+| Event | Target | Why that one |
+|---|---|---|
+| `file.uploaded` · `file.updated` | `file` — the file | Opens its folder with it selected. |
+| `file.moved` | `file` — the **new** path | "Where is it now" is the only useful answer to a move. |
+| `file.trashed` | `file` — the path **in the trash** | The copy that exists is the one in `.filex-trash/`, and the explorer shows it. Falls back to the original folder if the surface passed no trash path. |
+| `file.deleted` | `dir` — the parent folder | A permanent removal leaves no row to select. |
+| `file.upload_failed` | `dir` — the parent folder | The bytes never landed; the folder they were headed for is where the user retries. |
+| `file.infected` | `file` — the **trash** path when it was quarantined, the original path when the driver had no move | Where the file actually is. |
+| `drop.received` | `dir` — the drop folder | A drop can carry several files, so there is no single row to select. |
+| `comment.added` | `file` **or** `dir` | Read from the node row's type — a comment can hang on a folder. |
+| `e2e.escrow_used` | `dir` — the encrypted folder | |
+| `share.created` | `share` — the token | The event is "a link now exists"; the link is the thing. |
+| `admin_test` · `webhook_test` | `none` | |
+| `update_available` · `update_applied` | `none` | Not about a file. |
+| `replica_fail` · `replica_fail_spike` · `replica_reconcile_done` · `replica_status_report` · `primary_read_fail` | **`none` — honestly cannot** | These carry a path and nothing else (`internal/replica/`): a bare path does not name a storage, and guessing which storage it belongs to would send a click into another tenant's folder whenever two storages share a folder name. |
+| `quota_near_full` · `quota_full` · `queue_stuck` · `auth_fail_spike` · `disk_full` | `none` | Declared but **not emitted** by any code — see the Emitted column above. |
+
+### Where a click goes
+
+One resolver, three surfaces. The bell row, the browser notification and the
+desktop app's native notification all route through
+`web/src/lib/notificationTarget.ts` — the desktop **main process imports that
+same file** — so the three cannot disagree about where a click lands.
+
+| `kind` | Web (admin/drive SPA) | Desktop app |
+|---|---|---|
+| `file` | `/{base}explore?select=<storage>://<path>#<storage>/<folder>` — the folder opens and the row is **selected** | remounts the explorer at the folder and selects the row |
+| `dir` | `/{base}explore#<storage>/<folder>` | remounts the explorer at the folder |
+| `share` | the public `/s/<token>` page | opened in the **system browser** — a public page is not something to load into a window holding a bearer token |
+| `none` | the notifications page | brings the app window to the front |
+
+⚠ `none` lands a **non-admin** back on the explorer, not on the notifications
+page: every panel route is admin-gated and the guard redirects them. They still
+get the notification and still get every `file`/`dir`/`share` target — it is
+only the "nowhere in particular" case that has nowhere of their own to go.
+
+⚠ A `file` target resolves to its **folder plus a selection**, never to the file
+as a destination of its own. Opening "the file" would mean choosing between
+preview, edit and download — three answers for three file types — where showing
+it in its folder is right for every type, and is what "reveal" means in every
+file manager.
+
+⚠ The two path shapes are **not** interchangeable and both are load-bearing:
+the explorer's address bar carries `#<storage>/<folder>`, while its rows carry
+`data-fe-path="<storage>://<path>"`. Building one from the other by hand is how
+a hash ends up naming a folder called `qldemo:`.
+
+---
+
+## Reaching someone who is not looking at the bell
+
+The bell only notifies somebody who is looking at it. Two channels carry the
+same event further, and they are mutually exclusive on any one machine.
+
+### Browser notifications
+
+While a filex tab is open and the browser has granted permission, each new bell
+row also raises a `Notification`. Clicking it focuses the tab and goes to the
+event's [target](#click-target).
+
+- **Permission is asked from a click** — the button in the **Notifications**
+  pane of the user-settings dialog (the account menu, on every front door), or
+  the same pane of the admin panel's **Notifications → Your notifications** —
+  and never on page load. An origin that asks without a
+  gesture is answered by Chrome with a muted chip instead of a prompt — asking
+  at the wrong moment can cost you the permission permanently.
+- **A per-user switch** beside it turns it off. It is stored in
+  `localStorage` (`filex.notify.browser.<user id>`), **not** in the per-user
+  settings row, because the permission it acts on is granted per browser
+  profile and per device: a server-side flag would travel to a machine where
+  the permission was never granted, and say "on" while nothing ever appeared.
+- **It degrades silently.** No API, an insecure origin, permission denied, or a
+  constructor that throws (Android Chrome, where only a service worker may
+  notify) — all no-ops, never an error.
+- One toast per notification id (`tag: filex-notification-<id>`), so a
+  re-render cannot produce two.
+
+### Desktop app
+
+The desktop window is the explorer and has no bell in it, so the app polls the
+same endpoint and raises a **native OS notification** instead. A click brings
+the window to the front and opens the target; a share opens in the system
+browser. **App settings → Notifications** turns it off.
+
+It never double-notifies: the browser channel refuses to fire inside the
+Electron shell, so one event produces one notification on that machine.
+
+### Cost
+
+Both channels ride the bell's existing **15 s** unread-count poll — the one the
+bell has always run. The head of the unread list is fetched **only when that
+count goes up**, so a quiet instance costs exactly what it cost before. On the
+web the loop lives at the root of the SPA rather than in the bell component, so
+the screens that have no bell (the explorer, which is the whole product for a
+non-admin) are covered by the same loop rather than by a second one.
+
+⚠ **A baseline is taken before anything is announced.** A reload, or an app
+start, must not replay every unread row the user already had as toasts.
+
+⚠ A notification carries **a name, a count and a target** — never file content
+and never a credential. The title and body are the same strings the bell shows.
+
+---
+
 ## In-app bell (endpoints)
 
 Authenticated user endpoints, scoped to the **current user** (they see their own
@@ -279,6 +446,7 @@ Each item in `items` looks like:
   "title": "New upload",
   "body": "alice dropped 3 files into \"Inbox\".",
   "meta": { "folder": "Inbox", "count": 3 },
+  "target": { "kind": "dir", "storage": "team-bucket", "path": "Inbox" },
   "webhook_status": "sent",
   "created_at": "2026-07-04T09:15:00Z"
 }
@@ -286,8 +454,10 @@ Each item in `items` looks like:
 
 `read_at` is **absent** until the row is marked read (then it holds the
 timestamp); `user_id` is present only on user-scoped rows (absent on
-broadcasts); and `webhook_error` appears only when the webhook for that row
-failed.
+broadcasts); `webhook_error` appears only when the webhook for that row
+failed; and `target` is **absent** when there is nothing to open — see
+[Click target](#click-target), where an absent target and `{"kind":"none"}`
+mean the same thing.
 
 ---
 
@@ -368,8 +538,20 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 > display preference must not be able to hide an antivirus hit behind a
 > transient error.
 >
-> ⚠ There is no admin-UI screen for these two fields yet; they are set over the
-> API. The filtering itself is in force regardless of how the row got written.
+> ⚠ `in_app_enabled` has a screen now, and **everybody can reach it**: the
+> **Notifications** pane of the user-settings dialog, opened from the account
+> menu on every front door — the admin chrome, Home and the standalone
+> explorer, which between them are every screen a non-admin can be on. The
+> admin panel's own **Notifications → Your notifications** section is the same
+> two switches for an operator who is already there. `muted_events` is still
+> API-only, and both screens resend the user's existing list verbatim so
+> opening one cannot clear their mutes. The filtering itself is in force
+> regardless of how the row got written.
+>
+> Why that matters more than it sounds: this endpoint is open to every account,
+> and until the dialog existed its only screen sat behind the admin gate — so
+> the people who receive notifications were the exact people who could not turn
+> them off.
 
 ---
 

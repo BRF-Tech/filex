@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.40.0"
+version: "0.41.0"
 releaseNotes: |-
-  filex v0.40.0 — 2026-09-12
-  • The menus say which key does this.
-  • Twelve more verbs became remappable
-  • The settings modal refuses a combination the browser keeps for itself
-  • A ninth theme, Drive
-  • Dark mode put white text on the primary button
+  filex v0.41.0 — 2026-09-14
+  • A new face for the whole product.
+  • Home is a view inside the explorer
+  • User settings
+  • A listing that behaves like a table.
+  • Per-folder view memory
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
@@ -26,22 +26,35 @@ description: >-
   drive letter on Windows.
 
 
+  Browsing opens on Home — your storages, what you opened last, what you
+  starred. + New makes a folder or a document: Markdown, text, CSV or code
+  straight away, and Word, Excel, PowerPoint or OpenDocument once an
+  OnlyOffice server is connected. The templates are real documents compiled
+  into the binary, so nothing here needs LibreOffice installed. Select a dozen
+  files and Download hands back one ZIP, streamed rather than assembled, so a
+  large archive costs the server almost no memory. Every file records its
+  owner, so the listing has an Owner column, the filter row a People entry,
+  and quota counts against the owner rather than whoever touched the file
+  last.
+
+
   Highlights: public share links with PIN and expiry, file-drop upload links,
-  resumable uploads, full-text search, image/video/PDF thumbnails, trash and
-  file versioning, end-to-end encrypted folders (encrypted in your browser, so
-  the server only ever holds ciphertext) each with a recovery key shown once,
-  role-based access control, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app
-  with two-way folder sync, an embeddable web component, and an AI/MCP API for
-  agents. An open folder keeps itself current over a WebSocket, so a file
-  somebody else uploads appears without a refresh. OnlyOffice and draw.io can
-  be connected for in-browser document and diagram editing, and so can a
-  ClamAV container: give filex its address and every file written is scanned,
-  with infected ones quarantined into the trash.
+  resumable uploads, full-text search, thumbnails of the file itself (a PDF's
+  first page, a video's first frame that is not black, a text file's first
+  lines), trash and file versioning, end-to-end encrypted folders (encrypted
+  in your browser, so the server only ever holds ciphertext) each with a
+  recovery key shown once, role-based access control, TOTP 2FA, optional SSO
+  (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
+  component, and an AI/MCP API for agents. An open folder keeps itself current
+  over a WebSocket, so a file somebody else uploads appears without a refresh.
+  OnlyOffice and draw.io can be connected for in-browser document and diagram
+  editing, and so can a ClamAV container: give filex its address and every
+  file written is scanned, with infected ones quarantined into the trash.
 
 
   On Umbrel, filex stores its database in the app data directory and manages a
-  dedicated files folder out of the box. Sign in with the username and password
-  shown by Umbrel, then add more storages in the admin UI.
+  dedicated files folder out of the box. Sign in with the username and
+  password shown by Umbrel, then add more storages in the admin UI.
 developer: BRF-Tech
 website: https://filex.sh
 dependencies: []

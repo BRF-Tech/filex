@@ -46,59 +46,107 @@ const hintCombos = computed(() => ({
 
 // ------------------------------------------------------------------
 // Step definitions. `target` returns the element to spotlight (null =
-// centered card, e.g. the closing shortcuts step). Buttons without a
-// stable class are found via their localized title attribute — the
-// toolbar gives every icon-only button a title from the same catalogue.
+// centered card, e.g. the closing shortcuts step).
+//
+// gorunum:v3-shell — every target below is a `data-testid` or a class the
+// shell owns, resolved from the live DOM. It used to find two of its
+// buttons by matching their localized `title` attribute, which quietly
+// stopped working the moment those verbs moved into a menu: `byTitle(r,
+// t('toolbar.upload'))` matched nothing at 1440px, so the upload step was
+// dropped from the walk and nobody could see that it had been. A step that
+// disappears is indistinguishable from a step that was never written.
+//
+// ⚠ Two steps point at a control the narrow shell draws DIFFERENTLY — the
+// panel (a column at 1440px, a closed drawer behind `toolbar-nav` at
+// 390px) and the create button ("+ New" and its menu, versus the upload
+// FAB). They say a different sentence there, and the sentence is chosen
+// from THE ELEMENT THAT ACTUALLY RESOLVED, never from a width: one branch,
+// no media query to keep in sync with the stylesheet.
 // ------------------------------------------------------------------
-
-function byTitle(root: HTMLElement, label: string): HTMLElement | null {
-  const nodes = root.querySelectorAll<HTMLElement>('button[title]');
-  for (const el of Array.from(nodes)) {
-    if (el.getAttribute('title') === label) return el;
-  }
-  return null;
-}
 
 interface TourStep {
   id: string;
   titleKey: string;
-  descKey: string;
+  /** A key, or a key chosen from whichever element resolved (see above). */
+  descKey: string | ((el: HTMLElement | null) => string);
   target: (root: HTMLElement) => HTMLElement | null;
 }
 
 const STEPS: TourStep[] = [
   {
+    // The navigation panel: the standard views, then STORAGES, then
+    // CONNECTIONS. At 390px it is a drawer that starts closed, so there is
+    // nothing to spotlight and the button that opens it is the target.
     id: 'nav',
     titleKey: 'tour.step.nav.title',
-    descKey: 'tour.step.nav.desc',
-    target: (r) => r.querySelector<HTMLElement>('.fe-breadcrumb'),
-  },
-  {
-    id: 'upload',
-    titleKey: 'tour.step.upload.title',
-    descKey: 'tour.step.upload.desc',
+    descKey: (el) =>
+      el?.dataset.testid === 'sidenav' ? 'tour.step.nav.desc' : 'tour.step.nav.desc_closed',
     target: (r) =>
-      byTitle(r, t('toolbar.upload')) || r.querySelector<HTMLElement>('.fe-fab'),
+      r.querySelector<HTMLElement>('[data-testid="sidenav"]') ||
+      r.querySelector<HTMLElement>('[data-testid="toolbar-nav"]'),
   },
   {
+    // "+ New" — the menu that replaced the Upload / New folder pair. The
+    // narrow shell has no panel on screen and draws the upload FAB instead,
+    // which does ONE of the three things the menu offers, so it gets a
+    // sentence that promises only that one.
+    id: 'new',
+    titleKey: 'tour.step.new.title',
+    descKey: (el) =>
+      el?.dataset.testid === 'sidenav-new' ? 'tour.step.new.desc' : 'tour.step.new.desc_fab',
+    target: (r) =>
+      r.querySelector<HTMLElement>('[data-testid="sidenav-new"]') ||
+      r.querySelector<HTMLElement>('.fe-fab'),
+  },
+  {
+    // ⚠ The FIELD, not `.fe-search__input`. The wide header's input carries
+    // both class names and the narrow one carries only `fe-drivesearch__input`
+    // — so the old selector resolved at 1440px and matched nothing at 390px,
+    // where the field is the widest thing on the row. The testid is on the
+    // wrapper in both layouts, and spotlighting the wrapper also takes in the
+    // advanced-search and palette buttons the copy now names.
     id: 'search',
     titleKey: 'tour.step.search.title',
     descKey: 'tour.step.search.desc',
-    target: (r) =>
-      r.querySelector<HTMLElement>('.fe-search__input') ||
-      r.querySelector<HTMLElement>('.fe-toolbar__search-toggle'),
+    target: (r) => r.querySelector<HTMLElement>('[data-testid="drive-search"]'),
+  },
+  {
+    // The breadcrumb — this was the old first step's target while its title
+    // said "Storages & folders", which is the panel. Now it has its own step
+    // and its own title. Absent on Home, which has no address; the step drops
+    // itself there rather than pointing at the heading that takes its place.
+    id: 'crumb',
+    titleKey: 'tour.step.crumb.title',
+    descKey: 'tour.step.crumb.desc',
+    target: (r) => r.querySelector<HTMLElement>('.fe-breadcrumb'),
+  },
+  {
+    // The filter row. Unconditional in the shell now, but only drawn where
+    // there is a listing to filter — not at the multi-storage virtual root,
+    // which is where a first run usually starts, so this step is often the
+    // one that drops itself.
+    id: 'filters',
+    titleKey: 'tour.step.filters.title',
+    descKey: 'tour.step.filters.desc',
+    target: (r) => r.querySelector<HTMLElement>('[data-testid="filterbar"]'),
   },
   {
     id: 'view',
     titleKey: 'tour.step.view.title',
     descKey: 'tour.step.view.desc',
+    // Still `.fe-toolbar__view`: ViewSwitcher kept its class when it moved
+    // from the header to the breadcrumb row.
     target: (r) => r.querySelector<HTMLElement>('.fe-toolbar__view'),
   },
   {
-    id: 'share',
-    titleKey: 'tour.step.share.title',
-    descKey: 'tour.step.share.desc',
-    target: (r) => r.querySelector<HTMLElement>('.fe__body'),
+    // Sharing used to spotlight `.fe__body` — the whole listing, which is to
+    // say nothing in particular — while talking about a context menu. The
+    // details panel is where a share link is actually minted, so the step
+    // points at the control that opens it and names the context menu too.
+    id: 'details',
+    titleKey: 'tour.step.details.title',
+    descKey: 'tour.step.details.desc',
+    target: (r) => r.querySelector<HTMLElement>('[data-testid="subhead-inspector"]'),
   },
   {
     id: 'help',
@@ -143,6 +191,24 @@ interface Rect {
 const spot = ref<Rect | null>(null);
 const cardStyle = ref<Record<string, string>>({});
 const cardEl = ref<HTMLElement | null>(null);
+/**
+ * The element the CURRENT step resolved to, kept so a step whose control
+ * differs by width can pick its sentence from what is really there.
+ *
+ * Written at the top of `place()`, which runs before the card re-renders
+ * (the `stepIdx` watcher flushes 'pre') and again on every resize — so the
+ * copy follows the spotlight instead of lagging a step behind it. Assigning
+ * the same element twice is not a change, so a scroll storm costs nothing.
+ */
+const targetEl = ref<HTMLElement | null>(null);
+
+/** The step's sentence, with the shortcut names filled in. */
+const stepDesc = computed(() => {
+  const s = step.value;
+  if (!s) return '';
+  const key = typeof s.descKey === 'function' ? s.descKey(targetEl.value) : s.descKey;
+  return t(key, hintCombos.value);
+});
 
 const PAD = 6; // spotlight breathing room around the target
 const GAP = 12; // gap between spotlight and the card
@@ -152,6 +218,7 @@ async function place() {
   const r = props.root;
   if (!s) return;
   const el = r ? s.target(r) : null;
+  targetEl.value = el;
   if (!el) {
     spot.value = null; // centered card
     cardStyle.value = {};
@@ -169,17 +236,50 @@ async function place() {
     width: rect.width + PAD * 2,
     height: rect.height + PAD * 2,
   };
-  // Card: below the spotlight when there's room, above otherwise;
-  // clamped into the viewport horizontally.
+  // Card: below the spotlight, then above, then beside it.
+  //
+  // gorunum:v3-shell — the SIDE branches are why this is four cases and not
+  // two. The navigation panel is a full-height column, so neither "below" nor
+  // "above" fits and the old code clamped the card to the top of the viewport
+  // — which put it flat on top of the panel, hiding the very rows ("Home, My
+  // files, Shared with me…") the step was reading out. A coach mark that
+  // covers its own subject is worse than no coach mark: it looks like the
+  // product drew a dialog in the wrong place.
   await nextTick();
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const cw = Math.min(340, vw - 24);
   const ch = cardEl.value?.offsetHeight ?? 160;
-  let top = rect.bottom + PAD + GAP;
-  if (top + ch > vh - 12) top = Math.max(12, rect.top - PAD - GAP - ch);
-  let left = rect.left + rect.width / 2 - cw / 2;
-  left = Math.min(Math.max(12, left), vw - cw - 12);
+  const sTop = rect.top - PAD;
+  const sBottom = rect.bottom + PAD;
+  const sLeft = rect.left - PAD;
+  const sRight = rect.right + PAD;
+  // Centred on the target along the other axis, then clamped into view.
+  const clampX = (x: number) => Math.min(Math.max(12, x), Math.max(12, vw - cw - 12));
+  const clampY = (y: number) => Math.min(Math.max(12, y), Math.max(12, vh - ch - 12));
+  const midX = clampX(rect.left + rect.width / 2 - cw / 2);
+  const midY = clampY(rect.top + rect.height / 2 - ch / 2);
+
+  let top: number;
+  let left: number;
+  if (sBottom + GAP + ch <= vh - 12) {
+    top = sBottom + GAP;
+    left = midX;
+  } else if (sTop - GAP - ch >= 12) {
+    top = sTop - GAP - ch;
+    left = midX;
+  } else if (sRight + GAP + cw <= vw - 12) {
+    left = sRight + GAP;
+    top = midY;
+  } else if (sLeft - GAP - cw >= 12) {
+    left = sLeft - GAP - cw;
+    top = midY;
+  } else {
+    // Nothing fits — a target that fills the viewport. Clamp, and accept the
+    // overlap rather than drawing the card off screen.
+    top = clampY(sBottom + GAP);
+    left = midX;
+  }
   cardStyle.value = {
     top: `${Math.round(top)}px`,
     left: `${Math.round(left)}px`,
@@ -187,8 +287,30 @@ async function place() {
   };
 }
 
+let placeRaf = 0;
+/**
+ * Re-place after a resize or a scroll — but on the NEXT frame, never inline.
+ *
+ * ⚠ The explorer decides it is narrow from a ResizeObserver on its own root
+ * (FileExplorer.vue, `isNarrow`), and ResizeObserver callbacks run AFTER the
+ * frame's rAF callbacks — so neither this `window` listener nor a single rAF
+ * has seen the new layout yet. Measured: shrinking 1440 → 390 with the tour
+ * open left the spotlight on the navigation panel (the element was still in
+ * the DOM when this handler asked for it) both inline and after one frame;
+ * only a SECOND resize moved it onto the top bar's button. Two frames plus a
+ * tick puts this after the observer has fired and Vue has patched, so the
+ * first resize gets the right answer — and the step's sentence, which is
+ * chosen from that same element, changes with it.
+ */
 function onViewportChange() {
-  if (props.open) void place();
+  if (!props.open) return;
+  if (placeRaf) cancelAnimationFrame(placeRaf);
+  placeRaf = requestAnimationFrame(() => {
+    placeRaf = requestAnimationFrame(() => {
+      placeRaf = 0;
+      void nextTick().then(place);
+    });
+  });
 }
 
 // ------------------------------------------------------------------
@@ -250,6 +372,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onViewportChange);
   window.removeEventListener('scroll', onViewportChange, true);
+  if (placeRaf) cancelAnimationFrame(placeRaf);
 });
 
 // Theme cascade outside `.fe` — same pattern as ContextMenu.
@@ -309,7 +432,7 @@ const themeClass = computed(() => `fe-ctx-backdrop--theme-${props.theme || 'auto
             {{ t('tour.progress', { n: stepIdx + 1, m: total }) }}
           </p>
           <h3 class="fe-tour__title">{{ t(step.titleKey) }}</h3>
-          <p class="fe-tour__desc">{{ t(step.descKey, hintCombos) }}</p>
+          <p class="fe-tour__desc">{{ stepDesc }}</p>
           <div class="fe-tour__dots" aria-hidden="true">
             <span
               v-for="(s, i) in activeSteps"

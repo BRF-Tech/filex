@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.40.0
+    image: ghcr.io/brf-tech/filex:v0.41.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -66,32 +66,46 @@ x-casaos:
   description:
     en_US: >-
       filex is a fast, self-hosted file manager: browse, upload, preview,
-      share and edit files across local folders, S3/MinIO, SFTP, WebDAV, FTP
-      and SMB/NAS shares. It also works the other way round — the same tree is
-      reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic, WinSCP or
-      a media player can point straight at it, and `filex mount` attaches it as
-      a drive. Public share links with PIN and expiry, file-drop upload links,
-      resumable uploads, full-text search, thumbnails, trash and versioning,
+      share and edit files across local folders, S3/MinIO, SFTP, WebDAV,
+      FTP and SMB/NAS shares. It also works the other way round — the same
+      tree is reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone,
+      restic, WinSCP or a media player can point straight at it, and
+      `filex mount` attaches it as a drive. Browsing opens on Home — your
+      storages, what you opened last, what you starred — and + New
+      makes a folder or a document: Markdown, text, CSV or code straight
+      away, and Word, Excel, PowerPoint or OpenDocument once you connect
+      an OnlyOffice server. The templates are real documents compiled into
+      the binary, so no LibreOffice is installed anywhere. A multi-file
+      selection downloads as one streamed ZIP. Public share links with PIN
+      and expiry, file-drop upload links, resumable uploads, full-text
+      search, thumbnails of the file itself (a PDF's first page, a video's
+      first frame that is not black, a text file's first lines), trash and
+      versioning, file ownership with an Owner column and a People filter,
       end-to-end encrypted folders with a recovery key, RBAC, TOTP 2FA,
-      optional SSO (OIDC/LDAP), a desktop app with folder sync and an AI/MCP
-      API for agents. An open folder keeps itself up to date over a WebSocket,
-      so a file somebody else uploads appears without a refresh. Antivirus is
-      optional and needs no fatter image: point filex at a ClamAV container
-      over the network and every file written is scanned, infected ones
-      quarantined into the trash. On first start it
-      creates an admin account and prints the password once in the container
-      logs (also saved to /data/.first-run.txt), unless FILEX_ADMIN_EMAIL /
-      FILEX_ADMIN_PASSWORD are set.
+      optional SSO (OIDC/LDAP), a desktop app with folder sync and an
+      AI/MCP API for agents. An open folder keeps itself up to date over a
+      WebSocket, so a file somebody else uploads appears without a
+      refresh. Antivirus is optional and needs no fatter image: point
+      filex at a ClamAV container over the network and every file written
+      is scanned, infected ones quarantined into the trash. On first start
+      it creates an admin account and prints the password once in the
+      container logs (also saved to /data/.first-run.txt), unless
+      FILEX_ADMIN_EMAIL / FILEX_ADMIN_PASSWORD are set.
   tagline:
     en_US: Self-hosted file manager for all your storages
   title:
     en_US: filex
   icon: https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/logo.png
-  thumbnail: https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/social-preview.png
+  # ⚠ The social card is NOT under docs/screenshots and never was — it is
+  # rendered from site/social-preview.src.html into site/assets/, and site/ is
+  # withheld from the public repository, so no raw.githubusercontent URL can
+  # reach it. filex.sh serves it (the og:image of site/index.html).
+  thumbnail: https://filex.sh/assets/social-preview.png
+  # The current release's pictures (e2e/shots/release.mjs names the folder).
   screenshot_link:
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/explorer-grid-light.png
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/admin-dashboard.png
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/share-modal.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.41.0/explorer-grid-light.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.41.0/admin-dashboard.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.41.0/share-modal.png
   tips:
     before_install:
       en_US: >-
@@ -105,7 +119,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.40.0"
+  version: "0.41.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

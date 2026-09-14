@@ -110,7 +110,7 @@ onMounted(async () => {
 
     <Table
       :columns="columns"
-      :rows="sync.runs.items"
+      :rows="sync.items"
       :loading="sync.loading"
       :empty="t('sync.noResults')"
       :page="page"

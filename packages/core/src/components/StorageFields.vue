@@ -19,6 +19,7 @@ import { computed, ref } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { StorageField, StorageFieldOption } from '../types/Connections';
 import { useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 
 const props = defineProps<{
   fields: StorageField[];
@@ -175,7 +176,16 @@ function toggleReveal(key: string) {
             :aria-label="revealed[f.key] ? t('conn.form.hide') : t('conn.form.reveal')"
             @click="toggleReveal(f.key)"
           >
-            {{ revealed[f.key] ? '🙈' : '👁' }}
+            <!-- ikon:emoji — the two states of a secret field. 👁/🙈 were a
+                 hairline dingbat beside a full-colour monkey, i.e. two
+                 different fonts for one toggle; these are the same eye the
+                 context menu's Preview row uses, with and without its slash.
+                 The state is named on the button (title + aria-label). -->
+            <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+            <span
+              aria-hidden="true"
+              v-html="actionIconSvg(revealed[f.key] ? 'toggle-hidden' : 'preview')"
+            ></span>
           </button>
         </div>
 
@@ -313,6 +323,11 @@ function toggleReveal(key: string) {
 }
 .fe-cfield__eye {
   flex: 0 0 auto;
+  /* ikon:emoji — it holds an SVG now, not a 👁, so it centres the box
+     instead of a text baseline. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--fe-border-strong);
   background: var(--fe-bg-elev);
   color: var(--fe-text);
@@ -320,6 +335,9 @@ function toggleReveal(key: string) {
   padding: 0 10px;
   cursor: pointer;
   font-size: 14px;
+}
+.fe-cfield__eye .fe-aicon {
+  color: currentColor;
 }
 .fe-cfield__check {
   display: flex;

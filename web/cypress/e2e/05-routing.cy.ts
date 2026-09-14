@@ -7,7 +7,10 @@ const routes = [
   'storages',
   'storages/new',
   'users',
-  'profile',
+  // ⚠ 'profile' was here. The page is retired (the user-settings dialog owns
+  // those fields and a non-admin can open it too); the address survives only
+  // as a forward, and 25-account.cy.ts checks that it still lands on the
+  // dialog. Listing it here would be asserting that a retired page mounts.
   'settings',
   'external',
   'auth-providers',

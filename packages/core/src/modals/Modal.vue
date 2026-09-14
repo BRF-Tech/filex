@@ -16,6 +16,18 @@ const props = defineProps<{
    *  from the editor. ESC + emit('close') still wire through so the
    *  parent route can window.close() the tab. */
   chromeless?: boolean;
+  /**
+   * gorunum:v1 — full-bleed overlay. Like `chromeless` it drops the dialog
+   * head and footer and lets the card own the whole viewport, but it KEEPS
+   * the modal identity: the card still paints a ground and the caller draws
+   * its own chrome inside the slot (see PreviewModal's viewer bar).
+   *
+   * ⚠ Deliberately a second flag rather than a reuse of `chromeless`.
+   * `chromeless` means "the browser tab IS the container" (the standalone
+   * /files/edit route) and e2e/tests/83 asserts on exactly that class; an
+   * in-page preview that borrowed it would start claiming to be that route.
+   */
+  fullbleed?: boolean;
   /** Explicit theme. When set the modal stamps the appropriate
    *  `.fe--theme-{light,dark}` class on its `.fe` backdrop so the CSS
    *  variable cascade matches the host shell regardless of OS
@@ -100,6 +112,7 @@ function onBackdrop() {
       class="fe fe-modal__backdrop"
       :class="[
         { 'fe-modal__backdrop--chromeless': chromeless },
+        { 'fe-modal__backdrop--fullbleed': fullbleed && !chromeless },
         theme === 'light' ? 'fe--theme-light' : '',
         theme === 'dark' ? 'fe--theme-dark' : '',
       ]"
@@ -112,14 +125,15 @@ function onBackdrop() {
         :class="[
           `fe-modal__card--${size || 'md'}`,
           chromeless && 'fe-modal__card--chromeless',
+          fullbleed && !chromeless && 'fe-modal__card--fullbleed',
         ]"
         role="dialog"
         aria-modal="true"
-        :aria-labelledby="title && !chromeless ? titleId : undefined"
-        :aria-label="!title || chromeless ? title || undefined : undefined"
+        :aria-labelledby="title && !chromeless && !fullbleed ? titleId : undefined"
+        :aria-label="!title || chromeless || fullbleed ? title || undefined : undefined"
         @click.stop
       >
-        <header v-if="title && !chromeless" class="fe-modal__head">
+        <header v-if="title && !chromeless && !fullbleed" class="fe-modal__head">
           <h2 :id="titleId" class="fe-modal__title">{{ title }}</h2>
           <button
             type="button"
@@ -131,7 +145,7 @@ function onBackdrop() {
         <div class="fe-modal__body">
           <slot />
         </div>
-        <footer v-if="$slots.actions && !chromeless" class="fe-modal__actions">
+        <footer v-if="$slots.actions && !chromeless && !fullbleed" class="fe-modal__actions">
           <slot name="actions" />
         </footer>
       </div>

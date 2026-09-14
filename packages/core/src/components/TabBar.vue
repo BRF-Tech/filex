@@ -35,6 +35,35 @@ const props = defineProps<{
   splitEnabled?: boolean;
   /** true → the split toggle renders pressed (active tab has a pane). */
   splitActive?: boolean;
+  /**
+   * gorunum:v5-panerow — the details (inspector) toggle lives in this row too.
+   *
+   * ⚠ Opt-in, and absent means NOT DRAWN rather than "closed": until the host
+   * moves its own copy out of the breadcrumb row there would otherwise be two
+   * of the same button on screen, which is the duplicate this wave removes.
+   */
+  inspectorEnabled?: boolean;
+  /** true → the details toggle renders pressed (the panel is open). */
+  inspectorOpen?: boolean;
+  /**
+   * gorunum:v5-panerow — hide the tabs themselves (and "+"), keeping the row.
+   *
+   * ⚠ True is not "no tabs exist", it is "this deployment does not offer
+   * them": the `simple` profile drops tabs deliberately (#14 named them as
+   * power-user chrome) but still needs this row, because the details toggle
+   * lives in it. Without the flag the row could only be all-or-nothing, and
+   * the ⓘ would have to keep a second home in the breadcrumb row for that one
+   * profile — a control with two homes is how the two drift.
+   *
+   * ⚠⚠ Phrased as HIDE, not SHOW, and that is not taste. A prop declared
+   * `showTabs?: boolean` compiles to a runtime Boolean prop, and Vue casts an
+   * ABSENT Boolean prop to `false` — not to `undefined`. So `showTabs !== false`
+   * read false for every host that passed nothing, and the strip rendered with
+   * no tabs and no "+" at all. Measured in a real browser: `.fe-tabs__tab`
+   * count went from 1 to 0 the moment the prop was added, in both themes at
+   * both widths. Negative default = safe default.
+   */
+  hideTabs?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -43,6 +72,7 @@ const emit = defineEmits<{
   (e: 'new'): void;
   (e: 'reorder', from: number, to: number): void;
   (e: 'toggle-split'): void;
+  (e: 'toggle-inspector'): void /* gorunum:v5-panerow */;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -97,13 +127,17 @@ function onAux(id: string, ev: MouseEvent) {
   if (ev.button !== 1) return;
   ev.preventDefault();
   ev.stopPropagation();
+  // ⚠ The same guard the × has. `useTabs.closeTab()` refuses the last tab, so
+  // middle-clicking it was already a no-op; leaving it live while the × is
+  // hidden would be two doors to one verb disagreeing about whether it exists.
+  if (props.tabs.length <= 1) return;
   emit('close', id);
 }
 </script>
 
 <template>
   <div class="fe-tabs" role="tablist" :aria-label="t('tabs.strip')">
-    <div class="fe-tabs__scroll">
+    <div v-if="!hideTabs" class="fe-tabs__scroll">
       <div
         v-for="(tab, i) in tabs"
         :key="tab.id"
@@ -129,7 +163,14 @@ function onAux(id: string, ev: MouseEvent) {
       >
         <span v-if="tab.split" class="fe-tabs__splitdot" aria-hidden="true"></span>
         <span class="fe-tabs__label">{{ tab.label }}</span>
+        <!-- ⚠ Not drawn when this is the only tab. Owner's decision,
+             2026-09-13, verbatim: *"tek kalan tab'de x gözükmemeli, onu da
+             kaldırırsın."* It is not a style choice — `useTabs.closeTab()`
+             opens with `if (tabs.length <= 1) return null`, so at one tab the
+             × has always been a control that cannot do anything. Drawing it
+             was inviting a dead click. -->
         <button
+          v-if="tabs.length > 1"
           type="button"
           class="fe-tabs__close"
           :aria-label="t('tabs.close')"
@@ -143,12 +184,23 @@ function onAux(id: string, ev: MouseEvent) {
          the only way back to it was scrolling a strip most people do not know
          scrolls. Pinned here it is always where it was. -->
     <button
+      v-if="!hideTabs"
       type="button"
       class="fe-tabs__new"
       :aria-label="t('tabs.new')"
       :title="t('tabs.new')"
       @click="emit('new')"
     >+</button>
+    <!-- gorunum:v5-panerow — back in THIS row, where it was.
+         ⚠ It spent one round teleported up into the breadcrumb row beside the
+         details toggle. The reasoning was sound (that row is always drawn,
+         this strip is `v-if`'d) and it was approved, but the owner looked at
+         the result and rejected it: *"kanka split pane ve info butonunu alt
+         kısımda bırak"*. He decides. The reachability problem the teleport was
+         solving is real and is answered properly in the handover diff instead:
+         this row becomes the WINDOW's row — tabs, +, split and the details
+         toggle — and is drawn whenever any of the four has something to do,
+         rather than only when a second tab exists. -->
     <button
       v-if="splitEnabled !== false"
       type="button"
@@ -157,6 +209,7 @@ function onAux(id: string, ev: MouseEvent) {
       :aria-label="splitActive ? t('tabs.split_off') : t('tabs.split')"
       :title="splitActive ? t('tabs.split_off') : t('tabs.split')"
       :aria-pressed="splitActive ? 'true' : 'false'"
+      data-testid="tabs-split"
       @click="emit('toggle-split')"
     >
       <svg
@@ -172,6 +225,39 @@ function onAux(id: string, ev: MouseEvent) {
       >
         <rect x="3" y="4" width="18" height="16" rx="2" />
         <path d="M12 4v16" />
+      </svg>
+    </button>
+
+    <!-- gorunum:v5-panerow — the details toggle's home in this row.
+         ⚠ Rendered ONLY when the host passes `inspectorEnabled`, which nothing
+         does yet: until the FileExplorer diff in the handover is applied, the
+         ⓘ is still drawn in the breadcrumb row and this must stay silent, or
+         there would be two of it. When the diff lands, `infoPanelToggle` is
+         passed here and the subhead's copy is deleted in the same change. -->
+    <button
+      v-if="inspectorEnabled"
+      type="button"
+      class="fe-tabs__inspector"
+      :class="{ 'is-active': inspectorOpen }"
+      :aria-pressed="inspectorOpen ? 'true' : 'false'"
+      :title="t('toolbar.inspector')"
+      :aria-label="t('toolbar.inspector')"
+      data-testid="tabs-inspector"
+      @click="emit('toggle-inspector')"
+    >
+      <svg
+        class="fe-ficon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5" />
+        <circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none" />
       </svg>
     </button>
   </div>

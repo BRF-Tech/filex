@@ -353,6 +353,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// nobody: no node row, no search document, no realtime frame.
 	ah.AttachSearchIndex(d.Index)
 	ah.AttachThumbs(d.Thumbs)
+	// "Download the selection as one archive" (archive_download.go): an
+	// authenticated mint that resolves + authorizes the member list, and a
+	// credential-free navigation that streams it. Both halves need this store,
+	// so it is built here rather than inside either handler.
+	ah.AttachDownloadTickets(handlers.NewArchiveTicketStore())
 	// ⚠ Every absolute URL filex hands out (share + file-request links, the
 	// wss:// endpoint, upload-ticket URLs, every link inside an e-mail) is
 	// built from THIS resolver, so a multi-tenant install names the tenant's
@@ -420,6 +425,8 @@ func BuildRouter(d *Deps) http.Handler {
 	th.AttachSigner(thumbSigner)
 	ch := handlers.NewCapabilities(d.Caps, d.Store, d.Cfg.MultiTenant)
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
+	// The address the connection guides print — see Capabilities.Get.
+	ch.Tenants, ch.PublicURLSet = tenants, d.Cfg.PublicURLSet
 	stg := handlers.NewStorages(d.Store, d.Worker)
 	// The plugin conformance gate on storage save (handlers/plugin_gate.go).
 	stg.Plugins = d.Plugins
@@ -481,6 +488,7 @@ func BuildRouter(d *Deps) http.Handler {
 	sharedH := handlers.NewShared(d.Store)
 	sharedH.AttachThumbSigner(thumbSigner)
 	quotaH := handlers.NewQuota(d.Quota, d.Store)
+	quotaH.AttachACL(d.ACL)
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 	saveTextH.AttachACL(d.ACL)
 	saveTextH.AttachSearchIndex(d.Index)
@@ -562,6 +570,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// caller minted the ticket, and the URL can do nothing but that one write.
 	r.Put("/u/{ticket}", tuh.Upload)
 	r.Post("/u/{ticket}", tuh.Upload)
+	// Selection archive, redeem half. Credential-free on purpose and by the
+	// same reasoning as /u/ above: the ticket authorizes exactly one archive,
+	// was minted under an authenticated caller's own grants, is unguessable,
+	// expires in minutes and is consumed on use.
+	r.Get("/z/{ticket}", ah.DownloadArchive)
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
 	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)
@@ -865,6 +878,10 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/archive/list", ah.List)
 			r.Post("/archive/extract", ah.Extract)
 			r.Post("/archive/add", ah.Add)
+			// Mint only. The bytes come back from the public /z/{ticket}
+			// below, because a download has to be a navigation and a
+			// navigation carries no Authorization header.
+			r.Post("/archive/download", ah.DownloadTicket)
 
 			r.Get("/share", sh.HandleList)
 			r.Post("/share", sh.HandleCreate)
@@ -909,6 +926,17 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/", metaH.SetRecent)
 			})
 
+			// tablo:t1 — how this person left each folder (view mode, sort,
+			// column widths/order/visibility). One JSON document per user, on
+			// the user row rather than in the browser, because localStorage is
+			// per BROWSER and a shared machine would hand the next account the
+			// previous one's arrangements. See handlers/viewprefs.go.
+			vpH := handlers.NewViewPrefs(d.Store)
+			r.Route("/manager/view-prefs", func(r chi.Router) {
+				r.Get("/", vpH.Get)
+				r.Put("/", vpH.Put)
+			})
+
 			/* calisma:d3 comments */
 			// Node comments — flat chronological threads on files/folders
 			// (v0.6 "Çalışma" (Work)). Read+write = anyone who can SEE the node;
@@ -931,6 +959,12 @@ func BuildRouter(d *Deps) http.Handler {
 
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)
+			// Per-STORAGE usage, RBAC-filtered — "how full is this drive" for
+			// somebody who is not an administrator. Beside /quota/me because
+			// it is the same question asked of a different subject, and inside
+			// /api/files so it inherits the confine middleware (see the header
+			// of quota_storages.go).
+			r.Get("/quota/storages", quotaH.StorageUsage)
 
 			// Version history — list + restore. Admin-only HardDelete is
 			// mounted under /api/admin/versions/{id} below. The GET takes
@@ -946,7 +980,16 @@ func BuildRouter(d *Deps) http.Handler {
 
 	// ────── admin-only routes ──────
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(true))
+		// ⚠⚠ MiddlewareWithToken, not Middleware: a token must reach RequireAdmin
+		// ON THE CONTEXT, so the gate can judge the request by what the token
+		// grants. This group used to authenticate tokens through the driver
+		// chain, which kept the user and dropped the token — so an
+		// administrator's read-only or folder-confined token answered 200 on
+		// every route below exactly like the administrator's session. A token
+		// also wins over a session cookie sent with it, as on /api/files.
+		r.Use(auth.MiddlewareWithToken(d.Store, true))
+		// The account must be an administrator AND a token must grant `admin`
+		// and not be confined to a folder (auth.CallerMayAdminister).
 		r.Use(auth.RequireAdmin)
 		// Scope admin to its tenant (no-op unless multi-tenant mode is on). A
 		// tenant-admin then only sees its own storages/users; the supertenant
@@ -1270,12 +1313,14 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("mcp")).Handle("/mcp", aiMCP)
 
 		// Admin surface — the full admin panel as token-auth REST endpoints.
-		// Gated by the `admin` scope; the bound user is then elevated to an
-		// admin principal so the reused admin handler logic runs authorized.
-		// AuditMiddleware runs AFTER apitoken + RequireScope("admin") so the
-		// bound principal is on the context — every successful mutating
+		// Gated by the `admin` scope AND by the token not being confined to a
+		// folder (auth.RequireAdminToken — a `root:` token is a folder
+		// credential, never an operator one); the bound user is then elevated
+		// to an admin principal so the reused admin handler logic runs
+		// authorized. AuditMiddleware runs AFTER the gate so the bound
+		// principal is on the context — every successful mutating
 		// /api/ai/admin/* write lands in the audit log (action prefixed "ai.").
-		r.With(auth.RequireScope("admin"), auth.AuditMiddleware(d.Store)).Route("/admin", aiAdmin.Register)
+		r.With(auth.RequireAdminToken, auth.AuditMiddleware(d.Store)).Route("/admin", aiAdmin.Register)
 	})
 
 	// ────── ShareX uploader (token-authenticated) ──────

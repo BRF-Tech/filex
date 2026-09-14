@@ -76,7 +76,31 @@ export interface ExternalServiceStatus {
   detail?: string;
 }
 
+/**
+ * One document type the SERVER can create, from `capabilities.newdoc_types`.
+ *
+ * ⚠ `requires` is the whole point of shipping this list instead of hardcoding
+ * one in the client. The server knows it holds template bytes for `.docx`; it
+ * does NOT know whether this deployment has a document server that can open
+ * one. So it names the dependency and the client — which already resolves
+ * OnlyOffice/drawio, config override included — answers it. A client that
+ * re-derived "docx needs OnlyOffice" from a list of its own would be a second
+ * source of truth, and the one that rots first.
+ */
+export interface NewDocType {
+  /** Extension without the dot, lowercase. Also the key the create call sends. */
+  ext: string;
+  /** Coarse family, used for the picker's section headings. */
+  group: 'document' | 'text' | 'diagram';
+  mime: string;
+  /** External service the editor for this type needs; absent = built-in. */
+  requires?: 'onlyoffice' | 'drawio';
+}
+
 export interface Capabilities {
+  /** Document types this build can create. Absent on a server older than the
+   *  "New document" feature — hosts must treat that as "offer nothing". */
+  newdoc_types?: NewDocType[];
   ffmpeg?: boolean;
   ghostscript?: boolean;
   libreoffice?: boolean;
@@ -94,6 +118,10 @@ export interface Capabilities {
    *  ExplorerConfig.callerKind. Absent on a server older than the app/user
    *  token split, which is why every reader treats "missing" as a person. */
   caller_kind?: 'user' | 'app';
+  /** The address this deployment is reached at — only when it is real (the
+   *  operator configured it, or the request came in on a tenant's host).
+   *  Read by the connection guides; see `connectionsOrigin`. */
+  public_url?: string;
   external?: {
     onlyoffice?: ExternalServiceStatus;
     drawio?: ExternalServiceStatus;

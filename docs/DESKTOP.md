@@ -205,6 +205,29 @@ nothing reloads.
 
 ---
 
+## How it looks
+
+There is no appearance setting in *Settings*, and that is deliberate: the theme
+and the palette belong to **you**, not to this computer, so they are set where
+every other filex front door sets them — the **"..."** menu in the file list
+(*Theme*, *Compact view*). The app's own chrome — the account rail, Settings,
+the boot and sign-in screens, the dialogs — follows whatever you pick there, in
+light, dark and every palette. A second switch here would be a second answer to
+the same question.
+
+The window even reopens on the ground it last painted, so launching filex on a
+dark palette no longer flashes white first.
+
+The filex mark and wordmark sit at the top left, in the same corner the web app
+puts them, and follow the palette with everything else. The account rail down
+the side carries servers only — one logo, not two.
+
+The sign-in window is the one exception, and only because it has to be: it
+appears before there is an account, so there is nobody whose preference it could
+read. It follows your operating system until you are signed in.
+
+---
+
 ## Keeping folders on this computer
 
 The window is the online view of everything on the server. A folder you also
@@ -288,7 +311,7 @@ short:
 - A **delete never beats an edit**.
 - Changed in both places → **both are kept**.
 - Anything sync removes from this computer is **kept for 30 days**
-  (*Settings → Recently deleted*).
+  (*Settings → Removed by sync*).
 
 ---
 

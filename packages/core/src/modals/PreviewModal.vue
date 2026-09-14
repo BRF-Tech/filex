@@ -25,9 +25,12 @@ import type { Component } from 'vue';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import Modal from './Modal.vue';
+import StarButton from '../components/StarButton.vue';
 import { ensureMonaco, getMonaco, ensureHighlight } from '../composables/useMonacoLoader';
 import { useLocale } from '../composables/useLocale';
 import { browserProbeURL } from '../lib/externalReach';
+import { fileIconTile } from '../lib/fileIcons';
+import { actionIconSvg } from '../lib/actionIcons';
 
 const props = defineProps<{
   open: boolean;
@@ -68,13 +71,40 @@ const props = defineProps<{
    *  vs-dark). When unset Monaco falls back to `prefers-color-scheme`
    *  and the modal cascade follows whatever `.fe` parent it gets. */
   theme?: 'light' | 'dark' | 'auto';
+  /* === gorunum:v1-viewer — the full-bleed overlay's own contract ===
+   * Everything below is OPTIONAL and answered by the host, because the
+   * modal cannot invent any of it: it is handed ONE file and has no idea
+   * what list that file came out of, nor where the API lives. */
+  /** 1-based position of `file` in the host's current file list. */
+  index?: number;
+  /** How many files that list holds. `index` + `total` draw "1 of 9";
+   *  with either missing the counter is simply absent — a counter that
+   *  guesses is worse than no counter. */
+  total?: number;
+  /** Draw the prev/next chevrons even when index/total are unknown.
+   *  QuickLook sets it because its host already answers `nav`. */
+  navEnabled?: boolean;
+  /** API origin for the star toggle — same meaning as ExplorerConfig.apiBase.
+   *  Omitted = same origin, which is what the admin UI wants. */
+  apiBase?: string;
+  /** Draw the share action. Off by default on purpose: a share button with
+   *  no host listening to `@share` is a control that lies. */
+  shareEnabled?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  /** Previous / next file. −1 and +1, the SAME contract QuickLook already
+   *  emits upward — the chevrons are a second trigger for it, not a second
+   *  navigation mechanism. The host keeps the `file` prop in sync. */
+  (e: 'nav', delta: number): void;
+  /** The host opens its own share dialog. Only reachable when `shareEnabled`. */
+  (e: 'share'): void;
+  /** The star toggle succeeded — so the host can update its listing row. */
+  (e: 'starred', value: boolean): void;
 }>();
 
-const { t } = useLocale(() => props.locale);
+const { t, formatSize, formatDate, nodeDisplayName } = useLocale(() => props.locale);
 
 function ext(f: FileNode | null): string {
   return (f?.extension || '').toLowerCase();
@@ -296,6 +326,148 @@ const download = computed(() => (props.file ? props.downloadUrl(props.file.path)
 function stripAdapter(p: string): string {
   const idx = p.indexOf('://');
   return idx === -1 ? p : p.slice(idx + 3);
+}
+
+/* === gorunum:v1-viewer — full-bleed overlay chrome ===
+ *
+ * The card modal (title bar + Download/Close footer) is gone; what replaces
+ * it is one bar across the top, a chevron on each screen edge and a floating
+ * zoom pill. `chromeless` is untouched: the standalone /files/edit route still
+ * gets the bare viewer with no chrome at all, which is the whole point of that
+ * flag — the browser tab is its container.
+ */
+
+/** Chrome is drawn for the in-page overlay only. */
+const showChrome = computed(() => !props.chromeless);
+
+const viewerEl = ref<HTMLElement | null>(null);
+
+const tileHtml = computed(() => (props.file ? fileIconTile(props.file) : ''));
+const displayName = computed(() => (props.file ? nodeDisplayName(props.file) : ''));
+
+/** "1 of 9" — only when the host answered BOTH halves. */
+const counterText = computed(() => {
+  const i = props.index;
+  const n = props.total;
+  if (!i || !n || n < 1 || i < 1) return '';
+  return t('viewer.counter', { i, n });
+});
+
+/** `246.3 KB • Sep 9, 2026 • 1 of 9`, with any unknown part left out
+ *  rather than printed as a placeholder. */
+const metaLine = computed(() => {
+  const f = props.file;
+  if (!f) return '';
+  const parts: string[] = [];
+  if (typeof f.size === 'number' && f.type === 'file') parts.push(formatSize(f.size));
+  const when = formatDate(f.last_modified);
+  if (when) parts.push(when);
+  if (counterText.value) parts.push(counterText.value);
+  return parts.join(' • ');
+});
+
+/** The chevrons appear only where prev/next actually goes somewhere. */
+const canNav = computed(
+  () => showChrome.value && (props.navEnabled === true || (props.total ?? 0) > 1),
+);
+
+/** Starring is the real thing, not a second implementation: StarButton +
+ *  lib/star.ts, the same pair the listing rows use. It needs the DB node id,
+ *  which client-synthesized rows do not carry — no id, no button. */
+const starNodeId = computed(() =>
+  typeof props.file?.id === 'number' ? (props.file.id as number) : null,
+);
+
+/**
+ * Which kinds get the stage stretched instead of centred. Editors and
+ * document surfaces want every pixel; a photo wants to sit in the middle
+ * of the ground with room around it.
+ */
+const FILL_KINDS = new Set(['pdf', 'markdown', 'code', 'text', 'office', 'viewer']);
+const stageModifier = computed(() =>
+  FILL_KINDS.has(kind.value) ? 'fe-preview--fill' : 'fe-preview--center',
+);
+
+/* --- Zoom (image only) ----------------------------------------------
+ *
+ * ⚠ The pill is hidden for pdf / office / drawio. Those three paint their
+ * OWN zoom control inside their surface, and a second one wired to nothing
+ * is a control that lies — worse than no control, because the user reads a
+ * percentage that the thing on screen does not obey.
+ */
+const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+const zoom = ref(1);
+const imgEl = ref<HTMLImageElement | null>(null);
+/** The width the image settles at when it is fit to the stage (zoom = 1).
+ *  Everything else is a multiple of it, which is what makes "100%" mean
+ *  "the size you first saw" rather than "the pixel size of the file". */
+const fitWidth = ref(0);
+
+const canZoom = computed(() => showChrome.value && kind.value === 'image');
+
+function measureFit(): void {
+  if (zoom.value !== 1 || !imgEl.value) return;
+  const w = imgEl.value.getBoundingClientRect().width;
+  if (w > 0) fitWidth.value = w;
+}
+
+const imageStyle = computed(() => {
+  if (zoom.value === 1 || !fitWidth.value) return undefined;
+  return {
+    width: `${Math.round(fitWidth.value * zoom.value)}px`,
+    height: 'auto',
+    maxWidth: 'none',
+    maxHeight: 'none',
+  } as Record<string, string>;
+});
+
+function stepZoom(dir: 1 | -1): void {
+  const cur = zoom.value;
+  if (dir > 0) {
+    zoom.value = ZOOM_STEPS.find((s) => s > cur + 1e-6) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  } else {
+    const lower = ZOOM_STEPS.filter((s) => s < cur - 1e-6);
+    zoom.value = lower.length ? lower[lower.length - 1] : ZOOM_STEPS[0];
+  }
+}
+
+function resetZoom(): void {
+  zoom.value = 1;
+  void nextTick(measureFit);
+}
+
+const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
+const canZoomIn = computed(() => zoom.value < ZOOM_STEPS[ZOOM_STEPS.length - 1] - 1e-6);
+const canZoomOut = computed(() => zoom.value > ZOOM_STEPS[0] + 1e-6);
+
+/* --- Fullscreen ------------------------------------------------------ */
+const isFullscreen = ref(false);
+
+function onFullscreenChange(): void {
+  isFullscreen.value = !!document.fullscreenElement;
+}
+
+function toggleFullscreen(): void {
+  try {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.();
+    } else {
+      void viewerEl.value?.requestFullscreen?.();
+    }
+  } catch {
+    /* a browser that refuses fullscreen just leaves the overlay as it is */
+  }
+}
+
+/**
+ * The overlay has no backdrop ring to click — the card IS the viewport — so
+ * the ground around the content takes that job. `.self` is what keeps it
+ * honest: it only fires when the click landed on the ground itself, never on
+ * an editor, an iframe or the image.
+ */
+function onGroundClick(): void {
+  if (!showChrome.value) return;
+  emit('close');
 }
 
 const loading = ref(false);
@@ -713,6 +885,10 @@ async function runOrchestration(open: boolean, url: string, k: string): Promise<
   viewerCmp.value = null;
   viewerLoadError.value = null;
   pdfFallbackToNative.value = false;
+  /* gorunum:v1-viewer — a new file starts at 100%. Carrying 400% over from
+   * the previous photo means the next one opens mid-crop with no hint why. */
+  zoom.value = 1;
+  fitWidth.value = 0;
   disposeOnlyOfficeEditor();
   disposeMonaco();
   if (!open || !url) return;
@@ -772,6 +948,7 @@ watch(
 // `officeEditor`/Monaco state below. Doing this in onMounted+nextTick
 // guarantees every `let`/`function` in the file has been hoisted.
 onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreenChange);
   void nextTick(() => {
     if (!props.open) return;
     void runOrchestration(props.open, src.value, kind.value);
@@ -851,6 +1028,7 @@ function disposeOnlyOfficeEditor(): void {
 }
 
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
   disposeOnlyOfficeEditor();
   disposeMonaco();
 });
@@ -909,171 +1087,353 @@ function loadOnlyOfficeScript(base: string): Promise<void> {
 </script>
 
 <template>
-  <Modal :open="open" size="xl" :title="file?.basename || ''" :chromeless="chromeless" :theme="theme" @close="emit('close')">
-    <div v-if="file" class="fe-preview">
-      <template v-if="kind === 'image'">
-        <img :src="src" :alt="file.basename" class="fe-preview__image" />
-      </template>
-      <template v-else-if="kind === 'video'">
-        <video :src="src" controls preload="metadata" class="fe-preview__video" />
-      </template>
-      <template v-else-if="kind === 'audio'">
-        <audio :src="src" controls class="fe-preview__audio" />
-      </template>
-      <template v-else-if="kind === 'pdf'">
-        <object :data="src" type="application/pdf" class="fe-preview__iframe">
-          <div class="fe-preview__fallback">
-            <span class="fe-preview__fallback-icon">📕</span>
-            <p>{{ t('viewer.pdf_inline_failed') }}</p>
-            <a :href="download" class="fe-btn fe-btn--primary" target="_blank" rel="noopener">{{ t('viewer.open_in_new_tab') }}</a>
-          </div>
-        </object>
-      </template>
-
-      <template v-else-if="kind === 'markdown'">
-        <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
-        <div v-else-if="tooLarge" class="fe-preview__fallback">
-          {{ t('viewer.too_large') }} <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
+  <Modal
+    :open="open"
+    size="xl"
+    :title="file?.basename || ''"
+    :chromeless="chromeless"
+    :fullbleed="!chromeless"
+    :theme="theme"
+    @close="emit('close')"
+  >
+    <!-- === gorunum:v1-viewer ===
+         A full-bleed overlay, not a card: one bar across the top, a chevron on
+         each screen edge, a floating zoom pill at the bottom. `chromeless`
+         renders the viewer BARE (no bar, no chevrons, no pill) because the
+         standalone /files/edit route's container is the browser tab itself. -->
+    <div ref="viewerEl" class="fe-viewer" :class="{ 'fe-viewer--bare': chromeless }">
+      <header v-if="showChrome && file" class="fe-viewer__bar">
+        <div class="fe-viewer__ident">
+          <span class="fe-viewer__tile" aria-hidden="true" v-html="tileHtml"></span>
+          <span class="fe-viewer__idcol">
+            <span class="fe-viewer__name" :title="file.path">{{ displayName }}</span>
+            <span v-if="metaLine" class="fe-viewer__meta">{{ metaLine }}</span>
+          </span>
         </div>
-        <div
-          v-else-if="openMode === 'edit' && saveTextEndpoint"
-          class="fe-preview__md-split"
-        >
-          <div class="fe-preview__md-split-bar">
-            <span class="fe-preview__md-split-label">MARKDOWN</span>
-            <span v-if="fetchError" class="fe-preview__md-split-error">{{ fetchError }}</span>
-            <button
-              type="button"
-              class="fe-btn fe-btn--primary"
-              :disabled="!mdDirty || mdSaving"
-              @click="saveMarkdown"
-            >
-              {{ mdSaving ? t('viewer.saving') : (mdDirty ? t('viewer.save') : t('viewer.saved')) }}
-            </button>
-          </div>
-          <div class="fe-preview__md-split-body">
-            <textarea
-              class="fe-preview__md-split-input"
-              v-model="rawText"
-              @input="onMdInput"
-              @keydown.ctrl.s.prevent="saveMarkdown"
-              @keydown.meta.s.prevent="saveMarkdown"
-              spellcheck="false"
-              placeholder="# Markdown buraya…"
+
+        <div class="fe-viewer__acts">
+          <a
+            :href="download"
+            class="fe-viewer__act"
+            :title="t('viewer.download')"
+            :aria-label="t('viewer.download')"
+          ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('download')"></span></a>
+          <button
+            v-if="shareEnabled"
+            type="button"
+            class="fe-viewer__act"
+            :title="t('viewer.share')"
+            :aria-label="t('viewer.share')"
+            @click="emit('share')"
+          ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('access')"></span></button>
+          <!-- The listing's StarButton, not a copy of it: same component, same
+               lib/star.ts request, same optimistic rollback. -->
+          <StarButton
+            v-if="starNodeId !== null"
+            class="fe-viewer__act fe-viewer__act--star"
+            :starred="file.starred === true"
+            :node-id="starNodeId"
+            :api-base="apiBase"
+            :auth-headers="authHeaders"
+            :auth-credentials="authCredentials"
+            :locale="locale"
+            compact
+            @change="(v: boolean) => emit('starred', v)"
+          />
+          <button
+            v-if="openMode === 'view' && canEditKind && newTabEnabled !== false /* wiring:e2 */"
+            type="button"
+            class="fe-viewer__act"
+            :title="t('viewer.edit')"
+            :aria-label="t('viewer.edit')"
+            @click="openEditInNewTab"
+          ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('rename')"></span></button>
+          <button
+            v-if="newTabEnabled !== false /* wiring:e2 */"
+            type="button"
+            class="fe-viewer__act"
+            :title="t('viewer.open_in_new_tab')"
+            :aria-label="t('viewer.open_in_new_tab')"
+            @click="openInNewTab"
+          ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('open-tab')"></span></button>
+        </div>
+
+        <div class="fe-viewer__tail">
+          <button
+            type="button"
+            class="fe-viewer__act fe-viewer__close"
+            :title="t('viewer.close')"
+            :aria-label="t('viewer.close')"
+            @click="emit('close')"
+          ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('close')"></span></button>
+        </div>
+      </header>
+
+      <div class="fe-viewer__stage" @click.self="onGroundClick">
+        <div v-if="file" class="fe-preview" :class="stageModifier" @click.self="onGroundClick">
+          <template v-if="kind === 'image'">
+            <img
+              ref="imgEl"
+              :src="src"
+              :alt="file.basename"
+              class="fe-preview__image"
+              :style="imageStyle"
+              @load="measureFit"
             />
+          </template>
+          <template v-else-if="kind === 'video'">
+            <video :src="src" controls preload="metadata" class="fe-preview__video" />
+          </template>
+          <template v-else-if="kind === 'audio'">
+            <audio :src="src" controls class="fe-preview__audio" />
+          </template>
+          <template v-else-if="kind === 'pdf'">
+            <object :data="src" type="application/pdf" class="fe-preview__iframe">
+              <div class="fe-preview__fallback">
+                <!-- ikon:emoji — the file's own tile, the one the row behind
+                     this overlay is wearing. -->
+                <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+                <span class="fe-preview__fallback-icon" aria-hidden="true" v-html="tileHtml"></span>
+                <p>{{ t('viewer.pdf_inline_failed') }}</p>
+                <a :href="download" class="fe-btn fe-btn--primary" target="_blank" rel="noopener">{{ t('viewer.open_in_new_tab') }}</a>
+              </div>
+            </object>
+          </template>
+
+          <template v-else-if="kind === 'markdown'">
+            <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
+            <div v-else-if="tooLarge" class="fe-preview__fallback">
+              {{ t('viewer.too_large') }} <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
+            </div>
             <div
-              v-if="markdownUnavailable"
-              class="fe-preview__md-split-output fe-preview__md"
-            >{{ t('viewer.peer_not_installed') }}</div>
-            <div
+              v-else-if="openMode === 'edit' && saveTextEndpoint"
+              class="fe-preview__md-split"
+            >
+              <div class="fe-preview__md-split-bar">
+                <span class="fe-preview__md-split-label">MARKDOWN</span>
+                <span v-if="fetchError" class="fe-preview__md-split-error">{{ fetchError }}</span>
+                <button
+                  type="button"
+                  class="fe-btn fe-btn--primary"
+                  :disabled="!mdDirty || mdSaving"
+                  @click="saveMarkdown"
+                >
+                  {{ mdSaving ? t('viewer.saving') : (mdDirty ? t('viewer.save') : t('viewer.saved')) }}
+                </button>
+              </div>
+              <div class="fe-preview__md-split-body">
+                <textarea
+                  class="fe-preview__md-split-input"
+                  v-model="rawText"
+                  @input="onMdInput"
+                  @keydown.ctrl.s.prevent="saveMarkdown"
+                  @keydown.meta.s.prevent="saveMarkdown"
+                  spellcheck="false"
+                  :placeholder="t('viewer.md_placeholder')"
+                />
+                <div
+                  v-if="markdownUnavailable"
+                  class="fe-preview__md-split-output fe-preview__md"
+                >{{ t('viewer.peer_not_installed') }}</div>
+                <div
+                  v-else
+                  ref="markdownEl"
+                  class="fe-preview__md-split-output fe-preview__md"
+                  v-html="markdownHtml"
+                ></div>
+              </div>
+            </div>
+            <div v-else-if="fetchError" class="fe-preview__fallback">
+              <p>{{ fetchError }}</p>
+              <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
+            </div>
+            <div v-else-if="markdownHtml" ref="markdownEl" class="fe-preview__md" v-html="markdownHtml"></div>
+            <pre v-else class="fe-preview__pre">{{ rawText }}</pre>
+          </template>
+
+          <template v-else-if="kind === 'viewer'">
+            <div v-if="viewerLoadError && !pdfFallbackToNative" class="fe-preview__fallback">
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+              <span
+                class="fe-preview__fallback-icon fe-preview__fallback-icon--alert"
+                aria-hidden="true"
+                v-html="actionIconSvg('alert')"
+              ></span>
+              <p>{{ viewerLoadError }}</p>
+              <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
+            </div>
+            <div v-else-if="!viewerCmp" class="fe-preview__fallback">
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+              <span
+                class="fe-preview__fallback-icon fe-preview__fallback-icon--spin"
+                aria-hidden="true"
+                v-html="actionIconSvg('progress')"
+              ></span>
+              <p>{{ t('viewer.loading') }}</p>
+            </div>
+            <component
               v-else
-              ref="markdownEl"
-              class="fe-preview__md-split-output fe-preview__md"
-              v-html="markdownHtml"
-            ></div>
-          </div>
-        </div>
-        <div v-else-if="fetchError" class="fe-preview__fallback">
-          <p>{{ fetchError }}</p>
-          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
-        </div>
-        <div v-else-if="markdownHtml" ref="markdownEl" class="fe-preview__md" v-html="markdownHtml"></div>
-        <pre v-else class="fe-preview__pre">{{ rawText }}</pre>
-      </template>
+              :is="viewerCmp"
+              v-bind="viewerProps"
+              class="fe-preview__viewer"
+              @fallback="onPdfFallback"
+            />
+          </template>
 
-      <template v-else-if="kind === 'viewer'">
-        <div v-if="viewerLoadError && !pdfFallbackToNative" class="fe-preview__fallback">
-          <span class="fe-preview__fallback-icon">⚠️</span>
-          <p>{{ viewerLoadError }}</p>
-          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
-        </div>
-        <div v-else-if="!viewerCmp" class="fe-preview__fallback">
-          <span class="fe-preview__fallback-icon">⏳</span>
-          <p>{{ t('viewer.loading') }}</p>
-        </div>
-        <component
-          v-else
-          :is="viewerCmp"
-          v-bind="viewerProps"
-          class="fe-preview__viewer"
-          @fallback="onPdfFallback"
-        />
-      </template>
+          <template v-else-if="kind === 'code' || kind === 'text'">
+            <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
+            <div v-else-if="tooLarge" class="fe-preview__fallback">
+              {{ t('viewer.too_large') }} <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
+            </div>
+            <div v-else-if="fetchError" class="fe-preview__fallback">
+              <p>{{ fetchError }}</p>
+              <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
+            </div>
+            <div v-else class="fe-preview__code-wrap">
+              <div class="fe-preview__code-toolbar">
+                <!-- ⚠ lang="en". This badge holds a highlight.js language ID
+                     ("typescript", "ini", "nginx") — a technical token, never
+                     translated prose — and the CSS uppercases it. CSS
+                     text-transform is LOCALE-AWARE: under the Turkish UI the
+                     document is lang="tr", so "typescript" uppercased to
+                     "TYPESCRİPT" with a dotted İ (measured 2026-09-13). The
+                     sibling uppercase labels (.fe-sidenav__heading and friends)
+                     hold real Turkish words where "ETİKETLER" is exactly right,
+                     so the transform stays and only this one token opts out. -->
+                <span class="fe-preview__code-lang" lang="en">{{ codeLanguage }}</span>
+                <span v-if="!monacoReady && codeHtml" class="fe-preview__code-status">
+                  {{ saveTextEndpoint && !monacoUnavailable ? t('viewer.editor_loading') : t('viewer.read_only') }}
+                </span>
+                <span v-if="saveOk" class="fe-preview__code-status fe-preview__code-status--ok">
+                  <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+                  <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('check')"></span>
+                  {{ t('viewer.saved') }}
+                </span>
+                <span v-if="saveError" class="fe-preview__code-status fe-preview__code-status--err" :title="saveError">
+                  <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+                  <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('close')"></span>
+                  {{ t('viewer.save_error') }}
+                </span>
+                <span v-if="openMode === 'view'" class="fe-preview__code-status">{{ t('viewer.read_only') }}</span>
+                <button
+                  v-else-if="saveTextEndpoint && monacoReady"
+                  type="button"
+                  class="fe-btn fe-btn--primary"
+                  :disabled="saving"
+                  @click="saveCode"
+                >{{ saving ? t('viewer.saving') : t('viewer.save') }}</button>
+              </div>
+              <!-- Monaco target — hidden until ready, then occupies the slot. -->
+              <div ref="monacoEl" class="fe-preview__code-editor" :class="{ 'is-hidden': !monacoReady }" />
+              <!-- Highlight.js read-only fallback — visible until Monaco mounts. -->
+              <pre
+                v-if="!monacoReady && codeHtml"
+                class="fe-preview__pre fe-preview__code hljs"
+              ><code :class="`language-${codeLanguage}`" v-html="codeHtml"></code></pre>
+              <pre
+                v-else-if="!monacoReady && !codeHtml"
+                class="fe-preview__pre"
+                :data-lang="codeLanguage"
+              >{{ rawText }}</pre>
+            </div>
+          </template>
 
-      <template v-else-if="kind === 'code' || kind === 'text'">
-        <div v-if="loading" class="fe-preview__fallback">{{ t('viewer.loading') }}</div>
-        <div v-else-if="tooLarge" class="fe-preview__fallback">
-          {{ t('viewer.too_large') }} <a :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
-        </div>
-        <div v-else-if="fetchError" class="fe-preview__fallback">
-          <p>{{ fetchError }}</p>
-          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
-        </div>
-        <div v-else class="fe-preview__code-wrap">
-          <div class="fe-preview__code-toolbar">
-            <span class="fe-preview__code-lang">{{ codeLanguage }}</span>
-            <span v-if="!monacoReady && codeHtml" class="fe-preview__code-status">
-              {{ saveTextEndpoint && !monacoUnavailable ? t('viewer.editor_loading') : t('viewer.read_only') }}
-            </span>
-            <span v-if="saveOk" class="fe-preview__code-status fe-preview__code-status--ok">✓ {{ t('viewer.saved') }}</span>
-            <span v-if="saveError" class="fe-preview__code-status fe-preview__code-status--err" :title="saveError">✗ {{ t('viewer.save_error') }}</span>
-            <span v-if="openMode === 'view'" class="fe-preview__code-status">{{ t('viewer.read_only') }}</span>
-            <button
-              v-else-if="saveTextEndpoint && monacoReady"
-              type="button"
-              class="fe-btn fe-btn--primary"
-              :disabled="saving"
-              @click="saveCode"
-            >{{ saving ? t('viewer.saving') : t('viewer.save') }}</button>
-          </div>
-          <!-- Monaco target — hidden until ready, then occupies the slot. -->
-          <div ref="monacoEl" class="fe-preview__code-editor" :class="{ 'is-hidden': !monacoReady }" />
-          <!-- Highlight.js read-only fallback — visible until Monaco mounts. -->
-          <pre
-            v-if="!monacoReady && codeHtml"
-            class="fe-preview__pre fe-preview__code hljs"
-          ><code :class="`language-${codeLanguage}`" v-html="codeHtml"></code></pre>
-          <pre
-            v-else-if="!monacoReady && !codeHtml"
-            class="fe-preview__pre"
-            :data-lang="codeLanguage"
-          >{{ rawText }}</pre>
-        </div>
-      </template>
+          <template v-else-if="kind === 'office'">
+            <div v-if="officeError" class="fe-preview__fallback" data-testid="office-fallback">
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+              <span class="fe-preview__fallback-icon" aria-hidden="true" v-html="tileHtml"></span>
+              <p>{{ officeError }}</p>
+              <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
+            </div>
+            <div v-else ref="officeEl" class="fe-preview__office" />
+          </template>
 
-      <template v-else-if="kind === 'office'">
-        <div v-if="officeError" class="fe-preview__fallback" data-testid="office-fallback">
-          <span class="fe-preview__fallback-icon">📄</span>
-          <p>{{ officeError }}</p>
-          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
+          <template v-else>
+            <div class="fe-preview__fallback">
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+              <span class="fe-preview__fallback-icon" aria-hidden="true" v-html="tileHtml"></span>
+              <p>{{ t('viewer.no_preview') }}</p>
+              <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
+            </div>
+          </template>
         </div>
-        <div v-else ref="officeEl" class="fe-preview__office" />
-      </template>
+      </div>
 
-      <template v-else>
-        <div class="fe-preview__fallback">
-          <span class="fe-preview__fallback-icon">📎</span>
-          <p>{{ t('viewer.no_preview') }}</p>
-          <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
-        </div>
-      </template>
+      <button
+        v-if="canNav"
+        type="button"
+        class="fe-viewer__chev fe-viewer__chev--prev"
+        :title="t('viewer.nav_prev')"
+        :aria-label="t('viewer.nav_prev')"
+        @click="emit('nav', -1)"
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true" focusable="false"><path d="M15 4.5L7.5 12 15 19.5" /></svg>
+      </button>
+      <button
+        v-if="canNav"
+        type="button"
+        class="fe-viewer__chev fe-viewer__chev--next"
+        :title="t('viewer.nav_next')"
+        :aria-label="t('viewer.nav_next')"
+        @click="emit('nav', 1)"
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+             aria-hidden="true" focusable="false"><path d="M9 4.5L16.5 12 9 19.5" /></svg>
+      </button>
+
+      <!-- Zoom pill. Shown for the image viewer only - pdf, office and drawio
+           paint their own zoom inside their surface, and a second percentage
+           that the content does not obey is a control that lies. -->
+      <div v-if="canZoom" class="fe-viewer__zoom">
+        <button
+          type="button"
+          class="fe-viewer__zoom-btn"
+          :disabled="!canZoomOut"
+          :title="t('viewer.zoom_out')"
+          :aria-label="t('viewer.zoom_out')"
+          @click="stepZoom(-1)"
+        >&#8722;</button>
+        <button
+          type="button"
+          class="fe-viewer__zoom-level"
+          :title="t('viewer.zoom_reset')"
+          :aria-label="t('viewer.zoom_reset')"
+          @click="resetZoom"
+        >{{ zoomLabel }}</button>
+        <button
+          type="button"
+          class="fe-viewer__zoom-btn"
+          :disabled="!canZoomIn"
+          :title="t('viewer.zoom_in')"
+          :aria-label="t('viewer.zoom_in')"
+          @click="stepZoom(1)"
+        >+</button>
+        <span class="fe-viewer__zoom-sep" aria-hidden="true"></span>
+        <button
+          type="button"
+          class="fe-viewer__zoom-btn"
+          :title="isFullscreen ? t('viewer.exit_fullscreen') : t('viewer.fullscreen')"
+          :aria-label="isFullscreen ? t('viewer.exit_fullscreen') : t('viewer.fullscreen')"
+          @click="toggleFullscreen"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+               stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+               aria-hidden="true" focusable="false">
+            <template v-if="isFullscreen">
+              <path d="M9.5 4.5v5h-5" /><path d="M14.5 4.5v5h5" />
+              <path d="M9.5 19.5v-5h-5" /><path d="M14.5 19.5v-5h5" />
+            </template>
+            <template v-else>
+              <path d="M4.5 9.5v-5h5" /><path d="M19.5 9.5v-5h-5" />
+              <path d="M4.5 14.5v5h5" /><path d="M19.5 14.5v5h-5" />
+            </template>
+          </svg>
+        </button>
+      </div>
     </div>
-    <template #actions>
-      <button
-        v-if="file && openMode === 'view' && canEditKind && newTabEnabled !== false /* wiring:e2 */"
-        type="button"
-        class="fe-btn fe-btn--primary"
-        @click="openEditInNewTab"
-      >✏ {{ t('viewer.edit') }}</button>
-      <button
-        v-if="file && newTabEnabled !== false /* wiring:e2 */"
-        type="button"
-        class="fe-btn"
-        @click="openInNewTab"
-      >↗ {{ t('viewer.open_in_new_tab') }}</button>
-      <a v-if="file" :href="download" class="fe-btn">{{ t('viewer.download') }}</a>
-      <button type="button" class="fe-btn" @click="emit('close')">{{ t('viewer.close') }}</button>
-    </template>
   </Modal>
 </template>
 

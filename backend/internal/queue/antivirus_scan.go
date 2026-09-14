@@ -319,8 +319,15 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 			Node: &notify.NodeRef{StorageID: n.StorageID, Path: n.Path, Name: n.Name, Size: n.Size},
 			TS:   time.Now(),
 		}
+		// ⚠ Where the file IS, not where it was. A quarantined file has been
+		// moved into the trash, so the click opens the trash copy; only an
+		// unquarantined one is still at its original path (the driver had no
+		// move — the warning above).
 		if quarantined {
 			ev.Meta["trash_path"] = avNormalizePath(trashRel)
+			ev.Target = notify.FileTarget(avNormalizePath(trashRel))
+		} else {
+			ev.Target = notify.FileTarget(n.Path)
 		}
 		if _, err := a.notify.Send(ctx, ev); err != nil {
 			slog.Warn("antivirus: file.infected send failed",

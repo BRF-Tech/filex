@@ -39,12 +39,19 @@ describe('explorer navigation panel', () => {
     for (const view of ['recent', 'starred', 'shared', 'trash']) {
       cy.get(`[data-testid="sidenav-view-${view}"]`).should('be.visible');
     }
-    cy.get('[data-testid="sidenav-upload"]').should('be.visible');
-    cy.get('[data-testid="sidenav-new-folder"]').should('be.visible');
+    // One primary action since 0.41.0: + New, whose menu carries Upload and
+    // New folder (the two buttons that used to stand here are its first rows).
+    cy.get('[data-testid="sidenav-new"]').should('be.visible').click();
+    cy.get('[role="menuitem"]').should('contain.text', 'Upload files');
+    cy.get('[role="menuitem"]').should('contain.text', 'New folder');
+    cy.get('body').type('{esc}');
   });
 
+  // ⚠ The collapse control is the top bar's menu button (`toolbar-nav`), not a
+  // button inside the panel: since 0.41.0 the panel's own edge control exists
+  // only as the narrow drawer's close button (SideNav.vue explains why).
   it('collapses to a RAIL — icons stay, labels go, every row is still clickable', () => {
-    cy.get('[data-testid="sidenav-toggle"]').click();
+    cy.get('[data-testid="toolbar-nav"]').filter(':visible').first().click();
     cy.get('[data-testid="sidenav"]').should('have.class', 'fe-sidenav--rail');
     // The rail is the load-bearing half of the design: the panel must still be
     // there. A collapse that unmounts it would pass a "labels are gone" check
@@ -58,11 +65,11 @@ describe('explorer navigation panel', () => {
   });
 
   it('remembers the collapsed choice across a reload', () => {
-    cy.get('[data-testid="sidenav-toggle"]').click();
+    cy.get('[data-testid="toolbar-nav"]').filter(':visible').first().click();
     cy.window().its('localStorage').invoke('getItem', 'filex.sidenav').should('eq', '0');
     cy.reload();
     cy.get('[data-testid="sidenav"]', { timeout: 20000 }).should('have.class', 'fe-sidenav--rail');
-    cy.get('[data-testid="sidenav-toggle"]').click();
+    cy.get('[data-testid="toolbar-nav"]').filter(':visible').first().click();
     cy.get('[data-testid="sidenav"]').should('not.have.class', 'fe-sidenav--rail');
     cy.window().its('localStorage').invoke('getItem', 'filex.sidenav').should('eq', '1');
   });

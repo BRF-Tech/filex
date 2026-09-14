@@ -86,7 +86,7 @@ describe('virtual view labels', () => {
       // 3. The inspector — the third copy, which headed itself ".starred".
       //    Its folder-summary heading only renders with nothing selected, which
       //    is the state a view opens in.
-      cy.get('.fe-inspector__name').should(($el) =>
+      cy.get('.fe-inspector__title').should(($el) =>
         expect($el.text().trim(), 'inspector heading').to.eq(label),
       );
 

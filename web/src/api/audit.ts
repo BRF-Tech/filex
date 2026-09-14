@@ -23,6 +23,19 @@ interface BackendListResponse {
   offset?: number;
 }
 
+/**
+ * One audit row in the shape the views read.
+ *
+ * ⚠ The handler's rows carry `created_at`; `AuditEntry` — and so the Audit
+ * page's "Created" column and the dashboard's Recent activity — reads `at`.
+ * Nothing mapped one to the other, so every timestamp on both screens printed
+ * "—". Shared by the audit list and the dashboard so there is one mapping.
+ */
+export function toAuditEntry(row: AuditEntry): AuditEntry {
+  const r = row as AuditEntry & { created_at?: string };
+  return { ...r, at: r.at ?? r.created_at ?? '' };
+}
+
 export const AuditApi = {
   async list(params: AuditListParams = {}): Promise<PaginatedResponse<AuditEntry>> {
     // Backend returns `{entries, total, limit, offset}` and may wrap
@@ -41,9 +54,9 @@ export const AuditApi = {
       // or it's a `{entry, user_email}` wrapper.
       if (row && typeof row === 'object' && 'entry' in row && (row as BackendEntryEnvelope).entry) {
         const r = row as BackendEntryEnvelope;
-        return { ...(r.entry as AuditEntry), user_email: r.user_email ?? null };
+        return toAuditEntry({ ...(r.entry as AuditEntry), user_email: r.user_email ?? null });
       }
-      return row as AuditEntry;
+      return toAuditEntry(row as AuditEntry);
     });
     const limit = env.limit ?? items.length;
     const offset = env.offset ?? 0;

@@ -297,11 +297,13 @@ func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, err
 	if transferState == "" {
 		transferState = model.TransferStateStored
 	}
+	// See the sqlite driver: attribution rides the INSERT so a bulk write costs
+	// no extra round trips. nil owner/actor is SYSTEM and is written as NULL.
 	row := s.db.QueryRowContext(ctx,
-		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state, transfer_state)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state, transfer_state, owner_id, last_actor_id, external_upload)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 RETURNING `+nodeColumns(),
-		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState, transferState)
+		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState, transferState, n.OwnerID, n.LastActorID, n.ExternalUpload)
 	return scanNode(row)
 }
 
@@ -1988,13 +1990,28 @@ type rowScanner interface {
 	Scan(dst ...any) error
 }
 
-func nodeColumns() string {
-	return `id, storage_id, parent_id, name, path, path_hash, COALESCE(storage_key,''), type, size, COALESCE(mime,''), COALESCE(etag,''), backend_mtime, db_mtime, sync_state, COALESCE(transfer_state,'stored'), seen_at, deleted_at, created_at, updated_at`
-}
+// nodeColumnsFmt is the ONE place the node column order is written down.
+// %[1]s is the table alias ("" for a plain SELECT, "n." for the ones that JOIN
+// node_meta and have to disambiguate).
+//
+// ⚠ It is a format string rather than four hand-kept copies because four is
+// what there were, and a column added to `nodes` reached the ordinary listing,
+// the search rebuild — and silently missed the tag and starred reads, whose
+// scan then failed at runtime on a path the suite only walks in one test.
+const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,FALSE)`
+
+var (
+	// nodeColumnList is the unqualified list; nodeColumnsN is the "n."-aliased
+	// one. Both feed the same scanNode, which is why they cannot drift.
+	nodeColumnList = fmt.Sprintf(nodeColumnsFmt, "")
+	nodeColumnsN   = fmt.Sprintf(nodeColumnsFmt, "n.")
+)
+
+func nodeColumns() string { return nodeColumnList }
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload)
 	if err != nil {
 		return nil, err
 	}
@@ -2645,6 +2662,62 @@ func (s *Store) SetNodeOwner(ctx context.Context, nodeID int64, ownerID *int64) 
 	return err
 }
 
+// GetUserDisplayNames — see the sqlite driver for why this returns names and
+// not users.
+func (s *Store) GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk))
+		for i, id := range chunk {
+			ph = append(ph, fmt.Sprintf("$%d", i+1))
+			args = append(args, id)
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT id, COALESCE(NULLIF(display_name,''), NULLIF(username,''), email) FROM users WHERE id IN (`+strings.Join(ph, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[id] = name
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// SetNodeActor updates the last_actor_id column for one node. nil is SYSTEM.
+func (s *Store) SetNodeActor(ctx context.Context, nodeID int64, actorID *int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET last_actor_id=$1 WHERE id=$2`, actorID, nodeID)
+	return err
+}
+
+// SetNodeExternalUpload marks a node as having arrived through an anonymous
+// drop link.
+func (s *Store) SetNodeExternalUpload(ctx context.Context, nodeID int64, external bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET external_upload=$1 WHERE id=$2`, external, nodeID)
+	return err
+}
+
 // GetNodeOwner returns the owner_id (nullable) for one node.
 func (s *Store) GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error) {
 	var owner sql.NullInt64
@@ -2866,7 +2939,7 @@ func (s *Store) ListNodesByUserMeta(ctx context.Context, userID int64, key strin
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		`SELECT `+nodeColumnsN+`
 		 FROM user_node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
 		 WHERE m.user_id=$1 AND m.meta_key=$2 AND n.deleted_at IS NULL
@@ -2991,7 +3064,7 @@ func (s *Store) ListNodesByTag(ctx context.Context, tag string, limit int) ([]*m
 		limit = 500
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		`SELECT `+nodeColumnsN+`
 		 FROM node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
 		 WHERE m.meta_key=$1 AND n.deleted_at IS NULL

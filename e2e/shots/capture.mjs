@@ -16,29 +16,39 @@
 //   SHOTS_STORAGE    where to write the demo fixtures (this machine's view)
 //   SHOTS_MOUNT      the same directory as the SERVER sees it (differs when the
 //                    server runs in a VM/WSL/container; defaults to SHOTS_STORAGE)
-//   SHOTS_OUT        output directory (default: ../docs/screenshots)
+//   SHOTS_OUT        output directory (default: docs/screenshots/<release>/,
+//                    the release named in ./release.mjs)
 //   SHOTS_KEEP=1     leave the instance running for poking around
 //   SHOTS_PLUGIN_BIN a prebuilt example plugin (else: go build, then WSL)
 //   SHOTS_ALLOW_SKIP=1  do not fail when a shot could not be taken
+//
+// `demo-landing.png` needs a SECOND instance: demo mode replaces the login page,
+// so it cannot be shot from the instance everything else is shot from. When
+// this script boots its own instance it boots that one too, after the main
+// pass (see demoPass). Against SHOTS_URL it cannot, and SHOTS_DEMO=1 is the
+// way to point it at a demo-mode instance you started yourself.
 //
 // Every shot is taken with the UI language pinned to English three ways over:
 // the browser locale, the stored preference and the server default. Getting a
 // half-Turkish dialog into the repo took one of those being unset.
 
-import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { goBuild } from '../../scripts/lib/go-build.mjs';
 import { seedFixtures } from './fixtures.mjs';
+import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 
 const PORT = Number(process.env.SHOTS_PORT ?? 5298);
 const URL = process.env.SHOTS_URL ?? `http://127.0.0.1:${PORT}`;
-const OUT = process.env.SHOTS_OUT ?? join(REPO, 'docs/screenshots');
+const OUT = process.env.SHOTS_OUT ?? shotsDir();
 const STORAGE = process.env.SHOTS_STORAGE ?? join(tmpdir(), 'filex-shots-storage');
 const MOUNT = process.env.SHOTS_MOUNT ?? STORAGE;
 const DATA = process.env.SHOTS_DATA ?? join(tmpdir(), 'filex-shots-data');
@@ -69,18 +79,29 @@ function defaultBin() {
   return null;
 }
 
-async function waitForHealth(deadlineMs = 30_000) {
+async function waitForHealth(deadlineMs = 30_000, base = URL) {
   const until = Date.now() + deadlineMs;
   while (Date.now() < until) {
     try {
-      const r = await fetch(`${URL}/healthz`);
+      const r = await fetch(`${base}/healthz`);
       if (r.ok) return;
     } catch {
       /* not up yet */
     }
     await sleep(300);
   }
-  throw new Error(`no healthy instance at ${URL}`);
+  throw new Error(`no healthy instance at ${base}`);
+}
+
+function freePort() {
+  return new Promise((resolvePort, reject) => {
+    const srv = createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolvePort(port));
+    });
+  });
 }
 
 // binPath is the binary this run can drive from the command line (for the
@@ -285,16 +306,21 @@ async function newContext(browser, scheme, height = 940) {
   return ctx;
 }
 
-// ⚠ By id, and waiting for the DASHBOARD specifically. Matching the fields by
+// ⚠ By id, and waiting for a LANDING route specifically. Matching the fields by
 // label picked up the wrong control and the submit never fired — and because
 // the login page's own URL already contains "/admin/", a `waitForURL(/\/admin\//)`
 // resolved instantly and every later step ran signed OUT.
+//
+// ⚠ `home` is in the list since 2026-09-12: signing in used to land on the
+// dashboard, and the product now opens every role on /admin/home (the explorer
+// with the `.home` sentinel — see web/src/router/index.ts). Without it this
+// waited 20s on a page that had already arrived.
 async function signIn(page) {
   await page.goto(`${URL}/admin/login`);
   await page.fill('#email', EMAIL);
   await page.fill('#password', PASSWORD);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/admin\/(dashboard|explore)/, { timeout: 20_000 });
+  await page.waitForURL(/\/admin\/(home|dashboard|explore)/, { timeout: 20_000 });
 }
 
 async function dismissTour(page) {
@@ -304,6 +330,29 @@ async function dismissTour(page) {
     await skip.first().click().catch(() => {});
     await sleep(200);
   }
+}
+
+// Opens Share / Permissions for the current selection.
+//
+// ⚠ Selecting a file no longer puts a TEXT button on screen: the row under the
+// breadcrumb is the selection bar (gorunum:v2), whose entries are icon-only —
+// the label lives in `aria-label`/`title`. The previous version of this step
+// searched every visible button for the text "Share / Permissions", found
+// nothing, and timed out on `.fx-perm-modal`.
+//
+// ⚠ By data-testid on purpose. The bar renders a second, INVISIBLE copy of
+// every icon button to measure widths for folding (Toolbar.vue), and that copy
+// carries `data-key` — but not `data-testid`, so this cannot pick the ghost.
+// When the viewport is narrow enough that `access` folded away, it is in the
+// bar's own "⋯" instead, by label.
+async function openAccess(page) {
+  const direct = page.locator('[data-testid="selbar-access"]');
+  if (await direct.count()) {
+    await direct.first().click();
+    return;
+  }
+  await page.locator('[data-testid="selbar-more"]').click();
+  await page.locator('.fe-ctx__item', { hasText: /Share \/ Permissions/i }).first().click();
 }
 
 // The explorer lives at /admin/explore; ?storage= opens it inside one storage
@@ -346,38 +395,6 @@ async function shot(target, name) {
 }
 
 /**
- * wslCrossBuild builds the example plugin for Windows from inside WSL and puts
- * it where BOTH sides can see it — the repo's own gitignored bin/ — returning
- * the Windows path, or null.
- *
- * ⚠ Platform-specific on purpose, and the only kind that is allowed: this is
- * about where the Go toolchain lives on a Windows workstation (in WSL, while
- * node runs on Windows), not about filex behaving differently anywhere.
- */
-function wslCrossBuild(outPath) {
-  if (process.platform !== 'win32') return null;
-  const m = /^([A-Za-z]):[\\/](.*)$/.exec(REPO);
-  if (!m) return null;
-  const repoWsl = `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
-  const name = basename(outPath);
-  const winOut = join(REPO, 'bin', name);
-  mkdirSync(join(REPO, 'bin'), { recursive: true });
-  try {
-    execFileSync(
-      'wsl',
-      ['-e', 'bash', '-lc',
-       `cd ${repoWsl}/backend && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 ` +
-       `go build -trimpath -o ${repoWsl}/bin/${name} ./examples/plugin-memfs`],
-      { stdio: 'pipe' },
-    );
-  } catch (err) {
-    log(`WSL cross-build failed: ${firstLine(err)}`);
-    return null;
-  }
-  return existsSync(winOut) ? winOut : null;
-}
-
-/**
  * installExamplePlugin builds backend/examples/plugin-memfs and installs it
  * through the very API the admin page uses, so the plugins screenshot shows a
  * REAL running plugin rather than an empty table.
@@ -399,19 +416,16 @@ async function installExamplePlugin(token) {
     throw new Error(`SHOTS_PLUGIN_BIN does not exist: ${out}`);
   }
   if (!out) {
-  out = join(tmpdir(), process.platform === 'win32' ? 'filex-shot-memfs.exe' : 'filex-shot-memfs');
-  try {
-    execFileSync('go', ['build', '-o', out, './examples/plugin-memfs'], {
-      cwd: join(REPO, 'backend'),
-      env: { ...process.env, CGO_ENABLED: '0' },
-      stdio: 'pipe',
-    });
-  } catch (err) {
-    log(`go build: ${firstLine(err)} - trying the WSL toolchain`);
-    const cross = wslCrossBuild(out);
-    if (!cross) return false;
-    out = cross;
-  }
+    // ⚠ Built for the machine this script runs on, which is the machine
+    // running the instance. On a Windows workstation whose Go lives in WSL,
+    // scripts/lib/go-build.mjs cross-builds it there.
+    out = join(tmpdir(), process.platform === 'win32' ? 'filex-shot-memfs.exe' : 'filex-shot-memfs');
+    try {
+      goBuild({ cwd: join(REPO, 'backend'), pkg: './examples/plugin-memfs', out, ldflags: '', log });
+    } catch (err) {
+      log(`plugin build failed: ${firstLine(err)}`);
+      return false;
+    }
   }
   const form = new FormData();
   form.append('name', 'memfs');
@@ -442,6 +456,79 @@ async function installExamplePlugin(token) {
   return false;
 }
 
+/**
+ * The demo landing replaces the login page on an instance booted with
+ * FILEX_DEMO_MODE=true, so it is shot from wherever `base` points.
+ */
+async function shootDemoLanding(browser, base) {
+  const dctx = await newContext(browser, 'light', 1000);
+  const dpage = await dctx.newPage();
+  await dpage.goto(`${base}/admin/login`);
+  await dpage.waitForSelector('text=/Open the demo|demo/i', { timeout: 15_000 });
+  await sleep(1500);
+  // ⚠ The landing PRINTS the demo password (FILEX_DEMO_PASS, default
+  // "demo"). Booting the demo instance with this script's own PASSWORD —
+  // the obvious move, since the seed pass signs in with it — puts
+  // "password: demo-shots" in the README, a credential that opens nothing
+  // anybody reading it can reach. 2026-09-13 run did exactly that.
+  if ((await dpage.locator('body').innerText()).includes(PASSWORD)) {
+    throw new Error(
+      `demo-landing would show this script's own password ("${PASSWORD}") — ` +
+        'boot the demo instance without FILEX_DEMO_PASS so it shows the default',
+    );
+  }
+  await shot(dpage, 'demo-landing.png');
+  await dctx.close();
+}
+
+/**
+ * Boots a second, demo-mode instance of the same binary on its own port and
+ * data dir, shoots the landing and stops it.
+ *
+ * ⚠ Until this existed `demo-landing.png` was a separate hand-run pass
+ * (SHOTS_DEMO=1 against an instance booted in another shell), which is how a
+ * release could get a landing picture from a different build than the rest.
+ *
+ * ⚠ FILEX_DEMO_USER / FILEX_DEMO_PASS are REMOVED from the inherited
+ * environment, not merely left unset: the landing prints them, and the
+ * picture must show the product's defaults.
+ */
+async function demoPass(browser) {
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const data = mkdtempSync(join(tmpdir(), 'filex-shots-demo-'));
+  const env = {
+    ...process.env,
+    FILEX_LISTEN: `127.0.0.1:${port}`,
+    FILEX_DATA_DIR: data,
+    FILEX_ADMIN_EMAIL: EMAIL,
+    FILEX_ADMIN_PASSWORD: PASSWORD,
+    FILEX_DEFAULT_LOCALE: 'en',
+    FILEX_PUBLIC_URL: PUBLIC_URL,
+    FILEX_DEMO_MODE: 'true',
+    FILEX_SECRET_KEY: 'screenshots-only-key-not-a-real-secret',
+  };
+  delete env.FILEX_DEMO_USER;
+  delete env.FILEX_DEMO_PASS;
+  log(`booting a demo-mode instance on :${port} for demo-landing.png`);
+  const demo = spawn(binPath, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  demo.stdout.on('data', (d) => process.env.SHOTS_VERBOSE && process.stdout.write(d));
+  demo.stderr.on('data', (d) => process.env.SHOTS_VERBOSE && process.stderr.write(d));
+  let exited = false;
+  demo.on('exit', () => {
+    exited = true;
+  });
+  try {
+    await waitForHealth(30_000, base);
+    if (exited) throw new Error(`the demo-mode instance exited — is :${port} taken?`);
+    await shootDemoLanding(browser, base);
+  } finally {
+    demo.kill();
+    for (let i = 0; i < 50 && !exited; i++) await sleep(100);
+    rmSync(data, { recursive: true, force: true });
+  }
+}
+
 async function run() {
   const proc = await boot();
   try {
@@ -460,17 +547,10 @@ async function run() {
 
     const browser = await chromium.launch();
 
-    // The demo landing lives on an instance booted with FILEX_DEMO_MODE=true —
-    // it REPLACES the login page, so it cannot be captured in the same pass as
-    // everything else. Boot a demo-mode instance and run with SHOTS_DEMO=1.
+    // SHOTS_DEMO: the instance at SHOTS_URL is a demo-mode one somebody booted
+    // by hand, and the landing is the only thing to take from it.
     if (process.env.SHOTS_DEMO) {
-      const dctx = await newContext(browser, 'light', 1000);
-      const dpage = await dctx.newPage();
-      await dpage.goto(`${URL}/admin/login`);
-      await dpage.waitForSelector('text=/Open the demo|demo/i', { timeout: 15_000 });
-      await sleep(1500);
-      await shot(dpage, 'demo-landing.png');
-      await dctx.close();
+      await shootDemoLanding(browser, URL);
       await browser.close();
       return;
     }
@@ -532,14 +612,12 @@ async function run() {
     await openExplorer(page, 'Photos');
     await page.locator('.fe-list__row, .fe-grid__item').first().click();
     await sleep(400);
-    await page.evaluate(() => {
-      const el = [...document.querySelectorAll('button, [role="menuitem"], .fe-ctx__item')]
-        .filter((e) => !e.closest('.fe-toolbar__measure') && !e.closest('[aria-hidden="true"]'))
-        .find((e) => /Share \/ Permissions/i.test(e.textContent ?? ''));
-      el?.click();
-    });
+    await openAccess(page);
     await page.waitForSelector('.fx-perm-modal', { timeout: 10_000 });
-    await page.locator('.fx-perm-tab', { hasText: /^Link$/ }).click();
+    // gorunum:v2-share — the dialog leads with the link switch and folds the
+    // rest into named sections; the PIN / expiry / download-limit trio and the
+    // one-line curl live under "Link options". (It used to be a `Link` tab.)
+    await page.locator('[data-testid="share-options-toggle"]').click();
     await sleep(400);
     await page.evaluate(() => {
       const label = [...document.querySelectorAll('.fx-perm-modal label')].find((l) =>
@@ -578,6 +656,10 @@ async function run() {
     await page.keyboard.press('Escape');
 
     await ctx.close();
+
+    // The demo landing, from an instance of its own — only when this script
+    // started the main one. Pointed at SHOTS_URL it has no binary to boot.
+    if (proc) await demoPass(browser);
     await browser.close();
 
     if (skipped.length && !process.env.SHOTS_ALLOW_SKIP) {

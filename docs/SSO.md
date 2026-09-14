@@ -117,11 +117,17 @@ first boot — see
 
 ## Roles & admin access
 
-- Every SSO user is created with the default **`user`** role on first login.
-- To grant **admin**, set `FILEX_OIDC_ROLE_CLAIM` to the claim that carries the
-  user's roles/groups and `FILEX_OIDC_ADMIN_GROUP` to the value that means
-  "admin". On each login filex checks that claim (string **or** array); if it
-  contains the admin group, the user is elevated to `admin`.
+- An SSO account is created on its **first** login, with the **`user`** role —
+  or **`admin`**, when the mapping below matches at that moment.
+- To make that first login an admin, set `FILEX_OIDC_ROLE_CLAIM` to the claim
+  that carries the user's roles/groups and `FILEX_OIDC_ADMIN_GROUP` to the value
+  that means "admin". filex reads that claim (string **or** array, in the ID
+  token or the access token) when it creates the account.
+- ⚠⚠ **The claim is read once, at account creation — not on every login.** An
+  account that already exists keeps its role whatever the IdP says later:
+  adding someone to the admin group in the IdP after their first filex login
+  does **not** make them an admin, and removing them does **not** demote them.
+  Change an existing account's role in **Admin → Users**.
 - Example (Keycloak realm roles): `FILEX_OIDC_ROLE_CLAIM=realm_access.roles`,
   `FILEX_OIDC_ADMIN_GROUP=filex-admin`, then assign the `filex-admin` realm role
   to the users who should administer filex.
@@ -138,11 +144,12 @@ first boot — see
 
 | Env var | Required | Description |
 |---|---|---|
-| `FILEX_AUTH_DRIVERS` | yes | Comma list, e.g. `local,oidc`. Include `oidc` to enable SSO. |
+| `FILEX_AUTH_DRIVERS` | yes | Comma list, e.g. `local,oidc`. Include `oidc` to enable SSO. `oidc` alone is SSO-only: password sign-in is off, and a session from the identity provider is honoured like any other. (Before v0.41.0 leaving `local` out refused every session, see #24.) |
 | `FILEX_OIDC_ISSUER` | yes | IdP issuer URL (has `/.well-known/openid-configuration`). |
 | `FILEX_OIDC_CLIENT_ID` | yes | Client/application ID registered in the IdP. |
 | `FILEX_OIDC_CLIENT_SECRET` | yes* | Client secret (confidential client). |
-| `FILEX_OIDC_REDIRECT_URL` | yes | `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`. Must match the IdP exactly. |
+| `FILEX_OIDC_REDIRECT_URL` | no | Defaults to `FILEX_PUBLIC_URL` + `/api/auth/oidc/callback`. Whatever it resolves to must match the IdP exactly. |
+| `FILEX_OIDC_AUTO_REDIRECT` | no | `true` makes the login page start the OIDC flow straight away instead of showing the password form; `?local=1` still reaches the form. See [CONFIGURATION.md](CONFIGURATION.md#authentication). |
 | `FILEX_OIDC_ROLE_CLAIM` | no | Claim holding roles/groups (string or array). |
 | `FILEX_OIDC_ADMIN_GROUP` | no | Value within that claim that elevates a user to admin. |
 
@@ -161,12 +168,31 @@ else changes.
 
 ## Failure modes & troubleshooting
 
-### filex won't start / "discover provider" error
+### No SSO button / `oidc: SSO disabled until restart` in the log
 The issuer is wrong or unreachable. filex calls
-`<issuer>/.well-known/openid-configuration` at startup; if that 404s or times out
-the OIDC driver fails to initialize. Verify `FILEX_OIDC_ISSUER` (for Keycloak it
-**includes** `/realms/<realm>`, no trailing slash) and that filex's network can
-reach the IdP.
+`<issuer>/.well-known/openid-configuration` at startup and retries for about a
+minute (an IdP booting in the same compose file is the common case). If it still
+fails, filex **starts anyway without SSO** — password login keeps working — and
+logs the error at ERROR followed by `oidc: SSO disabled until restart`. Nothing
+retries after that: fix the issuer and restart. Verify `FILEX_OIDC_ISSUER` (for
+Keycloak it **includes** `/realms/<realm>`, no trailing slash) and that filex's
+network can reach the IdP.
+
+### The identity provider is down and nobody can sign in
+
+With `local` in `FILEX_AUTH_DRIVERS`, every local account still signs in with
+its password. With SSO **only** (`FILEX_AUTH_DRIVERS=oidc`), the administrator
+filex created at installation — `admin@local`, or the account
+`FILEX_ADMIN_EMAIL` named — can still get in: open the login page, choose
+**Administrator recovery sign-in** (`/admin/login?local=1`) and use that
+account's password. No other account can, so password sign-in stays off for
+everyone else; two-factor still applies, and the log records each such
+sign-in at WARN (`auth: recovery sign-in as the bootstrap administrator`).
+
+On an installation older than v0.41.0 the account is worked out once at
+startup: the oldest administrator that has a local password. If that account
+is later deleted, recovery lets nobody in — it is not handed to another
+administrator. Turn the whole thing off with `FILEX_AUTH_RECOVERY_LOGIN=false`.
 
 ### "state mismatch" after login
 The `state` cookie didn't survive the round trip. Usually a cookie/proxy issue:
@@ -189,10 +215,12 @@ The IdP's registered redirect URI must equal `FILEX_OIDC_REDIRECT_URL` **exactly
 (scheme, host, path). Update the client in the IdP or the env var so they match.
 
 ### User logs in but isn't admin
-Role mapping isn't matching. Confirm `FILEX_OIDC_ROLE_CLAIM` names the actual
-claim in the token (inspect the ID token at jwt.io) and that
-`FILEX_OIDC_ADMIN_GROUP` matches a value inside it. Roles are re-evaluated on
-every login.
+First: did this person sign in to filex **before** they were given the admin
+group? The mapping is applied only when the account is created, so an existing
+account is not promoted by a later login — set the role in **Admin → Users**.
+For accounts that are still to be created, confirm `FILEX_OIDC_ROLE_CLAIM` names
+the actual claim in the token (inspect it at jwt.io) and that
+`FILEX_OIDC_ADMIN_GROUP` matches a value inside it.
 
 ---
 

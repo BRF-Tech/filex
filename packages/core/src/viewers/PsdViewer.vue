@@ -9,7 +9,9 @@
  * — left as TODO for V2 since `ag-psd` doesn't ship a composite
  * pipeline of its own).
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerArrayBuffer } from '../composables/useViewerFetch';
 
 const props = defineProps<{
@@ -108,7 +110,14 @@ async function load(): Promise<void> {
     flattenLayers(psd, flat);
     layers.value = flat;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'PSD decode failed';
+    // ⚠ The person gets the localized sentence; the decoder's own words go to
+    // the console for whoever is debugging. `ag-psd` throws raw internals
+    // ("Offset is outside the bounds of the DataView" on a truncated file),
+    // and printing that verbatim put an untranslated English stack message in
+    // the middle of a Turkish UI — measured 2026-09-13 on a 6-byte
+    // `mockup.psd`.
+    console.warn('[filex] PSD decode failed:', err);
+    error.value = tt('viewer.failed_to_load', 'Failed to load file');
   } finally {
     loading.value = false;
   }
@@ -133,17 +142,32 @@ watch(() => props.url, load);
 function tt(key: string, fallback: string): string {
   return props.t ? props.t(key) : fallback;
 }
+
+/* === ikon:emoji — the fallback screen's mark ==========================
+ * Every viewer opened its "cannot show this" / "still loading" screen with a
+ * 48px colour emoji, one per format, each from whatever emoji font the OS
+ * shipped. The format mark is `lib/fileIcons`'s tile — the SAME tile the row
+ * the person just clicked is wearing, so the fallback is recognisably about
+ * that file — and "loading" is the stroked ring, spun by CSS, because no
+ * still picture can say "still going". */
+const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
 </script>
 
 <template>
   <div class="filex-viewer-psd">
     <div class="filex-viewer-psd__pane">
       <div v-if="error" class="filex-viewer-fallback">
-        <span class="filex-viewer-fallback__icon">🎨</span>
+        <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
         <p>{{ error }}</p>
       </div>
       <div v-else-if="loading" class="filex-viewer-fallback">
-        <span class="filex-viewer-fallback__icon">⏳</span>
+        <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span
+        class="filex-viewer-fallback__icon filex-viewer-fallback__icon--spin"
+        aria-hidden="true"
+        v-html="actionIconSvg('progress')"
+      ></span>
         <p>{{ tt('viewer.loading', 'Loading…') }}</p>
       </div>
       <canvas

@@ -54,8 +54,17 @@ export interface StorageField {
   aliases?: string[];
 }
 
+/**
+ * A driver's runtime feature set, from `backend/internal/storage.Capabilities`.
+ *
+ * ⚠ `range` was missing from BOTH hand-written copies of this (here and in
+ * web/src/api/types.ts) while the server has always sent it — the exact way a
+ * type re-declared per package drifts from the struct it describes.
+ */
 export interface StorageDriverCapabilities {
   read?: boolean;
+  /** Ranged reads: the difference between 206/Content-Range and a whole-object copy. */
+  range?: boolean;
   write?: boolean;
   move?: boolean;
   copy?: boolean;

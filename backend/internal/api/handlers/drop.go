@@ -282,6 +282,13 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	if sh.CreatedBy != nil && *sh.CreatedBy > 0 {
 		r = r.WithContext(quotastore.WithOwner(r.Context(), *sh.CreatedBy))
 	}
+	// …and mark the row as having ARRIVED FROM OUTSIDE. Ownership and origin
+	// are two different facts and this is the one place they come apart: the
+	// link's creator owns the file (they asked for it, it is in their storage,
+	// it is on their quota) but they did not put it there. The person who did
+	// is anonymous by design — no user row is invented for them, so the mark
+	// is the only honest way for the row to say "somebody else handed this in".
+	r = r.WithContext(quotastore.WithExternalOrigin(r.Context()))
 
 	// Resolve the target folder + storage server-side. The uploader supplies
 	// NONE of this — the destination is fixed by the token.
@@ -478,6 +485,10 @@ func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, c
 			Node:     &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name},
 			Share:    &notify.ShareRef{Token: sh.Token, Path: node.Path},
 			UserID:   sh.CreatedBy,
+			// ⚠ The FOLDER, not the drop link. The owner is being told files
+			// arrived; what they want is the files, and a drop can carry
+			// several of them, so there is no single file to select.
+			Target: notify.DirTarget(node.Path),
 		}
 		c := context.WithoutCancel(ctx)
 		go func() { _, _ = h.Notify.Send(c, ev) }()

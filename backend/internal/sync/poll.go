@@ -7,8 +7,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
 )
@@ -26,6 +30,23 @@ import (
 // than 30% of its objects will trip the step-4 guard once (a warning, and one
 // tombstone pass skipped); the next run compares like with like.
 func (s *storageSyncer) RunOnce(ctx context.Context) error {
+	// ⚠⚠ The scanner attributes NOTHING. Every row it creates or updates is
+	// SYSTEM, and that is true however the run was started.
+	//
+	// The background poller runs on a server-lifetime context with no user, so
+	// it was system by accident. `Worker.Trigger` is the other door: the admin
+	// "Scan now" button hands its REQUEST context straight through, and a
+	// request context carries the admin. Unguarded, one click on Scan therefore
+	// stamped the whole bucket — thousands of objects nobody uploaded — as that
+	// admin's, and (because the same identity drives quota) billed the lot to
+	// them. Measured on a three-file storage before this line existed: a file
+	// written straight into the directory came back owned by the admin who
+	// pressed the button.
+	//
+	// It is stripped HERE rather than at the trigger, because it is a property
+	// of the scan and not of the caller: finding a file is not putting it there.
+	ctx = quotastore.WithActor(quotastore.WithOwner(ctx, 0), 0)
+
 	// `runStart` is truncated to second precision to match SQLite's
 	// CURRENT_TIMESTAMP resolution. Without the truncation a sub-second
 	// runStart compares STRICTLY GREATER than every same-second seen_at
@@ -83,6 +104,29 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	return nil
 }
 
+// CatalogueTree catalogues everything under dir on drv exactly as a sync pass
+// catalogues a directory: rows the index does not have yet are created (with
+// the driver's own size, mime, etag and mtime), indexed and handed to avScan;
+// rows it already has are left as the walk leaves them. parent is the row of
+// dir itself.
+//
+// It exists for writes that put a whole subtree on the storage in ONE driver
+// call — a same-storage folder copy — and have no per-file signal to mirror
+// from. Reusing the walk rather than a second catalogue loop is the point: the
+// walk's rules (the trash skip, the encrypted-folder marker ordering, the
+// stale-row repair) cannot drift between the two.
+//
+// ⚠ Unlike RunOnce it does NOT strip the owner from ctx: the rows are billed
+// to whoever ctx says wrote them.
+func CatalogueTree(ctx context.Context, store db.Store, idx *search.Index,
+	avScan func(ctx context.Context, n *model.Node),
+	st *model.Storage, drv storage.Driver, dir string, parent *int64) error {
+	s := &storageSyncer{store: store, index: idx, avScan: avScan, storage: st, driver: drv, ctx: ctx}
+	added, updated := 0, 0
+	_, err := s.walk(ctx, dir, parent, &added, &updated)
+	return err
+}
+
 // walk recursively lists the storage from `path` downwards. parent is the
 // DB id of the parent node (nil at root).
 func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added, updated *int) (int, error) {
@@ -94,6 +138,22 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 		return 0, err
 	}
 	count := 0
+	/* wiring:e2 — the encrypted-folder marker is catalogued FIRST, before any
+	   sibling in this directory. "Is this folder encrypted?" is a DB-ROW
+	   lookup (e2e.FindRoot asks for the marker's node), so until that row
+	   exists every sibling row created here starts a content-extraction job
+	   that reads UnderEncrypted as false, indexes the plaintext and records
+	   the fingerprint — permanently, it never retries. Ordering is the
+	   driver's: os.ReadDir is sorted and `-` (0x2D) sorts before `.` (0x2E),
+	   and object stores promise nothing. walk runs once per directory, so
+	   this covers every depth — and the copy mirror, which walks too. */
+	for i, o := range objs {
+		if o.Name == e2e.MarkerName && o.Kind != storage.KindDirectory {
+			objs[0], objs[i] = objs[i], objs[0]
+			break
+		}
+	}
+	/* /wiring:e2 */
 	for _, obj := range objs {
 		select {
 		case <-ctx.Done():
@@ -154,6 +214,11 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			}
 			if obj.Kind == storage.KindDirectory {
 				n.Type = model.NodeTypeDirectory
+				// A folder row's size is the RECURSIVE total RecomputeFolderSizes
+				// caches, never the directory entry's own few kilobytes. RunOnce
+				// recomputes right after the walk; CatalogueTree (the copy
+				// mirror) does not, so the entry size would stand until then.
+				n.Size = 0
 			} else {
 				n.Type = model.NodeTypeFile
 			}
@@ -178,6 +243,17 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 					created, err, wasRepair = repaired, nil, true
 				} else {
 					slog.Warn("sync: create node failed", slog.String("path", obj.Path), slog.String("err", err.Error()))
+					/* wiring:e2 — a marker that was LISTED but whose row did not
+					   land abandons this directory for this pass. Downstream,
+					   "no marker row" and "the marker row failed" are the same
+					   thing, and carrying on indexes plaintext for good; an
+					   uncatalogued folder is repaired by the next pass. */
+					if obj.Name == e2e.MarkerName && obj.Kind != storage.KindDirectory {
+						slog.Warn("sync: leaving a directory uncatalogued this pass, its encrypted-folder marker row could not be written",
+							slog.String("path", p), slog.String("storage", s.storage.Name))
+						return count, nil
+					}
+					/* /wiring:e2 */
 					continue
 				}
 			}

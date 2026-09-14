@@ -379,8 +379,10 @@ func (s *Syncer) DeleteRows(ctx context.Context, st *model.Storage, rel string) 
 }
 
 // Move re-homes the node row (and cached descendants) to the new path and
-// re-indexes each. On a conflicting destination row the move degrades to
-// soft-deleting the source rows (the sync worker resurrects the truth).
+// re-indexes each. A stale FILE row holding the destination is dropped (its
+// bytes are the ones this move just replaced — see ReclaimDestination); a row
+// that still cannot be re-homed is left live where it is for the next sync
+// walk.
 func (s *Syncer) Move(ctx context.Context, st *model.Storage, srcRel, dstRel string) {
 	defer s.recoverSync("move", st, srcRel)
 	srcClean := NormalizePath(srcRel)
@@ -422,16 +424,57 @@ func (s *Syncer) MoveRows(ctx context.Context, st *model.Storage, srcRel, dstRel
 	for _, n := range subtree {
 		newPath := dstClean
 		if n.ID != node.ID {
-			newPath = dstClean + strings.TrimPrefix(n.Path, srcClean)
+			// ⚠ The prefix is trimmed off the NORMALIZED stored path.
+			// CollectSubtree walks parent_id, so it reaches rows spelled however
+			// their writer spelled them (EnsureDirChain stored "dav/davdir"
+			// verbatim before it canonicalised, and no migration rewrites
+			// `path`). On the raw spelling the trim was a no-op and the new
+			// path came out as the destination with the whole old path glued
+			// on. A row that is still not under the source is not re-homed:
+			// concatenating anyway writes a doubled path, and the next sync
+			// walk repairs a stale one.
+			stored := NormalizePath(n.Path)
+			suffix := strings.TrimPrefix(stored, srcClean)
+			if len(suffix) == len(stored) || !strings.HasPrefix(suffix, "/") {
+				s.warn("move skipped a descendant outside the source path",
+					slog.Int64("id", n.ID), slog.String("from", srcClean), slog.String("node", n.Path))
+				continue
+			}
+			newPath = dstClean + suffix
 		}
 		newHash := pathkey.Hash(st.ID, newPath)
 		pid := n.ParentID
 		if n.ID == node.ID {
 			pid = parentID
 		}
-		if err := s.Store.MoveNode(ctx, n.ID, pid, path.Base(newPath), newPath, newHash); err != nil {
-			_ = s.Store.SoftDeleteNode(ctx, n.ID)
-			s.RemoveFromIndex(ctx, n.ID)
+		err := s.Store.MoveNode(ctx, n.ID, pid, path.Base(newPath), newPath, newHash)
+		// The one failure that is repairable, and the one that actually
+		// happens: a stale row holding the destination against the live-only
+		// path_hash index. Top row only — a descendant's destination is inside
+		// the subtree being moved.
+		if err != nil && n.ID == node.ID && s.ReclaimDestination(ctx, st.ID, newPath, n.ID) {
+			err = s.Store.MoveNode(ctx, n.ID, pid, path.Base(newPath), newPath, newHash)
+		}
+		if err != nil {
+			s.warn("move node",
+				slog.Int64("id", n.ID),
+				slog.String("from", n.Path),
+				slog.String("to", newPath),
+				slog.String("err", err.Error()))
+			// ⚠ NOTHING is soft-deleted here, top row or descendant. Every
+			// caller runs AFTER the bytes moved, so a soft-delete is not a
+			// deletion: storage_key still names the path the bytes left, they
+			// were never retagged into `.filex-trash`, and the row lands in the
+			// trash listing behind a Restore that takes nothing back and reports
+			// success. Nothing reaps it either — sync.reconcileTrash only looks
+			// at LIVE rows under the trash prefix. A live row with a stale path
+			// is wrong in a way the next sync walk can see and repair.
+			if n.ID == node.ID {
+				// And the pass STOPS: re-homing the descendants under a top
+				// row that stayed at the source writes paths that claim a
+				// folder which is not their parent.
+				return false
+			}
 			continue
 		}
 		n.Path = newPath
@@ -440,6 +483,36 @@ func (s *Syncer) MoveRows(ctx context.Context, st *model.Storage, srcRel, dstRel
 		s.IndexNode(ctx, n)
 	}
 	return node.Path == dstClean
+}
+
+// ReclaimDestination drops a catalogue row that holds dstClean and so blocks
+// the move of keepID into it, and reports whether it removed one.
+//
+// ⚠ Only correct because every caller runs AFTER the bytes have moved onto the
+// destination. A row still claiming that path no longer describes what is
+// there: either the storage's move replaced those bytes (WebDAV MOVE with
+// `Overwrite: T`, an S3 copy+delete, a rename), or the row was stale to begin
+// with. Leaving it made the re-home fail against the live-only unique index
+// (migration 00032), and the moved file lost its identity — versions, shares
+// and comments stayed on a row parked in the trash while its bytes answered
+// under this one.
+//
+// HARD deleted, for the reason Delete gives: the bytes that row named are gone,
+// and a soft delete would put it in the trash behind a Restore that delivers
+// nothing. ⚠ A DIRECTORY row is left alone: nodes.parent_id cascades, so
+// dropping a folder row would silently take its cached subtree with it.
+func (s *Syncer) ReclaimDestination(ctx context.Context, storageID int64, dstClean string, keepID int64) bool {
+	occupant, _ := s.Store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, dstClean))
+	if occupant == nil || occupant.ID == keepID || occupant.Type == model.NodeTypeDirectory {
+		return false
+	}
+	if err := s.Store.HardDeleteNode(ctx, occupant.ID); err != nil {
+		s.warn("could not drop the stale row holding a move destination",
+			slog.Int64("id", occupant.ID), slog.String("path", dstClean), slog.String("err", err.Error()))
+		return false
+	}
+	s.RemoveFromIndex(ctx, occupant.ID)
+	return true
 }
 
 // EnsureDirChain walks rel segment by segment, creating any missing dir rows,

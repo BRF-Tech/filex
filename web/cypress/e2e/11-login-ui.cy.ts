@@ -9,12 +9,13 @@ describe('login UI', () => {
     cy.get('input[type="password"], input[name="password"]').should('exist');
   });
 
-  it('cy.uiLogin lands on the dashboard', () => {
+  it('cy.uiLogin lands on the start page', () => {
     cy.uiLogin();
-    cy.url().should('include', '/admin/dashboard');
-    // Sidebar must render (means AdminLayout mounted + auth store
-    // hydrated).
-    cy.contains(/depolar|storages|dashboard/i).should('be.visible');
+    // Home by default, for every role (web/src/lib/startPage.ts).
+    cy.url().should('include', '/admin/home');
+    // The navigation panel must render: the explorer mounted and the auth
+    // store hydrated.
+    cy.get('[data-testid="sidenav"]', { timeout: 15000 }).should('be.visible');
   });
 
   it('bad credentials surface an error without leaving /login', () => {

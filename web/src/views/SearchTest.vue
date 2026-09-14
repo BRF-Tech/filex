@@ -8,6 +8,10 @@ import type { PaginatedResponse } from '@/api/types';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { formatBytes, formatDate, formatNumber, formatRelative } from '@/lib/format';
+/* bul:s3 — snippet «» -> <mark> via TEXT segments (never v-html). The parser
+ * is the contract's, not this view's: it was a byte-for-byte copy of
+ * lib/snippet.ts, and web already depends on the package that owns it. */
+import { snippetSegments } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -70,25 +74,6 @@ async function rebuild() {
 }
 
 const haveResults = computed(() => results.value.items.length > 0);
-
-/* bul:s3 — snippet «» → <mark> via TEXT segments (never v-html). */
-interface SnippetSeg {
-  text: string;
-  match: boolean;
-}
-function snippetSegments(snippet: string): SnippetSeg[] {
-  const out: SnippetSeg[] = [];
-  const re = /«([^«»]*)»/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(snippet)) !== null) {
-    if (m.index > last) out.push({ text: snippet.slice(last, m.index), match: false });
-    if (m[1]) out.push({ text: m[1], match: true });
-    last = m.index + m[0].length;
-  }
-  if (last < snippet.length) out.push({ text: snippet.slice(last), match: false });
-  return out;
-}
 
 const scopeOptions = computed(() => [
   { value: 'all', label: t('search.scopeAll') },

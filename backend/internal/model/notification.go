@@ -20,6 +20,81 @@ type Notification struct {
 	WebhookStatus string          `json:"webhook_status"`
 	WebhookError  string          `json:"webhook_error,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
+
+	// Target is derived from MetaJSON at read time (HydrateTarget), never
+	// stored in a column of its own. Absent on rows that have nothing to
+	// open — the client reads a missing `target` as kind "none".
+	Target *NotificationTarget `json:"target,omitempty"`
+}
+
+// NotificationTargetKind says WHAT a notification is about, so a click on it
+// can go somewhere. It is a closed set on purpose: every click surface (bell
+// row, browser notification, desktop notification) switches on these four and
+// nothing else, which is what keeps the three from disagreeing.
+type NotificationTargetKind string
+
+// The four target kinds. "none" is a real answer, not a missing one — an
+// event about the whole instance (a replica failure, an available update)
+// has nothing to open, and saying so is better than inventing a path.
+const (
+	TargetNone  NotificationTargetKind = "none"
+	TargetFile  NotificationTargetKind = "file"
+	TargetDir   NotificationTargetKind = "dir"
+	TargetShare NotificationTargetKind = "share"
+)
+
+// NotificationTarget is the typed "where does this go" of one notification.
+//
+// ⚠ Storage is the storage NAME, not its numeric id: the explorer addresses
+// storages by name (`<storage>://<path>`), and the id is meaningless to a
+// caller who cannot read /api/admin/storages — which is every non-admin. It is
+// resolved once, centrally, when the event is sent (notify.Service.Send), so
+// no emitter has to look it up and no two emitters can resolve it differently.
+//
+// ⚠ Path is relative to that storage's root and never carries the
+// `<storage>://` prefix; Kind decides how it is read — the file itself for
+// TargetFile, the folder for TargetDir.
+type NotificationTarget struct {
+	Kind    NotificationTargetKind `json:"kind"`
+	Storage string                 `json:"storage,omitempty"`
+	Path    string                 `json:"path,omitempty"`
+	// ID is the opaque id of a target that is not a path — the share token
+	// for TargetShare.
+	ID string `json:"id,omitempty"`
+}
+
+// TargetFromMeta pulls the target back out of a stored meta blob.
+//
+// The target rides inside meta_json (the same fold notify.marshalMeta does for
+// node/share/actor) rather than in a column of its own, so reading it back is
+// a parse and not a migration. A blob that has no target — every row written
+// before this field existed — reads back nil, which every client treats as
+// TargetNone.
+func TargetFromMeta(meta json.RawMessage) *NotificationTarget {
+	if len(meta) == 0 {
+		return nil
+	}
+	var wrap struct {
+		Target *NotificationTarget `json:"target"`
+	}
+	if err := json.Unmarshal(meta, &wrap); err != nil {
+		return nil
+	}
+	if wrap.Target == nil || wrap.Target.Kind == "" || wrap.Target.Kind == TargetNone {
+		return nil
+	}
+	return wrap.Target
+}
+
+// HydrateTarget fills the read-only Target field from MetaJSON. Called on
+// every row the bell hands out (notify.Service.List), so the API item carries
+// `target` as a top-level field instead of making each client dig through
+// `meta`.
+func (n *Notification) HydrateTarget() {
+	if n == nil {
+		return
+	}
+	n.Target = TargetFromMeta(n.MetaJSON)
 }
 
 // NotificationInput is the new-row payload — DB drivers turn this into

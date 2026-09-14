@@ -116,7 +116,7 @@ func ProvisionUser(ctx context.Context, store ProvisionStore, h TenantHoming, dr
 		providerID = p.ID
 	}
 
-	u, err := store.CreateUser(ctx, email, "", role, "en", "UTC")
+	u, err := store.CreateUser(ctx, email, "", role, "en", model.TimezoneUnset)
 	if err != nil {
 		return nil, err
 	}

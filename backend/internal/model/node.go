@@ -49,6 +49,38 @@ type Node struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 
+	// ─── Ownership (migration 00004 + 00038) ───
+	//
+	// OwnerID is who PUT THE THING HERE. nil means SYSTEM: nobody put it here
+	// through filex — the storage scanner found it, it was written straight
+	// into the bucket, or the row predates the column. "System" is the honest
+	// word for ownerless, and no user is invented to stand in for it.
+	//
+	// It is set by the acting identity on every write surface (browser upload,
+	// new folder, save, WebDAV/FTPS/SFTP/S3/CLI/desktop under the account whose
+	// token was used) and it does NOT move afterwards: a move or a rename is
+	// the same file, and an overwrite changes the bytes, not whose file it is.
+	// The one exception is adoption — a system row (nil) that a user writes
+	// becomes that user's, because "nobody's" is not somebody else's.
+	OwnerID *int64 `json:"owner_id,omitempty"`
+	// LastActorID is who touched it LAST. nil means system for the same reason
+	// OwnerID does: a change that arrived from outside filex (the bucket side
+	// changed, a sync found new bytes) has no actor to name.
+	LastActorID *int64 `json:"last_actor_id,omitempty"`
+	// ExternalUpload marks a thing that arrived through an anonymous drop link
+	// / file request. The owner is the person who CREATED the link — they asked
+	// for the file, it lands in their storage and it is billed to their quota —
+	// but the row still has to be able to say the bytes were handed over by
+	// somebody else. That somebody is anonymous by design and gets no identity.
+	ExternalUpload bool `json:"external_upload,omitempty"`
+
+	// OwnerName is the owner's display name, resolved in one batched lookup by
+	// the API layer for the rows it is about to return. Never persisted, and
+	// empty for a system row — the client decides what to call "nobody".
+	OwnerName string `json:"owner_name,omitempty"`
+	// LastActorName is the same for LastActorID.
+	LastActorName string `json:"last_actor_name,omitempty"`
+
 	// Optional joined data — populated by API layer, never persisted.
 	Thumb *Thumbnail        `json:"thumb,omitempty"`
 	Meta  map[string]string `json:"meta,omitempty"`

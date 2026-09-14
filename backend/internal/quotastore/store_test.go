@@ -80,6 +80,22 @@ func (e *env) owner(t *testing.T, nodeID int64) *int64 {
 	return o
 }
 
+// actor reads last_actor_id straight off the row — the decorator's claim is
+// only worth anything if the column actually changed.
+func (e *env) actor(t *testing.T, nodeID int64) *int64 {
+	t.Helper()
+	n, err := e.raw.GetNode(context.Background(), nodeID)
+	require.NoError(t, err)
+	return n.LastActorID
+}
+
+func (e *env) node(t *testing.T, nodeID int64) *model.Node {
+	t.Helper()
+	n, err := e.raw.GetNode(context.Background(), nodeID)
+	require.NoError(t, err)
+	return n
+}
+
 func (e *env) file(t *testing.T, ctx context.Context, path string, size int64) *model.Node {
 	t.Helper()
 	n, err := e.store.CreateNode(ctx, &model.Node{
@@ -146,17 +162,29 @@ func TestOverwrite_AppliesTheDelta(t *testing.T) {
 
 // The bytes belong to whoever wrote them last: an overwrite by another user
 // hands the space back to the previous owner and charges the writer.
-func TestOverwrite_ByAnotherUser_MovesTheBytes(t *testing.T) {
+// ⚠⚠ This test used to be TestOverwrite_ByAnotherUser_MovesTheBytes and
+// asserted the opposite: that bob became the owner and carried the bytes. The
+// ownership model (migration 00038) changed the rule deliberately — an
+// overwrite changes the BYTES, not whose file it is — because an Owner column
+// whose answer changes every time a colleague edits a shared document cannot
+// answer the only question it is asked.
+//
+// The consequence is real and is not hidden: alice is now billed for a file
+// bob made bigger. Bob needs write access to alice's file to do it.
+func TestOverwrite_ByAnotherUser_KeepsTheOwner_AndRecordsTheActor(t *testing.T) {
 	e := newEnv(t)
 	n := e.file(t, asUser(e.alice), "shared.bin", 1000)
 	require.EqualValues(t, 1000, e.usage(t, e.alice))
 
 	require.NoError(t, e.store.UpdateNodeMeta(asUser(e.bob), n.ID, 3000, "", "", time.Now()))
 
-	assert.EqualValues(t, 0, e.usage(t, e.alice), "alice is not billed for bob's bytes")
-	assert.EqualValues(t, 3000, e.usage(t, e.bob))
-	if o := e.owner(t, n.ID); assert.NotNil(t, o) {
-		assert.Equal(t, e.bob, *o)
+	assert.EqualValues(t, 3000, e.usage(t, e.alice), "the owner carries their file's bytes")
+	assert.EqualValues(t, 0, e.usage(t, e.bob), "writing somebody else's file does not make it yours")
+	if o := e.owner(t, n.ID); assert.NotNil(t, o, "the owner must not move on an overwrite") {
+		assert.Equal(t, e.alice, *o)
+	}
+	if a := e.actor(t, n.ID); assert.NotNil(t, a, "who wrote it has to be recorded somewhere") {
+		assert.Equal(t, e.bob, *a)
 	}
 }
 
@@ -172,6 +200,9 @@ func TestOverwrite_AdoptsAnUnownedNode(t *testing.T) {
 	assert.EqualValues(t, 900, e.usage(t, e.alice))
 	if o := e.owner(t, n.ID); assert.NotNil(t, o) {
 		assert.Equal(t, e.alice, *o)
+	}
+	if a := e.actor(t, n.ID); assert.NotNil(t, a) {
+		assert.Equal(t, e.alice, *a)
 	}
 }
 
@@ -288,4 +319,144 @@ func TestRawStore_CountsNothing(t *testing.T) {
 		"the unwrapped store is the 6485c16 behaviour: 10 MiB written, 0 counted")
 	assert.Nil(t, e.owner(t, n.ID),
 		"and with no owner the release at purge can never fire either")
+}
+
+/* ── Ownership (migration 00038) ───────────────────────────────────────────
+ *
+ * owner_id says who PUT THE THING HERE; last_actor_id says who TOUCHED IT
+ * LAST. Everything below pins one sentence of the package comment against the
+ * real columns, because "the decorator calls SetNodeActor" is a claim about
+ * the code and the only claim worth making is about the row.
+ */
+
+// A create stamps both: the person who made it is also the last person to have
+// touched it.
+func TestCreate_StampsOwnerAndActor(t *testing.T) {
+	e := newEnv(t)
+	n := e.file(t, asUser(e.alice), "new.txt", 10)
+
+	row := e.node(t, n.ID)
+	require.NotNil(t, row.OwnerID)
+	assert.Equal(t, e.alice, *row.OwnerID)
+	require.NotNil(t, row.LastActorID)
+	assert.Equal(t, e.alice, *row.LastActorID)
+	assert.False(t, row.ExternalUpload, "an ordinary upload did not arrive from outside")
+}
+
+// A row the scanner found is SYSTEM on both counts. NULL is the answer, not a
+// user invented to stand in for one.
+func TestCreate_NoActingUser_IsSystemOnBothColumns(t *testing.T) {
+	e := newEnv(t)
+	n := e.file(t, context.Background(), "found.bin", 700)
+
+	row := e.node(t, n.ID)
+	assert.Nil(t, row.OwnerID, "nobody put it here")
+	assert.Nil(t, row.LastActorID, "nobody touched it")
+}
+
+// The public drop link: the OWNER is the person who created the link, and the
+// row still says the bytes were handed in by somebody else.
+func TestCreate_DropLink_OwnedByTheLinkCreator_AndMarkedExternal(t *testing.T) {
+	e := newEnv(t)
+	ctx := quotastore.WithExternalOrigin(quotastore.WithOwner(context.Background(), e.alice))
+	n := e.file(t, ctx, "submitted.pdf", 500)
+
+	row := e.node(t, n.ID)
+	require.NotNil(t, row.OwnerID)
+	assert.Equal(t, e.alice, *row.OwnerID, "the link's creator asked for the file; it is theirs")
+	assert.True(t, row.ExternalUpload, "the row has to be able to say somebody else handed it in")
+	assert.EqualValues(t, 500, e.usage(t, e.alice), "and it is on their quota")
+	assert.Nil(t, row.LastActorID,
+		"…but the link's creator did not TOUCH it — an anonymous visitor did, and that visitor is not a user")
+}
+
+// A move is the same file. Only the actor moves.
+func TestMove_KeepsTheOwner_AndRecordsTheMover(t *testing.T) {
+	e := newEnv(t)
+	n := e.file(t, asUser(e.alice), "doc.txt", 100)
+
+	require.NoError(t, e.store.MoveNode(asUser(e.bob), n.ID, nil, "moved.txt", "/moved.txt", "moved.txt"))
+
+	row := e.node(t, n.ID)
+	require.NotNil(t, row.OwnerID)
+	assert.Equal(t, e.alice, *row.OwnerID, "moving a file does not make it yours")
+	require.NotNil(t, row.LastActorID)
+	assert.Equal(t, e.bob, *row.LastActorID)
+	assert.EqualValues(t, 100, e.usage(t, e.alice), "a move is quota-neutral")
+	assert.EqualValues(t, 0, e.usage(t, e.bob))
+}
+
+// ⚠ A SYSTEM move — internal/sync repairing a row whose path drifted — is
+// filex tidying its own catalogue, not a person moving a file. Blanking the
+// last real actor there would destroy the only true thing the row knew.
+func TestMove_BySystem_LeavesTheActorAlone(t *testing.T) {
+	e := newEnv(t)
+	n := e.file(t, asUser(e.alice), "doc.txt", 100)
+
+	require.NoError(t, e.store.MoveNode(context.Background(), n.ID, nil, "r.txt", "/r.txt", "r.txt"))
+
+	if a := e.actor(t, n.ID); assert.NotNil(t, a) {
+		assert.Equal(t, e.alice, *a)
+	}
+}
+
+// An external change — the bucket side moved, a sync found new bytes — has
+// nobody to name, and says so.
+func TestOverwrite_BySystem_ClearsTheActor(t *testing.T) {
+	e := newEnv(t)
+	n := e.file(t, asUser(e.alice), "a.bin", 1000)
+	require.NotNil(t, e.actor(t, n.ID))
+
+	require.NoError(t, e.store.UpdateNodeMeta(context.Background(), n.ID, 1200, "", "", time.Now()))
+
+	assert.Nil(t, e.actor(t, n.ID), "a change from outside filex has no actor")
+	if o := e.owner(t, n.ID); assert.NotNil(t, o, "…but it does not orphan the file") {
+		assert.Equal(t, e.alice, *o)
+	}
+	assert.EqualValues(t, 1200, e.usage(t, e.alice))
+}
+
+// Restore is a person taking their file back out of the trash.
+func TestRestore_RecordsTheActor(t *testing.T) {
+	e := newEnv(t)
+	n := e.file(t, asUser(e.alice), "t.txt", 10)
+	require.NoError(t, e.store.SoftDeleteNode(context.Background(), n.ID))
+
+	require.NoError(t, e.store.RestoreNode(asUser(e.bob), n.ID))
+
+	row := e.node(t, n.ID)
+	require.NotNil(t, row.OwnerID)
+	assert.Equal(t, e.alice, *row.OwnerID)
+	require.NotNil(t, row.LastActorID)
+	assert.Equal(t, e.bob, *row.LastActorID)
+}
+
+// A copy is a NEW FILE, so the copier owns it. WithActor is how the ops worker
+// says who asked, long after the request is gone.
+func TestCopy_TheCopierOwnsTheCopy(t *testing.T) {
+	e := newEnv(t)
+	original := e.file(t, asUser(e.alice), "orig.txt", 400)
+
+	// What ops.execute does with pending_ops.actor_id.
+	ctx := quotastore.WithActor(quotastore.WithOwner(context.Background(), e.bob), e.bob)
+	copyNode := e.file(t, ctx, "orig-copy.txt", 400)
+
+	assert.Equal(t, e.alice, *e.node(t, original.ID).OwnerID, "the original is untouched")
+	require.NotNil(t, e.node(t, copyNode.ID).OwnerID)
+	assert.Equal(t, e.bob, *e.node(t, copyNode.ID).OwnerID)
+	assert.EqualValues(t, 400, e.usage(t, e.alice))
+	assert.EqualValues(t, 400, e.usage(t, e.bob), "a copy is a second set of real bytes")
+}
+
+// ActorFrom falls back to the explicit owner: a surface that named an owner and
+// no actor (the drop link, an upload ticket) is acting AS that identity.
+func TestActorFrom_FallsBackToTheNamedOwner(t *testing.T) {
+	ctx := quotastore.WithOwner(context.Background(), 7)
+	assert.EqualValues(t, 7, quotastore.ActorFrom(ctx))
+	assert.EqualValues(t, 9, quotastore.ActorFrom(quotastore.WithActor(ctx, 9)))
+	assert.EqualValues(t, 0, quotastore.ActorFrom(context.Background()))
+	assert.EqualValues(t, 0, quotastore.ActorFrom(quotastore.WithExternalOrigin(ctx)),
+		"an anonymous drop has an owner but no actor")
+	assert.EqualValues(t, 7, quotastore.OwnerFrom(quotastore.WithExternalOrigin(ctx)),
+		"…and the owner is untouched by that")
 }

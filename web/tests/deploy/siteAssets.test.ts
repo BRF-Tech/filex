@@ -1,5 +1,7 @@
-// `site/assets/` must be the copy of `docs/screenshots/` that `site/README.md`
-// says it is.
+// `site/assets/` must be the copy of the current release's screenshots that
+// `site/README.md` says it is — `docs/screenshots/<release>/`, the folder named
+// once in `e2e/shots/release.mjs` (older releases keep their own folders and are
+// never compared against).
 //
 // ⚠⚠ That sentence had been true when it was written and nothing kept it true.
 // Found 2026-09-06: `site/assets/admin-plugins.png` was the pre-fix capture
@@ -13,9 +15,10 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { SHOTS_ROOT, SHOTS_ROOT_REL } from '../../../e2e/shots/release.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
-const SRC = path.join(REPO, 'docs', 'screenshots');
+const SRC: string = SHOTS_ROOT;
 const DST = path.join(REPO, 'site', 'assets');
 
 // Files with no counterpart are site-owned, not copies: `social-preview.png`
@@ -64,14 +67,14 @@ it('this checkout is coherently one tree or the other', () => {
   ).toBe(true);
   expect(
     copies.length,
-    'site/assets exists and shares no picture with docs/screenshots. Either the sync stopped ' +
+    `site/assets exists and shares no picture with ${SHOTS_ROOT_REL}. Either the sync stopped ` +
       '(node scripts/sync-site-assets.mjs) or one of the two directories was renamed — and until ' +
       'that is fixed the comparison below has nothing to compare.',
   ).toBeGreaterThan(0);
 });
 
 describe.skipIf(!sitePresent)('site assets', () => {
-  it.each(copies)('site/assets/%s is byte-identical to docs/screenshots', (name) => {
+  it.each(copies)(`site/assets/%s is byte-identical to ${SHOTS_ROOT_REL}`, (name) => {
     const a = readFileSync(path.join(SRC, name));
     const b = readFileSync(path.join(DST, name));
     expect(

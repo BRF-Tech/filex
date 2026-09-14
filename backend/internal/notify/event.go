@@ -15,7 +15,13 @@
 // PATCH /admin/api/notifications/webhook-config to change them at runtime.
 package notify
 
-import "time"
+import (
+	"path"
+	"strings"
+	"time"
+
+	"github.com/brf-tech/filex/backend/internal/model"
+)
 
 // Severity classifies an event's urgency. Used by the UI for color
 // coding and webhook receivers for filtering.
@@ -123,7 +129,9 @@ const (
 	// the actor, and meta {comment_id, body (first 200 chars)}.
 	EventCommentAdded EventType = "comment.added"
 	// EventE2EEscrowUsed fires when an encrypted folder was opened with the
-	// recovery (escrow) key rather than its owner's passphrase. The payload
+	// operator's ESCROW key rather than its owner's passphrase. Not the
+	// recovery key — that one the owner holds; escrow means somebody else's
+	// key was used on their folder, which is why the owner is told. The payload
 	// carries the node plus meta {escrow_kid, storage, folder} and, when the
 	// caller was authenticated, actor_email.
 	//
@@ -133,6 +141,77 @@ const (
 	// this block. catalog_test.go now refuses that shape.
 	EventE2EEscrowUsed EventType = "e2e.escrow_used"
 )
+
+// Target is the typed "where does a click on this notification go" —
+// re-exported from model so subsystems only ever import notify.
+//
+// ⚠ There is exactly ONE of these per notification and exactly one resolver
+// per surface reading it. `node`/`share` above stay what they always were:
+// descriptive context for a webhook receiver. The target is the ADDRESS, and
+// it is a separate field because the two are not the same thing — a
+// `file.trashed` event describes the file at its original path and has to open
+// the copy in the trash, and `share.created` carries both a node and a share
+// while only one of them is the thing to open.
+type Target = model.NotificationTarget
+
+// TargetKind re-exports model.NotificationTargetKind.
+type TargetKind = model.NotificationTargetKind
+
+// The four target kinds, re-exported so an emitter never imports model just
+// to name one.
+const (
+	TargetNone  = model.TargetNone
+	TargetFile  = model.TargetFile
+	TargetDir   = model.TargetDir
+	TargetShare = model.TargetShare
+)
+
+// FileTarget addresses one file by its path inside its storage. The click
+// opens the file's FOLDER with the file selected — the folder is derived by
+// the client, never stored, so a rename of the parent cannot leave a target
+// pointing at a folder and a file that disagree.
+func FileTarget(p string) *Target { return &Target{Kind: TargetFile, Path: cleanTargetPath(p)} }
+
+// DirTarget addresses one folder by its path inside its storage.
+func DirTarget(p string) *Target { return &Target{Kind: TargetDir, Path: cleanTargetPath(p)} }
+
+// ShareTarget addresses a public share link by its token.
+func ShareTarget(token string) *Target {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return &Target{Kind: TargetNone}
+	}
+	return &Target{Kind: TargetShare, ID: token}
+}
+
+// ParentDirTarget addresses the FOLDER a path sits in — the honest target for
+// an event about something that is no longer there (a permanent delete).
+func ParentDirTarget(p string) *Target {
+	p = cleanTargetPath(p)
+	if p == "" {
+		return &Target{Kind: TargetDir}
+	}
+	d := path.Dir(p)
+	if d == "." || d == "/" {
+		d = ""
+	}
+	return &Target{Kind: TargetDir, Path: d}
+}
+
+// cleanTargetPath normalises a storage-relative path: backslashes to slashes,
+// no leading slash, no `<storage>://` prefix.
+//
+// ⚠ The prefix strip is not cosmetic. Emitters hand over `node.Path`, which is
+// storage-relative, but a caller that passes a qualified path would otherwise
+// produce `<storage>://<storage>://…` at the client — a target that resolves
+// to a folder that does not exist, which looks exactly like a deleted file.
+func cleanTargetPath(p string) string {
+	p = strings.ReplaceAll(strings.TrimSpace(p), "\\", "/")
+	if i := strings.Index(p, "://"); i >= 0 {
+		p = p[i+3:]
+	}
+	return strings.TrimPrefix(p, "/")
+}
 
 // NodeRef identifies the file/folder an event is about (webhook v2
 // payload `node` object).
@@ -180,6 +259,14 @@ type Event struct {
 	Node  *NodeRef  `json:"node,omitempty"`
 	Share *ShareRef `json:"share,omitempty"`
 	Actor *ActorRef `json:"actor,omitempty"`
+
+	// Target is where a click on this notification goes. Emitters set it
+	// with FileTarget/DirTarget/ShareTarget/ParentDirTarget; Send fills in
+	// the storage NAME from Node.StorageID and, failing that, downgrades the
+	// target to TargetNone rather than shipping half an address. It is
+	// always non-nil on the wire, so a receiver can switch on `target.kind`
+	// without a nil check.
+	Target *Target `json:"target,omitempty"`
 
 	// UserID, when non-nil, scopes the in-app notification to a single
 	// user. Otherwise the row is broadcast (admin-visible to everyone

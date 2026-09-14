@@ -1,8 +1,19 @@
-// Screenshots + measurements for the Drive shell (`uiProfile: 'drive'`,
-// GitHub #14, the reporter's four mockups).
+// Screenshots + measurements for the filex SHELL (GitHub #14, the reporter's
+// mockups).
+//
+// gorunum:v3-shell — ⚠ this used to be "the Drive shell (`uiProfile: 'drive'`)"
+// and the distinction it was built around is gone. `uiProfile` no longer picks
+// a LOOK: the header with its one wide search field, the filter row, "+ New",
+// the Folders/Files split, the info panel's tabs and the storage line are what
+// filex IS, for everybody, administrators included. What is left of the option
+// is REDUCTION — `'simple'` is the cut-down embed shell and `'drive'` is now a
+// deprecated alias of it (packages/core FileExplorer.vue, `simpleUi`). So every
+// check below asks "does the shell do this", never "does this profile differ
+// from that one"; the file keeps its name only because renaming it would
+// orphan the screenshots the README links to (see the note at the end).
 //
 // This change is a LAYOUT: a passing unit test proves almost nothing about it.
-// The questions are whether the profile actually changes what renders, whether
+// The questions are whether the shell actually renders what it claims, whether
 // a filter chip filters anything real, whether the folders/files split reads as
 // two groups, whether the details panel's two tabs both have something in them,
 // whether the whole shell survives 390px without a horizontal scrollbar, and
@@ -15,7 +26,8 @@
 // Environment:
 //   FILEX_BIN     binary to run (default: bin/filex.exe on Windows, bin/filex)
 //   SHOTS_URL     use an ALREADY-RUNNING instance instead of spawning one
-//   SHOTS_OUT     output directory (default: ../docs/screenshots/driveshell)
+//   SHOTS_OUT     output directory (default: docs/screenshots/<release>/driveshell,
+//                 the release named in ./release.mjs)
 //   SHOTS_KEEP=1  leave the instance running afterwards
 //
 // ⚠ Every shot is in English three ways over — browser locale, the stored
@@ -42,6 +54,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { seedFixtures } from './fixtures.mjs';
+import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -56,7 +69,7 @@ const PORT = Number(process.env.SHOTS_PORT ?? 5471);
 // a server bound to 127.0.0.1 answers that with ECONNREFUSED — which looks
 // exactly like a server that failed to start (e2e/README.md).
 const URL = process.env.SHOTS_URL ?? `http://127.0.0.1:${PORT}`;
-const OUT = process.env.SHOTS_OUT ?? join(REPO, 'docs/screenshots/driveshell');
+const OUT = process.env.SHOTS_OUT ?? shotsDir('driveshell');
 const DATA = join(tmpdir(), 'filex-driveshell-data');
 
 const ADMIN = { email: 'admin@local', password: 'admin' };
@@ -202,6 +215,35 @@ function backfillThumbs() {
   });
 }
 
+/**
+ * backfillUntilThumbs — render thumbnails, then LOOK, and go round again.
+ *
+ * ⚠⚠ `POST /api/admin/storages/:id/sync` answers **202**: it writes the nodes
+ * in the background. `thumb backfill` renders for the nodes that are already
+ * written and reports a cheerful `{processed: N, ok: N, failed: 0}` for them —
+ * so a backfill that starts too early SUCCEEDS loudly and still leaves the
+ * files the sync had not reached yet with no thumbnail at all.
+ *
+ * Measured 2026-09-13: the backfill said `{processed: 22, ok: 22}` and the
+ * hero shot came out with zero <img> tiles — `cover.png` drawn as a generic
+ * blue icon in the picture the README uses for the shell. Waiting a fixed
+ * number of seconds instead would be the same bet with a nicer face on it, so
+ * this asks the listing whether the pictures are actually there.
+ */
+async function backfillUntilThumbs(token, path, want, rounds = 10) {
+  for (let i = 0; i < rounds; i++) {
+    await backfillThumbs();
+    const files = await indexPath(token, path);
+    const ready = files.filter((f) => f.type === 'file' && f.thumb_url).length;
+    if (ready >= want) {
+      log(`thumbnails ready (${ready} under ${path})`);
+      return;
+    }
+    await sleep(1000);
+  }
+  log(`⚠ thumbnails never finished under ${path} — the grid shots will show icons`);
+}
+
 // ── the world the shots are taken in ──────────────────────────────────────
 // A believable drive: nested folders, images so thumbnails render, documents of
 // several types (the Type chip has to have something to separate), a couple of
@@ -344,7 +386,9 @@ async function seed() {
 
   // Thumbnails are rendered on UPLOAD; fixtures written straight to disk have
   // none, and every grid shot comes out as a wall of generic icons.
-  await backfillThumbs();
+  // ⚠ Not a bare `backfillThumbs()`: the syncs above are still running. See the
+  // block comment on backfillUntilThumbs.
+  await backfillUntilThumbs(adminToken, 'My files://', 2);
 
   const userToken = await login(USER.email, USER.password);
 
@@ -429,7 +473,7 @@ async function signIn(page, base, who) {
   await page.fill('#email', who.email);
   await page.fill('#password', who.password);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(admin|drive)\/(dashboard|explore)/, { timeout: 25_000 });
+  await page.waitForURL(/\/(admin|drive)\/(dashboard|explore|home)/, { timeout: 25_000 });
 }
 
 async function waitForExplorer(page) {
@@ -466,6 +510,31 @@ async function openRow(page, name) {
 }
 
 const rowCount = (page) => page.locator('.fe-list__row, .fe-grid__card').count();
+
+/**
+ * Collapse / expand the navigation panel.
+ *
+ * ⚠ `toolbar-nav`, the button at the far left of the TOP BAR — not
+ * `sidenav-toggle`. gorunum:v3-shell moved the collapse control out of the
+ * panel's own header and into the top bar's corner, with ONE definition at
+ * every width; the panel's copy survives only as the 390px drawer's dismiss.
+ * So at 1440px the old selector matched nothing and this script sat in
+ * Playwright's 30s timeout instead of failing with a word about it.
+ *
+ * Same helper, same message as e2e/shots/sidenav.mjs — one shape for one
+ * problem, so the next time this control moves there is one place to follow
+ * it to and two scripts that fail the same readable way.
+ */
+async function toggleNav(page) {
+  const n = await page.locator('[data-testid="toolbar-nav"]').count();
+  if (n !== 1) {
+    // Not a timeout: say WHICH assumption broke. A shot script that hangs
+    // tells the next reader nothing.
+    throw new Error(`expected exactly one [data-testid="toolbar-nav"], found ${n}`);
+  }
+  await page.locator('[data-testid="toolbar-nav"]').click();
+  await sleep(500);
+}
 
 /** Click a teleported context-menu entry by its visible label. */
 async function clickMenuItem(page, label) {
@@ -532,9 +601,9 @@ async function run(tokens) {
     await page.goto(`${URL}/drive/explore`);
     await waitForExplorer(page);
 
-    // ── the profile actually changes what renders ─────────────────────────
+    // ── the shell actually renders what it claims ─────────────────────────
     check(
-      'the drive profile puts ONE search field in the header, with the palette hint',
+      'the shell puts ONE search field in the header, with the palette hint',
       (await page.locator('[data-testid="drive-search"]').count()) === 1 &&
         (await page.locator('[data-testid="drive-search-palette"]').count()) === 1,
     );
@@ -550,9 +619,14 @@ async function run(tokens) {
         (await page.locator('[data-testid="sidenav-new-folder"]').count()) === 0,
     );
     check(
-      'the view switcher and the details toggle moved onto the breadcrumb row',
-      (await page.locator('.fe-subhead__actions [data-testid="view-grid"]').count()) === 1 &&
-        (await page.locator('.fe-subhead__actions [data-testid="subhead-inspector"]').count()) === 1 &&
+      // gorunum:v5-panestack — the details toggle moved AGAIN, from the
+      // breadcrumb row to the tab strip, when the strip became the window's
+      // row above BOTH panes. The view switcher stayed where it was: it is
+      // PER PANE, and there are two of it the moment a split is open.
+      'the view switcher is on the pane row and the details toggle is in the tab strip',
+      (await page.locator('.fe-subhead__actions [data-testid="view-grid"]').count()) >= 1 &&
+        (await page.locator('.fe-tabs [data-testid="tabs-inspector"]').count()) === 1 &&
+        (await page.locator('[data-testid="subhead-inspector"]').count()) === 0 &&
         (await page.locator('.fe-toolbar .fe-toolbar__view').count()) === 0,
     );
     check(
@@ -569,14 +643,19 @@ async function run(tokens) {
       (await page.locator('[data-testid="filterbar"]').count()) === 1 &&
         (await page.locator('[data-testid="filter-type"]').count()) === 1 &&
         (await page.locator('[data-testid="filter-modified"]').count()) === 1 &&
-        (await page.locator('[data-testid="filter-size"]').count()) === 1,
+        (await page.locator('[data-testid="filter-size"]').count()) === 1 &&
+        (await page.locator('[data-testid="filter-people"]').count()) === 1,
     );
-    // ⚠ Three chips, not the mockup's four. A People chip is left out because
-    // no listing row carries an owner and the endpoint reads no owner
-    // parameter — see the report on this branch.
+    // ⚠ FOUR chips now. This check used to assert three and say a People chip
+    // was left out because no listing row carried an owner — true until
+    // migration 00038 put ownership on the row and the listing projection
+    // started carrying it. The count is still asserted, because the reason to
+    // fear a People chip has not gone away: if ownership ever leaves the wire,
+    // this goes red rather than leaving a control that opens, offers names and
+    // changes nothing.
     check(
-      'there is no People chip (nothing behind it — deliberate, see the report)',
-      (await page.locator('[data-testid="filterbar"] .fe-filterbar__chip').count()) === 3,
+      'the People chip is there, and the row has exactly four chips',
+      (await page.locator('[data-testid="filterbar"] .fe-filterbar__chip').count()) === 4,
       `${await page.locator('[data-testid="filterbar"] .fe-filterbar__chip').count()} chips`,
     );
 
@@ -610,7 +689,7 @@ async function run(tokens) {
     );
 
     // ── the HERO, and its preconditions asserted BEFORE the shutter ──────
-    // ⚠ This is the picture the README shows for `uiProfile: 'drive'`, and the
+    // ⚠ This is the picture the README shows for the shell, and the
     // first version of it was taken later in this run — after the palette test
     // had typed "brief" into the search field — so the canonical shot of the
     // shell was a mid-search view of two rows. A screenshot that is wrong is
@@ -667,12 +746,19 @@ async function run(tokens) {
     await page.locator('[data-testid="sidenav-new"]').click();
     await sleep(400);
     const newItems = await page.locator('.fe-ctx__item .fe-ctx__label').allInnerTexts();
+    // ⚠ FOUR entries since 2026-09-13, not three: "New document" joined the
+    // menu with the `newdoc_types` capability (docx/xlsx/pptx/odt/md/txt/csv —
+    // /api/files/capabilities lists them, and the Office ones say which
+    // integration they need). Counting three here failed on the build that
+    // shipped the feature, which is the check working — the fix is to name the
+    // entry, not to stop counting, so a row that vanishes is still caught.
     check(
-      'the New menu offers upload, new folder and a file request',
-      newItems.length === 3 &&
+      'the New menu offers upload, new folder, a new document and a file request',
+      newItems.length === 4 &&
         /upload/i.test(newItems[0]) &&
         /folder/i.test(newItems[1]) &&
-        /request/i.test(newItems[2]),
+        /document/i.test(newItems[2]) &&
+        /request/i.test(newItems[3]),
       `[${newItems.join(' · ')}]`,
     );
     await shot(page, 'driveshell-new-menu-1440.png');
@@ -687,9 +773,10 @@ async function run(tokens) {
 
     // ── the filter row filters something REAL ────────────────────────────
     // ⚠ Inside Documents — a MIXED folder — not the storage root and not Photos.
-    // The root holds no image at all, so "Type → Images" there returns zero and
-    // a check that only asserts "fewer rows" passes on a filter that removed
-    // everything; Photos holds nothing but images, so the same filter removes
+    // The root holds one image among six other files, so "Type → Images" there
+    // leaves a single row and a check that only asserts "fewer rows" passes on
+    // a filter that removed nearly everything; Photos holds nothing but images,
+    // so the same filter removes
     // nothing and the check passes on a filter that does not work either. Only a
     // folder with both can tell those two apart.
     await openRow(page, 'Documents');
@@ -742,7 +829,7 @@ async function run(tokens) {
     // ── list view ────────────────────────────────────────────────────────
     await page.locator('.fe-subhead__actions [data-testid="view-list"]').click();
     await sleep(800);
-    check('list view still renders rows in the drive shell', (await rowCount(page)) > 0);
+    check('list view still renders rows in the shell', (await rowCount(page)) > 0);
     await shot(page, 'driveshell-list-1440.png');
 
     // ── the details panel, both tabs ─────────────────────────────────────
@@ -758,7 +845,7 @@ async function run(tokens) {
     });
     await sleep(500);
     if ((await page.locator('.fe-inspector').count()) === 0) {
-      await page.locator('[data-testid="subhead-inspector"]').click();
+      await page.locator('[data-testid="tabs-inspector"]').click();
       await sleep(700);
     }
     check(
@@ -850,6 +937,15 @@ async function run(tokens) {
     await sleep(400);
 
     // ── searching, and the sentinel that used to answer with it ──────────
+    // ⚠ Close the details panel first. It was opened for the Details/Activity
+    // shots above and stays open across navigation, so the README's search
+    // picture (and the rail one after it) came out with a fifth of the frame
+    // saying "Select an item to see its details" — a panel the caption is not
+    // about. Measured 2026-09-14 on the v0.41.0 set.
+    if ((await page.locator('.fe-inspector').count()) > 0) {
+      await page.locator('[data-testid="tabs-inspector"]').click();
+      await sleep(600);
+    }
     await page.locator('[data-testid="sidenav-storage-My files"]').click();
     await sleep(1200);
     await page.locator('.fe-subhead__actions [data-testid="view-grid"]').click();
@@ -900,8 +996,8 @@ async function run(tokens) {
     await page.locator('[data-testid="drive-search"] input').fill('');
     await sleep(1200);
     const expanded = await primaryWidth(page);
-    await page.locator('[data-testid="sidenav-toggle"]').click();
-    await sleep(600);
+    await toggleNav(page);
+    await sleep(100);
     const rail = await primaryWidth(page);
     check(
       'collapsing to the rail keeps a round "+ New" and gives the listing its width back',
@@ -920,8 +1016,7 @@ async function run(tokens) {
           .evaluateAll((c) => c.filter((x) => /trash/i.test(x.textContent ?? '')).length)) === 0,
     );
     await shot(page, 'driveshell-rail-1440.png');
-    await page.locator('[data-testid="sidenav-toggle"]').click();
-    await sleep(500);
+    await toggleNav(page);
 
     // ── keyboard reachability of every NEW control ───────────────────────
     const wanted = [
@@ -932,9 +1027,22 @@ async function run(tokens) {
       'filter-size',
       'view-list',
       'view-grid',
-      'subhead-inspector',
+      'tabs-inspector',
     ];
-    await page.evaluate(() => document.querySelector('[data-testid="toolbar-nav"]')?.focus());
+    // gorunum:v2-topbar — seed the walk from the EXPLORER ROOT, not from a
+    // named control.
+    //
+    // This used to focus a specific button, and then had to be repaired every
+    // time the header's first control moved — the note that stood here even
+    // had the rule backwards, claiming `toolbar-nav` was narrow-only and the
+    // panel's `sidenav-toggle` was the wide one, which is the reverse of
+    // gorunum:v3-shell. A comment that is wrong about the thing it is
+    // explaining is how the next reader gets sent the wrong way.
+    // `.fe` carries `tabindex="-1"`, so focusing it and pressing Tab lands on
+    // the first focusable control INSIDE the explorer, whatever that is today.
+    // That is what this check actually wants, and it cannot rot when the
+    // header's first control changes again.
+    await page.evaluate(() => document.querySelector('.fe')?.focus());
     const reached = new Set();
     for (let i = 0; i < 80; i++) {
       const seen = await page.evaluate(() => {
@@ -949,7 +1057,7 @@ async function run(tokens) {
     }
     const missed = wanted.filter((w) => !reached.has(w));
     check(
-      'Tab reaches every control the drive shell adds',
+      'Tab reaches every control the shell adds',
       missed.length === 0 && reached.has('drive-search-input'),
       `missed [${missed.join(', ')}]${reached.has('drive-search-input') ? '' : ' + the search field itself'}`,
     );
@@ -966,7 +1074,7 @@ async function run(tokens) {
     await dpage.locator('.fe-subhead__actions [data-testid="view-grid"]').click();
     await sleep(900);
     check(
-      'the drive shell paints itself in dark mode too',
+      'the shell paints itself in dark mode too',
       (await dpage.locator('[data-testid="drive-search"]').count()) === 1 &&
         (await dpage.evaluate(
           () => getComputedStyle(document.querySelector('.fe-drivesearch')).backgroundColor,
@@ -979,7 +1087,7 @@ async function run(tokens) {
     await dpage.locator('.fe-list__row, .fe-grid__card').first().click();
     await sleep(500);
     if ((await dpage.locator('.fe-inspector').count()) === 0) {
-      await dpage.locator('[data-testid="subhead-inspector"]').click();
+      await dpage.locator('[data-testid="tabs-inspector"]').click();
       await sleep(700);
     }
     await shot(dpage, 'driveshell-dark-info-1440.png');
@@ -1065,27 +1173,58 @@ async function run(tokens) {
       await mob.close();
     }
 
-    // ══ the administrator — the standard profile is untouched ═══════════
+    // ══ the administrator — THE SAME SHELL ══════════════════════════════
+    // gorunum:v3-shell — ⚠ this block used to assert the opposite of what it
+    // asserts now, and deliberately: an administrator was given the "standard"
+    // explorer (no header search field, no filter row, `sidenav-upload` instead
+    // of "+ New") while everybody else got the drive one. That was one product
+    // wearing two faces, decided by `auth.isAdmin ? 'standard' : 'drive'` in the
+    // web app, and it is exactly what this pass undid. The checks are inverted
+    // here rather than deleted, because "the admin does not quietly drift back
+    // onto a second shell" is worth a measurement of its own.
     const adm = await newContext(browser, 1440, 900);
     const apage = await adm.newPage();
     await signIn(apage, '/admin/', ADMIN);
     await apage.goto(`${URL}/admin/explore`);
     await waitForExplorer(apage);
     check(
-      'an administrator gets the standard explorer, with no drive chrome',
-      (await apage.locator('[data-testid="drive-search"]').count()) === 0 &&
-        (await apage.locator('[data-testid="filterbar"]').count()) === 0 &&
-        (await apage.locator('[data-testid="sidenav-new"]').count()) === 0 &&
-        (await apage.locator('[data-testid="sidenav-upload"]').count()) === 1,
+      'an administrator gets the SAME header and the SAME "+ New" as everybody else',
+      (await apage.locator('[data-testid="drive-search"]').count()) === 1 &&
+        (await apage.locator('[data-testid="drive-search-palette"]').count()) === 1 &&
+        (await apage.locator('[data-testid="sidenav-new"]').count()) === 1 &&
+        (await apage.locator('[data-testid="sidenav-upload"]').count()) === 0 &&
+        (await apage.locator('[data-testid="sidenav-new-folder"]').count()) === 0,
+      `search ${await apage.locator('[data-testid="drive-search"]').count()}, ` +
+        `+New ${await apage.locator('[data-testid="sidenav-new"]').count()}, ` +
+        `upload ${await apage.locator('[data-testid="sidenav-upload"]').count()}`,
     );
     check(
-      'an administrator keeps the full view switcher, in the toolbar where it was',
-      (await apage.locator('.fe-toolbar .fe-toolbar__view button').count()) === 3,
-      `${await apage.locator('.fe-toolbar .fe-toolbar__view button').count()} view buttons in the toolbar`,
+      'an administrator gets the view switcher on the breadcrumb row too, not back in the header',
+      (await apage.locator('.fe-subhead__actions .fe-toolbar__view button').count()) === 3 &&
+        (await apage.locator('.fe-toolbar .fe-toolbar__view').count()) === 0,
+      `${await apage.locator('.fe-subhead__actions .fe-toolbar__view button').count()} in the ` +
+        `breadcrumb row, ${await apage.locator('.fe-toolbar .fe-toolbar__view').count()} in the header`,
     );
+    // ⚠ The filter row is drawn where there is a LISTING to filter, and
+    // `/admin/explore` lands on the multi-storage virtual root, which is not
+    // one. Asserting it before this click would fail for a reason that has
+    // nothing to do with the administrator.
     await apage.locator('[data-testid="sidenav-storage-My files"]').click();
     await sleep(1300);
-    await shot(apage, 'standard-profile-1440.png');
+    check(
+      'and the filter row, with its four chips, is there for an administrator as well',
+      (await apage.locator('[data-testid="filterbar"]').count()) === 1 &&
+        (await apage.locator('[data-testid="filterbar"] .fe-filterbar__chip').count()) === 4,
+      `${await apage.locator('[data-testid="filterbar"] .fe-filterbar__chip').count()} chips`,
+    );
+    // ⚠ Renamed from `standard-profile-1440.png`: there is no "standard
+    // profile" any more, and a file whose name asserts a removed concept is how
+    // a screenshot outlives the thing it documented. Nothing links to the old
+    // name (checked across docs + README). The old picture stays where it is,
+    // in the pre-v0.41.0 `docs/screenshots/driveshell/` set — earlier releases'
+    // folders are never pruned (see ./release.mjs) — and the versioned folders
+    // from v0.41.0 on simply carry the new name.
+    await shot(apage, 'admin-shell-1440.png');
     await adm.close();
 
     // ══ no panel — the case the Trash row exists for ═════════════════════
@@ -1167,3 +1306,19 @@ if (failed.length) {
   for (const f of failed) console.log(`  FAILED: ${f.name}${f.detail ? ` — ${f.detail}` : ''}`);
   process.exitCode = 1;
 }
+
+// ── the note the header points at ─────────────────────────────────────────
+//
+// PROPOSAL, not done here: this script is no longer about a "drive shell",
+// because there is no other shell for it to be contrasted with. Renaming it to
+// `shell.mjs` (and the `driveshell/` set inside a release folder → `shell/`,
+// with the `driveshell-*.png` prefix following) would make the name say what
+// the file measures. It is left alone on purpose: two PNGs in that directory
+// are linked from README.md ("The drive shell" / "Searching in the drive
+// shell", also wording that no longer matches), the release process reads
+// those captions, and moving screenshots is a job for whoever owns README in
+// the same pass — a rename here alone would break the two links the repo's
+// front page depends on.
+//
+// Whoever does it: the only other references are e2e/README.md (if it lists
+// the shot scripts) and package.json scripts, if any.

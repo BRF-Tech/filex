@@ -11,6 +11,12 @@ It is an **optional** integration: filex embeds a self‑hosted build of
 in a hidden iframe. When it isn't configured, the Convert action simply doesn't
 appear.
 
+⚠ Configured is not the only condition. The action also stays hidden on a
+**multi-selection** (it converts one file at a time), where you **cannot write**
+(the result has to be saved beside the source), and **inside an end-to-end
+encrypted folder**, where the server only holds ciphertext and a conversion
+would have nothing to read. A folder is offered the action greyed out.
+
 - [Enable it](#enable-it)
 - [How it works](#how-it-works)
 - [Notes & limits](#notes--limits)
@@ -105,8 +111,11 @@ filex (Vue)  ──hidden iframe──►  <FILEX_CONVERT_URL>/?embed=1   (conve
 - filex advertises the feature through its capabilities probe: the Convert
   action appears when the stored `convert` service is enabled, whatever
   configured it. `POST /api/admin/external/convert/test` probes `${url}/healthz`
-  with a 3 s timeout and records the verdict, which is what the **Test** button
-  in the admin UI calls.
+  from the filex server with a 3 s timeout and records the verdict. ⚠ That is
+  one leg of two: the **Test** button in the admin UI also loads the URL from
+  **your browser** and reports it separately, because the iframe is fetched by
+  the browser, and a container-internal address such as `http://convert` is
+  reachable from filex and from nothing else.
 
 ⚠ Before v0.34.0 the URL the *running process* used was a snapshot taken at
 boot, while the admin UI read and wrote the database — so configuring the

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"archive/zip"
 	"context"
 	cryptoRand "crypto/rand"
 	"encoding/json"
@@ -9,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -31,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/zipstream"
 
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
@@ -223,6 +225,14 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// Root confinement: the `node_id` shape skips confine.Middleware, so a
+	// confined token could mint a public link to a file outside its folder.
+	// The `path` shape was already safe (resolveNodeIDFromPath is confined).
+	// Same 404 as the miss above.
+	if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 
 	// RBAC: creating a public share is an outbound-access grant → ≥editor.
 	if h.ACL != nil {
@@ -331,6 +341,9 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		Body:  inner.Path,
 		Share: &notify.ShareRef{Token: sh.Token, Path: inner.Path},
 		Meta:  map[string]any{"kind": sh.Kind, "has_pin": sh.PinHash != ""},
+		// The link, not the file behind it: the event is "a share now
+		// exists", and the thing to look at is the share.
+		Target: notify.ShareTarget(sh.Token),
 	}
 	if node != nil {
 		shareEv.Node = &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name, Size: node.Size}
@@ -577,6 +590,13 @@ func (h *Share) HandleList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
 		return
 	}
+	// Root confinement: the `node_id` shape skips confine.Middleware. The row
+	// carries the share TOKEN, so an out-of-root leak here is a working link to
+	// somebody else's file — refused with this endpoint's own empty-list shape.
+	if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
+		writeJSON(w, http.StatusOK, map[string]any{"shares": []any{}})
+		return
+	}
 
 	// RBAC: seeing an item's links is the same bar as minting one (≥editor).
 	if h.ACL != nil {
@@ -724,6 +744,16 @@ func (h *Share) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	if scope, confined := confinedScope(r.Context()); confined {
 		n, nerr := h.Store.GetNode(r.Context(), sh.NodeID)
 		if nerr != nil || n == nil || !scope.CanAccessStorage(n.StorageID) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+	}
+	// Root confinement: a confined token may only revoke links on files inside
+	// its folder — the share id skips confine.Middleware. Walk share → node →
+	// path; the same 404 the missing-share branch above produces.
+	if _, confined := confine.RootFrom(r.Context()); confined {
+		n, nerr := h.Store.GetNode(r.Context(), sh.NodeID)
+		if nerr != nil || n == nil || !rootAllows(r.Context(), h.Store, n.StorageID, n.Path) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -961,51 +991,52 @@ func (h *Share) claimDownloadSlot(r *http.Request, shareID int64) bool {
 // ⚠ The walk itself is still the driver's listing, so a brand-new staged file
 // (no object on the backend at all) is not in the archive; see the note on
 // serveFolderZip.
+//
+// ⚠ The walk and the zip loop both used to be written out here, a second time
+// in internal/sharezip (the cached twin of this very archive) and a third time
+// would have joined them for the authenticated selection download. They are now
+// one walk (sharezip.CollectFiles) and one writer (zipstream.Write). What is
+// still local to this function is the only thing that was ever different: the
+// bytes come from filebody rather than straight off the driver.
+//
+// ⚠ No Content-Length. There is no way to know one before the last member is
+// deflated, and this repo has already shipped a download that promised a length
+// it did not have (see declareBodyLength). Chunked is the honest answer.
 func (h *Share) streamFolderZip(ctx context.Context, w http.ResponseWriter, drv storage.Driver, storageID int64, root, name string) error {
+	files, err := sharezip.CollectFiles(ctx, drv, root)
+	if err != nil {
+		return err
+	}
+
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment", name+".zip"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	zw := zip.NewWriter(w)
-	defer zw.Close()
-
-	var walk func(dir, prefix string) error
-	walk = func(dir, prefix string) error {
-		objs, err := drv.List(ctx, dir)
-		if err != nil {
-			return err
-		}
-		for _, o := range objs {
-			if o.Name == ".filex-trash" || o.Name == ".thumbs" || o.Name == ".keepdir" {
-				continue
-			}
-			entry := prefix + o.Name
-			switch o.Kind {
-			case storage.KindDirectory:
-				if err := walk(o.Path, entry+"/"); err != nil {
-					return err
-				}
-			case storage.KindFile:
-				src, err := h.Body.Resolve(ctx, drv, storageID, o.Path, nil)
+	members := make([]zipstream.Member, 0, len(files))
+	for _, f := range files {
+		p := f.Path
+		members = append(members, zipstream.Member{
+			Name:  f.Rel,
+			Size:  f.Size,
+			Mtime: f.Mtime,
+			Open: func(c context.Context) (io.ReadCloser, error) {
+				src, err := h.Body.Resolve(c, drv, storageID, p, nil)
 				if err != nil {
-					continue
+					return nil, err
 				}
-				rc, err := src.Open(ctx)
-				if err != nil {
-					continue
-				}
-				fw, err := zw.Create(entry)
-				if err != nil {
-					_ = rc.Close()
-					return err
-				}
-				_, _ = io.Copy(fw, rc)
-				_ = rc.Close()
-			}
-		}
-		return nil
+				return src.Open(c)
+			},
+		})
 	}
-	return walk(root, "")
+	skips, err := zipstream.Write(ctx, w, members, zipstream.Options{
+		Flush:    flusher(w),
+		Manifest: incompleteArchiveNote,
+	})
+	for _, s := range skips {
+		slog.Warn("folder share archive: member left out", slog.String("entry", s.Name),
+			slog.Bool("partial", s.Partial), slog.String("err", s.Err.Error()))
+	}
+	return err
 }
 
 // serveFolderZip serves a shared folder as a ZIP ("download all"), backed by
@@ -1257,8 +1288,8 @@ const publicPageStyle = `<style>
   --px-card: #ffffff;
   --px-fg: #1b2129; --px-muted: #66727f;
   --px-line: #d7dde5;
-  --px-accent: #4f46e5; --px-accent-hover: #4338ca;
-  --px-accent-soft: rgba(79, 70, 229, 0.10);
+  --px-accent: #2f6ceb; --px-accent-hover: #2559c9;
+  --px-accent-soft: rgba(47, 108, 235, 0.10);
   --px-ok: #16a34a; --px-ok-soft: rgba(22, 163, 74, 0.12);
   --px-err: #dc2626; --px-err-soft: rgba(220, 38, 38, 0.10);
   --px-shadow: 0 12px 40px rgba(15, 23, 42, 0.10);
@@ -1269,8 +1300,8 @@ const publicPageStyle = `<style>
     --px-card: #1f242c;
     --px-fg: #e7ebf1; --px-muted: #97a1af;
     --px-line: #3a424d;
-    --px-accent: #6366f1; --px-accent-hover: #818cf8;
-    --px-accent-soft: rgba(99, 102, 241, 0.18);
+    --px-accent: #5b8cff; --px-accent-hover: #8fb0f7;
+    --px-accent-soft: rgba(91, 140, 255, 0.18);
     --px-ok: #22c55e; --px-ok-soft: rgba(34, 197, 94, 0.14);
     --px-err: #f87171; --px-err-soft: rgba(248, 113, 113, 0.12);
     --px-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
@@ -1309,7 +1340,13 @@ h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 // publicBrandMark is the tiny inline filex logo used in the public-page
 // footer — the same folder+check mark as the SPA's LogoMark.vue, with a solid
 // fill so no gradient ids can collide across pages.
-const publicBrandMark = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#6366f1"/><path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+// ⚠ The brand mark is hand-typed here because this page is served by the Go
+// binary with no bundler and no access to packages/core. It MUST be kept in
+// step with web/src/components/LogoMark.vue, web/public/favicon.svg,
+// web/public/icons/icon.svg, site/index.html and desktop/ui/*.html — this
+// copy shipped the pre-rebrand indigo on the page strangers see for a whole
+// wave after the others went blue (2026-09-13, found by the duplicate gate).
+const publicBrandMark = `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#2f6ceb"/><path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 
 // Public-page footers. Each template keeps its existing content language, so
 // there is a Turkish and an English variant of the same modest brand line.

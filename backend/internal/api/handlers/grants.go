@@ -653,7 +653,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		if req.Locale != "" && !mailLangEN(req.Locale) {
 			loc = "tr"
 		}
-		newU, cerr := h.Store.CreateUser(r.Context(), email, hash, role, loc, "UTC")
+		newU, cerr := h.Store.CreateUser(r.Context(), email, hash, role, loc, model.TimezoneUnset)
 		if cerr != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "could not create user: " + cerr.Error()})
 			return

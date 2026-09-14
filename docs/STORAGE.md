@@ -51,6 +51,17 @@ that cache in step with the real backend (see [Sync](#sync)).
 > the bucket or filesystem root. This stops filex from ever shadowing pre‑existing
 > objects at the root. See [Path validation](#path-validation--errors).
 
+**How full a storage is, is not an admin-only number.**
+`GET /api/files/quota/storages` answers `{name, used_bytes, file_count}` for
+each storage **the caller can open** — filtered by the same grant check the
+explorer's own root listing applies, so the set of drives somebody can measure
+is exactly the set they can browse. It is what Home's storage cards print for a
+non-admin. The figure is the *drive's* total, not that person's share of it
+(`/api/files/quota/me` is the per-user sum, and printing that under a drive's
+name would be a number about the person wearing a label about the drive), and a
+count is reused for 15 seconds so a page of cards costs one table scan rather
+than one per card.
+
 ---
 
 ## Adding a storage
@@ -75,7 +86,7 @@ is the first path segment:
 | Protocol | Address |
 |---|---|
 | WebDAV | `/dav/<storage name>/<path>` |
-| SFTP, NFS | `/<storage name>/<path>` |
+| SFTP, FTPS, NFS | `/<storage name>/<path>` |
 | S3-compatible API | the bucket is `<storage name>` |
 
 So a mount, a bookmark or a script that used the old name answers **404** until
@@ -89,9 +100,12 @@ accepts it in place of the name:
 
 ```
 /dav/7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/   WebDAV
-/7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/       SFTP, NFS
+/7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/       SFTP, FTPS, NFS
 s3://7f3a1b2c-4d5e-4f60-8a1b-2c3d4e5f6071/Documents/   the S3-compatible API
 ```
+
+The rule lives in one place (`internal/storageref`) rather than in each server,
+so there is no protocol where only one of the two identifiers works.
 
 It is on the storage's page in the admin UI, under **Stable address**, and in
 `GET /api/admin/storages` as `uid`. A mount written against it survives every

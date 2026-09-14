@@ -104,6 +104,15 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 		key = tenantBrandingKey(r.Context(), key)
 		defer h.Branding.Invalidate()
 	}
+	/* gorunum:v1 — operator stylesheet: cap it, and bust the branding cache
+	   it rides on so the next page load wears the new sheet. */
+	if key == CustomCSSSettingKey {
+		if err := validateCustomCSS(req.Value); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		defer h.Branding.Invalidate()
+	}
 	if err := h.Store.UpsertSetting(r.Context(), key, req.Value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -135,6 +144,17 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		if !allowSettingWrite(w, r, k) {
 			return
 		}
+		/* gorunum:v1 — the operator stylesheet is capped HERE, in the
+		   classify-everything-first loop, for the same reason the tenancy
+		   check is: refusing it in the write loop below would leave the
+		   other keys of the batch already written. */
+		if k == CustomCSSSettingKey {
+			val, _ := stringifyValue(v)
+			if err := validateCustomCSS(val); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+		}
 	}
 	for k, v := range raw {
 		if k == "" || v == nil {
@@ -152,6 +172,11 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			k = tenantBrandingKey(r.Context(), k)
+			defer h.Branding.Invalidate()
+		}
+		/* gorunum:v1 — already validated above; bust the branding cache the
+		   stylesheet rides on so the next page load wears the new sheet. */
+		if k == CustomCSSSettingKey {
 			defer h.Branding.Invalidate()
 		}
 		if err := h.Store.UpsertSetting(r.Context(), k, val); err != nil {

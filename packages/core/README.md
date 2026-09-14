@@ -51,7 +51,6 @@ const config = {
   sideNav: true,          // the navigation panel (default on)
   connections: true,      // its "How to connect" + "API keys" entries
   uiProfile: 'standard',  // 'simple' — one pane, list/grid, no tabs
-                          // 'drive'  — that, plus the Drive-shaped shell
 };
 </script>
 
@@ -106,10 +105,14 @@ instead of drawing an empty key cap. See
 
 ### Navigation panel
 
-The explorer ships a left navigation panel — a prominent **Upload**, the views
-**Recent · Starred · Shared with me · Trash**, and the storages the caller can
-see (a storage reached through a grant is marked *Shared*). It is on by default
-on every surface; the viewer collapses it to an icon rail and that choice is
+The explorer ships a left navigation panel — the primary **+ New** menu
+(upload files · new folder · new document · request files), the destinations
+**Home · Shared with me · Recent · Starred · Trash** (plus **My files** when
+the caller reaches at most one storage), the tags in use, and the storages the
+caller can see (a storage reached through a grant is marked *Shared*). It is on
+by default on every surface; the viewer collapses it to an icon rail from the
+control at the far left of the **top bar** — above the panel rather than inside
+it, so it is still reachable once the panel is a rail — and that choice is
 remembered per browser. Under 560px it becomes a drawer over the listing instead
 of a column.
 
@@ -118,7 +121,7 @@ const config = {
   apiBase: 'https://files.example.com',
   auth: { kind: 'bearer', token },
   sideNav: true,          // default; `rootPath` flips it off
-  uiProfile: 'simple',    // 'standard' (default) | 'simple' | 'drive'
+  uiProfile: 'simple',    // 'standard' (default) | 'simple'
 };
 ```
 
@@ -144,31 +147,35 @@ connect", Upload, the storages and Trash stay. See
 
 `uiProfile: 'simple'` is a preset, not a feature switch — nothing is removed
 from the build. It turns off the tab strip and the split pane, reduces the view
-switcher to list + grid, and starts the navigation panel expanded, for the
-people who want a file drive rather than a file manager.
+switcher to list + grid, and defaults the panel's "How to connect" / "API keys"
+entries off, for the people who want a file drive rather than a file manager.
+It does not gate the navigation panel: that ships in every profile, and only
+the viewer's own collapse choice moves it.
 
-`uiProfile: 'drive'` is `simple` plus the shell those people already know:
+There are **two profiles and no third**. ⚠ Anything else that reaches
+`uiProfile` — a typo, or the `'drive'` profile that was **removed** after
+v0.40.0 — resolves to `'standard'` and logs one console line naming it. **If
+you were passing `'drive'`, pass `'simple'`.** It was only ever `simple` plus a
+look, and the look below is now what *every* embed draws, with no string
+passed:
 
-- one primary **+ New** menu in the panel (upload files · new folder · request
-  files) instead of the Upload / New folder pair,
+- one primary **+ New** menu in the panel (upload files · new folder · new
+  document · request files) instead of the Upload / New folder pair,
 - one **search field across the header** with a ⌘K / Ctrl+K chip that hands the
   query to the command palette — the field searches the folder you are in, the
   palette is where "everywhere", saved searches and commands live,
-- a **filter row** under the breadcrumb: Type · Modified · Size,
-- **Folders** and **Files** as labelled sections in grid view,
+- a **filter row** under the breadcrumb: Type · People · Modified · Size,
+- **Folders** and **Files** as labelled sections in grid view — replaced by
+  **date headings** (Today · Yesterday · This Week · This Month · *September
+  2026*) in all three views while the listing is sorted by Modified,
 - the details panel split into **Details** and **Activity**, with "People with
   access" and a share-link row,
 - a **storage line** under the navigation (`GET /api/files/quota/me`).
 
-Nothing is removed here either: density, theme, the shortcut editor, the tour
-and the other view modes all live in the header's "⋯" menu, and the view
-switcher and details toggle move to the breadcrumb row rather than disappearing.
-
-⚠ There is deliberately **no People filter** and no Owner column, though the
-mockups this profile came from draw both: a listing row carries no owner
-(`nodes.owner_id` is quota bookkeeping, serialized by nothing) and the listing
-endpoint reads no owner parameter. A chip that opens, offers names and changes
-nothing is worse than no chip.
+The **People** chip and the **Owner** column are real now: migration `00038`
+put the owner on the node itself, so a listing row carries one, the chip offers
+only the people who actually own something in the rows on screen, and quota is
+counted against the owner rather than whoever last touched the file.
 
 ### Connections
 
@@ -187,7 +194,7 @@ import {
   NFSExportsPanel,
   TokensPanel,               // FTPS / WebDAV / filex mount sign in with a token
   ConnectionGuideView,
-  buildGuide, guideProtocols, guideName,
+  buildGuide, guideProtocols,
   useS3Keys, useSSHKeys, useNFSExports, useTokens,
   type ProtocolGuide, type ApiToken,
 } from '@brftech/filex-core';

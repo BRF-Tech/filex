@@ -1,13 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Bell, RefreshCcw, Send, Webhook } from 'lucide-vue-next';
+import { Bell, BellRing, RefreshCcw, Send, Webhook } from 'lucide-vue-next';
 
 import { useNotificationsStore } from '@/stores/notifications';
 import { useToastStore } from '@/stores/toast';
+import { useAuthStore } from '@/stores/auth';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
+import { useNotificationText } from '@/composables/useNotificationText';
 import type { Severity } from '@/api/types';
+import {
+  browserNotifyEnabled,
+  browserNotifyPermission,
+  isDesktopShell,
+  requestBrowserNotifyPermission,
+  setBrowserNotifyEnabled,
+  type BrowserNotifyPermission,
+} from '@/lib/browserNotify';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -17,6 +27,7 @@ import Badge from '@/components/ui/Badge.vue';
 const { t, locale } = useI18n();
 const notif = useNotificationsStore();
 const toast = useToastStore();
+const auth = useAuthStore();
 
 const refreshing = ref(false);
 const showWebhookForm = ref(false);
@@ -26,13 +37,74 @@ const webhookToken = ref('');
 async function load() {
   refreshing.value = true;
   try {
-    await Promise.all([notif.fetchAdminList(), notif.fetchUnread(), notif.fetchWebhook()]);
+    await Promise.all([
+      notif.fetchAdminList(),
+      notif.fetchUnread(),
+      notif.fetchWebhook(),
+      notif.fetchSettings(),
+    ]);
   } finally {
     refreshing.value = false;
   }
 }
 
 onMounted(load);
+
+// ── your own notification preferences ────────────────────────────────────
+//
+// ⚠ These two switches were an API with no screen: `GET/PATCH
+// /api/notifications/settings` has shipped since the bell did, and
+// docs/NOTIFICATIONS.md said in as many words that there was no UI for it. A
+// preference nobody can reach is a preference nobody has.
+
+const permission = ref<BrowserNotifyPermission>('unsupported');
+const browserOn = ref(true);
+const desktopShell = ref(false);
+
+onMounted(() => {
+  desktopShell.value = isDesktopShell();
+  permission.value = browserNotifyPermission();
+  browserOn.value = browserNotifyEnabled(auth.user?.id);
+});
+
+const inAppOn = computed(() => notif.settings?.in_app_enabled !== false);
+
+async function setInApp(v: boolean) {
+  try {
+    await notif.updateSettings({
+      in_app_enabled: v,
+      // ⚠ PATCH replaces the WHOLE preference — omitting muted_events clears
+      // every mute the user has (docs/NOTIFICATIONS.md → Per-user settings).
+      muted_events: notif.settings?.muted_events ?? [],
+    });
+    toast.success(t('notifications.prefs.saved'));
+  } catch (e: unknown) {
+    toast.error(extractError(e, 'Save failed'));
+  }
+}
+
+function setBrowser(v: boolean) {
+  browserOn.value = v;
+  setBrowserNotifyEnabled(v, auth.user?.id);
+}
+
+/**
+ * ⚠ Called from a click and from nowhere else. Asking for notification
+ * permission on page load is the pattern browsers punish — Chrome answers an
+ * origin that asks without a gesture with a muted chip instead of a prompt,
+ * which spends the permission without ever showing the user a choice.
+ */
+async function askPermission() {
+  permission.value = await requestBrowserNotifyPermission(auth.user?.id);
+  if (permission.value === 'granted') setBrowser(true);
+}
+
+/* gorunum:v2 — the same localised severity the bell prints; see NotificationBell. */
+function severityLabel(sev: string): string {
+  const key = `notifications.severity.${sev}`;
+  const out = t(key);
+  return out === key ? sev : out;
+}
 
 function severityTone(s: Severity): 'sky' | 'amber' | 'rose' {
   if (s === 'critical' || s === 'error') return 'rose';
@@ -71,7 +143,16 @@ function setUnread(v: boolean) {
   notif.fetchAdminList();
 }
 
-const tableRows = computed(() => notif.items);
+// ⚠ The SAME renderer the bell, the browser toast and the desktop app use.
+// This table has its own `event` column carrying the raw id in mono, so
+// nothing is lost by putting a sentence in the title column — and everything
+// is lost by not: eight of the eleven file events store no title at all, so
+// what stood here was `share.created` twice on the same row, once as data and
+// once pretending to be a title. See lib/notificationText.ts.
+const { notificationText } = useNotificationText();
+const tableRows = computed(() =>
+  notif.items.map((n) => ({ ...n, text: notificationText(n) })),
+);
 
 function gotoPage(p: number) {
   notif.setPage(p);
@@ -107,6 +188,56 @@ function currentPage(): number {
         </Button>
       </div>
     </header>
+
+    <!-- Your own preferences. Above the webhook card on purpose: this is the
+         half of the page that is about the person reading it. -->
+    <div class="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div class="flex items-center gap-2">
+        <BellRing class="h-5 w-5 text-zinc-500" />
+        <h2 class="text-sm font-semibold">{{ t('notifications.prefs.title') }}</h2>
+      </div>
+
+      <div class="mt-3 space-y-4">
+        <Toggle
+          :model-value="inAppOn"
+          :label="t('notifications.prefs.inApp')"
+          :description="t('notifications.prefs.inAppHint')"
+          name="notif-in-app"
+          @update:model-value="setInApp"
+        />
+
+        <div class="space-y-2">
+          <Toggle
+            :model-value="browserOn"
+            :label="t('notifications.prefs.browser')"
+            :description="t('notifications.prefs.browserHint')"
+            :disabled="desktopShell || permission === 'unsupported'"
+            name="notif-browser"
+            data-testid="notif-browser-toggle"
+            @update:model-value="setBrowser"
+          />
+          <div class="flex flex-wrap items-center gap-2 pl-12 text-xs">
+            <Badge v-if="desktopShell" tone="zinc">{{ t('notifications.prefs.desktopHandled') }}</Badge>
+            <template v-else>
+              <Badge v-if="permission === 'granted'" tone="emerald">{{ t('notifications.prefs.permGranted') }}</Badge>
+              <Badge v-else-if="permission === 'denied'" tone="rose">{{ t('notifications.prefs.permDenied') }}</Badge>
+              <Badge v-else-if="permission === 'unsupported'" tone="zinc">{{ t('notifications.prefs.permUnsupported') }}</Badge>
+              <Badge v-else tone="amber">{{ t('notifications.prefs.permDefault') }}</Badge>
+              <Button
+                v-if="permission === 'default'"
+                size="xs"
+                variant="outline"
+                data-testid="notif-browser-ask"
+                @click="askPermission"
+              >
+                {{ t('notifications.prefs.enableBrowser') }}
+              </Button>
+              <span v-if="permission === 'denied'" class="text-zinc-500">{{ t('notifications.prefs.permDeniedHint') }}</span>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Webhook config card -->
     <div class="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -166,9 +297,11 @@ function currentPage(): number {
         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
           <tr v-for="n in tableRows" :key="n.id" class="bg-white dark:bg-zinc-950" :class="{ 'opacity-70': n.read_at }">
             <td class="px-3 py-2 font-mono text-xs">{{ n.event }}</td>
-            <td class="px-3 py-2"><Badge :tone="severityTone(n.severity)">{{ n.severity }}</Badge></td>
-            <td class="px-3 py-2">{{ n.title }}</td>
-            <td class="px-3 py-2 max-w-md truncate text-xs text-zinc-600 dark:text-zinc-400">{{ n.body }}</td>
+            <td class="px-3 py-2"><Badge :tone="severityTone(n.severity)">{{ severityLabel(n.severity) }}</Badge></td>
+            <td class="px-3 py-2">{{ n.text.title }}</td>
+            <td class="px-3 py-2 max-w-md truncate text-xs text-zinc-600 dark:text-zinc-400">
+              {{ n.text.body }}
+            </td>
             <td class="px-3 py-2 text-xs">
               <span v-if="n.user_id">user #{{ n.user_id }}</span>
               <span v-else class="text-zinc-500">broadcast</span>

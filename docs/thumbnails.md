@@ -2,8 +2,10 @@
 
 filex renders preview thumbnails **server‑side** for images, video, audio, PDFs,
 office documents and SVGs, and a coloured placeholder card for everything else.
-Thumbnails are **on by default** — the grid view shows a real preview where one
-exists and falls back to a per‑type icon where it doesn't.
+Thumbnails are **on by default** — the grid, the list and the gallery all show
+a real preview where one exists and fall back to a per‑type icon where it
+doesn't. (Thumbnails were a grid‑only feature for a long time; the list drew a
+type glyph for every row, including a photograph.)
 
 The image and placeholder generators are pure Go and always work. The richer
 kinds (video, audio, PDF, office, SVG) each shell out to an **external tool**
@@ -44,11 +46,13 @@ Every generator writes a **JPEG** to the cache directory as
 
 Generation is triggered two ways:
 
-1. **After upload** — the moment an upload (or a public file‑drop) commits, filex
-   dispatches the pipeline in a **detached background goroutine** with a **90‑second
-   timeout**. The HTTP request returns immediately; a client disconnect can't abort
-   an in‑flight office→PDF conversion. Errors are swallowed (the pipeline logs its
-   own).
+1. **After a write** — the moment an upload, a public file‑drop or a document
+   created from **+ New** commits, filex dispatches the pipeline in a **detached
+   background goroutine** with its own timeout (**90 s** on the browser upload
+   path, **2 min** on the staged, AI/REST and protocol paths — an office→PDF
+   conversion of a large deck is the reason the longer ones exist). The HTTP
+   request returns immediately; a client disconnect can't abort an in‑flight
+   conversion. Errors are swallowed (the pipeline logs its own).
 2. **Backfill** — a one‑shot pass over files that already exist in the cache (see
    [Backfill](#backfill--catching-up-existing-files)).
 
@@ -62,10 +66,10 @@ Cached JPEGs are released two ways, both described in
 | Kind | Source types | Generator | External binary (auto‑detected on `PATH`) |
 |---|---|---|---|
 | **Image** | `image/*` — jpg, png, gif, bmp, tiff, webp | Built‑in Go (stdlib + `x/image`) | **none** |
-| **Video** | `video/*` — mp4, webm, mov, mkv, avi, … | `ffmpeg` — first frame at ~1 s, scaled to 320 wide | `ffmpeg` |
+| **Video** | `video/*` — mp4, webm, mov, mkv, avi, … | `ffmpeg` — the first frame that is **not black**, searched over the opening 10 s, scaled to 320 wide | `ffmpeg` |
 | **Audio** | `audio/*` — mp3, wav, ogg, flac, m4a, aac, opus | `ffmpeg` — a 320×120 waveform image (`showwavespic`) | `ffmpeg` |
-| **PDF** | `application/pdf` | Ghostscript renders page 1 at 96 dpi (falls back to poppler) | `gs` **or** `pdftoppm` |
-| **Office** | doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp | LibreOffice headless → PDF → page 1 rendered like a PDF | `libreoffice` (or `soffice`) **and** one of `gs` / `pdftoppm` |
+| **PDF** | `application/pdf` | Ghostscript renders page 1 at 96 dpi (falls back to poppler), then the page is scaled down to thumbnail size | `gs` **or** `pdftoppm` |
+| **Office** | doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp | LibreOffice headless → PDF → page 1 through the **same renderer** the PDF path uses | `libreoffice` (or `soffice`) **and** one of `gs` / `pdftoppm` |
 | **SVG** | `image/svg+xml` | librsvg rasterises to PNG → re‑encoded to JPEG | `rsvg-convert` |
 | **Placeholder** | everything else — archives, 3D models, code, markdown, rtf, raw docs, … | Built‑in Go — a tinted card with the extension centred (colour hashed from the extension) | **none** |
 
@@ -81,6 +85,36 @@ Notes:
 - **Office** goes through **two** tools: LibreOffice to make a PDF, then
   Ghostscript/poppler to rasterise page 1. It also wants a **JRE** and **fonts**
   present for reliable conversion (the stock full image ships both).
+- **Video: "first frame" means the first one with something in it.** A great
+  many real clips open on black — a fade‑in, a slate, a camera's leader — so
+  filex asks ffmpeg for the first frame whose average luma clears **24** (video
+  black is 16, not 0) within the opening **10 seconds**, and falls back to the
+  literal first frame when the whole opening is dark, because then black really
+  is what the video looks like. This replaced a single `-ss 1` seek that failed
+  two measured ways: a clip **shorter than a second** decoded no frame at all
+  while ffmpeg exited **zero** (the row said `ready` and the card 404ed), and a
+  1.6 s fade‑in produced a 581‑byte pure‑black JPEG. Every ffmpeg and
+  Ghostscript run is now followed by a check that a file actually came out — an
+  exit code does not tell you whether a frame did.
+- **The PDF and office paths are one renderer** (`renderPDFPage1`). office.go
+  used to carry its own transcription of the gs/pdftoppm block, which is how it
+  kept bugs the PDF path had already been fixed for — the missing downscale,
+  the zero‑exit‑but‑no‑file case, and pdftoppm's zero‑padded output name (page 1
+  of a 120‑page file is `‑001.jpg`, not `‑1.jpg`, so the old rename silently
+  missed on any PDF with ten or more pages).
+- **A rasterised page is downscaled like everything else.** `gs -r96` renders A4
+  at 816×1056, and that used to be what the cache handed out: a 358 KB JPEG
+  drawn inside a 184×108 card, for every PDF and office document in a folder.
+  Pages now go through the same fit‑to‑320 step the image generator uses. In the
+  card a page is anchored to its **top** rather than centre‑cropped, so the
+  letterhead and title — the only part that says *which* document it is — stay
+  visible.
+- **Text, code and CSV never reach the placeholder in the explorer.** The
+  backend will happily render them an extension tile, but the grid, list and
+  gallery skip the request and draw the file's **own first lines** instead: a
+  ranged read of at most 8 KiB, only once the card is on screen, only for files
+  under 4 MB, cached per path and version. It is the same one request the
+  generic card cost, spent on something that says what the file is.
 
 ---
 
@@ -157,14 +191,17 @@ ghostscript     → PDF (page 1)  ┐ office docs render via
 poppler-utils   → PDF fallback  ┘ LibreOffice → PDF → these
 libreoffice     → doc/docx/xls/xlsx/ppt/pptx/odt/ods/odp
 openjdk17-jre   → LibreOffice's conversion pipeline
+rsvg-convert    → SVG
+imagemagick     → reported as `thumbs.imagemagick` in the capabilities probe
 fonts (noto/liberation/dejavu)  → so office/PDF text isn't rendered as boxes
 ```
 
-> ⚠ The stock `full` image does **not** ship `rsvg-convert` (librsvg), so **SVG
-> thumbnails are `skipped`** on it. If you need SVG previews, add librsvg to the
-> image (`apk add rsvg-convert`) and rebuild. Whatever image you run, the
-> definitive check for what's actually present is the
-> [capabilities probe](#serving) (`thumbs.svg`, `thumbs.video`, …).
+The **`:slim`** image deliberately ships none of them (they are ~470 MB
+together, and they are the reason two images exist). Whatever image you run, the
+definitive check for what is actually present is the
+[capabilities probe](#serving) (`thumbs.svg`, `thumbs.video`, …) — and the boot
+log, which now names every tool that is missing (see
+[What happens if it isn't configured](#what-happens-if-it-isnt-configured--a-tool-is-missing)).
 
 If you build your own leaner image, drop tools from the install list — the
 capability probe will report `video=false` / `pdf=false` / etc. and the pipeline
@@ -226,8 +263,11 @@ curl https://files.example.com/api/files/capabilities | jq .thumbs
 ```
 ```json
 { "image": true, "imagemagick": true, "video": true, "audio": true,
-  "pdf": true, "office": true, "svg": false }
+  "pdf": true, "office": true, "svg": true }
 ```
+
+(Every one of them is `true` on the stock full image and `false` except `image`
+on `:slim`.)
 
 (The probe result is cached for 1 hour.)
 
@@ -292,6 +332,17 @@ default; most operators prefer to trigger backfills explicitly.
 
 - **Thumbnails are on by default.** With zero external tools you still get real
   image previews plus placeholder cards for everything else.
+- **A missing tool says so at boot**, by name. A grid of coloured rectangles
+  looks like a design choice rather than a missing package, so nobody goes
+  looking for the package — and two of the three ways filex ships (`:slim`, the
+  bare binary) arrive with none of these tools. With everything present the line
+  is INFO (`thumbs: every preview kind available …`); otherwise it is a **WARN**
+  naming each unavailable kind and what would install it:
+  ```
+  WARN thumbs: some previews will fall back to a plain type tile; the tool that
+       draws them is not installed  unavailable=audio,office,svg,video
+       install="audio needs ffmpeg; office needs libreoffice; svg needs rsvg-convert; video needs ffmpeg"
+  ```
 - **Missing tool for video / audio / PDF / office** → that kind can't be enabled,
   so the dispatcher routes the file to the **generic placeholder card**. The state
   is **`ready`**, *not* `failed` — the grid shows a legible tinted card with the
@@ -301,8 +352,10 @@ default; most operators prefer to trigger backfills explicitly.
 - **A generator that runs but errors** (tool present, but the file is broken /
   truncated / unsupported) → state **`failed`**, a WARN is logged, and the error
   text is stored on the row.
-- **Unsupported / other kinds** (archives, 3D models, code, markdown, rtf, raw
-  docs, …) always get the placeholder card (`ready`).
+- **Unsupported / other kinds** (archives, 3D models, rtf, raw docs, …) always
+  get the placeholder card (`ready`). Text, code and CSV files get one too, but
+  the explorer does not fetch it — it draws their first lines instead (see
+  [Generators](#generators--required-tools)).
 
 ---
 
@@ -334,13 +387,19 @@ and fonts; check the `error` column for the LibreOffice/Ghostscript output.
 
 ### SVGs never render
 `rsvg-convert` isn't on `PATH` — the capabilities probe shows `thumbs.svg:false`
-and rows are `skipped`. The stock `full` image omits librsvg; install it
-(`apk add rsvg-convert`) and re‑run with `--retry-skipped`.
+and rows are `skipped`. The stock `full` image ships librsvg, so this is a
+`:slim`, a bare‑binary or a custom image; install it (`apk add rsvg-convert`)
+and re‑run with `--retry-skipped`.
 
 ### PDF or video previews are blank / missing
 If the tool is entirely absent the file becomes a **placeholder** (`ready`), not
 a failure. If the tool is present but the row is **`failed`**, read the stored
-error — a broken PDF, an unreadable codec, or a permissions issue on the temp dir.
+error — a broken PDF, an unreadable codec, or a permissions issue on the temp
+dir. A run that exits zero without producing an image is now caught rather than
+stored as `ready`: the error names it (`ffmpeg exited 0 but wrote no frame`,
+`pdftoppm exited 0 but wrote no page`) and carries both renderers' own output,
+because gs and pdftoppm fail for different reasons and only one of them usually
+prints why.
 
 ### HEIC / AVIF images fail
 Go's decoder only handles JPEG, PNG, GIF, BMP, TIFF and WebP. HEIC/AVIF sources

@@ -8,7 +8,8 @@ recipient:
   folder without ever seeing its contents ("file‑drop" / "Request files").
 
 Both are created from the explorer's **Share / Permissions** dialog on any item
-(a share link needs ≥editor on the item).
+(a share link needs ≥editor on the item); a file request can also be started
+for the folder you are in from the navigation panel's **+ New → Request files**.
 
 - [Share links (download)](#share-links-download)
 - [File requests (upload / file-drop)](#file-requests-upload--file-drop)
@@ -19,7 +20,7 @@ Both are created from the explorer's **Share / Permissions** dialog on any item
 
 ## Share links (download)
 
-**Create.** Explorer → **Share / Permissions → Link**, or
+**Create.** Explorer → **Share / Permissions**, section **Link options**, or
 `POST /api/files/share`:
 
 ```jsonc
@@ -148,8 +149,9 @@ folder** — collecting documents, photos, submissions — without an account an
 folder is resolved server‑side from the token; the uploader can never influence
 the destination.
 
-**Create.** On a **folder**, Explorer → **Share / Permissions → Request files**,
-or `POST /api/files/share` with `kind: "drop"`:
+**Create.** On a **folder**, Explorer → **Share / Permissions**, section
+**Request files** — or **+ New → Request files** for the folder you are in — or
+`POST /api/files/share` with `kind: "drop"`:
 
 ```jsonc
 { "path": "s3://inbox",

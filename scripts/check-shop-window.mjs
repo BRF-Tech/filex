@@ -939,8 +939,8 @@ function checkScreenshots() {
       `${stale.length} README picture(s) have been out of date through ${STALE_RELEASES} or more releases:\n` +
         stale.map((s) => `      ${s}`).join('\n') +
         '\n    A stale screenshot is not missing information, it is WRONG information: the reader ' +
-        'takes it for the current product. Retake them with one command — `node e2e/shots/capture.mjs` ' +
-        '— then look at the PNGs before committing (docs/CONTRIBUTING.md → Release process, step 2).' +
+        'takes it for the current product. Retake them with one command — `pnpm shots` — then look at ' +
+        'the contact sheet it prints before committing (docs/CONTRIBUTING.md → Release process, step 2).' +
         '\n    ⚠ What this could not see: whether any picture is actually wrong. It compares commit ' +
         'dates, so a comment added to a component counts and a theme, font or browser change counts ' +
         'for nothing. Looking is still step 2.',

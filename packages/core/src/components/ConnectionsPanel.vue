@@ -26,6 +26,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { StorageRow } from '../types/Connections';
 import { useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { useConnections, connectionsOrigin } from '../composables/useConnections';
 import {
   buildGuide,
@@ -68,6 +69,7 @@ const {
   storages,
   visible,
   me,
+  publicUrl,
   loading,
   loaded,
   error,
@@ -274,7 +276,7 @@ const protocols = guideProtocols();
 const protocol = ref(protocols[0] ?? 'webdav');
 const guideStorage = ref<string>('');
 
-const origin = computed(() => connectionsOrigin(props.config));
+const origin = computed(() => connectionsOrigin(props.config, publicUrl.value));
 
 /**
  * What the S3 key panel published: the caller's own key, the endpoint the
@@ -387,7 +389,8 @@ watch(
         :aria-label="t('conn.close')"
         @click="emit('close')"
       >
-        ✕
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+        <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
       </button>
     </header>
 
@@ -670,6 +673,7 @@ watch(
         v-if="protocol === 'ftps' || protocol === 'webdav' || protocol === 'mount'"
         :config="config"
         :protocol="protocol"
+        :host="hostOf(origin)"
       />
 
       <ConnectionGuideView v-if="guide" :guide="guide" :locale="locale" />

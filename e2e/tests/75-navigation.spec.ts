@@ -58,7 +58,10 @@ test.describe('Navigation — root crumb + go-up', () => {
     // localised "Kök"/"Root", and it must sit directly above the path.
     const labels = (await crumbs.allInnerTexts()).map((s) => s.replace(/[›»]/g, '').trim());
     expect(labels, `crumbs were ${JSON.stringify(labels)}`).toContain(STORAGE_NAME);
-    expect(labels[0] === '/' ? labels[1] : labels[0]).toBe(STORAGE_NAME);
+    // The leading root crumb is an icon since 0.41.0 (no text), or "/" before
+    // it; the first NAMED crumb is the one that has to read as the adapter.
+    const named = labels.filter((l) => l !== '' && l !== '/');
+    expect(named[0]).toBe(STORAGE_NAME);
     expect(labels, 'a generic root label is the exact bug this pins').not.toContain('Kök');
     expect(labels, 'a generic root label is the exact bug this pins').not.toContain('Root');
   });

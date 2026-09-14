@@ -24,7 +24,7 @@ import type {
   Capabilities,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
-import { useFileApi, type GlobalSearchHit } from './composables/useFileApi';
+import { useFileApi, type GlobalSearchHit, type ManagerResponse } from './composables/useFileApi';
 import {
   useUploadChunked,
   isStagedUnsupported,
@@ -42,28 +42,50 @@ import PresenceBar from './components/PresenceBar.vue';
 import Toolbar, { type SelectionMode } from './components/Toolbar.vue';
 import StarButton from './components/StarButton.vue';
 import TagPicker from './components/TagPicker.vue';
+import {
+  activeSortDir,
+  activeSortKey,
+  applySort,
+  defaultSortDir,
+  globalSort,
+  setSortLocale,
+  type ListingOrder,
+} from './lib/sortOrder'; /* surucu:d1-sort */
+import {
+  attachViewPrefsStore,
+  folderKey as makeFolderKey,
+  folderMemoryEnabled,
+  folderPrefs,
+  rememberFolder,
+  touchFolder,
+  viewPrefsReady,
+} from './lib/viewPrefs'; /* tablo:t1 */
+import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
-import Breadcrumb from './components/Breadcrumb.vue';
-import ListView from './components/ListView.vue';
-import GridView from './components/GridView.vue';
-import FilterBar from './components/FilterBar.vue' /* surucu:d1 */;
-import ViewSwitcher from './components/ViewSwitcher.vue' /* surucu:d1 */;
 import {
   EMPTY_FILTERS,
   applyFilters,
   filtersActive,
   type DriveFilters,
 } from './lib/fileFilters' /* surucu:d1 */;
-import GalleryView from './components/GalleryView.vue'; /* wiring:d2 */
 import ContextMenu, { type ContextAction } from './components/ContextMenu.vue';
 import UploadProgress from './components/UploadProgress.vue';
 import PendingOpsTray from './components/PendingOpsTray.vue';
 import InspectorPanel from './components/InspectorPanel.vue'; /* koru:k1 */
-import SideNav from './components/SideNav.vue'; /* gezinti:g1 */
+import SideNav, { type NavDest } from './components/SideNav.vue'; /* gezinti:g1 */
+import HomeView from './components/HomeView.vue'; /* gorunum:v3-shell */
 import ConnectionsPanel from './components/ConnectionsPanel.vue'; /* gezinti:g1 */
 import TokensPanel from './components/TokensPanel.vue'; /* gezinti:g1 */
 /* cila:c wiring */
 import CommandPalette from './components/CommandPalette.vue';
+import AdvancedSearch from './components/AdvancedSearch.vue' /* gorunum:v1-advsearch */;
+import {
+  advQueryString,
+  advSearchTruncated,
+  type AdvCountResult,
+  type AdvScope,
+  type AdvSearchRequest,
+} from './lib/advSearch' /* gorunum:v1-advsearch */;
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
 /* wiring:c1 — tema galerisi */
@@ -76,6 +98,10 @@ import {
   type ThemeModePref,
 } from './lib/themes';
 /* /wiring:c1 */
+/* zaman:z3 — the embed's own time-zone setting + this instance's tiers */
+import TimeZoneDialog from './components/TimeZoneDialog.vue';
+import { useExplorerTimeZone } from './composables/useExplorerTimeZone';
+import { connectionsBase } from './composables/useConnections';
 /* wiring:c2 — shortcut settings modal + Space quick-look overlay */
 import ShortcutSettings from './components/ShortcutSettings.vue';
 import QuickLook from './components/QuickLook.vue';
@@ -89,7 +115,7 @@ import OnboardingTour from './components/OnboardingTour.vue';
 /* /wiring:c4 */
 /* wiring:d1 — tabs + per-tab split */
 import TabBar from './components/TabBar.vue';
-import SecondaryPane from './components/SecondaryPane.vue';
+import FilePane from './components/FilePane.vue';
 import { useTabs, type TabState } from './composables/useTabs';
 /* /wiring:d1 */
 /* wiring:e2 — end-to-end encrypted folders (docs/E2E-ENCRYPTION.md) */
@@ -127,17 +153,21 @@ import {
 import {
   filterListing,
   virtualSegmentLabel,
+  isVirtualViewPath,
   makeTagSegment,
   tagOfPath,
-  VIRTUAL_SEGMENTS,
   showHiddenFiles,
   setShowHiddenFiles,
   injectTrashRow,
   hydrateTrashRow as hydrateTrashRowShared,
 } from './lib/listing';
+import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
+import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
 import { setNodeStarred } from './lib/star';
 import { fetchAllTags, fetchTaggedRows, invalidateTagCache } from './lib/tags';
 import { resolveTransfer, type TransferIntent } from './lib/transfer';
+import { downloadArchive } from './lib/downloadSelection'; /* tasi:m1 */
+import { labelOfWire } from './lib/destinationTree'; /* tasi:m1 */
 import {
   activeNativeDrag,
   beginNativeDrag,
@@ -152,12 +182,14 @@ import {
 } from './lib/dragOut';
 
 import NewFolderModal from './modals/NewFolderModal.vue';
+import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
 import RenameModal from './modals/RenameModal.vue';
 import DeleteConfirmModal from './modals/DeleteConfirmModal.vue';
-import ShareModal from './modals/ShareModal.vue';
+import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirmation */
 import PreviewModal from './modals/PreviewModal.vue';
 import ConvertModal from './modals/ConvertModal.vue';
 import PermissionsModal from './modals/PermissionsModal.vue';
+import DestinationPickerModal from './modals/DestinationPickerModal.vue'; /* tasi:m1 */
 import { resolveLocale } from './locales/resolve';
 
 const props = defineProps<{
@@ -177,6 +209,23 @@ const emit = defineEmits<{
   // Lets a host (e.g. the Explore page's realtime layer) track the current
   // folder without reaching into internal state.
   (e: 'navigate', p: { path: string }): void;
+  /**
+   * gorunum:v2-topbar — the user asked for a refresh (the header's button or
+   * the palette's command; both reach `refreshAll`).
+   *
+   * The explorer reloads the LISTING itself; this is for the half it cannot
+   * know about. `config.storages` is the host's answer to "which drives may I
+   * show you", computed before the explorer was mounted, and nothing inside
+   * here can recompute it — so a drive added from somewhere else stayed
+   * invisible until the whole page was reloaded. The Explore page used to
+   * paper over that with a Refresh button of its own in the page bar; the bar
+   * is gone, so the one Refresh has to mean both halves.
+   *
+   * ⚠ A notification, not a request: the explorer does not wait for the host
+   * and does not care whether it does anything. An embedder with a fixed
+   * storage list simply ignores it.
+   */
+  (e: 'refresh'): void;
 }>();
 
 // --------------------------------------------------------------------
@@ -189,7 +238,17 @@ const api = useFileApi(props.config);
 // helpers) need `t()` at runtime, so the catalogue must be constructed before
 // they are wired. Depends only on props — safe this early.
 const locale = computed(() => resolveLocale(props.config.locale));
-const { t } = useLocale(locale);
+/* surucu:d1-sort — the alphabet the `type` key sorts in (lib/sortOrder sorts
+ * by the word the Type column PRINTS, so "Image" and "Görsel" each fall in
+ * their own order).
+ * ⚠ Pushed from HERE as well as from FilterBar and ListView, and that is not a
+ * third copy of a decision — it is one value, pushed by the component that
+ * always exists. This file is now the one that sorts; the filter row is absent
+ * at a virtual root and the list is absent in grid and gallery, so relying on
+ * either would leave the comparator on a stale alphabet exactly when they are
+ * not mounted. */
+watch(locale, (l) => setSortLocale(l), { immediate: true });
+const { t, formatSize } = useLocale(locale); /* tablo:t1 — the empty-trash confirmation names the space */
 
 // Live collaboration (WebSocket file-change events + presence), bundled into the
 // core so every consumer — the native panel AND the embedded webcomponent —
@@ -289,6 +348,20 @@ function retryLoad() {
 }
 
 const VIEW_MODE_KEY = 'brf-file-explorer:view-mode';
+/**
+ * tablo:t1 — true while a folder's REMEMBERED setup is being restored, as
+ * opposed to a person choosing one.
+ *
+ * ⚠⚠ Without this the whole design inverts. `brf-file-explorer:view-mode` is
+ * the GLOBAL default — what a folder nobody has configured opens as — and the
+ * per-folder memory is layered over it. If restoring a folder's grid view also
+ * wrote the global key, then merely WALKING INTO one folder you once set to
+ * grid would make grid the default for the entire product, and the person
+ * would have no way to tell which folder did it. Restoring is not choosing.
+ * The same flag also keeps the watcher below from re-recording what it just
+ * applied.
+ */
+let restoringFolderView = false;
 const viewMode = customRef<ViewMode>((track, trigger) => {
   let value: ViewMode = (() => {
     try {
@@ -307,10 +380,12 @@ const viewMode = customRef<ViewMode>((track, trigger) => {
     set(next) {
       if (next === value) return;
       value = next;
-      try {
-        localStorage.setItem(VIEW_MODE_KEY, next);
-      } catch {
-        /* quota */
+      if (!restoringFolderView) {
+        try {
+          localStorage.setItem(VIEW_MODE_KEY, next);
+        } catch {
+          /* quota */
+        }
       }
       trigger();
     },
@@ -338,15 +413,221 @@ const trashActive = computed(() => trashMode.value);
  * pattern is trashMode's, generalised — including the part that matters most,
  * that load() clears the mode, or the view sticks and every later navigation
  * renders under the wrong heading. */
-type NavView = '' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
+type NavView = '' | 'home' | 'recent' | 'starred' | 'shared' | 'trash' | 'tag';
 const navView = ref<NavView>('');
 /** Where the view was entered from, so "up" goes back there. */
 const navViewOrigin = ref<string>('');
+
+/**
+ * gorunum:v1 — when a row's NAME is not enough to know where it is.
+ *
+ * Recent, Starred, Shared with me and a tag view each draw rows gathered from
+ * every folder in the storage, so two files called `report.pdf` are two
+ * identical lines. The listing already knows how to print a row's folder — it
+ * did it for search hits only. Trash is left out on purpose: a trashed row's
+ * stored path is its trash key, not the folder it came from, so the column
+ * would print an internal name.
+ */
+const crossFolderView = computed(
+  () => navView.value !== '' && navView.value !== 'trash' && navView.value !== 'home',
+);
+
+/* === tablo:t1 — per-folder view memory ==================================
+ * "x folder'ında son görünüm nasıl kaldı ise öyle görünümde göstermemiz
+ * lazım." A folder opens the way you left it. The rule, the cap and the split
+ * between what is per-folder and what is a global preference are all argued in
+ * `lib/viewPrefs`; this is only the wiring — the two moments the explorer is
+ * the one that knows something: a navigation ended, and a person changed a
+ * view.
+ */
+
+/** An embed's opt-out. A product mounting filex in a two-inch panel does not
+ *  want a remembered gallery view arriving from somebody's main window. */
+const folderMemoryOn = computed(() => props.config.rememberFolderView !== false);
+
+/**
+ * The key the folder on screen is remembered under.
+ *
+ * `currentPath` is already the qualified `<storage>/<rel>` form, so the first
+ * segment is the storage ref — and the ref is swapped for the storage's
+ * immutable `uid` when the host supplies one (`config.storages[].uid`), which
+ * is the difference between a memory that survives a rename and one that does
+ * not. See the note on `folderKey` for what happens until it does.
+ *
+ * The virtual views (`.recent`, `.starred`, `.tag~x`) have no storage and so
+ * key on their own sentinel — which is how Recent gets a remembered sort of
+ * its own without a special case anywhere.
+ */
+const currentFolderKey = computed(() => {
+  if (!folderMemoryOn.value) return '';
+  const path = String(currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
+  if (!path) return '';
+  const [first, ...rest] = path.split('/');
+  const st = (props.config.storages ?? []).find((s) => s.name === first);
+  return makeFolderKey(st?.uid || first, rest.join('/'));
+});
+
+/** The GLOBAL default view mode — what a folder nobody has configured opens
+ *  as. Read from the same key the `viewMode` ref persists to, so there is one
+ *  answer rather than a second copy drifting beside it. */
+function globalViewMode(): ViewMode {
+  try {
+    const stored = localStorage.getItem(VIEW_MODE_KEY);
+    if (stored === 'list' || stored === 'grid' || stored === 'gallery') return stored;
+  } catch {
+    /* private mode */
+  }
+  return props.config.viewMode ?? 'list';
+}
+
+/** What we last RESTORED, so the recorder below can tell a restore's echo from
+ *  a person's choice.
+ *
+ * ⚠⚠ A signature and not a boolean flag, and the difference is a bug I would
+ * otherwise have shipped: Vue's watchers are asynchronous, so a `restoring =
+ * true … restoring = false` fence around the assignment is already back down
+ * by the time the recorder runs and every navigation would record itself as a
+ * deliberate choice — which would mean walking through a folder configures it.
+ * The `viewMode` setter's own guard CAN be a flag because a `customRef` setter
+ * runs synchronously inside the fence; these two need different mechanisms
+ * because they run at different times. */
+let appliedSig = '';
+
+function viewSig(key: string): string {
+  return `${key}|${viewMode.value}|${activeSortKey()}|${activeSortDir()}`;
+}
+
+/** A navigation ended: put this folder back the way it was left. */
+function applyFolderView(key: string) {
+  if (!key) return;
+  touchFolder(key); // LRU clock — only bumps folders already remembered
+  const p = folderPrefs(key);
+  restoringFolderView = true;
+  try {
+    /* ⚠ The `else` halves matter as much as the `if`s. Without them a folder
+     * with no memory of its own would inherit whatever the PREVIOUS folder was
+     * restored to — walk from a remembered gallery into a plain folder and it
+     * comes up as a gallery, which reads as the memory leaking rather than as
+     * a default holding. A folder with no memory follows the global default,
+     * and that has to be asserted, not assumed. */
+    const wantView = p?.v ?? globalViewMode();
+    if (wantView !== viewMode.value) viewMode.value = wantView;
+    if (p?.k) applySort(p.k, p.d ?? defaultSortDir(p.k));
+    else {
+      const g = globalSort();
+      applySort(g.key, g.dir);
+    }
+  } finally {
+    restoringFolderView = false;
+  }
+  appliedSig = viewSig(key);
+}
+
+/**
+ * tablo:t1 — hand `lib/viewPrefs` its transport.
+ *
+ * The document lives on the user row (migration 00039), so this is the one
+ * place that knows the base URL, the auth headers and the credentials mode.
+ * Started in `onMounted`, i.e. in the same turn as the first listing — the
+ * prefs are a single row and the listing has to walk a storage, so the prefs
+ * land first in practice, and nothing is applied to a folder until they do.
+ */
+onMounted(() => {
+  const base = props.config.apiBase ?? '';
+  const url = `${base}/api/files/manager/view-prefs`;
+  attachViewPrefsStore({
+    async load() {
+      const res = await fetch(url, {
+        headers: await buildAuthHeaders(),
+        credentials: api.credentialsMode(),
+      });
+      /* ⚠ A 401 is not an error here, it is an ANSWER: an app token or a
+       * public share link has no person to remember anything for. Returning
+       * null degrades to "remember nothing, write nothing", which is what the
+       * module does with it — no retry loop, no console noise. */
+      if (!res.ok) return null;
+      const body = (await res.json()) as { prefs?: unknown };
+      return body?.prefs ?? null;
+    },
+    save(doc) {
+      void (async () => {
+        try {
+          const payload = JSON.stringify({ prefs: doc });
+          await fetch(url, {
+            method: 'PUT',
+            headers: { ...(await buildAuthHeaders()), 'Content-Type': 'application/json' },
+            credentials: api.credentialsMode(),
+            body: payload,
+            /* ⚠ `keepalive` is what lets the save fired on `pagehide` outlive
+             * the page — but browsers cap a keepalive body at 64 KB and reject
+             * the request outright above it. The document is capped far below
+             * that (300 folders ≈ 33 KB), so this only ever guards the
+             * pathological case; sending it without keepalive is strictly
+             * better than having it rejected. */
+            keepalive: payload.length < 60000,
+          });
+        } catch {
+          /* Fire and forget. A view preference is never worth a toast, and the
+             next save carries the whole document again. */
+        }
+      })();
+    },
+  });
+});
+
+/* ⚠ `flush: 'post'` so this is the LAST word in the tick. A tab switch sets
+ * the path and the tab's own remembered view mode in the same turn; running
+ * before it would apply the folder's memory and then have the tab overwrite
+ * it, which is the one arrangement in which the feature silently does nothing
+ * on exactly the gesture people use most.
+ *
+ * ⚠⚠ `viewPrefsReady()` is a DEPENDENCY, not a guard, and that is what stops
+ * the flash the other way round: the first folder is usually open before the
+ * document lands, so this has to re-run when it does. Reading it here means
+ * the applier fires once more the moment the answer exists, and the folder
+ * settles into its remembered view without anybody having navigated again. */
+watch(
+  [currentFolderKey, () => viewPrefsReady()],
+  ([key, rdy]) => {
+    if (!rdy) return;
+    applyFolderView(key);
+  },
+  { immediate: true, flush: 'post' },
+);
+
+/** A person changed a view. Record it against the folder — and note that the
+ *  GLOBAL default was already written by the control they used (`setSort`
+ *  persists; the `viewMode` setter persists), which is what makes "Apply to
+ *  all folders" a pure forget rather than a second write. */
+watch(
+  () => [currentFolderKey.value, viewMode.value, activeSortKey(), activeSortDir()] as const,
+  ([key, v, k, d]) => {
+    /* ⚠ Nothing is recorded before the document has landed. Until then the
+     * state on screen is this session's defaults, not the person's choices,
+     * and writing it back would overwrite everything they had arranged with
+     * whatever the app happened to boot into. */
+    if (!key || !viewPrefsReady()) return;
+    const sig = viewSig(key);
+    if (sig === appliedSig) return; // the restore, echoing back
+    appliedSig = sig;
+    rememberFolder(key, { v, k, d });
+  },
+  /* ⚠⚠ `post`, and registered AFTER the applier, for a reason that is not
+   * stylistic. A navigation changes `currentFolderKey`, which is a dependency
+   * of BOTH watchers. Left pre-flush this one would run first, while the view
+   * state is still the folder you just LEFT, and write that folder's view mode
+   * and sort against the folder you just arrived in — every walk through the
+   * tree quietly configuring the next folder with the last one's setup. Post
+   * puts the applier first; by the time this runs, `appliedSig` matches and it
+   * correctly does nothing. */
+  { flush: 'post' },
+);
 /** The tag being browsed while navView === 'tag' ('' otherwise). */
 const navTag = ref<string>('');
 /** Sentinel parked in `dirname` so the breadcrumb can label the view. The tag
  *  view's sentinel is built per tag (`makeTagSegment`) — see lib/listing. */
 const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> = {
+  home: '.home',
   recent: '.recent',
   starred: '.starred',
   shared: '.shared',
@@ -360,12 +641,16 @@ const NAV_VIEW_DIRNAME: Record<Exclude<NavView, '' | 'trash' | 'tag'>, string> =
  * true of the four shipped views; the tag view would have inherited it.)
  */
 function virtualViewOf(path: string): { kind: Exclude<NavView, ''>; tag: string } | null {
+  /* ⚠ The "is this a sentinel at all?" half is `lib/listing`'s
+     `isVirtualViewPath`, not a second reading of the map here: FilePane has to
+     answer the same question before it qualifies a path (a qualified sentinel
+     becomes an adapter and stops being translatable), and two answers to it is
+     how the breadcrumb ended up printing `.starred`. This function adds only
+     what the panel needs on top: WHICH view. */
+  if (!isVirtualViewPath(path)) return null;
   const clean = String(path ?? '').replace(/^\/+|\/+$/g, '');
-  if (!clean) return null;
   const tag = tagOfPath(clean);
   if (tag) return { kind: 'tag', tag };
-  const key = VIRTUAL_SEGMENTS[clean];
-  if (!key) return null;
   const kind = clean.slice(1) as Exclude<NavView, '' | 'tag'>;
   return { kind, tag: '' };
 }
@@ -400,10 +685,47 @@ const atVirtualRoot = computed(() => {
   // gezinti:g1 — a virtual view (Recent / Starred / Shared with me) has no
   // backend folder behind it either. "New folder" there would have to invent a
   // destination, and "upload" would have to guess one.
+  //
+  // ⚠ gorunum:v3-shell — Home is in that set, and it is now the LANDING view,
+  // so the "+ New" menu opens with its three rows disabled on the first screen
+  // a person sees. That is deliberate and it is not a bug to "fix" by picking
+  // a drive: with several storages there is no honest answer to "upload where",
+  // and an entry that silently chose one would put somebody's file in a place
+  // they did not name. (With exactly one visible storage the question does not
+  // arise — `soleStorageName` opens that storage as the root, so "My files" is
+  // a real folder.) The reference stand enables it because it has one drive.
   if (navView.value && navView.value !== 'trash') return true;
   if (!multiStorageRoot.value) return false;
   return !((currentPath.value ?? '').replace(/^\/+|\/+$/g, ''));
 });
+
+/* surucu:d1-scope — WHERE THE FILTER ROW IS DRAWN, 2026-09-13.
+ *
+ * ⚠⚠ There is no longer a LIST of places. The row is drawn everywhere, and the
+ * only question left is which SHAPE it takes — and that is answered by what the
+ * rows are, not by which view you are in:
+ *
+ *     rows are files  → the whole row (Type · People · Modified · Size · find ·
+ *                       sort · ⋮). A folder, the trash, Starred, Shared,
+ *                       Recent, a tag — "it is a listing like any other"
+ *                       (owner, on the tag view), and the four chips answer
+ *                       from fields those rows carry.
+ *     rows are not    → the name box alone. The drive list (each row is a
+ *                       storage) and Home (three blocks of cards).
+ *
+ * ⚠ It used to be `!atVirtualRoot`, which is a different question altogether:
+ * that flag answers "is there a backend folder here to create in / upload to".
+ * Borrowing it cost the row its place in six views at once, including the two
+ * the owner asked for it back in ("root folder'da filtre barı kalsın … orada
+ * adam isterse storage ismi aratabilir" and "Home sayfasında da filtreleme
+ * barını getirelim").
+ */
+/** Home's body is three blocks of cards, not a listing — name box only. The
+ *  drive root reaches the same shape through the pane's own `atVirtualRoot`,
+ *  because a pane knows when it is showing drives and both panes can be. */
+const filterRowMode = computed<'full' | 'find'>(() =>
+  navView.value === 'home' ? 'find' : 'full',
+);
 
 function goUp() {
   // Leaving the trash view returns to the storage it was opened from, not the
@@ -428,7 +750,45 @@ function goUp() {
   void load(parent);
 }
 
-const selection = useSelection(() => files.value);
+/**
+ * gorunum:v1 — what the ACTIVE view is showing, in the order it shows it.
+ *
+ * A shift-range is arithmetic over a list, and this used to run it over
+ * `files` — the backend's answer — while the user was looking at a sorted or
+ * folder-hoisted one. Measured on a seeded storage: shift-clicking the first
+ * and fourth visible rows selected eight, because the folder the view had
+ * lifted to the top still sat last in `files`. The view now says what it drew
+ * (`display-order`) and the range is computed over that; `files` remains the
+ * fallback for the moment before the first paint and for surfaces that publish
+ * nothing.
+ */
+const displayOrder = ref<FileNode[]>([]);
+
+/**
+ * gorunum:v1 — where the previewed file sits in what the user is looking at.
+ *
+ * Counted over the DISPLAYED order, not over `files`: the viewer's "3 of 9"
+ * and its chevrons have to agree with the listing behind them, and that order
+ * is the view's, not the backend's. Directories are skipped — the viewer
+ * cannot open one, so counting them would promise a step that does nothing.
+ */
+const previewables = computed<FileNode[]>(() =>
+  (displayOrder.value.length ? displayOrder.value : files.value).filter((n) => n.type !== 'dir'),
+);
+const previewPosition = computed(() => {
+  const list = previewables.value;
+  const path = previewTarget.value?.path;
+  const i = path ? list.findIndex((n) => n.path === path) : -1;
+  return { index: i === -1 ? 0 : i + 1, total: i === -1 ? 0 : list.length };
+});
+function onPreviewNav(delta: number) {
+  const list = previewables.value;
+  const i = list.findIndex((n) => n.path === previewTarget.value?.path);
+  if (i === -1) return;
+  const next = list[i + delta];
+  if (next) previewTarget.value = next;
+}
+const selection = useSelection(() => (displayOrder.value.length ? displayOrder.value : files.value));
 watch(
   () => [...selection.selected.value],
   () => {
@@ -446,6 +806,15 @@ watch(
 const clipboard = ref<ClipboardState>({ mode: null, items: [], sourcePath: null });
 
 const capabilitiesData = ref<Capabilities | null>(null);
+/* zaman:z3 — the two clock tiers only an explorer instance can know: the zone
+ * its host configured, and the account behind its credential when that
+ * credential is a person's. Ranked in lib/timezone, never here. */
+const showTimeZone = ref(false);
+useExplorerTimeZone({
+  config: () => props.config,
+  capabilities: capabilitiesData,
+  fetchMe: () => api.jsonFetch(`${connectionsBase(props.config)}/api/auth/me`),
+});
 // Longest life a new share link may be given (server setting, days; 0 = no
 // ceiling). Both share dialogs derive their expiry choices from it.
 const shareMaxTtlDays = computed(() => capabilitiesData.value?.share_max_ttl_days ?? 0);
@@ -598,6 +967,27 @@ function openTagPickerFor(n: FileNode) {
  * notices. Drop it and re-ask; if a tag view is on screen, refresh it too —
  * removing a file's tag has to remove it from the listing that is named after
  * that tag. */
+/**
+ * etiket:t1 — "show me everything tagged this", from a FILE.
+ *
+ * ⚠⚠ The missing half of the tag feature, reported 2026-09-13 ("taglediğim
+ * dosya klasör tag'ine gitmiyor"): the view existed, the panel's Tags section
+ * listed every tag, and from a file's own chip there was no way in — you had to
+ * read the word off the chip and go find it again in the panel.
+ *
+ * ⚠ It is `loadTagView`, not a variant of it. The panel's Tags section, a
+ * restored tab, a pasted `#.tag~invoices` and now a chip all land in the one
+ * loader, so there is one definition of what a tag view IS.
+ *
+ * ⚠ The modal is closed on the way. It is opened over a listing to EDIT tags;
+ * once the chip has navigated, leaving it up means a dialog about one file
+ * covering the view of all the others that share its tag.
+ */
+function openTagView(tag: string) {
+  showTagPicker.value = false;
+  void loadTagView(tag);
+}
+
 function onNodeTagsChanged() {
   invalidateTagCache();
   void loadNavTags(true);
@@ -651,29 +1041,48 @@ const effectiveConvertUrl = computed<string | null>(
   () => props.config.convertBase || capabilitiesData.value?.convert_url || null,
 );
 
+/* belge:n1 — what the SERVER can create, crossed with what WE could open.
+ * `null` (a backend older than the feature) hides the entry entirely. */
+const newDocTypes = computed(() => capabilitiesData.value?.newdoc_types ?? null);
+const canNewDocument = computed(() => {
+  const list = newDocTypes.value;
+  if (!list || list.length === 0) return false;
+  return list.some((ty) =>
+    ty.requires === 'onlyoffice'
+      ? !!effectiveOnlyOfficeBase.value
+      : ty.requires === 'drawio'
+        ? !!effectiveDrawioUrl.value
+        : true,
+  );
+});
+
 // Upload
 const uploadJobs = ref<UploadJob[]>([]);
 const fileInputEl = ref<HTMLInputElement | null>(null);
 
 // Modals
 const showNewFolder = ref(false);
+const showNewDocument = ref(false); /* belge:n1 */
 const showRename = ref(false);
 const showDelete = ref(false);
-const showShare = ref(false);
 const showPreview = ref(false);
 const renameTarget = ref<FileNode | null>(null);
 /* ui-fix — does the open rename/delete/new-folder modal belong to the side
  * pane? (the menu is identical to the main pane's; this routes the mutation
  * to the right one.) */
 const mutationInPane = ref(false);
-const shareTarget = ref<FileNode | null>(null);
-const activeShare = ref<(ShareInfo & { url: string; filename?: string }) | null>(null);
 const previewTarget = ref<FileNode | null>(null);
 const previewMode = ref<'edit' | 'view'>('edit');
 const showConvert = ref(false);
 const convertTarget = ref<FileNode | null>(null);
 const showPerm = ref(false);
 const permTarget = ref<FileNode | null>(null);
+/* tasi:m1 — "Move to…" / "Copy to…" ask the SAME dialog where; only the mode
+ * differs, so there is one piece of state and not two dialogs. */
+const showDestPicker = ref(false);
+const destPickerMode = ref<'move' | 'copy'>('move');
+const destPickerTargets = ref<FileNode[]>([]);
+const destPickerBusy = ref(false);
 
 /* === koru:k1 — inspector (details) panel ===
  * Open/closed preference persists under `filex.inspector`; the panel itself
@@ -717,19 +1126,28 @@ function closeInspector() {
  * existing UI keeps its width when somebody does not want it (GitHub #14).
  *
  * The panel is NOT gated on role or profile: administrators get it too, and
- * `uiProfile` only changes the rest of the chrome. Gating it would be exactly
- * the "one behaviour on one surface" split this shared package exists to
- * prevent. */
-const uiProfile = computed(() => props.config.uiProfile ?? 'standard');
+ * so is everything else the header and the panel draw. Gating any of it would
+ * be exactly the "one behaviour on one surface" split this shared package
+ * exists to prevent — which is precisely what a per-role profile in the web
+ * app turned out to be. */
+const uiProfile = computed(() => resolveUiProfile(props.config.uiProfile));
 /**
- * ⚠ `drive` answers TRUE here. It is a superset of `simple`, so every question
- * `simple` already answers ("one pane?", "no tab strip?", "list and grid
- * only?") must keep the same answer under it — asking `=== 'simple'` in those
- * places is how the drive profile would silently grow a split pane the day
- * somebody adds a fourth condition. `driveShell` is only for what `drive` adds
- * on TOP.
+ * Is this the REDUCED explorer — one pane, one folder, list/grid only?
+ *
+ * ⚠⚠ This is the only question `uiProfile` still answers, and it is a question
+ * about REDUCTION, never about LOOK. The shell (the header with its one search
+ * field, the filter row, "+ New", the Folders/Files sections, the info panel's
+ * tabs, the storage line) is what filex IS — it is not a profile anything can
+ * be put into, so nothing below reads a profile to decide whether to draw it.
+ * The day that distinction blurs again, the profiles become two products with
+ * one name, which is exactly what this pass undid.
+ *
+ * ⚠ There are TWO values, and the rule for everything else — a typo, or the
+ * profile removed after v0.40.0 — lives in `lib/uiProfile` together with the
+ * argument for it. Nothing here branches on a retired name; this file asks one
+ * question of a value that has already been resolved.
  */
-const simpleUi = computed(() => uiProfile.value === 'simple' || uiProfile.value === 'drive');
+const simpleUi = computed(() => uiProfile.value === 'simple');
 
 /**
  * ⚠ `showInfoPanel` is documented public API ("whether the info panel toggle
@@ -740,8 +1158,13 @@ const simpleUi = computed(() => uiProfile.value === 'simple' || uiProfile.value 
  * reachable from the context menu, which is what the option says.
  */
 const infoPanelToggle = computed(() => props.config.showInfoPanel !== false);
-/* === surucu:d1 — the Drive shell (GitHub #14, the reporter's mockups) ===== */
-const driveShell = computed(() => uiProfile.value === 'drive');
+/* === surucu:d1 — the shell (GitHub #14, the reporter's mockups) ===========
+ * There is no `driveShell` computed any more, and its absence is the point:
+ * the filter row, "+ New", the info-panel tabs and the storage line are drawn
+ * because this is filex, not because a caller passed a string. Grep for
+ * `surucu:d1` to find them; every one of them is now unconditional or gated on
+ * something real (a folder to filter, a person to have a quota).
+ */
 
 const SIDENAV_LS_KEY = 'filex.sidenav';
 const sideNavExpanded = ref<boolean>(
@@ -920,12 +1343,70 @@ watchEffect(() => {
  * folder look empty, and the reason is off-screen the moment you scroll.
  */
 const driveFilters = ref<DriveFilters>({ ...EMPTY_FILTERS });
-const filtersOn = computed(() => driveShell.value && filtersActive(driveFilters.value));
-/** What the views render. Identical reference to `files` when nothing is set. */
-const displayFiles = computed<FileNode[]>(() =>
-  driveShell.value ? applyFilters(files.value, driveFilters.value) : files.value,
-);
+/* gorunum:v1-advsearch — declared HERE, beside the row's own state, and not
+   down with the rest of the dialog's wiring: `filtersOn` and `displayFiles`
+   read them, and a ref declared after a computed that touches it is the exact
+   "Cannot access X before initialization" this file was taken down by once
+   before (see the navVisible watcher note in onMounted). */
+const advFilters = ref<DriveFilters | null>(null);
+const advScope = ref<AdvScope>('name');
+/**
+ * surucu:d1-sort — WHERE THE ROWS IN HAND GOT THEIR ORDER, and the only place
+ * in the bundle that knows. `files` is a search answer exactly when
+ * `searchQuery` is set (`load()` picks `action=search` / `/api/files/search`
+ * off that same ref), and a search answer is RANKED: the backend scores every
+ * candidate (`internal/search/scorer.go`, ported from VS Code's Quick Open)
+ * and returns best-first.
+ *
+ * ⚠⚠ Owner's ruling, 2026-09-12, verbatim (translated from Turkish): "the
+ * filter in advanced search should belong to it alone. The other, ordinary
+ * search and the ⌘K side must stay in relevance order." Measured the next day
+ * on qldemo with the query `s`: the server ranked `Documents/server.ts` first
+ * and the list drew it FIFTEENTH of seventeen, because the active sort key was
+ * applied to everything the listing shows. Nothing looked broken — the grid
+ * and the list agreed with each other and every test was green — because
+ * re-alphabetising a ranked list is indistinguishable from sorting a folder.
+ *
+ * ⚠ Both scopes, one answer: the advanced dialog's content search lands in
+ * `files` through this same ref, so it is covered without a second rule. The
+ * ⌘K palette never needed one — it renders its own hits straight from
+ * `paletteGlobalSearch` and reaches for no comparator (verified, not assumed).
+ *
+ * ⚠ Declared HERE, above `displayFiles`, for the reason the `advFilters` note
+ * above gives: a ref/computed declared after the computed that reads it is the
+ * "Cannot access X before initialization" this file was taken down by once.
+ *
+ * ⚠ And NOT a module-level flag in `lib/sortOrder`: the split view's secondary
+ * pane only ever lists (`SecondaryPane.loadPane` calls `index`), so a global
+ * "we are searching" would silently unsort the pane that is not.
+ */
+const listingOrder = computed<ListingOrder>(() => (searchQuery.value ? 'relevance' : 'sort'));
+/* pane:p1 — `filtersOn` and `displayFiles` USED TO LIVE HERE, and they are the
+ * clearest example of what this refactor is for: they compose the filter row's
+ * narrowing, the advanced dialog's narrowing and the sort into the rows a
+ * listing draws — a PANE's job, done once in the host, which is why the split
+ * view's right-hand half had no filter row for two months and would have had
+ * to grow a second copy of this to get one. They are `FilePane`'s
+ * `displayFiles` / `filtersOn` now, and every pane has them.
+ *
+ * ⚠ `advFilters` stays here, and it is not an exception: it belongs to the
+ * advanced SEARCH, which is the window's (one search field, one dialog, one
+ * set of results). It is handed to the main pane as `extra-filters`, which is
+ * a narrowing composed AFTER the pane's own chips rather than instead of them.
+ * ⚠ `listingOrder` stays here for the same reason and is passed as `order`:
+ * whether the rows in hand were RANKED by the server is a fact about the
+ * answer the host fetched, not a preference the pane holds. The split pane
+ * only ever lists a folder, so it is never in relevance mode — which is
+ * exactly why a global "we are searching" flag would have been wrong.
+ */
+
+/* gorunum:v2-topbar / pane:p1 — the breadcrumb's "Subfolders" chevron used to
+ * be fed from here, which is why only the left-hand pane had one: the host
+ * knows ONE folder's listing and there are two panes. It is derived inside
+ * `FilePane` now, from the rows that pane is holding. */
+
 function clearDriveFilters() {
+  advFilters.value = null /* gorunum:v1-advsearch — the escape hatch clears BOTH */;
   setDriveFilters({ ...EMPTY_FILTERS });
 }
 function setDriveFilters(v: DriveFilters) {
@@ -938,8 +1419,168 @@ watch(
   () => `${currentPath.value}|${navView.value}`,
   () => {
     if (filtersActive(driveFilters.value)) driveFilters.value = { ...EMPTY_FILTERS };
+    /* gorunum:v1-advsearch — the advanced filters belong to the search that
+       set them, so they survive the rebase a search causes (a search moves
+       `currentPath` to the storage root, which is what fires this watcher) and
+       are dropped the moment there is no search left to belong to. */
+    if (!searchQuery.value) advFilters.value = null;
   },
 );
+
+/* === gorunum:v1-advsearch — the Advanced search dialog ===================
+ *
+ * One results surface: whatever the dialog asks for lands in `files` through
+ * the same `load()` a toolbar search lands in. There is no second list, no
+ * "search results" page and no separate empty state — the dialog composes a
+ * query, the explorer runs it, and the rows arrive where rows always arrive.
+ *
+ * Two things the dialog cannot do itself, and they live here because this is
+ * where the API client is:
+ *
+ *  1. **Scope routing.** `name` is served by the manager's
+ *     `?action=search&filter=…`, which is what the toolbar already uses and
+ *     what returns adapter-qualified rows. `content`/`all` exist ONLY on
+ *     `/api/files/search` (the manager's search action hardcodes
+ *     `search.ScopeName`), whose rows are raw node rows — so they are mapped
+ *     onto the listing shape below.
+ *  2. **The live count**, which is a real query. See `advSearchCount`.
+ */
+const showAdvSearch = ref(false);
+/** The folder the dialog was opened from, frozen for its lifetime. */
+const advPathBase = ref('');
+
+/**
+ * Whether the content scopes may be offered at all.
+ *
+ * ⚠ This USED to be a capability check: `/api/files/search` answered with a
+ * `storage_id` and no storage name, the explorer has no id→name map, and a row
+ * wearing the wrong drive's name is worse than a scope we did not offer — so
+ * the tabs were gated to single-storage installs, where the guess could not be
+ * wrong. `handlers/search.go` now labels every hit with its drive's name (and
+ * its owner) in `describeHits`, so there is nothing left to guess and the
+ * scopes are offered everywhere. Kept as a computed rather than deleted: the
+ * prop is public API, and an embedder pointed at an older backend still gets
+ * hits with no `storage` — which `advHitToNode` falls back for, row by row.
+ */
+const advContentAvailable = computed(() => true);
+
+/** How many hits we ask the content endpoint for. The manager's search action
+ *  uses 250 internally; matching it keeps the two scopes comparable. */
+const ADV_CONTENT_LIMIT = 250;
+
+/** Map one raw search hit onto the listing shape.
+ *
+ *  ⚠ The drive comes from the HIT (`describeHits` puts it there), not from the
+ *  pane we happen to be standing in — a content search spans storages, so
+ *  `adapter.value` is only the right answer by accident. It stays as the
+ *  fallback for a backend older than that field. */
+function advHitToNode(h: GlobalSearchHit, storageName: string): FileNode {
+  const rel = String(h.path ?? '').replace(/^\/+/, '');
+  const drive = typeof h.storage === 'string' && h.storage ? h.storage : storageName;
+  const name = String(h.name ?? rel.split('/').pop() ?? '');
+  const dot = name.lastIndexOf('.');
+  const mtime = typeof h.backend_mtime === 'string' ? h.backend_mtime : h.updated_at;
+  const ms = typeof mtime === 'string' ? Date.parse(mtime) : NaN;
+  return {
+    id: typeof h.id === 'number' ? h.id : undefined,
+    path: drive ? `${drive}://${rel}` : rel,
+    basename: name,
+    relativePath: rel,
+    type: h.type === 'dir' ? 'dir' : 'file',
+    extension: dot > 0 ? name.slice(dot + 1).toLowerCase() : '',
+    size: typeof h.size === 'number' ? h.size : 0,
+    // ⚠ Left UNSET when the row carries no parseable timestamp rather than
+    // defaulted to 0 or to now: `matchesModified` treats a missing timestamp
+    // as "unknown" and drops the row from a date filter, which is the honest
+    // answer. Stamping it with `Date.now()` would file every such file under
+    // "Today".
+    last_modified: Number.isNaN(ms) ? undefined : ms,
+    mime_type: typeof h.mime === 'string' ? h.mime : '',
+    /* The content snippet the hit came with, so a content match can show why
+       it matched. Undefined on name-only hits, exactly as the backend sends. */
+    snippet: typeof h.snippet === 'string' && h.snippet ? h.snippet : undefined,
+    /* Owner, so the People filter and the Owner column mean the same thing in a
+       content result as they do in a folder listing. Undefined rather than
+       guessed when the backend does not send it. */
+    owner_id: typeof h.owner_id === 'number' ? h.owner_id : undefined,
+    owner_name: typeof h.owner_name === 'string' ? h.owner_name : undefined,
+    owner_self: h.owner_self === true ? true : undefined,
+  };
+}
+
+/** Run one advanced search and hand back the rows, unfiltered. */
+async function advFetchRows(scope: AdvScope, query: string, target: string): Promise<FileNode[]> {
+  if (scope === 'name') {
+    const resp = await api.search(target, query);
+    return filterListing(resp.files);
+  }
+  const hits = await api.globalSearch(query, { limit: ADV_CONTENT_LIMIT, scope });
+  const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
+  return filterListing(hits.map((h) => advHitToNode(h, storageName)));
+}
+
+/** The target `load()` would use for the current position. */
+function advTarget(): string {
+  const requested = currentPath.value ?? '';
+  return multiStorageRoot.value ? virtualToWire(requested) : qualify(requested);
+}
+
+/**
+ * The dialog's live count — a REAL query, not an estimate.
+ *
+ * ⚠ It costs exactly what pressing Search costs: the same request, the same
+ * rows, the same client-side narrowing. There is no cheaper way to answer it —
+ * neither endpoint has a count mode — so the dialog prints that the number is
+ * produced by running the search rather than letting it look free.
+ *
+ * `capped` is the other half of the honesty: when the server returned as many
+ * hits as it was allowed to, the client-side filters narrowed a window and the
+ * number describes the rows that came back, not the storage.
+ */
+async function advSearchCount(req: AdvSearchRequest): Promise<AdvCountResult> {
+  const query = advQueryString(req);
+  const rows = await advFetchRows(req.scope, query, advTarget());
+  const limit = req.scope === 'name' ? 250 : ADV_CONTENT_LIMIT;
+  return {
+    count: applyFilters(rows, req.filters).length,
+    capped: advSearchTruncated(rows.length, limit),
+  };
+}
+
+function openAdvancedSearch(seed: string) {
+  advPathBase.value = qualify(currentPath.value ?? '') || '';
+  advSearchSeed.value = seed;
+  showAdvSearch.value = true;
+}
+const advSearchSeed = ref('');
+
+function applyAdvancedSearch(req: AdvSearchRequest) {
+  showAdvSearch.value = false;
+  advScope.value = req.scope;
+  advFilters.value = filtersActive(req.filters) ? { ...req.filters } : null;
+  const q = advQueryString(req);
+  // Same text as the box already holds → the `searchQuery` watcher will not
+  // fire, so the reload (which the new scope/filters need) is issued here.
+  if (q === searchQuery.value) void load();
+  else searchQuery.value = q;
+}
+
+/** Typing in the toolbar field is a plain search again — it replaces whatever
+ *  the dialog set rather than silently inheriting filters the user cannot see
+ *  from a box that shows only words. */
+function onToolbarSearch(v: string) {
+  advFilters.value = null;
+  advScope.value = 'name';
+  /* gorunum:v3-shell — Home has no listing behind it, and `searchQuery` is
+     watched by `load()`. Setting it here re-entered loadNavView('home') on
+     every keystroke — two fetches per pause, for a narrowing that could not
+     appear anywhere. The words are not lost: Enter hands them to the command
+     palette (Toolbar `searchEscalates`), which is the "everywhere" search the
+     field's own ⌘K chip advertises. */
+  if (navView.value === 'home') return;
+  searchQuery.value = v;
+}
+/* === /gorunum:v1-advsearch === */
 
 /**
  * surucu:d1 — what the header field says it will search: the folder you are
@@ -948,6 +1589,10 @@ watch(
  * searches what is on screen.
  */
 const driveScopeLabel = computed(() => {
+  /* gorunum:v3-shell — Home is not a place to search IN. Its three blocks are
+     an overview of everything, so "Search in Home" would name a scope that
+     does not exist; the placeholder falls back to the everywhere wording. */
+  if (navView.value === 'home') return '';
   if (navView.value === 'tag') return navTag.value;
   if (navView.value) return t(`sidenav.${navView.value}`);
   const rel = currentPath.value.replace(/\/+$/, '');
@@ -996,15 +1641,15 @@ function onInspectorShareCreated(payload: { path: string; url: string }) {
 }
 
 /* === surucu:d1 — the storage line under the navigation ==================
- * Fetched once per mount, and ONLY in the drive shell: no other profile draws
- * it, and an explorer that has drawn this panel for a year should not start
- * making a request it has no use for. `quotaMe()` answers null for a server
- * without the route or a caller without a person behind it, and null renders
- * nothing at all.
+ * Fetched once per mount. The gate is `identitySurfaces` and nothing else: a
+ * quota is one PERSON's ceiling, so an app token has nobody to have one, but
+ * every surface that has a person behind it draws the same line — this is the
+ * shell, not a profile. `quotaMe()` answers null for a server without the
+ * route, and null renders nothing at all.
  */
 const quotaSnapshot = ref<{ used: number; total: number; unlimited: boolean } | null>(null);
 async function loadQuota() {
-  if (!driveShell.value || !identitySurfaces.value) {
+  if (!identitySurfaces.value) {
     quotaSnapshot.value = null;
     return;
   }
@@ -1040,6 +1685,15 @@ async function loadQuota() {
  * safe fallback is the single-storage case — guessing in a multi-storage
  * install sends the user to a path in somebody else's drive.
  */
+/** tablo:t1 — an RFC3339 stamp from a node row as unix ms, or undefined. A
+ *  string we cannot parse is left undefined rather than turned into `NaN`,
+ *  which would print as "Invalid Date" and sort unpredictably. */
+function rowMillis(v: unknown): number | undefined {
+  if (typeof v !== 'string' || !v) return undefined;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
 function nodeRowToFileNode(row: Record<string, unknown>): FileNode | null {
   const rel = String(row?.path ?? '').replace(/^\/+/, '');
   if (!rel) return null;
@@ -1058,6 +1712,17 @@ function nodeRowToFileNode(row: Record<string, unknown>): FileNode | null {
   return {
     type: isDir ? 'dir' : 'file',
     id,
+    /* tablo:t1 — ⚠⚠ THE DATE. A node row carries `backend_mtime` (what the
+       storage says) and `db_mtime` (what our last scan recorded) as RFC3339
+       strings; `FileNode.last_modified` is unix MILLISECONDS. Nothing mapped
+       between the two, so every row from Recent, Starred and a tag view
+       arrived with no date at all — measured on Recent: eleven rows, eleven em
+       dashes in the Modified column, and a Modified column header you could
+       click that then sorted nothing. It also made the date grouping this view
+       is supposed to show impossible, because every row fell in the "No date"
+       bucket. Storage first: `backend_mtime` is the file's own truth and
+       `db_mtime` only says when we last looked at it. */
+    last_modified: rowMillis(row.backend_mtime) ?? rowMillis(row.db_mtime),
     path: storageName ? `${storageName}://${rel}` : rel,
     basename: name,
     extension: isDir
@@ -1107,15 +1772,79 @@ async function fetchNavRows(kind: 'recent' | 'starred' | 'shared'): Promise<File
   return rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null);
 }
 
+/* === gorunum:v3-shell — the Home view's own state ========================
+ * Two lists and a flag, and nothing else: the storages are already
+ * `config.storages` (the host's list, kept current by its own Refresh) and the
+ * cards come from GridView, so Home adds no third source of truth about what
+ * exists — it only asks the two per-user endpoints the panel's Recent and
+ * Starred rows already ask.
+ *
+ * ⚠ `files` stays EMPTY while Home is open. Home is not a listing: it renders
+ * its own sections, and putting its rows in `files` would hand the selection,
+ * the inspector, the keyboard range and every `files.length` in this file a
+ * list nobody is standing in.
+ */
+const homeRecent = ref<FileNode[]>([]);
+const homeStarred = ref<FileNode[]>([]);
+const homeLoading = ref(false);
+
+/**
+ * The storages Home draws.
+ *
+ * ⚠ Straight from `config.storages`, NOT a second fetch. The host already
+ * decided which drives this caller may see (RBAC on the server, then
+ * `fetchVisibleStorages` in our own app) and the navigation panel two hundred
+ * pixels to the left is rendering that same array — a Home that asked for its
+ * own copy could show a drive the panel beside it hides.
+ */
+const homeStorages = computed(() => props.config.storages ?? []);
+
+async function loadHome() {
+  homeLoading.value = true;
+  try {
+    // ⚠ Both at once and neither fatal on its own: a server without the
+    // starred endpoint must still be able to show somebody their recents.
+    const [r, st] = await Promise.all([
+      fetchNavRows('recent').catch(() => [] as FileNode[]),
+      fetchNavRows('starred').catch(() => [] as FileNode[]),
+    ]);
+    homeRecent.value = r;
+    homeStarred.value = st;
+  } finally {
+    homeLoading.value = false;
+  }
+}
+
 /** Open one of the panel views in the main pane. */
 async function loadNavView(kind: Exclude<NavView, ''>) {
   closeNavDrawer();
+  if (kind === 'home') {
+    // ⚠ The mode is set BEFORE the fetch, unlike the listing views below: Home
+    // renders its own sections with their own loading line, so there is
+    // nothing to hold back — and setting it afterwards would leave the
+    // previous folder's files on screen under the panel row that already reads
+    // as selected.
+    if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
+    navView.value = 'home';
+    navTag.value = '';
+    trashMode.value = false;
+    e2eRoot.value = '';
+    selection.clear();
+    files.value = [];
+    dirname.value = NAV_VIEW_DIRNAME.home;
+    currentPath.value = NAV_VIEW_DIRNAME.home;
+    adapter.value = '';
+    await loadHome();
+    return;
+  }
   if (kind === 'tag') {
     // The tag view needs a name; the panel calls loadTagView directly.
     if (navTag.value) await loadTagView(navTag.value);
     return;
   }
   if (kind === 'trash') {
+    void probeTrashPolicy(); /* tablo:t1 — in parallel: the banner is above the
+                                listing and must not wait behind it */
     await loadTrash();
     // ⚠ After loadTrash, not before: loadTrash goes through load()-adjacent
     // state and the mode has to be the last word, or the panel row for Trash
@@ -1224,6 +1953,25 @@ async function loadNavTags(force = false) {
 
 /* === /etiket:t1 === */
 
+/**
+ * gorunum:v3-shell — what the panel's first group does.
+ *
+ * ⚠ "My files" is answered with an ordinary navigation, not with a view. It
+ * opens the ROOT — the storage list in a multi-storage install, the storage
+ * root in a single-storage one, and the confined floor inside a `rootPath`
+ * embed (load() clamps it, so the row cannot be used to climb out of a
+ * confined explorer). `load('')` also clears `navView`, which is what takes
+ * the panel's highlight off whichever view you were in.
+ */
+function openNavDest(dest: NavDest) {
+  if (dest === 'myfiles') {
+    closeNavDrawer();
+    void load('');
+    return;
+  }
+  void loadNavView(dest);
+}
+
 /** Panel to a storage root. */
 function openNavStorage(name: string) {
   closeNavDrawer();
@@ -1251,17 +1999,31 @@ async function loadSharedStorages() {
   }
 }
 /* === /gezinti:g1 === */
-// Folder summary label for the no-selection state.
-const inspectorDirLabel = computed(() => {
-  if (trashMode.value) return t('node.trash');
-  const p = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
-  if (!p) return adapter.value || t('breadcrumb.root');
+/**
+ * What a user path READS AS — the folder's own name, or the view's.
+ *
+ * ⚠ Takes the path as an argument rather than reading `currentPath`, because
+ * there are two panes and the details panel follows whichever one has the
+ * keyboard (see `inspectorDirLabel`).
+ *
+ * ⚠ The `trashMode` special case it used to open with is gone, and that is a
+ * removal, not an omission: the trash view parks `.trash` in `currentPath`, and
+ * `virtualSegmentLabel('.trash')` is `t('node.trash')` — the same string, by
+ * the same route as every other view. One of the two was going to be forgotten
+ * the next time a view was added; it is the one that could be.
+ */
+function folderLabelOf(path: string): string {
+  const p = (path ?? '').replace(/^\/+|\/+$/g, '');
+  /* No path = the top of the tree. In multi-storage that is the DRIVE LIST, so
+     naming it after `adapter` — whichever storage was loaded last — would head
+     the panel with a drive the person is not looking at. */
+  if (!p) return multiStorageRoot.value ? t('breadcrumb.root') : (adapter.value || t('breadcrumb.root'));
   const seg = p.split('/').pop() || p;
   /* etiket:t1 — a THIRD surface that renders a path segment, and it had the
      same hole the tab strip did: in a virtual view the details panel headed
      itself ".starred". Same shared resolver, so it cannot drift again. */
   return virtualSegmentLabel(seg, t) || seg;
-});
+}
 function onInspectorManage(n: FileNode) {
   permTarget.value = n;
   showPerm.value = true;
@@ -1444,6 +2206,23 @@ function toggleHiddenFiles() {
   void splitPaneRef.value?.reload();
 }
 
+/**
+ * gorunum:v2-topbar — what the Refresh control actually means.
+ *
+ * ⚠ ONE function behind BOTH doors (the header's button and the palette's
+ * `refresh` command). They used to be two separate `() => load()` arrow
+ * functions in the template, which is how one of them would have quietly kept
+ * reloading only half of what the other does.
+ *
+ * The listing is ours; the storage list is the host's (`config.storages`), so
+ * the host is told and re-answers it in its own time. Nothing here waits on
+ * that: the folder is on screen again either way.
+ */
+function refreshAll() {
+  void load();
+  emit('refresh');
+}
+
 async function load(path?: string) {
   /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
    * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
@@ -1487,6 +2266,29 @@ async function load(path?: string) {
     else await loadNavView(asView.kind);
     return;
   }
+  /* A different folder is a different listing, and a selection belongs to the
+   * listing it was made in.
+   *
+   * ⚠⚠ Measured 2026-09-14 (v0.41.0 screenshot pass): double-clicking into an
+   * encrypted folder left "1 selected" — cut, copy, DELETE — hanging over its
+   * lock screen, and those actions were aimed at the folder the person was now
+   * standing INSIDE. Two stale things carried it: the selection itself, and
+   * `displayOrder`, the rows the view last drew. The lock screen (like the
+   * not-found state) draws no view, so nothing replaced the parent's rows, and
+   * `selection.nodes` kept resolving the double-clicked folder against them.
+   * A plain folder hid the bug only because its own view re-published its rows
+   * and the stale path stopped resolving — the selection was still there, and
+   * stepping back up brought it back to life.
+   *
+   * ⚠ Only when the FOLDER changes. A reload of the same folder (a realtime
+   * refresh, a mutation's re-render, a search rebased onto it) keeps what the
+   * person picked. Same rule the split pane applies in `onPaneNavigate`. */
+  const leaving = String(currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
+  const arriveAt = (to: string) => {
+    if (String(to ?? '').replace(/^\/+|\/+$/g, '') === leaving) return;
+    selection.clear();
+    displayOrder.value = [];
+  };
   loading.value = true;
   // Any normal navigation exits trash mode (the trash view is entered only
   // by opening the virtual `.trash` row, which calls loadTrash()).
@@ -1515,6 +2317,7 @@ async function load(path?: string) {
       // bounded: the recursive call carries a non-empty path, so
       // virtualToWire() resolves and this branch is not re-entered.
       if (soleStorageName.value) return await load(soleStorageName.value);
+      arriveAt('');
       currentPath.value = '';
       adapter.value = '';
       dirname.value = '';
@@ -1527,9 +2330,23 @@ async function load(path?: string) {
       ? virtualToWire(requested)
       : qualify(requested);
 
-    const resp = searchQuery.value
-      ? await api.search(target, searchQuery.value)
-      : await api.index(target);
+    /* gorunum:v1-advsearch — a content-scoped search cannot come from the
+       manager's search action (it hardcodes `search.ScopeName`), so it is
+       fetched from /api/files/search and projected onto the listing shape
+       here. Everything downstream — the views, the selection, the inspector —
+       sees ordinary rows, which is the point: one results surface. */
+    const advContent = !!searchQuery.value && advScope.value !== 'name';
+    const resp: ManagerResponse = advContent
+      ? {
+          adapter: adapter.value,
+          storages: (props.config.storages ?? []).map((s) => s.name),
+          dirname: dirname.value,
+          read_only: false,
+          files: await advFetchRows(advScope.value, searchQuery.value, target),
+        }
+      : searchQuery.value
+        ? await api.search(target, searchQuery.value)
+        : await api.index(target);
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
@@ -1537,6 +2354,10 @@ async function load(path?: string) {
        subtree; '' resets on every plain folder. Drives the lock screen. */
     e2eRoot.value = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';
     /* /wiring:e2 */
+    // currentPath is the user-facing form: `s3-test/example` in
+    // multi-storage mode, the bare relative path otherwise.
+    const arrived = multiStorageRoot.value ? wireToVirtual(resp.dirname) : stripAdapter(resp.dirname);
+    arriveAt(arrived);
     files.value = filterListing(resp.files);
     // Inject virtual `.trash` entry at root only — shared helper so the
     // split-view secondary pane shows the exact same row (no row-offset).
@@ -1552,11 +2373,7 @@ async function load(path?: string) {
     ) {
       void hydrateTrashRowShared(files.value, resp.adapter, api);
     }
-    // currentPath is the user-facing form: `s3-test/example` in
-    // multi-storage mode, the bare relative path otherwise.
-    currentPath.value = multiStorageRoot.value
-      ? wireToVirtual(resp.dirname)
-      : stripAdapter(resp.dirname);
+    currentPath.value = arrived;
   } catch (err) {
     const e = err instanceof Error ? err.message : String(err);
     const status = (err as { status?: number }).status;
@@ -1565,6 +2382,7 @@ async function load(path?: string) {
       // show the dedicated not-found state instead of a toast over a stale
       // listing that reads as "this folder is empty".
       notFoundPath.value = String(requested);
+      arriveAt(String(requested));
       e2eRoot.value = ''; /* wiring:e2 — no lock screen left over on a dead link */
       files.value = [];
       emit('error', { message: e, context: { path } });
@@ -1607,6 +2425,106 @@ function leaveNotFound() {
 // Entered by opening the virtual `.trash` row. Each row keeps its node `id`
 // so restore can target it. Permanent delete is admin-only / auto-purge, so
 // the only mutation offered here is Restore.
+/* === tablo:t1 — the trash banner ======================================
+ *
+ * The reference build draws, above the listing: what the trash IS, and the one
+ * irreversible action. We had neither — and the second half is a real
+ * regression rather than a missing decoration, because the only "Empty trash"
+ * in the whole repo is on the admin page `web/src/views/Trash.vue`, reached
+ * from the admin panel's own sidebar. An end user, who never sees the admin
+ * panel, had no way to empty their own trash at all.
+ *
+ * ⚠⚠ RETENTION IS A CLAIM, NOT A DECORATION. The reference says "30 days";
+ * ours must say what THIS deployment actually does, and `trash.retention_days`
+ * is a setting an operator changes. A banner stating the wrong number is worse
+ * than no banner, because people act on it — they leave something in the
+ * trash believing they have a month. So the number is asked for, and when the
+ * answer does not come the wording drops the period instead of guessing one.
+ *
+ * ⚠⚠ ONE PROBE ANSWERS BOTH QUESTIONS. `GET /api/admin/protection` carries
+ * the real retention and is refused to anyone who is not an operator — and
+ * `POST /api/admin/trash/empty` is gated on exactly the same thing. So its
+ * status code tells us the number AND whether this caller may empty anything,
+ * without a UI-side role check. That matters here: this file's own rule is
+ * that the BACKEND decides what a caller may see (see the note on
+ * `connections` in ExplorerConfig), and a client-side `role === "admin"` would
+ * be us guessing at an answer the server is willing to give.
+ */
+const trashRetentionDays = ref<number | null>(null);
+/** True only when the server has confirmed this caller may purge. */
+const trashCanEmpty = ref(false);
+const trashEmptying = ref(false);
+const showTrashConfirm = ref(false);
+
+async function probeTrashPolicy() {
+  trashRetentionDays.value = null;
+  trashCanEmpty.value = false;
+  try {
+    const res = await fetch(`${props.config.apiBase ?? ''}/api/admin/protection`, {
+      headers: await buildAuthHeaders(),
+      credentials: api.credentialsMode(),
+    });
+    /* ⚠ A 403 is the ANSWER "you are not an operator", not a failure: it is
+     * the ordinary case for every end user, and it must not reach the error
+     * emitter or the toast. */
+    if (!res.ok) return;
+    const body = (await res.json()) as { trash_retention_days?: unknown };
+    const d = body?.trash_retention_days;
+    if (typeof d === 'number' && d > 0) trashRetentionDays.value = d;
+    trashCanEmpty.value = true;
+  } catch {
+    /* offline / CORS — same as "not allowed": say nothing we cannot verify */
+  }
+}
+
+/** What the banner promises. Named the number, or explicitly not. */
+const trashBannerText = computed(() =>
+  trashRetentionDays.value !== null
+    ? t('trash.retention', { days: trashRetentionDays.value })
+    : t('trash.retention_unknown'),
+);
+
+/** How much is about to go. The confirmation names both, because "empty the
+ *  trash?" with no quantity is a question nobody can answer. */
+const trashTotalBytes = computed(() =>
+  files.value.reduce((sum, n) => {
+    const v = typeof n.size === 'number' ? n.size : (n as Record<string, unknown>).file_size;
+    return sum + (typeof v === 'number' ? v : 0);
+  }, 0),
+);
+/** ⚠ A total of zero is reported as "we do not know", not as "0 B". A server
+ *  that does not send sizes would otherwise have us telling somebody that
+ *  deleting their files frees nothing, on the last screen before it happens.
+ *  A genuinely empty set never reaches here — the button is disabled. */
+const trashSizeKnown = computed(() => trashTotalBytes.value > 0);
+/** Which sentence the confirmation uses: with or without a size. Singular or
+ *  plural is `t()`'s business (composables/useLocale → countedKey). */
+const trashConfirmKey = computed(() =>
+  trashSizeKnown.value ? 'trash.empty_confirm_body' : 'trash.empty_confirm_body_nosize',
+);
+
+async function emptyTrash() {
+  showTrashConfirm.value = false;
+  if (!trashCanEmpty.value || trashEmptying.value) return;
+  trashEmptying.value = true;
+  try {
+    const res = await fetch(`${props.config.apiBase ?? ''}/api/admin/trash/empty`, {
+      method: 'POST',
+      headers: await buildAuthHeaders(),
+      credentials: api.credentialsMode(),
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    await loadTrash();
+    flashToast(t('trash.emptied'));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    emit('error', { message: msg, context: { op: 'trash:empty' } });
+    flashToast(msg);
+  } finally {
+    trashEmptying.value = false;
+  }
+}
+
 async function loadTrash() {
   loading.value = true;
   trashOrigin.value = adapter.value || '';
@@ -1625,6 +2543,12 @@ async function loadTrash() {
           extension: e.name.includes('.') ? e.name.split('.').pop() || '' : '',
           storage: e.storage_name || '',
           visibility: 'private',
+          /* tablo:t1 — ⚠ BOTH. Every view reads `size` (the Size column, the
+             info panel, the empty-trash confirmation); only the upload code
+             reads `file_size`. Setting one of the two left every trashed row
+             with a blank Size cell and made "this permanently deletes 2 items
+             (0 B)" a false statement about two real files. */
+          size: e.size,
           file_size: e.size,
           mime_type: e.mime || '',
           extra_metadata: { deleted_at: e.deleted_at, ttl_days: e.ttl_days ?? null },
@@ -1709,6 +2633,30 @@ function wireJoin(dir: string, name: string): string {
   return dir.endsWith('://') || dir.endsWith('/') ? dir + name : `${dir}/${name}`;
 }
 
+/**
+ * Does anything in `targetWire` already carry the name of one of `sources`?
+ * Asked BEFORE a move is queued, because the answer decides whether the move
+ * can be undone.
+ *
+ * ⚠ The server never moves onto a taken name — it keeps both, and the moved
+ * item lands as `name-copy` (ops.MoveDest). The undo moves `target/<name>`
+ * back, so after a collision it would move the item that WAS ALREADY THERE.
+ * A colliding move is therefore offered no undo, and says so.
+ *
+ * Case-insensitive, and "could not list" counts as a collision: both err on
+ * the side of withholding an undo rather than offering one that moves the
+ * wrong file.
+ */
+async function movedNamesCollide(sources: string[], targetWire: string): Promise<boolean> {
+  try {
+    const res = await api.index(targetWire);
+    const taken = new Set((res.files ?? []).map((f) => String(f.basename ?? '').toLowerCase()));
+    return sources.some((s) => taken.has(wireBasename(s).toLowerCase()));
+  } catch {
+    return true;
+  }
+}
+
 // Register the inverse of a queued async move under its op id: once the op
 // settles OK, the toast offers "Geri Al" which queues the reverse move. The
 // inverse op deliberately gets NO undo entry of its own (no redo ping-pong).
@@ -1717,8 +2665,9 @@ function registerMoveUndo(
   sources: string[],
   targetWire: string,
   originWire: string | undefined,
+  collides: boolean,
 ) {
-  if (!originWire || !targetWire) return;
+  if (!originWire || !targetWire || collides) return;
   const movedPaths = sources.map((p) => wireJoin(targetWire, wireBasename(p)));
   if (movedPaths.length === 0) return;
   opUndo.set(opId, {
@@ -1806,8 +2755,19 @@ function writePersistedPath(path: string) {
   if ((window.location.hash || '') === target) return;
   // replaceState never fires `hashchange`, so onHashChange only ever sees
   // genuine external edits (paste, back/forward) — no self-echo to suppress.
+  //
+  // ⚠⚠ `history.state`, NEVER `null`. This mirrors the current folder into the
+  // hash, and it runs inside a host that may be a router-driven SPA: the admin
+  // app is vue-router, which keeps its own bookkeeping (scroll position, the
+  // position counter, `back`/`forward` links) in `history.state`. Passing
+  // `null` here erased it, vue-router warned
+  //   "history.state seems to have been manually replaced without preserving
+  //    the necessary values"
+  // and the NEXT navigation — into Home, or out to the admin panel — rendered
+  // a blank page. Measured 2026-09-13. Preserving the object costs nothing:
+  // the explorer has no state of its own to put there, only a URL to change.
   history.replaceState(
-    null,
+    history.state,
     '',
     target || window.location.pathname + window.location.search,
   );
@@ -1945,7 +2905,7 @@ useKeyboardShortcuts(rootEl, {
   onDelete: () => {
     /* ui-fix — the shortcut goes to the active pane too (consistent with the menu). */
     if (paneIsActive.value) {
-      const psel = splitPaneRef.value?.selectedNodes() ?? [];
+      const psel = splitSelection.nodes.value;
       if (psel.length) {
         paneCtxTargets.value = psel;
         mutationInPane.value = true;
@@ -1958,7 +2918,7 @@ useKeyboardShortcuts(rootEl, {
   },
   onRename: () => {
     if (paneIsActive.value) {
-      const psel = splitPaneRef.value?.selectedNodes() ?? [];
+      const psel = splitSelection.nodes.value;
       if (psel.length === 1) {
         renameTarget.value = psel[0];
         mutationInPane.value = true;
@@ -1970,9 +2930,16 @@ useKeyboardShortcuts(rootEl, {
       showRename.value = true;
     }
   },
-  onSelectAll: () => (paneIsActive.value ? splitPaneRef.value?.selectAll() : selection.selectAll()) /* wiring:d1 pane-route */,
+  onSelectAll: () => (paneIsActive.value ? splitSelection.selectAll() : selection.selectAll()) /* wiring:d1 pane-route */,
   onOpen: () => {
-    if (paneIsActive.value) return splitPaneRef.value?.openSelected(); /* wiring:d1 pane-route */
+    /* wiring:d1 pane-route — one `openNode`, whichever pane asked. A folder
+       opens IN the pane that had the keyboard; a file opens in the preview,
+       which is the window's, so there is nothing to route. */
+    if (paneIsActive.value) {
+      const pn = splitSelection.nodes.value[0];
+      if (pn) onPaneOpen('split', pn);
+      return;
+    }
     const n = selection.nodes.value[0];
     if (n) openNode(n);
   },
@@ -1980,7 +2947,6 @@ useKeyboardShortcuts(rootEl, {
     showNewFolder.value = false;
     showRename.value = false;
     showDelete.value = false;
-    showShare.value = false;
     showPreview.value = false;
     ctxRef.value?.hide();
     dismissToast();
@@ -2038,27 +3004,39 @@ useKeyboardShortcuts(rootEl, {
   },
   onUpload: () => triggerUpload(),
   onRefresh: () => void load(),
-  onDownload: () => void dispatchItemAction('download', shortcutTargets()),
-  onPreview: () => void dispatchItemAction('preview', shortcutTargets()),
-  onShare: () => void dispatchItemAction('access', shortcutTargets()),
-  onTags: () => void dispatchItemAction('tags', shortcutTargets()),
-  onConvert: () => void dispatchItemAction('convert', shortcutTargets()),
-  onOpenTab: () => void dispatchItemAction('open-tab', shortcutTargets()),
+  onDownload: () => void dispatchItemAction('download', activeTargets()),
+  onPreview: () => void dispatchItemAction('preview', activeTargets()),
+  onShare: () => void dispatchItemAction('access', activeTargets()),
+  onTags: () => void dispatchItemAction('tags', activeTargets()),
+  onConvert: () => void dispatchItemAction('convert', activeTargets()),
+  onOpenTab: () => void dispatchItemAction('open-tab', activeTargets()),
   onCopyPath: () => {
-    const n = shortcutTargets()[0];
+    const n = activeTargets()[0];
     if (n) void onCopyPath(n.path);
   },
-  onCopyId: () => void dispatchItemAction('copy-id', shortcutTargets()),
-  onRestore: () => void dispatchItemAction('restore', shortcutTargets()),
+  onCopyId: () => void dispatchItemAction('copy-id', activeTargets()),
+  onRestore: () => void dispatchItemAction('restore', activeTargets()),
   /* /tus:t1 */
   hasSelection: () => !selection.isEmpty.value,
 });
 
-/* tus:t1 — which rows a keyboard verb acts on: the active pane's selection when
- * the split pane has focus, otherwise the main listing's. Same rule the delete
- * and rename shortcuts have followed since wiring:d1. */
-function shortcutTargets(): FileNode[] {
-  if (paneIsActive.value) return splitPaneRef.value?.selectedNodes() ?? [];
+/**
+ * tus:t1 / pane:p1 — THE rows a verb acts on, whoever asked for it.
+ *
+ * The active pane's selection when the split pane has focus, otherwise the
+ * main listing's. It began as the keyboard's rule (hence tus:t1) and it is now
+ * everybody's: the keyboard shortcuts, the selection bar's count and mode, the
+ * action list the bar renders and the handler it dispatches through all read
+ * this one function.
+ *
+ * ⚠ Measured 2026-09-13, before that was true: the toolbar read
+ * `selection.nodes` directly, so ticking rows in the RIGHT pane raised no bar
+ * at all while the LEFT pane's bar went on describing a selection nobody was
+ * touching. Two answers to "what is selected" is how that happens; there is
+ * one now.
+ */
+function activeTargets(): FileNode[] {
+  if (paneIsActive.value) return splitSelection.nodes.value;
   return selection.nodes.value;
 }
 
@@ -2168,8 +3146,12 @@ async function restoreSelection(targets?: FileNode[]) {
       const ids = nodes
         .map((n) => (n as { id?: number }).id)
         .filter((x): x is number => typeof x === 'number');
-      const { restored } = await api.restoreIds(ids);
-      flashToast(t('toast.restored', { n: restored }));
+      const { restored, taken } = await api.restoreIds(ids);
+      flashToast(
+        taken.length
+          ? t('toast.restore_taken', { n: taken.length, name: taken[0] })
+          : t('toast.restored', { n: restored }),
+      );
       selection.clear();
       await loadTrash();
       return;
@@ -2258,15 +3240,18 @@ const breadcrumbCtxPath = ref<string>('');
 const paneCtxTargets = ref<FileNode[]>([]);
 const breadcrumbCtxLabel = ref<string>('');
 
+/* pane:p1 — `activeTargets()`, not `selection`: the bar describes the pane the
+ * keyboard is in. See the function's own note for what reading `selection`
+ * directly here used to cost. */
 const selectionMode = computed<SelectionMode>(() => {
-  const sel = selection.nodes.value;
+  const sel = activeTargets();
   if (sel.length === 0) return 'none';
   if (sel.length === 1) return sel[0].type === 'dir' ? 'single-dir' : 'single-file';
   return 'multi';
 });
 
 async function onToolbarAction(key: string) {
-  const sel = selection.nodes.value;
+  const sel = activeTargets();
   // The toolbar's "Aç" opens the in-page preview/editor modal (quick peek);
   // everything else shares dispatchItemAction with the context menu so the two
   // identical menus also behave identically.
@@ -2428,12 +3413,24 @@ function keepActionsFor(sel: FileNode[]): ContextAction[] {
   const st = keepStateOf(keepRemoteOf(sel[0]!));
   return [
     { divider: true, key: 'sep-keep', label: '' },
-    { key: 'keep-local', label: t('ctx.keep_local'), icon: '📌', hidden: st === 'kept' || st === 'inherited' },
-    { key: 'keep-online', label: t('ctx.keep_online'), icon: '☁', hidden: st !== 'kept' },
-    { key: 'keep-inherited', label: t('ctx.keep_inherited'), icon: '📌', disabled: true, hidden: st !== 'inherited' },
-    { key: 'keep-reveal', label: t('ctx.keep_reveal'), icon: '📂', hidden: st !== 'kept' && st !== 'inherited' },
+    { key: 'keep-local', label: t('ctx.keep_local'), hidden: st === 'kept' || st === 'inherited' },
+    { key: 'keep-online', label: t('ctx.keep_online'), hidden: st !== 'kept' },
+    { key: 'keep-inherited', label: t('ctx.keep_inherited'), disabled: true, hidden: st !== 'inherited' },
+    { key: 'keep-reveal', label: t('ctx.keep_reveal'), hidden: st !== 'kept' && st !== 'inherited' },
   ];
 }
+
+/**
+ * The context target when it is NOT part of this pane's listing.
+ *
+ * Home's Recent and Starred cards are the only rows in the product that a
+ * person can right-click without them being in `files` — they come from their
+ * own endpoints. `selection.nodes` can never resolve them (it filters the
+ * listing by selected path), so without this the menu is built from an empty
+ * selection and renders the blank-canvas menu. Empty in every other case, so
+ * the ordinary selection path is unaffected.
+ */
+const ctxUnlistedTargets = ref<FileNode[]>([]);
 
 async function onContextTarget(node: FileNode, ev: MouseEvent) {
   ctxMode.value = 'selection';
@@ -2442,13 +3439,40 @@ async function onContextTarget(node: FileNode, ev: MouseEvent) {
     selection.click(node.path);
     await nextTick();
   }
-  ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, selection.nodes.value);
+  // ⚠⚠ Fall back to the node that was actually clicked.
+  //
+  // `selection.nodes` is the CURRENT LISTING filtered by the selected paths
+  // (`useSelection(() => displayOrder ?? files)`), so it can only ever resolve
+  // a row that is in this pane's listing. Home is not a listing: its Recent
+  // and Starred cards come from their own endpoints and are absent from
+  // `files`, so selecting one left `selection.nodes` EMPTY and the menu opened
+  // with zero targets — which is the signature of a right-click on blank
+  // canvas. Measured 2026-09-13: the ⋮ and the right-click on every Home card
+  // opened a one-line "Show hidden files" menu instead of the fifteen-line
+  // file menu, in both Recent and Starred. HomeView's own header says these
+  // cards carry "the same right-click menu as the listing", so this is the
+  // contract being restored, not a new behaviour.
+  //
+  // In a real listing `selection.nodes` is non-empty by the line above, so
+  // multi-selection is untouched — this only rescues the case where the path
+  // cannot be resolved against the current pane.
+  //
+  // ⚠ BOTH halves are needed. `show()` decides what the chosen action RUNS on;
+  // `contextActions` decides what the menu LISTS, and it reads
+  // `selection.nodes` on its own. Setting only the first left the actions
+  // correct and the menu still empty, which looks identical to the bug.
+  ctxUnlistedTargets.value = selection.nodes.value.length ? [] : [node];
+  const targets = selection.nodes.value.length ? selection.nodes.value : [node];
+  ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, targets);
 }
 
 function onContextCanvas(ev: MouseEvent) {
   ev.preventDefault();
   ctxMode.value = 'selection';
   selection.clear();
+  // Blank canvas has no target — drop any node left over from a card menu, or
+  // the next right-click on empty space would offer that file's actions.
+  ctxUnlistedTargets.value = [];
   ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, []);
 }
 
@@ -2459,27 +3483,45 @@ function onCrumbContext(payload: { x: number; y: number; adapterPath: string; la
   ctxRef.value?.show({ clientX: payload.x, clientY: payload.y }, []);
 }
 
-/* ui-fix — right-click in the side (secondary) pane: activate the pane, then
- * open the menu. The menu is EXACTLY the main pane's (selectionActionList is
- * the single source); actions go to dispatchItemAction and are pane-routed
- * while ctxMode==='pane'. */
-function onPaneContext(node: FileNode | null, ev: MouseEvent) {
-  activePane.value = 'split';
-  void refreshKept();
-  const sel = splitPaneRef.value?.selectedNodes() ?? [];
-  // node=null (right-click on empty space): the selection-less menu
-  // ("Yeni Klasör" + "Yapıştır"). Otherwise the pane selection is the target
-  // (falling back to the clicked node).
-  paneCtxTargets.value = node ? (sel.length > 0 ? sel : [node]) : [];
-  ctxMode.value = 'pane';
-  ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
+/**
+ * pane:p1 — right-click in EITHER pane, through one door.
+ *
+ * The menu itself was already single-source (`selectionActionList`); this is
+ * the other half — the two panes no longer reach it through two different
+ * handlers, so a change to how a right-click picks its targets cannot land in
+ * one pane and miss the other. `node === null` is a right-click on empty
+ * space: the selection-less menu ("New folder" + "Paste").
+ */
+async function onPaneMenu(pane: 'main' | 'split', node: FileNode | null, ev: MouseEvent) {
+  void refreshKept(); // menu labels react if the kept set changed since last look
+  if (pane === 'split') {
+    activePane.value = 'split';
+    const sel = splitSelection.nodes.value;
+    if (node && !splitSelection.has(node.path)) {
+      splitSelection.click(node.path);
+      await nextTick();
+    }
+    const after = splitSelection.nodes.value;
+    paneCtxTargets.value = node ? (after.length > 0 ? after : (sel.length > 0 ? sel : [node])) : [];
+    ctxMode.value = 'pane';
+    ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
+    return;
+  }
+  activePane.value = 'main';
+  ctxMode.value = 'selection';
+  if (!node) {
+    selection.clear();
+    ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, []);
+    return;
+  }
+  await onContextTarget(node, ev);
 }
 
 const contextActions = computed<ContextAction[]>(() => {
   if (ctxMode.value === 'breadcrumb') {
     return [
-      { key: 'open', label: t('ctx.open'), icon: '↗' },
-      { key: 'copy-path', label: t('breadcrumb.copy_path'), icon: '📋' },
+      { key: 'open', label: t('ctx.open') },
+      { key: 'copy-path', label: t('breadcrumb.copy_path') },
     ];
   }
   if (ctxMode.value === 'pane' /* ui-fix — side-pane menu is EXACTLY the main pane's */) {
@@ -2487,23 +3529,25 @@ const contextActions = computed<ContextAction[]>(() => {
     if (psel.length === 0) {
       // Right-click on empty space: same as the main pane's canvas menu.
       return [
-        { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
-        { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+        { key: 'new-folder', label: t('toolbar.new_folder') },
+        { key: 'paste', label: t('ctx.paste'), disabled: !clipboard.value.mode },
       ];
     }
     return selectionActionList(psel);
   }
 
-  const sel = selection.nodes.value;
+  // `ctxUnlistedTargets` is non-empty only for a row that exists outside this
+  // pane's listing (Home's Recent / Starred cards) — see `onContextTarget`.
+  const sel = selection.nodes.value.length ? selection.nodes.value : ctxUnlistedTargets.value;
   const any = sel.length > 0;
   const single = sel.length === 1;
 
   if (trashActive.value) {
     if (!any) return [];
     return [
-      { key: 'restore', label: t('ctx.restore'), icon: '↩' },
+      { key: 'restore', label: t('ctx.restore') },
       { divider: true, key: 'sep1', label: '' },
-      { key: 'delete', label: t('ctx.delete_perm'), icon: '🗑', danger: true },
+      { key: 'delete', label: t('ctx.delete_perm'), danger: true },
     ];
   }
 
@@ -2525,8 +3569,8 @@ const contextActions = computed<ContextAction[]>(() => {
     if (!any) return [];
     if (!single) return [];
     return [
-      { key: 'open', label: t('ctx.open'), icon: '↗' },
-      { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉' } /* wiring:d1 */,
+      { key: 'open', label: t('ctx.open') },
+      { key: 'open-tab', label: t('ctx.open_new_tab') } /* wiring:d1 */,
       // A whole storage can be kept too — that IS the "sync everything"
       // shape, and it is one pair, not one per subfolder.
       ...keepActionsFor(sel),
@@ -2542,13 +3586,12 @@ const contextActions = computed<ContextAction[]>(() => {
       {
         key: 'toggle-hidden',
         label: showHiddenFiles.value ? t('ctx.hide_hidden') : t('ctx.show_hidden'),
-        icon: showHiddenFiles.value ? '🙈' : '👁',
       },
     ];
     if (!permCanEdit(dirPerm.value)) return view;
     return [
-      { key: 'new-folder', label: t('toolbar.new_folder'), icon: '📁' },
-      { key: 'paste', label: t('ctx.paste'), icon: '📋', disabled: !clipboard.value.mode },
+      { key: 'new-folder', label: t('toolbar.new_folder') },
+      { key: 'paste', label: t('ctx.paste'), disabled: !clipboard.value.mode },
       ...view,
     ];
   }
@@ -2565,13 +3608,28 @@ const contextActions = computed<ContextAction[]>(() => {
 function selectionActionList(sel: FileNode[]): ContextAction[] {
   const any = sel.length > 0;
   const single = sel.length === 1;
+  /* pane:p1 — a STORAGE row is a mount point, not a file: rename, delete, cut,
+   * copy and share all 4xx on it. The main listing answers this before it ever
+   * gets here (the `inStorageRoot` branch in `contextActions`), but the split
+   * pane lists the same virtual rows through no such branch — so its
+   * right-click menu has been offering "Sil" on a whole storage, and with the
+   * selection bar now reaching both panes it would be one click. Measured
+   * 2026-09-13: download/share/cut/copy/delete, all of them, on `depoB`.
+   * Answered HERE because this is the one list both surfaces render. */
+  if (sel.some(isStorageRow)) {
+    if (!single) return [];
+    return [
+      { key: 'open', label: t('ctx.open') },
+      { key: 'open-tab', label: t('ctx.open_new_tab') },
+      ...keepActionsFor(sel),
+    ];
+  }
   const isFile = single && sel[0]?.type === 'file';
   const tagsLabel = locale.value === 'en' ? 'Tags…' : 'Etiketler…';
   const singleHasId = single && typeof sel[0]?.id === 'number';
   /* yildiz:s1 */
   const canStar = starableNodes(sel).length > 0;
   const allStarred = selectionAllStarred(sel);
-  const copyIdLabel = locale.value === 'en' ? 'Copy node id' : "Node id'yi kopyala";
   // RBAC: gate mutating actions when the caller lacks edit on the target. The
   // "İzinler" (permissions) action shows only for owners on RBAC-on storages.
   const p = selPerm(sel);
@@ -2583,19 +3641,52 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   // picks the action from inside the modal, so there's no separate button.
   const accessLabel = locale.value === 'en' ? 'Share / Permissions' : 'Paylaş / İzinler';
   return [
-    { key: 'open', label: t('ctx.open'), icon: '↗', hidden: !single },
-    { key: 'open-tab', label: t('ctx.open_new_tab'), icon: '⧉', hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — open the folder in a new tab */,
-    { key: 'preview', label: t('ctx.preview'), icon: '👁', hidden: !single, disabled: !isFile },
-    { key: 'download', label: t('ctx.download'), icon: '⬇', hidden: !single, disabled: !isFile },
-    { key: 'convert', label: t('ctx.convert'), icon: '🔄', hidden: !single || !effectiveConvertUrl.value || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */, disabled: !isFile },
-    { key: 'access', label: accessLabel, icon: '🔗', hidden: !single || !w || e2eActive.value /* wiring:e2 — sharing is off in the MVP (the link would serve ciphertext) */ },
-    { key: 'details', label: t('ctx.details'), icon: 'ℹ', hidden: !any } /* koru:k1 */,
-    { key: 'copy-id', label: copyIdLabel, icon: '🆔', hidden: !singleHasId, disabled: !singleHasId },
+    { key: 'open', label: t('ctx.open'), hidden: !single },
+    { key: 'open-tab', label: t('ctx.open_new_tab'), hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — open the folder in a new tab */,
+    { key: 'preview', label: t('ctx.preview'), hidden: !single, disabled: !isFile },
+    /* tasi:m1 — Download works on ANY selection now. It used to disappear the
+       moment a second row was ticked, because the only implementation was one
+       `window.open` per node and the browser blocks the second popup; there is
+       one streaming archive behind it now (lib/downloadSelection), and the
+       server expands a selected folder itself, so a lone folder is a zip too.
+       ⚠ Still single-only inside an encrypted folder: those bytes are
+       decrypted IN THE BROWSER, one file at a time, and the server has no
+       plaintext to zip. */
+    { key: 'download', label: t('ctx.download'), hidden: !any || (e2eActive.value && !single), disabled: !any },
+    { key: 'convert', label: t('ctx.convert'), hidden: !single || !effectiveConvertUrl.value || !w || e2eActive.value /* wiring:e2 — convert is meaningless on ciphertext */, disabled: !isFile },
+    /* tasi:m1 — VISIBLE and grey above a multi-selection, not gone. Sharing
+       really is one item at a time (a share link addresses one node), and the
+       row now says so in its tooltip; vanishing taught the reader that filex
+       cannot share the thing they are looking at. */
+    {
+      key: 'access',
+      label: accessLabel,
+      hidden: !any || !w || e2eActive.value /* wiring:e2 — sharing is off in the MVP (the link would serve ciphertext) */,
+      disabled: !single,
+      title: single ? undefined : t('ctx.access.one_only'),
+    },
+    { key: 'details', label: t('ctx.details'), hidden: !any } /* koru:k1 */,
+    /* ⚠ "Copy node id" is NOT here any more (owner's call, 2026-09-13): it is a
+       developer's handle on a support ticket, not an everyday verb, and this
+       list is rendered by BOTH the right-click menu and the selection bar — so
+       one row put it in front of everyone, twice. It lives in the details
+       panel now, beside Path and ETag, which is where the other technical
+       facts about a file already are. The `copy-id` case below stays: the
+       panel dispatches it. */
     { divider: true, key: 'sep1', label: '', hidden: !w },
-    { key: 'rename', label: t('ctx.rename'), icon: '✎', hidden: !single || !w, disabled: !single },
-    { key: 'cut', label: t('ctx.cut'), icon: '✂', hidden: !any || !w, disabled: !any },
-    { key: 'copy', label: t('ctx.copy'), icon: '❐', hidden: !any, disabled: !any },
-    { key: 'paste', label: t('ctx.paste'), icon: '📋', hidden: !w, disabled: !clipboard.value.mode },
+    { key: 'rename', label: t('ctx.rename'), hidden: !single || !w, disabled: !single },
+    { key: 'cut', label: t('ctx.cut'), hidden: !any || !w, disabled: !any },
+    { key: 'copy', label: t('ctx.copy'), hidden: !any, disabled: !any },
+    /* tasi:m1 — "somewhere else", without the clipboard. Cut+paste has always
+       been able to do this, but only by navigating away from the rows you had
+       just picked; these two ask WHERE in a dialog and leave the listing where
+       it is.
+       ⚠ `icon:` is not decoration here — `actionIconSvg` answers '' for a key
+       it does not know, and a bar button with no glyph is an empty 28px box.
+       They borrow the clipboard verbs' marks, which is what they are. */
+    { key: 'move-to', label: t('ctx.move_to'), icon: 'cut', hidden: !any || !w, disabled: !any },
+    { key: 'copy-to', label: t('ctx.copy_to'), icon: 'copy', hidden: !any, disabled: !any },
+    { key: 'paste', label: t('ctx.paste'), hidden: !w, disabled: !clipboard.value.mode },
     { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId && !canStar },
     /* yildiz:s1 — "star must be an action, like a tag" (owner, v0.30.0).
        Beside Tags on purpose: they are the same kind of verb, and this is the
@@ -2604,13 +3695,13 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
     {
       key: 'star',
       label: allStarred ? t('ctx.unstar') : t('ctx.star'),
-      icon: allStarred ? '★' : '☆',
+      icon: allStarred ? 'unstar' : 'star' /* gorunum:v1-icons — names the glyph, not an emoji */,
       hidden: !canStar,
     },
-    { key: 'tags', label: tagsLabel, icon: '🏷', hidden: !singleHasId, disabled: !singleHasId },
+    { key: 'tags', label: tagsLabel, hidden: !singleHasId, disabled: !singleHasId },
     ...keepActionsFor(sel),
     { divider: true, key: 'sep2', label: '', hidden: !w },
-    { key: 'delete', label: t('ctx.delete'), icon: '🗑', danger: true, hidden: !any || !w, disabled: !any },
+    { key: 'delete', label: t('ctx.delete'), danger: true, hidden: !any || !w, disabled: !any },
   ];
 }
 
@@ -2618,17 +3709,22 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
 // two stay identical for a selection; the empty/trash/virtual-root cases match
 // the context menu's special branches.
 const toolbarActions = computed<ContextAction[]>(() => {
-  const sel = selection.nodes.value;
+  const sel = activeTargets();
+  /* pane:p1 — the split pane's bar offers EXACTLY what its own right-click
+   * menu offers (`contextActions`, ctxMode 'pane'). The three special branches
+   * below describe the MAIN listing's state — the trash, the multi-storage
+   * root — and the split pane reaches neither through this computed. */
+  if (paneIsActive.value) return sel.length ? selectionActionList(sel) : [];
   if (trashActive.value) {
     if (sel.length === 0) return [];
     return [
-      { key: 'restore', label: t('ctx.restore'), icon: '↩' },
-      { key: 'delete', label: t('ctx.delete_perm'), icon: '🗑', danger: true },
+      { key: 'restore', label: t('ctx.restore') },
+      { key: 'delete', label: t('ctx.delete_perm'), danger: true },
     ];
   }
   const trimmedPath = (currentPath.value ?? '').replace(/^\/+|\/+$/g, '');
   if (multiStorageRoot.value && trimmedPath === '') {
-    return sel.length === 1 ? [{ key: 'open', label: t('ctx.open'), icon: '↗' }] : [];
+    return sel.length === 1 ? [{ key: 'open', label: t('ctx.open') }] : [];
   }
   if (sel.length === 0) return [];
   return selectionActionList(sel);
@@ -2654,8 +3750,34 @@ async function onContextAction(action: ContextAction, targets: FileNode[]) {
 // the right-click menu (onContextAction) and the toolbar (onToolbarAction)
 // route here, so the two menus that now render the SAME list also behave the
 // same. (Toolbar "Aç" is the one deliberate exception — see onToolbarAction.)
+/**
+ * pane:p1 — is this verb mutating the SPLIT pane?
+ *
+ * Two signals, and they agree in every case a menu produced: the pane menu
+ * names itself (`ctxMode === 'pane'`), and every other door — the selection
+ * bar, the keyboard — means "the pane that has the keyboard".
+ *
+ * ⚠ Reading only `ctxMode` was safe only while the toolbar acted on
+ * `selection` no matter which pane had focus. It does not any more (see
+ * `activeTargets`), so a Cut fired from the bar over the right-hand pane would
+ * have taken the right pane's ROWS with the left pane's FOLDER as their
+ * origin, and the paste would then have moved them out of a directory they
+ * were never in.
+ */
+function actingInPane(): boolean {
+  return ctxMode.value === 'pane' || paneIsActive.value;
+}
+
 async function dispatchItemAction(key: string, targets: FileNode[]) {
   switch (key) {
+    /* gorunum:v1 — the selection bar's × . It used to be delivered by
+     * synthesising a click on the listing's background, because nothing here
+     * answered the key; a gesture that works by imitating another gesture
+     * breaks the first time that other one changes. */
+    case 'clear-selection':
+      if (paneIsActive.value) splitSelection.clear();
+      else selection.clear();
+      return;
     case 'open':
       // Context-menu "Aç" launches the standalone fullscreen route
       // in a new tab. Double-click (openNode) opens the in-page
@@ -2667,7 +3789,16 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       if (targets[0]) previewNode(targets[0]);
       break;
     case 'download':
-      if (targets[0]) downloadFile(targets[0]);
+      await downloadSelection(targets);
+      break;
+    /* tasi:m1 — the same dialog, twice; only `mode` differs. */
+    case 'move-to':
+    case 'copy-to':
+      if (targets.length === 0) break;
+      destPickerMode.value = key === 'move-to' ? 'move' : 'copy';
+      destPickerTargets.value = targets;
+      destPickerBusy.value = false;
+      showDestPicker.value = true;
       break;
     case 'keep-local': {
       const ds = desktopSync.value;
@@ -2704,9 +3835,6 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'convert':
       if (targets[0]) openConvert(targets[0]);
       break;
-    case 'share':
-      if (targets[0]) openShare(targets[0]);
-      break;
     case 'access':
       if (targets[0]) {
         permTarget.value = targets[0];
@@ -2734,20 +3862,20 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'rename':
       if (targets[0]) {
         renameTarget.value = targets[0];
-        mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
+        mutationInPane.value = actingInPane(); /* ui-fix */
         showRename.value = true;
       }
       break;
     case 'cut':
       /* ui-fix — in a pane context the clipboard source must be the pane's dir. */
-      if (ctxMode.value === 'pane') paneCut();
+      if (actingInPane()) paneCut();
       else {
         clipboard.value = { mode: 'cut', items: targets, sourcePath: currentPath.value };
         flashToast(t('toast.cut_ready'));
       }
       break;
     case 'copy':
-      if (ctxMode.value === 'pane') paneCopy();
+      if (actingInPane()) paneCopy();
       else {
         clipboard.value = { mode: 'copy', items: targets, sourcePath: currentPath.value };
         flashToast(t('toast.copy_ready'));
@@ -2756,13 +3884,20 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     case 'paste':
       /* ui-fix — pasting from the right-click menu goes to the active pane too
        * (the keyboard shortcut was already pane-routed; the menu was not). */
-      if (ctxMode.value === 'pane' || paneIsActive.value) await panePaste();
+      if (actingInPane()) await panePaste();
       else await paste();
       break;
-    case 'delete':
-      mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
+    case 'delete': {
+      /* ⚠ The confirm dialog reads `paneCtxTargets` in pane mode, and only the
+       * pane MENU used to fill it. Coming from the selection bar there is no
+       * menu, so the rows are handed over here or the dialog would delete
+       * whatever the last right-click left behind. */
+      const inPane = actingInPane(); /* ui-fix */
+      if (inPane) paneCtxTargets.value = targets;
+      mutationInPane.value = inPane;
       showDelete.value = true;
       break;
+    }
     case 'restore':
       if (targets.length > 0) await restoreSelection(targets);
       break;
@@ -2770,7 +3905,7 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       toggleHiddenFiles();
       break;
     case 'new-folder':
-      mutationInPane.value = ctxMode.value === 'pane'; /* ui-fix */
+      mutationInPane.value = actingInPane(); /* ui-fix */
       showNewFolder.value = true;
       break;
     case 'duplicate':
@@ -2816,10 +3951,17 @@ async function paste() {
     const plan = resolveTransfer(items, targetWire, cb.mode === 'cut' ? 'move' : 'copy');
     if (cb.mode === 'cut') {
       const originWire = qualify(sourceDir) || undefined;
+      const collides = await movedNamesCollide(items, targetWire);
       const { op } = await api.moveAsync(items, targetWire, originWire);
-      registerMoveUndo(op.id, items, targetWire, originWire);
+      registerMoveUndo(op.id, items, targetWire, originWire, collides);
       pendingOps.register(op);
-      flashToast(plan.cross ? t('split.cross_move') : t('split.move_queued'));
+      flashToast(
+        collides
+          ? t('toast.move_kept_both')
+          : plan.cross
+            ? t('split.cross_move')
+            : t('split.move_queued'),
+      );
     } else {
       const { op } = await api.copy(items, targetWire);
       pendingOps.register(op);
@@ -2856,7 +3998,104 @@ function downloadFile(n: FileNode) {
   window.open(url, '_blank');
 }
 
+/**
+ * tasi:m1 — download WHATEVER is selected, as one thing.
+ *
+ * One file is still one navigation to its own body: it keeps the range
+ * requests, the browser's own resume, and the encrypted-folder path that has
+ * to decrypt in this tab. Anything else — several files, or a folder, whose
+ * members the server expands itself — is one streaming archive behind a
+ * single-use ticket (lib/downloadSelection explains why a POST then a
+ * navigation, and why an iframe rather than `window.open`).
+ *
+ * ⚠ The old behaviour was not "download each one": the row HID itself above a
+ * single selection, because the only implementation was one `window.open` per
+ * node and the browser blocks the second as a popup.
+ */
+async function downloadSelection(targets: FileNode[]): Promise<void> {
+  if (targets.length === 0) return;
+  if (targets.length === 1 && targets[0].type === 'file') {
+    downloadFile(targets[0]);
+    return;
+  }
+  /* ⚠ Not a courtesy: minting asks the server to resolve and authorize every
+   * member, which on a deep folder is not instant, and nothing else on screen
+   * moves until the browser is handed the response. */
+  flashToast(t('toast.archive.preparing'));
+  try {
+    const ticket = await downloadArchive(api, targets.map((n) => n.path));
+    flashToast(t('toast.archive.started', { name: ticket.name, count: String(ticket.files) }));
+  } catch (err) {
+    const e = err as Error & { status?: number };
+    /* 409 is the server saying the selection held nothing this account may
+     * read — a different sentence from "it failed", and the only one that
+     * tells the reader what to do next. */
+    flashToast(e.status === 409 ? t('toast.archive.empty') : e.message);
+    emit('error', { message: e.message, context: { op: 'archive-download' } });
+  }
+}
+
+/**
+ * tasi:m1 — the destination dialog came back with a folder.
+ *
+ * Everything the verb needs already exists: `transferItems` is the one gate
+ * that moves and copies (cross-storage included) and owns the undo
+ * registration, so this only says WHICH rows, WHERE, and WHICH intent.
+ *
+ * ⚠ `originWire` is the folder the rows came FROM, and it has to follow the
+ * pane the selection belongs to — the same rule `actingInPane` states for
+ * every other mutation.
+ */
+async function onDestinationPicked(dest: string): Promise<void> {
+  const targets = destPickerTargets.value;
+  if (!dest || targets.length === 0) {
+    showDestPicker.value = false;
+    return;
+  }
+  const move = destPickerMode.value === 'move';
+  const originWire = actingInPane()
+    ? qualify(splitPaneRef.value?.getPath() ?? '')
+    : qualify(currentPath.value);
+  destPickerBusy.value = true;
+  try {
+    await transferItems(targets.map((n) => n.path), dest, originWire || undefined, move ? 'move' : 'copy');
+    /* ⚠ `transferItems` has already flashed "queued". This REPLACES it rather
+     * than stacking on it — there is one toast slot (`showToast`), and the
+     * useful half of the sentence is the destination, which "queued" does not
+     * carry. Do not add a second call expecting two messages; you would only
+     * be choosing which one nobody reads. */
+    const name = labelOfWire(dest, dest);
+    flashToast(move ? t('toast.moved_to', { name }) : t('toast.copied_to', { name }));
+    if (move) {
+      if (actingInPane()) splitSelection.clear();
+      else selection.clear();
+    }
+  } finally {
+    destPickerBusy.value = false;
+    showDestPicker.value = false;
+  }
+}
+
 // ------- Modals -------
+
+/* belge:n1 — after creating it, OPEN it. Creating a file and leaving the
+ * person looking at a listing is half the feature. */
+async function onDocumentCreated(file: { path: string; name: string; ext: string }) {
+  showNewDocument.value = false;
+  const dir = file.path.slice(0, file.path.lastIndexOf('/'));
+  if (dir && dir !== qualify(currentPath.value)) await load(dir);
+  else await load();
+  const node =
+    files.value.find((n) => n.path === file.path) ??
+    ({ type: 'file', path: file.path, basename: file.name, extension: file.ext } as unknown as FileNode);
+  previewTarget.value = node;
+  // ⚠ NOT previewModeForExt: that sends office types to 'view', which is right
+  // for a peek at somebody else's file and wrong for the one you just made.
+  previewMode.value = permCanEdit((node.perm as string) ?? dirPerm.value) ? 'edit' : 'view';
+  showPreview.value = true;
+  emit('file-opened', { path: node.path, basename: node.basename });
+  void markRecent(node);
+}
 
 async function submitNewFolder(name: string) {
   const inPane = mutationInPane.value; /* ui-fix — new folder in the side pane */
@@ -2949,12 +4188,6 @@ async function confirmDelete() {
   }
 }
 
-function openShare(n: FileNode) {
-  shareTarget.value = n;
-  activeShare.value = null;
-  showShare.value = true;
-}
-
 function openConvert(n: FileNode) {
   convertTarget.value = n;
   showConvert.value = true;
@@ -2965,32 +4198,6 @@ function onConvertDone(name: string) {
   void load();
 }
 
-async function submitShare(payload: {
-  password: boolean;
-  expires_at: string | null;
-  max_downloads: number | null;
-}) {
-  const target = shareTarget.value;
-  if (!target) return;
-  try {
-    const { share } = await api.createShare({
-      path: target.path, // qualified `<adapter>://<rel>`
-      password: payload.password,
-      expires_at: payload.expires_at,
-      max_downloads: payload.max_downloads,
-    });
-    activeShare.value = share;
-    emit('share-created', { path: target.path, url: share.url, pin: share.password_pin ?? null });
-  } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'share' } });
-  }
-}
-
-function closeShare() {
-  showShare.value = false;
-  shareTarget.value = null;
-  activeShare.value = null;
-}
 
 // ------- Upload -------
 
@@ -3355,19 +4562,49 @@ const clippedPaths = computed<Set<string>>(() => {
 
 const FE_DND_MIME = 'application/x-brf-files';
 
-function onItemDragStart(node: FileNode, ev: DragEvent) {
+/**
+ * pane:p1 — a drag started in one of the panes.
+ *
+ * `FilePane` has already written the payload both panes must agree on: the
+ * internal MIME, the ORIGIN directory (which is what lets a cross-pane move be
+ * undone) and the plain-text fallback. This is the part only the host knows —
+ * the desktop shell's OS drag and the browser's own `DownloadURL` hand-off —
+ * and wiring it for BOTH panes rather than only the left one is a capability
+ * the right-hand pane gains simply by being the same pane.
+ *
+ * ⚠ `pane` decides two things and nothing else: whose selection is being
+ * dragged, and which directory the drag says it came from. Everything below
+ * that point is identical, which is the reason there is one function.
+ */
+/**
+ * pane:p1 — a row was clicked in one of the panes. Both panes reach the SAME
+ * Ctrl/Shift semantics (`useSelection.click`), which is the point: the
+ * right-hand pane used to keep a plain Set in which Shift behaved as Ctrl, so
+ * a range-select worked on one side of the split and not the other.
+ */
+function onPaneClickRow(
+  pane: 'main' | 'split',
+  n: FileNode,
+  mod: { ctrl: boolean; shift: boolean },
+) {
+  (pane === 'split' ? splitSelection : selection).click(n.path, mod);
+}
+
+function onPaneItemDragStart(pane: 'main' | 'split', node: FileNode, ev: DragEvent) {
   if (!ev.dataTransfer) return;
   if (node.basename === '.trash') {
     ev.preventDefault();
     return;
   }
-  if (!selection.has(node.path)) {
-    selection.click(node.path);
-  }
-  const items = selection.nodes.value
+  const sel = pane === 'split' ? splitSelection.nodes.value : selection.nodes.value;
+  const dirWire =
+    pane === 'split' ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
+  const chosen = sel.some((n) => n.path === node.path) ? sel : [node];
+  const items = chosen
     .filter((n) => !clippedPaths.value.has(n.path))
     .filter((n) => n.basename !== '.trash')
     .map((n) => ({ path: n.path, basename: n.basename, type: n.type })); // qualified
+  if (items.length === 0) return;
 
   /* wiring:f1 — drag-out (to the desktop / another application).
      When a shell is present the drag is ALWAYS an OS drag: folders and
@@ -3378,21 +4615,17 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
      the app the drag is still a server-side move — the payload stays with us —
      and the shell is told to "give up" so it doesn't watch the drives for
      nothing. */
-  if (dragOut.value && items.length > 0) {
+  if (dragOut.value) {
     ev.preventDefault();
-    beginNativeDrag(items, qualify(currentPath.value));
+    beginNativeDrag(items, dirWire);
     void Promise.resolve(dragOut.value.start(items)).catch((err) => {
       endNativeDrag();
       cancelShellDrag();
       emit('error', { message: (err as Error).message, context: { op: 'drag-out' } });
     });
+    void prepareDragOut(items);
     return;
   }
-
-  ev.dataTransfer.setData(FE_DND_MIME, JSON.stringify(items));
-  ev.dataTransfer.setData(FE_DND_SRC_MIME, qualify(currentPath.value)); /* wiring:d1 — cross-pane origin stamp */
-  ev.dataTransfer.setData('text/plain', items.map((i) => i.path).join('\n'));
-  ev.dataTransfer.effectAllowed = 'move';
 
   /* Single file + a cookie session: the browser's own download path
      (DownloadURL) fetches the file onto the desktop at drop time; no
@@ -3403,8 +4636,6 @@ function onItemDragStart(node: FileNode, ev: DragEvent) {
     const payload = downloadUrlPayload(items[0], api.downloadUrl(items[0].path), node.mime_type);
     if (payload) ev.dataTransfer.setData('DownloadURL', payload);
   }
-
-  if (dragOut.value && items.length > 0) void prepareDragOut(items);
 }
 
 /* === wiring:f1 — drag-out preparation ===
@@ -3478,19 +4709,24 @@ async function prepareDragOut(items: DragItem[], quiet = false): Promise<void> {
 async function moveSourcesAsync(sources: string[], targetDir: string, opLabel: string, originOverride?: string): Promise<void> {
   try {
     const originWire = originOverride ?? qualify(currentPath.value); /* wiring:d1 — the real source folder for a drag coming from the split pane */
+    const collides = await movedNamesCollide(sources, targetDir);
     if (api.endpoints.moveAsync) {
       const { op } = await api.moveAsync(sources, targetDir, originWire);
-      registerMoveUndo(op.id, sources, targetDir, originWire);
+      registerMoveUndo(op.id, sources, targetDir, originWire, collides);
       pendingOps.register(op);
-      flashToast(t('split.move_queued'));
+      flashToast(collides ? t('toast.move_kept_both') : t('split.move_queued'));
     } else {
       await api.move(originWire, sources, targetDir);
       await load();
-      // Sync move (no async endpoint): offer the reverse move right away.
-      const movedPaths = sources.map((p) => wireJoin(targetDir, wireBasename(p)));
-      undoToast(t('toast.moved'), async () => {
-        await api.move(targetDir, movedPaths, originWire);
-      });
+      if (collides) {
+        flashToast(t('toast.move_kept_both'));
+      } else {
+        // Sync move (no async endpoint): offer the reverse move right away.
+        const movedPaths = sources.map((p) => wireJoin(targetDir, wireBasename(p)));
+        undoToast(t('toast.moved'), async () => {
+          await api.move(targetDir, movedPaths, originWire);
+        });
+      }
     }
     selection.clear();
   } catch (err) {
@@ -3886,12 +5122,34 @@ onMounted(() => {
 });
 
 function applyTabLocation(tb: TabState) {
-  if (tb.viewMode && tb.viewMode !== viewMode.value) viewMode.value = tb.viewMode;
+  /* tablo:t1 — the tab's own remembered view mode is applied only while
+   * per-folder memory is OFF.
+   *
+   * ⚠⚠ Two things remembering the same fact is two things that disagree, and
+   * this pair disagreed in a way nothing would have caught: open one folder in
+   * two tabs, set it to grid in the first, switch to the second, and the second
+   * restores the LIST it happened to be showing — for the same folder, whose
+   * remembered view is grid. Measured, 2026-09-13. The applier below could not
+   * correct it either, because it fires on a change of FOLDER and the folder
+   * did not change; only the tab did.
+   *
+   * With the memory on, the folder is the authority and a tab is just a window
+   * onto one, so the tab's copy is redundant and is ignored. With it off,
+   * nothing here changes at all and tabs keep exactly the behaviour they had.
+   */
+  if (!folderMemoryEnabled() && tb.viewMode && tb.viewMode !== viewMode.value) {
+    viewMode.value = tb.viewMode;
+  }
+  /* ⚠ AFTER the load, not before. `load()` is async, so `currentPath` — and
+   * with it `currentFolderKey` — only moves once it settles; re-asserting here
+   * is also what covers the case above, where the key never changes and the
+   * watcher therefore never runs. */
+  const settle = () => applyFolderView(currentFolderKey.value);
   if (tb.path === '.trash') {
-    void loadTrash();
+    void loadTrash().then(settle, settle);
     return;
   }
-  void load(tb.path);
+  void load(tb.path).then(settle, settle);
 }
 function activateTab(id: string) {
   const tb = tabsApi.activate(id);
@@ -3957,11 +5215,98 @@ onBeforeUnmount(() => {
 
 // ---- split (per-tab secondary pane) --------------------------------
 
-const splitPaneRef = ref<InstanceType<typeof SecondaryPane> | null>(null);
-// Split is disabled in narrow mode (the state is kept and comes back on widen).
-const splitVisible = computed(
-  () => !!activeSplit.value && !isNarrow.value && !simpleUi.value /* gezinti:g1 */,
+const mainPaneRef = ref<InstanceType<typeof FilePane> | null>(null);
+const splitPaneRef = ref<InstanceType<typeof FilePane> | null>(null);
+
+/* pane:p1 — the split pane's half of the state the HOST has to hold.
+ *
+ * ⚠⚠ Two instances of ONE composable, not two implementations. The explorer
+ * routes cut/copy/paste, the context menu, the inspector, the toolbar's count
+ * and every keyboard shortcut through "the active pane's selection", so it has
+ * to hold both — but `useSelection` is written once and this is the second
+ * call to it, exactly as `lib/fileFilters` is written once and this is the
+ * second filter object. What used to be here instead was a SECOND selection
+ * model living inside `SecondaryPane`, in which Shift behaved as Ctrl because
+ * it kept a plain Set with no range anchor. */
+const splitDisplayOrder = ref<FileNode[]>([]);
+const splitSelection = useSelection(() =>
+  splitDisplayOrder.value.length ? splitDisplayOrder.value : (splitPaneRef.value?.visibleNodes() ?? []),
 );
+const splitFilters = ref<DriveFilters>({ ...EMPTY_FILTERS });
+
+/** The split pane's folder, in the key `lib/viewPrefs` remembers folders under
+ *  — so the column menu's two per-folder rows tell the truth on the right as
+ *  well as on the left.
+ *
+ * ⚠⚠ READ-ONLY on this side, and that is a decision. The memory answers "how
+ * did I leave this folder", and a folder is left in ONE state; two panes both
+ * writing it would be the stale-snapshot race that already bit the tab strip
+ * once today, with a second racer. So: BOTH panes read a folder's arrangement
+ * when they arrive in it (the split pane's sort store is seeded from the
+ * global default and this key is what its column menu operates on), and only
+ * the main pane — the one the window's tab is about, the one whose view mode
+ * the tab records — writes it back. Nothing re-applies memory to a pane that
+ * is sitting still, so a choice made in one pane can never yank the other
+ * pane's view out from under it. */
+const splitFolderKey = computed(() => {
+  if (!folderMemoryOn.value) return '';
+  const path = String(splitPaneRef.value?.getPath() ?? '').replace(/^\/+|\/+$/g, '');
+  if (!path) return '';
+  const [first, ...rest] = path.split('/');
+  const st = (props.config.storages ?? []).find((sto) => sto.name === first);
+  return makeFolderKey(st?.uid || first, rest.join('/'));
+});
+
+/* pane:p1 — the row above BOTH panes. It survives the tabs being switched off
+ * (the `simple` profile) because the split and details toggles live in it too;
+ * `hideTabs` empties it without removing it. */
+const paneRowVisible = computed(
+  () => tabsVisible.value || infoPanelToggle.value || splitOffered.value,
+);
+
+/**
+ * pane:p1 — the states the WINDOW draws INSTEAD of a listing.
+ *
+ * Home, a dead deep link and the encrypted lock screen are not things that can
+ * happen to a pane — they are things that have happened to the explorer — so
+ * they arrive in `FilePane`'s `body` slot and this says which. Everything else
+ * in the old chain (the skeleton, the failed listing, the filtered-empty
+ * state, the listing itself) IS pane state and now lives in the pane, once,
+ * for both halves.
+ *
+ * ⚠ The two `return ''`s are load-bearing: they hand the turn back to the
+ * pane's own skeleton and error states in exactly the order the chain had, so
+ * a folder that is still loading does not flash its lock screen and a failed
+ * listing still gets the retry state rather than "not found".
+ */
+const hostBodyState = computed<'' | 'home' | 'notfound' | 'locked'>(() => {
+  if (navView.value === 'home') return 'home';
+  if (loading.value && files.value.length === 0) return '';
+  if (notFoundPath.value) return 'notfound';
+  if (loadError.value && files.value.length === 0) return '';
+  if (e2eLocked.value) return 'locked';
+  return '';
+});
+/**
+ * Can a second pane be OPENED here at all?
+ *
+ * ⚠⚠ One answer for every door to the split, and it is not `!isNarrow`. The
+ * tab strip's toggle and the command palette's row were both handed
+ * `!isNarrow` and nothing else, while the pane below was gated on the
+ * `simple` profile as well — so under `ui-profile="simple"` the button was
+ * drawn, a click recorded a split on the tab and turned the button PRESSED,
+ * and no pane ever appeared (measured 2026-09-14 at 1440: one pane before the
+ * click, one after, `aria-pressed="true"`). A control that lies about its own
+ * state is worse than a missing one. The state it wrote is kept, so switching
+ * the profile back would suddenly split a tab nobody remembers splitting —
+ * which is why `toggleSplit` refuses to open one here too, not only the
+ * button.
+ *
+ * Narrow mode keeps the state and brings it back on widen; the simple profile
+ * offers no split at all (`lib/uiProfile`).
+ */
+const splitOffered = computed(() => !isNarrow.value && !simpleUi.value);
+const splitVisible = computed(() => !!activeSplit.value && splitOffered.value /* gezinti:g1 */);
 
 function toggleSplit() {
   if (activeSplit.value) {
@@ -3969,7 +5314,7 @@ function toggleSplit() {
     activePane.value = 'main';
     return;
   }
-  if (isNarrow.value) return;
+  if (!splitOffered.value) return;
   tabsApi.setSplit({ path: currentPath.value ?? '', viewMode: viewMode.value });
 }
 function closeSplit() {
@@ -3978,7 +5323,36 @@ function closeSplit() {
 }
 function onPaneNavigate(p: string) {
   tabsApi.setSplit({ ...(activeSplit.value ?? {}), path: p });
+  /* A navigation is a new folder: the chips the person set for the folder they
+     just left must not silently keep narrowing the one they arrived in. Same
+     rule the main pane's own watcher applies. */
+  if (filtersActive(splitFilters.value)) splitFilters.value = { ...EMPTY_FILTERS };
+  splitSelection.clear();
+  splitDisplayOrder.value = [];
 }
+
+/**
+ * pane:p1 — a row was opened (double-click, Enter) in one of the panes.
+ *
+ * A FOLDER opens in the pane it was opened from — that is the whole point of a
+ * second pane. Everything else is the window's business (the preview modal,
+ * the encrypted-blob path, `markRecent`) and goes to the one `openNode` both
+ * panes have always been entitled to. The right-hand pane used to have no path
+ * to it at all, so double-clicking a file there did nothing.
+ */
+function onPaneOpen(pane: 'main' | 'split', n: FileNode) {
+  if (pane === 'split' && n.type === 'dir' && n.basename !== '.trash') {
+    void splitPaneRef.value?.loadFolder(
+      /* A multi-storage drive row's path is already the wire form for that
+         storage's root; a real row needs converting. The predicate comes from
+         `lib/fileIcons`, which is that concept's one home. */
+      iconFamilyFor(n) === 'storage' ? n.path : paneToUser(n.path),
+    );
+    return;
+  }
+  openNode(n);
+}
+
 /* ui-fix — when the trash row is opened from the side pane: the trash view
  * (with its restore actions) belongs to the main pane → activate the main
  * pane and open it there. */
@@ -4014,6 +5388,130 @@ watch(splitVisible, (v) => {
 });
 const paneIsActive = computed(() => activePane.value === 'split' && splitVisible.value);
 const mainPaneFocus = computed(() => splitVisible.value && activePane.value === 'main');
+/** The `data-pane` of the half that owns `activeTargets()`. The selection bar
+ *  is teleported into THAT pane, so this is what tells the toolbar where. */
+const activePaneId = computed(() => (paneIsActive.value ? 'split' : 'main'));
+
+/* === koru:k1 + pane:p1 — THE DETAILS PANEL FOLLOWS THE FOCUSED PANE =======
+ *
+ * ⚠⚠ It did not, and the owner reported it, 2026-09-13: "Yanda açılan info
+ * panele sadece ana pane üzerinde tıklanmış ya da bulunduğumuz yerin infosu
+ * geliyor. Onun dışında öteki pane'de tıkladığımız yerlerin infosu hiç
+ * gelmiyor." The panel read `selection.nodes` — the MAIN pane's selection —
+ * so clicking a row in the right-hand half changed the highlight, changed the
+ * selection bar (which had just been taught this rule) and left the panel
+ * describing something in the other half entirely.
+ *
+ * ⚠ The same source as the selection bar, deliberately: `activeTargets()`.
+ * That function is already the one answer to "what is selected right now", and
+ * the whole reason it exists is that the toolbar used to have a second one.
+ * A third, here, would be the same bug a month later.
+ *
+ * ⚠ WITH NO SELECTION the panel describes the focused pane's FOLDER, which is
+ * the behaviour it already had for the main pane and the only honest one: the
+ * head then reads the place you are standing in. So clicking into the split
+ * pane's empty background moves the panel to that pane's folder rather than
+ * leaving it on the other half's — which is the complaint, one level up.
+ */
+/**
+ * ⚠⚠ IT HOLDS THE LAST SELECTED THING. Owner's ruling, 2026-09-13, asked and
+ * answered: "son seçilen şeyi tutsun."
+ *
+ * So moving the keyboard to a pane with nothing ticked does NOT empty the panel
+ * and does NOT fall back to that pane's folder — it goes on describing whatever
+ * was selected last, until something else is selected. That is the difference
+ * between a panel you can read while you work in the other half and a panel
+ * that blanks the moment you click away from what you were reading about.
+ *
+ * ⚠ The two consequences of holding, handled below rather than left implicit:
+ *   1. the held item can live in the pane you are NOT looking at, so the panel
+ *      is TOLD it is holding and where the item is (`heldIn`), and says so;
+ *   2. a held item can stop existing — deleted, moved, or its pane closed — and
+ *      a panel describing a file that is gone is worse than an empty one, so
+ *      `heldValid` drops it the moment its own pane's listing no longer has it.
+ */
+const heldSelection = ref<{ nodes: FileNode[]; pane: 'main' | 'split'; path: string } | null>(null);
+
+/** The focused pane's location, user-path form. */
+const activePanePath = computed(() =>
+  paneIsActive.value ? (splitPaneRef.value?.getPath() ?? '') : (currentPath.value ?? ''),
+);
+function panePathOf(pane: 'main' | 'split'): string {
+  return pane === 'split' ? (splitPaneRef.value?.getPath() ?? '') : (currentPath.value ?? '');
+}
+/** The paths a pane's folder HOLDS — before the filter row narrows them. ⚠ The
+ *  unfiltered set on both sides: "is this row still there" and "is this row
+ *  currently drawn" are different questions, and answering the first with the
+ *  second would make typing in the filter box drop the held item as if the file
+ *  had been deleted. */
+function panePathsOf(pane: 'main' | 'split'): string[] {
+  return pane === 'split'
+    ? (splitPaneRef.value?.rowPaths() ?? [])
+    : files.value.map((n) => n.path);
+}
+
+/* Capture: any non-empty selection, in either pane, becomes the held one. */
+watch(
+  () => activeTargets(),
+  (nodes) => {
+    if (nodes.length) {
+      heldSelection.value = {
+        nodes,
+        pane: activePaneId.value as 'main' | 'split',
+        path: activePanePath.value,
+      };
+    }
+  },
+  { deep: false },
+);
+
+/**
+ * Is the held item still a real thing?
+ *
+ * ⚠ Only checked while its own pane is still showing the folder it was held
+ * from. Walking away from a folder is not a deletion — "last selected" has to
+ * survive a navigation or it is not a hold at all — but standing in the same
+ * folder with the row gone IS one, and that is the case that must not be
+ * described. A closed split pane takes its held item with it.
+ */
+const heldValid = computed<boolean>(() => {
+  const h = heldSelection.value;
+  if (!h || !h.nodes.length) return false;
+  if (h.pane === 'split' && !splitVisible.value) return false;
+  if (panePathOf(h.pane) !== h.path) return true; // navigated away — still held
+  const here = new Set(panePathsOf(h.pane));
+  return h.nodes.some((n) => here.has(n.path));
+});
+watch(heldValid, (ok) => {
+  if (!ok) heldSelection.value = null;
+});
+
+/** True while the panel is describing the HELD item rather than a live
+ *  selection — i.e. the focused pane has nothing ticked. */
+const inspectorHeld = computed(() => activeTargets().length === 0 && heldValid.value);
+const inspectorNodes = computed<FileNode[]>(() => {
+  const live = activeTargets();
+  if (live.length) return live;
+  return heldValid.value ? (heldSelection.value?.nodes ?? []) : [];
+});
+/** Where the held item lives — named, so "this is not what is selected in front
+ *  of you" is never a guess. Empty while a live selection is shown. */
+const inspectorHeldIn = computed(() =>
+  inspectorHeld.value ? folderLabelOf(heldSelection.value?.path ?? '') : '',
+);
+
+/** Folder summary label for the truly-empty state — of the FOCUSED pane. */
+const inspectorDirLabel = computed(() => folderLabelOf(activePanePath.value));
+/** How many rows that folder holds. `files` IS the main pane's row array, so
+ *  the two branches are the same quantity measured on the two panes. */
+const inspectorDirCount = computed(() =>
+  paneIsActive.value ? (splitPaneRef.value?.rowCount() ?? 0) : files.value.length,
+);
+/** RBAC level of that folder. The main pane's comes off the host's own load;
+ *  the split pane reads it from the response to its own `index`. */
+const inspectorDirPerm = computed(() =>
+  paneIsActive.value ? (splitPaneRef.value?.dirPerm() ?? '') : dirPerm.value,
+);
 
 // Pane helpers — always wrap the main pane's existing converters.
 function paneToUser(wire: string): string {
@@ -4030,13 +5528,13 @@ function paneClamp(p: string): string {
 // selection and paste lands in the pane's folder. The state is SHARED with the
 // main pane's — so cut-and-paste between panes works for free.
 function paneCut() {
-  const nodes = splitPaneRef.value?.selectedNodes() ?? [];
+  const nodes = splitSelection.nodes.value;
   if (nodes.length === 0) return;
   clipboard.value = { mode: 'cut', items: nodes, sourcePath: splitPaneRef.value?.getPath() ?? '' };
   flashToast(t('toast.cut'));
 }
 function paneCopy() {
-  const nodes = splitPaneRef.value?.selectedNodes() ?? [];
+  const nodes = splitSelection.nodes.value;
   if (nodes.length === 0) return;
   clipboard.value = { mode: 'copy', items: nodes, sourcePath: splitPaneRef.value?.getPath() ?? '' };
   flashToast(t('toast.copied'));
@@ -4678,21 +6176,14 @@ function closeRecoveryKey() {
     @drop="onDropUpload"
     @contextmenu="onContextCanvas"
   >
-    <!-- wiring:d1 — tab strip: not rendered at all on a SINGLE tab (embeds stay pixel-identical) -->
-    <TabBar
-      v-if="tabsVisible"
-      :tabs="tabItems"
-      :active-id="tabsActiveId"
-      :locale="locale"
-      :split-enabled="!isNarrow"
-      :split-active="!!activeSplit"
-      @select="activateTab"
-      @close="closeTabById"
-      @new="newTabHere"
-      @reorder="(from: number, to: number) => tabsApi.move(from, to)"
-      @toggle-split="toggleSplit"
-    />
-    <!-- /wiring:d1 -->
+    <!-- wiring:d1 — the tab strip used to be the explorer's first row, above
+         the header and spanning the sidebar too.
+         gorunum:v2-topbar — it then moved under the breadcrumb, INSIDE the
+         left pane.
+         gorunum:v5-panestack — and it is out again, one level up: a tab is a
+         location the WINDOW is showing and the split happens within it, so the
+         strip spans both panes and each pane carries only its own address.
+         See `.fe__stack` below. -->
     <Toolbar
       ref="toolbarRef"
       :view-mode="displayedViewMode /* ui-fix — the active pane's mode */"
@@ -4700,6 +6191,13 @@ function closeRecoveryKey() {
       :trash-active="trashActive"
       :actions="toolbarActions"
       :selection-mode="selectionMode"
+      :selection-count="activeTargets().length /* gorunum:v1 — the count the
+           selection bar prints. Without it the toolbar counted the ticked rows by
+           watching the DOM, which is a second source of truth for something the
+           parent already knows.
+           pane:p1 — and it is the ACTIVE pane's count, so the number and the
+           bar's position can never describe two different panes. */"
+      :selection-pane="activePaneId /* pane:p1 — which half the bar mounts into */"
       :paste-enabled="!!clipboard.mode"
       :convert-enabled="!!effectiveConvertUrl"
       :can-go-up="canGoUp"
@@ -4712,23 +6210,46 @@ function closeRecoveryKey() {
       :nav-open="navToggleOn /* gezinti:g1 */"
       :nav-enabled="sideNavEnabled /* gezinti:g1 */"
       :view-modes="allowedViewModes /* gezinti:g1 */"
-      :shell="driveShell ? 'drive' : 'classic' /* surucu:d1 */"
       :scope-label="driveScopeLabel /* surucu:d1 */"
+      :brand-name="config.brand?.name /* gorunum:v3-shell */"
+      :brand-mark-url="config.brand?.markUrl /* gorunum:v3-shell */"
+      :search-escalates="navView === 'home' /* gorunum:v3-shell */"
       @open-palette="openPaletteWith /* surucu:d1 */"
       @toggle-inspector="toggleInspector /* koru:k1 */"
       @toggle-nav="toggleSideNav /* gezinti:g1 */"
       @open-theme="showThemeGallery = true /* wiring:c1 */"
       @update:view-mode="setDisplayedViewMode($event) /* ui-fix — to the active pane */"
-      @update:search-query="searchQuery = $event"
+      @update:search-query="onToolbarSearch /* gorunum:v1-advsearch */"
+      @open-advanced-search="openAdvancedSearch /* gorunum:v1-advsearch */"
       @update:density="density = $event"
       @open-shortcut-settings="showShortcutSettings = true /* wiring:c2 */"
+      @open-timezone="showTimeZone = true /* zaman:z3 */"
       @new-folder="showNewFolder = true"
       @upload="triggerUpload"
-      @refresh="() => load()"
+      @refresh="refreshAll /* gorunum:v2-topbar */"
       @go-up="goUp"
       @action="onToolbarAction"
       @open-recents="showRecents = true"
-    />
+    >
+      <!-- gorunum:v3-shell — the host's product mark, at the far left of the
+           top bar beside the panel's collapse control. Passed straight
+           through: this package has no branding of its own and must not grow
+           any.
+           ⚠⚠ `v-if="$slots.brand"` is load-bearing, not tidiness. Declaring
+           this template unconditionally would hand Toolbar a `brand` slot on
+           every mount — an EMPTY one for a host that filled nothing — and a
+           slot that exists always is a slot whose fallback content never
+           renders. That fallback is `config.brand`, and it is the only door a
+           `<filex-explorer>` host has (slots do not reach a Vue custom
+           element at all; see ExplorerConfig.brand for the measurement). So:
+           slot when there is one, config otherwise. -->
+      <template v-if="$slots.brand" #brand><slot name="brand"></slot></template>
+      <!-- gorunum:v2-topbar — the host's account-level doors (admin panel,
+           settings, sign out), passed straight through. The explorer knows
+           nothing about them and must not: they are the EMBEDDER's chrome,
+           and an embed with none renders an empty cluster. -->
+      <template #header-actions><slot name="header-actions"></slot></template>
+    </Toolbar>
 
     <!-- koru:k1 — fe__main lays the listing body and the inspector panel out
          as flex siblings (row). Without the inspector open it is visually
@@ -4756,14 +6277,15 @@ function closeRecoveryKey() {
       :show-identity-surfaces="identitySurfaces"
       :can-write="canWriteHere && !atVirtualRoot && !trashActive"
       :locale="locale"
-      :new-menu="driveShell /* surucu:d1 */"
       :can-request-files="canWriteHere && !atVirtualRoot && !trashActive && !navView /* surucu:d1 */"
+      :can-new-document="canNewDocument && !trashActive && !navView /* belge:n1 */"
+      @new-document="showNewDocument = true"
       :quota="quotaSnapshot /* surucu:d1 */"
       :theme="themeMode /* surucu:d1 — the teleported New menu leaves .fe */"
       @request-files="openFileRequest /* surucu:d1 */"
       @toggle="toggleSideNav"
       @close="closeNavDrawer"
-      @open-view="loadNavView"
+      @open-view="openNavDest /* gorunum:v3-shell */"
       @open-tag="loadTagView"
       @open-storage="openNavStorage"
       @upload="triggerUpload"
@@ -4781,80 +6303,131 @@ function closeRecoveryKey() {
       :aria-label="t('sidenav.close')"
       @click="closeNavDrawer"
     ></button>
-    <!-- ui-fix — the left pane's header (breadcrumb + status strips + body)
-         in one wrapper: in split mode this wrapper fits the left half, so the
-         breadcrumb spans its own pane rather than the whole page (symmetric
-         with SecondaryPane's own crumbs). The active-pane accent lives on
-         this wrapper too. -->
-    <div
-      class="fe__primary"
-      :class="{ 'fe-pane--focus': mainPaneFocus } /* wiring:d1 — active-pane accent */"
-    >
-    <!-- surucu:d1 — the breadcrumb row. In the drive shell it also carries the
-         two controls that belong to a LISTING rather than to the app (the view
-         switcher and the details toggle), which is where the mockups put them
-         and where the header then has room for one wide search field.
-         Everywhere else the wrapper is `display: contents`, so the breadcrumb
-         is the same flex child of `.fe__primary` it has always been — one
-         Breadcrumb, not a second copy that can drift. -->
-    <div :class="driveShell ? 'fe-subhead' : 'fe-subhead--plain'">
-    <Breadcrumb
-      :dirname="dirname"
-      :adapter="adapter"
-      :root-label="adapter"
+    <!-- gorunum:v5-panestack / pane:p1 — THE TAB STRIP BELONGS TO THE WINDOW,
+         and BOTH halves below it are the SAME component.
+
+         Owner's decision, 2026-09-13: *"tab içinde split yapman lazım, dışında
+         yapıyorsun"* — a tab is a location the window is showing, and the split
+         happens WITHIN that location. So: top bar, then the strip full width,
+         then the panes. The strip used to render inside the left half, which
+         made the left pane carry the window's chrome and the right one read as
+         an afterthought.
+
+         And the second half of the same ruling: *"split pane ile gelen yeni
+         pane aslında yandaki pane ile birebir olması lazım"*. There is now ONE
+         `FilePane`, rendered twice. Everything a listing has — the crumbs, the
+         filter row, the sort control, the view switcher, the selection-bar
+         slot, the states, the column menu — is defined once, in that file, so
+         a feature added to a pane cannot miss the other pane. -->
+    <div class="fe__stack">
+    <TabBar
+      v-if="paneRowVisible"
+      :tabs="tabItems"
+      :active-id="tabsActiveId"
       :locale="locale"
-      :multi-storage-root="multiStorageRoot"
-      :root-path="rootPathProp"
-      @navigate="onNavigate"
-      @copy-path="onCopyPath"
-      @crumb-context="onCrumbContext"
-      @crumb-drop="onCrumbDropInto"
+      :hide-tabs="!tabsVisible /* gorunum:v5-panerow — the row stays for the
+             split and details toggles even where tabs are not offered */"
+      :split-enabled="splitOffered /* the pane's own gate — see splitOffered */"
+      :split-active="!!activeSplit"
+      :inspector-enabled="infoPanelToggle"
+      :inspector-open="showInspector"
+      @select="activateTab"
+      @close="closeTabById"
+      @new="newTabHere"
+      @reorder="(from: number, to: number) => tabsApi.move(from, to)"
+      @toggle-split="toggleSplit"
+      @toggle-inspector="toggleInspector"
     />
-    <div v-if="driveShell" class="fe-subhead__actions">
-      <ViewSwitcher
-        :view-mode="displayedViewMode"
-        :locale="locale"
-        :modes="allowedViewModes"
-        @update:view-mode="setDisplayedViewMode($event)"
-      />
-      <button
-        v-if="infoPanelToggle"
-        type="button"
-        class="fe-btn fe-btn--icon-only fe-toolbar__inspector"
-        :class="{ 'is-active': showInspector }"
-        :aria-pressed="showInspector"
-        :title="t('toolbar.inspector')"
-        :aria-label="t('toolbar.inspector')"
-        data-testid="subhead-inspector"
-        @click="toggleInspector"
-      >
-        <svg
-          class="fe-ficon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 11v5" />
-          <circle cx="12" cy="7.6" r="1" fill="currentColor" stroke="none" />
-        </svg>
-      </button>
-    </div>
-    </div>
-    <FilterBar
-      v-if="driveShell && !atVirtualRoot"
-      :value="driveFilters"
+    <div class="fe__panes">
+
+    <!-- pane:p1 — the main pane. HOST-DRIVEN (`self-driven` absent): its rows
+         come from `load()`, which also answers a search, the trash, the
+         panel's virtual views and an encrypted folder. Those are states the
+         WINDOW is in, so the three of them that have no listing behind them
+         arrive through the `body` slot and the rest through `empty`. -->
+    <FilePane
+      pane-id="main"
+      ref="mainPaneRef"
+      :api="api"
       :locale="locale"
       :theme="themeMode"
-      :shown="displayFiles.length"
-      :total="files.length"
-      @update:value="setDriveFilters"
-    />
+      :focused="mainPaneFocus"
+      :path="currentPath"
+      :qualify="qualify"
+      :to-user="paneToUser"
+      :clamp="paneClamp"
+      :root-path="rootPathProp"
+      :floor="rootFloor"
+      :multi-root="multiStorageRoot"
+      :rows="files"
+      :loading="loading"
+      :error="loadError"
+      :order="listingOrder"
+      :view-mode="viewMode"
+      :view-modes="allowedViewModes"
+      :show-crumbs="navView !== 'home' /* Home has no address: its cards come
+             from every folder in every storage, so a trail would have to name
+             one */"
+      :filter-mode="filterRowMode /* `show-filter-bar` is NOT passed: the row is
+             drawn in every view now, so the default (true) is the answer and a
+             prop repeating it would be a second place to forget. */"
+      :find-label="navView === 'home' ? t('filter.find.home') : ''"
+      :show-view-switcher="navView !== 'home'"
+      :folder-key="currentFolderKey"
+      :show-parent-path="!!searchQuery || crossFolderView"
+      :clipped="clippedPaths"
+      :extra-filters="advFilters"
+      :can-write="canWriteHere && !trashActive"
+      :can-paste="!!clipboard.mode"
+      :selected="selection.selected.value"
+      :filters="driveFilters"
+      :thumb-src="thumbs.src"
+      :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
+      :starred-ids="starredIds"
+      :star-enabled="identitySurfaces"
+      :api-base="props.config.apiBase ?? ''"
+      :auth-headers="() => buildAuthHeaders()"
+      :auth-credentials="api.credentialsMode()"
+      :e2e-active="e2eActive"
+      :body-override="hostBodyState !== ''"
+      @activate="setPaneMain"
+      @navigate="onNavigate"
+      @open="openNode"
+      @open-trash="() => loadTrash()"
+      @click-row="(n, m) => onPaneClickRow('main', n, m)"
+      @context="(n: FileNode | null, ev: MouseEvent) => onPaneMenu('main', n, ev)"
+      @clear-selection="selection.clear()"
+      @display-order="(nodes: FileNode[]) => (displayOrder = nodes)"
+      @item-drag-start="(n: FileNode, ev: DragEvent) => onPaneItemDragStart('main', n, ev)"
+      @item-drop-into="onItemDropInto"
+      @transfer="onPaneTransfer"
+      @update:view-mode="(v: ViewMode) => (viewMode = v)"
+      @update:filters="setDriveFilters"
+      @crumb-context="onCrumbContext"
+      @copy-path="onCopyPath"
+      @crumb-drop="onCrumbDropInto"
+      @new-folder="showNewFolder = true"
+      @upload="triggerUpload"
+      @paste="onToolbarAction('paste') /* surucu:d1-actions — through the SAME
+             handler the right-click menu and the toolbar use */"
+      @select-all="selection.selectAll()"
+      @clear-filters="clearDriveFilters"
+      @star-change="onStarChange"
+      @retry="retryLoad"
+    >
+      <!-- ⚠ NO `#heading` for Home, and the empty address row it used to live
+           on is not drawn either (FilePane's own guard). Owner, 2026-09-13:
+           "ver sayfa içinde salak bir Home yazısı var, onu kaldıralım."
+           He is right and it is the same rule the tab strip already follows:
+           the panel's Home row is highlighted, the tab says Home and the
+           address bar says `#.home` — a fourth "Home", in 18px type, over
+           three sections that name themselves, was the page introducing itself
+           to somebody who had just clicked its name. The SECTION headings
+           (Storages / Recent / Starred) stay: those name the blocks, not the
+           page. `home.title` is still the tab's and the panel row's word. -->
 
+      <!-- Strips that describe the WINDOW's state rather than the listing. -->
+      <template #banners>
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
          When the live socket is unavailable the same strip carries a small
          degraded-connection badge instead (presence is empty in fallback);
@@ -4958,7 +6531,8 @@ function closeRecoveryKey() {
       </div>
     </div>
     <div v-if="e2eUnlocked" class="fe-e2e-strip" role="status">
-      <span class="fe-e2e-strip__icon" aria-hidden="true">🔒</span>
+      <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+      <span class="fe-e2e-strip__icon" aria-hidden="true" v-html="actionIconSvg('lock')"></span>
       <span class="fe-e2e-strip__label">{{ t('e2e.strip.label') }}</span>
       <!-- The way back for somebody who declined. Quiet, but present: a
            refusal that could not be reversed without deleting the folder
@@ -4977,34 +6551,60 @@ function closeRecoveryKey() {
     </div>
     <!-- /wiring:e2 -->
 
-    <div
-      class="fe__body"
-      @pointerdown.capture="setPaneMain() /* wiring:d1 */"
-      @click.self="selection.clear()"
-    >
-      <!-- Initial load: skeleton ghosts (view-mode aware) instead of an
-           empty/"no files" flash. Only when there's nothing yet — navigation
-           keeps the current list, exactly as before. -->
-      <div v-if="loading && files.length === 0" class="fe__skeleton" role="status">
-        <span class="fe-sr-only">{{ t('loading') }}</span>
-        <div v-if="viewMode !== 'list' /* wiring:d2 — the gallery uses the grid skeleton too */" class="fe-skel-grid" aria-hidden="true">
-          <div v-for="i in 8" :key="i" class="fe-skel-card">
-            <div class="fe-skel fe-skel--thumb"></div>
-            <div class="fe-skel fe-skel--label"></div>
-          </div>
-        </div>
-        <div v-else class="fe-skel-list" aria-hidden="true">
-          <div v-for="i in 8" :key="i" class="fe-skel-row">
-            <div class="fe-skel fe-skel--icon"></div>
-            <div class="fe-skel fe-skel--name"></div>
-            <div class="fe-skel fe-skel--size"></div>
-            <div class="fe-skel fe-skel--date"></div>
-          </div>
-        </div>
-      </div>
+    <!-- tablo:t1 — the trash banner: what the trash IS on the left, the one
+         irreversible action on the right. OUTSIDE `fe__body` so it sits above
+         the listing AND above the centred empty state, which is where the
+         reference draws it and the only place it reads as a property of the
+         view rather than of the rows. -->
+    <div v-if="trashMode && !loading" class="fe-trashbar">
+      <p class="fe-trashbar__text">{{ trashBannerText }}</p>
+      <!-- Offered only when the SERVER has said this caller may purge. The
+           backend refuses regardless of what we draw; this is so nobody is
+           handed a button that always fails. -->
+      <button
+        v-if="trashCanEmpty"
+        type="button"
+        class="fe-btn fe-btn--danger fe-trashbar__action"
+        :disabled="files.length === 0 || trashEmptying"
+        data-testid="trash-empty"
+        @click="showTrashConfirm = true"
+      >
+        {{ t('trash.empty_action') }}
+      </button>
+    </div>
+      </template>
+
+      <!-- The three states with no listing behind them. `hostBodyState` keeps
+           them in the order the old chain had — and, crucially, behind the
+           skeleton, so a folder that is still loading does not flash its lock
+           screen. -->
+      <template #body>
+      <!-- gorunum:v3-shell — Home. FIRST in the chain, and it short-circuits
+           every state below it on purpose: those all describe a LISTING (a
+           dead deep link, a failed fetch, a locked folder, an empty folder)
+           and Home has no listing behind it — `files` is deliberately empty
+           while it is open, which every one of them would read as "nothing
+           here". Its own three blocks each carry their own empty state. -->
+      <HomeView
+        v-if="hostBodyState === 'home'"
+        :storages="homeStorages"
+        :recent="homeRecent"
+        :starred="homeStarred"
+        :loading="homeLoading"
+        :locale="locale"
+        :name-filter="driveFilters.name ?? '' /* surucu:d1-scope — Home's filter
+               row is the name box alone, and this is what it narrows. The same
+               `DriveFilters.name` the listing's own box writes, so the value is
+               reset on navigation by the one watcher that already does that and
+               there is no second piece of filter state to keep in step. */"
+        :thumb-src="thumbs.src"
+        @open-storage="openNavStorage"
+        @open-node="openNode"
+        @context-node="onContextTarget"
+      />
       <!-- Dead deep link (404) or RBAC-hidden dir (403, shown identically):
            a dedicated state instead of a misleading "this folder is empty". -->
-      <div v-else-if="notFoundPath" class="fe-state">
+      <div v-else-if="hostBodyState === 'notfound'" class="fe-state">
         <svg
           class="fe-state__art"
           viewBox="0 0 120 100"
@@ -5030,46 +6630,11 @@ function closeRecoveryKey() {
           </button>
         </div>
       </div>
-      <!-- Listing failed (network / 5xx) with nothing else to show: retryable
-           error state in the same visual language. -->
-      <div v-else-if="loadError && files.length === 0" class="fe-state">
-        <svg
-          class="fe-state__art"
-          viewBox="0 0 120 100"
-          width="110"
-          height="92"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="60" cy="50" r="28" />
-          <path d="M60 36v18" />
-          <circle cx="60" cy="63" r="1.8" fill="currentColor" stroke="none" />
-          <path d="M24 88h72" stroke-dasharray="3 5" />
-        </svg>
-        <p class="fe-state__title">{{ t('error.title') }}</p>
-        <!-- wiring:c4 — friendly hint + collapsible technical detail; the raw
-             error message used to sit in the hint slot and read like UI copy. -->
-        <p class="fe-state__hint">{{ t('error.hint') }}</p>
-        <div class="fe-state__actions">
-          <button type="button" class="fe-btn fe-btn--primary" @click="retryLoad">
-            {{ t('error.retry') }}
-          </button>
-        </div>
-        <details class="fe-state__details">
-          <summary class="fe-state__details-summary">{{ t('error.details') }}</summary>
-          <pre class="fe-state__details-pre">{{ loadError }}</pre>
-        </details>
-        <!-- /wiring:c4 -->
-      </div>
       <!-- wiring:e2 — encrypted-folder lock screen: the listing is not
            rendered until the correct password is entered. The password is
            verified against the marker in the browser; it never reaches the
            server. -->
-      <div v-else-if="e2eLocked" class="fe-state fe-e2e-lock">
+      <div v-else class="fe-state fe-e2e-lock">
         <svg
           class="fe-state__art"
           viewBox="0 0 120 100"
@@ -5095,6 +6660,8 @@ function closeRecoveryKey() {
             type="password"
             class="fe-input fe-e2e-lock__input"
             :placeholder="t('e2e.locked.pw_placeholder')"
+            :aria-label="t('e2e.locked.pw_placeholder') /* the title and hint above
+              say what this screen is; the field still needs its own name */"
             autocomplete="current-password"
             :disabled="e2eUnlockBusy"
           />
@@ -5116,8 +6683,14 @@ function closeRecoveryKey() {
         </button>
       </div>
       <!-- /wiring:e2 -->
+      </template>
+
+      <!-- Loaded and empty: WHICH empty. The pane's own fallback ("this folder
+           is empty") is the last branch here, and it is the one the split pane
+           falls back to. -->
+      <template #empty>
       <!-- Search with zero hits — its own message, not "folder is empty". -->
-      <div v-else-if="!loading && files.length === 0 && searchQuery" class="fe-state">
+      <div v-if="searchQuery" class="fe-state">
         <svg
           class="fe-state__art"
           viewBox="0 0 120 100"
@@ -5141,7 +6714,7 @@ function closeRecoveryKey() {
            how it fills up; "This folder is empty" would be wrong twice over,
            because there is no folder and nothing to drop into it. -->
       <div
-        v-else-if="!loading && files.length === 0 && navView && navView !== 'trash'"
+        v-else-if="navView && navView !== 'trash'"
         class="fe-state"
         :data-testid="`empty-${navView}`"
       >
@@ -5186,7 +6759,7 @@ function closeRecoveryKey() {
         </p>
       </div>
       <!-- Empty trash view. -->
-      <div v-else-if="!loading && files.length === 0 && trashMode" class="fe-state">
+      <div v-else-if="trashMode" class="fe-state">
         <svg
           class="fe-state__art"
           viewBox="0 0 120 100"
@@ -5205,41 +6778,15 @@ function closeRecoveryKey() {
           <path d="M52 44v32M60 44v32M68 44v32" opacity="0.5" />
         </svg>
         <p class="fe-state__title">{{ t('empty.trash.title') }}</p>
-      </div>
-      <!-- surucu:d1 — the folder HAS rows and the filters hid all of them.
-           "This folder is empty" would be false, and the way back is the chip
-           row just above, so the message names it and offers the button. -->
-      <div
-        v-else-if="!loading && filtersOn && displayFiles.length === 0 && files.length > 0"
-        class="fe-state"
-        data-testid="empty-filtered"
-      >
-        <svg
-          class="fe-state__art"
-          viewBox="0 0 120 100"
-          width="110"
-          height="92"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M26 28h68L68 58v24l-16 8V58z" />
-        </svg>
-        <p class="fe-state__title">{{ t('filter.empty.title') }}</p>
-        <p class="fe-state__hint">{{ t('filter.empty.hint') }}</p>
-        <div class="fe-state__actions">
-          <button type="button" class="fe-btn" @click="clearDriveFilters">
-            {{ t('filter.clear') }}
-          </button>
-        </div>
+        <!-- tablo:t1 — the second line the reference has and we did not. The
+             key did not exist in EITHER catalogue, so there was nothing to
+             show even if something had asked for it. -->
+        <p class="fe-state__hint">{{ t('empty.trash.hint') }}</p>
       </div>
       <!-- Loaded, zero files, no search: the real empty-folder state. The
            upload affordances follow write permission (RBAC viewers only get
            the title). -->
-      <div v-else-if="!loading && files.length === 0" class="fe-state">
+      <div v-else class="fe-state">
         <svg
           class="fe-state__art"
           viewBox="0 0 120 100"
@@ -5266,127 +6813,120 @@ function closeRecoveryKey() {
           </button>
         </div>
       </div>
-      <ListView
-        v-else-if="viewMode === 'list'"
-        :files="displayFiles /* surucu:d1 */"
-        :selected="selection.selected.value"
-        :clipped="clippedPaths"
-        :show-parent-path="!!searchQuery"
-        :locale="locale"
-        :loading="loading"
-        :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
-        :starred-ids="starredIds"
-        :star-enabled="identitySurfaces"
-        :api-base="props.config.apiBase ?? ''"
-        :auth-headers="() => buildAuthHeaders()"
-        :auth-credentials="api.credentialsMode()"
-        @click-row="(n, m) => selection.click(n.path, m)"
-        @dbl-row="openNode"
-        @context-row="onContextTarget"
-        @item-drag-start="onItemDragStart"
-        @item-drop-into="onItemDropInto"
-        @star-change="onStarChange"
-      />
-      <GridView
-        v-else-if="viewMode === 'grid' /* wiring:d2 — v-else → v-else-if (3. mod eklendi) */"
-        :files="displayFiles /* surucu:d1 */"
-        :sections="driveShell /* surucu:d1 */"
-        :selected="selection.selected.value"
-        :clipped="clippedPaths"
-        :show-parent-path="!!searchQuery"
-        :locale="locale"
-        :loading="loading"
-        :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
-        :thumb-src="thumbs.src"
-        :starred-ids="starredIds"
-        :star-enabled="identitySurfaces"
-        :api-base="props.config.apiBase ?? ''"
-        :auth-headers="() => buildAuthHeaders()"
-        :auth-credentials="api.credentialsMode()"
-        @click-card="(n, m) => selection.click(n.path, m)"
-        @dbl-card="openNode"
-        @context-card="onContextTarget"
-        @item-drag-start="onItemDragStart"
-        @item-drop-into="onItemDropInto"
-        @star-change="onStarChange"
-      />
-      <!-- wiring:d2 — gallery view (same event contract as GridView) -->
-      <GalleryView
-        v-else
-        :files="displayFiles /* surucu:d1 */"
-        :selected="selection.selected.value"
-        :clipped="clippedPaths"
-        :show-parent-path="!!searchQuery"
-        :locale="locale"
-        :loading="loading"
-        :thumb-src="thumbs.src"
-        :starred-ids="starredIds"
-        :star-enabled="identitySurfaces"
-        :api-base="props.config.apiBase ?? ''"
-        :auth-headers="() => buildAuthHeaders()"
-        :auth-credentials="api.credentialsMode()"
-        @click-card="(n, m) => selection.click(n.path, m)"
-        @dbl-card="openNode"
-        @context-card="onContextTarget"
-        @item-drag-start="onItemDragStart"
-        @item-drop-into="onItemDropInto"
-        @star-change="onStarChange"
-      />
-      <!-- /wiring:d2 -->
-    </div>
-    </div><!-- /fe__primary ui-fix -->
+      </template>
+    </FilePane>
 
-    <!-- wiring:d1 — per-tab split: the secondary pane on the right (off in
-         narrow mode). :key is bound to the tab id — on a tab switch the pane
-         remounts cleanly with its own location. -->
-    <SecondaryPane
-      :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
+    <!-- pane:p1 — the split pane. The SAME component, SELF-DRIVEN: it asks the
+         backend for one folder through the same `api.index` + `lib/listing`
+         helpers. `:key` is bound to the tab id, so a tab switch remounts it
+         with its own location. -->
+    <FilePane
       v-if="splitVisible && activeSplit"
       ref="splitPaneRef"
       :key="'split-' + tabsActiveId"
+      pane-id="split"
+      self-driven
+      closable
       :api="api"
-      :initial-path="activeSplit.path"
       :locale="locale"
+      :theme="themeMode"
+      :focused="paneIsActive"
+      :path="activeSplit.path"
       :qualify="qualify"
       :to-user="paneToUser"
       :clamp="paneClamp"
-      :root-label="multiStorageRoot ? '/' : adapter || t('breadcrumb.root')"
+      :root-path="rootPathProp"
       :floor="rootFloor"
       :multi-root="multiStorageRoot"
       :virtual-rows="virtualStorageRows"
-      :active="paneIsActive"
-      :view-mode="paneViewMode /* ui-fix */"
-      :thumb-src="thumbs.src /* ui-fix */"
-      :trash-visible="config.trashVisible !== false /* ui-fix — trash row symmetry */"
-      :nav-offers-trash="navOffersTrash /* surucu:d1 — the same door is not opened twice */"
-      @navigate="onPaneNavigate"
+      :trash-visible="config.trashVisible !== false"
+      :nav-offers-trash="navOffersTrash"
+      :view-mode="paneViewMode"
+      :view-modes="allowedViewModes"
+      :clipped="clippedPaths"
+      :can-write="canWriteHere"
+      :can-paste="!!clipboard.mode"
+      :selected="splitSelection.selected.value"
+      :filters="splitFilters"
+      :folder-key="splitFolderKey"
+      :thumb-src="thumbs.src"
+      :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
+      :starred-ids="starredIds"
+      :star-enabled="identitySurfaces"
+      :api-base="props.config.apiBase ?? ''"
+      :auth-headers="() => buildAuthHeaders()"
+      :auth-credentials="api.credentialsMode()"
       @activate="activePane = 'split'"
       @close="closeSplit"
-      @open-tab="(p: string) => tabsApi.openTab(p, { viewMode: viewMode, background: true })"
+      @navigate="onPaneNavigate"
+      @open="openNode"
+      @open-trash="onPaneOpenTrash"
+      @click-row="(n, m) => onPaneClickRow('split', n, m)"
+      @context="(n: FileNode | null, ev: MouseEvent) => onPaneMenu('split', n, ev)"
+      @clear-selection="splitSelection.clear()"
+      @display-order="(nodes: FileNode[]) => (splitDisplayOrder = nodes)"
+      @item-drag-start="(n: FileNode, ev: DragEvent) => onPaneItemDragStart('split', n, ev)"
+      @item-drop-into="onItemDropInto"
       @transfer="onPaneTransfer"
-      @context="onPaneContext /* ui-fix — side-pane right-click menu */"
-      @open-trash="onPaneOpenTrash /* ui-fix — the trash opens in the main pane */"
+      @update:view-mode="setPaneViewMode"
+      @update:filters="(v: DriveFilters) => (splitFilters = v)"
+      @copy-path="onCopyPath"
+      @crumb-drop="onCrumbDropInto"
+      @new-folder="showNewFolder = true"
+      @upload="triggerUpload"
+      @paste="onToolbarAction('paste')"
+      @select-all="splitSelection.selectAll()"
+      @clear-filters="splitFilters = { ...EMPTY_FILTERS }"
+      @star-change="onStarChange"
     />
-    <!-- /wiring:d1 -->
+
+    </div><!-- /fe__panes -->
+    </div><!-- /fe__stack pane:p1 -->
+
 
     <!-- koru:k1 — inspector (details) panel; v-if keeps the closed state
          free of any DOM. Narrow mode renders it as a full-size overlay. -->
     <InspectorPanel
       v-if="showInspector"
       :api="api"
-      :nodes="selection.nodes.value"
+      :nodes="inspectorNodes /* pane:p1 — the FOCUSED pane's selection, through
+             the same `activeTargets()` the selection bar reads. It was
+             `selection.nodes` (the main pane's, always), which is why clicking
+             in the split pane changed nothing here. */"
       :dir-label="inspectorDirLabel"
-      :dir-count="files.length"
-      :dir-perm="dirPerm"
+      :dir-count="inspectorDirCount"
+      :dir-perm="inspectorDirPerm"
+      :held-in="inspectorHeldIn /* non-empty ⇒ this is the LAST selected thing,
+             not what is ticked in front of you, and it lives here. */"
       :locale="locale"
       :narrow="isNarrow"
       :thumb-src="thumbs.src"
-      :tabs="driveShell /* surucu:d1 */"
+      :api-base="props.config.apiBase ?? '' /* etiket:t1 — the details panel's
+             Tags section mounts the same TagPicker the context menu opens, and
+             that component talks to `/api/files/tags/*` itself. These three are
+             the trio every self-fetching child in this package already takes
+             (StarButton, TagPicker, GridView's star column): the base, the
+             headers, and the credentials mode. ⚠ `authCredentials` is not
+             decoration — a credentialed cross-origin request cannot be answered
+             with `ACAO: *`, so an embed served from a different origin to the
+             API breaks without it. */"
+      :auth-headers="() => buildAuthHeaders()"
+      :auth-credentials="api.credentialsMode()"
+      @tags-changed="onNodeTagsChanged /* etiket:t1 — drop the panel's cached
+             tag list when the details panel edits tags, exactly as the modal
+             does. Harmless until InspectorPanel emits it. */"
+      @open-tag="openTagView /* etiket:t1 — a tag chip in this panel is a door to
+             that tag's view, the same door the navigation panel's Tags section
+             opens. */"
       @close="closeInspector"
       @share-created="onInspectorShareCreated /* surucu:d1 */"
       @manage-permissions="onInspectorManage"
       @toast="flashToast"
-      @changed="() => load()"
+      @changed="() => (paneIsActive ? void splitPaneRef?.reload() : void load()) /* pane:p1 —
+             the panel now acts on the FOCUSED pane's selection, so the listing
+             it refreshes afterwards has to be that pane's. Reloading the main
+             one would leave a restored version, a deleted comment or a renamed
+             file on screen unchanged in the half it happened in. */"
     />
     </div>
     <!-- /koru:k1 fe__main -->
@@ -5435,7 +6975,14 @@ function closeRecoveryKey() {
 
     <div v-if="dragOver" class="fe__dragover">
       <div class="fe__dragover-card">
-        <span class="fe-icon">⬆</span>
+        <!-- ⚠ Was the `⬆` emoji: rendered by whatever emoji font the machine
+             has, so the one mark on the drop overlay came out as a blue arrow
+             on Windows, a grey one on Linux and nothing at all on a headless
+             Chromium with no emoji font — on the single screen whose whole job
+             is one glyph and one line. Same `upload` key the "+ New" menu and
+             the toolbar draw, so the three now agree. -->
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+        <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('upload')"></span>
         <p>{{ t('dropzone.hint') }}</p>
       </div>
     </div>
@@ -5510,6 +7057,25 @@ function closeRecoveryKey() {
       @select="onContextAction"
     />
 
+    <!-- belge:n1 — New document: the types this deployment can actually create
+         AND open, then a name, then where it goes. -->
+    <NewDocumentModal
+      :open="showNewDocument"
+      :locale="locale"
+      :theme="themeMode"
+      :api="api"
+      :types="newDocTypes"
+      :current-path="qualify(currentPath)"
+      :storages="(props.config.storages ?? []).map((st) => st.name) /* ⚠ the dialog
+                 takes NAMES; `config.storages` is objects, and passing them
+                 straight through (as the wiring note had it) does not
+                 typecheck. */"
+      :only-office-ready="!!effectiveOnlyOfficeBase"
+      :drawio-ready="!!effectiveDrawioUrl"
+      @close="showNewDocument = false"
+      @created="onDocumentCreated"
+      @error="emit('error', { message: $event.message, context: { op: 'newdoc' } })"
+    />
     <NewFolderModal
       :open="showNewFolder"
       :locale="locale"
@@ -5517,6 +7083,26 @@ function closeRecoveryKey() {
       @close="showNewFolder = false"
       @submit="submitNewFolder"
       @encrypted="showNewFolder = false; showEncFolder = true /* wiring:e2 */"
+    />
+    <!-- tasi:m1 — "Şuraya taşı…" / "Şuraya kopyala…". ONE dialog for both, and
+         the same one anything else that has to ask for a folder mounts (the
+         new-document flow does): a second private folder browser is how two
+         choosers start disagreeing about what a writable folder is. -->
+    <DestinationPickerModal
+      :open="showDestPicker"
+      :api="api"
+      :locale="locale"
+      :mode="destPickerMode"
+      :busy="destPickerBusy"
+      :storages="(props.config.storages ?? []).map((st) => st.name) /* NAMES, not
+                 the objects — same shape NewDocumentModal takes */"
+      :start-at="qualify(paneIsActive ? (splitPaneRef?.getPath() ?? '') : currentPath) /* open
+                 where the selection lives, not at the drive list */"
+      :moving="destPickerMode === 'move'
+        ? destPickerTargets.filter((n) => n.type === 'dir').map((n) => n.path)
+        : [] /* only a MOVE can eat itself; a copy into your own subfolder is legal */"
+      @close="showDestPicker = false"
+      @pick="onDestinationPicked"
     />
     <!-- wiring:e2 — encrypted-folder creation modal -->
     <EncryptedFolderModal
@@ -5557,21 +7143,41 @@ function closeRecoveryKey() {
       @close="showRename = false"
       @submit="submitRename"
     />
+    <!-- tablo:t1 — emptying the trash is irreversible and it is a BULK
+         delete, so the question names what is about to go: how many things and
+         how much space. "Empty the trash?" with no quantity is a question
+         nobody can actually answer, and this is the last screen before the
+         bytes are gone for good. -->
+    <Modal
+      :open="showTrashConfirm"
+      :title="t('trash.empty_confirm_title')"
+      size="sm"
+      @close="showTrashConfirm = false"
+    >
+      <!-- ⚠ A singular form exists (`…_one`) and `t()` picks it from `count`:
+           this is the last screen before an irreversible bulk delete, and
+           "1 items" is not a sentence anybody should have to read there. -->
+      <p>{{ t(trashConfirmKey, { count: files.length, size: formatSize(trashTotalBytes) }) }}</p>
+      <template #actions>
+        <button type="button" class="fe-btn" @click="showTrashConfirm = false">
+          {{ t('modal.delete.cancel') }}
+        </button>
+        <button
+          type="button"
+          class="fe-btn fe-btn--danger"
+          data-testid="trash-empty-confirm"
+          @click="emptyTrash"
+        >
+          {{ t('trash.empty_action') }}
+        </button>
+      </template>
+    </Modal>
     <DeleteConfirmModal
       :open="showDelete"
       :locale="locale"
       :count="selection.size.value"
       @close="showDelete = false"
       @confirm="confirmDelete"
-    />
-    <ShareModal
-      :open="showShare"
-      :locale="locale"
-      :share="activeShare"
-      :share-max-ttl-days="shareMaxTtlDays"
-      @close="closeShare"
-      @submit="submitShare"
-      @toast="flashToast"
     />
     <PreviewModal
       :open="showPreview"
@@ -5592,6 +7198,19 @@ function closeRecoveryKey() {
       :pdf-worker-url="props.config.pdfWorkerUrl || null"
       :pdf-save-url="props.config.pdfSaveUrl || null"
       :viewer-base-url="effectiveViewerBaseUrl"
+      :index="previewPosition.index /* gorunum:v1 — the 3-of-9 counter */"
+      :total="previewPosition.total"
+      :nav-enabled="previewPosition.total > 1"
+      :share-enabled="!e2eActive /* gorunum:v2 — the viewer's share icon opens the
+           SAME dialog the menu opens. It shipped disabled because nothing was
+           listening; an icon that does nothing is worse than no icon. Off inside
+           an encrypted folder, where a link would serve ciphertext. */"
+      @share="() => {
+        const n = previewTarget;
+        if (n) { permTarget = n; permInitialTab = undefined; showPerm = true; }
+      }"
+      :api-base="props.config.apiBase ?? ''"
+      @nav="onPreviewNav"
       @close="showPreview = false"
     />
     <ConvertModal
@@ -5666,16 +7285,37 @@ function closeRecoveryKey() {
           <div class="fe-modal__body">
             <TagPicker
               :node-id="tagPickerNode.id"
+              :locale="locale"
               :api-base="props.config.apiBase ?? ''"
               :auth-headers="() => buildAuthHeaders()"
               :auth-credentials="api.credentialsMode()"
               @change="onNodeTagsChanged"
+              @open="openTagView /* etiket:t1 — the SAME door as in the details
+                     panel; `openTagView` closes this dialog on the way, because
+                     leaving a modal open over the view it just navigated to is
+                     a dialog nobody asked to keep. */"
               @error="(msg: string) => emit('error', { message: msg, context: { op: 'tags' } })"
             />
           </div>
         </div>
       </div>
     </transition>
+
+    <!-- gorunum:v1-advsearch — the advanced search dialog. Its result lands in
+         `files` through the same load() a toolbar search lands in, so there is
+         exactly one results surface and one empty state. -->
+    <AdvancedSearch
+      :open="showAdvSearch"
+      :locale="locale"
+      :theme="themeMode"
+      :initial-query="advSearchSeed"
+      :folder-label="driveScopeLabel"
+      :path-base="advPathBase"
+      :content-search="advContentAvailable"
+      :count="advSearchCount"
+      @close="showAdvSearch = false"
+      @submit="applyAdvancedSearch"
+    />
 
     <!-- cila:c wiring — command palette (Ctrl/Cmd+K) + shortcuts help (?) -->
     <CommandPalette
@@ -5695,12 +7335,12 @@ function closeRecoveryKey() {
       @upload="triggerUpload"
       @toggle-view="setDisplayedViewMode(displayedViewMode === 'list' ? 'grid' : displayedViewMode === 'grid' ? 'gallery' : 'list') /* wiring:d2 + ui-fix — 3-mode cycle, to the active pane */"
       @open-trash="loadTrash"
-      @refresh="() => load()"
+      @refresh="refreshAll /* gorunum:v2-topbar */"
       @go-up="goUp"
       @open-theme="showThemeGallery = true /* wiring:int */"
       @open-shortcut-settings="showShortcutSettings = true /* wiring:int */"
       @start-tour="startTour() /* wiring:int */"
-      :split-enabled="!isNarrow /* wiring:d1 */"
+      :split-enabled="splitOffered /* wiring:d1 — see splitOffered */"
       @tab-new="newTabHere() /* wiring:d1 */"
       @split-toggle="toggleSplit() /* wiring:d1 */"
     />
@@ -5752,6 +7392,14 @@ function closeRecoveryKey() {
         >{{ toast.actionLabel }}</button>
       </div>
     </transition>
+
+    <!-- zaman:z3 — the embed's own time-zone setting (kept in this browser) -->
+    <TimeZoneDialog
+      :open="showTimeZone"
+      :locale="locale"
+      :theme="themeMode"
+      @close="showTimeZone = false"
+    />
 
     <!-- wiring:c2 — shortcut settings modal + Space quick-look overlay -->
     <ShortcutSettings

@@ -4,29 +4,78 @@
  * Consumer overrides by setting `--fe-*` on a higher scope.
  */
 :root {
+  /* gorunum:v1 — the product's own palette and metrics. Everything below is a
+   * measured value, not a taste: the type scale, the control heights and the
+   * radii were read off the shell this look follows, in a real browser at
+   * 1440, and the palette clears the contrast bar in
+   * web/tests/api/themeContrast.test.ts in both variants. */
   --fe-bg: #ffffff;
-  --fe-bg-elev: #f7f8fa;
-  --fe-bg-hover: #edf0f5;
-  --fe-bg-selected: #dfe8ff;
-  --fe-border: #e2e6ed;
-  --fe-border-strong: #c7ced9;
-  --fe-text: #1a1e27;
-  --fe-text-muted: #5a6475;
+  --fe-bg-elev: #f7f8fb;
+  --fe-bg-hover: #f3f4f6;
+  --fe-bg-selected: #eef3ff;
+  --fe-border: #e5e7eb;
+  --fe-border-soft: #eef0f4;
+  --fe-border-strong: #d1d5db;
+  --fe-text: #1f2937;
+  --fe-text-muted: #6b7280;
   --fe-text-on-primary: #ffffff;
-  --fe-primary: #2f6fe0; /* ui-fix: beyaz metinle WCAG AA (eski #3b82f6 = 3.68) */
-  --fe-primary-hover: #2563eb;
+  --fe-primary: #2f6ceb;
+  --fe-primary-hover: #2559c9;
+  --fe-primary-soft: #e6ecfa;
+  /* Ink for text and icons ON the soft-primary ground — the active sidebar
+     row, the active scope tab, the active segment of a segmented control.
+     ⚠ It is a token of its own because `--fe-primary` cannot carry that job:
+     measured, the stock primary on the stock tint is 3.97:1, under the 4.5 the
+     palette file claims, and no tint rescues it (the primary is only 4.70:1 on
+     white to begin with). It is not `--fe-primary-hover` either, though that is
+     the value HERE: three of the shipped palettes darken their hover in dark
+     mode, toward the tint rather than away from it, and Night dark measures
+     3.78:1 that way. Each palette names the ink that clears the bar on its own
+     tint; web/tests/api/themeContrast.test.ts pins the pairing. */
+  --fe-primary-ink: #2559c9;
   --fe-danger: #dc2626;
   --fe-danger-hover: #b91c1c;
   --fe-keep-ok: #16a34a; /* selective-sync "on this computer" check */
-  --fe-shadow: 0 10px 32px rgba(15, 23, 42, 0.14);
-  --fe-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.08);
+  --fe-shadow: 0 20px 60px rgba(17, 24, 39, 0.18);
+  --fe-shadow-sm: 0 8px 24px rgba(17, 24, 39, 0.12);
   --fe-radius: 8px;
-  --fe-radius-sm: 4px;
+  --fe-radius-sm: 6px;
   --fe-radius-md: 10px;
   --fe-radius-lg: 12px;
-  --fe-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Control heights. A listing is a stack of rows and chips; when each one
+   * picks its own height the column edges wander and the page reads as
+   * hand-assembled. Three sizes, and every control picks one. */
+  --fe-h-sm: 28px;
+  --fe-h-md: 34px;
+  --fe-h-lg: 40px;
+  /* gorunum:v3-shell — the navigation panel's expanded width. A token because
+   * TWO places have to agree on it: the panel itself, and the gutter the top
+   * bar reserves at its left so the search field starts where the content
+   * area does. Written once in each place, they were one redesign away from
+   * disagreeing — and the failure is silent, a header that no longer lines up
+   * with the column under it.
+   * ⚠ The rail and the drawer keep their own widths; only the expanded column
+   * follows this.
+   * ⚠ 192px, not 255px (owner, 2026-09-13: "şu an default'ta çok açık geliyor
+   * yan menü, biraz kısaltabiliriz bence"). It is the reference build's own
+   * number, measured off it at 1280, and it is the WHOLE change: the top bar's
+   * gutter is `calc(this - 12px)`, so the search field moves left with the
+   * column instead of the header drifting out of line with it. Checked at the
+   * new width in Turkish, the longer of the two catalogues — the widest row
+   * label ("Paylaşılanlar") clears it, and so does the quota line. */
+  --fe-sidenav-w: 192px;
+  /* Type scale. Small and tight on purpose: the shell packs a filename, a
+   * size, a date and a menu into one row, and 14px with normal leading pushes
+   * that to two lines at any realistic column width. */
+  --fe-text-xs: 12px;
+  --fe-text-sm: 12.5px;
+  --fe-text-md: 13px;
+  --fe-font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --fe-font-mono: ui-monospace, "SF Mono", Consolas, Menlo, monospace;
+  --fe-gap-xs: 4px;
+  --fe-gap-sm: 8px;
   --fe-gap: 12px;
+  --fe-gap-lg: 16px;
 }
 
 .fe--theme-dark,
@@ -54,20 +103,22 @@
  * as white-on-white inside dark hosts. */
 .fe-ctx-backdrop--theme-dark,
 .fe-ctx-backdrop--theme-auto[data-prefers-dark='1'] {
-  --fe-bg: #0f1419;
-  --fe-bg-elev: #161c25;
-  --fe-bg-hover: #1f2733;
-  --fe-bg-selected: #23324a;
-  --fe-border: #2a323e;
-  --fe-border-strong: #3a4453;
-  --fe-text: #e5e9f0;
-  --fe-text-muted: #8b95a7;
-  /* Dark ink on the light-blue button. White measured 2.54:1 against it —
-   * the palette's own bar for text on a primary surface is 4.5, and every
-   * other themed palette clears it. #0f1419 measures 7.28. */
-  --fe-text-on-primary: #0f1419;
-  --fe-primary: #60a5fa;
-  --fe-primary-hover: #3b82f6;
+  --fe-bg: #15171c;
+  --fe-bg-elev: #1a1d23;
+  --fe-bg-hover: #1f232a;
+  --fe-bg-selected: #1c2740;
+  --fe-border: #2e333c;
+  --fe-border-soft: #262a32;
+  --fe-border-strong: #3d444f;
+  --fe-text: #e6e8ec;
+  --fe-text-muted: #888f9b;
+  /* Dark ink on the light-blue button. White measures 3.16:1 against it —
+   * the bar for text on a primary surface is 4.5, and #15171c measures 5.67. */
+  --fe-text-on-primary: #15171c;
+  --fe-primary: #5b8cff;
+  --fe-primary-hover: #7ba3ff;
+  --fe-primary-soft: #1c2740;
+  --fe-primary-ink: #7ba3ff;
   --fe-danger: #f87171;
   --fe-danger-hover: #ef4444;
     --fe-keep-ok: #4ade80;
@@ -79,18 +130,21 @@
   .fe:not(.fe--theme-light),
   /* Same trick for the teleported backdrop in auto mode. */
   .fe-ctx-backdrop--theme-auto:not(.fe-ctx-backdrop--theme-light) {
-    --fe-bg: #0f1419;
-    --fe-bg-elev: #161c25;
-    --fe-bg-hover: #1f2733;
-    --fe-bg-selected: #23324a;
-    --fe-border: #2a323e;
-    --fe-border-strong: #3a4453;
-    --fe-text: #e5e9f0;
-    --fe-text-muted: #8b95a7;
+    --fe-bg: #15171c;
+    --fe-bg-elev: #1a1d23;
+    --fe-bg-hover: #1f232a;
+    --fe-bg-selected: #1c2740;
+    --fe-border: #2e333c;
+    --fe-border-soft: #262a32;
+    --fe-border-strong: #3d444f;
+    --fe-text: #e6e8ec;
+    --fe-text-muted: #888f9b;
     /* See the note on the class-based dark block above. */
-    --fe-text-on-primary: #0f1419;
-    --fe-primary: #60a5fa;
-    --fe-primary-hover: #3b82f6;
+    --fe-text-on-primary: #15171c;
+    --fe-primary: #5b8cff;
+    --fe-primary-hover: #7ba3ff;
+    --fe-primary-soft: #1c2740;
+    --fe-primary-ink: #7ba3ff;
     --fe-danger: #f87171;
     --fe-danger-hover: #ef4444;
     --fe-keep-ok: #4ade80;
@@ -101,18 +155,34 @@
 
 /* === cila:a — file-type icon accent tokens (lib/fileIcons families) === */
 :root {
-  --fe-icon-folder: #d97706;
-  --fe-icon-image: #7c3aed;
-  --fe-icon-video: #db2777;
+  /* gorunum:v1 — the folder yellow, same value in both variants. A folder is
+   * the only glyph that is filled, and the one people find by colour before
+   * they read the name; darkening it for the light theme made it read as an
+   * archive box. */
+  --fe-icon-folder: #f4b400;
+  /* gorunum:v1 — these are now the fill of a chip, not the stroke of a glyph,
+   * so they are read as a block of colour and a family has to be one glance
+   * apart from its neighbours. Documents and code share the blue on purpose:
+   * both are "something you open and read", and splitting them made every
+   * listing look like a paint chart. */
+  --fe-icon-image: #2f6ceb;
+  --fe-icon-video: #7c3aed;
   --fe-icon-audio: #0d9488;
   --fe-icon-pdf: #dc2626;
-  --fe-icon-doc: #2563eb;
+  --fe-icon-doc: #2f6ceb;
   --fe-icon-sheet: #16a34a;
   --fe-icon-slides: #ea580c;
-  --fe-icon-archive: #78716c;
-  --fe-icon-code: #4f46e5;
-  --fe-icon-text: #64748b;
-  --fe-icon-unknown: #64748b; /* ui-fix: 3:1 UI contrast on the light theme */
+  --fe-icon-archive: #6b7280;
+  --fe-icon-code: #2f6ceb;
+  --fe-icon-text: #374151;
+  --fe-icon-unknown: #6b7280;
+  /* Not file types: the two rows that are PLACES. A drive is infrastructure
+   * rather than content, so it takes a slate that sits beside the type
+   * colours without competing with any of them — it is the first thing on the
+   * multi-storage root and should read as a shelf, not as another document.
+   * The bin is deliberately the quietest chip in the set. */
+  --fe-icon-storage: #475569;
+  --fe-icon-trash: #6b7280;
 }
 
 /* Dark values — same selector strategy as the palette blocks above. */
@@ -126,34 +196,38 @@
 .fe-ctx-backdrop--theme-dark,
 .fe-ctx-backdrop--theme-auto[data-prefers-dark='1'] {
   --fe-icon-folder: #fbbf24;
-  --fe-icon-image: #a78bfa;
-  --fe-icon-video: #f472b6;
+  --fe-icon-image: #4d7ff0;
+  --fe-icon-video: #9061f0;
   --fe-icon-audio: #2dd4bf;
-  --fe-icon-pdf: #f87171;
-  --fe-icon-doc: #60a5fa;
-  --fe-icon-sheet: #4ade80;
+  --fe-icon-pdf: #e05252;
+  --fe-icon-doc: #4d7ff0;
+  --fe-icon-sheet: #2eab63;
   --fe-icon-slides: #fb923c;
-  --fe-icon-archive: #a8a29e;
-  --fe-icon-code: #818cf8;
-  --fe-icon-text: #94a3b8;
-  --fe-icon-unknown: #8b95a7;
+  --fe-icon-archive: #79808d;
+  --fe-icon-code: #4d7ff0;
+  --fe-icon-text: #5b6472;
+  --fe-icon-unknown: #79808d;
+  --fe-icon-storage: #8b95a6;
+  --fe-icon-trash: #79808d;
 }
 
 @media (prefers-color-scheme: dark) {
   .fe:not(.fe--theme-light),
   .fe-ctx-backdrop--theme-auto:not(.fe-ctx-backdrop--theme-light) {
-    --fe-icon-folder: #fbbf24;
-    --fe-icon-image: #a78bfa;
-    --fe-icon-video: #f472b6;
+    --fe-icon-folder: #f4b400;
+    --fe-icon-image: #4d7ff0;
+    --fe-icon-video: #9061f0;
     --fe-icon-audio: #2dd4bf;
-    --fe-icon-pdf: #f87171;
-    --fe-icon-doc: #60a5fa;
-    --fe-icon-sheet: #4ade80;
+    --fe-icon-pdf: #e05252;
+    --fe-icon-doc: #4d7ff0;
+    --fe-icon-sheet: #2eab63;
     --fe-icon-slides: #fb923c;
-    --fe-icon-archive: #a8a29e;
-    --fe-icon-code: #818cf8;
-    --fe-icon-text: #94a3b8;
-    --fe-icon-unknown: #8b95a7;
+    --fe-icon-archive: #79808d;
+    --fe-icon-code: #4d7ff0;
+    --fe-icon-text: #5b6472;
+    --fe-icon-unknown: #79808d;
+    --fe-icon-storage: #8b95a6;
+    --fe-icon-trash: #79808d;
   }
 }
 

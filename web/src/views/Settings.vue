@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Save, Mail } from 'lucide-vue-next';
+import { Save, Mail, Paintbrush } from 'lucide-vue-next';
 
 import { useSettingsStore } from '@/stores/settings';
 import { useToastStore } from '@/stores/toast';
@@ -13,6 +13,8 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import Textarea from '@/components/ui/Textarea.vue';
+import { applyCustomCss } from '@/lib/customCss';
 
 const { t } = useI18n();
 const settings = useSettingsStore();
@@ -126,6 +128,41 @@ async function sendSmtpTest() {
   }
 }
 
+// ── gorunum:v1 — the operator's own stylesheet ──
+//
+// Reader: backend/internal/api/handlers/branding.go puts `ui.custom_css` on
+// the public /api/branding payload (`cfg.CustomCSS = customCSSFromSettings(m)`),
+// and web/src/lib/customCss.ts injects it as the last <style> in <head> on
+// every page load. This field is not one of the write-only rows lesson #92 is
+// about — follow that line and you reach a browser.
+//
+// The cap is bytes, not characters, because that is what the server counts;
+// a sheet with Turkish comments in it would otherwise disagree with the
+// number printed under the box.
+const CUSTOM_CSS_MAX_BYTES = 64 * 1024;
+const customCss = ref('');
+watchEffect(() => {
+  customCss.value = (settings.data['ui.custom_css'] as string) ?? '';
+});
+const customCssBytes = computed(() => new TextEncoder().encode(customCss.value).length);
+const customCssTooBig = computed(() => customCssBytes.value > CUSTOM_CSS_MAX_BYTES);
+
+async function saveCustomCss() {
+  if (customCssTooBig.value) {
+    toast.error(t('settings.customCss.tooBig'));
+    return;
+  }
+  try {
+    await settings.update({ 'ui.custom_css': customCss.value });
+    // Wear it immediately. The boot payload is cached for 60s, so without this
+    // the operator who just saved would be the last person to see the change.
+    applyCustomCss(customCss.value);
+    toast.success(t('settings.savedOk'));
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  }
+}
+
 onMounted(() => settings.fetch());
 </script>
 
@@ -151,6 +188,38 @@ onMounted(() => settings.fetch());
           <Save class="h-4 w-4" />
           {{ t('common.save') }}
         </Button>
+      </div>
+    </form>
+
+    <!-- gorunum:v1 — operator custom CSS -->
+    <form v-if="!settings.loading" class="card card-body space-y-3" @submit.prevent="saveCustomCss">
+      <h2 class="text-base font-semibold flex items-center gap-2">
+        <Paintbrush class="h-4 w-4" /> {{ t('settings.customCss.title') }}
+      </h2>
+      <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('settings.customCss.help') }}</p>
+      <p class="text-sm text-amber-600 dark:text-amber-400">{{ t('settings.customCss.scope') }}</p>
+      <Textarea
+        :model-value="customCss"
+        :rows="10"
+        monospace
+        data-testid="custom-css"
+        :placeholder="'.fe { --fe-primary: #2f6ceb; }'"
+        :error="customCssTooBig ? t('settings.customCss.tooBig') : null"
+        :hint="t('settings.customCss.hint')"
+        @update:model-value="(v) => (customCss = v as string)"
+      />
+      <div class="flex items-center gap-3">
+        <span
+          class="text-xs tabular-nums"
+          :class="customCssTooBig ? 'text-rose-500' : 'text-zinc-500 dark:text-zinc-400'"
+          data-testid="custom-css-count"
+        >{{ t('settings.customCss.count', { used: customCssBytes, max: CUSTOM_CSS_MAX_BYTES }) }}</span>
+        <div class="ml-auto">
+          <Button type="submit" :loading="settings.saving" :disabled="customCssTooBig">
+            <Save class="h-4 w-4" />
+            {{ t('common.save') }}
+          </Button>
+        </div>
       </div>
     </form>
 

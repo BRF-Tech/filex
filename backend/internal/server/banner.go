@@ -63,7 +63,10 @@ func PrintBanner(w io.Writer, cfg config.Config, fr FirstRunCredentials, caps ma
 			fmt.Fprintf(w, "    Password:  %s\n", yellow.Sprint(fr.AdminPassword))
 			fmt.Fprintf(w, "  Saved to:  %s (mode 0600, shown ONCE)\n", fr.WroteFile)
 		}
-		fmt.Fprintln(w, "  Change at: /admin/profile")
+		// ⚠ A deep link, not a page. The account fields moved into the
+		// user-settings dialog (it is the one a non-admin can open too), and
+		// `?settings=1` is how a printed line can still name it.
+		fmt.Fprintln(w, "  Change at: /admin/dashboard?settings=1")
 	}
 
 	fmt.Fprintln(w)

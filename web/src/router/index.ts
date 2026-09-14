@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { applyDocumentTitle } from '@/lib/documentTitle';
+import { startRouteName } from '@/lib/startPage';
 
 import AdminLayout from '@/components/AdminLayout.vue';
 
@@ -38,16 +39,54 @@ export function onUserBase(): boolean {
 
 const routes: RouteRecordRaw[] = [
   {
-    // Two front doors, two answers: /admin/ opens the panel, /drive/ opens
-    // the files. Everything below this is shared between them.
+    // ⚠ ONE answer, for both front doors and for everybody: Home.
+    //
+    // Landing inside a folder answers a question nobody asked on arrival
+    // ("what is in this particular directory?"); Home answers the three that
+    // are: which drives are mine, what was I just working on, what did I mark
+    // to come back to. A storage card is one click from the files — the same
+    // click the storage list in the explorer's root would have cost.
+    //
+    // ⚠ The ADMIN gets it too, and that is a change (owner's decision,
+    // 2026-09-12). `/admin/` used to open the dashboard, so the product opened
+    // on two different screens depending on which URL somebody had saved. An
+    // operator who wants the dashboard on launch chooses it in their profile
+    // settings — `lib/startPage`, honoured by the guard below, which is where
+    // the question can be answered with a hydrated session. The dashboard
+    // itself is unchanged and one click away, from the admin button in the
+    // explorer's header cluster.
     path: '/',
-    redirect: () => (onUserBase() ? { name: 'explore' } : { name: 'dashboard' }),
+    redirect: () => ({ name: 'home' }),
   },
   {
     path: '/login',
     name: 'login',
     component: () => import('@/views/Login.vue'),
     meta: { public: true, layout: 'blank' },
+  },
+  {
+    // The landing page, for both front doors and every role.
+    //
+    // ⚠⚠ It renders `Explore.vue` — the SAME component `/explore` renders, not
+    // a page of its own. Home is a VIEW of the explorer now (the navigation
+    // panel's first row, `packages/core` HomeView.vue), so the two routes
+    // differ only by where the explorer opens: this one passes the `.home`
+    // sentinel as `initialPath`, `/explore` passes none and restores wherever
+    // the person was. `web/src/views/Home.vue` — a separate page with a header
+    // of its own, a logo, a refresh, an "All files" button, an apps grid,
+    // sign-out and a language switch, and no panel at all — is gone with it.
+    //
+    // ⚠ NOT `public: true`. /explore below is public because the demo flow
+    // sends unauthenticated visitors there and the API answers them 401;
+    // Home's three blocks are all per-USER (their storages, their recents,
+    // their stars), so an anonymous visitor here has nothing to be shown and
+    // the guard sends them to the login form instead of to three empty boxes.
+    // No `requiresAdmin`: this route is outside the AdminLayout block, so an
+    // ordinary account reaches it.
+    path: '/home',
+    name: 'home',
+    component: () => import('@/views/Explore.vue'),
+    meta: { layout: 'blank' },
   },
   {
     // The demo's "Filex'i göster" (Show Filex) button lands here. No admin
@@ -131,10 +170,17 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'users.editTitle', parent: 'users' },
       },
       {
+        /**
+         * gorunum:v2 — the profile PAGE is gone; every field it had is in the
+         * user-settings dialog. The ADDRESS stays because the server prints it:
+         * the startup banner and `<data>/.first-run.txt` both tell a fresh
+         * operator to change their password at /admin/profile, and copies of
+         * that file are already on disk in the field. A dialog behind an avatar
+         * menu has no address to print, so this one forwards to it.
+         */
         path: 'profile',
         name: 'profile',
-        component: () => import('@/views/Profile.vue'),
-        meta: { breadcrumb: 'nav.profile' },
+        redirect: { name: 'dashboard', query: { settings: '1' } },
       },
       {
         path: 'settings',
@@ -288,9 +334,11 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   {
-    // Catch-all so unknown URLs don't 404 inside the SPA.
+    // Catch-all so unknown URLs don't 404 inside the SPA. A URL that means
+    // nothing lands on the landing page, same as `/` above — and the same one
+    // for both doors, for the same reason.
     path: '/:pathMatch(.*)*',
-    redirect: () => (onUserBase() ? { name: 'explore' } : { name: 'dashboard' }),
+    redirect: () => ({ name: 'home' }),
   },
 ];
 
@@ -326,30 +374,84 @@ router.beforeEach(async (to) => {
   if (to.meta.public) {
     // Already signed-in users shouldn't see /login.
     if (to.name === 'login' && auth.isAuthenticated) {
-      return { name: 'dashboard' };
+      // …and they land wherever they chose to land. This is the OTHER front
+      // door: a browser with a live session that hits /login never passes
+      // through `/`, so naming `dashboard` here would have made the start-page
+      // preference apply to some launches and not others.
+      return { name: startRouteName({ isAdmin: auth.isAdmin, userBase: onUserBase() }) };
     }
     return true;
   }
 
   if (!auth.isAuthenticated) {
-    return { name: 'login', query: { redirect: to.fullPath } };
+    // ⚠ `redirectedFrom` FIRST. A visitor who opened the bare front door has
+    // already been through the `/` record's redirect by the time this runs, so
+    // `to.fullPath` is the door's DEFAULT destination (`/dashboard`), not the
+    // door. Remembering that turns "I opened filex" into "I explicitly asked
+    // for the dashboard": the post-login push then goes straight there, the
+    // start-page preference below never sees a front-door navigation, and on
+    // the /drive/ base a non-admin was being sent back to an admin-only route
+    // to be bounced off it. Measured 2026-09-12 — `?redirect=/dashboard`.
+    const from = to.redirectedFrom?.fullPath ?? to.fullPath;
+    return { name: 'login', query: { redirect: from } };
+  }
+
+  // ── Start page ──────────────────────────────────────────────────────────
+  //
+  // The reader for `lib/startPage`. It lives HERE, not on the `/` record's
+  // own `redirect`, for one reason: a record redirect is evaluated while the
+  // route is being resolved, which is BEFORE `auth.fetchMe()` above has run on
+  // a cold load — so `isAdmin` is still false there and an administrator who
+  // chose "Admin panel" would be sent to Home on every launch. By this line
+  // the session is hydrated and the question can be answered truthfully.
+  //
+  // ⚠ Above the admin guard below, so a non-admin who chose Files is taken to
+  // Files rather than being bounced off `dashboard` first.
+  //
+  // ⚠ No flash: navigation guards run before any component mounts, so the
+  // door's default destination is never painted on the way past.
+  //
+  // ⚠ `to.redirectedFrom` — only a navigation that actually came through the
+  // front door is re-aimed. Typing /admin/dashboard still opens the dashboard;
+  // a preference that hijacked explicit URLs would be a trap, not a default.
+  // The query string is carried over so deep links through `/` (`?storage=…`)
+  // survive the re-aim.
+  if (to.redirectedFrom?.path === '/') {
+    // ⚠ The door comes first, and only then the room. A non-admin who opened
+    // the OPERATOR's prefix belongs on the end-user one — GitHub #14 is about
+    // exactly that URL telling an ordinary user they are in an admin tool. The
+    // admin guard below does this for admin-only routes; a start page of Files
+    // or Home is not admin-only, so without this line a non-admin who saved
+    // one would be left sitting on /admin/explore. Measured 2026-09-12.
+    if (!auth.isAdmin && !onUserBase()) {
+      window.location.replace(USER_BASE);
+      return false;
+    }
+    const want = startRouteName({ isAdmin: auth.isAdmin, userBase: onUserBase() });
+    if (want !== to.name) return { name: want, query: to.query, hash: to.hash };
   }
 
   // Admin-panel routes are admin-only. Non-admin accounts (user/viewer) get
-  // the explorer instead — they never see the panel chrome.
+  // their own front door instead — they never see the panel chrome.
+  //
+  // ⚠ The door, not a room inside it: `USER_BASE` resolves through the `/`
+  // redirect above to Home, so signing in and being handed on both end on the
+  // same screen. Naming `explore` here instead would mean the ONLY way to see
+  // Home was to type /drive/ by hand — the page would exist and nobody would
+  // ever arrive on it.
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     if (!onUserBase()) {
       // ⚠ A real navigation, not a router redirect. vue-router prefixes every
-      // push with the base it booted on, so `return { name: 'explore' }` from
-      // an /admin/ document lands the user on /admin/explore — the exact URL
-      // GitHub #14 is about. Reloading is safe for the flows that cross this
-      // line: a desktop pairing is stashed in sessionStorage a few lines up
-      // and sessionStorage survives a same-tab navigation (measured), and the
-      // explorer's remembered folder lives in localStorage.
-      window.location.replace(`${USER_BASE}explore`);
+      // push with the base it booted on, so `return { name: 'home' }` from
+      // an /admin/ document lands the user on /admin/home — the exact kind of
+      // URL GitHub #14 is about. Reloading is safe for the flows that cross
+      // this line: a desktop pairing is stashed in sessionStorage a few lines
+      // up and sessionStorage survives a same-tab navigation (measured), and
+      // the explorer's remembered folder lives in localStorage.
+      window.location.replace(USER_BASE);
       return false;
     }
-    return { name: 'explore' };
+    return { name: 'home' };
   }
 
   return true;

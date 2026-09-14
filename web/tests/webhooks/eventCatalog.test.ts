@@ -21,7 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
-import { WEBHOOK_EVENTS, webhookEventKey } from '@/lib/webhookEvents';
+import { WEBHOOK_EVENTS, userEventKey, webhookEventKey } from '@/lib/webhookEvents';
+import { NOTIFICATION_PHRASES, renderNotification } from '@/lib/notificationText';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const EVENT_GO = path.resolve(here, '../../../backend/internal/notify/event.go');
@@ -41,6 +42,16 @@ function backendEvents(source: string): string[] {
     if (m[1].includes('.')) out.push(m[1]);
   }
   return out;
+}
+
+/** Walks a dotted i18n path into a loaded bundle. */
+function lookup(bundle: Record<string, unknown>, key: string): string | undefined {
+  let cur: unknown = bundle;
+  for (const seg of key.split('.')) {
+    if (!cur || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return typeof cur === 'string' ? cur : undefined;
 }
 
 describe('webhook event catalogue', () => {
@@ -105,6 +116,118 @@ describe('webhook event catalogue', () => {
         if (label.trim() === ev) {
           problems.push(`${ev}: the label is just the event id`);
         }
+      }
+      expect(problems, problems.join('\n')).toEqual([]);
+    });
+
+    // ── the second audience ───────────────────────────────────
+    //
+    // The per-event switches in the user-settings dialog are read by the
+    // person receiving the notifications, not by the operator wiring the
+    // delivery. They borrowed the operator sentences for a release, and the
+    // result was a list explaining write semantics ("a write created a file
+    // that did not exist") to somebody who had opened "What to tell me about"
+    // to stop being pinged about comments.
+    //
+    // ⚠ This is the half of the gate that can rot silently: an event added to
+    // event.go and to WEBHOOK_EVENTS with only an operator label renders as a
+    // raw i18n key in the dialog — visible to every user, invisible to the
+    // build. Both catalogues are therefore required, for both languages.
+    it(`gives every event a short end-user label in ${name}`, () => {
+      const problems: string[] = [];
+      for (const ev of WEBHOOK_EVENTS) {
+        const key = userEventKey(ev);
+        const label = lookup(bundle, key);
+        if (!label || !label.trim()) {
+          problems.push(`${ev}: no end-user label (${name} ${key})`);
+          continue;
+        }
+        if (label.trim() === ev) {
+          problems.push(`${ev}: the end-user label is just the event id`);
+        }
+      }
+      expect(problems, problems.join('\n')).toEqual([]);
+    });
+
+    // ⚠ Not a style rule — a drift alarm. The cheapest way to satisfy the test
+    // above is to paste the operator sentence into the new block, which is
+    // exactly the state this work removed. If the two are identical, the
+    // dialog is back to explaining write semantics and nobody would notice.
+    it(`keeps the two audiences apart in ${name}`, () => {
+      const operator = (bundle.webhooks as Record<string, unknown> | undefined)?.events as
+        | Record<string, string>
+        | undefined;
+      const same: string[] = [];
+      for (const ev of WEBHOOK_EVENTS) {
+        const slug = webhookEventKey(ev).split('.').pop() as string;
+        const op = operator?.[slug]?.trim();
+        const user = lookup(bundle, userEventKey(ev))?.trim();
+        if (op && user && op === user) same.push(ev);
+      }
+      expect(
+        same,
+        `the end-user label is a copy of the operator sentence for: ${same.join(', ')} — ` +
+          'the switches in the settings dialog are read by the person being notified, ' +
+          'not by the person wiring the webhook',
+      ).toEqual([]);
+    });
+  }
+
+  // ── the third catalogue: what a notification SAYS ──────────────────────
+  //
+  // ⚠⚠ This is the one that was reaching real people as wire format. A row is
+  // written once, on the server, in one language, and eight of the eleven file
+  // events set no title at all — `notify.Service.Send` substitutes the event
+  // id, so the bell showed `share.created` and a browser notification came out
+  // as `{title: "file.uploaded", body: "/Documents/measure-me.txt"}` (measured
+  // 2026-09-12). The sentence is composed by the reader now; these tests make
+  // it impossible for a NEW event to arrive without one.
+  for (const lang of ["en", "tr"] as const) {
+    it(`phrases every backend event in ${lang}`, () => {
+      const missing = fromGo.filter((e) => !NOTIFICATION_PHRASES[e]?.[lang]);
+      expect(
+        missing,
+        `emitted by the backend with no ${lang} phrasing: ${missing.join(", ")} — ` +
+          "add it to web/src/lib/notificationText.ts, or the bell, the browser " +
+          "toast and the desktop app will all show the raw event id",
+      ).toEqual([]);
+    });
+
+    it(`never renders a raw event id in ${lang}`, () => {
+      // A realistic row: what the server actually stores for a file event —
+      // no usable title, a bare path for a body, the facts in meta.
+      const problems: string[] = [];
+      for (const ev of fromGo) {
+        const { title, body } = renderNotification(
+          {
+            event: ev,
+            title: ev,
+            body: "Belgeler/rapor.pdf",
+            meta: {
+              origin: "manager",
+              node: { path: "Belgeler/rapor.pdf", name: "rapor.pdf", size: 12 },
+              reason: "driver refused the write",
+              signature: "Eicar-Test-Signature",
+              from: "Belgeler/eski.pdf",
+              to: "Belgeler/rapor.pdf",
+              folder: "Gelen",
+              count: 3,
+              uploader: "",
+              body: "looks good to me",
+              storage: "team",
+            },
+            target: { kind: "file", storage: "team", path: "Belgeler/rapor.pdf" },
+          },
+          lang,
+        );
+        if (!title.trim()) problems.push(`${ev}: empty title`);
+        if (title.includes(ev)) problems.push(`${ev}: the title is the event id (${title})`);
+        if (/\{\w+\}/.test(title) || /\{\w+\}/.test(body)) {
+          problems.push(`${ev}: an unresolved placeholder survived (${title} / ${body})`);
+        }
+        // A dangling separator is what a missing field leaves behind, and it
+        // reads as a bug to the person looking at it.
+        if (/(^\s*[-:]|[-:]\s*$)/.test(title)) problems.push(`${ev}: dangling punctuation (${title})`);
       }
       expect(problems, problems.join('\n')).toEqual([]);
     });

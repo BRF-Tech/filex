@@ -81,7 +81,10 @@ try {
     await clickText(w, /Payla[sş] \/ [İI]zinler|Share \/ Permissions/);
   }
   await w.waitForTimeout(1200);
-  await clickText(w, /^Ba[gğ]lant[iı]$|^Link$/);
+  // gorunum:v2-share — the dialog leads with the link switch; PIN / expiry /
+  // download cap and "Create link" live under the named "Link options"
+  // section. (It used to be a `Bağlantı` / `Link` tab.)
+  await w.evaluate(() => document.querySelector('[data-testid="share-options-toggle"]')?.click());
   await w.waitForTimeout(800);
   await clickText(w, /Ba[gğ]lant[iı] olu[sş]tur|Create link/);
   await w.waitForTimeout(2500);

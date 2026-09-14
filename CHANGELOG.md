@@ -7,6 +7,405 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-09-14
+
+> ⚠ **0.40.0 was never finished.** Its npm packages and git tag were published,
+> but the container images, the binaries, the desktop builds and the GitHub
+> Release were not — so the app-store manifests that pinned `v0.40.0` pointed
+> at an image that does not exist. This release is the first complete one after
+> 0.39.1, it carries everything listed under 0.40.0 below except the **Drive**
+> theme (removed here — see *Changed*), and it moves every pin to itself.
+
+### Added
+
+- **A new face for the whole product.** The explorer was rebuilt around the
+  end-user shell [@alfatm](https://github.com/alfatm) designed on top of filex
+  and put up for review in #14 — measured screen by screen and adopted as
+  filex's own look rather than offered as a theme. One layout for the operator
+  and the end user alike, in the admin app, the desktop app and every embed:
+  a full-width top bar with the product mark, one search field, a **+ New**
+  menu, a 192px navigation panel with **Home · Shared with me · Recent ·
+  Starred · Trash**, the storages and the connection guides, a breadcrumb row
+  with the view switcher, a **Type · People · Modified · Size** filter row with
+  a sort control, a selection bar that replaces the filter row while anything is
+  ticked, and an info panel split into **Details** and **Activity**. The palette,
+  metrics, type scale and control heights are `--fe-*` tokens, so a theme or a
+  host page restyles all of it without forking a stylesheet. The tab strip, the
+  split pane, the gallery view, the palettes and the keyboard editor — filex's
+  own additions — are kept.
+
+- **Home is a view inside the explorer**, not a page beside it: your storages,
+  what you opened last and what you starred, under the same panel and header as
+  the files. It is where everybody lands, administrators included; an operator
+  who prefers the dashboard picks it under **User settings → Preferences →
+  Start page**.
+
+- **User settings**, one dialog behind the avatar: profile and photo, language,
+  time zone (a search field with the offset and local time on each row), start
+  page, light/dark and palette, density, per-folder view memory, notification
+  switches, password and two-factor. Language and theme moved here from the
+  header, so no preference has two controls.
+
+- **A listing that behaves like a table.** Resize a column, hide one, drag one
+  to a new place; the table scrolls sideways when the columns outgrow the pane,
+  with the actions column pinned right, instead of dropping a column. Name is an
+  ordinary column you can narrow. **The grid and the list obey the same sort** —
+  it used to be private state inside the list, so switching views reordered the
+  rows under you.
+
+- **Per-folder view memory** — optional, from user settings. The view mode and
+  sort of each folder you set up, stored **per person on the server**
+  (`GET/PUT /api/files/manager/view-prefs`, migration `00039`), so it follows you
+  to another machine and never leaks to anyone else looking at the same folder.
+  Capped and least-recently-used. An embed turns it off with
+  `rememberFolderView: false`.
+
+- **Who owns a file.** Every node records its owner and its last writer
+  (migration `00038`); the list has an **Owner** column and the filter row a
+  **People** filter; quota counts against the owner. A storage scan no longer
+  attributes a whole bucket to whoever pressed *Scan now*. Search hits carry the
+  storage name and the owner too, which lifts the old single-storage limit on
+  content search in the advanced search dialog.
+
+- **Download a selection as one archive.** Pick several files and folders and
+  Download streams a ZIP built on the fly (`POST /api/files/archive/download`
+  mints a single-use ticket, `GET /z/<token>` streams it): nothing is written
+  into your storage, nothing is buffered in the tab, and a 700 MB archive costs
+  the server under a megabyte. Every member is re-checked against the caller's
+  own permissions on the server.
+
+- **Move to / Copy to**, with a folder chooser that spans every storage, lists a
+  read-only folder as read-only, and refuses a destination you cannot write to —
+  and the server refuses it regardless of what the dialog offered.
+
+- **New document** under **+ New**: a Word, Excel, PowerPoint or OpenDocument
+  file, or any text or code format — name it, choose where it goes, and it opens
+  in the editor that handles it. The Office templates are minimal valid
+  documents compiled into the binary (verified by LibreOffice and by
+  OnlyOffice's own converter), so this works on the slim image; a type this
+  deployment could not then open is not offered, and the dialog says why.
+
+- **Thumbnails you can read.** A PDF shows its first page, top-anchored so the
+  title is in the card; a video its first frame that is not black; an Office
+  document its rendered first page; a text, code or CSV file fills the card with
+  its own content. A server missing ffmpeg, ghostscript or LibreOffice now says
+  so in its log at boot instead of quietly drawing coloured rectangles.
+
+- **Date headings in every view.** A listing sorted by Modified groups itself
+  under **Today · Yesterday · This Week · This Month · *September 2026*** — in
+  the list, the grid and the gallery. The ladder lives in one module
+  (`packages/core/src/lib/dateGroups.ts`) and all three views read it.
+  - ⚠ A heading is drawn **only when it is true**. Any other sort key draws
+    none, and neither does a search's ranked answer.
+  - ⚠ "This Week" is the six days before yesterday, not a calendar week.
+  - In the grid the date headings **replace** "Files" rather than stacking on
+    it; "Folders" stays as one run at the top.
+  - The boundary between today and yesterday is midnight in the **viewer's**
+    chosen time zone, not the browser's.
+
+- **Tags you can follow.** A tag chip in the details panel opens the tag view:
+  everything carrying that tag, folders as well as files, across storages, with
+  the ordinary filter row and sort on top.
+
+- **A notification bell in the top bar**, for every account. Non-admins were
+  raised browser notifications but had no way to open the list, mark one read
+  or follow one to what it was about.
+
+- **The desktop-app offer is a chip in the corner** of the app, not a card over
+  the file listing, with a permanent home under User settings. "Do not show this
+  again" is remembered against the account, not the browser.
+
+- **Browser notifications**, and a notification opens the thing it is about.
+
+- **The split pane is one pane component rendered twice**, so the right-hand
+  pane has the same breadcrumb, filter row, sort, view switcher and selection
+  bar as the left — it used to be a separate, thinner implementation.
+
+- **Time zones resolve the same way everywhere.** One ordered list decides the
+  zone every date is printed in: **the viewer's own pick → the host page's
+  `config.timeZone` → the account behind the token → the device.** The account
+  tier applies only to a person's token; an `app` token shared by many visitors
+  never imposes one account's zone on all of them. An embed gains a **Time zone**
+  row in its `⋯` menu, stored in the browser, because it has no settings dialog;
+  the web app and an embed use the same picker and the same resolver, so the two
+  can no longer disagree. New: `config.timeZone`, and a `time-zone` attribute on
+  `<filex-explorer>`.
+
+- **Operator custom CSS.** A stylesheet pasted under *Settings* is served with
+  the branding payload and applied last on every browser surface, the sign-in
+  page included, so an installation can override the `--fe-*` tokens without
+  forking anything. It is capped at 64 KB, stored as one global row (in
+  multi-tenant mode only the supertenant may set it), and injected as the text
+  of a single `<style>` element, never parsed as HTML. See
+  [docs/INTEGRATION.md](docs/INTEGRATION.md#operator-custom-css).
+
+- **Home tells everyone how full a storage is**, not only an administrator:
+  `GET /api/files/quota/storages` answers the same figure the admin storage list
+  carries, for the storages the caller may see and nothing about the others.
+
+- **Recovery sign-in for SSO-only installations.** With no `local` driver
+  enabled, the administrator filex created at installation can still sign in
+  with its password — and no other account can — so an identity provider that
+  is down, a client secret that expired or a broken realm no longer locks out
+  the one person who can fix it. The login page offers it behind an
+  *Administrator recovery sign-in* link; two-factor still applies and every
+  such sign-in is logged at WARN. On by default, `FILEX_AUTH_RECOVERY_LOGIN=false`
+  turns it off. Installations from before this release get the account worked
+  out once at startup: the oldest administrator that has a local password. See
+  [docs/SSO.md](docs/SSO.md#the-identity-provider-is-down-and-nobody-can-sign-in).
+
+- **Brand config for embeds**: `config.brand` (`name`, `markUrl`). A host
+  cannot fill any slot in `<filex-explorer>` — Vue projects light DOM only
+  through a shadow root and the element deliberately has none — so this is how
+  an embed puts its mark in the corner.
+
+- **A duplicate-code gate** (`scripts/dup-scan.mjs`, run by the web test suite):
+  near-duplicate fragments, the same concept implemented outside its one home,
+  and listing surfaces that build their own chrome. The rule and how to answer it
+  are in `docs/CONTRIBUTING.md`.
+
+### Changed
+
+- ⚠⚠ **`uiProfile: 'drive'` is removed.** It shipped as a third profile in
+  0.32.0 and became an alias of `'simple'` during this cycle; there are now two
+  profiles, `'standard'` and `'simple'`, and no alias of either.
+
+  **If you pass `'drive'`, pass `'simple'` instead.** An unrecognised value —
+  a typo, or this retired name — resolves to `'standard'` (the documented
+  default) and logs one console line naming it. That direction is deliberate:
+  mapping the retired name onto `'simple'` would be the alias again under
+  another name, and it would also mean a plain typo silently REDUCED somebody's
+  UI, which looks like features going missing and points at nothing. The
+  argument is written out in `packages/core/src/lib/uiProfile.ts`.
+
+- ⚠ **The Drive theme added in 0.40.0 is removed.** Its palette became the
+  product's stock palette, so the theme had nothing left to change.
+
+- **The product colour is blue** (`#2f6ceb` light, `#5b8cff` dark) — the mark,
+  the favicon and PWA icon, the admin panel, the desktop app, the public share
+  page and the project site all moved off indigo together.
+
+- **Byte sizes are decimal everywhere** (1 KB = 1000 B). The explorer used 1024
+  and the admin panel 1000, so the same file read `1.43 MB` in one and `1.5 MB`
+  in the other; a quota typed as 10 GB read back as 9.31 GB in the side panel.
+  Turkish gets its own decimal separator.
+
+- **The sign-in page follows the operating system's light/dark setting and the
+  browser's language**; both are chosen in user settings once you are in.
+
+- **`/admin/profile` opens user settings.** The profile page is gone — every
+  field it had lives in the user settings dialog, which a non-admin can open
+  too. The address keeps working, because the startup banner and
+  `<data>/.first-run.txt` on existing installs still point a new operator at it.
+
+- **"Copy node id" left the right-click menu** and the selection bar; the id is
+  in the details panel, beside Path and ETag, one click to copy.
+
+- **`@brftech/filex-react` needs no stylesheet import** — the look is injected
+  by the bundle. A bundler build needs the optional viewer packages
+  externalized; see `docs/INTEGRATION.md`.
+
+- ⚠ **MySQL needs 8.0.17 or newer, MariaDB 11.4 or newer.** Migration `00041`
+  compares file names byte for byte with `utf8mb4_0900_bin`, which MySQL added
+  in 8.0.17, and it rebuilds the `nodes` table — on a large catalogue that takes
+  as long as an `ALTER TABLE` of that table takes on your server. The previous
+  documentation promised MariaDB 10.5.2; MariaDB 10.x never got past migration
+  `00001`. Measured versions are listed in
+  [docs/DATABASES.md](docs/DATABASES.md#supported-versions).
+
+### Fixed
+
+- ⚠⚠ **A token is now limited to what the token grants, not to what its
+  account could do.** An API token minted on an administrator's account was
+  accepted on the admin routes (`/api/admin/*`, `/metrics`) whatever its scopes —
+  a `read`-only or folder-confined token included — because the scopes were
+  never consulted there. Administration now requires a token that carries the
+  `admin` scope and is not confined to a folder; a signed-in session is
+  unaffected. **If you handed scoped tokens minted on an admin account to
+  scripts, CI jobs or agents, review them.**
+
+- ⚠⚠ **A folder-confined token stays inside its folder on every surface.**
+  Search, the manager's listing, stat and read by node id, share management,
+  comments, the OnlyOffice config and tags/stars/recents all enforced tenant
+  isolation but not a token's `root:` confinement, so a confined token could
+  reach nodes outside its folder by search or by id. They now apply the same
+  confinement rule as the file protocols, before anything is returned. WebDAV,
+  S3, SFTP, FTPS and NFS were already correct.
+
+- **A malformed `root:` scope is refused when the token is created** instead of
+  being accepted and then silently ignored.
+
+- ⚠⚠ **Sign-in with SSO only (`FILEX_AUTH_DRIVERS=oidc`) worked for nobody**
+  (#24), and sessions that were already open died on the restart that applied
+  it. Every sign-in ends in the same session cookie, but only the `local`
+  driver ever read that session back; the OIDC driver answers "unauthorized" by
+  design once its callback is done, and so does LDAP. Leave `local` out and the
+  identity provider's callback minted a session the very next request refused,
+  so the browser went back to the sign-in page, round and round — the setup
+  `docs/DOCKER.md` recommends. Sessions are now validated whatever sign-in
+  drivers are enabled, the way API tokens already were, without turning
+  password sign-in back on. Measured end to end against a mock identity
+  provider: the old build bounced to `/admin/login` with `401` on
+  `/api/auth/me`, this one lands on Home. `ldap` alone had the same defect.
+
+- ⚠⚠ **A grant on the trash bin no longer decides who may restore someone
+  else's deleted file.** A trash entry is judged on the folder it came from.
+  An old row with no recorded original path — its path still inside
+  `.filex-trash/` — was judged on the bin instead, so an account holding a grant
+  there saw other accounts' deleted files in its trash and could restore them.
+  Such rows are no longer listed or restorable; an admin can still purge them.
+  Found by [@alfatm](https://github.com/alfatm) while working on a fork.
+
+- **Restoring onto a name that is taken no longer destroys what holds it.** A
+  file restore overwrote the file now at that path and then failed with a 500;
+  a folder restore poured its contents into the folder now at that path and
+  answered 200. The restore now refuses with 409 `EXISTS` before anything
+  moves, the entry stays in the trash, and the explorer and the admin trash page
+  say which name is taken. Found by [@alfatm](https://github.com/alfatm) while working on a fork.
+
+- **A folder restored on an object store comes back where it was.** It landed
+  under `<folder>/.filex-trash/<key>/` while the restore reported success. A
+  restore whose trashed objects had all vanished also reported success; it now
+  leaves a `trash restore move failed` warning naming the trash key. Found by [@alfatm](https://github.com/alfatm) while working on a fork.
+
+- **A copied folder no longer opens empty.** Only the top folder of a
+  same-storage copy was recorded, so its contents stayed invisible until the
+  next sync, and a copy of something the cache had not seen yet was not
+  recorded at all. The whole copied tree is now catalogued as it lands.
+  Found by [@alfatm](https://github.com/alfatm) while working on a fork.
+
+- **Encrypted folders stay out of search.** When a sync or a copy catalogued a
+  file before the folder's `.filex-e2e.json` marker, the content indexer read
+  the file as unencrypted and indexed its text, permanently. The marker is now
+  always catalogued first. Found by [@alfatm](https://github.com/alfatm) while working on a fork.
+
+- **A move whose bookkeeping fails no longer invents a trash entry.** A stale
+  row at the destination, or a row that could not be moved, sent the moved file
+  to the trash while its bytes sat at the destination, and restoring it did
+  nothing. The stale row is now dropped and the move recorded, and a folder's
+  sub-rows stored without a leading slash move with it instead of getting a
+  doubled path. Found by [@alfatm](https://github.com/alfatm) while working on a fork.
+
+- ⚠⚠ **Moving a file onto a name that is taken no longer destroys the file
+  that had it.** Moving `a.txt` into a folder that already held an `a.txt`
+  finished as a success and replaced the file that was there — not into the
+  trash, gone. A copy and a move between storages already kept both; a move
+  within one storage now does the same, the moved item landing as `a-copy.txt`.
+  Such a move says so when it is queued and offers no undo, because the undo
+  would move the file that was already there.
+
+- ⚠⚠ **SQLite: one cancelled request could lock every account out until a
+  restart.** When a request was cancelled while its query was starting — a
+  closed tab, a navigation away — the SQLite driver dropped the half-read result
+  without finalizing its statement. SQLite never cleared its interrupt flag
+  again, and filex runs SQLite on one connection, so from then on every
+  statement answered `interrupted (9)`: sign-in said "invalid credentials" and
+  no background job ran. `modernc.org/sqlite` is upgraded from v1.30.2 to
+  v1.58.0, where the result is closed, and a test cancels three thousand
+  queries and requires the connection to stay usable (the old driver failed it
+  within a dozen).
+
+- **MySQL: four paths the cross-engine gate never reached** (#23). The shared
+  store still had SQLite-only SQL: `MAX(0, x)` in quota accounting (a syntax
+  error on every upload, so usage never moved and no quota was enforced),
+  `LIMIT -1` in version pruning (history grew without bound, silently), and
+  `datetime('now', …)` in the sync history (500). And the default collation
+  compared file names ignoring case and accents, so `README.md` beside
+  `Readme.md` uploaded, never listed, and logged a duplicate key on every sync;
+  migration `00041` makes names and paths byte-exact, and one sync then
+  catalogues the files that were missing. CI now prepares every statement in
+  the shared store on a real MySQL server and runs those four paths on every
+  engine.
+
+- **The OnlyOffice Test blamed the network for a refusal.** A document server
+  answering error -4 was reported as unable to reach filex. Since ONLYOFFICE
+  Docs 7.4 the same -4 is what a stock document server gives when it refuses to
+  download from a private IP address — which a docker or podman network is —
+  so the result now names that cause and the setting that lifts it, and
+  `docs/ONLYOFFICE.md` shows the log line that tells the two apart (#17).
+
+- **The web app and an embed disagreed about the time.** Every account was
+  created with the time zone `UTC` — the column default and six creation paths —
+  so the web app, which follows the account, printed UTC, while an embed, which
+  cannot see the account, printed the browser's zone. Accounts now start with
+  **no** zone, which means "the viewer's browser", and migration `00040` turns
+  the existing `UTC` defaults into that. A zone somebody actually chose is kept.
+
+- **The connection guides printed the wrong address in a proxied embed** — the
+  host page's origin instead of filex's. Capabilities now publishes the
+  operator's `public_url` (only when one is configured, never the built-in
+  guess), and the guides use it first.
+
+- **`filex thumb backfill` reported success doing nothing** on a storage that
+  had never been synced. It now refuses that storage with the reason and the
+  fix, processes the others, and exits non-zero.
+
+- **The Location column doubled the storage name** (`My files/My files://Photos`)
+  for a storage whose name was not URL-shaped — a space, an underscore, a
+  leading digit. Three views carried their own copy of the parser; they share one.
+
+- **Under `uiProfile: 'simple'` the split button was drawn and did nothing.** It
+  is not offered there any more, in the tab strip or the command palette.
+
+- **The escrow notification said "recovery key".** Opening an encrypted folder
+  with the operator's escrow key was labelled as the owner's recovery key — in
+  the notification text, the notification switch and the webhook event label,
+  in both languages. Those are opposite facts about who touched the folder.
+
+- **The admin dashboard's sync card never showed a run** (it read a field the
+  endpoint does not send), the sync-run list ignored paging and its state
+  filter, and every time on the audit page and in *Recent activity* printed a
+  dash.
+
+- **Counts read "1 items"** and similar across the explorer and the admin
+  panel; singular and plural now come from the catalogue, and a gate fails a
+  counted message without both.
+
+- **A notification said `share.created`.** Most file events never set a title,
+  so the bell, the browser notification and the desktop app's native one showed
+  the event id — and the rest were written once, in the language of whoever
+  caused them. Each surface now composes the sentence in its own reader's
+  language from the event's facts, from one catalogue shared by all three; the
+  server's own title and body stay for webhooks and the audit table.
+
+- **Markdown lists had no bullets or numbers** in the viewer.
+
+- **The React package rendered a blank page.** Two causes: the web component's
+  `sideEffects` named the entry file while registration lives in a hashed chunk,
+  so a bundler could drop it; and the React adapter routed every prop as an
+  attribute, so the explorer received the string `"[object Object]"` as its
+  config. All three packages now produce byte-identical screenshots, and a gate
+  keeps the shipped stylesheets identical.
+
+- **A folder archive no longer includes previous versions of its files.**
+  Zipping a folder — including a public folder share and its cache — walked the
+  `.versions/` directory the listings hide.
+
+- **Moving a folder into its own subfolder is refused** with a reason, instead
+  of being accepted and failing minutes later in the operations tray.
+
+- **The details panel printed the browser's clock** while the row beside it
+  printed the viewer's chosen time zone — a whole day apart for a viewer far
+  from the machine's zone.
+
+- **Recent, Starred and tag views had no dates** (every Modified cell was a
+  dash) and printed a dash under every name; trash rows had no size.
+
+- **The tag view was empty on every multi-storage install**: its rows arrived
+  without a storage name and were dropped rather than guessed.
+
+- **Search results are shown in the server's relevance order** instead of being
+  re-sorted by the active column, which had put the best match fifteenth of
+  seventeen. The sort control says so while a search is open.
+
+- **The EPUB viewer hung on "Loading" forever**, the 3D viewer showed a black
+  pane, and the PSD viewer printed a raw English exception, on a file they could
+  not read.
+
+- **A video shorter than a second got no thumbnail** while its row said
+  *ready*; a video opening on a fade got a black one; a PDF thumbnail was cropped
+  to the middle of the page.
+
 ## [0.40.0] - 2026-09-12
 
 ### Added

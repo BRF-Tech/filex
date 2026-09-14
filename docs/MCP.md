@@ -173,11 +173,16 @@ token both work exactly as before.
 | `write` | `upload` / `mkdir` / `move` **and** `share` / `unshare` / `zip` / `unzip` |
 | `delete` | `delete` (soft-delete to trash) |
 | `mcp` | the streamable-HTTP MCP server at `/api/ai/mcp` |
-| `admin` | the full admin surface at `/api/ai/admin/*` **and** the `admin_*` MCP tools |
+| `admin` | the admin REST surface at `/api/ai/admin/*` **and** the `admin_*` MCP tools — a subset of the admin panel, listed [under Tool set](#tool-set) |
 
 > **Least privilege.** Give an agent only what it needs — most read/write agents
 > want `read,write,mcp`. `admin` is a superuser scope (it can manage users,
 > storages, settings, replica, queue …); reserve it for trusted operator tools.
+
+> ⚠⚠ **Mint agent and embed tokens on a non-admin account** (`user_id`). Scopes
+> are enforced on `/api/ai`; the admin panel's own `/api/admin/*` routes and
+> `/metrics` are gated on the **account's role**, so a token is only as limited
+> as the account it is bound to.
 
 ### Root confinement
 
@@ -187,7 +192,7 @@ ceiling** it cannot escape. `<adapter>` is a storage name (see [STORAGE.md](STOR
 
 - The ceiling is enforced on **both** the `/api/files` UI surface and the
   `/api/ai` REST + MCP surface — every path-bearing operation routes through a
-  single chokepoint, so no endpoint can be missed.
+  single chokepoint.
 - A confined caller treats its root as `/`: a **bare relative path** (e.g.
   `"reports/q3.csv"`) resolves *under* the root, and an empty path means the root
   itself. Fully-qualified `adapter://root/...` paths are validated as-is.
@@ -220,18 +225,18 @@ storage's root (or, when confined, your root).
 | GET | `/api/ai/files?path=` | `read` | → `{entries:[…]}` |
 | GET | `/api/ai/info?path=` | `read` | → `{entry:{…}}` |
 | GET | `/api/ai/download?path=` | `read` | → raw bytes (stream) |
-| GET | `/api/ai/search?path=&q=` | `read` | → `{entries:[…]}` |
+| GET | `/api/ai/search?path=&q=` | `read` | → `{entries:[…]}` — names and `tag:` filters only; content search is the MCP `file_search` tool |
 | POST | `/api/ai/upload` | `write` | `{path, content}` / `{path, content_base64}` / multipart `file` |
 | POST | `/api/ai/upload/ticket` | `write` | `{path, expires_in_seconds?, max_bytes?}` → `{url, ticket, path, max_bytes, expires_at, curl}` |
 | PUT/POST | `/u/{ticket}` | *(none — see below)* | raw body (`curl -T`) or multipart `file` → `{entry:{…}}` |
 | POST | `/api/ai/mkdir` | `write` | `{path}` |
-| POST | `/api/ai/move` | `write` | `{src, dst}` (same storage) |
+| POST | `/api/ai/move` | `write` | `{src, dst}` — across storages too (see [below](#moving-files-between-storages)) |
 | POST | `/api/ai/delete` | `delete` | `{path}` → soft-delete to trash |
 | POST | `/api/ai/share` | `write` | `{path, pin?, expires_in_days?, max_downloads?}` → `{url, token, pin?}` |
 | POST | `/api/ai/unshare` | `write` | `{token}` |
 | POST | `/api/ai/zip` | `write` | `{sources:[…], dest}` (server-side) |
 | POST | `/api/ai/unzip` | `write` | `{src, dest}` (server-side) |
-| `*` | `/api/ai/admin/*` | `admin` | mirrors the admin panel as REST endpoints |
+| `*` | `/api/ai/admin/*` | `admin` | the same admin handlers the panel calls, for the areas listed [under Tool set](#tool-set) |
 
 Notes:
 
@@ -334,7 +339,7 @@ user's role + grants + confinement):
 | `file_write` | Create/overwrite a file (`content` text or `content_base64` binary). Content you generate — never a file off your disk. |
 | `file_upload_ticket` | Get a short-lived, **credential-free** URL (plus the ready `curl -T` line) for a LOCAL file of any size. The bytes never enter the conversation; the URL takes one upload to a fixed path. |
 | `file_delete` | Soft-delete to filex trash (recoverable from the UI). |
-| `file_move` | Move/rename within the same storage. |
+| `file_move` | Move or rename a file/folder. Works across storages: the bytes are copied and verified, then the source is removed ([below](#moving-files-between-storages)). |
 | `file_mkdir` | Create a directory. |
 | `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and may be answered by a folder (`main code` finds `Code/main.go`); supports `tag:` / `-tag:` filters; `content=false` restores name-only. |
 | `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Use this to hand a file to someone instead of streaming it back. |
@@ -365,11 +370,18 @@ visible as "the agent's file is missing" rather than as an error:
   row, so the listing afterwards handed out paths that 404.
 
 **Admin tools** (`admin_*`) — registered **only** when the token carries the
-`admin` scope. They mirror the admin panel one-to-one (dashboard, users,
-storages, settings, sync runs, shares, trash, search index, auth providers,
-external services, replica, replication targets, queue, notifications, audit, and
-RBAC grants). Each runs the same handler the admin SPA calls and every **mutating
-call is written to the audit log** (action prefixed `ai.`). Examples:
+`admin` scope. They cover these areas of the admin panel, and so does
+`/api/ai/admin/*`: dashboard, users, storages, settings, sync runs, shares,
+trash, search index, auth providers, external services, replica, replication
+targets, queue, notifications, audit, and RBAC grants. Each runs the same handler
+the admin SPA calls and every **mutating call is written to the audit log**
+(action prefixed `ai.`).
+
+⚠ **Not the whole panel.** Tenants (providers), webhook targets, storage
+plugins, quotas, version purge, duplicates, protection/antivirus, usage & cost,
+self-update and the AI tokens themselves have no `admin_*` tool and no route
+under `/api/ai/admin`; they are reachable only through the panel's own
+`/api/admin/*` routes. Examples:
 `admin_users_create`, `admin_storages_create`, `admin_settings_set`,
 `admin_grant_set`, `admin_trash_restore`, `admin_queue_retry`.
 
@@ -379,11 +391,12 @@ call is written to the audit log** (action prefixed `ai.`). Examples:
 
 - **Least privilege by scope.** Hand each agent only the verbs it needs; keep
   `admin` for trusted operator tooling. Empty scopes = full access, so set scopes
-  explicitly on shared/automated tokens.
+  explicitly on shared/automated tokens. ⚠ Bind the token to a **non-admin**
+  account: the panel's `/api/admin/*` routes check the account's role rather
+  than the token's scopes ([Scopes](#scopes)).
 - **Per-agent confinement.** A `root:<adapter>://<rel>` scope is a hard ceiling
   enforced server-side on every path across `/api/files` and `/api/ai`. In a
-  multi-tenant deploy, give each project a token confined to its own folder —
-  one project's agent can never read or mutate another's files.
+  multi-tenant deploy, give each project a token confined to its own folder.
 - **Same ACL as the UI.** Every file op is gated by the bound user's RBAC grants
   and role ceiling — identically to the interactive `/api/files` surface. A
   `viewer`-bound token can read but never mutate; a token can only touch what its

@@ -1,6 +1,6 @@
 /** English UI strings. */
 export const en: Record<string, string> = {
-  'toolbar.new_folder': 'New Folder',
+  'toolbar.new_folder': 'New folder',
   'toolbar.upload': 'Upload',
   'toolbar.search': 'Search',
   'toolbar.search.placeholder': 'Search by name or tag:…',
@@ -39,10 +39,11 @@ export const en: Record<string, string> = {
   'ctx.paste': 'Paste',
   'ctx.info': 'Info',
   'ctx.duplicate': 'Duplicate',
-  'ctx.new_file': 'New File',
+  'ctx.new_file': 'New file',
 
   'modal.delete.title': 'Delete?',
-  'modal.delete.message': '{count} item(s) will be moved to trash.',
+  'modal.delete.message': '{count} items will be moved to trash.',
+  'modal.delete.message_one': '1 item will be moved to trash.',
   'modal.delete.confirm': 'Move to Trash',
   'modal.delete.cancel': 'Cancel',
 
@@ -50,7 +51,7 @@ export const en: Record<string, string> = {
   'modal.rename.save': 'Save',
   'modal.rename.cancel': 'Cancel',
 
-  'modal.newfolder.title': 'New Folder',
+  'modal.newfolder.title': 'New folder',
   'modal.newfolder.placeholder': 'Folder name',
   'modal.newfolder.create': 'Create',
   'modal.newfolder.cancel': 'Cancel',
@@ -96,10 +97,11 @@ export const en: Record<string, string> = {
   'unit.mb': 'MB',
   'unit.gb': 'GB',
   'unit.tb': 'TB',
+  'unit.pb': 'PB',
 
   'breadcrumb.root': 'Root',
-  'breadcrumb.copy_path': 'Copy Path',
-  'breadcrumb.go_to_path': 'Go To Path',
+  'breadcrumb.copy_path': 'Copy path',
+  'breadcrumb.go_to_path': 'Go to path',
   'breadcrumb.path_placeholder': 'fileman/foo/bar',
 
   'ops.copy': 'Copying',
@@ -110,9 +112,13 @@ export const en: Record<string, string> = {
   'ops.error': 'error',
 
   'node.trash': 'Trash',
+  /* gorunum:v1 — the singular kind, printed under a folder's name on a card
+   * and beside it in the list. The plural section heading is a different
+   * string on purpose. */
+  'node.folder': 'Folder',
 
   // ——— Rich viewer chrome ———
-  'viewer.open_in_new_tab': 'Open in New Tab',
+  'viewer.open_in_new_tab': 'Open in new tab',
   'viewer.loading': 'Loading…',
   'viewer.failed_to_load': 'Failed to load file',
   'viewer.peer_not_installed': 'Optional viewer library is not installed. Install the peer dependency or use the download button.',
@@ -150,6 +156,7 @@ export const en: Record<string, string> = {
   'viewer.epub_next': 'Next',
   'viewer.drawio.disabled': 'diagrams.net embed is not configured for this filex instance — operator must wire FILEX_DRAWIO_URL to enable the editor.',
   'viewer.archive.entries': '{n} files',
+  'viewer.archive.entries_one': '1 file',
   'viewer.archive.empty': 'Archive is empty.',
   'viewer.archive.error': 'Could not read archive contents.',
   'viewer.name': 'Name',
@@ -217,7 +224,10 @@ export const en: Record<string, string> = {
   'toast.cut_ready': 'Cut — ready to paste',
   'toast.copy_ready': 'Copied — ready to paste',
   'toast.same_folder_cut': 'Cannot cut into the same folder',
-  'toast.restored': '{n} item(s) restored',
+  'toast.restored': '{n} items restored',
+  'toast.restored_one': '1 item restored',
+  'toast.restore_taken': '{n} items were not restored: something already has their names. Rename what is there, then restore again.',
+  'toast.restore_taken_one': '“{name}” was not restored: something already has that name. Rename what is there, then restore again.',
   'toast.delete_queued': 'Delete queued',
   'toast.trash_retention': 'Items in the trash are removed automatically once the retention window ends. Permanent deletion is done from the admin panel.',
   'dropzone.hint': 'Drop files here',
@@ -226,7 +236,9 @@ export const en: Record<string, string> = {
   'viewer.pdf_inline_failed': 'Your browser could not display this PDF inline.',
   'viewer.too_large': 'File is too large (>1 MB).',
   'viewer.csv_rows': '{n} rows',
+  'viewer.csv_rows_one': '1 row',
   'presence.others': '{n} people',
+  'presence.others_one': '1 person',
   'conn.offline': 'No live connection — changes may be delayed',
   'conn.tooltip': 'Live connection to the server is unavailable; the list refreshes periodically. This notice disappears once the connection is back.',
 
@@ -253,8 +265,25 @@ export const en: Record<string, string> = {
   'star.failed': 'Could not change the star',
   'shortcuts.inspector': 'Toggle details panel',
   'inspector.title': 'Details',
+  'inspector.copy_name': 'Copy name',
+  'inspector.items': '{n} items',
+  'inspector.items_one': '1 item',
+  'inspector.type': 'Type',
+  'inspector.select_hint': 'Select an item to see its details.',
+  /* pane:p1 — the panel HOLDS the last selected thing (owner's ruling,
+     2026-09-13), so it can be describing an item in the half of a split
+     window nobody is looking at. This line says which one and where. */
+  'inspector.held': 'Last selected — in {where}',
   'inspector.close': 'Close',
   'inspector.section.general': 'General',
+  'inspector.section.tags': 'Tags',
+  /* etiket:t1 — TagPicker's own chrome. It printed these three in English
+     regardless of the catalogue until 2026-09-13; `tags.open` is the chip's new
+     "show me everything with this tag". */
+  'tags.open': 'Open tag: {tag}',
+  'tags.add': '+ Add tag',
+  'tags.name': 'Tag name',
+  'tags.remove': 'Remove tag',
   'inspector.section.versions': 'Versions',
   'inspector.section.permissions': 'Permissions',
   'inspector.section.shares': 'Shares',
@@ -263,11 +292,14 @@ export const en: Record<string, string> = {
   'inspector.modified': 'Modified',
   'inspector.mime': 'MIME type',
   'inspector.etag': 'ETag',
+  'inspector.nodeId': 'Node ID',
   'inspector.copy': 'Copy',
   'inspector.copied': 'Copied',
   'inspector.error': 'Could not load',
   'inspector.items_summary': '{n} items, {size} total',
+  'inspector.items_summary_one': '1 item, {size} total',
   'inspector.folder_items': '{n} items',
+  'inspector.folder_items_one': '1 item',
   'inspector.versions.empty': 'No version history',
   'inspector.versions.v': 'Version {n}',
   'inspector.versions.restore': 'Restore',
@@ -306,7 +338,18 @@ export const en: Record<string, string> = {
   'theme.name.contrast': 'High Contrast',
   'theme.name.gray': 'Soft Gray',
   'theme.name.terminal': 'Terminal Green',
-  'theme.name.drive': 'Drive',
+  /* === zaman:z3 — the time-zone picker (embed dialog + web settings) === */
+  'tz.menu': 'Time zone',
+  'tz.title': 'Time zone',
+  'tz.label': 'Show dates in',
+  'tz.search': 'Search a city, country or offset — try "Istanbul" or "GMT+3"',
+  'tz.default.device': "Use this device's zone ({zone})",
+  'tz.default.account': "Use the account's zone ({zone})",
+  'tz.default.host': "Use this site's default ({zone})",
+  'tz.no_match': 'No zone matches “{query}”. Try a city, a country, or an offset like GMT+3.',
+  'tz.more': '{n} more — keep typing to narrow the list.',
+  'tz.hint': 'Saved in this browser only. Every date is stored as one moment in time and shown on the clock you pick here.',
+  'tz.now': 'Right now in {zone}: {time}',
   /* === wiring:c2 — customizable shortcuts + quick look === */
   'shortcuts.quicklook': 'Quick look',
   'shortcuts.customize': 'Customize',
@@ -331,6 +374,7 @@ export const en: Record<string, string> = {
   /* === wiring:c3 — operations center === */
   'opc.title': 'Operations',
   'opc.aria_badge': '{n} operations — toggle operations center',
+  'opc.aria_badge_one': '1 operation — toggle operations center',
   'opc.close': 'Close',
   'opc.active': 'In progress',
   'opc.history': 'History',
@@ -359,24 +403,34 @@ export const en: Record<string, string> = {
   'tour.next': 'Next',
   'tour.done': 'Done',
   'tour.progress': '{n} / {m}',
-  'tour.step.nav.title': 'Storages & folders',
+  'tour.step.nav.title': 'Storages & views',
   'tour.step.nav.desc':
-    'Your current location lives here. Click any crumb to jump back to parent folders or the storage root.',
-  'tour.step.upload.title': 'Upload files',
-  'tour.step.upload.desc':
-    'Pick files with this button — or simply drag & drop them anywhere in the window.',
+    'Home, Shared with me, Recent, Starred and Trash are always in this panel, with your storages and connections underneath. The button in the top-left corner collapses it to a rail and brings it back.',
+  'tour.step.nav.desc_closed':
+    'This button opens the navigation panel: Home, Shared with me, Recent, Starred and Trash, with your storages and connections underneath.',
+  'tour.step.new.title': 'Add something',
+  'tour.step.new.desc':
+    'Everything new starts here — upload from this device, create a folder, or ask somebody else for a file. Dropping files onto the window uploads them as well.',
+  'tour.step.new.desc_fab':
+    'This button uploads files from this device. Dropping files onto the window works as well.',
   'tour.step.search.title': 'Search',
   'tour.step.search.desc':
-    'This box searches the whole storage by name — separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The {palette} command palette also runs commands.',
+    'This field searches the whole storage by name — separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The sliders button opens advanced search, and {palette} opens the command palette, which runs commands too.',
+  'tour.step.crumb.title': 'Where you are',
+  'tour.step.crumb.desc':
+    'This trail is the address of the folder on screen. Click any step to go back up, and the chevron beside the last one lists the folders inside it.',
+  'tour.step.filters.title': 'Narrow the list',
+  'tour.step.filters.desc':
+    'Type, People, Modified and Size filter the folder you are in, the box beside them matches names as you type, and the control at the end of the row sorts.',
   'tour.step.view.title': 'Switch views',
   'tour.step.view.desc':
-    'Toggle between the list and grid layout; your choice is remembered.',
-  'tour.step.share.title': 'Sharing',
-  'tour.step.share.desc':
-    'Right-click any file and use "Share / Permissions" to create a link with an optional PIN and expiry.',
+    'Change how this folder is drawn; your choice is remembered.',
+  'tour.step.details.title': 'Details & sharing',
+  'tour.step.details.desc':
+    'Select a file and open this panel for its details, its activity and its share links. For the full menu, right-click the file or use the button at the end of its row — "Share / Permissions" there creates a link with an optional PIN and expiry.',
   'tour.step.help.title': 'Shortcuts',
   'tour.step.help.desc':
-    'Press {help} for the shortcut cheat-sheet and {palette} for the command palette. Replay this tour any time via "Restart the tour" in the menu.',
+    'Press {help} for the shortcut cheat-sheet and {palette} for the command palette. Theme and "Restart the tour" are in the "More actions" menu at the top right; your account and sign-out are behind the avatar beside it.',
   'error.hint': 'This may be a temporary network or server problem. Please try again.',
   'error.details': 'Technical details',
   'col.star': 'Star',
@@ -422,6 +476,7 @@ export const en: Record<string, string> = {
   'split.retry': 'Retry',
   'split.copy_queued': 'Copy queued',
   'split.move_queued': 'Move queued',
+  'toast.move_kept_both': 'Move queued. A name was already taken there, so that item will be kept beside the existing one with “-copy” added. This move cannot be undone.',
   'split.cross_copy': 'Different storages — copy queued instead',
   'dragout.downloading': 'Downloading into the folder you dropped on…',
   'dragout.not_found': 'Could not find where it was dropped — a drop onto an application (rather than a folder) cannot be filled in',
@@ -443,8 +498,9 @@ export const en: Record<string, string> = {
   /* wiring:e2 — end-to-end encrypted folders */
   'e2e.create.title': 'Create encrypted folder',
   'e2e.create.option': 'Create encrypted folder…',
-  'e2e.create.pw_placeholder': 'Folder password (min 8 characters)',
-  'e2e.create.pw2_placeholder': 'Repeat the password',
+  'e2e.create.pw_label': 'Folder password',
+  'e2e.create.pw_placeholder': 'At least 8 characters',
+  'e2e.create.pw2_label': 'Repeat the password',
   'e2e.create.warn_title': 'NO WAY BACK',
   'e2e.create.warn_body':
     'Files in this folder can only be opened with this password or the recovery key shown once when the folder is created. The password is NEVER stored on the server, and filex keeps no copy of the recovery key either. Lose both and the contents are gone for good.',
@@ -465,6 +521,10 @@ export const en: Record<string, string> = {
   'e2e.locked.busy': 'Verifying…',
   'e2e.unlock.wrong': 'Wrong password.',
   'e2e.unlock.marker_missing': 'Could not read the key file (.filex-e2e.json).',
+  /* ikon:emoji — the listing marker's accessible name. The row used to print
+     a 🔒 and nothing else; the padlock that replaced it is aria-hidden inside
+     the tile, so the span that carries it says this instead. */
+  'e2e.badge': 'Encrypted folder',
   'e2e.strip.label': 'Encrypted folder — unlocked',
   'e2e.strip.lock': 'Lock',
   'e2e.locked_toast': 'Folder locked',
@@ -575,7 +635,8 @@ export const en: Record<string, string> = {
   'conn.denied.unreachable': 'The server did not answer: {error}',
   'conn.denied.guideHint': 'You do not need administrator rights to connect your own computer to the storages you can already see.',
   'conn.denied.guideCta': 'Show me how to connect',
-  'conn.list.count': '{n} storage(s)',
+  'conn.list.count': '{n} storages',
+  'conn.list.count_one': '1 storage',
   'conn.list.add': 'Add a storage',
   'conn.list.empty': 'No storage is configured yet. Add one and the files show up in the explorer.',
   'conn.list.edit': 'Edit',
@@ -594,7 +655,8 @@ export const en: Record<string, string> = {
   'conn.form.enabled': 'Enabled',
   'conn.form.test': 'Test connection',
   'conn.form.testing': 'Testing…',
-  'conn.form.testOk': 'Connected. {count} item(s) at the root.',
+  'conn.form.testOk': 'Connected. {count} items at the root.',
+  'conn.form.testOk_one': 'Connected. 1 item at the root.',
   'conn.form.testFail': 'Could not connect: {error}',
   'conn.form.save': 'Save',
   'conn.form.saving': 'Saving…',
@@ -969,6 +1031,8 @@ export const en: Record<string, string> = {
   'sidenav.title': 'Navigation',
   'sidenav.views': 'Views',
   'sidenav.storages': 'Storages',
+  'sidenav.home': 'Home',
+  'sidenav.myfiles': 'My files',
   'sidenav.recent': 'Recent',
   'sidenav.starred': 'Starred',
   'sidenav.shared': 'Shared with me',
@@ -976,8 +1040,22 @@ export const en: Record<string, string> = {
   'sidenav.collapse': 'Collapse navigation',
   'sidenav.expand': 'Expand navigation',
   'sidenav.close': 'Close navigation',
+  // ⚠ `open`/`close` are the DRAWER's pair, `expand`/`collapse` the docked
+  // panel's, and they are not interchangeable — see the note on
+  // `navToggleLabel` in Toolbar.vue. Below 560px the panel is a drawer over
+  // the listing: it is not narrowed to a rail, it is not on screen at all, so
+  // "expand" would promise a width change to something that has no width.
+  'sidenav.open': 'Open navigation',
   'sidenav.storage.shared': 'Shared',
-  'toolbar.nav': 'Navigation',
+  // ⚠ `toolbar.nav` is GONE, and nothing replaced it. It was the one label on
+  // the panel's collapse control, first as the noun "Navigation" — which names
+  // the panel and never says the button does anything to it, so the owner
+  // could not find how to collapse the panel (2026-09-13: "yan menüyü kısıp
+  // açabilir olalım ya bence") — and then as the static stopgap "Show or hide
+  // navigation". The four `sidenav.*` verbs above are the real fix: the label
+  // is bound to `navOpen`, so it says *collapse* when it will collapse and
+  // *expand* when it will expand.
+  'node.home': 'Home',
   'node.recent': 'Recent',
   'node.starred': 'Starred',
   'node.shared': 'Shared with me',
@@ -1006,17 +1084,57 @@ export const en: Record<string, string> = {
   'conn.tokens.capNote': 'Your account and its permissions are the ceiling — asking for more than you have is refused, not granted.',
   /* === /gezinti:g1 === */
 
-  /* === surucu:d1 — the Drive shell (uiProfile: 'drive', GitHub #14) ===== */
+  /* === surucu:d1 — the shell (GitHub #14); every profile, no longer a
+     `uiProfile: 'drive'` opt-in === */
   'drive.new': 'New',
   'drive.new.upload': 'Upload files',
   'drive.new.folder': 'New folder',
   'drive.new.request': 'Request files',
+  'drive.new.document': 'New document',
+
+  /* === belge:n1 — "New document": the picker under + New =================
+     Type names are NOT listed here. A tile reads its words from
+     lib/fileIcons `typeLabelFor`, the same table the listing's Type column
+     uses, so ".docx" is called the same thing in both places and a new type
+     needs no string at all. Only this dialog's own chrome lives below. */
+  'newdoc.title': 'New document',
+  'newdoc.type.label': 'Document type',
+  'newdoc.group.document': 'Documents',
+  'newdoc.group.text': 'Text and code',
+  'newdoc.group.diagram': 'Diagrams',
+  'newdoc.withheld.onlyoffice': 'Office documents need a document server (OnlyOffice), which is not configured here.',
+  'newdoc.withheld.drawio': 'Diagrams need a drawio service, which is not configured here.',
+  'newdoc.empty.title': 'No document types are available',
+  'newdoc.empty.body': 'This server did not offer any type this app can create.',
+  'newdoc.empty.blocked': 'Every type this server can create needs an editor service that is not configured here.',
+  'newdoc.name': 'Name',
+  'newdoc.name.placeholder': 'Document name',
+  'newdoc.untitled': 'Untitled',
+  'newdoc.err.slash': 'A name cannot contain a slash.',
+  'newdoc.err.exists': '{name} is already here. Choose another name.',
+  'newdoc.location': 'Location',
+  'newdoc.location.none': 'Choose a folder',
+  'newdoc.location.change': 'Change',
+  'newdoc.location.noaccess': 'You cannot save into this folder.',
+  'newdoc.create': 'Create',
+  'newdoc.creating': 'Creating…',
+  'newdoc.cancel': 'Cancel',
   'drive.search.placeholder': 'Search in {scope}',
   'drive.search.placeholder_all': 'Search your files',
   'drive.search.hint_title': 'Search everywhere and run commands ({combo})',
   'drive.storage.used': '{used} of {total} used',
   'drive.storage.used_unlimited': '{used} used',
   'drive.storage.label': 'Storage',
+  /* === gorunum:v3-shell — the Home view (the overview, inside the shell) ==
+   * The section headings are `sidenav.storages` / `sidenav.recent` /
+   * `sidenav.starred` and the two empty states are `empty.recent.*` /
+   * `empty.starred.*`, on purpose: the block headed "Recent" on Home and the
+   * panel row labelled "Recent" beside it are the same thing, and a second
+   * string for it is how the two drift apart one translation at a time. Only
+   * what exists nowhere else is below. */
+  'home.title': 'Home',
+  'home.storages.empty': 'No storages yet',
+  'home.storages.hint': 'A storage is a drive filex reads and writes — an administrator adds them.',
   'drive.section.folders': 'Folders',
   'drive.section.files': 'Files',
   'filter.aria': 'Filters',
@@ -1044,6 +1162,12 @@ export const en: Record<string, string> = {
   'filter.size.1to10': '1 - 10 MB',
   'filter.size.10to100': '10 - 100 MB',
   'filter.size.gt100': 'Over 100 MB',
+  /* surucu:d1-actions — the ⋮ menu at the end of the filter row. Only its own
+     NAME is new: every row inside it reuses the string that verb already has
+     (`toolbar.new_folder`, `toolbar.upload`, `ctx.paste`, `shortcuts.select_all`,
+     `selection.clear`), because a menu that renames a command is a menu the
+     reader has to learn twice. */
+  'filter.actions': 'Listing actions',
   'filter.clear': 'Clear filters',
   'filter.empty.title': 'Nothing here matches those filters',
   'filter.empty.hint': 'Clear a filter, or search everywhere with the field above.',
@@ -1077,4 +1201,268 @@ export const en: Record<string, string> = {
   'convert.unsupported_input': 'This file type has no source format the converter can read.',
   'convert.converting': 'Converting…',
   'convert.convert': 'Convert',
+  /* === gorunum:v1-chrome — the filter row's name box === */
+  'filter.find': 'Filter in this folder…',
+  /* surucu:d1-scope — the same box where the rows are not a folder's contents.
+     It has to say what it narrows: at the drive list "this folder" names
+     nothing, and on Home it would name three blocks at once. */
+  'filter.find.storages': 'Filter storages…',
+  'filter.find.home': 'Filter Home…',
+  /* === gorunum:v1-viewer — the full-bleed overlay's own chrome === */
+  'viewer.share': 'Share',
+  'viewer.nav_prev': 'Previous file',
+  'viewer.nav_next': 'Next file',
+  /* The counter in the top bar's meta line: "246.3 KB • Sep 9, 2026 • 1 of 9". */
+  'viewer.counter': '{i} of {n}',
+  'viewer.zoom_reset': 'Reset zoom',
+  'viewer.fullscreen': 'Full screen',
+  'viewer.exit_fullscreen': 'Exit full screen',
+  'viewer.md_placeholder': '# Markdown here…',
+  /* === gorunum:v1-selbar — the selection bar that replaces the filter row === */
+  'selection.count': '{n} selected',
+  'selection.clear': 'Clear selection',
+  /* === gorunum:v1-preview — the kind, said in words ======================
+     The Type column used to print the extension in caps. These are what it
+     prints instead; the table that picks one is in `lib/fileIcons.ts`
+     (`typeLabelKey`), so this list and that one are the only two places a
+     kind is named. Anything unmapped still falls back to the uppercased
+     extension — these names improve on that fallback, they do not replace
+     it. `Folder` is NOT here: it is `node.folder`, which the grid card's
+     caption already prints. */
+  'ftype.typescript': 'TypeScript',
+  'ftype.javascript': 'JavaScript',
+  'ftype.vue': 'Vue component',
+  'ftype.python': 'Python',
+  'ftype.go': 'Go',
+  'ftype.rust': 'Rust',
+  'ftype.php': 'PHP',
+  'ftype.ruby': 'Ruby',
+  'ftype.java': 'Java',
+  'ftype.kotlin': 'Kotlin',
+  'ftype.swift': 'Swift',
+  'ftype.c': 'C source',
+  'ftype.cpp': 'C++ source',
+  'ftype.csharp': 'C# source',
+  'ftype.stylesheet': 'Stylesheet',
+  'ftype.html': 'HTML document',
+  'ftype.json': 'JSON data',
+  'ftype.yaml': 'YAML',
+  'ftype.xml': 'XML',
+  'ftype.toml': 'TOML',
+  'ftype.sql': 'SQL',
+  'ftype.shell': 'Shell script',
+  'ftype.powershell': 'PowerShell script',
+  'ftype.markdown': 'Markdown',
+  'ftype.plaintext': 'Plain text',
+  'ftype.log': 'Log file',
+  'ftype.config': 'Configuration',
+  'ftype.sheet': 'Spreadsheet',
+  'ftype.figma': 'Figma design',
+  'ftype.design': 'Design file',
+  'ftype.image': 'Image',
+  'ftype.video': 'Video',
+  'ftype.audio': 'Audio',
+  'ftype.pdf': 'PDF document',
+  'ftype.document': 'Document',
+  'ftype.slides': 'Presentation',
+  'ftype.archive': 'Archive',
+  'ftype.code': 'Code',
+  /* === gorunum:v1-advsearch — the Advanced search dialog ==================
+   * Two `filter.*` keys are added here rather than beside their siblings
+   * because they are new members of shared unions the dialog introduced
+   * (`modified: 'around'`, `size: 'range'`); the filter row never selects
+   * them, but `chipLabel` would print the raw key if one ever reached it. */
+  'filter.modified.around': 'Around a date',
+  'filter.size.range': 'Custom range',
+
+  'advsearch.open': 'Advanced search',
+  'advsearch.title': 'Advanced search',
+  'advsearch.subtitle': 'Find files by name, content, path, or tags.',
+  'advsearch.close': 'Close',
+  'advsearch.content.heading': 'Content search',
+  'advsearch.viewall': 'View all results',
+  'advsearch.where.any_short': 'Anywhere',
+  'advsearch.where.here_short': 'Only here',
+  'advsearch.where.skip_short': 'Skip this',
+  'advsearch.server.legend': 'What the server searches',
+  'advsearch.client.legend': 'Narrow the results that come back',
+  'advsearch.query.label': 'Words',
+  'advsearch.query.placeholder': 'Part of a name, or words inside a file',
+  'advsearch.scope.label': 'Look in',
+  'advsearch.scope.name': 'Names and paths',
+  'advsearch.scope.content': 'File contents',
+  'advsearch.scope.all': 'Both',
+  'advsearch.scope.hint':
+    'Contents are searched from the index, which covers text-like files up to 200 KB.',
+  'advsearch.people.name_only':
+    'Owner is read off the rows that come back, and only a name search returns rows that carry one.',
+  'advsearch.scope.name_only':
+    'Only names and paths here: a content hit reaches the explorer without the drive it came from, so content search is offered on single-storage deployments only.',
+  'advsearch.tags.label': 'Tags',
+  'advsearch.tags.placeholder': 'invoice, quarterly report',
+  'advsearch.tags.exclude': 'Without tags',
+  'advsearch.tags.exclude_placeholder': 'archive',
+  'advsearch.tags.hint':
+    'Separate with commas. Tags narrow: several tags means files carrying all of them, and a tag nobody has applied returns nothing.',
+  'advsearch.where.label': 'Folder',
+  'advsearch.where.any': 'Anywhere in this storage',
+  'advsearch.where.here': 'Only in {folder}',
+  'advsearch.where.skip': 'Everywhere except {folder}',
+  'advsearch.around.label': 'Within',
+  'advsearch.around.date': 'Date and time',
+  'advsearch.around.h1': '1 hour',
+  'advsearch.around.d1': '1 day',
+  'advsearch.around.w1': '1 week',
+  'advsearch.size.range_label': 'Between',
+  'advsearch.size.from': 'From',
+  'advsearch.size.to': 'To',
+  'advsearch.count.idle': 'Type something, or pick a tag.',
+  'advsearch.count.counting': 'Counting…',
+  'advsearch.count.result': '{n} matching items',
+  'advsearch.count.capped': '{n} matching items in the first page of hits',
+  'advsearch.count.result_one': '1 matching item',
+  'advsearch.count.capped_one': '1 matching item in the first page of hits',
+  'advsearch.count.error': 'The count could not be run.',
+  'advsearch.count.cost':
+    'The count runs this search. Type, owner, date, size and folder are applied to the rows that come back, not by the server.',
+  'advsearch.wire': 'Sent as',
+  'advsearch.reset': 'Reset',
+  'advsearch.cancel': 'Cancel',
+  'advsearch.submit': 'Search',
+
+  /* === gorunum:v2-topbar — the page bar is gone; the explorer's own header
+     and breadcrumb row carry what it used to. === */
+  'breadcrumb.subfolders': 'Subfolders',
+  'breadcrumb.subfolders.empty': 'No subfolders here',
+  'header.admin': 'Admin panel',
+  'header.settings': 'Settings',
+  'header.signout': 'Sign out',
+  'ai.assistant': 'AI assistant',
+  'ai.soon': 'Coming soon',
+  'ai.assistant.soon': 'AI assistant — coming soon',
+
+  /* gorunum:v2-share — the Share / Permissions dialog's own chrome. The
+     controls inside it keep the strings they already had; these are the new
+     shell: the title, the one switch, the sentence that says who can open the
+     item right now, and the three named sections it all folds into. */
+  'access.title': 'Share "{name}"',
+  'access.close': 'Close',
+  'access.done': 'Done',
+  'access.copy': 'Copy',
+  'access.copied': 'Copied',
+  'access.link.switch': 'Link sharing',
+  'access.who.private': 'Only people with access can open it.',
+  'access.who.link': 'Anyone with the link can open it.',
+  'access.who.pin': 'Anyone with the link and the PIN can open it.',
+  'access.who.existing': 'Link sharing is on — {n} links already exist.',
+  'access.who.existing_one': 'Link sharing is on — 1 link already exists.',
+  'access.section.link': 'Link options',
+  'access.section.people': 'People with access',
+  'access.section.drop': 'Request files',
+  'access.sum.pin_on': 'PIN on',
+  'access.sum.pin_off': 'No PIN',
+  'access.sum.people': '{n} people',
+  'access.sum.people_one': '1 person',
+  'access.sum.people_none': 'No one yet',
+  'access.sum.drop': '{n} upload links',
+  'access.sum.drop_one': '1 upload link',
+  'access.sum.drop_none': 'No upload link',
+  /* Ownership — the Owner column and the People chip. "System" is the honest
+     word for a row nobody put here through filex (the scanner found it, or it
+     was written straight into the bucket); it is a real answer, not a blank. */
+  'col.owner': 'Owner',
+  'owner.you': 'You',
+  'owner.system': 'System',
+  'owner.unknown': 'Unknown',
+  'owner.external': 'Uploaded through an upload link',
+  'owner.last_actor': 'Last changed by {who}',
+  'filter.people': 'People',
+  'filter.people.any': 'Anyone',
+  'filter.people.me': 'You',
+  'filter.people.system': 'System',
+  'filter.people.someone': 'Someone else',
+  /* surucu:d1-sort — the listing sort control at the trailing edge of the
+     filter row. The four key names are `col.*`: the menu offers exactly the
+     words the list view's own column headers carry, so the two controls that
+     drive one sort cannot name it differently. */
+  'sort.by': 'Sort by',
+  'sort.asc': 'Ascending',
+  'sort.desc': 'Descending',
+  /* The order a SEARCH RESULT is in. It is not a fifth sort key — it is what
+     the control prints instead of a key while the rows on screen were ranked
+     by the server, so the button stops claiming a sort it is not performing.
+     `_why` is the reason the control is closed, and the owner asked for the
+     reason to be written rather than for the control to go quietly inert. */
+  'sort.relevance': 'Relevance',
+  'sort.relevance_why':
+    'Search results are listed by how well they match. Your sort comes back when you leave the search.',
+  /* === tablo:t1 — the table's own configuration ==========================
+     Column widths and visibility are a preference about YOUR SCREEN; the view
+     a folder opens in is a fact about the FOLDER. Both are set from here, and
+     `folder_hint` is the rule in one sentence, written where the person who is
+     about to be surprised by it can read it. */
+  'col.location': 'Location',
+  'cols.menu': 'Column options',
+  'cols.title': 'Columns',
+  'cols.resize': 'Resize {col}',
+  'cols.move_left': 'Move {col} left',
+  'cols.move_right': 'Move {col} right',
+  'cols.reset': 'Reset columns',
+  'cols.folder_title': 'Folder view',
+  'cols.folder_hint':
+    'Folders you set up keep their own view. Your last choice is the default everywhere else.',
+  'cols.forget_folder': "Forget this folder's view",
+  'cols.apply_all': 'Apply to all folders ({count} remembered)',
+  /* === tablo:t1 — the trash banner ======================================
+     ⚠ `retention` is only used when the deployment has TOLD us the number
+     (GET /api/admin/protection). Everywhere else `retention_unknown` says the
+     same thing without naming a period we cannot verify: a banner that states
+     the wrong retention is worse than no banner, because people act on it. */
+  'trash.retention': 'Items in the trash are permanently deleted after {days} days.',
+  'trash.retention_one': 'Items in the trash are permanently deleted after 1 day.',
+  'trash.retention_unknown':
+    'Items in the trash are permanently deleted after a retention period set by your administrator.',
+  'trash.empty_action': 'Empty trash',
+  'trash.empty_confirm_title': 'Empty the trash?',
+  'trash.empty_confirm_body_one': 'This permanently deletes 1 item ({size}). It cannot be undone.',
+  'trash.empty_confirm_body':
+    'This permanently deletes {count} items ({size}). It cannot be undone.',
+  'trash.empty_confirm_body_nosize_one': 'This permanently deletes 1 item. It cannot be undone.',
+  'trash.empty_confirm_body_nosize': 'This permanently deletes {count} items. It cannot be undone.',
+  'trash.emptied': 'Trash emptied',
+  'empty.trash.hint': 'Files you delete land here first, so you can put them back.',
+
+  /* tasi:m1 — the destination picker (modals/DestinationPickerModal.vue) and
+     the two selection verbs built on it. */
+  'destpicker.title.move': 'Move to',
+  'destpicker.title.copy': 'Copy to',
+  'destpicker.title.choose': 'Choose a folder',
+  'destpicker.confirm.move': 'Move here',
+  'destpicker.confirm.copy': 'Copy here',
+  'destpicker.confirm.choose': 'Choose this folder',
+  'destpicker.cancel': 'Cancel',
+  'destpicker.up': 'Up one level',
+  'destpicker.crumbs': 'Location',
+  'destpicker.drives': 'Drives',
+  'destpicker.loading': 'Loading…',
+  'destpicker.empty': 'No subfolders here',
+  'destpicker.unreadable': 'This folder cannot be opened.',
+  'destpicker.readonly': 'Read-only',
+  'destpicker.readonly_here': 'You cannot write into this folder.',
+  'destpicker.pick_a_drive': 'Open a storage to choose a folder inside it.',
+  'destpicker.target': 'Destination: {name}',
+  'destpicker.tag.blocked': 'Not allowed',
+  'destpicker.blocked.self': 'A folder cannot be moved into itself.',
+  'destpicker.blocked.descendant': 'A folder cannot be moved into one of its own subfolders.',
+
+  'ctx.move_to': 'Move to…',
+  'ctx.copy_to': 'Copy to…',
+  'ctx.access.one_only': 'Sharing works on one item at a time.',
+
+  'toast.archive.preparing': 'Preparing the archive…',
+  'toast.archive.started': 'Downloading {name} ({count} files)',
+  'toast.archive.started_one': 'Downloading {name} (1 file)',
+  'toast.archive.empty': 'Nothing to download — the selection contains no readable file.',
+  'toast.moved_to': 'Moved to {name}',
+  'toast.copied_to': 'Copy to {name} queued',
 };

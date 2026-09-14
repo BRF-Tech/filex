@@ -13,7 +13,8 @@
  *   - font size +/- (Themes API)
  *   - graceful fallback if peer not installed
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 
 const props = defineProps<{
   url: string;
@@ -41,6 +42,29 @@ const loading = ref(true);
 
 let book: any = null;
 let rendition: any = null;
+
+/**
+ * How long an epub.js step may hang before we call it a failure.
+ *
+ * Generous on purpose: a large publication on a slow disk legitimately takes
+ * seconds, and a false "cannot open" on a book that would have rendered is a
+ * worse bug than the one this guards against.
+ */
+const EPUB_STEP_TIMEOUT_MS = 15000;
+
+/** Reject if `p` has not settled within `EPUB_STEP_TIMEOUT_MS`. */
+function withTimeout<T>(p: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`EPUB ${label} timed out after ${EPUB_STEP_TIMEOUT_MS}ms`)),
+        EPUB_STEP_TIMEOUT_MS,
+      );
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -81,14 +105,24 @@ async function load(): Promise<void> {
       flow: 'paginated',
       manager: 'default',
     });
-    await rendition.display();
+    // ⚠⚠ Both of these have to be raced against a clock. epub.js resolves
+    // `display()` and `loaded.navigation` from its own internal promises, and
+    // when the archive is not a readable EPUB it simply NEVER settles —
+    // neither resolve nor reject — so the `catch` below can't fire and
+    // `finally` never runs. Measured 2026-09-13 on an 8-byte `handbook.epub`:
+    // the pane sat on "Yükleniyor…" forever with no error anywhere.
+    await withTimeout(rendition.display(), 'display');
     rendition.themes.fontSize(fontSize.value + '%');
-    const nav = await book.loaded.navigation;
+    // `<any>` explicitly: `book` is `any`, so without it `T` infers as `{}`
+    // and `nav.toc` stops type-checking.
+    const nav = await withTimeout<any>(book.loaded.navigation, 'navigation');
     toc.value = (nav?.toc ?? []) as TocNode[];
     ready.value = true;
   } catch (err) {
-    error.value =
-      err instanceof Error ? err.message : 'EPUB load failed';
+    // The reader gets the localized sentence; epub.js's own wording (and the
+    // timeout marker) goes to the console for whoever is debugging.
+    console.warn('[filex] EPUB load failed:', err);
+    error.value = tt('viewer.failed_to_load', 'Failed to load file');
   } finally {
     loading.value = false;
   }
@@ -165,12 +199,22 @@ watch(
 function tt(key: string, fallback: string): string {
   return props.t ? props.t(key) : fallback;
 }
+
+/* === ikon:emoji — the fallback screen's mark ==========================
+ * Every viewer opened its "cannot show this" / "still loading" screen with a
+ * 48px colour emoji, one per format, each from whatever emoji font the OS
+ * shipped. The format mark is `lib/fileIcons`'s tile — the SAME tile the row
+ * the person just clicked is wearing, so the fallback is recognisably about
+ * that file — and "loading" is the stroked ring, spun by CSS, because no
+ * still picture can say "still going". */
+const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
 </script>
 
 <template>
   <div ref="root" class="filex-viewer-epub">
     <div v-if="error" class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">📖</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
       <p>{{ error }}</p>
     </div>
     <template v-else>

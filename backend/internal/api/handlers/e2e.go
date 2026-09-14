@@ -295,6 +295,8 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 		Title:    "Encrypted folder opened with the escrow key",
 		Body:     root,
 		Node:     &notify.NodeRef{StorageID: st.ID, Path: root, Name: name},
+		// The encrypted folder that was opened.
+		Target: notify.DirTarget(root),
 		Meta: map[string]any{
 			"escrow_kid": h.Escrow.KID,
 			"storage":    st.Name,

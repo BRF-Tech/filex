@@ -4,6 +4,7 @@
  * files. Backed by `GET /api/files/manager/recent?limit=20`.
  */
 import { ref, onMounted, watch } from 'vue';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 
 interface RecentNode {
   id: number;
@@ -83,8 +84,19 @@ watch(() => props.refreshKey, load);
   <div class="filex-recent">
     <header>
       <h3>Recently opened</h3>
-      <button class="filex-recent-refresh" type="button" @click="load" :disabled="loading">
-        ↻
+      <button
+        class="filex-recent-refresh"
+        type="button"
+        title="Refresh"
+        aria-label="Refresh"
+        @click="load"
+        :disabled="loading"
+      >
+        <!-- ikon:emoji — ↻ was a bare arrow glyph with no label at all, so
+             the only thing naming this button was its shape. Same mark as the
+             toolbar's Refresh now, and it says what it is. -->
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+        <span aria-hidden="true" v-html="actionIconSvg('refresh')"></span>
       </button>
     </header>
 
@@ -130,6 +142,9 @@ watch(() => props.refreshKey, load);
   color: var(--fe-text, var(--filex-text, #111827));
 }
 .filex-recent-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: var(--fe-text-muted, var(--filex-text-muted, #9ca3af));

@@ -9,6 +9,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -158,6 +159,94 @@ type searchResult struct {
 	Snippet string `json:"snippet"`
 	// Matched reports which side(s) hit: "name" | "content" | "both".
 	Matched string `json:"matched"`
+	// OwnerSelf says the CALLER owns this row.
+	//
+	// It lives on the wrapper rather than on model.Node because it is not a
+	// property of the file: it is the answer to "is this mine", which depends
+	// on who asked. The listing projection already answers it the same way
+	// (handlers/manager.go, `owner_self`), and it has to be answered HERE for
+	// the same reason it is answered there — the embeddable client is mounted
+	// in hosts that have no idea which filex account the session belongs to,
+	// so a raw `owner_id` it cannot compare against anything is a number, not
+	// an owner. Omitted when false, exactly like the listing's key.
+	OwnerSelf bool `json:"owner_self,omitempty"`
+}
+
+// describeHits fills in the two things a raw node row cannot say about
+// itself, for the rows this response is about to return.
+//
+//  1. WHICH DRIVE it came from. `model.Node.Storage` exists precisely for the
+//     handlers that return nodes outside a folder listing, and search was the
+//     one left out: a hit carried a numeric `storage_id` and no name, so a
+//     client in multi-storage mode could not build the `name://path` it needs
+//     to open one. That is the same defect that made the recently-opened tray
+//     list files which did nothing when clicked (see the field's own comment).
+//  2. WHO OWNS IT, by name, and whether that is the caller. `owner_id` was
+//     already on the wire (migrations 00004 + 00038 put it on the row); the
+//     display name and `owner_self` were not, which left every consumer with
+//     a number it could neither show nor compare.
+//
+// Both lookups are batched/cached per response: one GetStorage per distinct
+// storage, one GetUserDisplayNames for every owner and last-actor at once.
+func (h *Search) describeHits(ctx context.Context, rows []searchResult) {
+	if len(rows) == 0 {
+		return
+	}
+	var viewer int64
+	if u := auth.UserFrom(ctx); u != nil {
+		viewer = u.ID
+	}
+
+	storages := map[int64]string{}
+	seen := map[int64]bool{}
+	ids := make([]int64, 0, 8)
+	for _, res := range rows {
+		if res.Node == nil {
+			continue
+		}
+		if _, ok := storages[res.StorageID]; !ok {
+			name := ""
+			if st, err := h.Store.GetStorage(ctx, res.StorageID); err == nil && st != nil {
+				name = st.Name
+			}
+			storages[res.StorageID] = name
+		}
+		for _, id := range []*int64{res.OwnerID, res.LastActorID} {
+			if id == nil || *id <= 0 || seen[*id] {
+				continue
+			}
+			seen[*id] = true
+			ids = append(ids, *id)
+		}
+	}
+
+	names := map[int64]string{}
+	if len(ids) > 0 {
+		// A failed lookup costs the names, not the rows: a hit with an
+		// owner_id and no owner_name is what the wire already means by "the
+		// server could not resolve it", and dropping the whole response over
+		// a display name would be the wrong trade.
+		if resolved, err := h.Store.GetUserDisplayNames(ctx, ids); err == nil {
+			names = resolved
+		}
+	}
+
+	for i := range rows {
+		n := rows[i].Node
+		if n == nil {
+			continue
+		}
+		if n.Storage == "" {
+			n.Storage = storages[n.StorageID]
+		}
+		if n.OwnerID != nil {
+			n.OwnerName = names[*n.OwnerID]
+			rows[i].OwnerSelf = viewer > 0 && *n.OwnerID == viewer
+		}
+		if n.LastActorID != nil {
+			n.LastActorName = names[*n.LastActorID]
+		}
+	}
 }
 
 // Search returns up to N matching nodes.
@@ -198,6 +287,31 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 50
 	}
 	sc := search.ParseScope(req.Scope)
+	// Root confinement. A token confined to one folder (a `root:` scope, put
+	// on the context by confine.Middleware — this route is under /api/files)
+	// must not receive hits from OUTSIDE that folder. This is the same ceiling
+	// handlers/ai_ops.Search, ai_mcp's content search and the thumb endpoint
+	// enforce, applied here with the same confine.Root.Within primitive rather
+	// than a second copy of the rule. Each hit is dropped as it is collected —
+	// BEFORE its searchResult (which carries the snippet) is ever appended — so
+	// an out-of-root file's content snippet is never placed in the response.
+	root, confined := confine.RootFrom(r.Context())
+	storageNameForRoot := map[int64]string{}
+	withinRoot := func(storageID int64, p string) bool {
+		if !confined {
+			return true
+		}
+		name, ok := storageNameForRoot[storageID]
+		if !ok {
+			if st, err := h.Store.GetStorage(r.Context(), storageID); err == nil && st != nil {
+				name = st.Name
+			}
+			storageNameForRoot[storageID] = name
+		}
+		// An unresolved storage name yields "", which root.Within refuses — the
+		// safe direction for an authorization check.
+		return root.Within(name, p)
+	}
 	// `tag:` is a FILTER, not a search term (issue #15). It is parsed out
 	// of the query string here and resolved against the database, which
 	// is the only place tags are current — a tag copied into the search
@@ -224,6 +338,9 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			if n.Name == e2e.MarkerName {
 				continue
 			}
+			if !withinRoot(n.StorageID, n.Path) {
+				continue
+			}
 			results = append(results, searchResult{Node: n, Matched: search.MatchedName})
 			if len(results) >= req.Limit {
 				break
@@ -236,6 +353,9 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
 				/* wiring:e2 — the marker file stays hidden in name search too */
 				if n.Name == e2e.MarkerName {
+					continue
+				}
+				if !withinRoot(n.StorageID, n.Path) {
 					continue
 				}
 				results = append(results, searchResult{Node: n, Snippet: hit.Snippet, Matched: hit.Matched})
@@ -259,6 +379,9 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				if !plan.Accepts(n.Name, n.Path) || !tagFilterAccepts(tagFilter, n.ID) {
+					continue
+				}
+				if !withinRoot(n.StorageID, n.Path) {
 					continue
 				}
 				results = append(results, searchResult{Node: n, Matched: search.MatchedName})
@@ -302,5 +425,9 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		}
 		results = kept
 	}
+	// Last, so nothing is looked up for a row the tenant or ACL gate is about
+	// to drop — and so a dropped row can never leak the name of whoever owns
+	// it.
+	h.describeHits(r.Context(), results)
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }

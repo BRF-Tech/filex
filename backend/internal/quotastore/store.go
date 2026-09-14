@@ -47,17 +47,60 @@
 //
 // # Attribution
 //
-// The owner is the acting identity, resolved in this order:
+// This package is also where a node LEARNS WHOSE IT IS, for the same reason it
+// is where the bytes are counted: the store is the one thing every write
+// surface has in common. `nodes.owner_id`, `nodes.last_actor_id` and
+// `nodes.external_upload` (migrations 00004 and 00038) are written here and
+// nowhere else.
 //
-//  1. an explicit owner put on the context with WithOwner — used by surfaces
-//     with no logged-in user whose bytes still belong to someone (the public
-//     file-drop link bills the link's creator; the async copy worker bills
-//     the owner of the source file);
-//  2. auth.UserFrom(ctx) — every authenticated surface, including WebDAV
-//     Basic auth and AI/REST tokens;
-//  3. nobody. A node discovered by the storage scanner was not uploaded by
-//     anyone, so it stays unowned and uncounted — until a user overwrites it,
-//     at which point it becomes theirs.
+// The acting identity is resolved in this order:
+//
+//  1. an explicit identity put on the context — WithOwner for surfaces with no
+//     logged-in user whose bytes still belong to someone (the public file-drop
+//     link bills the link's creator; an upload ticket bills its minter), and
+//     WithActor for a background worker running long after the request that
+//     asked for the work is gone (the async copy/move queue, which carries the
+//     requesting user in `pending_ops.actor_id`);
+//  2. auth.UserFrom(ctx) — every authenticated surface, including WebDAV,
+//     FTPS, SFTP, NFS and S3 (internal/protocolauth stamps the principal on
+//     the connection context) and every API token;
+//  3. nobody. A node the storage scanner discovered was not put there by
+//     anyone, so it stays SYSTEM — and NULL is the honest way to say that.
+//     No user is invented to stand in for it.
+//
+// # The two columns say different things
+//
+//	owner_id      — who PUT THE THING HERE
+//	last_actor_id — who TOUCHED IT LAST
+//
+// and they move independently:
+//
+//   - upload / new folder / save / create   → owner = actor = the writer
+//   - a write over WebDAV/FTPS/S3/CLI/sync  → the account whose token was used
+//   - a drop-link upload                    → owner = the LINK'S CREATOR, plus
+//     external_upload=1. The uploader is anonymous by design and is not a user;
+//     nothing invents one for them.
+//   - copy                                  → a new file, so the COPIER owns it
+//   - move / rename                         → the same file: owner UNCHANGED,
+//     actor = the mover
+//   - edit / overwrite / restore            → owner UNCHANGED, actor = the actor
+//   - an external change (the bucket side moved, a sync found new bytes)
+//     → actor = NULL (system); the owner is left alone
+//
+// ⚠ The one place an owner still moves is ADOPTION: a SYSTEM row (owner NULL)
+// that a user writes becomes that user's. "Nobody's" is not "somebody else's",
+// and without it a scanner-found file could be filled with gigabytes that no
+// quota ever counted.
+//
+// ⚠⚠ This changed a quota behaviour, deliberately, and the change is worth
+// stating plainly: before, an overwrite by another user MOVED the bytes to the
+// writer. Now a file that already has an owner keeps it, so the owner carries
+// the new size. The identity `usage_bytes(u) == SUM(size) WHERE owner_id=u`
+// still holds exactly — but it is now possible for user B to grow the total
+// user A is billed for, by overwriting A's file with a bigger one. B needs
+// write access to A's file to do it, and the alternative (ownership that
+// silently changes hands every time somebody edits a shared document) makes
+// the Owner column unable to answer the only question it is asked.
 package quotastore
 
 import (
@@ -87,7 +130,7 @@ func WithOwner(ctx context.Context, userID int64) context.Context {
 
 // OwnerFrom returns the effective owner for a write on this context: the
 // explicit attribution if one was set, otherwise the authenticated user,
-// otherwise 0 ("nobody").
+// otherwise 0 ("nobody" — SYSTEM).
 func OwnerFrom(ctx context.Context) int64 {
 	if v, ok := ctx.Value(ownerCtxKey{}).(int64); ok {
 		return v
@@ -96,6 +139,90 @@ func OwnerFrom(ctx context.Context) int64 {
 		return u.ID
 	}
 	return 0
+}
+
+// actorCtxKey carries an explicit "who is doing this" for background work that
+// runs long after the request that asked for it.
+type actorCtxKey struct{}
+
+// WithActor names the person on whose behalf the work under the returned
+// context is being done, for surfaces with no authenticated user in context.
+//
+// It is separate from WithOwner because the two answer different questions and
+// a move proves it: the ops worker's move is DONE BY the person who dragged the
+// file, but it does not make the file theirs. Pass 0 to attribute to nobody.
+func WithActor(ctx context.Context, userID int64) context.Context {
+	return context.WithValue(ctx, actorCtxKey{}, userID)
+}
+
+// ActorFrom returns who is acting on this context: the explicit actor if one
+// was set, otherwise the explicit owner (a surface that named an owner and no
+// actor — an upload ticket, the async copy worker — is acting as that
+// identity), otherwise the authenticated user, otherwise 0 (SYSTEM).
+//
+// ⚠⚠ An anonymous drop is the exception, and it is the whole reason the two
+// questions are asked separately. The link's creator OWNS what lands — they
+// asked for it, it is in their storage, it is on their quota — but they did
+// not TOUCH it: a visitor did, and that visitor is not a user. Falling back to
+// the owner here would write "last changed by Ada" onto a file Ada has never
+// seen, which is a lie the UI cannot see through. Measured before this branch
+// existed: a drop-link upload came back last_actor = the link's creator.
+//
+// So an external drop has no actor. What actually happened is recorded by
+// external_upload, which says "somebody else handed this in" without inventing
+// a person to have done it.
+func ActorFrom(ctx context.Context) int64 {
+	if v, ok := ctx.Value(actorCtxKey{}).(int64); ok {
+		return v
+	}
+	if ExternalOriginFrom(ctx) {
+		return 0
+	}
+	return OwnerFrom(ctx)
+}
+
+// externalCtxKey marks writes that arrived from outside filex through an
+// anonymous drop link.
+type externalCtxKey struct{}
+
+// WithExternalOrigin marks every node written under the returned context as
+// having arrived through an anonymous drop link / file request.
+//
+// The OWNER is still a real account — the person who created the link, set
+// separately with WithOwner — and this only records that the bytes were handed
+// over by somebody else. That somebody has no identity here: they are anonymous
+// by design, and inventing a user row for them would put a person in the
+// account list who cannot log in and was never invited.
+func WithExternalOrigin(ctx context.Context) context.Context {
+	return context.WithValue(ctx, externalCtxKey{}, true)
+}
+
+// ExternalOriginFrom reports whether this context is an anonymous drop.
+func ExternalOriginFrom(ctx context.Context) bool {
+	v, _ := ctx.Value(externalCtxKey{}).(bool)
+	return v
+}
+
+// ptr is nil for 0 ("nobody" — SYSTEM) and a pointer otherwise, which is how
+// both columns spell the same distinction in the database.
+func ptr(id int64) *int64 {
+	if id <= 0 {
+		return nil
+	}
+	v := id
+	return &v
+}
+
+// sameID compares two nullable ids.
+func sameID(a *int64, b *int64) bool {
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return *a == *b
+	}
 }
 
 // Metrics is the optional counter sink. Nil in tests and in any build that
@@ -157,27 +284,37 @@ func (s *Store) add(ctx context.Context, userID, delta int64) {
 
 // CreateNode stamps the acting identity onto the new row and counts its bytes.
 //
-// Directories get an owner too (it is useful provenance and costs one UPDATE),
-// but only files move the counter — a directory's `size` column is a cached
-// recursive total (internal/sync.RecomputeFolderSizes), so counting it would
-// bill every byte twice.
+// Directories get an owner too — somebody made the folder, and that is worth
+// saying — but only files move the counter: a directory's `size` column is a
+// cached recursive total (internal/sync.RecomputeFolderSizes), so counting it
+// would bill every byte twice.
+//
+// ⚠ The attribution is written ONTO THE MODEL, before the INSERT, rather than
+// as a follow-up UPDATE the way it used to be. An archive extract, a desktop
+// sync or a scanner walk creates rows in bulk, and a second round trip per row
+// is a cost the feature does not need to have: the drivers name the three
+// columns in the INSERT itself.
 func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, error) {
+	owner := OwnerFrom(ctx)
+	actor := ActorFrom(ctx)
+	if n != nil {
+		// The context wins when it knows something; a caller that pre-filled
+		// the model (nothing does today) keeps its value when it does not.
+		if owner > 0 || n.OwnerID == nil {
+			n.OwnerID = ptr(owner)
+		}
+		if actor > 0 || n.LastActorID == nil {
+			n.LastActorID = ptr(actor)
+		}
+		if ExternalOriginFrom(ctx) {
+			n.ExternalUpload = true
+		}
+	}
 	created, err := s.Store.CreateNode(ctx, n)
 	if err != nil || created == nil {
 		return created, err
 	}
-	owner := OwnerFrom(ctx)
-	if owner <= 0 {
-		return created, nil
-	}
-	if serr := s.Store.SetNodeOwner(ctx, created.ID, &owner); serr != nil {
-		slog.Warn("quota: set node owner",
-			slog.Int64("node", created.ID),
-			slog.Int64("owner", owner),
-			slog.String("err", serr.Error()))
-		return created, nil
-	}
-	if created.Type == model.NodeTypeFile {
+	if owner > 0 && created.Type == model.NodeTypeFile {
 		s.add(ctx, owner, created.Size)
 	}
 	return created, nil
@@ -197,36 +334,105 @@ func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, 
 	if before == nil || before.Type != model.NodeTypeFile {
 		return nil
 	}
-	prevOwner, _ := s.Store.GetNodeOwner(ctx, id)
+	prevOwner := before.OwnerID
 	writer := OwnerFrom(ctx)
+	s.stampActor(ctx, before, ptr(ActorFrom(ctx)))
 
-	// No acting user (storage scanner noticing the file changed on the
-	// backend): keep the owner, just correct their total.
+	// No acting user — the storage scanner noticing the file changed on the
+	// backend. The owner is left alone and their total is corrected; the actor
+	// was already set to NULL just above, because a change that arrived from
+	// outside filex has nobody to name.
 	if writer <= 0 {
 		if prevOwner != nil {
 			s.add(ctx, *prevOwner, size-before.Size)
 		}
 		return nil
 	}
-	// Same owner: a plain delta.
-	if prevOwner != nil && *prevOwner == writer {
-		s.add(ctx, writer, size-before.Size)
+	// Somebody already owns it: an overwrite changes the BYTES, not whose file
+	// it is. The owner carries the delta; who did the writing is recorded in
+	// last_actor_id and nowhere else.
+	if prevOwner != nil {
+		s.add(ctx, *prevOwner, size-before.Size)
 		return nil
 	}
-	// A different user (or nobody) owned it: the bytes now on disk are the
-	// writer's, so the old owner gives back what they were carrying and the
-	// writer takes on the new size. This is also how a node the scanner found
-	// — unowned, uncounted — starts counting the first time someone writes it.
-	if prevOwner != nil {
-		s.add(ctx, *prevOwner, -before.Size)
-	}
+	// Nobody owned it — a row the scanner discovered. "Nobody's" is not
+	// "somebody else's", so the writer adopts it, and that is what makes a
+	// found file start counting against a quota at all.
 	if err := s.Store.SetNodeOwner(ctx, id, &writer); err != nil {
-		slog.Warn("quota: re-attribute node",
+		slog.Warn("quota: adopt unowned node",
 			slog.Int64("node", id), slog.Int64("owner", writer), slog.String("err", err.Error()))
 		return nil
 	}
 	s.add(ctx, writer, size)
 	return nil
+}
+
+// stampActor writes last_actor_id when it actually changes.
+//
+// `before` was already read by the caller, so the comparison is free and the
+// common case — the same person editing their own file twice — costs nothing.
+func (s *Store) stampActor(ctx context.Context, before *model.Node, actor *int64) {
+	if before == nil || sameID(before.LastActorID, actor) {
+		return
+	}
+	if err := s.Store.SetNodeActor(ctx, before.ID, actor); err != nil {
+		slog.Warn("quota: set node actor",
+			slog.Int64("node", before.ID), slog.String("err", err.Error()))
+	}
+}
+
+// MoveNode records who moved it. A move or a rename is the SAME file: the
+// owner does not change and neither does the size, so there is nothing to
+// count — only somebody to name.
+//
+// ⚠ One UPDATE per row, on top of the move's own. A subtree move
+// (protocolsync.MoveRows) calls this once per descendant, so the bookkeeping
+// cost of a move doubles. It is DB-cache work that runs after the driver has
+// already moved the bytes, and the alternative — widening MoveNode's signature
+// through five protocol servers — buys back a round trip at the price of a
+// cross-cutting change to code this feature has no other business in.
+func (s *Store) MoveNode(ctx context.Context, id int64, parentID *int64, name, fullPath, pathHash string) error {
+	if err := s.Store.MoveNode(ctx, id, parentID, name, fullPath, pathHash); err != nil {
+		return err
+	}
+	s.stampActorByID(ctx, id)
+	return nil
+}
+
+// RestoreNode records who took it back out of the trash. Usage does not move:
+// a trashed file never stopped counting.
+func (s *Store) RestoreNode(ctx context.Context, id int64) error {
+	if err := s.Store.RestoreNode(ctx, id); err != nil {
+		return err
+	}
+	s.stampActorByID(ctx, id)
+	return nil
+}
+
+// RestoreNodeAt is RestoreNode with the original path put back.
+func (s *Store) RestoreNodeAt(ctx context.Context, id int64, parentID *int64, origPath string) error {
+	if err := s.Store.RestoreNodeAt(ctx, id, parentID, origPath); err != nil {
+		return err
+	}
+	s.stampActorByID(ctx, id)
+	return nil
+}
+
+// stampActorByID is stampActor for the paths that have no `before` row in hand.
+//
+// ⚠ A system move does NOT blank the actor. internal/sync.repairStalePath
+// moves a row whose path drifted, and that is filex tidying its own catalogue,
+// not a person moving a file — overwriting the last real actor with NULL there
+// would destroy the only true thing the row knew.
+func (s *Store) stampActorByID(ctx context.Context, id int64) {
+	actor := ptr(ActorFrom(ctx))
+	if actor == nil {
+		return
+	}
+	if err := s.Store.SetNodeActor(ctx, id, actor); err != nil {
+		slog.Warn("quota: set node actor",
+			slog.Int64("node", id), slog.String("err", err.Error()))
+	}
 }
 
 // HardDeleteNode releases the bytes. This is the ONLY release point: a soft

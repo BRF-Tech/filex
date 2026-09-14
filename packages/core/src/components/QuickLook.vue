@@ -43,14 +43,31 @@ const props = defineProps<{
   pdfWorkerUrl?: string | null;
   viewerBaseUrl?: string | null;
   theme?: 'light' | 'dark' | 'auto';
+  /* === gorunum:v1-viewer — passed straight through to PreviewModal ===
+   * The peek knows nothing about the listing either; the host that answers
+   * `nav` is the one that can say "1 of 9". */
+  /** 1-based position of `file` in the host's file list. */
+  index?: number;
+  /** How many files that list holds. */
+  total?: number;
+  /** API origin for the star toggle. */
+  apiBase?: string;
+  /** Draw the share action (the host must listen to `@share`). */
+  shareEnabled?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  /** Arrow navigation: -1 = previous file, +1 = next file. */
+  /** Arrow navigation: -1 = previous file, +1 = next file. Now raised by the
+   *  overlay's edge chevrons as well as by the arrow keys — ONE contract, two
+   *  triggers, because a second navigation path would drift from this one. */
   (e: 'nav', delta: number): void;
   /** Enter — close the peek and open the file for real. */
   (e: 'open-full'): void;
+  /** The viewer's share action (only reachable when `shareEnabled`). */
+  (e: 'share'): void;
+  /** The viewer's star toggle succeeded. */
+  (e: 'starred', value: boolean): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -156,7 +173,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
     :drawio-url="drawioUrl"
     :pdf-worker-url="pdfWorkerUrl"
     :viewer-base-url="viewerBaseUrl"
+    :index="index"
+    :total="total"
+    :api-base="apiBase"
+    :share-enabled="shareEnabled"
+    :nav-enabled="true"
     @close="emit('close')"
+    @nav="(d: number) => emit('nav', d)"
+    @share="emit('share')"
+    @starred="(v: boolean) => emit('starred', v)"
   />
   <!--
     Teleported under <body> for the same reason as ContextMenu and

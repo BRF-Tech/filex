@@ -63,16 +63,19 @@ postgresql:
   password: change-me-postgres
   storage: 8Gi
 
-# Queue. Default sqlite (shares the DB). Redis enables distributed workers.
-# All three drivers order by priority, so an interactive operation is served
-# ahead of a bulk backlog (a first storage import can queue tens of thousands).
+# Queue. `sqlite` (the default) sets nothing, and filex's queue then follows the
+# database — sqlite, postgres or mysql, on the same connection. Name another
+# driver only to move the queue off the database; `redis` enables distributed
+# workers. Every driver orders by priority, so an interactive operation is
+# served ahead of a bulk backlog (a first storage import can queue tens of
+# thousands).
 #
 # ⚠ Upgrading an install that already runs the redis driver: the pending set
 # was a LIST and becomes a SORTED SET, converted at startup. Every queued
 # operation survives, but an older filex cannot read the converted key —
 # downgrading after this is not supported.
 queue:
-  driver: sqlite          # sqlite | postgres | redis
+  driver: sqlite          # sqlite (= follow the database) | postgres | mysql | redis
   dsn: ""
 
 redis:
@@ -120,10 +123,11 @@ minio:
   rootPassword: change-me-minio
   storage: 20Gi
 
-# ── Zero-touch config (seeded from env on first boot) ───────────────────
-# Everything below is applied to the DB once, on first boot, only when unset —
-# so a fresh install comes up fully configured with NO admin-UI clicks. Later
-# edits in the admin UI win.
+# ── Zero-touch config ────────────────────────────────────────────────────
+# A fresh install comes up fully configured with NO admin-UI clicks. `auth` is
+# read from the environment on EVERY start; the admin, SMTP, branding, trash
+# and storage blocks after it are applied to the DB once, on the FIRST boot,
+# only when unset — later edits in the admin UI win.
 
 # Authentication. `drivers` is a comma list: local | oidc | ldap | proxy_header.
 # For SSO, set drivers "local,oidc" and fill oidc.* — that is the whole setup.

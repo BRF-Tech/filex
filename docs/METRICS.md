@@ -35,8 +35,8 @@ Mint the token in the admin UI (API / MCP), or from the file explorer's
 navigation panel under **Connections → API keys** — which an embed proxied with
 a shared *app* token does not show
 ([MCP.md](MCP.md#token-kinds--user-vs-app)) — with an account that has
-the `admin` role. A token carrying a `root:` confinement scope will not do —
-those are subtree-limited credentials and the admin gate refuses them.
+the `admin` role. The gate is the **account's role**, so give the scrape job a
+token of its own and keep it the way you keep an admin password.
 
 ## What is published
 
@@ -146,13 +146,13 @@ The alternative is an operator watching a spinner.
 |---|---|---|
 | `filex_plugin_ops_total{plugin,op,outcome="ok"\|"error"\|"busy"}` | counter | every operation filex sends a plugin. `op` is the storage operation (`list`, `stat`, `read`, `read_range`, `write`, `delete`, `mkdir`, `move`, `copy`, `set_mtime`, and `op` for the paths that are not named individually) |
 | `filex_plugin_op_duration_seconds{plugin,op}` | histogram | how long the plugin took to answer (buckets 5 ms → 30 s) |
-| `filex_plugin_in_flight{plugin}` | gauge | operations inside the plugin right now, out of the ceiling of 10 |
+| `filex_plugin_in_flight{plugin}` | gauge | operations inside the plugin right now, out of its ceiling (`FILEX_PLUGIN_MAX_INFLIGHT`, default 10) |
 | `filex_plugin_restarts_total{plugin}` | counter | times the supervisor restarted it after it exited |
 | `filex_plugin_up{plugin}` | gauge | `1` while it is running **and its driver is registered** — `0` while it is disabled, failed or refused |
 
 ⚠ **`busy` is not an error.** It means the plugin hit its concurrency ceiling
 and a caller was refused a slot after waiting 5 s. That is a sizing signal — a
-storage too popular or a backend too slow for ten parallel operations — not a
+storage too popular or a backend too slow for that many parallel operations — not a
 fault to chase in the plugin's code. It is a separate outcome precisely so it
 cannot hide inside an error rate.
 

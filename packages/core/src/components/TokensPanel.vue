@@ -45,6 +45,14 @@ const props = defineProps<{
    * otherwise would have people mint one per protocol.
    */
   protocol?: string;
+  /**
+   * The host the surrounding guide tells people to connect to. Given by the
+   * connection guides, which know the server's own public address; without
+   * it the label falls back to where this panel was loaded from. ⚠ The
+   * default label used to be built from apiBase / the page while the guide
+   * right under it printed the server's address — one screen, two machines.
+   */
+  host?: string;
 }>();
 
 const emit = defineEmits<{
@@ -52,7 +60,7 @@ const emit = defineEmits<{
 }>();
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
-const { t } = useLocale(locale);
+const { t, formatDate } = useLocale(locale);
 
 const { tokens, loading, error, canMint, revealed, load, create, remove, dismiss } = useTokens(
   props.config,
@@ -100,6 +108,7 @@ function defaultLabel(): string {
 
 /** A name the user will recognise in the list later. */
 function hostLabel(): string {
+  if (props.host) return props.host;
   try {
     return new URL(props.config.apiBase || window.location.origin).host;
   } catch {
@@ -169,10 +178,13 @@ async function copySecret(): Promise<void> {
   }
 }
 
+/* zaman:z1 — one date formatter for the package. This was a bare
+ * `toLocaleDateString()`: the browser's locale and the browser's zone, so a
+ * key minted at 23:30 in Istanbul was dated a day early for a viewer reading
+ * UTC and came out in the wrong language besides. */
 function fmtDate(v?: string | null): string {
-  if (!v) return '';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+  const ms = new Date(v ?? '').getTime();
+  return Number.isNaN(ms) ? '' : formatDate(ms);
 }
 
 function usedLabel(row: ApiToken): string {

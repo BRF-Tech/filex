@@ -195,7 +195,7 @@ async function restart(p: Plugin) {
 async function remove(p: Plugin) {
   // Say what will stop working, with the number, before it happens.
   const msg = p.in_use > 0
-    ? t('plugins.deleteConfirmInUse', { name: p.name, count: p.in_use })
+    ? t('plugins.deleteConfirmInUse', { name: p.name, count: p.in_use }, p.in_use)
     : t('plugins.deleteConfirm', { name: p.name });
   if (!window.confirm(msg)) return;
   busyId.value = p.id;
@@ -311,7 +311,7 @@ function conformanceTone(p: Plugin): 'emerald' | 'amber' | 'rose' {
 function conformanceLabel(p: Plugin): string {
   if (!p.conformance) return t('plugins.conformance.unverified');
   if (p.conformance.verified) return t('plugins.conformance.verified');
-  return t('plugins.conformance.failed', { count: probeCounts(p).fail });
+  return t('plugins.conformance.failed', { count: probeCounts(p).fail }, probeCounts(p).fail);
 }
 
 function probeTone(status: ProbeStatus): 'emerald' | 'rose' | 'zinc' {

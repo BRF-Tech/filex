@@ -15,6 +15,7 @@ import {
 import { DashboardApi } from '@/api/dashboard';
 import type { DashboardStats } from '@/api/types';
 import { useStoragesStore } from '@/stores/storages';
+import { useSyncStore } from '@/stores/sync';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { formatBytes, formatDate, formatNumber, formatRelative } from '@/lib/format';
@@ -29,7 +30,11 @@ import { syncTone } from '@/lib/syncTone';
 const { t, locale } = useI18n();
 const router = useRouter();
 const storages = useStoragesStore();
+const sync = useSyncStore();
 const toast = useToastStore();
+
+/** How many runs the Recent syncs card lists. */
+const RECENT_SYNCS = 5;
 
 const stats = ref<DashboardStats | null>(null);
 const loading = ref(true);
@@ -53,7 +58,14 @@ const driverIcon = (driver: string): string => {
 async function load() {
   loading.value = true;
   try {
-    const [s, _] = await Promise.all([fetchStats(), storages.fetch()]);
+    // ⚠⚠ Recent syncs come from the sync-run list — the SAME source as the
+    // Sync page's table — not from the dashboard payload. That payload has no
+    // run list at all (handlers/dashboard.go → Response), so the card read an
+    // always-empty field and said "No sync runs recorded" directly beside a
+    // storage card saying "Last sync: 11 seconds ago" (v0.41.0 screenshot
+    // pass). The storage card's time is the latest run's start; now both are
+    // read from runs that exist.
+    const [s] = await Promise.all([fetchStats(), storages.fetch(), sync.fetch({ page_size: RECENT_SYNCS })]);
     stats.value = s;
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -276,10 +288,11 @@ onMounted(load);
         </header>
         <div v-if="loading" class="card-body text-center text-zinc-500"><Spinner /></div>
         <ul
-          v-else-if="stats?.recent_syncs?.length"
+          v-else-if="sync.items.length"
           class="divide-y divide-zinc-200 dark:divide-zinc-800"
+          data-testid="dashboard-recent-syncs"
         >
-          <li v-for="r in stats.recent_syncs" :key="r.id" class="px-4 py-2 text-sm">
+          <li v-for="r in sync.items.slice(0, RECENT_SYNCS)" :key="r.id" class="px-4 py-2 text-sm">
             <div class="flex items-center justify-between gap-2">
               <span class="truncate font-medium">{{ r.storage_name }}</span>
               <Badge :tone="syncTone(r.state)" size="xs">{{ r.state }}</Badge>

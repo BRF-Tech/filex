@@ -40,13 +40,40 @@ describe('/drive front door', () => {
     });
   });
 
-  it('a signed-in visitor lands on the explorer and STAYS under /drive/', () => {
+  it('a signed-in visitor lands on Home and STAYS under /drive/', () => {
     cy.apiLogin();
     cy.visit('/drive/');
-    // The router's root redirect resolves to `explore` on the user base.
-    cy.url({ timeout: 15000 }).should('include', '/drive/');
+    // The router's root redirect resolves to `home` on the user base — the
+    // three blocks (Storages / Recent / Starred), not a folder listing.
+    cy.url({ timeout: 15000 }).should('include', '/drive/home');
     cy.url().should('not.include', '/admin/');
-    cy.get('[data-testid="sidenav"]', { timeout: 20000 }).should('be.visible');
+    cy.get('[data-testid="home-view"]', { timeout: 20000 }).should('be.visible');
+    cy.get('[data-testid="home-storages"]').should('exist');
+    cy.get('[data-testid="home-recent"]').should('exist');
+    cy.get('[data-testid="home-starred"]').should('exist');
+  });
+
+  // ⚠ Since 0.41.0 Home is a VIEW inside the explorer, not a page beside it,
+  // so opening a storage is a move inside the same explorer: the route stays
+  // /drive/home and the hash names the folder (`#<storage>`). A refresh
+  // restores that folder, because the hash outranks the route's start path
+  // (FileExplorer readPersistedPath).
+  it('a storage card on Home is one click from the files', () => {
+    cy.apiLogin();
+    cy.visit('/drive/');
+    cy.get('[data-testid="home-storage-card"]', { timeout: 20000 })
+      .first()
+      .invoke('attr', 'data-storage')
+      .then((name) => {
+        cy.get('[data-testid="home-storage-card"]').first().click();
+        cy.url({ timeout: 15000 }).should('include', '/drive/');
+        cy.url().should('not.include', '/admin/');
+        cy.location('hash').should('eq', `#${encodeURIComponent(String(name))}`);
+        cy.get('[data-testid="home-view"]').should('not.exist');
+        cy.reload();
+        cy.location('hash', { timeout: 15000 }).should('eq', `#${encodeURIComponent(String(name))}`);
+        cy.get('[data-testid="home-view"]').should('not.exist');
+      });
   });
 
   it('a deep link into /drive/explore renders the file explorer', () => {

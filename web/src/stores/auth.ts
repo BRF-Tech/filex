@@ -4,6 +4,7 @@ import { AuthApi } from '@/api/auth';
 import type { LoginRequest, User } from '@/api/types';
 import { extractError } from '@/api/client';
 import { applyAccountLocale } from '@/i18n';
+import { applyAccountTimeZone } from '@/lib/timezone';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
@@ -26,6 +27,12 @@ export const useAuthStore = defineStore('auth', () => {
       // up here. Putting it in login() alone would leave a returning session
       // (cookie still valid, no login form) in the wrong language.
       applyAccountLocale(me.user?.locale);
+      // zaman:z1 — and the account's clock, at the same single choke point and
+      // for the same reason. Unlike the language this one OUTRANKS the local
+      // mirror: there is one control for it and it writes both halves, so a
+      // difference is a stale cache rather than a newer decision
+      // (lib/timezone's header).
+      applyAccountTimeZone(me.user?.timezone);
       error.value = null;
       return me.user;
     } catch (e: unknown) {

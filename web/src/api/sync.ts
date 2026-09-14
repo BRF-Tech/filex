@@ -63,13 +63,31 @@ function toSyncRun(b: BackendSyncRun): SyncRun {
   };
 }
 
+/**
+ * The query the handler actually reads (handlers/sync_admin.go → List):
+ * `storage_id`, `status`, `limit`, `offset`.
+ *
+ * ⚠ The page used to send `page`, `page_size` and `state`, none of which the
+ * handler looks at — so every page was page one, the state filter filtered
+ * nothing, and a caller asking for "the last five" got fifty.
+ */
+function toQuery(p: SyncRunListParams): Record<string, string | number | undefined> {
+  const size = p.page_size && p.page_size > 0 ? p.page_size : undefined;
+  return {
+    storage_id: p.storage_id,
+    status: p.state === 'error' ? 'failed' : p.state,
+    limit: size,
+    offset: size && p.page && p.page > 1 ? (p.page - 1) * size : undefined,
+  };
+}
+
 export const SyncApi = {
   async list(params: SyncRunListParams = {}): Promise<PaginatedResponse<SyncRun>> {
     // Backend admin handler returns `{entries, total, limit, offset}`
     // and uses `status` instead of `state`. Normalize both shapes.
     const { data } = await api.get<PaginatedResponse<SyncRun> | BackendListResponse>(
       '/admin/sync-runs',
-      { params },
+      { params: toQuery(params) },
     );
     if ('items' in data && Array.isArray(data.items)) {
       return data as PaginatedResponse<SyncRun>;

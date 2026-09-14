@@ -6,9 +6,15 @@ import InstallPrompt from '@/components/InstallPrompt.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { completeDesktopHandoff, hasPendingHandoff } from '@/lib/desktopHandoff';
+import { useNotificationWatcher } from '@/composables/useNotificationWatcher';
 
 const auth = useAuthStore();
 const caps = useCapabilitiesStore();
+
+// The bell's poll, moved up to the root so it also runs on the screens that
+// have no bell — /drive/explore is the whole product for a non-admin. Same
+// 15 s cadence, one loop, and it is what raises browser notifications.
+useNotificationWatcher();
 
 const handingOff = ref(false);
 const handoffCode = ref<string | null>(null);
@@ -116,8 +122,21 @@ onMounted(async () => {
     </div>
   </div>
 
+  <!-- ⚠⚠ NO `mode="out-in"` on this transition, and that is a fix, not a
+       preference.
+       `out-in` serialises the route change: the entering component mounts only
+       after the leaving one's leave transition RESOLVES. When that resolution
+       never arrives the RouterView renders nothing at all — and it stays that
+       way for every navigation afterwards, because the transition never
+       releases. Measured 2026-09-13: signing in left `#app` holding only the
+       toast container and the install banner, with the route matched, its
+       component resolved and NOT ONE warning or error in the console; pushing
+       another route from the console rendered nothing either. It looked like a
+       dead application and it was one line of decoration.
+       Without `mode`, the two views cross-fade for 120ms — imperceptible on a
+       full-page route change, and it cannot deadlock. -->
   <RouterView v-slot="{ Component, route }">
-    <transition name="fade" mode="out-in">
+    <transition name="fade">
       <component :is="Component" :key="route.path" />
     </transition>
   </RouterView>

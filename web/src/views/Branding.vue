@@ -41,7 +41,12 @@ watchEffect(() => {
 });
 
 const accentValid = computed(() => /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(form.accent));
-const previewAccent = computed(() => (accentValid.value ? form.accent : '#4f46e5'));
+// gorunum:v1 — the stand-in when the operator has set no accent of their
+// own is the PRODUCT's accent (#2f6ceb, `--fe-primary` light), not the old
+// indigo. The placeholder below and the hex quoted by
+// `settings.accentInvalid` are the same value on purpose: an example that
+// disagrees with the preview teaches the operator the wrong colour.
+const previewAccent = computed(() => (accentValid.value ? form.accent : '#2f6ceb'));
 
 function pickLogo() {
   fileInput.value?.click();
@@ -174,7 +179,7 @@ onMounted(() => settings.fetch());
             <div class="flex-1">
               <Input
                 :model-value="form.accent"
-                placeholder="#4f46e5"
+                placeholder="#2f6ceb"
                 monospace
                 @update:model-value="(v) => (form.accent = v as string)"
               />

@@ -225,7 +225,7 @@ async function deleteRule(r: ReplicaRule) {
 async function fixAll() {
   try {
     const r = await replica.fixAll();
-    toast.success(t('replica.failures.queued', { n: r.queued }));
+    toast.success(t('replica.failures.queued', { n: r.queued }, r.queued));
   } catch (e: unknown) {
     toast.error(extractError(e, 'Fix all failed'));
   }

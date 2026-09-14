@@ -20,6 +20,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import {
   comboFromEvent,
   effectiveCombo,
@@ -189,7 +190,9 @@ function onClose() {
           :disabled="!anyOverridden"
           @click="onResetAll"
         >
-          ↺ {{ t('shortcuts.settings.reset_all') }}
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+          <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('restore')"></span>
+          {{ t('shortcuts.settings.reset_all') }}
         </button>
       </div>
 
@@ -257,7 +260,8 @@ function onClose() {
                   :aria-label="t('shortcuts.settings.reset')"
                   @click="onReset(s.id)"
                 >
-                  ↺
+                  <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+                  <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('restore')"></span>
                 </button>
               </template>
               <span v-else class="fe-shortset__fixed">{{ t('shortcuts.settings.fixed') }}</span>

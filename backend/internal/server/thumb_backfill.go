@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
@@ -57,6 +58,105 @@ type BackfillStats struct {
 	OK        int
 	Failed    int
 	Skipped   int
+	// NotIndexed names the storages this run REFUSED, and why. See
+	// ErrNotIndexed.
+	NotIndexed []NotIndexedStorage
+}
+
+// NotIndexedStorage is one storage a backfill would have reported success on
+// while rendering nothing for it.
+type NotIndexedStorage struct {
+	ID     int64
+	Name   string
+	Reason string
+}
+
+// ErrNotIndexed is returned (wrapped, after every other storage has been
+// processed) when at least one targeted storage's catalogue cannot be trusted
+// to hold its files.
+//
+// ⚠⚠ Why a backfill refuses instead of doing what it can. A backfill renders
+// thumbnails for NODES — rows in the catalogue — because that is what a
+// thumbnail is keyed on. Files written straight onto a storage's backend have
+// no node until a sync writes one, and a sync answers 202 and writes them in
+// the background. So this command, run against a storage nobody had synced, or
+// one whose sync was still going, walked an empty (or half-written) catalogue
+// and printed `{processed: 0, ok: 0, failed: 0, skipped: 0}` with exit 0.
+// Measured 2026-09-14, and it is how a screenshot run produced a grid with no
+// thumbnails while every step it took said "ok". A command that does nothing
+// and reports success is worse than one that fails: nobody goes looking.
+//
+// It cannot simply sync first: the CLI runs beside a live server, and two
+// processes syncing one storage into one database is its own bug. So it says
+// what is missing and what to do, and exits non-zero.
+var ErrNotIndexed = errors.New("thumb backfill: storage catalogue not ready")
+
+// catalogueState is what catalogueGap reads. Narrow on purpose, so the rule
+// is testable without a server.
+type catalogueState interface {
+	GetLastSyncRun(ctx context.Context, storageID int64) (*model.SyncRun, error)
+	StorageStats(ctx context.Context, storageID int64) (fileCount int64, totalBytes int64, err error)
+}
+
+// catalogueGap says why a storage's catalogue cannot be trusted to hold the
+// files on its backend, or "" when it can.
+//
+//   - a sync is running → the rows it has not reached yet do not exist, so a
+//     backfill now leaves exactly those files without a thumbnail (the
+//     shots run: `{processed: 22, ok: 22}` and a grid of generic icons);
+//   - never synced, the catalogue holds no file, and the backend's root is
+//     not empty → there is literally nothing to render.
+//
+// ⚠ Never synced BUT holding files is not refused: a storage filled through
+// uploads has a node for everything it was given, and "run a backfill after
+// installing ffmpeg" is exactly this command's job there. It is logged,
+// because files placed on its backend directly would still be missed.
+func catalogueGap(ctx context.Context, store catalogueState, st *model.Storage, drv storage.Driver) string {
+	if run, err := store.GetLastSyncRun(ctx, st.ID); err == nil && run != nil && run.Status == "running" {
+		return fmt.Sprintf("a sync is still running (started %s UTC): the files it has not reached "+
+			"are not in the catalogue yet, so they would get no thumbnail. Wait for it to finish and run "+
+			"backfill again (if the server restarted mid-sync and nothing is running, start a new sync)",
+			run.StartedAt.UTC().Format("2006-01-02 15:04:05"))
+	}
+	if st.LastSyncAt != nil {
+		return ""
+	}
+	files, _, err := store.StorageStats(ctx, st.ID)
+	if err != nil || files > 0 {
+		if files > 0 {
+			slog.Warn("thumb backfill: storage has never been synced — only files uploaded through filex are in the catalogue",
+				slog.String("storage", st.Name),
+				slog.Int64("files", files),
+				slog.String("hint", "files placed on its backend directly get no thumbnail until a sync indexes them"))
+		}
+		return ""
+	}
+	if drv == nil {
+		return ""
+	}
+	objs, err := drv.List(ctx, "/")
+	if err != nil {
+		return ""
+	}
+	for _, o := range objs {
+		if internalBackendEntry(o.Name) {
+			continue
+		}
+		return fmt.Sprintf("it has never been synced: its files are on the backend but not in the "+
+			"catalogue, so there is nothing to render thumbnails for. Sync it first (Storages → Sync, "+
+			"or POST /api/admin/storages/%d/sync), wait for the sync to finish, then run backfill again", st.ID)
+	}
+	return "" // an empty storage: nothing to do is the truth
+}
+
+// internalBackendEntry reports the backend-root names filex keeps for itself,
+// which say nothing about whether the storage holds anybody's files.
+func internalBackendEntry(name string) bool {
+	switch strings.TrimPrefix(name, "/") {
+	case ".filex-trash", ".thumbs", ".versions", ".keepdir", ".filex-open":
+		return true
+	}
+	return false
 }
 
 // BackfillThumbs walks every file node in scope and (re)dispatches the
@@ -149,17 +249,28 @@ func (s *Server) BackfillThumbs(ctx context.Context, opts BackfillOptions) (Back
 		limit:        opts.Limit,
 		emitted:      &emitted,
 	}
+	var notIndexed []NotIndexedStorage
 	walkErr := func() error {
 		for _, st := range targets {
 			// Pre-warm the driver so the pipeline's AttachStorage map is
 			// populated. resolver returns the cached driver when present.
-			if _, err := s.resolver(st.ID); err != nil {
+			drv, err := s.resolver(st.ID)
+			if err != nil {
 				slog.Warn("thumb backfill: resolve storage",
 					slog.String("name", st.Name),
 					slog.String("err", err.Error()))
 				continue
 			}
-			err := walker.walk(ctx, st.ID, nil, jobs)
+			// Refuse, per storage, a catalogue that cannot hold its files yet —
+			// and keep going for the others. See ErrNotIndexed.
+			if reason := catalogueGap(ctx, s.store, st, drv); reason != "" {
+				notIndexed = append(notIndexed, NotIndexedStorage{ID: st.ID, Name: st.Name, Reason: reason})
+				slog.Warn("thumb backfill: storage refused",
+					slog.String("storage", st.Name),
+					slog.String("reason", reason))
+				continue
+			}
+			err = walker.walk(ctx, st.ID, nil, jobs)
 			if errors.Is(err, errLimitReached) {
 				break
 			}
@@ -173,10 +284,18 @@ func (s *Server) BackfillThumbs(ctx context.Context, opts BackfillOptions) (Back
 	wg.Wait()
 
 	stats := BackfillStats{
-		Processed: int(processed.Load()),
-		OK:        int(okCnt.Load()),
-		Failed:    int(failCnt.Load()),
-		Skipped:   int(skipCnt.Load()),
+		Processed:  int(processed.Load()),
+		OK:         int(okCnt.Load()),
+		Failed:     int(failCnt.Load()),
+		Skipped:    int(skipCnt.Load()),
+		NotIndexed: notIndexed,
+	}
+	if walkErr == nil && len(notIndexed) > 0 {
+		parts := make([]string, 0, len(notIndexed))
+		for _, n := range notIndexed {
+			parts = append(parts, fmt.Sprintf("%q: %s", n.Name, n.Reason))
+		}
+		walkErr = fmt.Errorf("%w — %s", ErrNotIndexed, strings.Join(parts, "; "))
 	}
 	return stats, walkErr
 }

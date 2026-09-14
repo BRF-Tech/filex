@@ -1,6 +1,6 @@
 /** Turkish UI strings. */
 export const tr: Record<string, string> = {
-  'toolbar.new_folder': 'Yeni Klasör',
+  'toolbar.new_folder': 'Yeni klasör',
   'toolbar.upload': 'Yükle',
   'toolbar.search': 'Ara',
   'toolbar.search.placeholder': 'Ada ya da tag: ile ara…',
@@ -13,7 +13,7 @@ export const tr: Record<string, string> = {
   'ctx.preview': 'Önizle',
   'ctx.download': 'İndir',
   'ctx.convert': 'Dönüştür',
-  'ctx.rename': 'Yeniden Adlandır',
+  'ctx.rename': 'Yeniden adlandır',
   'ctx.delete': 'Sil',
   'ctx.delete_perm': 'Kalıcı Olarak Sil',
   'ctx.restore': 'Geri Getir',
@@ -39,18 +39,19 @@ export const tr: Record<string, string> = {
   'ctx.paste': 'Yapıştır',
   'ctx.info': 'Bilgi',
   'ctx.duplicate': 'Kopyasını Oluştur',
-  'ctx.new_file': 'Yeni Dosya',
+  'ctx.new_file': 'Yeni dosya',
 
   'modal.delete.title': 'Silinsin mi?',
   'modal.delete.message': '{count} öğe çöpe atılacak.',
+  'modal.delete.message_one': '{count} öğe çöpe atılacak.',
   'modal.delete.confirm': 'Çöpe At',
   'modal.delete.cancel': 'Vazgeç',
 
-  'modal.rename.title': 'Yeniden Adlandır',
+  'modal.rename.title': 'Yeniden adlandır',
   'modal.rename.save': 'Kaydet',
   'modal.rename.cancel': 'Vazgeç',
 
-  'modal.newfolder.title': 'Yeni Klasör',
+  'modal.newfolder.title': 'Yeni klasör',
   'modal.newfolder.placeholder': 'Klasör adı',
   'modal.newfolder.create': 'Oluştur',
   'modal.newfolder.cancel': 'Vazgeç',
@@ -96,10 +97,11 @@ export const tr: Record<string, string> = {
   'unit.mb': 'MB',
   'unit.gb': 'GB',
   'unit.tb': 'TB',
+  'unit.pb': 'PB',
 
   'breadcrumb.root': 'Kök',
-  'breadcrumb.copy_path': 'Yolu Kopyala',
-  'breadcrumb.go_to_path': 'Yola Git',
+  'breadcrumb.copy_path': 'Yolu kopyala',
+  'breadcrumb.go_to_path': 'Yola git',
   'breadcrumb.path_placeholder': 'fileman/foo/bar',
 
   'ops.copy': 'Kopyalanıyor',
@@ -110,9 +112,10 @@ export const tr: Record<string, string> = {
   'ops.error': 'hata',
 
   'node.trash': 'Çöp Kutusu',
+  'node.folder': 'Klasör',
 
   // ——— Zengin önizleyici chrome ———
-  'viewer.open_in_new_tab': 'Yeni Sekmede Aç',
+  'viewer.open_in_new_tab': 'Yeni sekmede aç',
   'viewer.loading': 'Yükleniyor…',
   'viewer.failed_to_load': 'Dosya yüklenemedi',
   'viewer.peer_not_installed': 'Bu dosya tipi için opsiyonel kütüphane kurulu değil. Peer dependency yükle veya İndir düğmesini kullan.',
@@ -150,6 +153,7 @@ export const tr: Record<string, string> = {
   'viewer.epub_next': 'Sonraki',
   'viewer.drawio.disabled': 'diagrams.net editörü bu filex kurulumunda yapılandırılmamış — yönetici FILEX_DRAWIO_URL\'yi ayarlamalı.',
   'viewer.archive.entries': '{n} dosya',
+  'viewer.archive.entries_one': '{n} dosya',
   'viewer.archive.empty': 'Arşiv boş.',
   'viewer.archive.error': 'Arşiv okunamadı.',
   'viewer.name': 'Ad',
@@ -218,6 +222,9 @@ export const tr: Record<string, string> = {
   'toast.copy_ready': 'Kopyala → Yapıştır hazır',
   'toast.same_folder_cut': 'Aynı klasöre kesilemez',
   'toast.restored': '{n} öğe geri getirildi',
+  'toast.restored_one': '{n} öğe geri getirildi',
+  'toast.restore_taken': '{n} öğe geri getirilmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.',
+  'toast.restore_taken_one': '“{name}” geri getirilmedi: aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.',
   'toast.delete_queued': 'Silme kuyruğa alındı',
   'toast.trash_retention': 'Çöpteki öğeler saklama süresi sonunda otomatik silinir. Kalıcı silme yönetici panelinden yapılır.',
   'dropzone.hint': 'Dosyaları buraya bırak',
@@ -226,7 +233,9 @@ export const tr: Record<string, string> = {
   'viewer.pdf_inline_failed': 'Tarayıcı PDF\'i inline açamadı.',
   'viewer.too_large': 'Dosya çok büyük (>1 MB).',
   'viewer.csv_rows': '{n} satır',
+  'viewer.csv_rows_one': '{n} satır',
   'presence.others': '{n} kişi',
+  'presence.others_one': '{n} kişi',
   'conn.offline': 'Canlı bağlantı yok — değişiklikler gecikebilir',
   'conn.tooltip': 'Sunucuyla canlı bağlantı kurulamadı; liste belirli aralıklarla otomatik yenilenir. Bağlantı geri gelince bu uyarı kaybolur.',
 
@@ -253,8 +262,25 @@ export const tr: Record<string, string> = {
   'star.failed': 'Yıldız değiştirilemedi',
   'shortcuts.inspector': 'Ayrıntılar panelini aç/kapat',
   'inspector.title': 'Ayrıntılar',
+  'inspector.copy_name': 'Adı kopyala',
+  'inspector.items': '{n} öğe',
+  'inspector.items_one': '{n} öğe',
+  'inspector.type': 'Tür',
+  'inspector.select_hint': 'Ayrıntılarını görmek için bir öğe seçin.',
+  /* pane:p1 — panel SON seçilen şeyi tutar (Burak'ın kararı, 2026-09-13);
+     dolayısıyla bölünmüş pencerenin bakılmayan yarısındaki bir öğeyi
+     anlatıyor olabilir. Bu satır hangisi olduğunu ve nerede durduğunu söyler. */
+  'inspector.held': 'Son seçilen — {where} içinde',
   'inspector.close': 'Kapat',
   'inspector.section.general': 'Genel',
+  'inspector.section.tags': 'Etiketler',
+  /* etiket:t1 — TagPicker'ın kendi çerçevesi. 2026-09-13'e kadar bu üçü
+     katalogdan bağımsız olarak İngilizce basılıyordu; `tags.open` ise çipin
+     yeni "bu etiketi taşıyan her şeyi göster" kapısı. */
+  'tags.open': 'Etiketi aç: {tag}',
+  'tags.add': '+ Etiket ekle',
+  'tags.name': 'Etiket adı',
+  'tags.remove': 'Etiketi kaldır',
   'inspector.section.versions': 'Sürümler',
   'inspector.section.permissions': 'İzinler',
   'inspector.section.shares': 'Paylaşımlar',
@@ -263,11 +289,14 @@ export const tr: Record<string, string> = {
   'inspector.modified': 'Değiştirilme',
   'inspector.mime': 'MIME türü',
   'inspector.etag': 'ETag',
+  'inspector.nodeId': 'Düğüm kimliği',
   'inspector.copy': 'Kopyala',
   'inspector.copied': 'Kopyalandı',
   'inspector.error': 'Yüklenemedi',
   'inspector.items_summary': '{n} öğe, toplam {size}',
+  'inspector.items_summary_one': '{n} öğe, toplam {size}',
   'inspector.folder_items': '{n} öğe',
+  'inspector.folder_items_one': '{n} öğe',
   'inspector.versions.empty': 'Sürüm geçmişi yok',
   'inspector.versions.v': 'Sürüm {n}',
   'inspector.versions.restore': 'Geri yükle',
@@ -306,7 +335,18 @@ export const tr: Record<string, string> = {
   'theme.name.contrast': 'Yüksek Kontrast',
   'theme.name.gray': 'Yumuşak Gri',
   'theme.name.terminal': 'Terminal Yeşili',
-  'theme.name.drive': 'Drive',
+  /* === zaman:z3 — saat dilimi seçici (gömme penceresi + web ayarları) === */
+  'tz.menu': 'Saat dilimi',
+  'tz.title': 'Saat dilimi',
+  'tz.label': 'Tarihleri şu saatle göster',
+  'tz.search': 'Şehir, ülke ya da saat farkı arayın — “İstanbul” veya “GMT+3” deneyin',
+  'tz.default.device': 'Bu cihazın saat dilimini kullan ({zone})',
+  'tz.default.account': 'Hesabın saat dilimini kullan ({zone})',
+  'tz.default.host': 'Bu sitenin varsayılanını kullan ({zone})',
+  'tz.no_match': '“{query}” ile eşleşen saat dilimi yok. Bir şehir, bir ülke ya da GMT+3 gibi bir fark deneyin.',
+  'tz.more': '{n} kayıt daha var — listeyi daraltmak için yazmayı sürdürün.',
+  'tz.hint': 'Yalnızca bu tarayıcıda saklanır. Her tarih tek bir an olarak saklanır ve burada seçtiğiniz saatle gösterilir.',
+  'tz.now': '{zone} bölgesinde şu an: {time}',
   /* === wiring:c2 — özelleştirilebilir kısayollar + hızlı bakış === */
   'shortcuts.quicklook': 'Hızlı bakış',
   'shortcuts.customize': 'Özelleştir',
@@ -331,6 +371,7 @@ export const tr: Record<string, string> = {
   /* === wiring:c3 — işlem merkezi === */
   'opc.title': 'İşlemler',
   'opc.aria_badge': '{n} işlem — işlem merkezini aç/kapat',
+  'opc.aria_badge_one': '{n} işlem — işlem merkezini aç/kapat',
   'opc.close': 'Kapat',
   'opc.active': 'Sürüyor',
   'opc.history': 'Geçmiş',
@@ -359,24 +400,34 @@ export const tr: Record<string, string> = {
   'tour.next': 'İleri',
   'tour.done': 'Bitti',
   'tour.progress': '{n} / {m}',
-  'tour.step.nav.title': 'Depo ve klasörler',
+  'tour.step.nav.title': 'Depolar ve görünümler',
   'tour.step.nav.desc':
-    'Bulunduğun konum burada görünür. Kırıntı çubuğundaki adımlara tıklayarak üst klasörlere ve depo köküne dönebilirsin.',
-  'tour.step.upload.title': 'Dosya yükle',
-  'tour.step.upload.desc':
-    'Bu düğmeyle dosya seçebilirsin; dosyaları doğrudan pencereye sürükleyip bırakmak da çalışır.',
+    'Ana sayfa, Benimle paylaşılanlar, Son kullanılanlar, Yıldızlılar ve Çöp Kutusu hep bu panelde durur; altında da depoların ve bağlantıların. Sol üst köşedeki düğme paneli ince bir şeride indirir ve geri açar.',
+  'tour.step.nav.desc_closed':
+    'Bu düğme gezinti panelini açar: Ana sayfa, Benimle paylaşılanlar, Son kullanılanlar, Yıldızlılar ve Çöp Kutusu; altında da depoların ve bağlantıların.',
+  'tour.step.new.title': 'Yeni bir şey ekle',
+  'tour.step.new.desc':
+    'Yeni olan her şey buradan başlar: bu cihazdan dosya yükleyebilir, klasör oluşturabilir ya da birinden dosya isteyebilirsin. Dosyaları pencereye sürükleyip bırakmak da yükler.',
+  'tour.step.new.desc_fab':
+    'Bu düğme bu cihazdan dosya yükler. Dosyaları pencereye sürükleyip bırakmak da çalışır.',
   'tour.step.search.title': 'Arama',
   'tour.step.search.desc':
-    'Bu kutu deponun tamamında ada göre arar; ayraçları ve bir harflik yazım hatasını affeder, yani "fatura 2026" yazdığında fatura_2026.pdf gelir. tag:fatura yazarak etikete göre süzebilirsin. {palette} komut paleti ayrıca komut da çalıştırır.',
+    'Bu alan deponun tamamında ada göre arar; ayraçları ve bir harflik yazım hatasını affeder, yani "fatura 2026" yazdığında fatura_2026.pdf gelir. tag:fatura yazarak etikete göre süzebilirsin. Yanındaki sürgü düğmesi gelişmiş aramayı, {palette} ise komut paletini açar; palet komut da çalıştırır.',
+  'tour.step.crumb.title': 'Bulunduğun yer',
+  'tour.step.crumb.desc':
+    'Bu iz, ekrandaki klasörün adresidir. Adımlardan birine tıklayarak üste çıkabilir, sonuncusunun yanındaki oktan içindeki klasörleri görebilirsin.',
+  'tour.step.filters.title': 'Listeyi daralt',
+  'tour.step.filters.desc':
+    'Tür, Kişiler, Değiştirilme ve Boyut bulunduğun klasörü süzer; yanındaki kutu yazdıkça adlara göre eşleşir, satırın sonundaki denetim ise sıralar.',
   'tour.step.view.title': 'Görünümü değiştir',
   'tour.step.view.desc':
-    'Liste ve ızgara görünümü arasında geçiş yapabilirsin; seçimin hatırlanır.',
-  'tour.step.share.title': 'Paylaşım',
-  'tour.step.share.desc':
-    'Bir dosyaya sağ tıklayıp "Paylaş / İzinler" ile bağlantı oluşturabilir, PIN ve son kullanma süresi ekleyebilirsin.',
+    'Bu klasörün nasıl çizildiğini değiştirir; seçimin hatırlanır.',
+  'tour.step.details.title': 'Ayrıntılar ve paylaşım',
+  'tour.step.details.desc':
+    'Bir dosyayı seçip bu paneli açtığında ayrıntılarını, hareketlerini ve paylaşım bağlantılarını görürsün. Tam menü için dosyaya sağ tıkla ya da satırının sonundaki düğmeyi kullan: oradaki "Paylaş / İzinler" ile PIN ve son kullanma süresi verilebilen bir bağlantı oluşturulur.',
   'tour.step.help.title': 'Kısayollar',
   'tour.step.help.desc':
-    '{help} tuşu kısayol kartını, {palette} komut paletini açar. Bu turu menüdeki "Turu tekrar başlat" ile dilediğinde yeniden izleyebilirsin.',
+    '{help} tuşu kısayol kartını, {palette} komut paletini açar. Tema ve "Turu tekrar başlat" sağ üstteki "Diğer işlemler" menüsünde; hesabın ve çıkış ise yanındaki avatarın arkasında.',
   'error.hint': 'Bağlantı ya da sunucu kaynaklı geçici bir sorun olabilir. Yeniden deneyin.',
   'error.details': 'Teknik ayrıntılar',
   'col.star': 'Yıldız',
@@ -422,6 +473,7 @@ export const tr: Record<string, string> = {
   'split.retry': 'Yeniden dene',
   'split.copy_queued': 'Kopyalama kuyruğa alındı',
   'split.move_queued': 'Taşıma kuyruğa alındı',
+  'toast.move_kept_both': 'Taşıma kuyruğa alındı. Hedefte aynı adla bir öğe vardı, taşınan öğe onun yanına “-copy” ekiyle konacak. Bu taşıma geri alınamaz.',
   'split.cross_copy': 'Depolar farklı — kopyalama kuyruğa alındı',
   'dragout.downloading': 'Bırakılan klasöre indiriliyor…',
   'dragout.not_found': 'Bırakılan yer bulunamadı — dosya bir klasöre değil bir uygulamaya bırakıldıysa indirme yapılamaz',
@@ -443,8 +495,9 @@ export const tr: Record<string, string> = {
   /* wiring:e2 — uçtan uca şifreli klasörler */
   'e2e.create.title': 'Şifreli klasör oluştur',
   'e2e.create.option': 'Şifreli klasör oluştur…',
-  'e2e.create.pw_placeholder': 'Klasör parolası (en az 8 karakter)',
-  'e2e.create.pw2_placeholder': 'Parolayı tekrar girin',
+  'e2e.create.pw_label': 'Klasör parolası',
+  'e2e.create.pw_placeholder': 'En az 8 karakter',
+  'e2e.create.pw2_label': 'Parolayı tekrar girin',
   'e2e.create.warn_title': 'GERİ DÖNÜŞÜ YOK',
   'e2e.create.warn_body':
     'Bu klasördeki dosyalar yalnız bu parolayla ya da klasör oluşturulurken bir kez gösterilen kurtarma anahtarıyla açılır. Parola sunucuda TUTULMAZ; kurtarma anahtarının da filex\'te kopyası kalmaz. İkisini de kaybederseniz içerik sonsuza dek gider.',
@@ -465,6 +518,10 @@ export const tr: Record<string, string> = {
   'e2e.locked.busy': 'Doğrulanıyor…',
   'e2e.unlock.wrong': 'Parola yanlış.',
   'e2e.unlock.marker_missing': 'Şifre dosyası (.filex-e2e.json) okunamadı.',
+  /* ikon:emoji — listedeki işaretin erişilebilir adı. Satır eskiden yalnız
+     bir 🔒 basıyordu; onun yerini alan asma kilit kutunun içinde
+     aria-hidden, dolayısıyla adı taşıyan yer bu. */
+  'e2e.badge': 'Şifreli klasör',
   'e2e.strip.label': 'Şifreli klasör — kilit açık',
   'e2e.strip.lock': 'Kilitle',
   'e2e.locked_toast': 'Klasör kilitlendi',
@@ -576,6 +633,7 @@ export const tr: Record<string, string> = {
   'conn.denied.guideHint': 'Zaten görebildiğiniz depolara kendi bilgisayarınızdan bağlanmak için yönetici yetkisi gerekmez.',
   'conn.denied.guideCta': 'Nasıl bağlanacağımı göster',
   'conn.list.count': '{n} depo',
+  'conn.list.count_one': '{n} depo',
   'conn.list.add': 'Depo ekle',
   'conn.list.empty': 'Henüz yapılandırılmış depo yok. Bir tane ekleyin, dosyalar dosya yöneticisinde görünsün.',
   'conn.list.edit': 'Düzenle',
@@ -595,6 +653,7 @@ export const tr: Record<string, string> = {
   'conn.form.test': 'Bağlantıyı sına',
   'conn.form.testing': 'Sınanıyor…',
   'conn.form.testOk': 'Bağlandı. Kökte {count} öğe var.',
+  'conn.form.testOk_one': 'Bağlandı. Kökte {count} öğe var.',
   'conn.form.testFail': 'Bağlanılamadı: {error}',
   'conn.form.save': 'Kaydet',
   'conn.form.saving': 'Kaydediliyor…',
@@ -972,6 +1031,8 @@ export const tr: Record<string, string> = {
   'sidenav.title': 'Gezinti',
   'sidenav.views': 'Görünümler',
   'sidenav.storages': 'Depolar',
+  'sidenav.home': 'Ana sayfa',
+  'sidenav.myfiles': 'Dosyalarım',
   'sidenav.recent': 'Son kullanılanlar',
   'sidenav.starred': 'Yıldızlılar',
   'sidenav.shared': 'Benimle paylaşılanlar',
@@ -979,8 +1040,20 @@ export const tr: Record<string, string> = {
   'sidenav.collapse': 'Gezintiyi daralt',
   'sidenav.expand': 'Gezintiyi genişlet',
   'sidenav.close': 'Gezintiyi kapat',
+  // ⚠ aç/kapat çifti ÇEKMECENİN, daralt/genişlet çifti yerleşik PANELİN —
+  // ikisi birbirinin yerine kullanılamaz; bkz. en.ts'teki not ve Toolbar.vue
+  // içindeki `navToggleLabel`. 560px altında panel listenin üzerine gelen bir
+  // çekmecedir: raya inmez, hiç ekranda değildir; "genişlet" olmayan bir
+  // genişliği büyütmeyi vaat ederdi.
+  'sidenav.open': 'Gezintiyi aç',
   'sidenav.storage.shared': 'Paylaşılan',
-  'toolbar.nav': 'Gezinti',
+  // ⚠ `toolbar.nav` KALDIRILDI, yerine bir şey konmadı — bkz. en.ts'teki not.
+  // Paneli daraltan tek denetimin etiketiydi; önce "Gezinti" (panelin adı,
+  // düğmenin ne yaptığını söylemiyor), sonra "Gezintiyi göster/gizle" (sabit
+  // geçici çözüm). Gerçek düzeltme yukarıdaki dört `sidenav.*` fiili:
+  // etiket `navOpen`'a bağlı, daraltacaksa "daralt", genişletecekse
+  // "genişlet" yazıyor.
+  'node.home': 'Ana sayfa',
   'node.recent': 'Son kullanılanlar',
   'node.starred': 'Yıldızlılar',
   'node.shared': 'Benimle paylaşılanlar',
@@ -1009,17 +1082,56 @@ export const tr: Record<string, string> = {
   'conn.tokens.capNote': 'Tavan hesabın ve yetkilerin — sahip olduğundan fazlasını istemek reddedilir, verilmez.',
   /* === /gezinti:g1 === */
 
-  /* === surucu:d1 — Sürücü kabuğu (uiProfile: 'drive', GitHub #14) ======== */
+  /* === surucu:d1 — kabuk (GitHub #14); artık `uiProfile: 'drive'` ile
+     gelen bir seçenek değil, her profilde çizilir === */
   'drive.new': 'Yeni',
   'drive.new.upload': 'Dosya yükle',
   'drive.new.folder': 'Yeni klasör',
   'drive.new.request': 'Dosya iste',
+  'drive.new.document': 'Yeni belge',
+
+  /* === belge:n1 — "Yeni belge": + Yeni altındaki seçici ==================
+     Tür adları BURADA durmuyor. Her kutucuk sözcüklerini lib/fileIcons
+     `typeLabelFor`den okur — listedeki Tür sütununun okuduğu tablonun
+     aynısı — böylece ".docx" iki yerde de aynı adla anılır ve yeni bir tür
+     için hiç dizge gerekmez. Aşağıda yalnız bu pencerenin kendi metni var. */
+  'newdoc.title': 'Yeni belge',
+  'newdoc.type.label': 'Belge türü',
+  'newdoc.group.document': 'Belgeler',
+  'newdoc.group.text': 'Metin ve kod',
+  'newdoc.group.diagram': 'Çizimler',
+  'newdoc.withheld.onlyoffice': 'Ofis belgeleri için bir belge sunucusu (OnlyOffice) gerekir; burada tanımlı değil.',
+  'newdoc.withheld.drawio': 'Çizimler için drawio servisi gerekir; burada tanımlı değil.',
+  'newdoc.empty.title': 'Kullanılabilir belge türü yok',
+  'newdoc.empty.body': 'Bu sunucu, bu uygulamanın oluşturabileceği bir tür sunmadı.',
+  'newdoc.empty.blocked': 'Bu sunucunun oluşturabildiği her tür, burada tanımlı olmayan bir düzenleyici servisine bağlı.',
+  'newdoc.name': 'Ad',
+  'newdoc.name.placeholder': 'Belge adı',
+  'newdoc.untitled': 'Adsız',
+  'newdoc.err.slash': 'Ad eğik çizgi içeremez.',
+  'newdoc.err.exists': '{name} burada zaten var. Başka bir ad seçin.',
+  'newdoc.location': 'Konum',
+  'newdoc.location.none': 'Bir klasör seçin',
+  'newdoc.location.change': 'Değiştir',
+  'newdoc.location.noaccess': 'Bu klasöre kaydedemezsiniz.',
+  'newdoc.create': 'Oluştur',
+  'newdoc.creating': 'Oluşturuluyor…',
+  'newdoc.cancel': 'Vazgeç',
   'drive.search.placeholder': '{scope} içinde ara',
   'drive.search.placeholder_all': 'Dosyalarında ara',
   'drive.search.hint_title': 'Her yerde ara ve komut çalıştır ({combo})',
   'drive.storage.used': '{total} alanın {used} kadarı dolu',
   'drive.storage.used_unlimited': '{used} kullanılıyor',
   'drive.storage.label': 'Depolama',
+  /* === gorunum:v3-shell — Ana sayfa görünümü (kabuğun içindeki genel bakış)
+   * Bölüm başlıkları `sidenav.storages` / `sidenav.recent` / `sidenav.starred`,
+   * boş durumlar da `empty.recent.*` / `empty.starred.*` — bilerek: Ana
+   * sayfadaki "Son kullanılanlar" başlığı ile yanındaki panel satırı aynı
+   * şeydir, ikisine ayrı metin yazmak onları çeviri çeviri birbirinden
+   * ayırmanın yoludur. Aşağıda yalnızca başka hiçbir yerde olmayanlar var. */
+  'home.title': 'Ana sayfa',
+  'home.storages.empty': 'Henüz depo yok',
+  'home.storages.hint': 'Depo, filex’in okuyup yazdığı sürücüdür — depoları yönetici ekler.',
   'drive.section.folders': 'Klasörler',
   'drive.section.files': 'Dosyalar',
   'filter.aria': 'Süzgeçler',
@@ -1047,10 +1159,16 @@ export const tr: Record<string, string> = {
   'filter.size.1to10': '1 - 10 MB',
   'filter.size.10to100': '10 - 100 MB',
   'filter.size.gt100': '100 MB üstü',
+  /* surucu:d1-actions — filtre satırının sonundaki ⋮ menüsü. Yalnızca menünün
+     KENDİ adı yeni: içindeki her satır o eylemin zaten sahip olduğu metni
+     kullanır (`toolbar.new_folder`, `toolbar.upload`, `ctx.paste`,
+     `shortcuts.select_all`, `selection.clear`) — bir komutu yeniden adlandıran
+     menü, okuyucuya aynı şeyi iki kez öğretir. */
+  'filter.actions': 'Liste işlemleri',
   'filter.clear': 'Süzgeçleri temizle',
   'filter.empty.title': 'Bu süzgeçlere uyan bir şey yok',
   'filter.empty.hint': 'Bir süzgeci kaldır ya da yukarıdaki alandan her yerde ara.',
-  'filter.count': '{total} ögeden {shown} tanesi',
+  'filter.count': '{total} öğeden {shown} tanesi',
   'inspector.tab.details': 'Ayrıntılar',
   'inspector.tab.activity': 'Etkinlik',
   'inspector.people': 'Erişimi olan kişiler',
@@ -1062,7 +1180,7 @@ export const tr: Record<string, string> = {
   'inspector.link.none': 'Paylaşılmadı',
   'inspector.link.create': 'Bağlantı oluştur',
   'inspector.link.copy': 'Bağlantıyı kopyala',
-  'inspector.activity.empty': 'Bu öge için henüz etkinlik kaydı yok.',
+  'inspector.activity.empty': 'Bu öğe için henüz etkinlik kaydı yok.',
   'inspector.activity.hint': 'Sürümler dosya değiştikçe, yorumlar ise insanlar yazdıkça birikir.',
   'inspector.activity.version': '{n}. sürüm kaydedildi',
   'inspector.activity.comment': '{who} yorum yaptı',
@@ -1081,4 +1199,267 @@ export const tr: Record<string, string> = {
   'convert.unsupported_input': 'Bu dosya tipi için kaynak format bulunamadı.',
   'convert.converting': 'Dönüştürülüyor…',
   'convert.convert': 'Dönüştür',
+  /* === gorunum:v1-chrome — filtre satırındaki ad kutusu === */
+  'filter.find': 'Bu klasörde filtrele…',
+  /* surucu:d1-scope — satırların bir klasörün içeriği olmadığı yerlerde aynı
+     kutu. Neyi daralttığını söylemek zorunda: depo listesinde "bu klasör" hiçbir
+     şeyi adlandırmaz, Ana sayfada ise üç bloğu birden adlandırırdı. */
+  'filter.find.storages': 'Depolarda filtrele…',
+  'filter.find.home': 'Ana sayfada filtrele…',
+  /* === gorunum:v1-viewer — tam ekran görüntüleyicinin kendi çerçevesi === */
+  'viewer.share': 'Paylaş',
+  'viewer.nav_prev': 'Önceki dosya',
+  'viewer.nav_next': 'Sonraki dosya',
+  /* Üst çubuğun künye satırındaki sayaç: "246,3 KB • 9 Eyl 2026 • 1 / 9". */
+  'viewer.counter': '{i} / {n}',
+  'viewer.zoom_reset': 'Yakınlaştırmayı sıfırla',
+  'viewer.fullscreen': 'Tam ekran',
+  'viewer.exit_fullscreen': 'Tam ekrandan çık',
+  'viewer.md_placeholder': '# Markdown buraya…',
+  /* === gorunum:v1-selbar — filtre satırının yerini alan seçim çubuğu === */
+  'selection.count': '{n} seçildi',
+  'selection.clear': 'Seçimi temizle',
+  /* === gorunum:v1-preview — türün adı, kelimeyle =======================
+     Tür sütunu eskiden uzantıyı büyük harfle yazıyordu; artık bunları
+     yazıyor. Hangisinin seçileceğine `lib/fileIcons.ts` karar verir
+     (`typeLabelKey`) — bir türü adlandıran yalnız iki yer var: o tablo ve bu
+     liste. Eşleşmeyen her şey yine büyük harfli uzantıya düşer. `Klasör`
+     burada DEĞİL: o `node.folder`, grid kartının alt yazısı zaten onu basar. */
+  'ftype.typescript': 'TypeScript',
+  'ftype.javascript': 'JavaScript',
+  'ftype.vue': 'Vue bileşeni',
+  'ftype.python': 'Python',
+  'ftype.go': 'Go',
+  'ftype.rust': 'Rust',
+  'ftype.php': 'PHP',
+  'ftype.ruby': 'Ruby',
+  'ftype.java': 'Java',
+  'ftype.kotlin': 'Kotlin',
+  'ftype.swift': 'Swift',
+  'ftype.c': 'C kaynağı',
+  'ftype.cpp': 'C++ kaynağı',
+  'ftype.csharp': 'C# kaynağı',
+  'ftype.stylesheet': 'Stil dosyası',
+  'ftype.html': 'HTML belgesi',
+  'ftype.json': 'JSON verisi',
+  'ftype.yaml': 'YAML',
+  'ftype.xml': 'XML',
+  'ftype.toml': 'TOML',
+  'ftype.sql': 'SQL',
+  'ftype.shell': 'Kabuk betiği',
+  'ftype.powershell': 'PowerShell betiği',
+  'ftype.markdown': 'Markdown',
+  'ftype.plaintext': 'Düz metin',
+  'ftype.log': 'Günlük dosyası',
+  'ftype.config': 'Ayar dosyası',
+  'ftype.sheet': 'Hesap tablosu',
+  'ftype.figma': 'Figma tasarımı',
+  'ftype.design': 'Tasarım dosyası',
+  'ftype.image': 'Görsel',
+  'ftype.video': 'Video',
+  'ftype.audio': 'Ses',
+  'ftype.pdf': 'PDF belgesi',
+  'ftype.document': 'Belge',
+  'ftype.slides': 'Sunum',
+  'ftype.archive': 'Arşiv',
+  'ftype.code': 'Kod',
+  /* === gorunum:v1-advsearch — Gelişmiş arama penceresi ===================
+   * İki `filter.*` anahtarı kardeşlerinin yanında değil burada: paylaşılan
+   * birleşimlere pencerenin eklediği yeni üyeler (`modified: 'around'`,
+   * `size: 'range'`). Filtre satırı bunları hiç seçmez ama biri oraya
+   * ulaşırsa `chipLabel` ham anahtarı yazardı. */
+  'filter.modified.around': 'Bir tarihin çevresinde',
+  'filter.size.range': 'Özel aralık',
+
+  'advsearch.open': 'Gelişmiş arama',
+  'advsearch.title': 'Gelişmiş arama',
+  'advsearch.subtitle': 'Dosyaları ada, içeriğe, yola ya da etikete göre bulun.',
+  'advsearch.close': 'Kapat',
+  'advsearch.content.heading': 'İçerik araması',
+  'advsearch.viewall': 'Tüm sonuçları gör',
+  'advsearch.where.any_short': 'Her yerde',
+  'advsearch.where.here_short': 'Yalnız burada',
+  'advsearch.where.skip_short': 'Burayı atla',
+  'advsearch.server.legend': 'Sunucunun aradığı',
+  'advsearch.client.legend': 'Gelen sonuçları daralt',
+  'advsearch.query.label': 'Kelimeler',
+  'advsearch.query.placeholder': 'Adın bir parçası ya da dosyanın içindeki kelimeler',
+  'advsearch.scope.label': 'Nerede arasın',
+  'advsearch.scope.name': 'Ad ve yol',
+  'advsearch.scope.content': 'Dosya içeriği',
+  'advsearch.scope.all': 'İkisi de',
+  'advsearch.scope.hint':
+    'İçerik, dizinden aranır; dizin metin türü dosyaların ilk 200 KB’ını kapsar.',
+  'advsearch.people.name_only':
+    'Sahip, gelen satırlardan okunur; sahip bilgisi taşıyan satırları da yalnız ad araması döndürür.',
+  'advsearch.scope.name_only':
+    'Burada yalnız ad ve yol: içerik sonucu gezgine hangi depodan geldiği bilgisi olmadan ulaşır, bu yüzden içerik araması yalnız tek depolu kurulumlarda sunulur.',
+  'advsearch.tags.label': 'Etiketler',
+  'advsearch.tags.placeholder': 'fatura, üç aylık rapor',
+  'advsearch.tags.exclude': 'Şu etiketler hariç',
+  'advsearch.tags.exclude_placeholder': 'arşiv',
+  'advsearch.tags.hint':
+    'Virgülle ayırın. Etiket daraltır: birden çok etiket hepsini birden taşıyan dosyalar demektir, hiç kullanılmamış bir etiket ise hiçbir şey döndürmez.',
+  'advsearch.where.label': 'Klasör',
+  'advsearch.where.any': 'Bu deponun her yerinde',
+  'advsearch.where.here': 'Yalnız {folder} içinde',
+  'advsearch.where.skip': '{folder} dışındaki her yerde',
+  'advsearch.around.label': 'Şu kadar içinde',
+  'advsearch.around.date': 'Tarih ve saat',
+  'advsearch.around.h1': '1 saat',
+  'advsearch.around.d1': '1 gün',
+  'advsearch.around.w1': '1 hafta',
+  'advsearch.size.range_label': 'Şunun arasında',
+  'advsearch.size.from': 'En az',
+  'advsearch.size.to': 'En çok',
+  'advsearch.count.idle': 'Bir şeyler yazın ya da etiket seçin.',
+  'advsearch.count.counting': 'Sayılıyor…',
+  'advsearch.count.result': '{n} eşleşen öğe',
+  'advsearch.count.capped': 'Sonuçların ilk sayfasında {n} eşleşen öğe',
+  'advsearch.count.result_one': '1 eşleşen öğe',
+  'advsearch.count.capped_one': 'Sonuçların ilk sayfasında 1 eşleşen öğe',
+  'advsearch.count.error': 'Sayım çalıştırılamadı.',
+  'advsearch.count.cost':
+    'Sayım bu aramayı çalıştırır. Tür, sahip, tarih, boyut ve klasör sunucuda değil, gelen satırlar üzerinde uygulanır.',
+  'advsearch.wire': 'Gönderilen',
+  'advsearch.reset': 'Sıfırla',
+  'advsearch.cancel': 'Vazgeç',
+  'advsearch.submit': 'Ara',
+
+  /* === gorunum:v2-topbar — sayfanın üst barı kalktı; onun taşıdıklarını
+     artık gezginin kendi başlığı ve kırıntı satırı taşıyor. === */
+  'breadcrumb.subfolders': 'Alt klasörler',
+  'breadcrumb.subfolders.empty': 'Burada alt klasör yok',
+  'header.admin': 'Yönetim paneli',
+  'header.settings': 'Ayarlar',
+  'header.signout': 'Çıkış yap',
+  'ai.assistant': 'AI asistanı',
+  'ai.soon': 'Yakında',
+  'ai.assistant.soon': 'AI asistanı — yakında',
+
+  /* gorunum:v2-share — Paylaş / İzinler penceresinin kendi çerçevesi. İçindeki
+     denetimler eski metinlerini koruyor; buradakiler yeni kabuk: başlık, tek
+     anahtar, "şu anda kim açabilir" cümlesi ve her şeyin katlandığı üç adlı
+     bölüm. */
+  'access.title': '"{name}" paylaşımı',
+  'access.close': 'Kapat',
+  'access.done': 'Bitti',
+  'access.copy': 'Kopyala',
+  'access.copied': 'Kopyalandı',
+  'access.link.switch': 'Bağlantı paylaşımı',
+  'access.who.private': 'Yalnızca erişimi olan kişiler açabilir.',
+  'access.who.link': 'Bağlantıyı bilen herkes açabilir.',
+  'access.who.pin': "Bağlantıyı ve PIN'i bilen herkes açabilir.",
+  'access.who.existing': 'Bağlantı paylaşımı açık — {n} bağlantı var.',
+  'access.who.existing_one': 'Bağlantı paylaşımı açık — {n} bağlantı var.',
+  'access.section.link': 'Bağlantı seçenekleri',
+  'access.section.people': 'Erişimi olanlar',
+  'access.section.drop': 'Dosya iste',
+  'access.sum.pin_on': 'PIN var',
+  'access.sum.pin_off': 'PIN yok',
+  'access.sum.people': '{n} kişi',
+  'access.sum.people_one': '{n} kişi',
+  'access.sum.people_none': 'Henüz kimse yok',
+  'access.sum.drop': '{n} yükleme bağlantısı',
+  'access.sum.drop_one': '{n} yükleme bağlantısı',
+  'access.sum.drop_none': 'Yükleme bağlantısı yok',
+  /* Sahiplik — Sahibi sütunu ve Kişiler çipi. "Sistem", filex üzerinden kimsenin
+     koymadığı satırın dürüst karşılığıdır (tarayıcı buldu ya da doğrudan kovaya
+     yazıldı); boşluk değil, gerçek bir cevaptır. */
+  'col.owner': 'Sahibi',
+  'owner.you': 'Siz',
+  'owner.system': 'Sistem',
+  'owner.unknown': 'Bilinmiyor',
+  'owner.external': 'Yükleme bağlantısıyla geldi',
+  'owner.last_actor': 'Son değiştiren: {who}',
+  'filter.people': 'Kişiler',
+  'filter.people.any': 'Herkes',
+  'filter.people.me': 'Siz',
+  'filter.people.system': 'Sistem',
+  'filter.people.someone': 'Başka biri',
+  /* surucu:d1-sort — filtre satırının sağ ucundaki sıralama denetimi. Dört
+     ölçütün adı `col.*`: menü, liste görünümünün sütun başlıklarındaki
+     sözcüklerin aynısını sunar — tek bir sıralamayı süren iki denetim onu
+     farklı adlarla anamaz. */
+  'sort.by': 'Sıralama ölçütü',
+  'sort.asc': 'Artan',
+  'sort.desc': 'Azalan',
+  /* Bir ARAMA SONUCUNUN sırası. Beşinci bir sıralama ölçütü değildir —
+     ekrandaki satırları sunucu sıraladığında denetim, ölçüt adı yerine bunu
+     yazar; böylece yapmadığı bir sıralamayı üstlenmez. `_why` denetimin neden
+     kapalı olduğudur: Burak, denetimin sessizce işlevsizleşmesini değil
+     nedeninin yazılmasını istedi. */
+  'sort.relevance': 'Alaka',
+  'sort.relevance_why':
+    'Arama sonuçları eşleşme yakınlığına göre listelenir. Seçtiğiniz sıralama, aramadan çıkınca geri gelir.',
+  /* === tablo:t1 — tablonun kendi yapılandırması ==========================
+     Sütun genişlikleri ve görünürlüğü EKRANINIZA dair bir tercihtir; bir
+     klasörün hangi görünümle açılacağı ise KLASÖRE dair bir olgudur. İkisi de
+     buradan ayarlanır; `folder_hint` kuralı tek cümlede, tam da ona şaşıracak
+     kişinin okuyabileceği yerde söyler. */
+  'col.location': 'Konum',
+  'cols.menu': 'Sütun seçenekleri',
+  'cols.title': 'Sütunlar',
+  'cols.resize': '{col} sütununu yeniden boyutlandır',
+  'cols.move_left': '{col} sütununu sola taşı',
+  'cols.move_right': '{col} sütununu sağa taşı',
+  'cols.reset': 'Sütunları sıfırla',
+  'cols.folder_title': 'Klasör görünümü',
+  'cols.folder_hint':
+    'Ayarladığınız klasörler kendi görünümünü korur. Son seçiminiz diğer her yerde varsayılan olur.',
+  'cols.forget_folder': 'Bu klasörün görünümünü unut',
+  'cols.apply_all': 'Tüm klasörlere uygula ({count} klasör hatırlanıyor)',
+  /* === tablo:t1 — çöp kutusu bilgi şeridi ================================
+     ⚠ `retention` yalnızca kurulum bize sayıyı SÖYLEDİĞİNDE kullanılır
+     (GET /api/admin/protection). Diğer her durumda `retention_unknown` aynı
+     şeyi, doğrulayamadığımız bir süreyi taahhüt etmeden söyler: yanlış saklama
+     süresi yazan bir şerit, hiç şerit olmamasından kötüdür — insanlar ona
+     bakıp karar verir. */
+  'trash.retention': 'Çöp kutusundaki öğeler {days} gün sonra kalıcı olarak silinir.',
+  'trash.retention_one': 'Çöp kutusundaki öğeler {days} gün sonra kalıcı olarak silinir.',
+  'trash.retention_unknown':
+    'Çöp kutusundaki öğeler, yöneticinizin belirlediği saklama süresi dolunca kalıcı olarak silinir.',
+  'trash.empty_action': 'Çöp kutusunu boşalt',
+  'trash.empty_confirm_title': 'Çöp kutusu boşaltılsın mı?',
+  'trash.empty_confirm_body_one': 'Bu işlem 1 öğeyi ({size}) kalıcı olarak siler. Geri alınamaz.',
+  'trash.empty_confirm_body':
+    'Bu işlem {count} öğeyi ({size}) kalıcı olarak siler. Geri alınamaz.',
+  'trash.empty_confirm_body_nosize_one': 'Bu işlem 1 öğeyi kalıcı olarak siler. Geri alınamaz.',
+  'trash.empty_confirm_body_nosize': 'Bu işlem {count} öğeyi kalıcı olarak siler. Geri alınamaz.',
+  'trash.emptied': 'Çöp kutusu boşaltıldı',
+  'empty.trash.hint': 'Sildiğiniz dosyalar önce buraya düşer, böylece geri alabilirsiniz.',
+
+  /* tasi:m1 — hedef klasör seçici (modals/DestinationPickerModal.vue) ve
+     üzerine kurulan iki seçim eylemi. */
+  'destpicker.title.move': 'Şuraya taşı',
+  'destpicker.title.copy': 'Şuraya kopyala',
+  'destpicker.title.choose': 'Klasör seç',
+  'destpicker.confirm.move': 'Buraya taşı',
+  'destpicker.confirm.copy': 'Buraya kopyala',
+  'destpicker.confirm.choose': 'Bu klasörü seç',
+  'destpicker.cancel': 'Vazgeç',
+  'destpicker.up': 'Bir üst klasör',
+  'destpicker.crumbs': 'Konum',
+  'destpicker.drives': 'Sürücüler',
+  'destpicker.loading': 'Yükleniyor…',
+  'destpicker.empty': 'Burada alt klasör yok',
+  'destpicker.unreadable': 'Bu klasör açılamıyor.',
+  'destpicker.readonly': 'Salt okunur',
+  'destpicker.readonly_here': 'Bu klasöre yazamazsınız.',
+  'destpicker.pick_a_drive': 'Bir klasör seçmek için önce bir depo açın.',
+  'destpicker.target': 'Hedef: {name}',
+  'destpicker.tag.blocked': 'Uygun değil',
+  'destpicker.blocked.self': 'Bir klasör kendi içine taşınamaz.',
+  'destpicker.blocked.descendant': 'Bir klasör kendi alt klasörlerinden birine taşınamaz.',
+
+  'ctx.move_to': 'Şuraya taşı…',
+  'ctx.copy_to': 'Şuraya kopyala…',
+  'ctx.access.one_only': 'Paylaşım aynı anda tek öğe için çalışır.',
+
+  'toast.archive.preparing': 'Arşiv hazırlanıyor…',
+  'toast.archive.started': '{name} indiriliyor ({count} dosya)',
+  'toast.archive.started_one': '{name} indiriliyor ({count} dosya)',
+  'toast.archive.empty': 'İndirilecek bir şey yok — seçimde okunabilir dosya bulunmuyor.',
+  'toast.moved_to': '{name} klasörüne taşındı',
+  'toast.copied_to': '{name} klasörüne kopyalama kuyruğa alındı',
 };

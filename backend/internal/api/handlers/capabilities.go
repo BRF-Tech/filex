@@ -10,7 +10,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/newdoc"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
 // Capabilities exposes /api/capabilities.
@@ -34,6 +36,11 @@ type Capabilities struct {
 	// create such a folder is entitled to know, before they create it, that
 	// their operator holds a second key to it.
 	E2EEscrow *e2e.EscrowKey
+	// Tenants + PublicURLSet feed `public_url`: the address this deployment is
+	// reached at, for the connection guides (see Get). Zero values publish
+	// nothing, which is what every test that builds this handler by hand gets.
+	Tenants      tenanturl.Resolver
+	PublicURLSet bool
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -168,6 +175,46 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	merged["e2e_escrow"] = esc
+
+	// The document types a "New document" picker may offer, from the template
+	// registry compiled into this binary (internal/newdoc).
+	//
+	// ⚠ It answers "can the SERVER make these bytes", not "can the client open
+	// them". Each row carries a `requires` field naming the external service
+	// its editor needs ("onlyoffice", "drawio", or empty for the built-in code
+	// and markdown editors); the client crosses that against the `external`
+	// block above and offers only what is satisfied. Splitting it this way is
+	// what keeps a client from carrying its own hardcoded extension list —
+	// which is the list that rots the moment the registry grows a type — and
+	// what stops an install with no document server from offering a .docx
+	// nobody there can then open.
+	//
+	// Published to anonymous callers too. It is a static property of the
+	// build, identical on every install of this version, and names no host.
+	merged["newdoc_types"] = newdoc.Types()
+
+	// The address a client PROGRAM should be pointed at — the WebDAV URL, the
+	// `filex mount` / rclone lines in the connection guides.
+	//
+	// ⚠⚠ The guides used to build it from where the PAGE was loaded (the
+	// explorer's apiBase, else window.location.origin). That is right for the
+	// admin SPA, which the same binary serves, and wrong for every host that
+	// proxies /api to filex under its OWN origin: an embed inside another app
+	// printed `https://<that app>/dav/`, an address that reaches the host, not
+	// filex. It also disagreed with the same page's S3 endpoint and SFTP host,
+	// which have always come from here.
+	//
+	// ⚠ Published only when it is TRUE: the operator set public_url, or this
+	// request arrived on a tenant's own host. The built-in guess
+	// (http://localhost:5212) is never announced — a guide that printed it
+	// would send every client to the reader's own machine; with nothing here
+	// the client falls back to the address it loaded from, as before.
+	// It is not a secret (every share link carries it), so an anonymous caller
+	// gets it too.
+	if origin := h.Tenants.FromRequest(r); origin != "" && (h.PublicURLSet || origin != h.Tenants.Fallback()) {
+		merged["public_url"] = origin
+	}
+
 	writeJSON(w, http.StatusOK, merged)
 }
 

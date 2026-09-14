@@ -4,7 +4,7 @@
 
 # filex — self-hosted file manager that embeds anywhere
 
-[![Release](https://img.shields.io/github/v/release/BRF-Tech/filex?color=6366f1)](https://github.com/BRF-Tech/filex/releases)
+[![Release](https://img.shields.io/github/v/release/BRF-Tech/filex?color=2f6ceb)](https://github.com/BRF-Tech/filex/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/BRF-Tech/filex/ci.yml?branch=main&label=ci)](https://github.com/BRF-Tech/filex/actions)
 [![License: MIT](https://img.shields.io/github/license/BRF-Tech/filex?color=22c55e)](LICENSE)
 [![Container](https://img.shields.io/badge/ghcr.io-brf--tech%2Ffilex-2496ed?logo=docker&logoColor=white)](https://github.com/BRF-Tech/filex/pkgs/container/filex)
@@ -16,8 +16,8 @@ background folder sync**, and a **built-in MCP server** so AI agents can drive i
 natively.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/explorer-grid-dark.png">
-  <img src="docs/screenshots/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.41.0/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.41.0/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -63,17 +63,18 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   `viewer` account and `…/drive` and they get the file manager itself: their storages,
   uploads, sharing, search, the editor. No admin panel to walk through, no separate
   frontend to deploy. `…/admin` is the operator's door to the same app.
-- **Navigation people already know** — a left panel with a prominent **Upload** and
-  **Recent · Starred · Shared with me · Trash**, plus the storages you can reach; a
-  storage someone shared with you simply appears there, one click, no mount
-  instructions. Anyone can collapse it to an icon rail, and `uiProfile: 'simple'`
-  presets the rest of the chrome off — one pane, one folder, list or grid — for people
-  who want a file drive rather than a file manager. **`uiProfile: 'drive'`** goes one
-  step further and gives them the shell they already know: a single **+ New** menu,
-  one search field across the header with its ⌘K palette hint, a Type / Modified /
-  Size filter row, Folders and Files as labelled sections, Details and Activity in
-  the info panel, and a storage line. One explorer in every case: there is no second
-  UI to keep in step.
+- **Navigation people already know** — a left panel with a prominent **+ New** menu and
+  **Home · My files · Shared with me · Recent · Starred · Trash**, plus the storages you
+  can reach; a storage someone shared with you simply appears there, one click, no mount
+  instructions. Anyone can collapse it to an icon rail from the top bar. **Home** is a
+  view *in* the app, not a page beside it — your drives, what you opened last and what
+  you starred, under the same sidebar and the same header as the files. This is the
+  shell everybody gets: a single search field across the header with its ⌘K palette
+  hint, a Type / People / Modified / Size filter row, Folders and Files as labelled
+  sections, Details and Activity in the info panel, and a storage line. For people who
+  want a file drive rather than a file manager, `uiProfile: 'simple'` presets the rest
+  of the chrome off — one pane, one folder, list or grid. One explorer in every case:
+  there is no second UI to keep in step.
 - **Embeds anywhere** — the same UI ships as a Vue 3 component, a React component and a
   framework-agnostic `<filex-explorer>` web component. Put a real file manager inside
   *your* product, backed by your own filex server and locked to a per-tenant folder.
@@ -154,35 +155,35 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 | Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
-| ![Share modal](docs/screenshots/share-modal.png) | ![Markdown viewer](docs/screenshots/viewer-markdown.png) |
+| ![Share modal](docs/screenshots/v0.41.0/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.41.0/viewer-markdown.png) |
 
 | Admin panel | Demo landing |
 |---|---|
-| ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Demo landing](docs/screenshots/demo-landing.png) |
+| ![Admin dashboard](docs/screenshots/v0.41.0/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.41.0/demo-landing.png) |
 
-| The drive shell (`uiProfile: 'drive'`) — what a non-admin lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
+| The shell — what everybody lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
 |---|---|
-| ![The drive shell](docs/screenshots/driveshell/driveshell-hero-1440.png) | ![Searching in the drive shell](docs/screenshots/driveshell/driveshell-search-1440.png) |
+| ![The filex shell](docs/screenshots/v0.41.0/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.41.0/driveshell/driveshell-search-1440.png) |
 
-| Navigation panel — Upload, Recent / Starred / Shared with me / Trash, and your storages | Collapsed to the icon rail |
+| Navigation panel — Home, My files, Shared with me, Recent, Starred, Trash, and your storages | Collapsed to the icon rail |
 |---|---|
-| ![Navigation panel](docs/screenshots/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/sidenav/sidenav-rail-1440.png) |
+| ![Navigation panel](docs/screenshots/v0.41.0/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.41.0/sidenav/sidenav-rail-1440.png) |
 
 | Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
 |---|---|
-| ![Shared with me](docs/screenshots/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.41.0/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.41.0/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
-| ![How to connect](docs/screenshots/sidenav/connect-1440.png) | ![API keys](docs/screenshots/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.41.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.41.0/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
-| ![Connection guide](docs/screenshots/connections-guide.png) |
+| ![Connection guide](docs/screenshots/v0.41.0/connections-guide.png) |
 
 | A storage filex does not ship — installed as a plugin, describing its own config form |
 |---|
-| ![Plugins](docs/screenshots/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.41.0/admin-plugins.png) |
 
 ## Quick start — binary
 
@@ -204,7 +205,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
     Email:    admin@local
     Password: kT9_x4Pq2Nm-BvLs
   Saved to:  ~/.filex/.first-run.txt (mode 0600, shown ONCE)
-  Change at: /admin/profile
+  Change at: /admin/dashboard?settings=1
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -250,6 +251,12 @@ pnpm add @brftech/filex-react
 import { FileManager } from '@brftech/filex-react';
 <FileManager config={{ apiBase: 'http://localhost:5212' }} onError={(e) => console.error(e)} />
 ```
+
+There is **no stylesheet to import** — the look travels inside the bundle and is
+injected on mount, so nothing is missing from that snippet. ⚠ A bundler will need the
+optional viewer packages externalized (`monaco-editor` and friends), which
+[docs/INTEGRATION.md](docs/INTEGRATION.md) shows in one `rollupOptions.external`
+line; every one of those imports is guarded, so the viewers degrade rather than break.
 
 ### Vanilla JS / any framework
 ```html
@@ -348,9 +355,15 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Protocol gateway** — the same tree is reachable as **S3** (SigV4; aws-cli, rclone, restic, mc, s3fs), **SFTP** (OpenSSH, WinSCP, FileZilla, sshfs), **FTPS** (explicit TLS, for the equipment that only learned FTP; hand it your reverse proxy's auto-renewing certificate — it is re-read on change), **NFSv3** (LAN NAS clients, media players) and **WebDAV** — each with its own credential you can revoke on its own, and all of them behind the same permissions, trash and quota as the UI ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
 - **`filex mount`** — attach a remote filex server to a folder over ordinary HTTPS: a folder on Linux, a **drive letter on Windows** (`filex mount Z:`, needs the free [WinFsp](https://winfsp.dev)). Not a sync: nothing is copied but a bounded read cache, so it opens one file out of a hundred thousand without downloading the rest.
 - **Real-time collaboration** — presence bar with live avatars + focus, instant file-change updates over WebSocket, polling fallback. One write is announced the moment it lands; a burst (a zip extraction, a folder upload, an NFS client writing chunk after chunk) is merged into one frame per window so the folder stays live without flooding the page ([docs/REALTIME.md](docs/REALTIME.md)).
+- **A listing that behaves like a table** — resize a column, hide one, drag one to a new place; the table scrolls sideways rather than dropping a column when it runs out of room, and the actions column stays pinned to the right. Sort by name, type, date or size, in either direction, and **the grid and the list obey the same sort** — until this release "sorted by size" was a fact about one view, and switching views reordered the rows under you. Sorted by date, all three views group the rows under **Today · Yesterday · This week · This month** and then month by month, in **your** time zone rather than the browser's.
+- **A folder remembers how you left it** — optional, from user settings: the view mode and the sort of each folder you actually set up, kept **per person on the server** so they follow you to another machine and to the desktop app, and never leak to anyone else looking at the same folder. Off by default, in which case your last choice simply applies everywhere ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
+- **Who owns a file** — every node carries its owner, the listing has an **Owner** column and the filter row a **People** entry, and quota counts against the owner rather than whoever last touched the file.
+- **Take a selection with you** — pick several files and folders and **Download** streams them as one archive, built on the fly: no temporary file is written into your storage, nothing is buffered in the tab, and a 700 MB archive costs the server under a megabyte of memory. **Move to** and **Copy to** open a folder chooser that spans every storage and refuses a destination you cannot write to — server-side, not just in the dialog.
+- **New document** — create a Word, Excel, PowerPoint or OpenDocument file, or any text or code format, from the **+ New** menu: name it, choose where it goes, and it opens in the editor that handles it. The templates are real, minimal, valid documents compiled into the binary, so this works on an install with no LibreOffice; a type this deployment could not then open is not offered in the first place, and the dialog says why.
 - **RBAC + item permissions** — roles, per-file/folder grants with inheritance, share invites by e-mail (SMTP), grant-aware search and listings. **Shared with me** answers the reverse question from the recipient's side — what other people granted you, and which storages you reach only through a grant.
-- **Drive shell (`uiProfile: 'drive'`)** — the end-user layout, and a preset of the same explorer rather than a second one: a primary **+ New** menu (upload files · new folder · request files), one **search field in the header** whose ⌘K / Ctrl+K chip hands the query to the command palette (the field searches this folder; the palette is where "everywhere", saved searches and commands live), a **Type · Modified · Size** filter row under the breadcrumb, **Folders** and **Files** as labelled sections in grid view, an info panel split into **Details** (with "People with access" and a share-link row) and **Activity** (version history and comments), and a **storage line** under the navigation. Density, theme, the shortcut editor and the other view modes stay one click away in the header's "⋯" menu — nothing is removed from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
-- **Navigation panel** — Upload as the primary action, the views Recent / Starred / Shared with me / Trash, the storages you can see, and **How to connect** + **API keys**: the per-protocol guides and the self-service token manager, opened from inside the explorer so an embedded copy's users can mint the credential WebDAV/FTPS/`filex mount` ask for instead of asking an administrator. Collapsible to an icon rail (remembered per browser), a drawer instead of a column under 560px. On by default in the web app, the desktop app and every embed; `uiProfile: 'simple'` additionally turns off the tab strip, the split pane, the gallery view mode and the "How to connect" surface without removing any of them from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
+- **The shell** — one layout, for the operator and the end user alike, in the admin app, the desktop app and every embed: a top bar spanning the full width with the collapse control and the product mark at its left edge, one **search field** whose ⌘K / Ctrl+K chip hands the query to the command palette (the field searches this folder; the palette is where "everywhere", saved searches and commands live), a primary **+ New** menu (upload files · new folder · **new document** · request files), a **Type · People · Modified · Size** filter row under the breadcrumb, **Folders** and **Files** as labelled sections in grid view, an info panel split into **Details** (with "People with access" and a share-link row) and **Activity** (version history and comments), and a **storage line** under the navigation. Theme, palette, language, density, the time zone, the start page and the notification switches all live in **user settings**, reached from the avatar; the keyboard editor and *Restart the tour* are in the same menu. Nothing is removed from the build — an embed, which has no settings dialog, keeps a "⋯" menu that still holds them ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
+- **Home, inside the shell** — the landing view for everybody, admins included: your storages, what you opened last and what you starred, as cards in the content area with the same navigation panel and the same header as the files. Moving between Home and a folder changes the content and nothing else. An operator who would rather land on the admin dashboard chooses it in their profile settings.
+- **Navigation panel** — the **+ New** menu as the primary action, the destinations Home / My files / Shared with me / Recent / Starred / Trash, the storages you can see, and **How to connect** + **API keys**: the per-protocol guides and the self-service token manager, opened from inside the explorer so an embedded copy's users can mint the credential WebDAV/FTPS/`filex mount` ask for instead of asking an administrator. Collapsible to an icon rail (remembered per browser) from the top bar, a drawer instead of a column under 560px. On by default in the web app, the desktop app and every embed; `uiProfile: 'simple'` additionally turns off the tab strip, the split pane, the gallery view mode and the "How to connect" surface without removing any of them from the build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Sharing** — public links with PIN, expiry and max-downloads, under an admin-set **maximum link life** (default 7 days — the dialog only offers what the server will keep); folder links stream as ZIP (cached, pre-warmed up to a size ceiling, swept after a week); **file-request** upload links for inbound drops; ShareX-compatible upload endpoint ([docs/SHARING.md](docs/SHARING.md)).
 - **Desktop app + folder sync** — Windows/Linux/macOS app: tray-resident two-way sync, **selective sync** (right-click → *Keep on this computer*, one root folder per account, the rest online-only), several accounts at once, **opens Office documents from your own disk** in the server's editor, self-updating (macOS: unsigned build, updates by re-download until it is signed) ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Trash & version history** — deletes are reversible within a retention window, writes keep snapshots; both live in the storage you already mounted ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
@@ -367,8 +380,8 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Universal converter** — optional side-car converts between document/image formats from the UI. It, OnlyOffice and drawio are configured in the admin panel and apply to the running server, with no restart ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md), [docs/CONVERT-INTEGRATION.md](docs/CONVERT-INTEGRATION.md)).
 - **Notifications** — generic JSON webhooks (Slack/Discord-agnostic): any number of targets, each with its own signing secret and its own per-event subscription, plus an in-app bell with read/unread and a per-user mute matrix. A write that **creates** a file and a write that **replaces** one are different events (`file.uploaded` / `file.updated`), and the ones an operator most wants on their own — an infected upload quarantined, a failed upload, an encrypted folder opened with its recovery key — are subscribable individually ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
 - **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`) while numbers are matched literally (`2026` never means `2025`), `tag:` filters, exact matches ranked first.
-- **Thumbnails** — image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware. A cached thumbnail is released when the file it belongs to is deleted for good, and a periodic reconciler reclaims the orphans an older install accumulated ([docs/thumbnails.md](docs/thumbnails.md)).
-- **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there. Nine palettes ship in the theme gallery, each one a map of the `--fe-*` tokens rather than a second stylesheet, so a host page or an embed can pick one — or set its own values — without forking any CSS.
+- **Thumbnails you can read** — a PDF shows its **first page**, top-anchored so the title is in the card; a video its first frame that is not black (opening on a fade used to produce a black square, and a clip shorter than a second produced nothing at all while the row still said "ready"); an Office document its rendered first page; and a text, code or CSV file **fills the card with its own first lines** rather than repeating the extension the row already prints. image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware, and a server missing one of those binaries now says so in its log at boot instead of silently drawing coloured rectangles. A cached thumbnail is released when the file it belongs to is deleted for good, and a periodic reconciler reclaims the orphans an older install accumulated ([docs/thumbnails.md](docs/thumbnails.md)).
+- **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there. Eight palettes ship in the theme gallery, each one a map of the `--fe-*` tokens rather than a second stylesheet, so a host page or an embed can pick one — or set its own values — without forking any CSS.
 - **Keyboard, and it says so** — every verb in the right-click menu and the toolbar prints the key that runs it, read from the registry so it follows a remap. Thirty-two actions are remappable from *Shortcut settings* (stored per browser); the handful of combinations a browser takes for itself, like `Ctrl+W`, are refused with a reason instead of stored as a key that would never fire.
 - **Usage & cost** — filex does not meter your provider's bill; it reads the report the provider already writes, normalises it and prices it with a table you can edit. Backblaze B2's daily CSVs are read over the same S3 API filex already speaks, so no new dependency and no new credential type. Free allowances are their own fields rather than constants in a formula, and the page keeps the provider's account-level row apart from its per-bucket rows — summing them counts the same transactions twice, by exactly the amount nobody notices ([docs/USAGE.md](docs/USAGE.md)).
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.

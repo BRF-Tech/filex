@@ -192,34 +192,29 @@ try {
   await skipTour(win);
   await rowEvent(win, seeded);
   await win.waitForTimeout(300);
-  // ⚠ Share does not sit on the toolbar at this width — it is inside the "⋯"
-  // overflow. Looking for the button on the toolbar found nothing and reported
-  // a missing DIALOG, which is a different bug entirely.
+  // ⚠⚠ Share is on the SELECTION BAR now, and it is an icon.
+  //
+  // gorunum:v1 moved the selected rows' verbs out of the toolbar and onto the
+  // bar that appears when something is ticked (Toolbar.vue: "the selection's
+  // verbs are on screen in the selection bar now"). Two things followed, and
+  // this suite was caught by both: the toolbar's "⋯" no longer lists Share at
+  // all while a row is selected, and the bar's own button carries no text —
+  // its label is a `title`. Measured 2026-09-12: the bar renders
+  // `data-testid="selbar-access"`, title "Share / Permissions (Shift+S)".
+  //
+  // A text match found nothing and the run reported "the share dialog does not
+  // open" — which sends the reader to the dialog, when the truth was that no
+  // button had been pressed. Match on the test id, and fall back to the label
+  // in `title` OR text so an older build still passes.
   await win.evaluate(() => {
-    // ⚠ VISIBLE buttons only. The toolbar keeps an aria-hidden measuring strip
-    // that renders EVERY action so the fold calculation has real widths — so a
-    // plain querySelectorAll finds a "Share / Permissions" button that is not
-    // on screen and has no click handler. Clicking that one did nothing, and
-    // the run reported a missing dialog instead of a missed button.
     const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
-    const buttons = [...document.querySelectorAll('button')].filter(visible);
-    const direct = buttons.find((x) => /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(x.textContent ?? ''));
-    if (direct) { direct.click(); return; }
-    // ⚠ The wide-mode overflow button carries no class of its own — only the
-    // narrow one does (.fe-toolbar__more). Find it by the glyph it renders.
-    buttons.find((x) => (x.textContent ?? '').trim() === '⋯')?.click();
-  });
-  await win.waitForTimeout(600);
-  await win.evaluate(() => {
-    // ⚠ Same trap as above, and it bites harder here: the measuring strip is
-    // `visibility:hidden; height:0`, which still has client rects, so a
-    // "is it visible" test that only measures boxes picks the handler-less
-    // clone and the menu closes with nothing done.
-    const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
-    const item = [...document.querySelectorAll('button, li, [role="menuitem"]')]
+    const byId = document.querySelector('[data-testid="selbar-access"]');
+    if (byId && visible(byId)) { byId.click(); return; }
+    const label = (e) => `${e.getAttribute('title') ?? ''} ${e.textContent ?? ''}`;
+    [...document.querySelectorAll('button, li, [role="menuitem"]')]
       .filter(visible)
-      .find((x) => /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(x.textContent ?? ''));
-    item?.click();
+      .find((x) => /Payla[sş] \/ [İI]zinler|Share \/ Permissions/i.test(label(x)))
+      ?.click();
   });
   await win.waitForTimeout(1500);
 

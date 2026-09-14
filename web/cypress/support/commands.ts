@@ -71,7 +71,9 @@ Cypress.Commands.add('uiLogin', (email, password) => {
     .filter(':visible')
     .first()
     .click();
-  cy.url().should('include', '/admin/dashboard');
+  // The start page: Home for every account by default, the dashboard for an
+  // admin who picked it in user settings (web/src/lib/startPage.ts, 0.41.0).
+  cy.url().should('match', /\/admin\/(home|dashboard)([?#]|$)/);
 });
 
 Cypress.Commands.add('adminGet', <T = unknown,>(path: string) => {

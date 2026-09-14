@@ -61,7 +61,7 @@ async function seedS3Storage(request: APIRequestContext) {
       mount_path: `/${S3_STORAGE}`,
       // JSON field name is `config` and the type is json.RawMessage.
       config: cfg,
-      sync_mode: 'manual',
+      sync_mode: 'ondemand',
       sync_interval_s: 0,
       enabled: true,
       read_only: false,

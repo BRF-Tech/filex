@@ -117,3 +117,7 @@ NUL
 
 # The e2e runner keeps the server log here so CI can upload it.
 e2e/.artifacts/
+
+# A local development data directory (a dev server's store and a generated
+# secret). It holds credentials, so it must never be swept into a commit.
+/_livedata/

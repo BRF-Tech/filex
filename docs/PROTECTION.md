@@ -16,7 +16,7 @@ a share link**. Trash and versioning themselves are documented in
 
 ## Protection settings API
 
-Admin-only, session or admin-scoped token:
+Admin-only:
 
 | Method & path | Body | Notes |
 |---|---|---|
@@ -315,7 +315,7 @@ whole time. The priority rule still holds (the probe was picked up after
 floor a 16-second-per-file scanner leaves. Installing `clamav-daemon` is not
 cosmetic.
 
-All three queue drivers order by `priority`. Redis does it with a sorted set
+Every queue driver orders by `priority`. Redis does it with a sorted set
 scored on `priority DESC, arrival ASC`; measured on a real Redis with the same
 20 000-op backlog, an interactive op that had waited **20.0 s** behind 18 000
 sweep ops is now served **first, in 1 ms**. (Until v0.34.0 the Redis pending set
@@ -393,22 +393,21 @@ upload — quarantine into `.filex-trash/` plus a `file.infected` event.
 
 ## Version retention (`versions.keep_n`)
 
-By default filex trims each file's history to a compile-time 20 snapshots at
-snapshot time. `versions.keep_n` adds an operator-tunable **daily retention
+Every snapshot trims that file's history on the spot. With `versions.keep_n`
+unset it trims to a compile-time **20**; with `keep_n` set it trims to `keep_n`
+— above 20 as well as below. `keep_n` also turns on a **daily retention
 sweep**:
 
-- `0` (default): sweep disabled — behavior unchanged.
+- `0` (default): sweep disabled, and the inline trim keeps 20.
 - `N > 0`: once a day, every node that has version rows is trimmed to its
   newest `N` versions (rows + backing `.versions/…` objects, deletion of the
-  storage object being best-effort per object).
+  storage object being best-effort per object). The sweep is what applies a
+  lowered `N` to files nobody has written since.
 
 The sweep shares its schedule with the trash purge loop: daily tick, first
 tick one interval after boot, summary log line
 (`version retention complete keep_n=… nodes=… deleted=…`).
 
-> Note: because the snapshot path still trims to 20 inline, values **above 20**
-> currently have no additional effect — `keep_n` is practically a way to keep
-> *fewer* than 20 versions.
 
 ## The `file.infected` event
 

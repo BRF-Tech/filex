@@ -1,18 +1,60 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
-import { Menu as MenuIcon, LogOut, User as UserIcon, Search, ChevronDown } from 'lucide-vue-next';
+import { defineAsyncComponent, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import {
+  Menu as MenuIcon,
+  LogOut,
+  Search,
+  ChevronDown,
+  SlidersHorizontal,
+} from 'lucide-vue-next';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/vue';
 import { useI18n } from 'vue-i18n';
 
 import { useAuthStore } from '@/stores/auth';
-import LocaleSwitcher from './LocaleSwitcher.vue';
-import DarkModeToggle from './DarkModeToggle.vue';
+// gorunum:v3-shell — ⚠ no LocaleSwitcher and no DarkModeToggle here any more.
+// Both did a job the user-settings modal already does, one click away in the
+// account menu below (Preferences → Language, Preferences → Theme), and the
+// owner's rule for this wave is that no two controls may do the same job —
+// "aynı işlevi yapan iki buton olmaması lazım, context menü butonları
+// dışında". The explorer's own header cluster lost its copies in the same
+// pass; this was the last pair.
 import NotificationBell from './NotificationBell.vue';
 import QuotaWidget from './QuotaWidget.vue';
 
+// Async so the modal's markup, its strings and core's stylesheet stay out of
+// the panel's first paint — nothing here is needed until somebody opens it.
+const UserSettingsModal = defineAsyncComponent(() => import('./UserSettingsModal.vue'));
+
+const showSettings = ref(false);
+
 const emit = defineEmits<{ (e: 'toggleSidebar'): void }>();
 
+const route = useRoute();
 const router = useRouter();
+
+/**
+ * `?settings=1` opens the dialog — the deep link that replaced the retired
+ * /admin/profile page.
+ *
+ * ⚠ It has to exist, and it has to be on a route rather than a button: the
+ * server prints where to change the first-run password into the startup
+ * banner AND into `<data>/.first-run.txt`, a file that is already sitting on
+ * installs in the field saying `/admin/profile`. A dialog reachable only by
+ * clicking an avatar cannot be named in either place. The parameter is
+ * stripped the moment it is honoured, so a reload or a shared URL does not
+ * reopen it.
+ */
+watch(
+  () => route.query.settings,
+  (v) => {
+    if (v === undefined || v === null) return;
+    showSettings.value = true;
+    const { settings: _drop, ...rest } = route.query;
+    router.replace({ path: route.path, query: rest, hash: route.hash });
+  },
+  { immediate: true },
+);
 const auth = useAuthStore();
 const { t } = useI18n();
 
@@ -51,8 +93,6 @@ function gotoSearch() {
     <div class="ml-auto flex items-center gap-1.5">
       <QuotaWidget />
       <NotificationBell />
-      <DarkModeToggle />
-      <LocaleSwitcher />
 
       <Menu as="div" class="relative">
         <MenuButton
@@ -84,6 +124,11 @@ function gotoSearch() {
               {{ auth.user?.email }}
             </div>
             <div class="divider" />
+            <!-- The person's own settings, in one place — and the ONLY
+                 place. /admin/profile used to sit under this with the same
+                 fields; two screens editing one account is how one of them
+                 goes stale, so the page was retired and this is what the
+                 account menu offers. -->
             <MenuItem v-slot="{ active }">
               <button
                 type="button"
@@ -93,10 +138,11 @@ function gotoSearch() {
                     ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
                     : 'text-zinc-700 dark:text-zinc-200',
                 ]"
-                @click="router.push({ name: 'profile' })"
+                data-testid="account-user-settings"
+                @click="showSettings = true"
               >
-                <UserIcon class="h-4 w-4" />
-                {{ t('nav.profile') }}
+                <SlidersHorizontal class="h-4 w-4" />
+                {{ t('userSettings.open') }}
               </button>
             </MenuItem>
             <div class="divider" />
@@ -119,5 +165,7 @@ function gotoSearch() {
         </transition>
       </Menu>
     </div>
+
+    <UserSettingsModal v-if="showSettings" v-model="showSettings" />
   </header>
 </template>

@@ -5,6 +5,14 @@ Quota is **per user**. `users.quota_bytes` is the ceiling (`0` = unlimited) and
 `GET|POST /api/admin/users/{id}/quota` and the caller's own snapshot is
 `GET /api/files/quota/me` — see [Backend → Admin: quota](BACKEND.md#admin-quota).
 
+⚠ A per-user total is not "how full is this drive", and the two must not be
+printed under the same label. That second question has its own endpoint,
+`GET /api/files/quota/storages`: per-**storage** usage, filtered to the storages
+the caller may open, so a non-administrator's storage card shows a real figure
+instead of a per-user sum wearing a drive's name. It is a property of the drive
+— item-level grants do not narrow it, and a drive you cannot open is not
+reported at all. Also in [Backend → Admin: quota](BACKEND.md#admin-quota).
+
 This page is about the other half: **how `usage_bytes` gets its value**, which
 is the part that has to be exactly right or the ceiling is decoration.
 
@@ -24,7 +32,8 @@ from that identity:
 |---|---|---|
 | **Bytes land** (any write path) | owner stamped, size added | the account now stores them |
 | **Overwrite** | the **delta** is applied | one file on disk is one file's worth of quota |
-| **Overwrite by another user** | old owner `-=` old size, writer `+=` new size, owner changes | the bytes on the disk are the ones the writer just put there |
+| **Overwrite by another user** | the **owner** takes the delta; the owner does **not** change | an overwrite changes the bytes, not whose file it is. Who did the writing is recorded in `last_actor_id` and nowhere else |
+| **Overwrite of an unowned (SYSTEM) row** | the writer **adopts** it and its full size is added | "nobody's" is not "somebody else's" — and without adoption a scanner-found file could be filled with gigabytes no quota ever counted |
 | **Overwrite by no one** (storage scanner sees the file changed on the backend) | delta applied, owner **unchanged** | nobody uploaded it; the existing owner still holds it |
 | **Trash** (soft delete) | **nothing** | the bytes are still on the storage — deleting does not free space, emptying the trash does |
 | **Restore** | **nothing** | they never stopped counting |
@@ -39,21 +48,51 @@ under their ceiling by filling the trash.
 
 ### Who the bytes belong to
 
-Attribution is resolved in this order:
+Ownership is a fact on the row rather than a by-product of the last write.
+Migration `00038` split it in two: `nodes.owner_id` is **who put the thing
+here**, `nodes.last_actor_id` is **who touched it last**, and they move
+independently — an edit, an overwrite, a move or a restore changes the actor and
+leaves the owner alone. The listing's **Owner** column and the filter row's
+**People** chip read the first one; quota reads it too.
 
-1. an **explicit owner** on the request context (`quotastore.WithOwner`) — used
-   where the writer is not the account being billed:
+⚠ That changed a quota behaviour, deliberately. An overwrite by another user
+used to *move* the bytes to the writer; a file that already has an owner now
+keeps it, so user B can grow the total user A is billed for by overwriting A's
+file with a bigger one. B needs write access to A's file to do it, and the
+alternative — ownership silently changing hands every time somebody edits a
+shared document — makes the Owner column unable to answer the only question it
+is asked.
+
+The acting identity is resolved in this order:
+
+1. an **explicit identity** on the context — `quotastore.WithOwner` for a
+   surface with no logged-in user whose bytes still belong to someone, and
+   `WithActor` for work running long after the request that asked for it:
    - the **public file-drop link** bills the link's creator. The uploader is
      anonymous by design, but the files land in the creator's storage, so they
      are the creator's bytes. Without this the drop would be the one write
-     surface with no ceiling at all;
-   - the **async copy worker** bills the owner of the **source** file. It runs
-     on a server-lifetime context long after the request is gone.
-2. the **authenticated account** — every logged-in surface, including WebDAV
-   Basic auth and API-token writes (a token is bound to an account).
-3. **nobody**. A file the storage scanner discovered was not uploaded through
-   filex, so it stays unowned and uncounted — until a user overwrites it, at
-   which point it becomes theirs.
+     surface with no ceiling at all. The row is also marked `external_upload`
+     and gets **no actor**: writing "last changed by Ada" onto a file Ada has
+     never seen is a lie the UI cannot see through;
+   - an **upload ticket** bills its minter. The redeem carries no credential, so
+     the write runs as the person who minted the ticket: their grants decide,
+     their quota is charged, the file lands owned by them;
+   - the **async copy/move worker** acts as the person who asked, carried in
+     `pending_ops.actor_id`. A **copy** is a new file, so the copier owns it (a
+     queue row written before that column existed names nobody and falls back to
+     the source file's owner, rather than leaving a second set of real bytes
+     uncounted); a **move** is the same file, so it changes only the actor.
+2. the **authenticated account** — every logged-in surface, including WebDAV,
+   FTPS, SFTP, NFS and the S3 gateway (the protocol servers stamp the principal
+   on the connection context) and every API-token write (a token is bound to an
+   account).
+3. **nobody** — SYSTEM. A file the storage scanner discovered was not put there
+   by anyone, so it stays unowned and uncounted until a user writes it, at which
+   point they adopt it. ⚠ That holds however the scan was *started*: the admin
+   **Scan now** button hands its own request context to the walk, and until the
+   identity was stripped inside the scan, one click stamped every object in the
+   bucket as that admin's — and billed the lot to them. Finding a file is not
+   putting it there.
 
 ### Reconciling
 
@@ -87,11 +126,21 @@ write a log line naming the numbers involved. See [Metrics](METRICS.md).
 ## Where it is implemented
 
 All of it lives in **one** place: `internal/quotastore`, a `db.Store` decorator
-that overrides `CreateNode`, `UpdateNodeMeta` and `HardDeleteNode`. Every write
-surface — browser upload, staged upload, staged ingest, WebDAV `PUT`, the public
-drop, ShareX, the AI/REST API, save-text, archive extract, copy — reaches it
-through the store, so none of them carries quota code and a write path added
-next month is counted on the day it is written.
+over `CreateNode`, `UpdateNodeMeta` and `HardDeleteNode` (the three that move
+bytes) plus `MoveNode`, `RestoreNode` and `RestoreNodeAt` (which move no bytes
+and only record who acted). Every write surface — browser upload, staged upload,
+staged ingest, WebDAV `PUT`, the public drop, ShareX, the AI/REST API,
+save-text, archive extract, copy — reaches it through the store, so none of them
+carries quota code and a write path added next month is counted on the day it is
+written.
+
+That is also why the attribution itself lives here: the store is the one thing
+every write surface has in common, so `owner_id`, `last_actor_id` and
+`external_upload` are written in this package and nowhere else. `CreateNode`
+stamps them **onto the model before the INSERT** rather than as a follow-up
+`UPDATE` — an archive extract, a desktop sync or a scanner walk creates rows in
+bulk, and a second round trip per row is a cost this feature does not need to
+have.
 
 > ⚠ **History.** Until v0.20 `quota.AddUsage` and `Store.SetNodeOwner` had **no
 > callers anywhere in the tree**. `usage_bytes` was never incremented,

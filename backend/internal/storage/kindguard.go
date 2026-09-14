@@ -55,6 +55,17 @@ func EnsureDirTarget(ctx context.Context, d Driver, p string) error {
 	return nil
 }
 
+// Exists reports whether anything occupies p on d. Only a definite ErrNotFound
+// reads as free: any other Stat failure (a timeout, a 403, a 503) counts as
+// TAKEN, because every caller asks in order to avoid putting bytes on top of
+// something, and "I could not check" must not read as "nothing is there".
+func Exists(ctx context.Context, d Driver, p string) bool {
+	if _, err := d.Stat(ctx, p); err != nil {
+		return !errors.Is(err, ErrNotFound)
+	}
+	return true
+}
+
 // statForGuard returns the object at p, or (nil, nil) when the guard cannot
 // reach a verdict.
 //

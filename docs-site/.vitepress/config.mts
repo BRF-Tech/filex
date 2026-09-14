@@ -61,7 +61,7 @@ export default defineConfig({
 
   head: [
     ['link', { rel: 'icon', type: 'image/png', href: '/logo.png' }],
-    ['meta', { name: 'theme-color', content: '#3b82f6' }],
+    ['meta', { name: 'theme-color', content: '#2f6ceb' }],
     ['meta', { property: 'og:title', content: 'filex — self-hosted file manager' }],
     ['meta', { property: 'og:site_name', content: 'filex' }]
   ],

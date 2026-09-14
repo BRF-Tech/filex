@@ -98,7 +98,7 @@ visually. `pnpm test:debug` opens the inspector.
 | `tests/30-files.spec.ts`    | upload fixture, soft-delete to trash, restore from trash |
 | `tests/40-share.spec.ts`    | share token + public viewer with PIN |
 | `tests/50-search.spec.ts`   | admin search/index stats + rebuild button |
-| `tests/60-profile.spec.ts`  | locale switch, password change, TOTP enroll |
+| `tests/60-user-settings.spec.ts` | the user-settings dialog (`?settings=1`, which the retired `/admin/profile` address now forwards to): language switch, password change, TOTP enroll |
 | `tests/01-harness.spec.ts`  | the harness itself: no piped server log, isolated storages |
 | `tests/91-rounds-…`         | round 4-8 regressions; seeds its own fixture set locally, or point at a live one with `E2E_FIXTURE_STORAGE` |
 
@@ -138,10 +138,10 @@ environment variables:
 - Tests are **serialized** (`workers: 1`) because the backend is
   single-tenant and shares a single SQLite DB across the run.
 - `E2E_AUTOSTART=1` makes Playwright spin the Docker image up itself
-  via `webServer` config — used in CI.
+  via `webServer` config. Nothing in CI sets it.
 - Skips must be **measured and explained**, never a hedge. A skip whose
   condition can no longer become false is a deleted test with extra steps:
-  60-profile skipped its locale and password cases on every run for as long as
+  the old `60-profile` spec skipped its locale and password cases on every run for as long as
   anyone looked, because it matched `/old password/` against a field labelled
   "Current password". If you write `test.skip`, the reason string has to name
   the thing that is missing (`rsvg-convert is not on PATH here`) so a reader
@@ -154,6 +154,17 @@ environment variables:
 
 ## CI
 
-The `test:e2e` job in `.gitlab-ci.yml` (rules: optional,
-`allow_failure: true` initially) runs the suite against the freshly
-built Docker image on tag pushes.
+⚠ **No CI job runs this whole suite.** It gates a release because the release
+process runs it (`node e2e/run.mjs local`, `docs/CONTRIBUTING.md` → *Release
+process*), not because a pipeline does. What CI does run is one spec,
+`91-rounds-4-6-regression`, in two GitLab jobs:
+
+| Job | When | Blocking |
+|---|---|---|
+| `e2e:rounds-regression` | merge requests, the default branch, tags | yes |
+| `e2e:rounds-regression-browser` | the default branch and tags, in the Playwright image with a real Chromium | no (`allow_failure: true`) |
+
+Neither job starts a filex of its own: both point Playwright at whatever
+`E2E_BASE_URL` names, signing in with `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD`
+from the CI variables. The suite that runs against a throwaway build on every
+push is Cypress (`web/cypress/README.md`).

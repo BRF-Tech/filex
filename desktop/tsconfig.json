@@ -4,7 +4,23 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "outDir": "dist",
-    "rootDir": "src",
+    // tsc never emits for this package — scripts/build-main.mjs (esbuild) does,
+    // and `pnpm typecheck` passes --noEmit anyway. Saying so in the config is
+    // what lets allowImportingTsExtensions below be set at all.
+    "noEmit": true,
+    // ⚠ So src/notifications.ts can import the shared click resolver as
+    // `.../notificationTarget.ts`. The extension is not a style choice: the
+    // desktop TEST runner is plain node (`node --experimental-strip-types
+    // --test`), whose ESM resolver does NOT rewrite a `.js` specifier to a
+    // `.ts` file the way tsc and esbuild do — so a `.js` import typechecks and
+    // then fails to run under the tests.
+    "allowImportingTsExtensions": true,
+    // ⚠ No rootDir. src/notifications.ts imports the notification-click
+    // resolver from web/src/lib — deliberately, so the desktop app and the
+    // browser bell cannot disagree about where a click goes — and a rootDir of
+    // "src" makes tsc refuse a file above it (TS6059). Nothing is emitted by
+    // tsc here anyway: the build is esbuild (scripts/build-main.mjs) and this
+    // config exists for `pnpm typecheck`.
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

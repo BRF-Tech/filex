@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -133,6 +135,38 @@ func (s *Service) EmptyOlderThan(ctx context.Context, olderThanDays int, storage
 	return s.purgeOlderThan(ctx, cutoff, storageID)
 }
 
+// ConflictError reports that a restore's original path is occupied. Nothing
+// was moved and nothing was un-trashed. It unwraps to os.ErrExist, the same
+// error a rename collision maps to 409 with.
+type ConflictError struct {
+	// Path is the occupied storage-relative path.
+	Path string
+}
+
+func (e *ConflictError) Error() string { return fmt.Sprintf("trash: %q already exists", e.Path) }
+
+func (e *ConflictError) Unwrap() error { return os.ErrExist }
+
+// occupied reports whether something other than n already holds rel, and both
+// halves matter: the BYTES, which the restore's rename would replace (a file)
+// or merge into (a folder), and a LIVE row, which the live-only unique index on
+// (storage_id, path_hash) (migration 00032) would refuse a second of — after
+// the bytes had already left the trash key.
+//
+// ⚠ A row soft-deleted WHERE IT STOOD (the tombstone pass never retags) has
+// its own bytes at rel, if it has any. Those are not an occupant, so the byte
+// half is skipped for it; only a live row can take the name from under it.
+func (s *Service) occupied(ctx context.Context, drv storage.Driver, n *model.Node, rel string) bool {
+	hash := pathkey.Hash(n.StorageID, rel)
+	if row, err := s.Store.GetNodeByPath(ctx, n.StorageID, hash); err == nil && row != nil {
+		return true
+	}
+	if drv == nil || pathkey.Hash(n.StorageID, n.Path) == hash {
+		return false
+	}
+	return storage.Exists(ctx, drv, rel)
+}
+
 // Restore lifts the deleted_at flag on a node AND moves the underlying
 // file back from the `.filex-trash/` location to its original path
 // (saved in `storage_key` at delete time).
@@ -157,21 +191,40 @@ func (s *Service) Restore(ctx context.Context, nodeID int64) error {
 		// storage layout untouched.
 		return s.Store.RestoreNode(ctx, nodeID)
 	}
+	var drv storage.Driver
+	if s.Resolver != nil {
+		if d, err := s.Resolver(n.StorageID); err == nil {
+			drv = d
+		}
+	}
+	// ⚠ Before ANY byte moves, and as an error rather than a log line. The
+	// driver step below is a rename: it silently replaces a file at the
+	// original path, and for a folder the rename fails with ENOTEMPTY and
+	// TakeBack's per-object walk pours the trashed tree INTO the occupying
+	// folder, overwriting what shares a name. That step is best-effort by
+	// contract, so nothing after it can refuse — this is the only place the
+	// answer fits.
+	if s.occupied(ctx, drv, n, origPath) {
+		return &ConflictError{Path: origPath}
+	}
 	// Move the file back on disk. Best-effort: keep going even if the
 	// driver step fails (admin can recover via SQL + storage CLI).
-	if s.Resolver != nil {
-		if drv, err := s.Resolver(n.StorageID); err == nil {
-			// TakeBack mirrors Put: native rename when the driver has one,
-			// Copy+Delete when it does not, and a per-object walk for a folder
-			// an object store never had a real object for.
-			if err := TakeBack(ctx, drv, n.Path, origPath); err != nil &&
-				!errors.Is(err, storage.ErrNotFound) {
-				slog.Warn("trash restore move failed",
-					slog.Int64("node_id", n.ID),
-					slog.String("from", n.Path),
-					slog.String("to", origPath),
-					slog.String("err", err.Error()))
-			}
+	if drv != nil {
+		// TakeBack mirrors Put: native rename when the driver has one,
+		// Copy+Delete when it does not, and a per-object walk for a folder
+		// an object store never had a real object for.
+		//
+		// ⚠ ErrNotFound is logged too. The contract is best-effort — the
+		// row comes back whatever the driver did, and the documented fix
+		// is to find the object under `.filex-trash/` by hand — which only
+		// works if this line names the key. Filtering ErrNotFound out
+		// left the one restore that delivers nothing without a record.
+		if err := TakeBack(ctx, drv, n.Path, origPath); err != nil {
+			slog.Warn("trash restore move failed",
+				slog.Int64("node_id", n.ID),
+				slog.String("from", n.Path),
+				slog.String("to", origPath),
+				slog.String("err", err.Error()))
 		}
 	}
 	parent, err := s.Store.LookupParentByPath(ctx, n.StorageID, origPath)
@@ -181,6 +234,36 @@ func (s *Service) Restore(ctx context.Context, nodeID int64) error {
 		parent = nil
 	}
 	return s.Store.RestoreNodeAt(ctx, nodeID, parent, origPath)
+}
+
+// OriginalPath resolves the path a trashed row is JUDGED on: where the file
+// came from, which is the only path a grant, a confinement root or a restore
+// is ever written about. `known` is false when the row does not record one.
+//
+// `storage_key` holds it — SoftDeleteAndRetag writes it there while rewriting
+// `path` to the trash key. When the column is EMPTY (legacy rows; migration
+// 00033 deliberately left those alone) the row's own `path` is the original,
+// because nothing renamed it: the sync tombstone pass's SoftDeleteNode leaves
+// `path` exactly where the file lived.
+//
+// ⚠ The one shape with no answer is a resolved path that is ITSELF inside
+// `.filex-trash/` — the walk used to mint rows for the trash's own bytes, and
+// the tombstone pass soft-deleted them where they stood (see
+// sync.reconcileTrash). A trash key records the basename and nothing else, so
+// the folder the file came from is not recoverable from the row by anyone.
+// Every caller that authorises on the result must DENY when known is false:
+// the alternative asks about `.filex-trash/…`, a path no rule is written
+// about, and hands the answer to whoever holds a grant on the bin. The path is
+// still returned, for display.
+func OriginalPath(n *model.Node) (orig string, known bool) {
+	if n == nil {
+		return "", false
+	}
+	orig = n.StorageKey
+	if orig == "" {
+		orig = n.Path
+	}
+	return orig, orig != "" && !IsTrashPath(orig)
 }
 
 // List returns soft-deleted entries (the trash listing for the admin UI).
@@ -217,15 +300,14 @@ func (s *Service) List(ctx context.Context, storageID *int64, limit, offset int)
 			Mime:      n.Mime,
 		}
 		entry.StorageName = storageNames[n.StorageID]
-		// Prefer the original path stashed in storage_key; fall back
-		// to current `path` (legacy rows pre-`.filex-trash/`). Show the
-		// ORIGINAL basename, not the `<unix>-<rand>__name` trash-key the
-		// node was renamed to on soft-delete.
+		// The ORIGINAL path (OriginalPath's rule, legacy fallback included),
+		// and the ORIGINAL basename rather than the `<unix>-<rand>__name` key
+		// the node was renamed to on soft-delete. A row that records no
+		// original path keeps its trash key here — see OriginalPath for why
+		// the handler must not authorise on it.
+		entry.Path, _ = OriginalPath(n)
 		if n.StorageKey != "" {
-			entry.Path = n.StorageKey
 			entry.Name = path.Base(n.StorageKey)
-		} else {
-			entry.Path = n.Path
 		}
 		if n.DeletedAt != nil {
 			entry.DeletedAt = *n.DeletedAt

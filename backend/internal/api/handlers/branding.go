@@ -60,6 +60,12 @@ type BrandingConfig struct {
 	Accent        string `json:"accent"`
 	FooterText    string `json:"footer_text"`
 	HidePoweredBy bool   `json:"hide_powered_by"`
+	// CustomCSS is the operator stylesheet (settings key `ui.custom_css`,
+	// gorunum:v1 — custom_css.go). It rides this payload because /api/branding
+	// is the appearance fetch the SPA already makes at boot, pre-session; the
+	// browser injects it into <head>. Instance-wide, never tenant-overlaid,
+	// and deliberately unused by the server-rendered public-page chrome below.
+	CustomCSS string `json:"custom_css"`
 }
 
 // BrandingSource resolves the effective branding for a request host from the
@@ -127,6 +133,10 @@ func (b *BrandingSource) For(ctx context.Context, host string) BrandingConfig {
 		return BrandingConfig{}
 	}
 	cfg := brandingFromMap(m, "branding.")
+	// gorunum:v1 — THE READER for `ui.custom_css`. A settings field with no
+	// reader saves, reads back and does nothing (filex lesson #92); this is
+	// the line that makes the operator's stylesheet reach a browser.
+	cfg.CustomCSS = customCSSFromSettings(m)
 	if b.MultiTenant && host != "" {
 		if p, perr := b.Store.GetProviderByHost(ctx, host); perr == nil && p != nil && !p.IsSupertenant {
 			overlayBrandingFromMap(&cfg, m, fmt.Sprintf("tenant.%d.branding.", p.ID))

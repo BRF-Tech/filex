@@ -138,8 +138,11 @@ even under `policy: minor`. That relaxes once the project reaches `1.0`.
 
 Everything before step 6 is undone by doing nothing.
 
-> **Why the snapshot matters:** filex has no down migrations. Once a release has
-> migrated the schema there is no code path back — the backup *is* the rollback.
+> **Why the snapshot matters:** putting the old binary back does not put the old
+> schema back. A self-upgrade never rolls a migration down, and the down steps
+> that do exist (`filex migrate down`, one at a time) are destructive by
+> definition — `00038`'s drops the columns it added, with whatever was written
+> into them. For anything that already migrated, the backup *is* the rollback.
 
 ### Rolling back
 

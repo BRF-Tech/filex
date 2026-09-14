@@ -13,13 +13,30 @@ test.describe('Login flow', () => {
     await expect(page.getByText(/invalid|hata|incorrect|geçersiz|unauthorized/i)).toBeVisible({ timeout: 5_000 });
   });
 
-  test('accepts admin credentials and lands on dashboard', async ({ page }) => {
+  // ⚠ Home, not the dashboard: since 0.41.0 every account, administrators
+  // included, starts on Home unless it picked the dashboard in user settings
+  // (web/src/lib/startPage.ts).
+  test('accepts admin credentials and lands on Home', async ({ page }) => {
     await loginAs(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await expect(page).toHaveURL(/\/admin\/dashboard/);
-    // Dashboard always renders SOMETHING — either the empty-state CTA
-    // (fresh install) or a stat card. Just sanity-check we left the
-    // login page behind.
-    await expect(page.getByRole('heading').first()).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/home/);
+    // With a storage, Home is the explorer's Home view. On a fresh install —
+    // which is what this spec usually meets, being among the first to run —
+    // it is the "no storages yet" state, and that state has a layout of its
+    // own to hold.
+    const home = page.getByTestId('home-view');
+    const emptyActions = page.getByTestId('explore-empty-actions');
+    await expect(home.or(emptyActions)).toBeVisible({ timeout: 15_000 });
+    if (await emptyActions.isVisible()) {
+      // ⚠⚠ Measured 2026-09-14 on the first screen after a fresh install: the
+      // bell and the avatar sat in a 420px-tall framed column down the middle
+      // of the page, because their wrapper carries the explorer root's `.fe`
+      // class and inherited its box. A row of two controls is a few dozen
+      // pixels tall.
+      const box = await emptyActions.boundingBox();
+      expect(box, 'the empty state draws its bell and avatar').not.toBeNull();
+      expect(box!.height, 'bell + avatar are a row, not an explorer-sized column').toBeLessThan(80);
+      await expect(page.getByTestId('explore-account')).toBeVisible();
+    }
   });
 
   test('logout clears session', async ({ page }) => {

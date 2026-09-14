@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -331,6 +332,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
+	// Sessions are validated whatever login drivers are enabled — see
+	// withSessionAuthenticator (issue #24).
+	enabled = withSessionAuthenticator(enabled, store)
+
 	// API-token driver is always enabled (independent of cfg.Auth.Drivers)
 	// so AI agents / the work.example.com FilexClient / MCP clients can
 	// authenticate against /api/files and /api/ai with X-Filex-Token or a
@@ -343,6 +348,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		enabled = append(enabled, atDrv)
 	}
 	auth.SetEnabled(enabled)
+
+	// Recovery sign-in for the bootstrap administrator when password sign-in
+	// is otherwise off — see withRecoveryLogin.
+	var recoveryLogin bool
+	loginDrvs, recoveryLogin = withRecoveryLogin(loginDrvs, cfg.Auth.RecoveryLogin, store)
+	if recoveryLogin {
+		slog.Info("auth: password sign-in is off; the bootstrap administrator can still use it, for recovery",
+			slog.String("disable_with", "FILEX_AUTH_RECOVERY_LOGIN=false"))
+	}
 
 	// One LoginDriver reaches the login handler, so several become a chain.
 	// A single driver is passed through unwrapped: the chain would be a
@@ -389,6 +403,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	// Capability service.
 	caps := capability.New(store)
+	caps.SetRecoveryLogin(recoveryLogin)
 	caps.SetStaticInventory(
 		cfg.Auth.Drivers,
 		storage.Names(),
@@ -465,6 +480,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		pipelineCaps.Office = cap.Thumbs.Office
 		pipelineCaps.SVG = cap.Thumbs.SVG
 	}
+	logThumbCapabilities(pipelineCaps)
 	pipeline := thumb.New(store, cfg.Thumbs.CacheDir, pipelineCaps)
 	pipeline.AttachBody(bgBody)
 
@@ -1346,6 +1362,14 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("server: first run: %w", err)
 	}
+	// An installation from before the bootstrap administrator was recorded
+	// gets it recorded now, once — recovery sign-in needs to know who it is.
+	if admin, err := authlocal.EnsureBootstrapAdmin(ctx, s.store); err != nil {
+		slog.Warn("auth: could not record the bootstrap administrator",
+			slog.String("err", err.Error()))
+	} else if admin == nil {
+		slog.Warn("auth: recovery sign-in has nobody to let in: the administrator created at installation is gone, or no administrator holds a local password")
+	}
 	caps, _ := capability.New(s.store).Get(ctx)
 	storages, _ := s.store.ListStorages(ctx)
 	var capExt map[string]model.ExternalServiceState
@@ -1522,7 +1546,10 @@ func (s *Server) Start(ctx context.Context) error {
 			}
 			slog.Info("thumb backfill (boot): starting one-shot backfill")
 			res, err := s.BackfillThumbs(ctx, BackfillOptions{})
-			if err != nil {
+			// ⚠ A refused storage is not an abort: every other storage was
+			// processed, and saying "aborted" would hide that. The refusal
+			// itself is already logged per storage by BackfillThumbs.
+			if err != nil && !errors.Is(err, ErrNotIndexed) {
 				slog.Warn("thumb backfill (boot): aborted", slog.String("err", err.Error()))
 				return
 			}
@@ -1691,4 +1718,108 @@ func queueDriverFor(cfg config.Config) string {
 	default:
 		return "sqlite"
 	}
+}
+
+// logThumbCapabilities says, once at boot, which kinds of file this
+// installation can actually draw a preview for.
+//
+// ⚠ Why this is worth a line of log. Every rich generator shells out to
+// another program, and `internal/capability` turns the generator off when the
+// program is not on PATH. That is the right behaviour — a missing tool is a
+// disabled feature, not a crash — but until now it happened in COMPLETE
+// SILENCE, and the visible result is a grid of coloured rectangles with the
+// extension printed on them. That looks like a design choice rather than a
+// missing package, so nobody goes looking for the package.
+//
+// It matters because it is not a hypothetical configuration. filex ships
+// three ways and two of them arrive with none of these tools:
+//
+//	docker/Dockerfile       ffmpeg, ghostscript, poppler, libreoffice — all in
+//	docker/Dockerfile.slim  none, deliberately, and documented as such
+//	the bare binary         whatever the operator's machine happens to have
+//
+// Every other subsystem that can be switched off by its surroundings already
+// says so at boot — see the antivirus line a few screens up, which is the
+// shape this follows.
+func logThumbCapabilities(c thumb.Capabilities) {
+	missing := map[string]string{}
+	if !c.Video {
+		missing["video"] = "ffmpeg"
+	}
+	if !c.Audio {
+		missing["audio"] = "ffmpeg"
+	}
+	if !c.PDF {
+		missing["pdf"] = "ghostscript or poppler-utils (pdftoppm)"
+	}
+	if !c.Office {
+		missing["office"] = "libreoffice"
+	}
+	if !c.SVG {
+		missing["svg"] = "rsvg-convert"
+	}
+	if len(missing) == 0 {
+		slog.Info("thumbs: every preview kind available (image, video, audio, pdf, office, svg)")
+		return
+	}
+	kinds := make([]string, 0, len(missing))
+	for k := range missing {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	needs := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		needs = append(needs, k+" needs "+missing[k])
+	}
+	// WARN, not INFO: the reader is looking at a folder of coloured tiles and
+	// this is the sentence that explains it.
+	slog.Warn("thumbs: some previews will fall back to a plain type tile; the tool that draws them is not installed",
+		slog.String("unavailable", strings.Join(kinds, ",")),
+		slog.String("install", strings.Join(needs, "; ")),
+		slog.String("note", "the default docker image ships all of these; the slim image deliberately does not"))
+}
+
+// withRecoveryLogin appends the recovery sign-in driver when no enabled login
+// driver is `local` and recovery is on, and reports whether it did.
+//
+// The owner's ruling, 2026-09-14: on an installation that signs in through an
+// identity provider alone, the administrator created at installation must
+// still be able to sign in with a password — for recovery only. Without it an
+// unreachable IdP, an expired client secret or a broken realm locks out the
+// one person who can repair filex's side of it. local.RecoveryLogin accepts
+// that account and no other, so password sign-in stays off for everyone else.
+//
+// It goes LAST: a directory driver in the list judges its own accounts first.
+func withRecoveryLogin(loginDrvs []auth.LoginDriver, enabled bool, store db.Store) ([]auth.LoginDriver, bool) {
+	if !enabled {
+		return loginDrvs, false
+	}
+	for _, d := range loginDrvs {
+		if n, ok := d.(interface{ Name() string }); ok && (n.Name() == "local" || n.Name() == authlocal.RecoveryLoginName) {
+			return loginDrvs, false
+		}
+	}
+	return append(loginDrvs, authlocal.NewRecoveryLogin(store)), true
+}
+
+// withSessionAuthenticator makes sure something in the chain can turn a filex
+// session back into a user, whichever login drivers the operator enabled.
+//
+// ⚠⚠ Issue #24. Every sign-in — a password, an LDAP bind, an OIDC callback —
+// ends in the same sessions row and the same `filex_session` cookie, but only
+// the `local` driver's Authenticate reads that row: OIDC's and LDAP's answer
+// "unauthorized" by design. With `FILEX_AUTH_DRIVERS=oidc` the callback minted
+// a session the very next request refused, so nobody could sign in and every
+// open session died on the restart that applied the setting.
+//
+// The validator is not a LoginDriver, so it enables no password sign-in; and
+// when `local` is already in the list it adds nothing, because that driver
+// does the same lookup.
+func withSessionAuthenticator(enabled []auth.Driver, store db.Store) []auth.Driver {
+	for _, d := range enabled {
+		if d.Name() == "local" || d.Name() == authlocal.SessionAuthenticatorName {
+			return enabled
+		}
+	}
+	return append(enabled, authlocal.NewSessionAuthenticator(store))
 }

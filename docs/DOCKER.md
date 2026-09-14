@@ -6,6 +6,7 @@ that lets you assemble the stack you actually need.
 - [Images](#images)
 - [Compose profiles](#compose-profiles)
 - [Volume layout](#volume-layout)
+- [Which user the container runs as](#which-user-the-container-runs-as)
 - [Reverse proxies](#reverse-proxies)
 - [TLS termination](#tls-termination)
 - [Backups](#backups)
@@ -40,7 +41,10 @@ produced in pure Go.
 
 filex probes for each external tool at start and reports what it found on
 `/api/files/capabilities`, so on `slim` a video thumbnail is a disabled feature
-with a stated reason — not a crash and not a silent failure.
+with a stated reason — not a crash and not a silent failure. It also says so in
+the log on the way up, naming the kinds it cannot draw and the package each one
+wants, because the visible symptom is a grid of plain type tiles and that reads
+as a design choice rather than a missing program.
 
 > ⚠ **`slim` was not slim before v0.30.x.** The tag was built from the full
 > recipe, so this table promised ~40 MB while the registry served 511 MB. The
@@ -49,8 +53,8 @@ with a stated reason — not a crash and not a silent failure.
 ### Build locally
 
 ```bash
-docker build -t brftech/filex:full -f docker/Dockerfile .
-docker build -t brftech/filex:slim -f docker/Dockerfile.slim .
+docker build -t ghcr.io/brf-tech/filex:full -f docker/Dockerfile .
+docker build -t ghcr.io/brf-tech/filex:slim -f docker/Dockerfile.slim .
 ```
 
 Both Dockerfiles are multi-stage:
@@ -65,7 +69,7 @@ docker build \
   --build-arg VERSION=v0.1.0 \
   --build-arg COMMIT=$(git rev-parse --short HEAD) \
   --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  -t brftech/filex:full -f docker/Dockerfile .
+  -t ghcr.io/brf-tech/filex:full -f docker/Dockerfile .
 ```
 
 ---
@@ -155,7 +159,8 @@ have no safe default use `${VAR:?msg}` and will fail-fast if missing.
 ## Volume layout
 
 ```
-./data                       # FILEX_DATA_DIR — sqlite, search, thumbs, tmp
+./data                       # FILEX_DATA_DIR — sqlite, search.bleve, thumbs,
+                             #   cache, uploads, ssh, ftps, plugins, dav
 ./storage-local              # default 'local' driver root (mounted into /var/lib/filex/local-storage)
 filex-onlyoffice-data/       # docker volume (OnlyOffice docs)
 filex-onlyoffice-logs/       # docker volume
@@ -342,6 +347,11 @@ is encryption. (The `cert_file` / `key_file` pair that does exist belongs to the
 Stop-the-world isn't required if you back up the DB consistently:
 
 ### SQLite
+
+⚠ Check the filename against your own `FILEX_DB_DSN` first. filex's default is
+`<data-dir>/instance.sqlite`; the `docker-compose.yml` in this repo pins
+`FILEX_DB_DSN=/data/filex.db`, which is the name below.
+
 ```bash
 sqlite3 data/filex.db ".backup '/backup/filex-$(date -u +%Y-%m-%dT%H%M%SZ).db'"
 ```
@@ -367,7 +377,11 @@ the file bytes — the storage is the source of truth.
   this is the file's **only** copy.
 
 What's **not** safe to lose:
-- `data/instance.sqlite` (or your Postgres/MySQL DB) — auth, shares, audit, sync metadata.
+- `data/instance.sqlite` — or `data/filex.db` under this repo's compose, or your
+  Postgres/MySQL DB: auth, shares, audit, sync metadata.
+- `data/ssh/` + `data/ftps/` — SFTP host keys and the FTPS certificate.
+  Regenerating them is a changed host key, and every client that connected
+  before refuses the next connection until it is cleared.
 - `data/.first-run.txt` — initial admin password (only useful pre-first-login).
 
 ---
@@ -387,5 +401,9 @@ To pin a version:
 ```yaml
 services:
   filex:
-    image: brftech/filex:slim-v0.2.0
+    image: ghcr.io/brf-tech/filex:slim-vX.Y.Z
 ```
+
+⚠ The registry is `ghcr.io/brf-tech/filex`. A bare `brftech/filex` is a Docker
+Hub name nobody publishes, and a compose file that names it fails the pull with
+*"repository does not exist"*.

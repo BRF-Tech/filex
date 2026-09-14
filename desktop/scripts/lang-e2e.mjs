@@ -56,8 +56,16 @@ check('the shell is in Turkish', /Ayarlar/.test(shell) && /Dil/.test(shell),
 // because the component merges `{...attributes, ...config}` and the config
 // property set at mount time won. A property is not a screen.
 const listText = await win.evaluate(() => document.querySelector('filex-explorer')?.innerText ?? '');
+// ⚠ Anchored on the LISTING'S COLUMN HEADERS, not on a button. The first
+// version looked for "Yeni Klasör" / "Dosya adı" / "AD" — and gorunum:v1/v2
+// took all three away: the drive shell replaced the New Folder button with a
+// "+ Yeni" menu, and the headers stopped being upper-cased, so `AD\b` no longer
+// matched "Ad". The check then reported "the file list is not in Turkish"
+// against a file list that was entirely in Turkish (measured 2026-09-12).
+// Owner and Size are drawn by every profile, in every layout, and there is no
+// listing without them.
 check('the file list itself is in Turkish, not just its locale property',
-  /Yeni Klasör|Dosya adı|AD\b/.test(listText),
+  /Yeni Klasör|Dosya adı|\bSahibi\b|\bBoyut\b/.test(listText),
   listText.split(/\n/).filter(Boolean).slice(0, 4).join(' · ') || 'boş');
 // …and it changed in place: a language switch that throws you back to the root
 // folder is its own bug.

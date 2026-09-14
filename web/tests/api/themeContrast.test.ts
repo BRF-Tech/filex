@@ -47,6 +47,24 @@ const RULES: Array<[string, string, number]> = [
   ['--fe-text', '--fe-bg-elev', 4.5],
   ['--fe-text', '--fe-bg-hover', 4.5],
   ['--fe-text', '--fe-bg-selected', 4.5],
+  // The soft primary is a SURFACE — the active sidebar row, the active scope
+  // tab, the active segment of a segmented control, a filter chip that is set.
+  // TWO different inks are painted on it and both are pinned, because a rule
+  // that measures a pairing the product does not draw measures nothing:
+  //
+  //   `--fe-text` — the selection bar (`.fe-selbar`) wears the tint as chrome
+  //     and keeps ordinary text on it. 9.44:1 (Terminal dark) to 17.85:1.
+  //   `--fe-primary-ink` — everything else. It is a token of its own because
+  //     `--fe-primary` cannot do the job: measured, primary-on-tint is 3.97:1
+  //     in the stock light palette, and no tint rescues it (the stock primary
+  //     is only 4.70:1 on white). `--fe-primary-hover` is the value in most
+  //     palettes, but NOT a substitute for the token: Night, Forest and Lilac
+  //     darken their hover in dark mode — toward the tint rather than away
+  //     from it — and Night dark measures 3.78:1 that way, a regression on
+  //     what it has today. Each palette names the ink that clears the bar on
+  //     its own tint; the worst of the sixteen is Night dark at 5.09:1.
+  ['--fe-text', '--fe-primary-soft', 4.5],
+  ['--fe-primary-ink', '--fe-primary-soft', 4.5],
   ['--fe-text-on-primary', '--fe-primary', 4.5],
   ['--fe-primary', '--fe-bg', 3],
   ['--fe-danger', '--fe-bg', 3],

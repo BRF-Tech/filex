@@ -48,6 +48,17 @@ export interface PendingOpDto {
   created_at: string | null;
 }
 
+/** Answer to `?action=newfile` — where the new document actually landed. */
+export interface NewFileResponse {
+  /** Adapter-qualified path, ready to hand to the viewer. */
+  path: string;
+  /** Final basename, which may have gained the extension server-side. */
+  name: string;
+  ext: string;
+  size: number;
+  mime: string;
+}
+
 export interface ManagerResponse {
   adapter: string;
   storages: string[];
@@ -504,6 +515,27 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * Create an empty document of a known type in `path`.
+   *
+   * `type` is an extension from `capabilities.newdoc_types` — the registry the
+   * SERVER compiled in, not a list the client keeps. That matters for the
+   * office formats: a .docx is a ZIP of XML parts, so "create an empty file"
+   * has to be answered by whoever holds the template bytes, and the client
+   * cannot manufacture one.
+   *
+   * `name` may or may not already carry the extension; the server appends it
+   * when it is missing. Throws on a name collision (409 NAME_TAKEN) — the
+   * dialog warns first, but this is the check.
+   */
+  async function newFile(path: string, name: string, type: string): Promise<NewFileResponse> {
+    return jsonFetch<NewFileResponse>(managerUrl('newfile'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, name, type }),
+    });
+  }
+
   async function rename(path: string, item: string, name: string): Promise<ManagerResponse> {
     return jsonFetch<ManagerResponse>(managerUrl('rename'), {
       method: 'POST',
@@ -577,11 +609,18 @@ export function useFileApi(config: ExplorerConfig) {
   /**
    * Restore soft-deleted nodes by their node id. The filex backend restores
    * one node per call (`POST {node_id}`), so we fan out and tally successes.
+   *
+   * `taken` names the entries the server refused because something already
+   * holds their original path (409 `EXISTS`). That refusal is the server
+   * protecting the file that holds the name — a restore used to overwrite it —
+   * so it is reported by name rather than folded into "0 items restored",
+   * which would read as if nothing had been tried.
    */
-  async function restoreIds(ids: number[]): Promise<{ restored: number }> {
+  async function restoreIds(ids: number[]): Promise<{ restored: number; taken: string[] }> {
     const url = endpoints.trashRestore;
     if (!url) throw new Error('trashRestore endpoint not configured');
     let restored = 0;
+    const taken: string[] = [];
     for (const id of ids) {
       try {
         await jsonFetch(url, {
@@ -590,11 +629,20 @@ export function useFileApi(config: ExplorerConfig) {
           body: JSON.stringify({ node_id: id }),
         });
         restored++;
-      } catch {
-        /* skip individual failures; report the count that succeeded */
+      } catch (err) {
+        const e = err as { status?: number; detail?: string };
+        if (e.status === 409) {
+          try {
+            const body = JSON.parse(e.detail ?? '') as { code?: string; name?: string };
+            if (body.code === 'EXISTS') taken.push(body.name || String(id));
+          } catch {
+            /* a 409 without the envelope is counted as a plain failure */
+          }
+        }
+        /* any other failure: skip it, report the count that succeeded */
       }
     }
-    return { restored };
+    return { restored, taken };
   }
 
   /**
@@ -934,6 +982,7 @@ export function useFileApi(config: ExplorerConfig) {
     quotaMe /* surucu:d1 */,
     subfolders,
     newFolder,
+    newFile,
     rename,
     move,
     copy,

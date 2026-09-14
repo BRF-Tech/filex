@@ -4,9 +4,10 @@
 //
 // A token is a 64-char hex string handed out once at create time
 // (POST /api/admin/ai-tokens). Only its sha256 hash is stored in the
-// api_tokens table. Every token is bound to a user, so a request
-// authenticated by this driver inherits that user's role and flows through
-// the same auth.Middleware / RequireAdmin checks as a cookie session.
+// api_tokens table. Every token is bound to a user, and a request
+// authenticated by this driver carries BOTH the user and the token through
+// auth.Middleware (see AuthenticateToken), so the gates downstream — RequireAdmin
+// among them — judge it by what the token grants, not by the account's role.
 //
 // Credentials are read from either header:
 //
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -73,13 +75,20 @@ var ValidScopes = []string{ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAd
 
 // IsValidScope reports whether s is a known issuable scope — a verb scope or a
 // well-formed `root:<adapter>://<rel>` confinement scope.
+//
+// ⚠ "Well-formed" is decided by the confinement parser itself, not by a
+// non-empty check. A root scope it cannot read (`root:projects`, no storage
+// named) used to be accepted here and then ignored by every surface that
+// enforces confinement, so the operator believed they had issued a folder
+// credential and had in fact issued an unconfined one.
 func IsValidScope(s string) bool {
 	switch s {
 	case ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAdmin:
 		return true
 	}
 	if strings.HasPrefix(s, ScopeRootPrefix) {
-		return strings.TrimSpace(strings.TrimPrefix(s, ScopeRootPrefix)) != ""
+		_, ok := confine.ParseRoot(strings.TrimPrefix(s, ScopeRootPrefix))
+		return ok
 	}
 	return false
 }
@@ -111,31 +120,41 @@ func (d *Driver) Capabilities() auth.Capabilities {
 // Authenticate resolves a bearer/X-Filex-Token credential to its bound
 // user. Returns auth.ErrUnauthorized (so the middleware falls through to
 // the next driver) when no credential is present or it doesn't validate.
+//
+// ⚠ The user alone is not the whole answer for a token: see AuthenticateToken,
+// which is what auth.Middleware actually calls.
 func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
+	u, _, err := d.AuthenticateToken(r)
+	return u, err
+}
+
+// AuthenticateToken implements auth.TokenAuthenticator: it returns the bound
+// user AND the matched token, so the chain attaches the token to the request
+// context and every scope and confinement check downstream can see it.
+//
+// ⚠ Returning only the user was the defect: a request authenticated here then
+// looked, to every gate after it, like the account's own session, and was
+// judged by the account's role instead of by the token's scopes.
+func (d *Driver) AuthenticateToken(r *http.Request) (*model.User, *model.APIToken, error) {
 	raw := ExtractToken(r)
 	if raw == "" {
-		return nil, auth.ErrUnauthorized
+		return nil, nil, auth.ErrUnauthorized
 	}
 	ctx := r.Context()
 	tok, err := d.store.GetAPITokenByHash(ctx, HashToken(raw))
-	if err != nil {
-		return nil, auth.ErrUnauthorized
+	if err != nil || tok == nil {
+		return nil, nil, auth.ErrUnauthorized
 	}
 	if tok.ExpiresAt != nil && tok.ExpiresAt.Before(time.Now()) {
-		return nil, auth.ErrUnauthorized
+		return nil, nil, auth.ErrUnauthorized
 	}
 	user, err := d.store.GetUser(ctx, tok.UserID)
-	if err != nil {
-		return nil, auth.ErrUnauthorized
+	if err != nil || user == nil {
+		return nil, nil, auth.ErrUnauthorized
 	}
 	// Best-effort usage stamp — never fail the request on a write error.
 	_ = d.store.TouchAPIToken(ctx, tok.ID)
-	// This driver proves identity for the shared auth.Middleware chain, so
-	// existing /api/files routes also accept AI tokens. Per-token scope
-	// enforcement lives in the dedicated AI middleware
-	// (auth.APITokenMiddleware), which additionally attaches the matched
-	// token to the request context.
-	return user, nil
+	return user, tok, nil
 }
 
 // ExtractToken pulls the raw token from the X-Filex-Token header first,

@@ -60,7 +60,9 @@ export default defineConfig({
         scope: '/',
         display: 'standalone',
         orientation: 'any',
-        theme_color: '#4f46e5',
+        // Product blue — in step with index.html's theme-color meta,
+        // web/public/favicon.svg, web/public/icons/icon.svg and LogoMark.vue.
+        theme_color: '#2f6ceb',
         background_color: '#0a0a0a',
         icons: [
           // A full-bleed SVG doubles as the "any" and "maskable" icon; Chrome
@@ -101,11 +103,27 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
       },
       devOptions: {
-        // Enable the SW in `vite dev` so the install/update flow can be
-        // exercised locally without a full production build. Can be switched
-        // off (FILEX_DISABLE_DEV_SW=1) when a test runner's own harness frames
-        // conflict with an active service worker.
-        enabled: process.env.FILEX_DISABLE_DEV_SW !== '1',
+        // ⚠⚠ OFF by default in `vite dev`, and the default is the decision.
+        //
+        // The service worker precaches a manifest of BUILT, hashed asset names.
+        // The dev server serves unhashed module URLs instead (`/admin/src/…`,
+        // `/admin/node_modules/.vite/deps/…`, `?t=<mtime>` query strings), so
+        // every single request missed the precache and the worker logged two
+        // lines about it — roughly a hundred lines of "Precaching did not find
+        // a match" / "No route found for" before the app had even painted,
+        // which buries any real error in the console. It also asked for
+        // `/admin/admin/favicon.svg`: the manifest path is relative to the
+        // build's outDir and the worker resolves it against its own `/admin/`
+        // scope, doubling the base.
+        //
+        // ⚠ Worse than the noise: `navigateFallback` lets it answer a
+        // NAVIGATION from a precache that does not match the running dev
+        // build, which is a blank page that looks like an application bug.
+        //
+        // Set FILEX_DEV_SW=1 to turn it on when you are actually working on
+        // the install/update flow. Production is untouched — the block above
+        // is what ships.
+        enabled: process.env.FILEX_DEV_SW === '1',
         type: 'module',
         navigateFallback: '/admin/index.html',
       },
@@ -137,6 +155,14 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:5212',
       '/embed.js': 'http://localhost:5212',
+      // ⚠ Not under /api, and it has to be here or the feature cannot be
+      // exercised in dev at all. `/z/<ticket>` is where a multi-selection
+      // download streams from: the browser NAVIGATES to it (a fetch would
+      // buffer the whole archive in the tab), so it carries no Authorization
+      // header and cannot live behind the /api prefix. Unproxied it 404s
+      // against the dev server itself, which looks like a broken feature
+      // rather than a missing line — measured 2026-09-13.
+      '/z': 'http://localhost:5212',
     },
   },
   preview: {

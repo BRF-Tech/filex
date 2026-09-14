@@ -4,85 +4,69 @@
 // iOS (manual add-to-home-screen), or a new service-worker build is waiting.
 //
 // ⚠ web/ only — never rendered inside the embedded <filex-explorer> hosts.
-import { computed } from 'vue';
-import { useInstallPrompt } from '@/composables/useInstallPrompt';
+//
+// ⚠⚠ TWO SHAPES, ONE MESSAGE (2026-09-13, the owner's ruling: "küçültüp köşeye
+// alalım, kapanınca ack olduğu için tekrar gösterilmesin, ama ayarlar altında
+// da yeri olsun"). The offer used to be ONE shape — a 448×285 card fixed to
+// the bottom centre — and it wore that shape everywhere. On the sign-in page
+// that is right: there is nothing else on the screen, the page reserves room
+// for it, and it is the moment the desktop app is genuinely worth advertising.
+// Inside the app it was the loudest object on Home, on every folder, on
+// Starred, Shared and Trash, standing on the file listing until somebody
+// closed it. Measured on Home at 1440×900 before this change: the card covered
+// x 496-944, y 600-884 — dead centre of the listing.
+//
+// So the offer is now:
+//
+//   · SIGN-IN PAGE  → the full card, bottom centre, unchanged. It publishes
+//                     its measured height (see below) and Login.vue reserves
+//                     exactly that, which is what keeps the submit button
+//                     clickable (cypress/e2e/91-install-banner-login.cy.ts).
+//   · EVERYWHERE ELSE → a collapsed chip in the bottom-right corner that still
+//                     SAYS WHAT IT IS, and opens into the same card when it is
+//                     clicked. A bare icon would have been smaller still and
+//                     would have been a removed feature with a decoration left
+//                     behind.
+//
+// It is one piece of markup wearing two shells, not two components: the head,
+// the download rows, the iOS help and the install button are written once, so
+// the corner form cannot drift away from the card the sign-in page shows.
+//
+// ⚠ The service-worker UPDATE bar is NOT part of this and deliberately keeps
+// its full-width bottom band — see the template.
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { useDesktopDownloads, useInstallPrompt } from '@/composables/useInstallPrompt';
+
+// gorunum:v1 — the banner is painted from the product's palette (`--fe-*`),
+// and this is the component that has to carry the import: it is mounted at the
+// app root, so it renders over routes that pull in no explorer chunk of their
+// own and would otherwise have no token declared at all. Measured before this
+// change on /admin/login: `getPropertyValue('--fe-bg')` was the empty string.
+// ⚠ It lands in the entry CSS, so every route now loads the core stylesheet
+// (index CSS 48 kB -> 209 kB raw, ~23 kB gzip, and the separate style-*.css
+// chunk the explorer routes used to fetch is gone). If the shell ever imports
+// it globally from main.ts, this import becomes redundant rather than extra.
+import '@brftech/filex-core/style.css';
 
 // Public-asset base ('/admin/' today). Used for the icon below — see the
 // comment on the <img> for why it must not be a static src.
 const baseUrl = import.meta.env.BASE_URL;
 
-// Where the installers live. Kept as a single constant so the banner and the
-// docs cannot drift apart.
-const RELEASES = 'https://github.com/BRF-Tech/filex/releases/latest';
-// ⚠ Asset names carry NO version, on purpose: `releases/latest/download/<name>`
-// only resolves for a fixed filename, so a versioned one would send every
-// visitor to a 404 the moment a new release went out.
-const DL = `${RELEASES}/download`;
-
-/** What this visitor can actually download, said plainly.
- *
- *  ⚠ "Download for Windows" on its own is the complaint this replaces: it did
- *  not say whether it was an installer or a portable build, and the link went
- *  to a release page listing ten files. Each entry below names the file, what
- *  it does to the machine, and roughly how big it is. */
-const desktopDownloads = computed<{ label: string; hint: string; href: string }[]>(() => {
-  if (desktopPlatform.value === 'windows') {
-    return [
-      {
-        label: 'Windows installer (.exe)',
-        hint: 'Installs filex and adds it to the Start menu, and updates itself · ~92 MB',
-        href: `${DL}/filex-desktop-x64.exe`,
-      },
-      // ⚠ A machine you may not install software on is a real case, not an
-      // edge one — and it was the only platform with no answer for it: the
-      // AppImage and the mac .zip already run unextracted. The hint has to say
-      // what it costs, because "portable" reads as strictly better until you
-      // find out it never updates.
-      {
-        label: 'Windows portable (.exe)',
-        hint: 'Runs from anywhere — a USB stick, Downloads — and keeps its files beside itself. Does not update itself · ~92 MB',
-        href: `${DL}/filex-desktop-portable-x64.exe`,
-      },
-    ];
-  }
-  if (desktopPlatform.value === 'linux') {
-    return [
-      {
-        label: 'Linux (.AppImage)',
-        hint: 'Portable — no installation, just make it executable and run · ~140 MB',
-        href: `${DL}/filex-desktop-x86_64.AppImage`,
-      },
-      {
-        label: 'Debian / Ubuntu (.deb)',
-        hint: 'Installs system-wide with apt · ~99 MB',
-        href: `${DL}/filex-desktop-amd64.deb`,
-      },
-    ];
-  }
-  // ⚠ Apple Silicon only, and unsigned: the CI runner's arch is the artifact's
-  // arch (macos-14 = arm64), and there is no Developer ID yet, so the first
-  // launch is a Gatekeeper "Open Anyway" — the hint says so up front instead
-  // of letting the user find out from a dialog that reads like a virus alert.
-  return [
-    {
-      label: 'macOS (.dmg, Apple Silicon)',
-      hint: 'Unsigned — first launch: System Settings → Privacy & Security → Open Anyway',
-      href: `${DL}/filex-desktop-arm64.dmg`,
-    },
-  ];
-});
-
-const desktopLabel = computed(() =>
-  desktopPlatform.value === 'windows'
-    ? 'Windows'
-    : desktopPlatform.value === 'linux'
-      ? 'Linux'
-      : 'macOS',
-);
+// ⚠ The download rows were hardcoded English while their own card title came
+// from the catalogue, so a Turkish visitor met a Turkish heading over two
+// English rows (2026-09-13, the owner saw it). They now come from the
+// catalogue too — and from the SAME place the settings pane reads them
+// (`useDesktopDownloads`), so the two surfaces cannot disagree about which
+// file to hand somebody.
+const {
+  platformLabel: desktopLabel,
+  downloads: desktopDownloads,
+  releasesUrl: RELEASES,
+} = useDesktopDownloads();
 
 const {
   canPromptInstall,
-  desktopPlatform,
   showDesktopDownload,
   showIOSInstructions,
   shouldOfferInstall,
@@ -92,83 +76,200 @@ const {
   reloadForUpdate,
 } = useInstallPrompt();
 
+/* WHICH SHAPE — the full card, or the corner chip.
+ *
+ * ⚠ Keyed on the sign-in ROUTE, and it has to be: `meta.public` and
+ * `meta.layout: 'blank'` cannot tell login apart from /explore, which carries
+ * exactly the same pair and IS the file listing. `login` is also the one route
+ * name the router's own guard already depends on in three places, so it is not
+ * a name that moves quietly.
+ *
+ * ⚠ The fallback is the QUIET shape. If the route is ever renamed, or this
+ * component is ever mounted outside a router, the offer degrades to a corner
+ * chip everywhere rather than to a card over every listing — the cheaper of
+ * the two failures by a wide margin. */
+const route = useRoute();
+const loud = computed(() => route?.name === 'login');
+
+/** Corner chip: closed until it is asked to open. Never persisted — this is
+ *  "I am looking at it now", not a preference. */
+const open = ref(false);
+/** The body (downloads / iOS help / install button) is on screen. */
+const expanded = computed(() => loud.value || open.value);
+
+function toggle() {
+  if (!loud.value) open.value = !open.value;
+}
+/** The head's accessible name in the corner shell — it is a disclosure button
+ *  there, and a disclosure button that does not say which way it goes is a
+ *  shape with no name. On the sign-in page the head is not a control at all. */
+const toggleLabel = computed(() =>
+  loud.value ? undefined : open.value ? 'install.collapse' : 'install.expand',
+);
+
 async function onInstall() {
   const outcome = await promptInstall();
   // If the user accepted, the appinstalled handler clears the offer; on
   // dismiss we hide the banner so it isn't immediately re-shown.
   if (outcome === 'dismissed') dismiss();
 }
+
+/* How much of the bottom of the viewport this banner is standing on, published
+ * as `--filex-install-banner-h` on <html> so a page underneath can keep its own
+ * content out from under it.
+ *
+ * ⚠ Not a design nicety — a measured defect. The banner is fixed to the bottom
+ * centre and the sign-in card's submit button is in that same place: measured
+ * at 1440x900, the banner's box started at y=600 and the submit's centre was at
+ * y=600, so `document.elementFromPoint` over the button returned the banner.
+ * The sign-in page used to reserve a HARDCODED 224px for it, which was the
+ * banner's height on the day that number was written; it is 301px today (two
+ * download rows), and it changes again with the platform, the language and the
+ * width. A page that reserves the real number is right at every size; one that
+ * reserves a constant is right on one day.
+ *
+ * Reported for the wrapper, so it includes the gap the banner leaves at the
+ * bottom edge, and cleared when nothing is on screen — the page then gets a
+ * plain 0 and lays out as if the banner did not exist.
+ *
+ * ⚠⚠ WHAT COUNTS is a full-width BOTTOM BAND: the update bar, and the install
+ * card in its sign-in shape. The corner chip does NOT, and that is the whole
+ * contract rather than an oversight — the variable answers "how much of the
+ * bottom edge is unusable", and a 44px chip tucked into one corner leaves the
+ * bottom edge usable, exactly as the toast stack in that same corner does. If
+ * the chip published its height, every page that reserves room would leave a
+ * blank strip across its full width for something standing in one corner.
+ * The chip reads the variable INSTEAD, and lifts itself above the update bar
+ * when one is showing. */
+const BANNER_H_VAR = '--filex-install-banner-h';
+const updateEl = ref<HTMLElement | null>(null);
+const installEl = ref<HTMLElement | null>(null);
+let ro: ResizeObserver | null = null;
+
+const BANNER_CLASS = 'filex-install-banner';
+
+function publishBannerHeight() {
+  if (typeof document === 'undefined') return;
+  const band = loud.value ? (installEl.value?.offsetHeight ?? 0) : 0;
+  const h = Math.max(updateEl.value?.offsetHeight ?? 0, band);
+  document.documentElement.style.setProperty(BANNER_H_VAR, `${h}px`);
+  // The height alone cannot be asked "are you there?" in a media query, and a
+  // page that has to give something up to make room needs to know whether
+  // there is anything to make room for.
+  document.documentElement.classList.toggle(BANNER_CLASS, h > 0);
+}
+
+watch(
+  [updateEl, installEl, loud],
+  ([u, i]) => {
+    ro?.disconnect();
+    if (typeof ResizeObserver !== 'undefined') {
+      ro ??= new ResizeObserver(() => publishBannerHeight());
+      if (u) ro.observe(u as HTMLElement);
+      if (i) ro.observe(i as HTMLElement);
+    }
+    publishBannerHeight();
+  },
+  { flush: 'post', immediate: true },
+);
+
+onBeforeUnmount(() => {
+  ro?.disconnect();
+  ro = null;
+  if (typeof document !== 'undefined') {
+    document.documentElement.style.removeProperty(BANNER_H_VAR);
+    document.documentElement.classList.remove(BANNER_CLASS);
+  }
+});
 </script>
 
 <template>
-  <!-- Service-worker update prompt (registerType: 'prompt'). Sits above the
-       install banner; both are fixed to the bottom of the viewport. -->
+  <!-- Service-worker update prompt (registerType: 'prompt').
+       ⚠⚠ NOT given the corner treatment, on purpose. Everything else this
+       component says is an OFFER the person may ignore forever; this one is
+       the only thing here they actually have to act on — the bundle in their
+       tab is stale until they press Reload — and it is transient, gone the
+       moment they do. Shrinking the advert and shrinking the thing that says
+       "you are running old code" are not the same decision. It keeps the
+       full-width band, keeps z-50 above everything, and keeps publishing its
+       height so a page can stay clear of it. -->
   <div
     v-if="needRefresh"
+    ref="updateEl"
     class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-4"
     data-testid="pwa-update-banner"
   >
-    <div
-      class="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-xl border border-indigo-500/30 bg-white p-3 shadow-lg dark:bg-zinc-900"
-    >
-      <span class="flex-1 text-sm text-zinc-700 dark:text-zinc-200">
+    <div class="pointer-events-auto flex w-full max-w-md items-center gap-3 ip-card ip-card--update">
+      <span class="flex-1 ip-text">
         {{ $t('install.updateAvailable') }}
       </span>
-      <button
-        type="button"
-        class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-        data-testid="pwa-update-reload"
-        @click="reloadForUpdate"
-      >
+      <button type="button" class="ip-btn" data-testid="pwa-update-reload" @click="reloadForUpdate">
         {{ $t('install.reload') }}
       </button>
     </div>
   </div>
 
-  <!-- Install offer: native prompt (Chrome/Edge/Android) or iOS instructions. -->
+  <!-- Install offer: the desktop app (PC), the native prompt (Chrome/Edge/
+       Android) or the iOS instructions. One markup, two shells — see the
+       header for why. -->
   <div
     v-if="shouldOfferInstall"
-    class="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4"
+    ref="installEl"
+    :class="['ip-dock', loud ? 'ip-dock--band' : 'ip-dock--corner']"
     data-testid="pwa-install-banner"
   >
     <div
-      class="pointer-events-auto w-full max-w-md rounded-xl border border-zinc-200 bg-white p-4 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+      class="ip-card ip-card--install"
+      :class="{ 'ip-card--chip': !expanded }"
+      data-testid="pwa-install-card"
     >
-      <div class="flex items-start gap-3">
-        <!-- Bound, not a static src: Vue's SFC compiler turns a literal `src`
-             into a module import, and this file lives in public/ so Rollup
-             cannot resolve it — the production build fails outright. Binding
-             keeps it a plain runtime URL, and BASE_URL keeps it correct if the
-             app's base ever moves off /admin/. -->
-        <img
-          :src="`${baseUrl}icons/icon.svg`"
-          alt=""
-          class="h-10 w-10 shrink-0 rounded-lg"
-        />
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            {{ showDesktopDownload ? $t('install.desktopTitle') : $t('install.title') }}
-          </p>
-          <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            {{
-              showDesktopDownload
-                ? $t('install.desktopSubtitle', { platform: desktopLabel })
-                : $t('install.subtitle')
-            }}
-          </p>
-
-          <!-- iOS: no programmatic prompt, walk the user through Share sheet. -->
-          <p
-            v-if="showIOSInstructions"
-            class="mt-2 text-xs text-zinc-600 dark:text-zinc-300"
-            data-testid="pwa-ios-instructions"
+      <div class="ip-head">
+        <!-- On the sign-in page there is nothing to toggle, so the head is not
+             a control. In the corner the WHOLE head opens it: a 16px caret is
+             not a target on a phone. -->
+        <component
+          :is="loud ? 'div' : 'button'"
+          :type="loud ? undefined : 'button'"
+          class="ip-head__main"
+          :class="{ 'ip-head__main--static': loud }"
+          :aria-expanded="loud ? undefined : open"
+          :aria-controls="loud ? undefined : 'filex-install-body'"
+          :aria-label="toggleLabel ? $t(toggleLabel) : undefined"
+          :data-testid="loud ? undefined : 'pwa-install-toggle'"
+          @click="toggle"
+        >
+          <!-- Bound, not a static src: Vue's SFC compiler turns a literal `src`
+               into a module import, and this file lives in public/ so Rollup
+               cannot resolve it — the production build fails outright. Binding
+               keeps it a plain runtime URL, and BASE_URL keeps it correct if the
+               app's base ever moves off /admin/. -->
+          <img
+            :src="`${baseUrl}icons/icon.svg`"
+            alt=""
+            class="ip-mark"
+          />
+          <span class="ip-head__text">
+            <span class="ip-title">
+              {{ showDesktopDownload ? $t('install.desktopTitle') : $t('install.title') }}
+            </span>
+            <!-- ⚠ The subtitle is what the chip gives up, and it is the right
+                 thing to give up: the title alone still names the offer, which
+                 is the test a corner treatment has to pass. -->
+            <span v-if="expanded" class="ip-muted">
+              {{
+                showDesktopDownload
+                  ? $t('install.desktopSubtitle', { platform: desktopLabel })
+                  : $t('install.subtitle')
+              }}
+            </span>
+          </span>
+          <span v-if="!loud" class="ip-caret" :class="{ 'ip-caret--open': open }" aria-hidden="true"
+            >&#9662;</span
           >
-            {{ $t('install.iosInstructions') }}
-          </p>
-        </div>
+        </component>
         <button
           type="button"
-          class="-mr-1 -mt-1 rounded-md p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+          class="ip-close"
           :aria-label="$t('common.close')"
           data-testid="pwa-install-dismiss"
           @click="dismiss"
@@ -177,45 +278,305 @@ async function onInstall() {
         </button>
       </div>
 
-      <!-- PC: the useful install is the desktop app — it is the only build
-           that syncs folders to disk and stays running in the tray. -->
-      <div v-if="showDesktopDownload" class="mt-3 space-y-2">
-        <a
-          v-for="d in desktopDownloads"
-          :key="d.href"
-          :href="d.href"
-          class="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 hover:border-indigo-400 dark:border-zinc-700 dark:hover:border-indigo-500"
-          data-testid="desktop-download-button"
-        >
-          <span class="min-w-0">
-            <span class="block text-sm font-medium text-zinc-900 dark:text-zinc-50">{{ d.label }}</span>
-            <span class="block text-xs text-zinc-500 dark:text-zinc-400">{{ d.hint }}</span>
-          </span>
-          <span aria-hidden="true" class="text-indigo-600 dark:text-indigo-400">↓</span>
-        </a>
-        <a
-          :href="RELEASES"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="block text-xs text-zinc-500 underline hover:text-zinc-700 dark:text-zinc-400"
-        >
-          {{ $t('install.desktopAllDownloads') }}
-        </a>
-      </div>
+      <div v-if="expanded" id="filex-install-body" class="ip-body">
+        <!-- iOS: no programmatic prompt, walk the user through Share sheet. -->
+        <p v-if="showIOSInstructions" class="ip-ios" data-testid="pwa-ios-instructions">
+          {{ $t('install.iosInstructions') }}
+        </p>
 
-      <div
-        v-else-if="canPromptInstall"
-        class="mt-3 flex justify-end"
-      >
-        <button
-          type="button"
-          class="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-          data-testid="pwa-install-button"
-          @click="onInstall"
-        >
-          {{ $t('install.install') }}
-        </button>
+        <!-- PC: the useful install is the desktop app — it is the only build
+             that syncs folders to disk and stays running in the tray. -->
+        <template v-if="showDesktopDownload">
+          <a
+            v-for="d in desktopDownloads"
+            :key="d.href"
+            :href="d.href"
+            class="flex items-center justify-between gap-3 ip-dl"
+            data-testid="desktop-download-button"
+          >
+            <span class="min-w-0">
+              <span class="block ip-dl__label">{{ d.label }}</span>
+              <span class="block ip-muted">{{ d.hint }}</span>
+            </span>
+            <span aria-hidden="true" class="ip-dl__arrow">↓</span>
+          </a>
+          <a :href="RELEASES" target="_blank" rel="noopener noreferrer" class="block ip-all">
+            {{ $t('install.desktopAllDownloads') }}
+          </a>
+        </template>
+
+        <div v-else-if="canPromptInstall" class="flex justify-end">
+          <button type="button" class="ip-btn" data-testid="pwa-install-button" @click="onInstall">
+            {{ $t('install.install') }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* gorunum:v1 — the banner sits over every page until it is dismissed, so it
+   is painted from the same tokens as everything under it. Nothing here is a
+   Tailwind palette name or a raw hex; the dark variant comes from the tokens
+   themselves rather than from a `dark:` twin that has to be kept in step. */
+
+/* ── the two shells ─────────────────────────────────────────────────────── */
+
+.ip-dock {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+}
+.ip-dock > * {
+  pointer-events: auto;
+}
+
+/* Sign-in page: the full-width band it has always been. `pointer-events-none`
+   on the wrapper is load-bearing — clicks pass through everywhere except the
+   card itself, which is half of what keeps the submit button reachable. */
+.ip-dock--band {
+  inset-inline: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px 16px;
+}
+.ip-dock--band > * {
+  width: 100%;
+  max-width: 28rem;
+}
+
+/* In-app: the bottom-RIGHT corner.
+   ⚠ Chosen by measurement, not by taste. Bottom-left is the sidebar's own
+   footer (the storage read-out), top-right is the account menu, and the
+   listing itself reads from the top-left down — so the bottom-right is the
+   one corner of this product that is empty at rest.
+   ⚠⚠ It is not empty when something is HAPPENING there: the toast stack
+   (`ToastContainer.vue`, z-50) and the pending-ops tray (z-40) already share
+   that corner. This chip is therefore the BOTTOM of that stack at z-30 — a
+   transient thing the person has to read always draws over a standing advert,
+   never the other way round.
+   ⚠ `bottom` reads the update bar's published height, so the chip steps up
+   over it instead of sitting under it on a narrow screen where the bar spans
+   the full width. */
+.ip-dock--corner {
+  right: 12px;
+  bottom: calc(12px + var(--filex-install-banner-h, 0px));
+  left: auto;
+  z-index: 30;
+  max-width: min(22rem, calc(100vw - 24px));
+}
+
+/* ── the card ───────────────────────────────────────────────────────────── */
+
+.ip-card {
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  background: var(--fe-bg);
+  box-shadow: var(--fe-shadow);
+  font-family: var(--fe-font);
+}
+.ip-card--update {
+  padding: 12px;
+}
+.ip-card--install {
+  padding: 16px;
+}
+/* Collapsed: a chip. The padding shrinks with it — a 16px inset around one
+   line of text is what made the old card look like a dialog. */
+.ip-card--chip {
+  padding: 6px 6px 6px 10px;
+  border-radius: 999px;
+}
+/* It is a control, so it says so on hover. Without this the chip reads as a
+   label somebody left in the corner rather than as something to press. */
+.ip-card--chip:hover {
+  border-color: var(--fe-primary);
+}
+
+.ip-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ip-card--chip .ip-head {
+  align-items: center;
+  gap: 4px;
+}
+
+.ip-head__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.ip-head__main--static {
+  cursor: default;
+}
+.ip-card--chip .ip-head__main {
+  align-items: center;
+  gap: 8px;
+}
+
+.ip-head__text {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ip-mark {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: var(--fe-radius);
+}
+.ip-card--chip .ip-mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+}
+
+.ip-caret {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  color: var(--fe-text-muted);
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+/* On the expanded card the head is top-aligned (a 40px mark beside two lines
+   of text), so the caret has to be nudged onto the title's line rather than
+   floating above it. */
+.ip-card--install:not(.ip-card--chip) .ip-caret {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+.ip-caret--open {
+  transform: rotate(180deg);
+}
+
+.ip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ip-text {
+  font-size: var(--fe-text-md);
+  color: var(--fe-text);
+}
+.ip-title {
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  color: var(--fe-text);
+}
+/* One line, and truncated rather than wrapped: a chip that grows to two lines
+   on a long Turkish title stops being a chip. */
+.ip-card--chip .ip-title {
+  font-size: var(--fe-text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ip-muted {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.ip-ios {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text);
+}
+
+.ip-btn {
+  height: var(--fe-h-sm);
+  padding: 0 14px;
+  border: 1px solid var(--fe-primary);
+  border-radius: var(--fe-radius);
+  background: var(--fe-primary);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  color: var(--fe-text-on-primary);
+  cursor: pointer;
+}
+.ip-btn:hover {
+  background: var(--fe-primary-hover);
+  border-color: var(--fe-primary-hover);
+}
+
+.ip-close {
+  flex: 0 0 auto;
+  padding: 4px;
+  margin: -4px -4px 0 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: none;
+  color: var(--fe-text-muted);
+  line-height: 1;
+  cursor: pointer;
+}
+/* The chip's body is one large target, so the × is the only small one on it —
+   it gets a touch-sized box of its own rather than the 4px inset the card
+   uses, where it sits in acres of padding already. */
+.ip-card--chip .ip-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 16px;
+}
+.ip-card--chip .ip-close:hover {
+  background: var(--fe-bg-elev);
+}
+.ip-close:hover {
+  color: var(--fe-text);
+}
+
+.ip-dl {
+  padding: 8px 12px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  text-decoration: none;
+}
+.ip-dl:hover {
+  border-color: var(--fe-primary);
+}
+.ip-dl__label {
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  color: var(--fe-text);
+}
+.ip-dl__arrow {
+  color: var(--fe-primary);
+}
+
+.ip-all {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  text-decoration: underline;
+}
+.ip-all:hover {
+  color: var(--fe-text);
+}
+
+.ip-card :focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+</style>

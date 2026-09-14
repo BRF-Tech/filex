@@ -108,8 +108,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Backend](BACKEND.md) — internals
 - [HTTP / component API](API.md)
 - [Embedding the explorer](INTEGRATION.md) — Vue / React / Web Component, and the
-  two options every wrapper shares: the **navigation panel** (`sideNav`) and the
-  chrome **profiles** (`uiProfile`: `standard` · `simple` · `drive`)
+  two options every wrapper shares: the **navigation panel** (`sideNav`) and how
+  much of the explorer to show (`uiProfile`: `standard` · `simple` — two values,
+  and the third one, `drive`, was **removed** after v0.40.0; pass `simple`)
 - [AI & MCP](MCP.md) — API tokens (including the `user` / `app` token kinds), scopes, the MCP endpoint for agents, and credential-free upload tickets for large local files
 
 ## Repo only — not published to docs.filex.sh

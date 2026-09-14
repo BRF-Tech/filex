@@ -27,7 +27,7 @@ hero:
 features:
   - icon: 🌐
     title: A browser client for your users
-    details: Give someone a user or viewer account and the address …/drive, and they get the file manager itself — their storages, uploads, sharing, search and the editor — with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application.
+    details: Give someone a user or viewer account and the address …/drive, and they land on their own Home — their storages, what they opened last, what they starred — one click from the file manager itself, with its uploads, sharing, search and editor, and with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application, and it opens on the same Home.
     link: /RBAC
     linkText: Roles and access
   - icon: 🖥️
@@ -65,6 +65,11 @@ features:
     details: filex does not meter your provider's bill — it reads the report the provider already writes and prices it with a table you can edit. Backblaze B2's daily report is read over the same S3 API filex already speaks, and the free allowances are shown beside the billable lines, because "your downloads were free this month" is usually the thing worth knowing.
     link: /USAGE
     linkText: Usage & cost docs
+  - icon: 🖼️
+    title: Thumbnails you can read
+    details: A PDF shows its first page, top-anchored so the title is in the card; a video its first frame that is not black, because a fade-in used to produce a black square; an Office document its rendered first page; and a text, code or CSV file its own first lines instead of repeating the extension the row already prints. A server missing ffmpeg, ghostscript or libreoffice says so in its log at boot rather than quietly drawing coloured rectangles.
+    link: /thumbnails
+    linkText: Thumbnail docs
   - icon: 💾
     title: Mount it as a drive
     details: filex mount attaches a remote server over ordinary HTTPS — a folder on Linux, a drive letter on Windows. Not a sync — it opens one file out of a hundred thousand without downloading the rest.
@@ -82,7 +87,7 @@ features:
     linkText: CLI docs
   - icon: 🧭
     title: Navigation people already know
-    details: 'A left panel with a prominent Upload; the views Recent, Starred, Shared with me and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail when you want the width back, and switch the drive profile on for people who want a file drive rather than a file manager: one "+ New" menu, one search field in the header with its palette shortcut, a Type/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel.'
+    details: 'A left panel led by one "+ New" menu — upload files, a new folder, a new document, a file request; the destinations Home, My files, Shared with me, Recent, Starred and Trash; your tags, each one opening the files carrying it; and the storages you can reach — a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for — unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail from the top bar when you want the width back. Everything around it is one shell, drawn by every embed with no string passed — one search field in the header with its palette shortcut, a Type/People/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel — and uiProfile ''simple'' reduces it for people who want a file drive rather than a file manager.'
     link: /INTEGRATION
     linkText: Turning it on
   - icon: 🧩

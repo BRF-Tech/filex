@@ -10,8 +10,8 @@ Add this directory as `apps/filex/` in a Runtipi app store repo (your own
 custom store works: Settings → App Stores → add repo), then install from the
 Runtipi UI.
 
-Missing store asset: `metadata/logo.jpg` (Runtipi requires a logo per app —
-not included here; export one from `docs/logo.png`).
+The store assets Runtipi requires are in place: `metadata/logo.jpg` and
+`metadata/description.md`.
 
 ## What's required
 

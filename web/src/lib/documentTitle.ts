@@ -31,7 +31,7 @@ async function loadInstanceName(): Promise<void> {
   if (brandingRequested) return;
   brandingRequested = true;
   try {
-    const branding = await BrandingApi.get();
+    const branding = await BrandingApi.boot();
     const name = branding?.name?.trim();
     if (name && name !== instanceName) {
       instanceName = name;

@@ -194,6 +194,48 @@ func IssueSession(ctx context.Context, store db.Store, userID int64) (string, er
 	return tok, nil
 }
 
+// SessionAuthenticatorName is the chain name of the session-only validator.
+// It is deliberately not registered with auth.Register: it is not a driver an
+// operator enables or configures, so the admin auth-providers page must not
+// list it.
+const SessionAuthenticatorName = "session"
+
+// SessionAuthenticator turns the session a request carries into its user —
+// the half of this driver that has nothing to do with passwords.
+//
+// Every login driver mints its session through IssueSession, into one table,
+// behind one cookie; this is what reads it back. It exists apart from Driver so
+// the server can validate sessions on an installation that has turned password
+// sign-in off (`FILEX_AUTH_DRIVERS=oidc`, issue #24) without turning it back on:
+// it implements auth.Driver and nothing else, never auth.LoginDriver.
+type SessionAuthenticator struct {
+	d *Driver
+}
+
+// NewSessionAuthenticator returns a validator over the shared sessions table.
+func NewSessionAuthenticator(store db.Store) *SessionAuthenticator {
+	return &SessionAuthenticator{d: New(store)}
+}
+
+// Name implements auth.Driver.
+func (s *SessionAuthenticator) Name() string { return SessionAuthenticatorName }
+
+// Init implements auth.Driver.
+func (s *SessionAuthenticator) Init(ctx context.Context, cfg map[string]any) error {
+	return s.d.Init(ctx, cfg)
+}
+
+// Authenticate implements auth.Driver: the same session lookup the local
+// driver performs, one implementation.
+func (s *SessionAuthenticator) Authenticate(r *http.Request) (*model.User, error) {
+	return s.d.Authenticate(r)
+}
+
+// Capabilities implements auth.Driver. It signs nobody in.
+func (s *SessionAuthenticator) Capabilities() auth.Capabilities {
+	return auth.Capabilities{Logout: true}
+}
+
 // RevokeSession deletes a session token. The counterpart to IssueSession, for
 // the same reason: a driver that can mint must be able to revoke.
 func RevokeSession(ctx context.Context, store db.Store, token string) error {

@@ -270,7 +270,7 @@ func resetPassword(email, password, label string) error {
 	if err != nil {
 		// auto-create as admin if user did not exist.
 		hash, _ := local.HashPassword(password)
-		_, err := store.CreateUser(context.Background(), strings.ToLower(email), hash, model.RoleAdmin, "en", "UTC")
+		_, err := store.CreateUser(context.Background(), strings.ToLower(email), hash, model.RoleAdmin, "en", model.TimezoneUnset)
 		if err != nil {
 			return err
 		}
@@ -647,6 +647,10 @@ func thumbBackfillCmd() *cobra.Command {
 			return err
 		},
 	}
+	// A refused storage (server.ErrNotIndexed) is a RUNTIME answer, not a
+	// misuse: printing the flag list above it reads as "you typed it wrong".
+	c.SilenceUsage = true
+	c.SilenceErrors = true // main prints it once, as `filex: ...`
 	c.Flags().StringVar(&storageRef, "storage", "", "limit to a single storage (id or name); empty = every enabled storage")
 	c.Flags().IntVar(&limit, "limit", 0, "stop after N files (0 = unlimited)")
 	c.Flags().BoolVar(&retryFailed, "retry-failed", false, "re-run thumbnails currently in state=failed")

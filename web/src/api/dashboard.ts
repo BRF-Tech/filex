@@ -1,13 +1,16 @@
 import { api } from './client';
-import type { AuditEntry, DashboardStats, SyncRun } from './types';
+import { toAuditEntry } from './audit';
+import type { AuditEntry, DashboardStats } from './types';
 
 // Backend wire shape — `{storages:[{...}], total_users, active_sessions,
 // queue_depth, recent_activity, capabilities}`. The frontend
 // DashboardStats type expects `{storage_count, user_count, total_files,
 // total_bytes, active_sync_count, queue_depth, last_sync_at,
-// recent_audit, recent_syncs}` — completely different keys. Normalize
-// at the boundary so the Dashboard cards render real numbers instead
-// of "—".
+// recent_audit}` — completely different keys. Normalize at the boundary
+// so the Dashboard cards render real numbers instead of "—".
+//
+// ⚠ There is no run list in this payload. The Recent syncs card reads the
+// sync-run list (stores/sync) — the same source as the Sync page.
 interface BackendStorageRow {
   id: number;
   name?: string;
@@ -25,7 +28,6 @@ interface BackendDashboard {
   active_sessions?: number;
   queue_depth?: number;
   recent_activity?: AuditEntry[];
-  recent_syncs?: SyncRun[];
   capabilities?: Record<string, unknown>;
 }
 
@@ -47,8 +49,7 @@ function normalize(d: BackendDashboard): DashboardStats {
     active_sync_count: activeSync,
     queue_depth: d.queue_depth ?? 0,
     last_sync_at: lastSync,
-    recent_audit: d.recent_activity ?? [],
-    recent_syncs: d.recent_syncs ?? [],
+    recent_audit: (d.recent_activity ?? []).map(toAuditEntry),
   };
 }
 

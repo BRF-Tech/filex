@@ -93,8 +93,13 @@ that link.
   capture is stored under a random‑prefixed filename, so every upload gets its
   own fresh link — a same‑named capture never overwrites or repoints an earlier
   one.
-- The link has **no expiry / download limit** by default. Revoke it anytime from
-  the item's Share/Permissions dialog in the explorer, or via the shares admin.
+- The link has **no download limit**, and it lives as long as the instance's
+  **share-link ceiling** allows — `share.max_ttl_days`, **7 days** unless an
+  admin changed it on the Protection page ([SHARING.md](SHARING.md)). A
+  screenshot link pasted into a ticket today stops working next week on a
+  default install; raise the ceiling (or set it to `0`) if your captures need
+  to outlive that. Revoke a link any time from the item's Share/Permissions
+  dialog in the explorer, or via the shares admin.
 
 ---
 
@@ -118,8 +123,8 @@ X-Filex-Token: <token>        (or: Authorization: Bearer <token>)
 ```
 
 Errors return `{"error":"…"}` with an appropriate status (`400` bad multipart /
-missing `file`, `401` bad/absent token, `403` scope/permission denied, `503` no
-storage configured).
+missing `file`, `401` bad/absent token, `403` scope/permission denied, `413` a
+capture over **512 MiB**, `503` no storage configured).
 
 A quick `curl` sanity check:
 

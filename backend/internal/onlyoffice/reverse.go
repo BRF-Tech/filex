@@ -258,7 +258,14 @@ func (s *Service) VerifyReversePath(ctx context.Context) ReverseResult {
 		res.Checked = false
 		res.Detail = "the document server rejected the request's signature, so it never tried to download anything — check that the JWT secret matches the one in the document server's configuration"
 	case answer.Error == -4:
-		res.Detail = "the document server could not download " + probeURL + " (its error -4). It is running, and it cannot reach filex at that address"
+		// ⚠ -4 does not say WHY. Since ONLYOFFICE Docs 7.4 the document server
+		// refuses, by default, to download from a private IP address — and a
+		// container network (docker, podman: 10.x, 172.16-31.x) is exactly
+		// that. It then fails before sending a single request, which from here
+		// is indistinguishable from a route that does not exist. Naming only
+		// reachability sent #17's reporter to the network when the answer was
+		// one setting on the document server.
+		res.Detail = "the document server could not download " + probeURL + " (its error -4). It is running, and either it cannot reach filex at that address or it refused to: ONLYOFFICE Docs 7.4+ refuses private IP addresses by default — look for \"private IP address\" in the document server's log, and if it is there set ALLOW_PRIVATE_IP_ADDRESS=true on that container"
 	case answer.Error != 0:
 		res.Detail = fmt.Sprintf("the document server answered error %d and no request reached filex at %s", answer.Error, probeURL)
 	default:

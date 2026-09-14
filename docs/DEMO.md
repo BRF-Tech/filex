@@ -71,9 +71,9 @@ with a single boolean test when demo mode is off.
 
 ### How the prefix list is kept honest
 
-A prefix list has one failure mode of its own: a **fourth** prefix. `/api/admin`
-and `/api/ai/admin` were the same admin panel behind two front doors, and the
-second one was found only because somebody went looking.
+A prefix list has one failure mode of its own: **the prefix nobody added**.
+`/api/admin` and `/api/ai/admin` were the same admin panel behind two front
+doors, and the second one was found only because somebody went looking.
 
 `backend/internal/api/shop_window_route_table_test.go` walks the entire chi
 route table and classifies every state-changing route by asking the running
@@ -85,7 +85,7 @@ ordinary user is entitled to use may be, so the guard cannot be widened over the
 product to make the first test quiet.
 
 Nothing in that test names a route. It found `/metrics` on its first run, and it
-is the reason a fifth prefix cannot arrive unnoticed. ⚠ Its one blind spot: the
+is the reason the next front door cannot arrive unnoticed. ⚠ Its one blind spot: the
 classification is behavioural, so a route with its own bespoke authorization
 that answers an ordinary user exactly as it answers an anonymous one reads as
 "not role-gated". Use `auth.RequireAdmin` or `RequireScope("admin")` like the

@@ -22,7 +22,6 @@
 package sharezip
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -40,6 +39,8 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/versioning"
+	"github.com/brf-tech/filex/backend/internal/zipstream"
 )
 
 // ErrShareGone ends a build whose folder share stopped existing while it ran.
@@ -176,7 +177,7 @@ func (c *Cache) Enabled() bool { return c.dir != "" }
 // file list (no generation, no bytes read). The cache path is
 // <dir>/<nodeID>-<sig>.zip.
 func (c *Cache) Plan(ctx context.Context, drv storage.Driver, root string, nodeID int64) (string, []File, error) {
-	files, err := collectFiles(ctx, drv, root)
+	files, err := CollectFiles(ctx, drv, root)
 	if err != nil {
 		return "", nil, err
 	}
@@ -309,10 +310,15 @@ func (c *Cache) run(cachePath string, files []File, nodeID int64, drv storage.Dr
 	pruneOld(c.dir, nodeID, cachePath)
 }
 
-// collectFiles walks root and returns every file under it (metadata only).
+// CollectFiles walks root and returns every file under it (metadata only).
 // Internal dirs (trash, thumbnails, keepdir) are skipped so the archive matches
 // what the streaming path would produce.
-func collectFiles(ctx context.Context, drv storage.Driver, root string) ([]File, error) {
+//
+// Exported because the UNCACHED folder-share download (api/handlers/share.go)
+// needs the same walk, and had its own copy of it. Two walks is how one of them
+// quietly starts including `.filex-trash` after somebody adds a fourth internal
+// directory to the other.
+func CollectFiles(ctx context.Context, drv storage.Driver, root string) ([]File, error) {
 	var out []File
 	var walk func(dir, prefix string) error
 	walk = func(dir, prefix string) error {
@@ -321,7 +327,7 @@ func collectFiles(ctx context.Context, drv storage.Driver, root string) ([]File,
 			return err
 		}
 		for _, o := range objs {
-			if o.Name == ".filex-trash" || o.Name == ".thumbs" || o.Name == ".keepdir" {
+			if internalName(o.Name) {
 				continue
 			}
 			entry := prefix + o.Name
@@ -340,6 +346,30 @@ func collectFiles(ctx context.Context, drv storage.Driver, root string) ([]File,
 		return nil, err
 	}
 	return out, nil
+}
+
+// internalName reports whether a listing entry is filex's own bookkeeping
+// rather than one of the user's files.
+//
+// ⚠ `.versions` was missing here, and it is the one that matters. Version
+// history lives at the STORAGE ROOT (versioning.VersionsPrefix,
+// `.versions/<node id>/<n>`), so it never showed up while this walk was only
+// ever used on a folder — and then it showed up the moment somebody archived
+// the root. Measured 2026-09-13 on a live local storage: downloading a
+// storage root produced an archive whose first member was `.versions/7/1`,
+// i.e. a previous version of a file that no listing anywhere in filex will
+// show you. That is every archive this walk feeds: the folder-share ZIP, its
+// on-disk cache, and the selection download.
+//
+// The listing projectors (projectFileNodes / projectDriverObjects) have always
+// hidden all four. Two lists of "what is ours" is how they drift, and this one
+// had already drifted.
+func internalName(name string) bool {
+	switch name {
+	case ".filex-trash", ".thumbs", ".keepdir", versioning.VersionsPrefix:
+		return true
+	}
+	return false
 }
 
 // signature is a content hash over the file set (sorted rel path + size +
@@ -363,67 +393,41 @@ func signature(files []File) string {
 // still be running; its error aborts the build. It is consulted both between
 // files and DURING a file's copy, because "between files" is no bound at all
 // on a folder whose one file is 15 GB.
+//
+// ⚠ The loop itself lives in internal/zipstream now. It used to be written out
+// here, and again in the public folder-share download, and a third time would
+// have been added for "download my selection" — three copies of the same
+// twenty lines, agreeing by accident on the parts that matter (skip an
+// unreadable member, stop when told to) and disagreeing on the rest. What this
+// function still owns is what is genuinely local to a CACHED share archive: the
+// driver the members are read from, the progress counter the download page
+// polls, and the abandonment check. The skip tolerance and the mid-copy
+// interrupt now come from one implementation, so the next fix to either lands
+// everywhere at once.
 func writeZip(ctx context.Context, out io.Writer, drv storage.Driver, files []File, done *atomic.Int64, check func() error) error {
-	g := &checkGate{check: check, last: time.Now()}
-	zw := zip.NewWriter(out)
+	members := make([]zipstream.Member, 0, len(files))
 	for _, f := range files {
-		if err := g.due(); err != nil {
-			_ = zw.Close()
-			return err
-		}
-		rc, err := drv.Read(ctx, f.Path)
-		if err != nil {
-			done.Add(1)
-			continue
-		}
-		fw, cErr := zw.Create(f.Rel)
-		if cErr != nil {
-			_ = rc.Close()
-			_ = zw.Close()
-			return cErr
-		}
-		if _, cpErr := io.Copy(fw, &gatedReader{r: rc, gate: g}); cpErr != nil {
-			_ = rc.Close()
-			_ = zw.Close()
-			return cpErr
-		}
-		_ = rc.Close()
-		done.Add(1)
+		p := f.Path
+		members = append(members, zipstream.Member{
+			Name:  f.Rel,
+			Size:  f.Size,
+			Mtime: f.Mtime,
+			Open:  func(c context.Context) (io.ReadCloser, error) { return drv.Read(c, p) },
+		})
 	}
-	return zw.Close()
-}
-
-// checkGate runs check at most once per activeCheckInterval.
-type checkGate struct {
-	check func() error
-	last  time.Time
-}
-
-func (g *checkGate) due() error {
-	if g == nil || g.check == nil {
-		return nil
-	}
-	now := time.Now()
-	if now.Sub(g.last) < activeCheckInterval {
-		return nil
-	}
-	g.last = now
-	return g.check()
-}
-
-// gatedReader lets the gate interrupt a single long copy. Returning the error
-// from Read is what stops io.Copy, and the caller then discards the partial
-// temp file.
-type gatedReader struct {
-	r    io.Reader
-	gate *checkGate
-}
-
-func (r *gatedReader) Read(p []byte) (int, error) {
-	if err := r.gate.due(); err != nil {
-		return 0, err
-	}
-	return r.r.Read(p)
+	_, err := zipstream.Write(ctx, out, members, zipstream.Options{
+		Gate: check,
+		// Passed through, including the 0 the tests use to mean "ask at every
+		// opportunity" — zipstream reads a non-positive interval the same way.
+		GateEvery: activeCheckInterval,
+		OnMember:  func(zipstream.Member) { done.Add(1) },
+		// A skipped member still counts as progress: the counter drives the
+		// visitor's "building your archive…" percentage, and a file that
+		// cannot be read is one the build will never come back to. Leaving it
+		// uncounted pinned the bar below 100 for the life of the build.
+		OnSkip: func(zipstream.Skip) { done.Add(1) },
+	})
+	return err
 }
 
 // shareGone reports whether nodeID's folder share has been observed to be gone

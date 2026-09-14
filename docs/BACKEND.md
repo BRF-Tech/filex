@@ -16,7 +16,9 @@ All endpoints under `/api/*` return JSON. All write endpoints expect
 - [Realtime (WebSocket)](#realtime-websocket)
 - [Operations (long-running)](#operations-long-running)
 - [Admin: storages](#admin-storages)
+- [Admin: plugins](#admin-plugins)
 - [Admin: users](#admin-users)
+- [Admin: quota](#admin-quota)
 - [Admin: external services](#admin-external-services)
 - [Admin: protection & antivirus](#admin-protection--antivirus)
 - [Admin: webhooks](#admin-webhooks)
@@ -90,7 +92,7 @@ Patches the caller's own `email`, `display_name`, `locale`, `timezone` and
 `avatar_url` is the **profile picture**: a `data:image/…` URI (≤ 48 KB) or an
 `http(s)` / site-relative URL; an explicit `""` removes it. Anything else is a
 `400` rather than a silent drop — the person is looking at an upload they
-believe worked. The admin SPA's profile page downscales what you pick to 160px
+believe worked. The SPA's user-settings dialog downscales what you pick to 160px
 before encoding, so the cap is not something a user meets.
 
 The picture belongs to the **account**, which is what makes it appear
@@ -168,6 +170,29 @@ Measured before this changed (2026-09-07, demo.filex.sh): an unauthenticated
 `GET /api/files/capabilities` answered 200 with
 `"url": "https://docs.example.com"` — the operator's internal document server,
 published by every install that configured one.
+
+`newdoc_types` is the other field worth naming, because it decides what a
+"New document" menu may offer: the document types **this build can create**,
+from a template registry compiled into the binary (`internal/newdoc`). Each row
+is `{ ext, group, mime, requires }`, where `requires` names the external service
+the *editor* needs (`"onlyoffice"`, `"drawio"`, or absent for the built-in code
+and markdown editors).
+
+```json
+"newdoc_types": [
+  { "ext": "docx", "group": "document", "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "requires": "onlyoffice" },
+  { "ext": "md",   "group": "text",     "mime": "text/markdown; charset=utf-8" }
+]
+```
+
+⚠ It answers "can the SERVER make these bytes", not "can this deployment open
+them". A client crosses `requires` against the `external` block above and
+offers only what is satisfied, which is what stops an install with no document
+server from offering a `.docx` nobody there can then open — and what keeps the
+client from carrying a hardcoded extension list that rots the moment the
+registry grows a type. Published to anonymous callers too: it is a static
+property of the build, identical on every install of this version, and names no
+host.
 
 ⚠ `antivirus` means **configured**, not answering: the setting is on and either
 a scanner binary resolved or a clamd address is set. Reachability costs a
@@ -254,6 +279,12 @@ Send it or don't.
 ```
 **Response 202** `{ "op": { "id": 12, "kind": "move", "storage_id": 1, "dest_storage_id": 2, … } }`
 — the work is queued; poll `GET /api/files/ops`.
+
+**Nothing is moved on top of something.** When the destination folder already
+holds the name, the moved item lands beside it as `name-copy`, `name-copy-2`, …
+— within one storage exactly as between two. A move into the folder the item is
+already in changes nothing. (Before 0.41.0 a same-storage move replaced the
+file that held the name.)
 
 ### `POST /api/files/copy` ![user](https://img.shields.io/badge/-user-blue)
 Same shape, same queued answer.
@@ -992,6 +1023,37 @@ Worth running after bulk imports, or after deleting a user whose files were
 left behind (their bytes stop being attributed to anyone).
 
 The caller's own snapshot is at `GET /api/files/quota/me`.
+
+### `GET /api/files/quota/storages` ![user](https://img.shields.io/badge/-user-blue)
+
+"How full is this drive", for somebody who is not an administrator — the same
+per-storage total `/api/admin/storages` carries in `stats.total_size_bytes`,
+for the storages the caller is allowed to see.
+
+```json
+{ "storages": [ { "name": "team", "used_bytes": 85022, "file_count": 31 } ] }
+```
+
+⚠ It is **not** `/api/files/quota/me` under another name. That one is a
+per-USER sum across every storage (`SUM(nodes.size) WHERE owner_id = me`);
+printing it under one drive's name would be a number about the person wearing
+a label about the drive. This is a property of the drive, and every reader of
+the same drive gets the same figure.
+
+The filter is the one the explorer's own root listing applies: list the enabled
+storages, drop every one whose RBAC grant set is not `StorageVisible`. **A
+storage the caller cannot open is not reported at all** — not its size, not its
+name, not a zero row. Tenancy is closed before that (the handler reads the
+tenant-scoped store), and a **root-confined** caller — an API token carrying
+`root:<adapter>://<rel>`, or a trusted proxy's `X-Filex-Root` — is looking at a
+folder rather than a drive, so it is answered with the storage only when the
+confinement is the storage root, and with an empty list otherwise.
+
+Cost: one `COUNT(*) + SUM(size)` aggregate per visible storage, memoised
+process-wide for 15 s and keyed by storage id, so a page that shows every drive
+costs one pass per drive per quarter-minute no matter how many people have it
+open. A storage whose count fails is omitted rather than reported as `0`; the
+caller's card falls back to naming the kind of thing.
 
 ---
 

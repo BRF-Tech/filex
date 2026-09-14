@@ -17,17 +17,23 @@ a file, not a redesign.
 ## How it works
 
 Backblaze writes a usage report once a day into a bucket it owns, named
-`b2-reports-<accountId>`. Each day is a folder of CSVs. filex reads those files
-over the same S3 API it already speaks — no new dependency, no new credential
-type — and caches what it parsed, so opening the page does not fetch a month of
-CSVs every time.
+`b2-reports-<accountId>`, under one folder per day. filex reads those files over
+the same S3 API it already speaks — no new dependency, no new credential type —
+and caches what it parsed, so opening the page does not fetch a month of CSVs
+every time.
 
 ```
 b2-reports-<accountId>/
   2026-09-11/
-    <accountId>_2026-09-11_account.csv        ← account-level totals
-    <accountId>_2026-09-11_bucket.csv         ← one row per bucket
+    usage.account-<accountId>.csv     ← a standalone account
 ```
+
+The account-level line and the per-bucket lines are rows of the **same** file;
+the account line is the one with an empty `bucket_id`. An account inside a
+Backblaze organization or group gets `usage.<resource>.<location>.csv` or
+`usage.group-<groupId>.<location>.csv` instead, and filex reads every
+`usage.*.csv` in the day's folder — skipping `usage.audit-*` and the
+`*.reportingLocations.csv` lookup table, which are not usage.
 
 ## Setting it up
 
@@ -46,12 +52,15 @@ endpoint `https://s3.<region>.backblazeb2.com`, bucket `b2-reports-<accountId>`,
 |---|---|
 | **Provider** | `Backblaze B2` |
 | **Report storage** | the storage you just made |
-| **Account ID** | your B2 account id — the same one in the bucket's name |
+| **Account ID** | your B2 account id — the same one in the bucket's name. Optional: the day's folder is listed either way, and the id is only used to try `usage.account-<id>.csv` by name when it cannot be |
 | **Path prefix** | only if the reports are not at the root of that bucket |
 
-The same values are settings, so they can be set from the API or seeded at
-install time: `usage.provider`, `usage.report_storage`, `usage.account_id`,
-`usage.prefix`.
+The same values are rows in the settings table — `usage.provider`,
+`usage.report_storage`, `usage.account_id`, `usage.prefix` and `usage.pricing`
+— so they can also be written through `PATCH /api/admin/settings`. ⚠ There is
+**no environment variable** for any of them: unlike the antivirus family they
+are not seeded at first boot, so a compose file cannot configure this page.
+Set them here, or through the settings API.
 
 > **The report appears the day after the account does.** A brand-new B2 account
 > has no `b2-reports-…` bucket at all until Backblaze writes its first daily
@@ -98,4 +107,4 @@ report reads as "you used nothing".
 ## See also
 
 - [STORAGE.md](STORAGE.md) — attaching an S3 storage, and the B2 master-key trap
-- [CONFIGURATION.md](CONFIGURATION.md) — settings and how they are seeded
+- [CONFIGURATION.md](CONFIGURATION.md) — the environment variables filex does read

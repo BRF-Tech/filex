@@ -23,6 +23,7 @@ package writehook
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -181,10 +182,11 @@ func EmitWritten(ctx context.Context, storageID int64, node *model.Node, origin 
 		return
 	}
 	emit(ctx, notify.Event{
-		Event: kind.Event(),
-		Body:  node.Path,
-		Meta:  mergeMeta(origin, meta),
-		Node:  &notify.NodeRef{StorageID: storageID, Path: node.Path, Name: node.Name, Size: node.Size},
+		Event:  kind.Event(),
+		Body:   node.Path,
+		Meta:   mergeMeta(origin, meta),
+		Node:   &notify.NodeRef{StorageID: storageID, Path: node.Path, Name: node.Name, Size: node.Size},
+		Target: notify.FileTarget(node.Path),
 	})
 }
 
@@ -213,6 +215,10 @@ func OnUploadFailed(ctx context.Context, storageID int64, userID int64, p, name,
 		Body:     p,
 		Meta:     m,
 		Node:     &notify.NodeRef{StorageID: storageID, Path: p, Name: name},
+		// The bytes never landed, so the file is not there to select — but
+		// the folder the user was uploading INTO is, and that is where they
+		// go to try again.
+		Target: notify.ParentDirTarget(p),
 	}
 	if userID != 0 {
 		e.UserID = &userID
@@ -230,6 +236,10 @@ func OnFileDeleted(ctx context.Context, storageID int64, path, name, origin stri
 		Body:  path,
 		Meta:  mergeMeta(origin, meta),
 		Node:  &notify.NodeRef{StorageID: storageID, Path: path, Name: name},
+		// Permanent removal: there is no row left to select, so the target is
+		// the folder it was removed from. A file target here would open the
+		// right folder and then hunt for a file that is gone.
+		Target: notify.ParentDirTarget(path),
 	})
 }
 
@@ -245,6 +255,9 @@ func OnFileMoved(ctx context.Context, storageID int64, oldPath, newPath, name, o
 		Body:  newPath,
 		Meta:  m,
 		Node:  &notify.NodeRef{StorageID: storageID, Path: newPath, Name: name},
+		// The NEW location — "where is it now" is the only useful answer to a
+		// move.
+		Target: notify.FileTarget(newPath),
 	})
 }
 
@@ -260,7 +273,22 @@ func OnFileTrashed(ctx context.Context, storageID int64, path, name, trashPath, 
 		Body:  path,
 		Meta:  m,
 		Node:  &notify.NodeRef{StorageID: storageID, Path: path, Name: name},
+		// ⚠ trashPath, not path. A soft delete moved the file; the copy that
+		// exists is the one in `.filex-trash/`, and the explorer shows it
+		// (trashVisible). Targeting the original path would open a folder
+		// where the file provably is not.
+		Target: trashedTarget(path, trashPath),
 	})
+}
+
+// trashedTarget picks what a `file.trashed` click opens: the file in the
+// trash when we know where it went, the folder it came from when we do not
+// (a surface may pass an empty trashPath).
+func trashedTarget(orig, trashPath string) *notify.Target {
+	if strings.TrimSpace(trashPath) != "" {
+		return notify.FileTarget(trashPath)
+	}
+	return notify.ParentDirTarget(orig)
 }
 
 // mergeMeta folds the variadic extra maps into one meta map and stamps

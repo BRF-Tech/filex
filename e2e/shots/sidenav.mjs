@@ -12,7 +12,8 @@
 // Environment:
 //   FILEX_BIN     binary to run (default: bin/filex.exe on Windows, bin/filex)
 //   SHOTS_URL     use an ALREADY-RUNNING instance instead of spawning one
-//   SHOTS_OUT     output directory (default: ../docs/screenshots/sidenav)
+//   SHOTS_OUT     output directory (default: docs/screenshots/<release>/sidenav,
+//                 the release named in ./release.mjs)
 //   SHOTS_KEEP=1  leave the instance running afterwards
 //
 // ⚠ Every shot is in English three ways over — browser locale, the stored
@@ -27,6 +28,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { seedFixtures } from './fixtures.mjs';
+import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -36,7 +38,7 @@ const PORT = Number(process.env.SHOTS_PORT ?? 5297);
 // a server bound to 127.0.0.1 answers that with ECONNREFUSED — which looks
 // exactly like a server that failed to start (e2e/README.md).
 const URL = process.env.SHOTS_URL ?? `http://127.0.0.1:${PORT}`;
-const OUT = process.env.SHOTS_OUT ?? join(REPO, 'docs/screenshots/sidenav');
+const OUT = process.env.SHOTS_OUT ?? shotsDir('sidenav');
 const DATA = join(tmpdir(), 'filex-sidenav-data');
 
 const ADMIN = { email: 'admin@local', password: 'admin' };
@@ -328,7 +330,7 @@ async function signIn(page, base, who) {
   await page.fill('#email', who.email);
   await page.fill('#password', who.password);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(admin|drive)\/(dashboard|explore)/, { timeout: 25_000 });
+  await page.waitForURL(/\/(admin|drive)\/(dashboard|explore|home)/, { timeout: 25_000 });
 }
 
 async function waitForExplorer(page) {
@@ -368,6 +370,32 @@ async function openRow(page, name) {
     row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   }, name);
   await sleep(1200);
+}
+
+/**
+ * Collapse / expand the navigation panel.
+ *
+ * ⚠ `toolbar-nav`, the button at the far left of the TOP BAR — not
+ * `sidenav-toggle`. The panel's own edge button was removed at 560px and up
+ * (SideNav.vue, gorunum:v3-shell): two buttons for one verb, one of them
+ * inside the thing it collapses, and the survivor is the toolbar's because it
+ * is still there when the panel is a 56px rail. `sidenav-toggle` exists only
+ * as the 390px drawer's dismiss now, so at 1440px the old selector matched
+ * nothing and this script sat in Playwright's timeout instead of failing with
+ * a word about it.
+ *
+ * One definition for all three wide call sites, so the next time this control
+ * moves there is one place to follow it to.
+ */
+async function toggleNav(page) {
+  const n = await page.locator('[data-testid="toolbar-nav"]').count();
+  if (n !== 1) {
+    // Not a timeout: say WHICH assumption broke. A shot script that hangs
+    // tells the next reader nothing.
+    throw new Error(`expected exactly one [data-testid="toolbar-nav"], found ${n}`);
+  }
+  await page.locator('[data-testid="toolbar-nav"]').click();
+  await sleep(500);
 }
 
 /**
@@ -464,8 +492,7 @@ async function run(tokens) {
     );
 
     // ── collapse to the rail ─────────────────────────────────────────────
-    await page.locator('[data-testid="sidenav-toggle"]').click();
-    await sleep(500);
+    await toggleNav(page);
     check(
       'collapsing leaves an icon rail, not an empty gutter',
       (await page.locator('[data-testid="sidenav"].fe-sidenav--rail').count()) === 1 &&
@@ -488,8 +515,13 @@ async function run(tokens) {
         (b) => b.getAttribute('data-testid') ?? b.className,
       ),
     );
+    // Seed focus on the rail's OWN first control. It used to be
+    // `sidenav-toggle`, which was the first button inside the panel; that
+    // button is gone above 560px, so seeding on it left focus on <body> and
+    // the walk below started from wherever the last click happened to leave
+    // it — a pass that proved nothing.
     await page.evaluate(() => {
-      const first = document.querySelector('[data-testid="sidenav-toggle"]');
+      const first = document.querySelector('[data-testid="sidenav"] button');
       first?.focus();
     });
     const reached = new Set();
@@ -519,8 +551,7 @@ async function run(tokens) {
     );
 
     // Back to expanded for the view shots — that is how the profile ships.
-    await page.locator('[data-testid="sidenav-toggle"]').click();
-    await sleep(500);
+    await toggleNav(page);
 
     // ── the four views, with real content ────────────────────────────────
     for (const view of ['recent', 'starred', 'shared', 'trash']) {
@@ -595,16 +626,25 @@ async function run(tokens) {
     await page.keyboard.press('Escape');
     await sleep(400);
 
-    // ── the simple profile actually drops the chrome ─────────────────────
+    // ── the non-admin gets the SAME explorer as the admin ────────────────
+    // ⚠⚠ This pair used to assert the opposite — no tab strip, a two-way view
+    // switcher — because /drive/ passed `uiProfile: 'drive'` for anyone who was
+    // not an admin. That expression is gone (owner's decision, 2026-09-12, in
+    // web/src/views/Explore.vue verbatim: "their app and our app will be one to
+    // one. The admin gets one extra button, nothing else"), so a check that
+    // still demanded the reduced chrome here was asserting the split the
+    // rebuild removed. It is inverted rather than deleted: parity is the thing
+    // that can silently regress, and the admin's own counts are checked below
+    // with the same selectors, so the two halves can be compared.
     await page.locator('[data-testid="sidenav-storage-My files"]').click();
     await sleep(1000);
     check(
-      'the simple profile has no tab strip',
-      (await page.locator('.fe-tabs').count()) === 0,
+      'the non-admin gets the tab strip, same as the admin',
+      (await page.locator('.fe-tabs').count()) === 1,
     );
     check(
-      'the simple profile offers list + grid, not the full switcher',
-      (await page.locator('.fe-toolbar__view button').count()) === 2,
+      'the non-admin gets the full view switcher, same as the admin',
+      (await page.locator('.fe-toolbar__view button').count()) === 3,
       `${await page.locator('.fe-toolbar__view button').count()} view buttons`,
     );
     check(
@@ -696,9 +736,17 @@ async function run(tokens) {
       'the panel renders inside a plain-HTML embed, switched on by the attribute',
       (await epage.locator('filex-explorer [data-testid="sidenav"]').count()) === 1,
     );
+    // ⚠ `.fe-tabs` is NOT the tab strip any more — it is the pane row
+    // (gorunum:v5-panerow), which survives the tabs being switched off because
+    // the split and details toggles live in it too; `hideTabs` EMPTIES it
+    // rather than removing it. So the question "did the simple profile take"
+    // is asked of what the row contains — no tabs, no "+" — not of the row.
+    // Measured: with ui-profile="simple" the embed renders .fe-tabs once and
+    // .fe-tabs__scroll / .fe-tabs__tab / .fe-tabs__new zero times.
     check(
       'the embed took ui-profile="simple" from the attribute too',
-      (await epage.locator('filex-explorer .fe-tabs').count()) === 0 &&
+      (await epage.locator('filex-explorer .fe-tabs__scroll').count()) === 0 &&
+        (await epage.locator('filex-explorer .fe-tabs__new').count()) === 0 &&
         (await epage.locator('filex-explorer .fe-toolbar__view button').count()) === 2,
     );
     check(
@@ -746,8 +794,7 @@ async function run(tokens) {
       `${await apage.locator('.fe-toolbar__view button').count()} view buttons`,
     );
     const admExpanded = await primaryWidth(apage);
-    await apage.locator('[data-testid="sidenav-toggle"]').click();
-    await sleep(500);
+    await toggleNav(apage);
     await apage.locator('[data-testid="sidenav-storage-My files"]').click();
     await sleep(1400);
     await shot(apage, 'admin-rail-1440.png');

@@ -53,62 +53,32 @@ export interface LoginResponse {
  *  new one assignable. */
 export type StorageDriver = 'local' | 's3' | 'sftp' | 'ftp' | 'webdav' | (string & {});
 
-/** Widget a storage config field renders as. Unknown values fall back to
- *  a plain text input rather than hiding the field. */
-export type StorageFieldType = 'string' | 'int' | 'bool' | 'password' | 'select';
+/**
+ * The driver-descriptor wire types come from @brftech/filex-core, they are not
+ * re-declared here.
+ *
+ * They describe `backend/internal/storage/descriptor.go`, which both packages
+ * render — the admin form and the explorer's connections panel. Declared once
+ * per package they were free to disagree with each other and with the Go
+ * struct, and they did: neither copy had `range`, which the server has always
+ * sent in `Capabilities`. web already depends on the package that owns them.
+ */
+export type {
+  StorageDriverCapabilities,
+  StorageField,
+  StorageFieldOption,
+  StorageFieldType,
+} from '@brftech/filex-core';
 
-export interface StorageFieldOption {
-  value: string;
-  /** English fallback; `i18n_key` wins when the catalogue has it. */
-  label: string;
-  i18n_key?: string;
-}
-
-/** One config key of a storage driver, as declared by the driver itself
- *  (backend/internal/storage/descriptor.go). */
-export interface StorageField {
-  key: string;
-  type: StorageFieldType;
-  /** English fallback label — used only when `i18n_key` is missing from
-   *  the locale catalogue. */
-  label: string;
-  help?: string;
-  i18n_key: string;
-  help_i18n_key?: string;
-  required: boolean;
-  /** Credential material: render masked, never log. */
-  secret: boolean;
-  default?: unknown;
-  placeholder?: string;
-  options?: StorageFieldOption[];
-  min?: number;
-  max?: number;
-  monospace?: boolean;
-  multiline?: boolean;
-  advanced?: boolean;
-  /** THE field that scopes the storage inside the backend (s3 prefix,
-   *  local path, sftp/ftp/webdav root). The backend rejects an empty or
-   *  "/" value with ROOT_PATH_FORBIDDEN. */
-  root?: boolean;
-  /** Legacy spellings the driver still reads for this field. */
-  aliases?: string[];
-}
+import type { StorageDriverCapabilities, StorageField } from '@brftech/filex-core';
 
 export interface StorageDriverDescriptor {
+  /** Narrower than core's `string`: the built-ins get autocomplete here. */
   driver: StorageDriver;
   label: string;
   i18n_key: string;
   fields: StorageField[];
-  capabilities: {
-    read?: boolean;
-    write?: boolean;
-    move?: boolean;
-    copy?: boolean;
-    delete?: boolean;
-    mkdir?: boolean;
-    presign?: boolean;
-    watch?: boolean;
-  };
+  capabilities: StorageDriverCapabilities;
 }
 
 export interface StorageRef {
@@ -252,6 +222,8 @@ export interface Capabilities {
   /** SSO-first installs: login page starts the OIDC flow immediately;
    *  the password form stays reachable via ?local=1. */
   oidc_auto_redirect?: boolean;
+  /** Password sign-in is off, but the bootstrap administrator may still use it (recovery). */
+  auth_recovery_login?: boolean;
   demo_mode?: boolean;
   demo_user?: string;
   /** Demo password (FILEX_DEMO_PASS). Sent by the server only when
@@ -373,7 +345,6 @@ export interface DashboardStats {
   queue_depth: number;
   last_sync_at: string | null;
   recent_audit: AuditEntry[];
-  recent_syncs: SyncRun[];
 }
 
 export interface SearchHit {
@@ -436,6 +407,24 @@ export type Severity = 'info' | 'warning' | 'error' | 'critical';
 
 export type WebhookStatus = 'pending' | 'sent' | 'failed' | 'skipped';
 
+/**
+ * Where a click on a notification goes. Filled by the backend
+ * (`model.NotificationTarget`); absent on rows that have nothing to open and
+ * on every row written before the field existed — both read as "none".
+ *
+ * ⚠ Resolve it with `lib/notificationTarget.ts`, never by reading `meta`. The
+ * whole point of the field is that one rule decides where every surface lands.
+ */
+export interface NotificationTargetRef {
+  kind: 'file' | 'dir' | 'share' | 'none';
+  /** Storage NAME, not id — the explorer addresses storages by name. */
+  storage?: string;
+  /** Path inside that storage, relative, no `<storage>://` prefix. */
+  path?: string;
+  /** Share token, for `kind: 'share'`. */
+  id?: string;
+}
+
 export interface NotificationItem {
   id: number;
   event: string;
@@ -443,6 +432,7 @@ export interface NotificationItem {
   title: string;
   body: string;
   meta: Record<string, unknown>;
+  target?: NotificationTargetRef;
   user_id?: number | null;
   read_at?: string | null;
   webhook_status: WebhookStatus;

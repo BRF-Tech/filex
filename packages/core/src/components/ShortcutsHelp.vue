@@ -11,6 +11,7 @@
 import { computed } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import { useShortcutList, type ShortcutView } from '../composables/useKeyboardShortcuts';
 import Modal from '../modals/Modal.vue';
 
@@ -72,7 +73,9 @@ const groups = computed(() => {
     </div>
     <template #actions>
       <button type="button" class="fe-btn fe-btn--primary" @click="emit('customize')">
-        ⌨ {{ t('shortcuts.customize') }}
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+        <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('shortcut-settings')"></span>
+        {{ t('shortcuts.customize') }}
       </button>
       <button type="button" class="fe-btn" @click="emit('close')">{{ t('viewer.close') }}</button>
     </template>

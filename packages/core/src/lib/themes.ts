@@ -35,7 +35,7 @@
  * untouched — its token maps below exist only to render the gallery
  * preview card.
  *
- * Persistence: localStorage `filex.theme` (absent/invalid → default),
+ * Persistence: localStorage `filex.palette` (absent/invalid → default),
  * shared reactively across every explorer instance on the page and
  * synced across tabs via the `storage` event.
  *
@@ -60,13 +60,78 @@ export interface ThemeDef {
   dark: ThemeTokenMap;
 }
 
-export const THEME_LS_KEY = 'filex.theme';
+/**
+ * ⚠⚠ `filex.palette`, NOT `filex.theme` — and the rename is a BUG FIX, not
+ * tidying.
+ *
+ * `web/src/lib/theme.ts` has always stored the admin app's light/dark/auto
+ * MODE under `filex.theme`, and this module stored the PALETTE id under the
+ * same name. Two writers, one key, neither aware of the other — and because
+ * both readers fall back silently on a value they do not recognise, nothing
+ * ever threw: picking "Night Blue" in the explorer reset the panel's
+ * light/dark choice to auto, and choosing Dark in the panel reset the palette
+ * to default. It went unseen for as long as the two controls lived on
+ * opposite sides of the product; putting them both in the settings modal
+ * makes it a one-click round trip.
+ */
+export const THEME_LS_KEY = 'filex.palette';
+
+/** The key this preference used to share with the app's mode. Read once, to
+ *  carry a palette across the rename; never written. */
+const LEGACY_THEME_LS_KEY = 'filex.theme';
+
 export const DEFAULT_THEME_ID = 'default';
 
 /* ------------------------------------------------------------------ */
 /* Registry                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * ⚠⚠ Every theme declares the SAME key set, and there is a test for it
+ * (`web/tests/api/themeTokenParity.test.ts`). That test exists because of a
+ * bug whose whole nature is that nothing notices:
+ *
+ *   `--fe-primary-soft` was declared by variables.css and used by nine rules
+ *   in base.css — the active tab of a segmented control, a filter chip that is
+ *   set, an active toolbar button, the advanced-search tabs — and by NO theme
+ *   map at all. So somebody on Forest, Amber or Lilac got their palette
+ *   everywhere except the one token that marks "this is the selected thing",
+ *   which stayed stock blue and clashed with the palette they had just picked.
+ *   `--fe-border-soft` (ten rules, the quieter separators inside panels) was
+ *   missing the same way. Neither errored, neither looked broken in the
+ *   gallery card, and the only way to see it was to pick a theme and look.
+ *
+ * How the two are derived, so a new theme fills them the same way:
+ *
+ *   --fe-primary-soft = the theme's OWN primary mixed into its OWN background,
+ *     at the fraction that reproduces the STOCK tint's separation from its
+ *     background (1.184:1 light, 1.207:1 dark). Separation is the invariant,
+ *     not the mix fraction: the palettes' primaries run from a near-black
+ *     green to a pale grey, so a fixed 13% lands anywhere between invisible
+ *     and a slab. Held that way, every palette's tint reads with the same
+ *     weight as the stock one. Measured: text on it is 9.44:1 (Terminal dark)
+ *     to 17.85:1 (High Contrast light), so the 4.5 bar is never in question.
+ *   --fe-border-soft = the theme's own border mixed toward its own background
+ *     at the stock fraction (0.60 light / 0.68 dark), which reproduces the
+ *     stock value exactly. ⚠ High Contrast is the deliberate exception: it
+ *     takes its own `--fe-border` unchanged, because a *soft* separator is the
+ *     one thing that theme exists to not have.
+ *
+ * ⚠ What is deliberately NOT themed, and why:
+ *   `--fe-ok` / `--fe-warning` / `--fe-keep-ok` — status signals, not taste.
+ *     They are identical in light and dark on purpose; "ok" that is green in
+ *     one palette and amber in another stops being a signal.
+ *   `--fe-icon-*` — file-type accents. A PDF is red and a folder is yellow in
+ *     every palette, and they are never the only cue (the row carries its name
+ *     in `--fe-text` too).
+ *   radii, control heights, the type scale, gaps, `--fe-sidenav-w`,
+ *     `--fe-font-mono` — metrics, not a palette.
+ *   `--fe-shadow` / `--fe-shadow-sm` / `--fe-font` — depth and face rather
+ *     than colour, and the two themes that DO override them (High Contrast's
+ *     hard 1px outlines, Terminal's monospace face) are extras on top of the
+ *     shared set, not holes in it. The parity test allows extras and requires
+ *     the shared set.
+ */
 export const THEMES: ThemeDef[] = [
   {
     // Stock palette — the maps duplicate variables.css ONLY for the
@@ -74,38 +139,44 @@ export const THEMES: ThemeDef[] = [
     id: DEFAULT_THEME_ID,
     nameKey: 'theme.name.default',
     light: {
+      /* ⚠ Mirrors styles/variables.css exactly — web/tests/api/themeContrast.test.ts
+       * fails on any drift. It has drifted before: the stock primary was
+       * darkened for contrast and this preview map kept the old blue, so the
+       * gallery card advertised a colour the product no longer used. */
       '--fe-bg': '#ffffff',
-      '--fe-bg-elev': '#f7f8fa',
-      '--fe-bg-hover': '#edf0f5',
-      '--fe-bg-selected': '#dfe8ff',
-      '--fe-border': '#e2e6ed',
-      '--fe-border-strong': '#c7ced9',
-      '--fe-text': '#1a1e27',
-      '--fe-text-muted': '#5a6475',
+      '--fe-bg-elev': '#f7f8fb',
+      '--fe-bg-hover': '#f3f4f6',
+      '--fe-bg-selected': '#eef3ff',
+      '--fe-border': '#e5e7eb',
+      '--fe-border-soft': '#eef0f4',
+      '--fe-border-strong': '#d1d5db',
+      '--fe-text': '#1f2937',
+      '--fe-text-muted': '#6b7280',
       '--fe-text-on-primary': '#ffffff',
-      /* ⚠ Mirrors styles/variables.css. It drifted once: the stock primary was
-       * darkened to #2f6fe0 for WCAG AA against white text and this preview
-       * map kept the old #3b82f6, so the gallery card advertised a blue the
-       * product no longer used. */
-      '--fe-primary': '#2f6fe0',
-      '--fe-primary-hover': '#2563eb',
+      '--fe-primary': '#2f6ceb',
+      '--fe-primary-hover': '#2559c9',
+      '--fe-primary-soft': '#e6ecfa',
+      '--fe-primary-ink': '#2559c9',
       '--fe-danger': '#dc2626',
       '--fe-danger-hover': '#b91c1c',
     },
     dark: {
-      '--fe-bg': '#0f1419',
-      '--fe-bg-elev': '#161c25',
-      '--fe-bg-hover': '#1f2733',
-      '--fe-bg-selected': '#23324a',
-      '--fe-border': '#2a323e',
-      '--fe-border-strong': '#3a4453',
-      '--fe-text': '#e5e9f0',
-      '--fe-text-muted': '#8b95a7',
-      /* Dark ink, not white: white on #60a5fa measures 2.54 against the 4.5
+      '--fe-bg': '#15171c',
+      '--fe-bg-elev': '#1a1d23',
+      '--fe-bg-hover': '#1f232a',
+      '--fe-bg-selected': '#1c2740',
+      '--fe-border': '#2e333c',
+      '--fe-border-soft': '#262a32',
+      '--fe-border-strong': '#3d444f',
+      '--fe-text': '#e6e8ec',
+      '--fe-text-muted': '#888f9b',
+      /* Dark ink, not white: white on the button measures 3.16 against the 4.5
        * this file claims. Mirrors styles/variables.css. */
-      '--fe-text-on-primary': '#0f1419',
-      '--fe-primary': '#60a5fa',
-      '--fe-primary-hover': '#3b82f6',
+      '--fe-text-on-primary': '#15171c',
+      '--fe-primary': '#5b8cff',
+      '--fe-primary-hover': '#7ba3ff',
+      '--fe-primary-soft': '#1c2740',
+      '--fe-primary-ink': '#7ba3ff',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
     },
@@ -120,12 +191,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#e2e9f7',
       '--fe-bg-selected': '#d2ddf4',
       '--fe-border': '#d6deee',
+      '--fe-border-soft': '#e3e8f4',
       '--fe-border-strong': '#aebfda',
       '--fe-text': '#151f38',
       '--fe-text-muted': '#49587a',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#2c4a9e',
       '--fe-primary-hover': '#213a80',
+      '--fe-primary-soft': '#e0e6f4',
+      '--fe-primary-ink': '#213a80',
       '--fe-danger': '#c62828',
       '--fe-danger-hover': '#a51f1f',
     },
@@ -135,12 +209,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#1a2547',
       '--fe-bg-selected': '#243665',
       '--fe-border': '#26335a',
+      '--fe-border-soft': '#1d2748',
       '--fe-border-strong': '#3c4e84',
       '--fe-text': '#dfe6f7',
       '--fe-text-muted': '#96a5cc',
       '--fe-text-on-primary': '#050b26',
       '--fe-primary': '#6d8dfc',
       '--fe-primary-hover': '#5273f2',
+      '--fe-primary-soft': '#182243',
+      '--fe-primary-ink': '#6d8dfc',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
     },
@@ -155,12 +232,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#dcecdf',
       '--fe-bg-selected': '#c8e2ce',
       '--fe-border': '#d2e2d4',
+      '--fe-border-soft': '#e0ece1',
       '--fe-border-strong': '#a2c3a8',
       '--fe-text': '#182b1d',
       '--fe-text-muted': '#42604a',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#2b7a41',
       '--fe-primary-hover': '#226334',
+      '--fe-primary-soft': '#dbe9dc',
+      '--fe-primary-ink': '#226334',
       '--fe-danger': '#c62828',
       '--fe-danger-hover': '#a51f1f',
     },
@@ -170,12 +250,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#1b2d23',
       '--fe-bg-selected': '#264532',
       '--fe-border': '#28402f',
+      '--fe-border-soft': '#1f3225',
       '--fe-border-strong': '#3e5f49',
       '--fe-text': '#dcebe0',
       '--fe-text-muted': '#93b09b',
       '--fe-text-on-primary': '#04180b',
       '--fe-primary': '#54c17a',
       '--fe-primary-hover': '#3fae66',
+      '--fe-primary-soft': '#16291d',
+      '--fe-primary-ink': '#54c17a',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
     },
@@ -190,12 +273,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#f0e3c8',
       '--fe-bg-selected': '#ead6ab',
       '--fe-border': '#e6dabf',
+      '--fe-border-soft': '#efe6d3',
       '--fe-border-strong': '#c6b184',
       '--fe-text': '#33270f',
       '--fe-text-muted': '#655631',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#9a4b00',
       '--fe-primary-hover': '#7c3c00',
+      '--fe-primary-soft': '#f3e5d7',
+      '--fe-primary-ink': '#7c3c00',
       '--fe-danger': '#c62828',
       '--fe-danger-hover': '#a51f1f',
     },
@@ -205,12 +291,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#2f2312',
       '--fe-bg-selected': '#44331b',
       '--fe-border': '#3b2e17',
+      '--fe-border-soft': '#302512',
       '--fe-border-strong': '#5b4a29',
       '--fe-text': '#f2e7d4',
       '--fe-text-muted': '#bda887',
       '--fe-text-on-primary': '#2a1c02',
       '--fe-primary': '#f5a524',
       '--fe-primary-hover': '#ffb84d',
+      '--fe-primary-soft': '#31230c',
+      '--fe-primary-ink': '#ffb84d',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
     },
@@ -225,12 +314,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#e8ddf5',
       '--fe-bg-selected': '#dccaf0',
       '--fe-border': '#e1d6ee',
+      '--fe-border-soft': '#ebe3f4',
       '--fe-border-strong': '#bda6d9',
       '--fe-text': '#241a33',
       '--fe-text-muted': '#584871',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#7231e0',
       '--fe-primary-hover': '#5f21c4',
+      '--fe-primary-soft': '#e9e3fc',
+      '--fe-primary-ink': '#5f21c4',
       '--fe-danger': '#c62828',
       '--fe-danger-hover': '#a51f1f',
     },
@@ -240,12 +332,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#261d37',
       '--fe-bg-selected': '#37294f',
       '--fe-border': '#302546',
+      '--fe-border-soft': '#261e38',
       '--fe-border-strong': '#4b3a6d',
       '--fe-text': '#e9e2f5',
       '--fe-text-muted': '#a999c5',
       '--fe-text-on-primary': '#180d33',
       '--fe-primary': '#b197fa',
       '--fe-primary-hover': '#9c7cf4',
+      '--fe-primary-soft': '#272038',
+      '--fe-primary-ink': '#b197fa',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
     },
@@ -260,12 +355,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#e0e0e0',
       '--fe-bg-selected': '#c9dcff',
       '--fe-border': '#5c5c5c',
+      '--fe-border-soft': '#5c5c5c',
       '--fe-border-strong': '#000000',
       '--fe-text': '#000000',
       '--fe-text-muted': '#3d3d3d',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#003d99',
       '--fe-primary-hover': '#002a6b',
+      '--fe-primary-soft': '#e7edf7',
+      '--fe-primary-ink': '#002a6b',
       '--fe-danger': '#a80000',
       '--fe-danger-hover': '#7d0000',
       '--fe-shadow': '0 0 0 1px #000000, 0 10px 32px rgba(0, 0, 0, 0.25)',
@@ -277,12 +375,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#212121',
       '--fe-bg-selected': '#003d80',
       '--fe-border': '#8f8f8f',
+      '--fe-border-soft': '#8f8f8f',
       '--fe-border-strong': '#ffffff',
       '--fe-text': '#ffffff',
       '--fe-text-muted': '#d6d6d6',
       '--fe-text-on-primary': '#001430',
       '--fe-primary': '#7ab8ff',
       '--fe-primary-hover': '#9ccaff',
+      '--fe-primary-soft': '#0e1a29',
+      '--fe-primary-ink': '#9ccaff',
       '--fe-danger': '#ff7575',
       '--fe-danger-hover': '#ff9999',
       '--fe-shadow': '0 0 0 1px #ffffff, 0 12px 32px rgba(0, 0, 0, 0.65)',
@@ -299,12 +400,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#e4e4e7',
       '--fe-bg-selected': '#d6d7db',
       '--fe-border': '#dfdfe2',
+      '--fe-border-soft': '#e9e9eb',
       '--fe-border-strong': '#b9b9c0',
       '--fe-text': '#26272b',
       '--fe-text-muted': '#585a63',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#4b4b54',
       '--fe-primary-hover': '#38383f',
+      '--fe-primary-soft': '#e4e4e6',
+      '--fe-primary-ink': '#38383f',
       '--fe-danger': '#c62828',
       '--fe-danger-hover': '#a51f1f',
     },
@@ -314,12 +418,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#26262b',
       '--fe-bg-selected': '#35353c',
       '--fe-border': '#2d2d33',
+      '--fe-border-soft': '#242429',
       '--fe-border-strong': '#4a4a52',
       '--fe-text': '#e6e6e9',
       '--fe-text-muted': '#a4a4ad',
       '--fe-text-on-primary': '#17171b',
       '--fe-primary': '#b0b0ba',
       '--fe-primary-hover': '#c4c4cd',
+      '--fe-primary-soft': '#242428',
+      '--fe-primary-ink': '#c4c4cd',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
     },
@@ -334,12 +441,15 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#d5ead9',
       '--fe-bg-selected': '#bce3c6',
       '--fe-border': '#cbe2d1',
+      '--fe-border-soft': '#dbebdf',
       '--fe-border-strong': '#94c2a0',
       '--fe-text': '#0c2913',
       '--fe-text-muted': '#31573c',
       '--fe-text-on-primary': '#ffffff',
       '--fe-primary': '#116b33',
       '--fe-primary-hover': '#0c5427',
+      '--fe-primary-soft': '#dbe9dd',
+      '--fe-primary-ink': '#0c5427',
       '--fe-danger': '#c62828',
       '--fe-danger-hover': '#a51f1f',
       '--fe-font': 'ui-monospace, "SF Mono", Consolas, Menlo, monospace',
@@ -350,103 +460,18 @@ export const THEMES: ThemeDef[] = [
       '--fe-bg-hover': '#112418',
       '--fe-bg-selected': '#1a3a26',
       '--fe-border': '#1c3a2a',
+      '--fe-border-soft': '#142b1e',
       '--fe-border-strong': '#316144',
       '--fe-text': '#4fdd8b',
       '--fe-text-muted': '#38a668',
       '--fe-text-on-primary': '#03180a',
       '--fe-primary': '#25c95e',
       '--fe-primary-hover': '#4fdd8b',
+      '--fe-primary-soft': '#0c2412',
+      '--fe-primary-ink': '#4fdd8b',
       '--fe-danger': '#ff6b62',
       '--fe-danger-hover': '#ff8d86',
       '--fe-font': 'ui-monospace, "SF Mono", Consolas, Menlo, monospace',
-    },
-  },
-  {
-    /**
-     * Drive — the palette of the end-user shell alfatm built on top of filex
-     * and put on a demo stand for review (GitHub #14). The drive profile's
-     * layout came out of their mockups; this is the colour and shape half of
-     * the same look, mapped onto our own tokens so every surface the explorer
-     * has — not just the drive shell — can wear it.
-     *
-     * Measured from their demo rather than eyeballed: 43 custom properties,
-     * of which the ones with a home here are the palette, the radii (6/8/10)
-     * and the per-file-type accents. Inter leads the font stack because that
-     * is what the demo uses; nothing is downloaded for it, so a machine
-     * without Inter installed falls back to the same system face as every
-     * other theme.
-     */
-    id: 'drive',
-    nameKey: 'theme.name.drive',
-    light: {
-      '--fe-bg': '#ffffff',
-      '--fe-bg-elev': '#f7f8fb',
-      '--fe-bg-hover': '#f3f4f6',
-      '--fe-bg-selected': '#eef3ff',
-      '--fe-border': '#e5e7eb',
-      '--fe-border-strong': '#d1d5db',
-      '--fe-text': '#1f2937',
-      '--fe-text-muted': '#6b7280',
-      '--fe-text-on-primary': '#ffffff',
-      '--fe-primary': '#2f6ceb',
-      '--fe-primary-hover': '#2559c9',
-      '--fe-danger': '#dc2626',
-      '--fe-danger-hover': '#b91c1c',
-      '--fe-font': 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-      '--fe-radius-sm': '6px',
-      '--fe-radius': '8px',
-      '--fe-radius-md': '10px',
-      '--fe-radius-lg': '12px',
-      '--fe-shadow': '0 20px 60px rgba(17, 24, 39, 0.18)',
-      '--fe-shadow-sm': '0 8px 24px rgba(17, 24, 39, 0.12)',
-      '--fe-icon-folder': '#f4b400',
-      '--fe-icon-image': '#2f6ceb',
-      '--fe-icon-video': '#7c3aed',
-      '--fe-icon-audio': '#0d9488',
-      '--fe-icon-pdf': '#dc2626',
-      '--fe-icon-doc': '#2f6ceb',
-      '--fe-icon-sheet': '#16a34a',
-      '--fe-icon-slides': '#ea580c',
-      '--fe-icon-archive': '#6b7280',
-      '--fe-icon-code': '#2f6ceb',
-      '--fe-icon-text': '#374151',
-      '--fe-icon-unknown': '#6b7280',
-    },
-    dark: {
-      '--fe-bg': '#15171c',
-      '--fe-bg-elev': '#1a1d23',
-      '--fe-bg-hover': '#1f232a',
-      '--fe-bg-selected': '#1c2740',
-      '--fe-border': '#2e333c',
-      '--fe-border-strong': '#3d444f',
-      '--fe-text': '#e6e8ec',
-      '--fe-text-muted': '#888f9b',
-      /* Dark ink on a light-blue button: white on #5b8cff measures 3.16, and
-       * the bar this file documents is 4.5. */
-      '--fe-text-on-primary': '#15171c',
-      '--fe-primary': '#5b8cff',
-      '--fe-primary-hover': '#7ba3ff',
-      '--fe-danger': '#f87171',
-      '--fe-danger-hover': '#ef4444',
-      '--fe-font': 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
-      '--fe-radius-sm': '6px',
-      '--fe-radius': '8px',
-      '--fe-radius-md': '10px',
-      '--fe-radius-lg': '12px',
-      '--fe-shadow': '0 20px 60px rgba(0, 0, 0, 0.6)',
-      '--fe-shadow-sm': '0 8px 24px rgba(0, 0, 0, 0.5)',
-      '--fe-icon-folder': '#f4b400',
-      '--fe-icon-image': '#4d7ff0',
-      '--fe-icon-video': '#9061f0',
-      '--fe-icon-audio': '#2dd4bf',
-      '--fe-icon-pdf': '#e05252',
-      '--fe-icon-doc': '#4d7ff0',
-      '--fe-icon-sheet': '#2eab63',
-      '--fe-icon-slides': '#fb923c',
-      '--fe-icon-archive': '#79808d',
-      '--fe-icon-code': '#4d7ff0',
-      '--fe-icon-text': '#5b6472',
-      '--fe-icon-unknown': '#79808d',
     },
   },
 ];
@@ -469,7 +494,17 @@ const ALL_TOKEN_KEYS: string[] = Array.from(
 function readStoredThemeId(): string {
   try {
     const v = localStorage.getItem(THEME_LS_KEY);
-    return v && themeById(v) ? v : DEFAULT_THEME_ID;
+    if (v && themeById(v)) return v;
+    // One-time carry-over from the shared key. `themeById` is what makes this
+    // safe: 'light' / 'dark' / 'auto' are not palette ids, so a value the app's
+    // mode wrote can never be mistaken for a palette here.
+    const legacy = localStorage.getItem(LEGACY_THEME_LS_KEY);
+    if (legacy && themeById(legacy)) {
+      localStorage.setItem(THEME_LS_KEY, legacy);
+      localStorage.removeItem(LEGACY_THEME_LS_KEY);
+      return legacy;
+    }
+    return DEFAULT_THEME_ID;
   } catch {
     return DEFAULT_THEME_ID;
   }

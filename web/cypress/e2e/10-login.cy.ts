@@ -20,9 +20,13 @@ describe('login', () => {
     cy.contains(/geçersiz|invalid|incorrect|hatalı/i, { timeout: 8000 }).should('be.visible');
   });
 
-  it('accepts admin credentials and lands on the dashboard', () => {
+  // ⚠ Home, not the dashboard. Since 0.41.0 every account — administrators
+  // included — starts on Home unless it picked the dashboard in user settings
+  // (web/src/lib/startPage.ts).
+  it('accepts admin credentials and lands on Home', () => {
     cy.uiLogin();
-    cy.contains(/panel|dashboard/i, { timeout: 8000 }).should('be.visible');
+    cy.url().should('include', '/admin/home');
+    cy.get('[data-testid="home-view"]', { timeout: 15000 }).should('be.visible');
   });
 
   it('apiLogin sets the bearer token', () => {

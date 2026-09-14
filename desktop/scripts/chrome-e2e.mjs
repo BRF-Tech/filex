@@ -37,9 +37,25 @@ await win.waitForSelector('#rail .slot.active .avatar--brand img', { timeout: 15
 const brand = await win.evaluate(() => {
   const img = document.querySelector('#rail .slot.active .avatar--brand img');
   return {
-    // The app's own mark is FIXED and leads the rail; it must not be the thing
-    // that changes with the selected account.
-    appMarkLeads: document.querySelector('#rail')?.firstElementChild?.classList.contains('appmark'),
+    // ⚠ The app's own mark is in the TOP BAR now, not on the rail — the rail
+    // drew a second copy of it about 60px from this one (gorunum:v3-shell gave
+    // the explorer a brand corner and this window fills it via `config.brand`).
+    // The RULE is unchanged and is what this still measures: something on
+    // screen always names the app, and it is never the selected account's
+    // badge. It just moved, and gained the wordmark on the way.
+    //
+    // ⚠ naturalWidth, not "the element exists": the mark is a data: URI, and a
+    // URI that fails to decode leaves a perfectly good <img> with a src on a
+    // corner that is blank.
+    brandImgDecoded: (() => {
+      const img = document.querySelector('.fe-toolbar__mark .fe-toolbar__markimg');
+      return !!img && img.naturalWidth > 0 && img.naturalHeight > 0;
+    })(),
+    brandWordmark: [...(document.querySelectorAll('.fe-toolbar__mark span') ?? [])]
+      .map((e) => e.textContent.trim()).filter(Boolean).join(' '),
+    // …and the rail starts with a SERVER, with no second mark above it.
+    railStartsWithAccount: document.querySelector('#rail')?.firstElementChild?.classList.contains('slot'),
+    railHasAppMark: !!document.querySelector('#rail .appmark'),
     src: img ? (img.getAttribute('src') || '').slice(0, 24) : null,
     // naturalWidth is the honest question: a broken URL still leaves an <img>
     // in the DOM, and the row would be an empty white plate.
@@ -49,7 +65,11 @@ const brand = await win.evaluate(() => {
       .map((el) => el.textContent.trim()),
   };
 });
-check("the app's own mark leads the rail, fixed", brand.appMarkLeads === true);
+check('the top bar names the app — the mark actually decoded', brand.brandImgDecoded === true);
+check('…with the wordmark beside it', brand.brandWordmark === 'filex', brand.brandWordmark || '(none)');
+check('…and the rail does not draw a SECOND copy of the same mark',
+  brand.railHasAppMark === false && brand.railStartsWithAccount === true,
+  `appmark=${brand.railHasAppMark} firstChild=${brand.railStartsWithAccount ? 'account' : 'something else'}`);
 check("the active server's row carries its own logo", brand.src !== null,
   `.avatar--brand img: ${brand.src === null ? 'MISSING' : 'present'}`);
 check('the logo actually decoded', brand.decoded, `src=${brand.src ?? '—'}…`);
@@ -65,6 +85,14 @@ await win.waitForSelector('.fe-tabs', { timeout: 15_000 }).catch(() => {});
 // existed, so a fresh window had no strip and no + button.
 check('tab strip is on screen with a single tab', await strip().isVisible().catch(() => false));
 check('…and it holds exactly one tab', (await tabs().count()) === 1);
+
+// ⚠ Again, here. `ensureNoTour()` above runs seconds before this point, and
+// between the two sits a 15s wait for the branding plate — a wait that runs to
+// its full timeout on any server with no logo set. The tour appears during it,
+// and the click below then fails with "…fe-tour intercepts pointer events",
+// which reads as "the + is broken". Measured 2026-09-12 against a local
+// instance: the branding wait timed out and every later click was swallowed.
+await ensureNoTour();
 
 // The + lives in the strip, so a hidden strip means no way to open a tab.
 await win.locator('.fe-tabs__new').click();
@@ -173,15 +201,37 @@ check('the shipped CSS scopes its scrollbar rules to .fe',
   'a bare `*` rule would hijack the embedding page');
 
 // ── day / night / automatic ──────────────────────────────────────────
+//
+// ⚠ Opened from the "⋯" menu, not from a toolbar button. gorunum:v2 took the
+// theme control off the header ("density, theme → user settings, and the '⋯'
+// menu below", Toolbar.vue) and `.fe-toolbar__theme` stopped existing — this
+// suite then spent 30s waiting for it and died with a locator timeout, which
+// reads as "the theme gallery is broken" rather than "the door moved".
 await ensureNoTour();
-await win.locator('.fe-toolbar__theme:not(.fe-toolbar__measure .fe-toolbar__theme)').first().click();
+await win.locator('[data-testid="drive-more"]').first().click();
+await sleep(500);
+await win.evaluate(() => {
+  const visible = (e) => e.getClientRects().length > 0 && !e.closest('[aria-hidden="true"]');
+  [...document.querySelectorAll('.fe-ctx__item, [role="menuitem"], button, li')]
+    .filter(visible)
+    .find((x) => /^(Tema|Theme)$/i.test((x.textContent ?? '').trim()))
+    ?.click();
+});
 await win.waitForSelector('.fe-thememode', { timeout: 10_000 }).catch(() => {});
 const opts = win.locator('.fe-thememode__opt');
 check('the theme gallery offers a day/night/automatic switch', (await opts.count()) === 3);
 check('exactly one of the three reads as active',
   (await win.locator('.fe-thememode__opt.is-active').count()) === 1);
 
-/** Reads what the explorer actually resolved to, not what we asked for. */
+/** Reads what the explorer actually resolved to, not what we asked for — and
+ *  what the SHELL around it did about it.
+ *
+ *  ⚠⚠ `shellDark` is the half this suite used to have no opinion about, and it
+ *  was wrong for as long as nobody looked. Measured 2026-09-12: with the
+ *  preference on Dark the file list went dark and the app's own settings
+ *  surface stayed white — a full-window white page inside a dark application.
+ *  The shell now copies the explorer's answer (ui/app.html →
+ *  adoptExplorerTheme), so the two can be asserted against each other. */
 const mode = () =>
   win.evaluate(() => {
     const root = document.querySelector('.fe');
@@ -192,20 +242,31 @@ const mode = () =>
       // The token that actually paints the surface — the classes are only the
       // mechanism, this is the result.
       bg: getComputedStyle(root).getPropertyValue('--fe-bg').trim(),
+      // …and the same question asked of the chrome that wraps it.
+      shellDark: document.documentElement.classList.contains('dark'),
+      shellBg: getComputedStyle(document.documentElement).getPropertyValue('--fe-bg').trim(),
+      shellScheme: getComputedStyle(document.documentElement).colorScheme,
     };
   });
 
 await opts.nth(1).click(); // Night
-await sleep(300);
+await sleep(400);
 let m = await mode();
 check('Night paints the dark variant', m.dark && !m.light, JSON.stringify(m));
 check('…and the choice is remembered', m.stored === 'dark', String(m.stored));
+check('…and the APP CHROME goes dark with it, not just the file list',
+  m.shellDark === true && m.shellBg === m.bg,
+  `shellDark=${m.shellDark} shellBg=${m.shellBg} explorerBg=${m.bg}`);
+check('…including the colour-scheme the window\u2019s own form controls follow',
+  m.shellScheme === 'dark', m.shellScheme);
 
 await opts.nth(0).click(); // Day
-await sleep(300);
+await sleep(400);
 m = await mode();
 check('Day paints the light variant', m.light && !m.dark, JSON.stringify(m));
 check('…and the choice is remembered', m.stored === 'light', String(m.stored));
+check('…and the chrome comes back with it', m.shellDark === false && m.shellBg === m.bg,
+  `shellDark=${m.shellDark} shellBg=${m.shellBg} explorerBg=${m.bg}`);
 
 await opts.nth(2).click(); // Automatic
 await sleep(300);

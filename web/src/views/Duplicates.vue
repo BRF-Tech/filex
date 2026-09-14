@@ -129,7 +129,7 @@ onMounted(async () => {
     </div>
 
     <p v-if="hasGroups" class="text-sm text-zinc-600 dark:text-zinc-300">
-      {{ t('duplicates.summary', { groups: formatNumber(groups.length, locale), waste: formatBytes(totalWaste, locale) }) }}
+      {{ t('duplicates.summary', { groups: formatNumber(groups.length, locale), waste: formatBytes(totalWaste, locale) }, groups.length) }}
     </p>
 
     <div v-if="loading && !loaded" class="card card-body text-center text-zinc-500"><Spinner /></div>
@@ -158,7 +158,7 @@ onMounted(async () => {
           <span class="truncate font-medium flex-1">
             {{ g.nodes[0]?.name ?? g.key }}
           </span>
-          <Badge tone="zinc" size="xs">{{ t('duplicates.copies', { n: formatNumber(g.count, locale) }) }}</Badge>
+          <Badge tone="zinc" size="xs">{{ t('duplicates.copies', { n: formatNumber(g.count, locale) }, g.count) }}</Badge>
           <span class="text-xs tabular-nums text-zinc-500 whitespace-nowrap">{{ formatBytes(g.size, locale) }}</span>
           <span class="text-xs tabular-nums whitespace-nowrap text-rose-600 dark:text-rose-400 font-medium">
             {{ t('duplicates.wasted', { size: formatBytes(g.total_waste, locale) }) }}

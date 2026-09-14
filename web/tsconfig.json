@@ -22,7 +22,13 @@
     "types": ["vite/client", "node"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      // ⚠ The package's own export map already publishes `./src/*` (that is how
+      // web/tests/ deep-import core's helpers), and Vite resolves it — but TS
+      // stops at the extension-less target the map names and reports TS2307.
+      // This points the TYPE resolution at the same file Vite loads; it is not
+      // a second source, it is the same one.
+      "@brftech/filex-core/src/*": ["../packages/core/src/*"]
     }
   },
   "include": [

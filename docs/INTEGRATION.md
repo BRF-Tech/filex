@@ -5,19 +5,24 @@ or plain HTML). The explorer is one component; you point it at a filex backend
 and pass an auth token. Everything else (uploads, preview, share, move, delete,
 trash, convert) is built in.
 
-> Status (2026-06-24): move / delete→trash / copy / folder-share-zip / trash UI /
-> menu parity bugs are fixed and deployed (filex v0.1.27, demo + prod). The
-> three wrappers below all build against the current core.
-
 ## 1. Pick a wrapper
 
-| Host app | Package | Component |
-|----------|---------|-----------|
-| Plain HTML / any framework | `@brftech/filex` (web component) | `<filex-explorer>` |
-| React 18/19 | `@brftech/filex-react` | `<FileManager>` |
-| Vue 3 | `@brftech/filex-core` | `FileExplorer` |
+| Host app | Package | Component | Stylesheet |
+|----------|---------|-----------|------------|
+| Plain HTML / any framework | `@brftech/filex` (web component) | `<filex-explorer>` | none — the bundle injects it |
+| React 18/19 | `@brftech/filex-react` | `<FileManager>` | none — same bundle, same injection |
+| Vue 3 | `@brftech/filex-core` | `FileExplorer` | `import '@brftech/filex-core/style.css'` |
 
 All three render the **same** explorer — they differ only in how you mount it.
+
+⚠ The stylesheet column is not a detail: the look is one global sheet plus the
+`--fe-*` tokens on it, and only the Vue wrapper imports it by hand. The web
+component carries the same bytes *inside its JavaScript* and appends them to
+`<head>` on first mount, and the React adapter wraps that web component — so a
+React host imports no CSS and is not missing anything. `style.css` is also
+published by both `@brftech/filex-core` and `@brftech/filex` for a host that
+would rather serve the file itself.
+
 Working end-to-end examples live in [`demo/`](../demo): `index.html` (vanilla),
 `vue.html`, `react.html`. They load from CDN (no build step) — open one and
 point it at a backend to see the exact wiring.
@@ -43,14 +48,41 @@ const config = {
   // root is empty and no listing request is ever made — which looks exactly
   // like a broken connection rather than a missing option.
   multiStorageRoot: true,
-  storages: [{ name: 'docs' }, { name: 'media', label: 'Media', readOnly: true }],
+  // ⚠ Fill in `uid` wherever you know it. A storage's NAME is editable — that
+  // is what a name is for — so it is not a stable address, which is why every
+  // protocol also accepts the uid as a path's first segment. Anything keyed on
+  // a storage for the long term prefers it: per-folder view memory does, so a
+  // renamed storage keeps its folders' remembered views instead of losing them.
+  // Absent = the name is used, and a rename costs the memory once.
+  storages: [
+    { name: 'docs', uid: '0f0a8d6e-1c3f-4f2a-9a4e-6a1b2c3d4e5f' },
+    { name: 'media', label: 'Media', readOnly: true },
+  ],
   trashVisible: true,      // show the Trash entry (list + restore)
 
-  // Navigation panel: Upload · Recent / Starred / Shared with me / Trash · the
-  // tags in use · the storage list. ON by default on every surface. The viewer collapses it to an
-  // icon rail with the toggle in the panel head (or the one in the toolbar) and
+  // Per-folder view memory (view mode + sort), Windows-Explorer style.
+  // Default ON — this flag says the feature is AVAILABLE to the person, who
+  // then turns the memory itself on in their own settings (default off there).
+  // The opt-out is for embeds: a filex in a two-inch panel has one shape it
+  // wants and no room to argue with a gallery view arriving from the person's
+  // main window. State lives in a server-side per-user document, not
+  // localStorage, so it follows them across browsers and never leaks between
+  // two accounts looking at the same folder.
+  // ⚠ Column widths are NOT covered by this flag — they are a global
+  // preference about the reader's screen, not about the folder.
+  rememberFolderView: true,
+
+  // Navigation panel, in the order it draws: the primary "+ New" menu (upload
+  // files · new folder · new document · request files), the destinations
+  // Home · Shared with me · Recent · Starred · Trash (plus "My files" when the
+  // caller reaches at most one storage — with several there is a drives root
+  // to go back to instead), the tags in use, the storages this caller can
+  // reach, then "How to connect" + "API keys".
+  // ON by default on every surface. The viewer collapses it to a 56px
+  // icon rail from the control at the FAR LEFT OF THE TOP BAR — above the
+  // panel, not inside it, so it is still there when the panel is a rail — and
   // that choice is remembered per browser. Below 560px it is a drawer over the
-  // listing rather than a column.
+  // listing rather than a column, and the drawer keeps a dismiss of its own.
   // ⚠ `rootPath` flips the default to off — a confined embed has no storage
   // list, and its views would name files outside the folder you confined it to.
   sideNav: true,
@@ -71,18 +103,36 @@ const config = {
   // ⚠ Proxying with one shared token (below) is exactly the 'app' case.
   callerKind: 'app',
 
-  // 'standard' (default) — tab strip, split pane, list/grid/gallery.
+  // The product mark at the far left of the top bar, beside the navigation
+  // panel's collapse control. Both halves optional; neither renders nothing.
+  //   name    — wordmark text, printed verbatim, never translated
+  //   markUrl — the glyph, as an <img src>: a path, a URL, or a data: URI
+  // ⚠⚠ Use this rather than the `#brand` slot in a WEB COMPONENT. A slot
+  // cannot be filled in `<filex-explorer>` at all — measured: a
+  // `<span slot="brand">` inside the element is discarded, and the element's
+  // `setup` sees no slots, with or without a shadow root. Vue projects light
+  // DOM into a custom element only through a native `<slot>` inside a shadow
+  // root, and this element is deliberately light-DOM so the one global
+  // stylesheet reaches it. A host mounting the Vue SFC can use either; the
+  // slot wins when it is filled.
+  brand: { name: 'filex', markUrl: '/logo.svg' },
+
+  // How much of the explorer to put on screen. A REDUCTION, and only that.
+  // 'standard' (default) — everything: tab strip, split pane, list/grid/gallery.
   // 'simple'             — one pane, one folder, list/grid, no tab strip, no
-  //                        split. Nothing is removed from the build; this is a
-  //                        preset for people who do not want a power tool.
-  // 'drive'              — everything 'simple' does, plus the shell an end
-  //                        user already knows: one "+ New" menu, one search
-  //                        field in the header with a ⌘K/Ctrl+K chip that hands
-  //                        the query to the command palette, a Type/Modified/
-  //                        Size filter row, Folders and Files as sections in
-  //                        grid view, Details/Activity in the info panel, and a
-  //                        storage line under the navigation.
-  //                        ⚠ A superset of 'simple', not a sibling.
+  //                        split, Connections off. Nothing is removed from the
+  //                        build; this is a preset for people who do not want a
+  //                        power tool.
+  // Two values, and no third. ⚠ Anything else resolves to 'standard' and logs
+  // one console line naming it — the 'drive' profile was REMOVED after v0.40.0,
+  // so pass 'simple' if that is what you were asking for.
+  // ⚠⚠ It does NOT decide the look. The shell — one "+ New" menu, one search
+  // field in the header with its ⌘K/Ctrl+K chip, the Type/People/Modified/Size
+  // filter row, Folders and Files as sections in grid view (replaced by date
+  // headings while the listing is sorted by Modified), Details/Activity in the
+  // info panel, the storage line under the navigation, and the Home view — used
+  // to be gated behind a profile. It is the default now, in the admin app, the
+  // desktop app and every embed, with no string passed.
   uiProfile: 'simple',
 };
 ```
@@ -178,11 +228,52 @@ eventMatchesShortcut(ev, 'palette'); // true when THIS event fires that action
 
 A theme is a map of `--fe-*` custom properties in a light and a dark variant,
 not a second stylesheet — picking one is independent of light/dark mode, which
-keeps deciding which variant is active. Nine ship (Default, Night Blue, Forest,
-Amber, Lilac, High Contrast, Soft Gray, Terminal Green and Drive), and a host
+keeps deciding which variant is active. Eight ship (Default, Night Blue,
+Forest, Amber, Lilac, High Contrast, Soft Gray and Terminal Green), and a host
 that wants its own look sets the same tokens on any scope above the explorer.
 Every shipped palette clears WCAG 2.1 contrast in both variants, which is a
 check in the test suite rather than a claim.
+
+#### Operator custom CSS
+
+An operator who wants a look no shipped theme gives can paste a stylesheet in
+the admin panel: **Settings -> Custom CSS**, stored as the setting
+`ui.custom_css` and capped at 64 KB (the page counts the same UTF-8 bytes the
+server enforces). It is delivered on the public `GET /api/branding` payload,
+which the SPA already fetches on every page load before a session exists, and
+injected as the text of a single `<style data-filex-custom>` element appended
+last in `<head>`. Last is deliberate: a token override ties on specificity with
+the declaration it overrides, so source order is what decides, and the element
+moves back to the end whenever a lazily loaded route injects its own CSS.
+
+Three things worth knowing before you write one:
+
+- **The `--fe-*` custom properties are the supported surface.** They are listed
+  above and in `packages/core/src/styles/variables.css`, and setting them on any
+  scope above the explorer — `.fe`, `:root`, one wrapper div — is the whole API.
+  A sheet that only assigns tokens keeps working across releases.
+- **Class names are not a stable API.** `.fe-row`, `.fe-grid-card` and friends
+  are internal markup that moves between releases with no deprecation and no
+  changelog entry. Target them if you must, and re-check your sheet on every
+  upgrade. That includes the admin panel's own chrome, which is built from
+  utility classes rather than `--fe-*` tokens: a token-only sheet restyles the
+  file surfaces and leaves the panel's sidebar and buttons alone.
+- **A change reaches other browsers within about a minute.** The payload is
+  sent with `Cache-Control: public, max-age=60`, so a visitor already on the
+  site keeps the previous sheet until their next load past that window. The
+  admin who saves sees it immediately — the Settings page applies its own save
+  without waiting for a reload.
+- **It applies to everyone using the installation, on every page**, including
+  the login screen — it is one instance-wide row, not a per-user preference and
+  not a per-tenant one. In multi-tenant mode only the supertenant may write it;
+  a tenant admin's write is refused, the way every other instance-wide setting
+  is. Clearing the box removes the element entirely.
+
+The value is CSS and is only ever assigned as a style element's text, so it
+cannot introduce markup; the server additionally refuses a sheet containing
+`</style`, which no stylesheet needs. Embedded web-component and React hosts
+are NOT styled by this setting — their page is yours, so set the same tokens
+there directly.
 
 ### The navigation panel and the simple profile
 
@@ -235,8 +326,10 @@ use that when the token rotates.
     multiStorageRoot: true, trashVisible: true, locale: 'tr',
     sideNav: true, connections: true, uiProfile: 'simple',
   };
-  el.addEventListener('error', (e) => console.error(e.detail));
-  el.addEventListener('file-opened', (e) => console.log(e.detail));
+  // ⚠ The payload is e.detail[0]: a custom element's detail is the emit's
+  // argument LIST (docs/API.md → Events).
+  el.addEventListener('error', (e) => console.error(e.detail[0].message));
+  el.addEventListener('file-opened', (e) => console.log(e.detail[0].path));
 </script>
 ```
 
@@ -268,10 +361,20 @@ import { FileManager } from '@brftech/filex-react';
   config={{ apiBase: 'https://files.example.com',
             auth: { kind: 'bearer', token },
             sideNav: true, connections: true, uiProfile: 'simple' }}
-  onError={(e) => console.error(e.detail)}
-  onFileOpened={(e) => console.log(e.detail)}
+  onError={(e) => console.error(e.detail[0].message)}
+  onFileOpened={(e) => console.log(e.detail[0].path)}
 />
 ```
+> One import, no separate stylesheet — see the table in section 1. The
+> connections panel has no React wrapper: render `<filex-connections>` in JSX
+> and set `config` on the ref, the way you would any non-React element.
+>
+> ⚠ The optional viewer peers (Monaco, Mermaid, epub, xlsx, CodeMirror, …) are
+> reached through dynamic imports that are caught, so a build without them
+> falls back to the plain viewer — but a bundler still refuses to resolve an
+> import it cannot find. If `vite build` stops with `Rollup failed to resolve
+> import "monaco-editor"`, either install the ones you want or list them in
+> `build.rollupOptions.external`.
 
 ### Vue 3
 ```vue
@@ -301,7 +404,7 @@ caller to its own folder. **Do it server-side — the frontend `rootPath` below 
 only cosmetic.** filex enforces confinement on `/api/files` from two sources
 (narrowest wins):
 
-1. **Root-scoped API token** (hard ceiling, un-bypassable). Create a filex API
+1. **Root-scoped API token** (the server-side ceiling). Create a filex API
    token whose `scopes` include `root:<adapter>://<rel>`, e.g.
    `read,write,delete,root:main://projeler/acme`. Proxy `/api/files/*` with it
    as `Authorization: Bearer <token>` (server-side — the browser never sees it).
@@ -309,6 +412,9 @@ only cosmetic.** filex enforces confinement on `/api/files` from two sources
    default — the right kind here, because this one credential stands in for
    every visitor. ⚠ Confinement and kind are independent: a `root:` scope does
    not make a token an app, and an app token is not confined unless you say so.
+   ⚠⚠ Pass a **non-admin** `user_id`. Omitted, the token is bound to the admin
+   minting it — and the admin panel's own `/api/admin/*` routes are gated on the
+   account's role, so a token is only as limited as the account behind it.
 2. **`X-Filex-Root` header** (per-request, narrows within the token root). Your
    proxy sets `X-Filex-Root: main://projeler/acme` per request. A stray client
    header can only narrow, never escape the token root.

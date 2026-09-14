@@ -11,6 +11,7 @@ about to do.
 - [Testing](#testing)
 - [Code style](#code-style)
 - [Docs](#docs)
+- [Screenshots](#screenshots)
 - [Release process](#release-process)
 
 ---
@@ -31,9 +32,17 @@ pnpm install            # all workspace packages
 pnpm run dev            # parallel: package watch + admin Vite dev server
 
 # In another shell — Go backend
+# once, on a fresh clone: the binary embeds these two directories, and
+# `go build` refuses a //go:embed pattern that matches nothing
+mkdir -p backend/embed/admin backend/embed/web
+touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+
 cd backend
-go run ./cmd/filex serve --listen 127.0.0.1:5212 --data-dir ./.dev-data
+FILEX_LISTEN=127.0.0.1:5212 FILEX_DATA_DIR=./.dev-data go run ./cmd/filex serve
 ```
+
+⚠ `serve` takes its settings from the environment (or `--config`), not from
+flags: `--listen` and `--data-dir` are refused with `unknown flag`.
 
 The admin SPA is served by Vite at <http://localhost:5173> in dev mode and
 proxies `/api/*` to the Go server at `:5212`. For the embedded build (what
@@ -208,6 +217,60 @@ journey in Playwright.
 - Prefer composables for reusable logic; SFC for components.
 - No default exports (named only) — easier IDE refactor.
 
+### Do not write the same logic twice
+
+Anything repeated is added in one place and managed from one place. This is not
+a style preference — it is the rule this codebase has broken most often, and
+every time it was found by a person looking at a screen: a 464-line second
+listing pane, one `mime_type === 'inode/storage'` test in three view
+components, the brand mark hand-typed into five files (one still painted the
+pre-rebrand indigo), two byte formatters that round differently on the same
+screen. The second copy always gets written because the first is inconvenient
+to reach, nothing notices, and the two drift.
+
+**The gate:** `web/tests/quality/duplication.test.ts`, running
+`scripts/dup-scan.mjs`. Run it yourself with `node scripts/dup-scan.mjs` — it
+prints a ranked report and takes about two seconds. It checks three things:
+
+| | what it catches | threshold |
+|---|---|---|
+| **fragments — verbatim** | a block copy-pasted with its names intact | ≥ 100 contiguous tokens (~15 lines) |
+| **fragments — renamed** | a block re-typed, or copied and adapted, so no name matches | ≥ 140 tokens of identical structure, ≥ 14 distinct keywords/operators |
+| **concepts** | a second implementation of something that has one home — byte formatting, date formatting, the storage-row test, the logo | any occurrence outside its home |
+| **listing surfaces** | a component that renders the view components but hand-rolls the breadcrumb / filter row / view switch | any missing shared piece |
+
+Scope is `packages/core/src`, `web/src`, `backend/internal`, `desktop/src`.
+Tests, locale catalogues, generated files and build output are out of scope.
+
+**When it fires: extract the shared thing and call it from both places.** That
+is the answer nearly every time, and it is usually smaller than it looks.
+Adding a second copy *and* an allowlist entry is not an answer — it is the
+failure this gate exists to stop, written down.
+
+**To declare a legitimate twin,** add an entry to the right register in the
+test file, with a reason **about this code**. "Known issue" is rejected by the
+gate; so is anything under 60 characters.
+
+- `LEGITIMATE_TWINS` — the duplication is the design and will not be removed
+  (the Postgres and SQLite drivers are two dialects of one interface). No
+  ceiling: these grow on purpose.
+- `KNOWN_DUPLICATION` — debt. Real, pre-existing, owed. Carries a `maxTokens`
+  ceiling, so the area cannot quietly grow a *bigger* copy than it already has.
+- `CONCEPT_EXEMPTIONS` / `COMPOSITION_DEBT` — the same, per concept and per
+  surface.
+
+**The registers are kept honest by going stale loudly.** An entry that no
+longer matches anything *fails*. So when you fix a duplicate the build turns
+red and tells you to delete its entry — that is intended, and the fix is one
+line. An allowlist nobody prunes becomes the place the next duplicate hides.
+
+Two limits worth knowing, so you do not mistake silence for absence: the
+fragment passes only see duplication that is still *shaped* like the original
+(a re-implementation with a different structure — which is what the old
+`SecondaryPane` was, before one `FilePane` replaced both halves of the split —
+is caught by the listing-surface rule instead, not by tokens), and Vue
+`<template>` and `<style>` blocks are not scanned at all.
+
 ### General
 
 - **Line endings are LF, and `.gitattributes` enforces it** — you do not need to
@@ -252,6 +315,40 @@ Doc updates live alongside code changes in the same PR. The pattern:
 
 ---
 
+## Screenshots
+
+**Every UI feature ships with its screenshots, in the same change.** A screen
+that changed under a picture that did not is wrong information in the README,
+not missing information.
+
+1. **Take them with `pnpm shots`.** A screen with no picture yet gets one in the
+   `e2e/shots/` script that owns it, or in a new script there — the command
+   runs every file in that directory that imports `@playwright/test`, so a new
+   script cannot be left out.
+2. **Look at the contact sheet it prints** (`e2e/.artifacts/shots/contact-sheet.html`):
+   every picture of the run with its path and the script that took it. Each one
+   must be in English, show what its name says, and have nothing across it — no
+   onboarding tour, no install banner, no dialog caught mid-fade.
+3. **Commit the pictures** in `docs/screenshots/<release>/` with the code.
+
+What the command does, so a red run can be read: builds
+`build:packages → build:web → sync:embed → go build` (Go native, or through WSL
+on Windows); boots the binary and **refuses to shoot unless it serves `web/dist`
+byte for byte** (`scripts/check-embed.mjs`; source maps only have to exist, their
+bytes are not reproducible — a binary built without `sync:embed` carries an older
+UI and still passes every API check); runs every script, the
+E2E-escrow instance and its throwaway key pair included; syncs `site/assets`;
+fails on a picture in the release folder that no script wrote; and ends every
+process it started. `--only <script>` while you work on one screen,
+`--no-build` to shoot a binary you already built (still verified). It needs
+Playwright's Chromium once: `pnpm --dir e2e exec playwright install chromium`.
+
+CI runs the same command on every tag and on demand (GitLab `shots`, GitHub
+*Screenshots*) and uploads the pictures with the sheet, so a script that no
+longer fits the product turns a job red instead of a release night.
+
+---
+
 ## Release process
 
 Maintainer-only. Reproducible, automated by CI.
@@ -268,69 +365,25 @@ Maintainer-only. Reproducible, automated by CI.
    > trash & versioning, E2E folders and self-update had all shipped — six
    > minor releases' worth — and not one of them had reached the README.
 
-2. **Open every screenshot the README shows and check it against the shipped
-   UI — in English.** Same failure as step 1, in pictures: a screenshot is
-   read as a promise about what the product looks like *now*, and a stale one
-   is wrong information rather than missing information. Two things to
-   confirm, image by image:
-
-   - **Language.** These are the repo's shop window and its readers are not
-     Turkish. Every visible string — buttons, menus, dialog footers — must be
-     English. Capture with the UI language set to English and re-read the
-     result; a half-translated dialog ("Düzenle" next to "Download") is worse
-     than no screenshot, because it looks like a product that cannot pick a
-     language.
-   - **Currency.** If a release touched a screen a screenshot shows, retake
-     it. A control added this cycle must be visible in the picture that claims
-     to show that screen.
-
-   Retake them with:
+2. **Retake the screenshots and look at them.** Bump `SHOTS_RELEASE` in
+   `e2e/shots/release.mjs` to the release being cut — each release's pictures go
+   in a new `docs/screenshots/vX.Y.Z/`, and older folders are never retaken,
+   moved or deleted — point the README and docs at the new folder, then run
 
    ```bash
-   pnpm run build:all                     # the shots come from this binary
-   pnpm --dir e2e run install:browsers    # once
-   node e2e/shots/capture.mjs             # → docs/screenshots/*.png
+   pnpm shots
    ```
 
-   ⚠ `build:all` ends in `build:backend`, which is a plain `go build` — it
-   needs Go on the **same** PATH as pnpm. On a Windows workstation whose
-   toolchain lives in WSL, run the first three steps natively and cross-build
-   the binary the shots boot:
-
-   ```bash
-   wsl -e bash -lc 'cd /mnt/g/filex/backend && \
-     GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
-     -o /tmp/filex.exe ./cmd/filex && cp /tmp/filex.exe /mnt/g/filex/bin/filex.exe'
-   ```
-
-   It boots a local instance, seeds a demo tree, pins the UI language to
-   English three ways over (browser locale, stored preference, server default)
-   and writes the set. `admin-plugins.png` needs the example plugin built and
-   running: the script tries `go build`, then cross-builds through WSL, then
-   `SHOTS_PLUGIN_BIN` if you point it at a binary yourself. Then **look at the
-   PNGs** before committing them — see `e2e/README.md` for the knobs (running
-   server, VM/WSL paths, thumbnails, the demo-mode landing page).
-
-   Then copy the ones filex.sh shows:
-
-   ```bash
-   node scripts/sync-site-assets.mjs
-   ```
-
-   ⚠ `site/assets/` is documented as a copy of `docs/screenshots/` and nothing
-   kept it one: on 2026-09-06 the marketing page was still showing the plugins
-   picture whose footer named the **private** GitLab repo, after the README had
-   been fixed. `web/tests/deploy/siteAssets.test.ts` fails the build now.
-
-   ⚠ **A shot the script could not take exits 1.** It used to log a line and
-   exit 0, which is how a picture stayed behind for several releases with a
-   `github.com/brf-tech/filex` footer in it — in the README of the public
-   GitHub repo. If you genuinely want a partial run, say so with
-   `SHOTS_ALLOW_SKIP=1`; do not commit around it.
+   and **open the contact sheet it prints** before committing the folder: every
+   picture in English, current, nothing covering it. [Screenshots](#screenshots)
+   says what the command checks on the way.
 
    > Why this is a numbered step: by 2026-08-14 `share-modal.png` showed a
    > share dialog with no download limit — a control that had shipped two
    > releases earlier — and `viewer-markdown.png` had Turkish buttons in it.
+   > The v0.41.0 set then had to be taken three times by hand: scripts that no
+   > longer fit the UI, and a binary carrying a 16-hour-old interface that
+   > passed every API check. `pnpm shots` exists so neither happens again.
 
 3. **Audit the documentation on every surface. Never skip this.** The README
    pass above is one leg of it; a feature can be finished, tested and shipped and
@@ -360,7 +413,7 @@ Maintainer-only. Reproducible, automated by CI.
    | `packages/*/README.md` | these are the **npm pages** — an export nobody documents does not exist for anybody installing the package |
    | `desktop/README.md` | what the app actually does |
    | `deploy/*/README.md` | install instructions per target |
-   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`) | **app-store listings** — public product copy |
+   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`), `deploy/runtipi/*/metadata/description.md` | **app-store listings** — public product copy. Three stores, and the Runtipi one is a whole markdown page rather than one line, which is exactly why it is the one that rots |
    | `deploy/helm/*/Chart.yaml` | shown by `helm search` |
    | `package.json` descriptions | shown on npm |
    | `deploy/compose/*.yml` | new env vars and **published ports** with the traps beside them |
@@ -505,7 +558,17 @@ Maintainer-only. Reproducible, automated by CI.
    ```bash
    git status --porcelain | grep '^??' && echo "untracked files — commit them or move them to their branch"
    pnpm -s --filter ./web build      # vue-tsc + vite, the gate nothing else runs
+   node e2e/run.mjs cypress          # the suite release.yml waits for, run BEFORE the tag is public
+   node e2e/run.mjs local            # Playwright — the journeys Cypress does not walk
    ```
+
+   Measured 2026-09-14, on v0.41.0: the explorer had been rebuilt and every
+   account now landed on Home instead of the dashboard. Nothing local had run
+   either end-to-end suite during the cycle, and both still waited for
+   `/admin/dashboard` after signing in — so every spec behind the login helpers
+   would have gone red in the tag's own CI run, after the tag was public, and
+   held back every binary, image and package. Fourteen Cypress failures were
+   stale selectors, not product bugs; that is only knowable by running them.
 
    Measured 2026-09-12, on v0.38.1: `git add -A` swept in two work-in-progress
    files from a feature branch — an admin page with no route, no menu entry and

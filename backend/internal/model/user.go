@@ -29,6 +29,25 @@ func ValidRole(name string) bool {
 	}
 }
 
+// TimezoneUnset is the account time zone of somebody who has not chosen one.
+//
+// ⚠⚠ It is the EMPTY string, and that is not a placeholder for "UTC". A
+// timestamp is an instant; the reader picks the clock (packages/core
+// lib/timezone). An empty zone tells every client "use the clock of the device
+// this person is looking through" — the owner's rule, verbatim: "ben 03'te
+// video yükledim, GMT 0 eleman o videonun yüklenme saatini kendi zaman
+// diliminde görecek."
+//
+// Every account used to be created with the literal "UTC" (six call sites, and
+// the column default), so a person who had never opened the setting could not
+// be told apart from one who had deliberately picked UTC. The web app honours
+// the account's zone and therefore drew every date in UTC, while the same
+// explorer embedded on another page — which cannot see the account — drew the
+// browser's clock. Measured 2026-09-14 on one fresh account: 11:57 PM UTC in
+// the app beside 4:57 PM PDT in the embed, for the same file.
+// Migration 00040 clears the rows that default wrote.
+const TimezoneUnset = ""
+
 // User represents an authenticated principal.
 type User struct {
 	ID    int64  `json:"id"`

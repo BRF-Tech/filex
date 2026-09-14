@@ -285,6 +285,10 @@ func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
 		}
 		nodes = kept
 	}
+	// Root confinement: this raw branch is addressed by ?storage=&?parent= ids,
+	// which confine.Middleware cannot rewrite, so a confined token listed a
+	// folder outside its root. Drop the out-of-root rows (inert unconfined).
+	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"nodes": nodes,
 	})
@@ -663,7 +667,7 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 			n.Thumb = t
 		}
 	}
-	files := projectFileNodes(s.Name, nodes, dirsOnly, set, h.ThumbSigner)
+	files := projectFileNodes(s.Name, nodes, dirsOnly, set, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
@@ -901,16 +905,25 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	// sibling handler already applies to /api/files/search
 	// (handlers/search.go): scope absent ⇒ unscoped ⇒ unchanged.
 	//
-	// ⚠ The SQL-LIKE fallback further down does not pass through here and does
-	// not need to: its cross-storage walk enumerates ListEnabledStorages, which
-	// tenantstore confines. That inconsistency — one path scoped by the store,
-	// the other not scoped at all — is what hid this for as long as it did.
+	// ⚠ The SQL-LIKE fallback further down runs its rows through this SAME keep
+	// (see accept()): its cross-storage walk enumerates ListEnabledStorages
+	// (tenant-confined) but that says nothing about the token's `root:` subtree,
+	// so it must pass keep or a confined token gets the leak back on an index
+	// miss. One choke point, both branches.
 	scope, confined := confinedScope(r.Context())
 	keep := func(n *model.Node) bool {
 		if n == nil || n.DeletedAt != nil {
 			return false
 		}
 		if confined && !scope.CanAccessStorage(n.StorageID) {
+			return false
+		}
+		// Root confinement: the toolbar walks a whole storage's index, so a
+		// `root:`-confined token saw name hits from OUTSIDE its folder — the
+		// same leak as /api/files/search, closed with the same primitive. The
+		// ?path= that picks the adapter was rewritten within-root by
+		// confine.Middleware, but that only scopes the storage, not the subtree.
+		if !rootAllows(r.Context(), h.Store, n.StorageID, n.Path) {
 			return false
 		}
 		return crossStorage || n.StorageID == s.ID
@@ -940,6 +953,14 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		plan := search.PlanFallback(parsed.Text)
 		accept := func(rows []*model.Node) {
 			for _, n := range rows {
+				// ⚠ Same choke point as keep() above — the index branch runs
+				// hits through keep(), and this SQL-LIKE fallback must apply the
+				// same tenant + root confinement or a confined token gets the
+				// leak back the moment the index misses. rootAllows/keep are
+				// inert for unconfined callers.
+				if !keep(n) {
+					continue
+				}
 				if plan.Accepts(n.Name, n.Path) && tagFilterAccepts(tagFilter, n.ID) {
 					nodes = append(nodes, n)
 				}
@@ -1017,7 +1038,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 	}
 
-	files := projectFileNodes(s.Name, nodes, false, nil, h.ThumbSigner)
+	files := projectFileNodes(s.Name, nodes, false, nil, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"adapter":   s.Name,
 		"storages":  storageNames,
@@ -1087,6 +1108,13 @@ func (h *Manager) Stat(w http.ResponseWriter, r *http.Request) {
 	// The refusal reuses the miss above BYTE FOR BYTE — same status, same body
 	// — so a foreign id is indistinguishable from one that never existed.
 	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(node.StorageID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// Root confinement: the id is not a path, so confine.Middleware never saw
+	// it (see confine_guard.go). Same 404 as the miss above, so a foreign id is
+	// indistinguishable from one that never existed.
+	if !rootAllows(r.Context(), h.Store, node.StorageID, node.Path) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1178,6 +1206,13 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 	// happen to exist, and shaped like the by-id miss above so a foreign id
 	// cannot be told apart from one that never existed.
 	if scope, confined := confinedScope(r.Context()); confined && !scope.CanAccessStorage(storageID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	// Root confinement. The `?path=` shape was already rewritten within-root by
+	// confine.Middleware; the `?id=` shape it could not reach, so a confined
+	// token read another folder's BYTES by id. Same 404 as the miss above.
+	if !rootAllows(r.Context(), h.Store, storageID, aclRel) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -1294,7 +1329,52 @@ func joinAdapterPath(adapter, rel string) string {
 // type, extension, size, last_modified, mime_type, thumb_url. We
 // always ship the adapter-qualified `path` so deep-link routing keeps
 // working.
-func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *acl.Set, signer *thumb.Signer) []map[string]any {
+// hydrateOwnerNames resolves the display name of every owner and last-actor in
+// one query for the whole page, and returns the id of the person looking.
+//
+// ⚠ This is the reason the Owner column is affordable. The ids ride along in
+// the node row that was already read (they are columns on `nodes`), so the only
+// extra work is ONE `... WHERE id IN (…)` over `users` per listing — not one
+// per row. A folder of 5 000 files owned by three people costs one query with
+// three ids in it; asking per row would have cost 5 000.
+//
+// A failure is not fatal: the ids are still true, and the client's fallback for
+// a name it does not have is the same "System"/id it uses for an ownerless row.
+func (h *Manager) hydrateOwnerNames(ctx context.Context, nodes []*model.Node) int64 {
+	var viewer int64
+	if u := auth.UserFrom(ctx); u != nil {
+		viewer = u.ID
+	}
+	seen := map[int64]bool{}
+	ids := make([]int64, 0, 8)
+	for _, n := range nodes {
+		for _, id := range []*int64{n.OwnerID, n.LastActorID} {
+			if id == nil || *id <= 0 || seen[*id] {
+				continue
+			}
+			seen[*id] = true
+			ids = append(ids, *id)
+		}
+	}
+	if len(ids) == 0 {
+		return viewer
+	}
+	names, err := h.Store.GetUserDisplayNames(ctx, ids)
+	if err != nil {
+		return viewer
+	}
+	for _, n := range nodes {
+		if n.OwnerID != nil {
+			n.OwnerName = names[*n.OwnerID]
+		}
+		if n.LastActorID != nil {
+			n.LastActorName = names[*n.LastActorID]
+		}
+	}
+	return viewer
+}
+
+func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *acl.Set, signer *thumb.Signer, viewer int64) []map[string]any {
 	out := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		if n.DeletedAt != nil {
@@ -1343,6 +1423,35 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		}
 		if n.Etag != "" {
 			entry["etag"] = n.Etag
+		}
+		// Ownership (migrations 00004 + 00038). Every key here is OMITTED when
+		// it has nothing to say, so a client that does not know about owners
+		// sees exactly the row it saw before: a system row carries no owner
+		// key at all, which is also the wire's way of saying "nobody".
+		if n.OwnerID != nil {
+			entry["owner_id"] = *n.OwnerID
+			if n.OwnerName != "" {
+				entry["owner_name"] = n.OwnerName
+			}
+			// The client says "You" without being told who it is. The core
+			// package is embedded in hosts that have no idea which filex
+			// account the session belongs to, so answering that here is the
+			// difference between a working column and a prop nobody can pass.
+			if viewer > 0 && *n.OwnerID == viewer {
+				entry["owner_self"] = true
+			}
+		}
+		if n.LastActorID != nil {
+			entry["last_actor_id"] = *n.LastActorID
+			if n.LastActorName != "" {
+				entry["last_actor_name"] = n.LastActorName
+			}
+			if viewer > 0 && *n.LastActorID == viewer {
+				entry["last_actor_self"] = true
+			}
+		}
+		if n.ExternalUpload {
+			entry["external_upload"] = true
 		}
 		if set != nil {
 			entry["perm"] = set.Effective(acl.CleanRel(n.Path)).String()

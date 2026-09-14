@@ -11,6 +11,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path"
 	"strconv"
@@ -88,11 +89,10 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
 			return
 		}
-		orig := node.StorageKey
-		if orig == "" {
-			orig = node.Path
-		}
-		if !root.Within(h.storageName(r.Context(), node.StorageID), orig) {
+		// A row that records no original path (trash.OriginalPath, known=false)
+		// cannot be placed inside anybody's root, so it is outside every one.
+		orig, known := trash.OriginalPath(node)
+		if !known || !root.Within(h.storageName(r.Context(), node.StorageID), orig) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "path outside confined root"})
 			return
 		}
@@ -104,16 +104,27 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trash entry not found"})
 			return
 		}
-		orig := node.StorageKey
-		if orig == "" {
-			orig = node.Path
-		}
-		if !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, orig, acl.LevelEditor) {
+		// ⚠ Judged on where the file came from, never on `.filex-trash/…`: a
+		// grant on the bin says nothing about somebody else's deleted file.
+		orig, known := trash.OriginalPath(node)
+		if !known || !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, orig, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return
 		}
 	}
 	if err := h.Service.Restore(r.Context(), req.NodeID); err != nil {
+		var conflict *trash.ConflictError
+		if errors.As(err, &conflict) {
+			// Nothing moved and the entry is still in the trash: the name was
+			// taken, and a restore does not destroy what holds it.
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "something already exists at this path: " + path.Base(conflict.Path),
+				"code":  "EXISTS",
+				"name":  path.Base(conflict.Path),
+				"path":  conflict.Path,
+			})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -266,10 +277,16 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 	// Confinement: only surface trashed nodes whose original path is inside
 	// the caller's root — the embedded client's boundary, orthogonal to the
 	// tenant one above.
+	//
+	// ⚠ Both filters below read `e.Path`, which Service.List resolves through
+	// trash.OriginalPath. An entry whose path is still a trash key records no
+	// original path, so neither filter has a subject to judge and it is not
+	// shown: a grant on `.filex-trash/` would otherwise surface another
+	// account's deleted file, and the restore refuses the row anyway.
 	if root, ok := confine.RootFrom(r.Context()); ok {
 		kept := entries[:0]
 		for _, e := range entries {
-			if root.Within(e.StorageName, e.Path) {
+			if !trash.IsTrashPath(e.Path) && root.Within(e.StorageName, e.Path) {
 				kept = append(kept, e)
 			}
 		}
@@ -280,7 +297,7 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 	if h.ACL != nil {
 		kept := entries[:0]
 		for _, e := range entries {
-			if aclAllowName(r.Context(), h.ACL, h.Store, e.StorageName, e.Path, acl.LevelViewer) {
+			if !trash.IsTrashPath(e.Path) && aclAllowName(r.Context(), h.ACL, h.Store, e.StorageName, e.Path, acl.LevelViewer) {
 				kept = append(kept, e)
 			}
 		}

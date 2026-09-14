@@ -37,15 +37,17 @@ an error frame and the socket stays open.
 
 ```json
 {"type":"change","path":"main://reports/2026","action":"upload","name":"q3.pdf"}
-{"type":"presence","path":"main://reports/2026","users":[{"id":4,"uid":"4","name":"Ayşe","file":"q3.pdf"}]}
+{"type":"presence","path":"main://reports/2026","users":[{"id":4,"uid":"4","name":"Ayşe","file":"q3.pdf","avatar":"<data: URI or https URL>"}]}
 ```
 
 `path` is echoed back exactly as **that** client spelled it on `subscribe`, so
 an embed subscribing with a confine-relative path and a native panel using the
 absolute one can both match frames against what they asked for.
 
-`action` is one of `create`, `delete`, `rename`, `move`, `upload`, `modify`.
-**It is advisory.** The only thing a client is required to do with a change
+`action` is one of `create`, `delete`, `rename`, `move` or `upload`; a rename
+or move also carries `new_name`. (`modify` is declared in the wire type and not
+sent by anything today — an overwrite announces as `upload`.) **It is
+advisory.** The only thing a client is required to do with a change
 frame is re-fetch the listing — `action`/`name` are there for toasts and for
 future incremental patching, and the sections below say exactly when they are
 not populated.

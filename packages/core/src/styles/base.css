@@ -76,7 +76,10 @@
   background: var(--fe-bg);
   color: var(--fe-text);
   font-family: var(--fe-font);
-  font-size: 14px;
+  /* gorunum:v1 — 13px, not 14. A row carries a filename, a size, a date and a
+   * menu; at 14 that wraps to two lines at any realistic column width, which
+   * is why every dense file manager sits at 13. */
+  font-size: var(--fe-text-md);
   border: 1px solid var(--fe-border);
   border-radius: var(--fe-radius);
   overflow: hidden;
@@ -1423,6 +1426,49 @@ filex-explorer {
 .fe-ficon--code { color: var(--fe-icon-code); }
 .fe-ficon--text { color: var(--fe-icon-text); }
 .fe-ficon--unknown { color: var(--fe-icon-unknown); }
+
+/* gorunum:v1 — the listing badge: a filled rounded square in the family's
+ * colour with the glyph knocked out in white. Sized from the wrapper's
+ * font-size like .fe-ficon, so the existing 32px grid / 16px list scales keep
+ * working: the chip is the full em box and the glyph sits at 60% of it.
+ * The folder keeps its own colour and no chip — see lib/fileIcons.iconTile. */
+.fe-ftile {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25em;
+  background: var(--fe-icon-unknown);
+  color: #ffffff;
+}
+.fe-ftile .fe-ficon {
+  width: 0.6em;
+  height: 0.6em;
+  color: inherit;
+}
+.fe-ftile--folder {
+  background: none;
+  border-radius: 0;
+  color: var(--fe-icon-folder);
+}
+.fe-ftile--folder .fe-ficon {
+  width: 1em;
+  height: 1em;
+}
+.fe-ftile--image { background: var(--fe-icon-image); }
+.fe-ftile--video { background: var(--fe-icon-video); }
+.fe-ftile--audio { background: var(--fe-icon-audio); }
+.fe-ftile--pdf { background: var(--fe-icon-pdf); }
+.fe-ftile--doc { background: var(--fe-icon-doc); }
+.fe-ftile--sheet { background: var(--fe-icon-sheet); }
+.fe-ftile--slides { background: var(--fe-icon-slides); }
+.fe-ftile--archive { background: var(--fe-icon-archive); }
+.fe-ftile--code { background: var(--fe-icon-code); }
+.fe-ftile--text { background: var(--fe-icon-text); }
+.fe-ftile--unknown { background: var(--fe-icon-unknown); }
+
 .fe-grid__icon--svg {
   display: flex;
   align-items: center;
@@ -4710,10 +4756,11 @@ filex-explorer {
 }
 /* --- /gezinti:g1 --- */
 
-/* === surucu:d1 — the Drive shell (uiProfile: 'drive', GitHub #14) ======
-   Everything here is additive and gated on a class the other two profiles
-   never carry, so `standard` and `simple` render exactly what they rendered
-   before this block existed.
+/* === surucu:d1 — the shell (GitHub #14) ===============================
+   ⚠ This block used to be additive and gated on a class only `uiProfile:
+   'drive'` carried. It is not a variant any more: `.fe-toolbar--drive` is on
+   every header (Toolbar.vue says why the modifier survives), and every profile
+   renders what is below. See ExplorerConfig.uiProfile.
 
    ⚠ Unscoped and prefixed, like the rest of this file. A `<style scoped>` in
    an SFC compiles to `.cls[data-v-HASH]`, and the hash does not match in the
@@ -5022,15 +5069,20 @@ filex-explorer {
 }
 
 /* ── Folders / Files sections in the grid ─────────────────────────────── */
-/* A grid item spanning every column, so the cards keep flowing under it. */
-.fe-grid__heading {
+/* A grid item spanning every column, so the cards keep flowing under it.
+ * ⚠ The gallery's date headings share this rule rather than copying it: the
+ * two are the same object in two grids, and a second declaration block is how
+ * one of them ends up a different size after a design pass. */
+.fe-grid__heading,
+.fe-gal__heading {
   grid-column: 1 / -1;
   margin: 6px 2px 2px;
   font-size: 13px;
   font-weight: 600;
   color: var(--fe-text);
 }
-.fe-grid__heading:first-child {
+.fe-grid__heading:first-child,
+.fe-gal__heading:first-child {
   margin-top: 0;
 }
 
@@ -5156,3 +5208,5352 @@ filex-explorer {
   min-width: 0;
 }
 /* === /surucu:d1 === */
+
+/* === gorunum:v1-icons — appended by the menu-icon slice === */
+/*
+ * One stroked set for every action row, replacing the emoji the menus used to
+ * print. Emoji are not an icon set: the OS picks the font, so two rows of the
+ * same menu came out at different weights, different optical sizes and — worst
+ * of the three — different colours, which meant the row's own colour never
+ * reached its glyph. These draw on `currentColor`, so the menu's one coloured
+ * entry, "Çöpe taşı", is the only coloured icon in it.
+ *
+ * The markup comes from lib/actionIcons.ts (static strings, injected with
+ * v-html); this block only sizes and colours it.
+ */
+.fe-aicon {
+  /* 16px, not 1em: the glyph is drawn on a 24-unit grid and reads as a smudge
+     below 15. Fixed so a menu, a toolbar button and a bottom sheet — three
+     different font sizes — get the same icon. */
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: block;
+  /* Muted by default so the LABEL stays the thing being read; the row's own
+     colour takes over for the states that mean something (below). */
+  color: var(--fe-text-muted);
+}
+
+/* The context menu / bottom sheet. `.fe-ctx__icon` keeps the 1.2em column it
+   already had — this only centres the SVG inside it, so rows with an icon and
+   rows without still line their labels up. */
+.fe-ctx__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* The destructive entry, and only it, is coloured — the whole point of moving
+   off emoji was that this could be true. */
+.fe-ctx__item.is-danger .fe-aicon {
+  color: var(--fe-danger);
+}
+/* Under the pointer the icon joins the label at full strength. */
+.fe-ctx__item:hover:not(.is-disabled) .fe-aicon,
+.fe-ctx__item:focus-visible .fe-aicon {
+  color: var(--fe-text);
+}
+
+/* Toolbar buttons. `.fe-icon` was a text span; when it carries an SVG it is a
+   box. The button already sets its own colour (primary, danger, active), so
+   the icon inherits it rather than staying muted. */
+.fe-icon > .fe-aicon {
+  color: inherit;
+}
+.fe-btn--danger .fe-aicon {
+  color: var(--fe-danger);
+}
+/* === /gorunum:v1-icons === */
+
+/* === gorunum:v1-grid === */
+/* The grid card's anatomy. Two shapes, one shared row:
+ *
+ *   .fe-grid__card--folder   186×56    the row IS the card
+ *   .fe-grid__card--file     186×166   184×108 preview + the row as a footer
+ *
+ * Heights are min-heights on purpose: a search result adds a parent path and
+ * a content snippet under the caption, and a card that clipped them would be
+ * hiding the very thing the search found.
+ */
+
+.fe-grid {
+  /* A fixed track, not a stretching one: the card's 186px is part of the
+     spec, and a grid that stretches the last row's cards to 240px makes the
+     same folder a different size in two folders. */
+  grid-template-columns: repeat(auto-fill, 186px);
+  gap: var(--fe-gap);
+  padding: var(--fe-gap);
+  align-content: start;
+  /* ⚠ Without this a folder card that shares a row with file cards is
+     stretched to 166px by the grid's default `stretch`: the 56px card exists
+     in the markup and measures 166 on screen, and only in a row that happens
+     to hold both. Measured, not guessed — the first browser pass read 186×166
+     for a folder card. */
+  align-items: start;
+}
+/* Compact density keeps its tighter gap and padding, but not a narrower card:
+   at ~104px the name column is ~30px and every card reads as an ellipsis. */
+.fe--density-compact .fe-grid {
+  grid-template-columns: repeat(auto-fill, 186px);
+}
+
+.fe-grid__card {
+  padding: 0;
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg);
+  overflow: hidden;
+}
+.fe--density-compact .fe-grid__card {
+  padding: 0;
+}
+.fe-grid__card--folder {
+  min-height: 56px;
+}
+.fe-grid__card--file {
+  min-height: 166px;
+}
+
+/* The preview: files only. A thumbnail fills it; without one the type tile
+   sits centred on --fe-bg-elev, which is also the mat behind a thumbnail that
+   does not cover the whole box. Rounded to the card's TOP corners only —
+   inner radius, so the curve follows the border rather than crossing it. */
+.fe-grid__card--file .fe-grid__thumb {
+  flex: 0 0 108px;
+  height: 108px;
+  aspect-ratio: auto;
+  margin: 0;
+  border-radius: calc(var(--fe-radius-md) - 1px) calc(var(--fe-radius-md) - 1px) 0 0;
+  background: var(--fe-bg-elev);
+}
+
+/* The shared row. On a file it is the footer under the preview; on a folder
+   it is the whole card, which is why the padding differs: the folder's glyph
+   needs the 12px inset the file's tile does not. */
+.fe-grid__foot {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.fe-grid__card--folder .fe-grid__foot {
+  min-height: 54px;
+  padding: 0 var(--fe-gap-xs) 0 var(--fe-gap);
+  gap: var(--fe-gap);
+}
+.fe-grid__card--file .fe-grid__foot {
+  min-height: 56px;
+  padding: 0 var(--fe-gap-xs) 0 var(--fe-gap-sm);
+  gap: var(--fe-gap-sm);
+}
+
+/* The 24px type tile in the row (lib/fileIcons sizes itself from font-size).
+   A folder gets the same box and the untiled solid glyph inside it. */
+.fe-grid__tile {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.fe-grid__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.fe-grid__label {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--fe-text);
+}
+/* The caption: "1.7 MB • Sep 9, 2026" on a file, "Folder" on a folder. */
+.fe-grid__meta {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The ⋮ on every card. It opens the context menu — the same one the right
+   click opens, built from the explorer's single action list — so it carries
+   no styling that would suggest a menu of its own. */
+.fe-grid__menu {
+  flex: 0 0 var(--fe-h-sm);
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-md);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fe-grid__menu:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-grid__menu:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+/* The section labels — and, while the rows are in date order, the date
+   labels that replace "Files" (lib/dateGroups). ~20px of air above each, none
+   above the first: the grid's own padding already provides it.
+   ⚠ The gallery rides the same rule; see the note at the first block. */
+.fe-grid__heading,
+.fe-gal__heading {
+  grid-column: 1 / -1;
+  margin: 20px 2px var(--fe-gap-sm);
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fe-text);
+}
+.fe-grid__heading:first-child,
+.fe-gal__heading:first-child {
+  margin-top: 0;
+}
+/* === /gorunum:v1-grid === */
+
+/* === gorunum:v1-chrome — the shell: sidebar · header · crumbs · filters ===
+   Measured off the reference at 1440×900, light and dark (the spec's "Chrome"
+   section). Only declared --fe-* tokens are used: a raw value here cannot be
+   reached by a theme, and web/tests/api/themeTokens.test.ts fails the build on
+   a phantom one.
+
+   ⚠ Last block in the file on purpose — sibling agents append their own, and
+   nobody edits the middle. Everything here is a RESTYLE of markup that already
+   exists; no behaviour (the toolbar fold, the narrow layout, the drawer, the
+   drive shell, the uiProfile variants) is gated on any of it.
+   ---------------------------------------------------------------------- */
+
+/* ── the sidebar ──────────────────────────────────────────────────────── */
+/* An elevated ground with one hairline against the listing, which is what
+   separates "the places" from "the files" without a second border or a
+   shadow. 255px: the widest storage label in the fixtures fits on one line. */
+.fe-sidenav {
+  flex: 0 0 var(--fe-sidenav-w);
+  width: var(--fe-sidenav-w);
+  background: var(--fe-bg-elev);
+}
+/* The rail and the drawer keep their own widths — only the ground follows. */
+.fe-sidenav--rail {
+  flex: 0 0 56px;
+  width: 56px;
+}
+/* ⚠ The width HAS to be restated here. `.fe-sidenav` above is a later rule of
+   equal specificity, so without this the drawer inherits the docked column's
+   255px and stops being `min(280px, 84%)` — measured at 390px, where the
+   drawer came back 25px narrow. */
+.fe-sidenav--drawer {
+  flex: none;
+  width: min(280px, 84%);
+  background: var(--fe-bg-elev);
+}
+.fe-sidenav__head {
+  background: var(--fe-bg-elev);
+}
+.fe-sidenav__scroll {
+  padding: 6px 8px 12px;
+}
+/* One row = one destination: a 34px box, the token height every other control
+   in the shell picks, with the glyph and the label 8px apart. */
+.fe-sidenav__item {
+  height: var(--fe-h-md);
+  padding: 0 var(--fe-gap);
+  gap: var(--fe-gap-sm);
+  margin: 1px 0;
+  border-radius: var(--fe-radius-md);
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+}
+.fe-sidenav__item .fe-ficon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  font-size: 18px;
+}
+/* The active row is the soft primary wash with primary ink. ⚠ Weight stays
+   500: bolding the active row re-measures its text and every row below it
+   shifts by a pixel as you click down the list. */
+.fe-sidenav__item.is-active {
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+  font-weight: 500;
+}
+.fe-sidenav__item.is-active:hover {
+  background: var(--fe-primary-soft);
+}
+.fe-sidenav--rail .fe-sidenav__item {
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--fe-radius-md);
+}
+/* Section captions: small, spaced and quiet — a label for a group, not a row
+   you can click. The 18px inset is measured, and it is deliberately deeper
+   than the items' 12px: the caption aligns with the item TEXT, not with the
+   glyph column. */
+.fe-sidenav__heading {
+  margin: 12px 0 2px;
+  padding: 0 18px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-sidenav__section {
+  margin-top: var(--fe-gap-sm);
+}
+/* The footer. Two muted lines — the name of the thing over the figure — so it
+   reads as a status and never competes with a destination above it.
+   ⚠ "Storage" is the ACCOUNT's line (quotaMe), not the selected drive's, so
+   the label stays the generic word rather than the storage's name. */
+.fe-sidenav__quota {
+  background: var(--fe-bg-elev);
+}
+.fe-sidenav__quota-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fe-text-muted);
+}
+.fe-sidenav__quota-text {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--fe-text-muted);
+}
+
+/* ── the header's search field ────────────────────────────────────────── */
+/* ONE field in every shell (Toolbar.vue renders the same markup for both, the
+   classic one carrying the legacy `fe-search*` hooks as well). A wide box with
+   the magnifier inside the leading edge and the ⌘K chip inside the trailing
+   one; the chip's text comes from the shortcut registry, never a literal. */
+.fe-drivesearch {
+  height: var(--fe-h-lg);
+  max-width: 560px;
+  padding: 0 var(--fe-gap-sm) 0 var(--fe-gap);
+  gap: var(--fe-gap-sm);
+  border-radius: var(--fe-radius);
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+}
+.fe-drivesearch:focus-within {
+  border-color: var(--fe-primary);
+  box-shadow: none;
+  background: var(--fe-bg);
+}
+.fe-drivesearch__input {
+  font-size: var(--fe-text-md);
+  /* ⚠ The classic field also carries .fe-search__input, whose own rule sets a
+     border, a ground and a 200px minimum — the field around it draws all three
+     now, so they are cleared here rather than in the middle of the file. */
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.fe-drivesearch__input:focus-visible {
+  outline: none;
+}
+.fe-drivesearch__kbd {
+  font-size: 11px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+}
+/* The classic header's search cluster used to be a bordered pill holding a
+   bare input plus Upload and Refresh. The field draws its own box now, so the
+   wrapper goes back to being pure layout — and it is what grows. */
+.fe-toolbar__search-group {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: var(--fe-gap-sm);
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+}
+.fe-toolbar__search-group .fe-btn {
+  height: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  border-radius: var(--fe-radius-md);
+}
+.fe-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Narrow, classic: the row-wide field the magnifier expands into keeps the
+   same box as the wide one, one size down. */
+.fe-toolbar--narrow .fe-search--full .fe-search__input {
+  height: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  border-radius: var(--fe-radius);
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+  font-size: var(--fe-text-md);
+}
+
+/* ── the breadcrumb row ───────────────────────────────────────────────── */
+/* Crumbs lead; the view switcher and the details toggle sit at the trailing
+   edge (the drive shell renders them there — everywhere else the wrapper is
+   `display: contents` and this row is the breadcrumb alone).
+   ⚠ The rule under the row moves to the WRAPPER: while it lived on the
+   breadcrumb itself it stopped under the crumbs and left the actions hanging
+   over nothing. */
+.fe-subhead {
+  gap: var(--fe-gap-sm);
+  background: var(--fe-bg);
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-subhead > .fe-breadcrumb {
+  border-bottom: 0;
+  background: transparent;
+}
+.fe-subhead__actions {
+  gap: var(--fe-gap-sm);
+  padding-right: var(--fe-gap);
+}
+.fe-breadcrumb {
+  gap: var(--fe-gap-xs);
+  padding: 6px var(--fe-gap);
+  font-size: var(--fe-text-md);
+}
+/* "Go to path" — an icon button now (the ✏ emoji it used to print came from
+   whatever emoji font the machine had), so it needs a box rather than a
+   font-size. */
+/* ⚠ 24px, not --fe-h-sm. The crumb bar is pinned at 37px because the panel's
+   head (.fe-sidenav__head) and the split pane's own crumbs (.fe-split__crumbs)
+   are 37px too, and the three sit on one line across the top; a 28px button
+   inside 6px padding makes this row 40px and only this row. */
+.fe-breadcrumb__edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--fe-radius-sm);
+}
+.fe-breadcrumb__edit .fe-ficon {
+  width: 15px;
+  height: 15px;
+}
+/* The segmented view switcher: one box, one active cell, no gaps between the
+   cells — three separate buttons in a row read as three controls. */
+.fe-toolbar__view {
+  gap: 0;
+  padding: 2px;
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
+.fe-toolbar__view .fe-btn {
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  border-radius: var(--fe-radius-sm);
+  color: var(--fe-text-muted);
+}
+.fe-toolbar__view .fe-btn.is-active {
+  background: var(--fe-bg);
+  color: var(--fe-primary);
+}
+
+/* ── the filter row ───────────────────────────────────────────────────── */
+.fe-filterbar {
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-sm) var(--fe-gap);
+}
+/* A pill is a control, not a tag: 28px, the small token height, with the
+   caret that says it opens something. */
+.fe-filterbar__chip {
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm) 0 var(--fe-gap);
+  gap: var(--fe-gap-xs);
+  border-radius: var(--fe-radius);
+  border-color: var(--fe-border);
+  font-size: var(--fe-text-xs);
+}
+.fe-filterbar__chip.is-set {
+  background: var(--fe-primary-soft);
+  border-color: var(--fe-primary);
+  color: var(--fe-primary-ink);
+  font-weight: 600;
+}
+.fe-filterbar__caret {
+  width: 14px;
+  height: 14px;
+}
+/* "Filter in this folder…" — the same 28px box as the pills beside it, so the
+   row has one edge top and bottom. */
+.fe-filterbar__find {
+  flex: 0 1 240px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 140px;
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+}
+.fe-filterbar__find:focus-within {
+  border-color: var(--fe-primary);
+}
+.fe-filterbar__find-glass {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  color: var(--fe-text-muted);
+}
+.fe-filterbar__find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fe-text-xs);
+  outline: none;
+}
+.fe-filterbar__find-input::placeholder {
+  color: var(--fe-text-muted);
+}
+.fe-filterbar__clear {
+  font-size: var(--fe-text-xs);
+}
+/* At 390px the row scrolls sideways on itself (surucu:d1); the name box must
+   not eat the width the pills need to be reachable in that scroll. */
+.fe--narrow .fe-filterbar__find {
+  flex: 0 0 160px;
+  min-width: 160px;
+}
+/* === /gorunum:v1-chrome === */
+
+/* === gorunum:v1-selbar — the selection bar =============================
+   The moment anything is ticked, the FILTER ROW is replaced by a tinted bar:
+   "16 selected", icon-only actions, and an × that clears. Same box as the row
+   it replaces (8px/12px padding around 28px controls = 44px), so the chrome
+   does not jump by a pixel when the two swap.
+
+   Where it lives: `.fe-selbar-slot` is an empty div the toolbar inserts into
+   `.fe__primary` right after the breadcrumb wrapper — the filter row's place,
+   and where the filter row WOULD be in a profile that has none. The toolbar
+   teleports the bar into it and marks the slot `.is-active`.
+   ---------------------------------------------------------------------- */
+.fe-selbar-slot {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* The swap. A general sibling, because both are children of `.fe__primary`
+   and the slot is inserted before the filter row. */
+.fe-selbar-slot.is-active ~ .fe-filterbar {
+  display: none;
+}
+
+.fe-selbar {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-width: 0;
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  /* The "something is active" tint, the same token the set filter pill and the
+     active sidebar item wear — the bar is chrome in an active state, not a row. */
+  background: var(--fe-primary-soft);
+  border-bottom: 1px solid var(--fe-border);
+  color: var(--fe-text);
+}
+/* No slot to land in (a bare <Toolbar>): the bar renders inside the toolbar
+   instead of under the breadcrumb, and takes the whole row so it still reads
+   as a bar rather than a control wedged between two others. */
+.fe-selbar--inline {
+  flex: 1 1 100%;
+  border-bottom: 0;
+  border-radius: var(--fe-radius);
+}
+.fe-selbar__count {
+  flex: 0 0 auto;
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  color: var(--fe-primary);
+  white-space: nowrap;
+}
+/* The fold's measuring frame: it absorbs the free width, so its `clientWidth`
+   IS the room the icons have. `overflow: hidden` keeps a row that does not fit
+   from widening the explorer while the arithmetic catches up. */
+.fe-selbar__actions {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  overflow: hidden;
+}
+.fe-selbar__btn,
+.fe-selbar__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  cursor: pointer;
+}
+.fe-selbar__btn:hover,
+.fe-selbar__close:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-selbar__btn:focus-visible,
+.fe-selbar__close:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-selbar__btn .fe-icon,
+.fe-selbar__close .fe-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+.fe-selbar__btn .fe-icon svg,
+.fe-selbar__close .fe-icon svg {
+  width: 18px;
+  height: 18px;
+}
+/* Destructive is still `--fe-danger`, but as a GLYPH: a filled red button in a
+   row of quiet icons reads as the thing you are meant to press. */
+.fe-selbar__btn--danger {
+  color: var(--fe-danger);
+}
+.fe-selbar__btn--danger:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-danger-hover);
+}
+.fe-selbar__btn.is-disabled,
+.fe-selbar__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fe-selbar__btn.is-disabled:hover,
+.fe-selbar__btn:disabled:hover {
+  background: transparent;
+}
+.fe-selbar__close {
+  color: var(--fe-text-muted);
+}
+/* Out of layout, but still LAID OUT: `visibility` (not `display: none`) is what
+   leaves the buttons with a real offsetWidth to measure. */
+.fe-selbar__measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  visibility: hidden;
+  pointer-events: none;
+}
+/* At 390px the count keeps its line and the icons fold into the "⋯" on their
+   own — the bar never scrolls sideways, because the × has to stay reachable. */
+.fe--narrow .fe-selbar {
+  gap: var(--fe-gap-xs);
+  padding: var(--fe-gap-sm) var(--fe-gap-sm);
+}
+.fe--narrow .fe-selbar__count {
+  font-size: var(--fe-text-sm);
+}
+/* === /gorunum:v1-selbar === */
+
+/* === gorunum:v1-list === */
+/* The list row, rebuilt to the measured spec. Everything here is an override
+   of the pre-gorunum list block further up the file — it lives at the end so
+   two agents working on the same wave cannot collide in the middle. */
+
+/* Eight columns: tick · name · type · OWNER · modified · size · star · ⋮.
+
+   ⚠ This block used to say "there is deliberately NO Owner column: a listing
+   carries no owner, and an empty column headed Owner is worse than no column at
+   all". The first half is what changed — migration 00038 put ownership on the
+   row and the listing projection carries it — and the second half is still the
+   rule the column has to keep earning. */
+.fe-list__head,
+.fe-list__row {
+  grid-template-columns: 28px minmax(0, 1fr) 84px 120px 170px 84px 24px var(--fe-h-sm);
+  gap: var(--fe-gap-sm);
+  padding: 0 var(--fe-gap);
+}
+
+/* 13px/500 muted, no background — the header is a label for the columns, not
+   a band of chrome sitting on top of them. */
+.fe-list__head {
+  min-height: var(--fe-h-md);
+  background: transparent;
+  border-bottom: 1px solid var(--fe-border-soft);
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.fe-list__head .fe-list__col {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* ~34px rows, a hairline between them, no zebra. `min-height` rather than
+   `height`: a search result carries a parent path and a snippet under the
+   name, and a fixed height clips them. */
+.fe-list__row {
+  min-height: var(--fe-h-md);
+  border-bottom: 1px solid var(--fe-border-soft);
+}
+
+/* The tick. It selects the same thing the row does — see ListView.onCheckClick
+   — so it gets the plain control look, not an accent of its own. */
+.fe-list__col--check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-list__check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  border: 1.5px solid var(--fe-border-strong);
+  border-radius: 5px;
+  background: var(--fe-bg);
+  cursor: pointer;
+}
+.fe-list__check.is-on {
+  background: var(--fe-primary);
+  border-color: var(--fe-primary);
+}
+/* A drawn tick rather than a glyph: a text check inherits the row's font and
+   lands a pixel differently in every family. */
+.fe-list__check.is-on::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 2.5px;
+  width: 4px;
+  height: 9px;
+  border: solid var(--fe-text-on-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.fe-list__check:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+
+/* The 24px type tile (lib/fileIcons sizes itself off 1em). */
+.fe-list__icon {
+  flex: 0 0 auto;
+  font-size: 24px;
+  line-height: 0;
+}
+
+/* The name sits tight against the tile so the kind label reads as its
+   annotation rather than as the next column. */
+.fe-list__col--name {
+  gap: var(--fe-gap-sm);
+}
+.fe-list__name-wrap {
+  flex: 0 1 auto;
+}
+.fe-list__name {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  line-height: 1.35;
+}
+.fe-list__kind {
+  flex: 0 0 auto;
+  font-size: var(--fe-text-xs);
+  font-weight: 400;
+  color: var(--fe-text-muted);
+  white-space: nowrap;
+}
+
+.fe-list__col--owner,
+.fe-list__col--type,
+.fe-list__col--mod,
+.fe-list__col--size {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fe-text-md);
+  color: var(--fe-text-muted);
+}
+
+/* The ⋮ at the trailing edge of every row. Same box and same glyph size as
+   the grid card's, because it opens the same menu. */
+.fe-list__col--menu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-list__menu {
+  flex: 0 0 var(--fe-h-sm);
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-md);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-family: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fe-list__menu:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-list__menu:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+/* Compact density still means something with a min-height in play. */
+.fe--density-compact .fe-list__row {
+  min-height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap);
+}
+.fe--density-compact .fe-list__head {
+  min-height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap);
+}
+
+/* The loading ghosts mirror the row grid so the swap to real rows does not
+   shift the layout. */
+.fe-skel-row {
+  grid-template-columns: 28px minmax(0, 1fr) 84px 120px 170px 84px 24px var(--fe-h-sm);
+  gap: var(--fe-gap-sm);
+  padding: 0 var(--fe-gap);
+  min-height: var(--fe-h-md);
+  border-bottom-color: var(--fe-border-soft);
+}
+
+/* Narrow: the tick, the name, the size and the ⋮ survive; the rest would each
+   take a third of a phone's width to say one word. ⚠ This has to restate the
+   column template — the pre-gorunum narrow rule further up the file names
+   three columns, and seven cells flowing into three make implicit rows.
+
+   ⚠ Twice, on purpose. The media query answers the VIEWPORT; `.fe--narrow` is
+   what an embedded explorer gets from its own ResizeObserver (< 560px of
+   container, FileExplorer "bag:b4"), and an embed in a narrow column on a wide
+   screen only ever matches the second. */
+.fe--narrow .fe-list__head,
+.fe--narrow .fe-list__row,
+.fe--narrow .fe-skel-row {
+  grid-template-columns: 28px minmax(0, 1fr) 72px var(--fe-h-sm);
+}
+.fe--narrow .fe-list__col--type,
+.fe--narrow .fe-list__col--owner,
+.fe--narrow .fe-list__col--mod,
+.fe--narrow .fe-list__col--star,
+.fe--narrow .fe-list__head .fe-list__col--type,
+.fe--narrow .fe-list__head .fe-list__col--owner,
+.fe--narrow .fe-list__head .fe-list__col--mod,
+.fe--narrow .fe-list__head .fe-list__col--star {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .fe-list__head,
+  .fe-list__row,
+  .fe-skel-row {
+    grid-template-columns: 28px minmax(0, 1fr) 72px var(--fe-h-sm);
+  }
+  .fe-list__col--type,
+  .fe-list__col--owner,
+  .fe-list__col--mod,
+  .fe-list__col--star,
+  /* ⚠ The header's cells need the same two-class weight as the rule that
+     lays them out (`.fe-list__head .fe-list__col`), or they stay visible and
+     the header wraps to a second line while the rows below it do not —
+     measured at 390px: "Name Type Mod" over "Size" against four-cell rows. */
+  .fe-list__head .fe-list__col--type,
+  .fe-list__head .fe-list__col--owner,
+  .fe-list__head .fe-list__col--mod,
+  .fe-list__head .fe-list__col--star {
+    display: none;
+  }
+}
+/* === /gorunum:v1-list === */
+
+/* === gorunum:v1-preview === */
+/* The synthetic preview: the first lines of the real file, drawn inside the
+ * card's existing 184×108 box (and inside the gallery tile, same rules).
+ *
+ * It is deliberately unreadable as prose — 8.5px monospace, muted, clipped —
+ * because it is not a reader. Its job is to let the eye tell a config file
+ * from a component from a table before the name is read, which is the one
+ * thing the coloured type tile cannot do: one glyph covers .ts, .go, .css and
+ * .sql. `lib/filePreview.ts` bounds what is fetched to draw it.
+ */
+
+.fe-fprev {
+  /* Fills the box rather than sitting in its flex centre: a preview that
+     starts anywhere but the top-left is not a preview of a file. */
+  position: absolute;
+  inset: 0;
+  padding: 9px 10px 0;
+  background: var(--fe-bg-elev);
+  font-family: var(--fe-font-mono);
+  font-size: 8.5px;
+  line-height: 11px;
+  color: var(--fe-text-muted);
+  text-align: left;
+  white-space: pre;
+  overflow: hidden;
+  /* The box always ends mid-file, so END it. A hard crop through a line of
+     text reads as a rendering bug; a fade reads as "there is more below".
+     ⚠ The `#000` is not a theme colour and must not become one — a mask uses
+     only the alpha channel, so the black here means "fully opaque". */
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  /* The card owns every gesture: click, double-click, drag and right-click
+     must not land on the preview instead of the thing it is a preview of. */
+  pointer-events: none;
+  user-select: none;
+}
+
+.fe-fprev__line {
+  overflow: hidden;
+}
+
+/* The tint. Only the first token of a line, only when it really is a keyword
+   or a markdown marker (`lib/filePreview.ts` decides), and in the family's own
+   accent — the same colour as that file's tile in the footer, so the two read
+   as one object. Everything else stays plain: the brief's rule is that plain
+   text beats fake colour, and a highlighter that guesses is fake colour. */
+.fe-fprev--code .fe-fprev__tint {
+  color: var(--fe-icon-code);
+}
+.fe-fprev--text .fe-fprev__tint {
+  color: var(--fe-icon-text);
+}
+
+/* Tables are one grid, not a stack of rows: `--fprev-cols` comes from the
+   parsed file, and every cell is a direct child, so column two is under column
+   two even when a row is short. */
+.fe-fprev--table {
+  display: grid;
+  grid-template-columns: repeat(var(--fprev-cols, 3), minmax(0, 1fr));
+  align-content: start;
+  gap: 0 6px;
+  white-space: nowrap;
+}
+.fe-fprev__cell {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--fe-border-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The first row is a header often enough that treating it as one is right
+   more often than not, and when it is not, the file's first row is still the
+   row a person looks at first. */
+.fe-fprev__cell.is-head {
+  color: var(--fe-text);
+  font-weight: 600;
+}
+
+/* The gallery tile is several times the area of a grid card's box, so the
+   same type would be a smudge in a corner. Scale only — the markup, the
+   parser and the limits are shared (no surface-specific behaviour). */
+.fe-gal__thumb .fe-fprev {
+  padding: 12px 14px 0;
+  font-size: 10px;
+  line-height: 14px;
+}
+.fe-gal__thumb .fe-fprev--table {
+  gap: 0 8px;
+}
+/* === /gorunum:v1-preview === */
+
+/* === gorunum:v1-viewer ===
+ *
+ * The viewer stopped being a card. What it is now: an overlay that owns the
+ * whole viewport, with one bar across the top (type tile + name + a muted
+ * "246.3 KB • Sep 9, 2026 • 1 of 9" line, centred icon actions, close at the
+ * trailing edge), a chevron on each screen edge, and a floating zoom pill at
+ * the bottom centre.
+ *
+ * ⚠ `--fullbleed` is NOT `--chromeless`. Chromeless is the standalone
+ * /files/edit route, where the browser tab is the container and NO chrome is
+ * drawn at all; e2e/tests/83 asserts on exactly that. Fullbleed keeps the
+ * modal identity and hands the chrome to PreviewModal.
+ */
+/* ⚠ `border: 0` is not decoration. The backdrop also carries the `.fe` root
+ * class (that is how it reaches the theme variables) and `.fe` draws a 1px
+ * border with a radius — so the "full-bleed" card measured 1438×898 at 1,1
+ * inside a 1440×900 viewport, with a hairline of the host shell showing
+ * around all four edges. */
+.fe-modal__backdrop--fullbleed {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+/* ⚠ 100%, not 100vh. The backdrop is `position: fixed; inset: 0`, i.e. exactly
+ * the viewport (measured 1440×900), while `100vh` came out 898px in the same
+ * browser and left the card floating 1px down with 2px of the shell showing
+ * under it. A percentage of a parent we can measure beats a viewport unit we
+ * cannot — and it is also what survives a mobile browser's dynamic toolbar. */
+.fe-modal__card--fullbleed {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+.fe-modal__card--fullbleed .fe-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.fe-viewer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+}
+
+/* ---- Top bar ---- */
+.fe-viewer__bar {
+  flex: 0 0 auto;
+  display: grid;
+  /* Three tracks, not flex: the action cluster is CENTRED on the bar, which
+     only holds when the two side tracks are equal. With flex the cluster
+     drifts with the length of the filename. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--fe-gap);
+  height: 56px;
+  padding: 0 var(--fe-gap);
+  background: var(--fe-bg-elev);
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe-viewer__ident {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-width: 0;
+}
+/* The tile sizes itself from font-size (lib/fileIcons draws a 1em chip). */
+.fe-viewer__tile {
+  font-size: 24px;
+  line-height: 0;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.fe-viewer__idcol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.fe-viewer__name {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  color: var(--fe-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fe-viewer__meta {
+  font-size: var(--fe-text-xs);
+  font-weight: 400;
+  color: var(--fe-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fe-viewer__acts {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  justify-self: center;
+}
+.fe-viewer__tail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.fe-viewer__act {
+  width: var(--fe-h-md);
+  height: var(--fe-h-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  border-radius: var(--fe-radius-md);
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+}
+.fe-viewer__act:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-viewer__act .fe-aicon {
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+/* StarButton brings its own padding/box; inside the bar it is one of the
+   same 34px squares as its neighbours. The component itself is untouched —
+   it is the SAME button the listing rows use. */
+.fe-viewer__act--star.filex-star-btn {
+  padding: 0;
+  border: 0;
+}
+.fe-viewer__act--star.filex-star-btn:hover {
+  background: var(--fe-bg-hover);
+}
+
+/* ---- Stage ---- */
+.fe-viewer__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.fe-viewer__stage > .fe-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Media: the file sits in the middle of the ground with room around it.
+   ⚠ Centred with `margin: auto`, not `justify-content: center` — a flex item
+   centred the other way cannot be scrolled back to on its leading edge, which
+   is exactly what a zoomed-in photo needs. */
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--center {
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: auto;
+  padding: var(--fe-gap-lg);
+}
+/* ⚠ `flex-shrink: 0` is what makes the zoom pill tell the truth. `.fe-preview`
+ * is a flex container, so the image is a flex ITEM and shrinks to the stage by
+ * default: measured with `width: 1800px; max-width: none` set inline and the
+ * element still 1406px wide — the pill said 150% and nothing on screen grew
+ * past 125%. max-width was never the constraint. */
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--center > * {
+  margin: auto;
+  flex: 0 0 auto;
+}
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--center .fe-preview__image,
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--center .fe-preview__video,
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--center .fe-preview__audio {
+  max-height: 100%;
+}
+
+/* Editors and document surfaces take every pixel — the old 70vh/78vh heights
+   were sized for a card that no longer exists and would leave a dead band
+   under the editor. */
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--fill {
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--fe-bg);
+}
+.fe-viewer:not(.fe-viewer--bare) .fe-preview--fill > * {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+/* ---- Edge chevrons ---- */
+.fe-viewer__chev {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--fe-h-lg);
+  height: var(--fe-h-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  border-radius: 999px;
+  box-shadow: var(--fe-shadow-sm);
+  cursor: pointer;
+  padding: 0;
+  z-index: 2;
+}
+.fe-viewer__chev:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-viewer__chev--prev { left: var(--fe-gap); }
+.fe-viewer__chev--next { right: var(--fe-gap); }
+
+/* ---- Zoom pill ---- */
+.fe-viewer__zoom {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  height: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  border-radius: 999px;
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+  box-shadow: var(--fe-shadow);
+  z-index: 2;
+}
+/* The quick-look legend already owns the bottom centre (`.fe.fe-ql-hint`,
+   bottom: 14px, teleported to <body>). Stack the pill above it instead of
+   printing one on top of the other. */
+.fe-modal__backdrop.fe-quicklook .fe-viewer__zoom {
+  bottom: 56px;
+}
+.fe-viewer__zoom-btn,
+.fe-viewer__zoom-level {
+  border: 0;
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  border-radius: var(--fe-radius-sm);
+  font-size: var(--fe-text-sm);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-viewer__zoom-btn {
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0;
+  font-size: var(--fe-text-md);
+}
+.fe-viewer__zoom-level {
+  min-width: 46px;
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--fe-text);
+}
+.fe-viewer__zoom-btn:hover:not(:disabled),
+.fe-viewer__zoom-level:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-viewer__zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.fe-viewer__zoom-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--fe-border);
+}
+
+/* Narrow screens: the name column is the only thing that can give way, and
+   the chevrons come off the edges so they stop sitting on the content. */
+@media (max-width: 640px) {
+  .fe-viewer__bar {
+    height: 52px;
+    gap: var(--fe-gap-sm);
+    padding: 0 var(--fe-gap-sm);
+  }
+  .fe-viewer__chev--prev { left: var(--fe-gap-xs); }
+  .fe-viewer__chev--next { right: var(--fe-gap-xs); }
+}
+/* === /gorunum:v1-viewer === */
+
+/* === gorunum:v1-advsearch — the Advanced search dialog =====================
+ *
+ * Two visually distinct halves, because the dialog makes two different
+ * promises and the reader has to be able to tell them apart without reading
+ * the code: everything under the first legend is answered by the server,
+ * everything under the second narrows the rows that came back. The second
+ * legend therefore sits on a rule, not just in a lighter colour — a shade is
+ * a hint, a line is a boundary.
+ */
+
+/* The filter affordance inside the search field, beside the palette chip. */
+.fe-drivesearch__tune {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-drivesearch__tune:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-drivesearch__tune:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-drivesearch__tune .fe-aicon {
+  width: 17px;
+  height: 17px;
+}
+
+.fe-advsearch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap);
+  font-size: var(--fe-text-md);
+  color: var(--fe-text);
+}
+
+.fe-advsearch__legend {
+  margin: 0;
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__legend--client {
+  margin-top: var(--fe-gap-xs);
+  padding-top: var(--fe-gap);
+  border-top: 1px solid var(--fe-border);
+}
+
+.fe-advsearch__row {
+  display: flex;
+  gap: var(--fe-gap);
+  align-items: flex-start;
+}
+.fe-advsearch__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-xs);
+  flex: 1 1 0;
+  min-width: 0;
+}
+.fe-advsearch__field--wide {
+  flex: 1 1 100%;
+}
+.fe-advsearch__label {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  color: var(--fe-text);
+}
+
+/* The query box — the same shape as the header field, so the dialog reads as
+   that field opened up rather than as a different search. */
+.fe-advsearch__box {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  height: var(--fe-h-lg);
+  padding: 0 var(--fe-gap);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+}
+.fe-advsearch__box:focus-within {
+  border-color: var(--fe-primary);
+}
+.fe-advsearch__glass {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__glass .fe-aicon {
+  width: 17px;
+  height: 17px;
+}
+.fe-advsearch__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fe-text-md);
+  outline: none;
+}
+.fe-advsearch__input::placeholder {
+  color: var(--fe-text-muted);
+}
+
+/* Segmented control — the scope tabs and the ± span picker. */
+.fe-advsearch__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  align-self: flex-start;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.fe-advsearch__seg-btn {
+  appearance: none;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fe-advsearch__seg-btn:hover {
+  color: var(--fe-text);
+}
+.fe-advsearch__seg-btn.is-active {
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fe-advsearch__seg-btn:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+.fe-advsearch__pair {
+  display: flex;
+  gap: var(--fe-gap-sm);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.fe-advsearch__num {
+  width: 6.5rem;
+  flex: 0 0 auto;
+}
+.fe-advsearch__unit {
+  width: 5rem;
+  flex: 0 0 auto;
+}
+
+.fe-advsearch__hint {
+  font-size: var(--fe-text-xs);
+  line-height: 1.45;
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__hint--block {
+  margin: 0;
+}
+
+/* The live count. Boxed, because it is a measurement and not a caption: the
+   number and the sentence explaining what it cost belong to each other. */
+.fe-advsearch__count {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-xs);
+  margin-top: var(--fe-gap-xs);
+  padding: var(--fe-gap);
+  border: 1px solid var(--fe-border-soft);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg-elev);
+}
+.fe-advsearch__count-line {
+  margin: 0;
+  font-size: var(--fe-text-md);
+  color: var(--fe-text);
+  min-height: 1.2em;
+}
+.fe-advsearch__wire {
+  margin: 0;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  overflow-wrap: anywhere;
+}
+.fe-advsearch__wire code {
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-xs);
+  padding: 1px 5px;
+  border-radius: var(--fe-radius-sm);
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+}
+
+/* Reset sits apart from Cancel/Search: it changes the form, they leave it. */
+.fe-advsearch__reset {
+  margin-right: auto;
+}
+
+/* One column on a narrow viewport — two 1fr fields at 390px leave a date
+   input that cannot show a date. */
+@media (max-width: 640px) {
+  .fe-advsearch__row {
+    flex-direction: column;
+    gap: var(--fe-gap-sm);
+    /* ⚠ The row sets `align-items: flex-start` so two side-by-side fields of
+       different heights line up at the top. Turned on its side that same rule
+       stops being alignment and becomes WIDTH: measured at 390px, every input
+       shrank to about half the dialog. Stretch is the column's answer. */
+    align-items: stretch;
+  }
+}
+/* === /gorunum:v1-advsearch === */
+
+/* === gorunum:v2-topbar === =================================================
+   The page bar above the explorer is gone and this header is the only one on
+   the screen, so it takes the reference shell's shape in EVERY profile: one
+   wide field across the row, and a trailing cluster of icon-only buttons.
+   The two controls that belong to a listing (view switcher, details) and the
+   tab strip moved down onto / under the breadcrumb row.
+
+   Only declared `--fe-*` tokens (web/tests/api/themeTokens.test.ts fails the
+   build on a phantom one). Last block in the file — sibling agents append
+   theirs after it, nobody edits the middle.
+   ------------------------------------------------------------------------ */
+
+/* ── the header ───────────────────────────────────────────────────────── */
+/* One set of metrics for both profiles. The classic row used to be 10px tall
+   on the outside and the drive row 8px, which is two headers wearing one
+   name; with the same contents they now measure the same. */
+.fe-toolbar:not(.fe-toolbar--narrow) {
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-sm) var(--fe-gap);
+}
+/* The trailing cluster: the explorer's own utilities, then the host's
+   account-level doors through the slot. `0 0 auto` so the field beside it is
+   the thing that absorbs the width. */
+.fe-toolbar__tail {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  min-width: 0;
+}
+/* Every button in the cluster is the same square, whoever rendered it — the
+   host's three arrive through a slot and would otherwise come out as ordinary
+   labelled buttons sitting beside icon squares. */
+.fe-toolbar__tail .fe-btn {
+  height: var(--fe-h-md);
+  min-width: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  justify-content: center;
+  border-radius: var(--fe-radius-md);
+  border-color: transparent;
+  background: transparent;
+  color: var(--fe-text-muted);
+}
+.fe-toolbar__tail .fe-btn:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  border-color: transparent;
+  color: var(--fe-text);
+}
+/* The narrow classic row draws its buttons inline rather than inside the
+   cluster (search collapses behind a magnifier there, so the row is not the
+   same shape). They still have to be the SAME BUTTON: measured at 390px the
+   six icons came out as six bordered boxes while the identical six at 1440
+   were flat, which is one control wearing two costumes by viewport. */
+.fe-toolbar--narrow > .fe-btn--icon-only {
+  height: var(--fe-h-md);
+  min-width: var(--fe-h-md);
+  justify-content: center;
+  border-radius: var(--fe-radius-md);
+  border-color: transparent;
+  background: transparent;
+  color: var(--fe-text-muted);
+}
+.fe-toolbar--narrow > .fe-btn--icon-only:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  border-color: transparent;
+  color: var(--fe-text);
+}
+/* …except when it is pressed: the nav toggle and a search with a live query
+   both say so with the shared active style, and a transparent border would
+   erase it. */
+.fe-toolbar--narrow > .fe-btn--icon-only.is-active {
+  background: var(--fe-primary-soft);
+  border-color: transparent;
+  color: var(--fe-primary-ink);
+}
+
+/* ── "coming soon" ────────────────────────────────────────────────────── */
+/* The AI assistant is drawn and disabled. ⚠ It must not read as BROKEN: the
+   glyph keeps a legible weight (0.55, not the 0.5 a plain `:disabled` would
+   give a control nobody meant to announce) and carries a small caption, so
+   the row says "not yet" rather than "not working". The caption is hidden
+   below 900px, where the tooltip and the aria-label still carry it — six
+   words in a 390px header would push the search field off the row. */
+.fe-toolbar__soon.fe-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+  gap: var(--fe-gap-xs);
+}
+.fe-toolbar__soon-tag {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .fe-toolbar__soon-tag {
+    display: none;
+  }
+}
+.fe--narrow .fe-toolbar__soon-tag {
+  display: none;
+}
+
+/* ── the breadcrumb row ───────────────────────────────────────────────── */
+/* The row is now the crumbs' row in every profile (it used to be
+   `display: contents` outside the drive shell, with the view switcher and the
+   details toggle drawn up in the header instead). */
+.fe-subhead {
+  flex: 0 0 auto;
+}
+/* The home crumb. A 24px box like the path-editor beside it, for the same
+   reason: this row is pinned at 37px to line up with the panel's head and the
+   split pane's own crumbs, and a 28px control inside 6px of padding makes
+   this row — and only this row — 40px. */
+.fe-breadcrumb__home {
+  padding: 0;
+  gap: var(--fe-gap-xs);
+  color: var(--fe-text-muted);
+}
+.fe-breadcrumb__home .fe-icon,
+.fe-breadcrumb__home .fe-aicon {
+  width: 16px;
+  height: 16px;
+}
+.fe-breadcrumb__home:hover {
+  color: var(--fe-text);
+}
+.fe-breadcrumb__home.is-last {
+  color: var(--fe-text);
+}
+/* "Subfolders" — the chevron on the last crumb. Same 24px box as the pencil,
+   and the menu hangs off it the way the overflow "…" menu already does. */
+.fe-breadcrumb__sub-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.fe-breadcrumb__sub {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-breadcrumb__sub:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-breadcrumb__sub .fe-icon,
+.fe-breadcrumb__sub .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+/* An empty folder answers in words. Without this the menu opens as a 0px
+   sliver, which reads as a broken control rather than as "nothing in here". */
+.fe-breadcrumb__menu-empty {
+  margin: 0;
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  white-space: nowrap;
+}
+/* The path editor. ⚠ `margin-left: auto` (line ~381) floated it to the far end
+   of the crumb row, where it landed against the view switcher and read as part
+   of that cluster rather than as a thing you do to the path. Measured at 1440:
+   the crumbs ended at x=381 and the pencil sat at x=1242. It belongs beside the
+   chevron, which is where the reference puts it. */
+.fe-breadcrumb__edit {
+  margin-left: 0;
+}
+.fe-breadcrumb__edit .fe-icon,
+.fe-breadcrumb__edit .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+
+/* ── the tab strip, under the breadcrumb ──────────────────────────────── */
+/* It used to be the explorer's first row, above the header and across the
+   sidebar too. Under the crumbs it belongs to the pane it is standing over,
+   so it sits on the listing's own ground rather than on the header's — an
+   elevated band here would read as a second header. */
+.fe__primary > .fe-tabs {
+  padding: var(--fe-gap-xs) var(--fe-gap-sm) 0;
+  background: var(--fe-bg);
+  border-bottom: 1px solid var(--fe-border);
+}
+/* The two controls that act on the strip rather than on one tab. They are the
+   only door to "new tab" and to the split pane, so they keep a visible box
+   while the tabs beside them stay flat. */
+.fe__primary > .fe-tabs .fe-tabs__new,
+.fe__primary > .fe-tabs .fe-tabs__split {
+  align-self: center;
+  border-radius: var(--fe-radius-sm);
+}
+/* === /gorunum:v2-topbar === */
+
+/* === gorunum:v2-share — the Share / Permissions dialog ======================
+ *
+ * Every capability the old three-tab panel had is still here; what changed is
+ * the order they are asked in. The dialog now opens on ONE decision — is this
+ * item shared by link, yes or no — answers it in a sentence, and hands over
+ * the link with its Copy button. PIN, expiry, the download cap, the people
+ * with access and the inbound drop link fold into three NAMED sections under
+ * it, one click each.
+ *
+ * ⚠ Named, not "Advanced". A disclosure whose label does not say what is
+ * behind it is a place controls go to be lost; each `__sechead` therefore
+ * carries a `__secmeta` summary of its own state ("PIN yok · 7 gün"), so the
+ * reader can tell from the closed dialog whether the thing they came for is
+ * already set.
+ *
+ * ⚠ `.fx-perm-*` survives on the root and on two inner hooks only because
+ * e2e/shots/capture.mjs addresses the dialog by them. They carry no styling.
+ */
+
+.fe-share__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--fe-gap-lg);
+  background: rgba(0, 0, 0, 0.45);
+  font-family: var(--fe-font);
+}
+
+/* Small and quiet. The old panel was 520px because it had to hold a tab strip
+   over a two-column grid of controls; with one decision on top it does not,
+   and a narrower box is what makes the single switch read as the subject. */
+.fe-share {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  max-height: 86vh;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  box-shadow: var(--fe-shadow);
+  font-size: var(--fe-text-md);
+  overflow: hidden;
+}
+
+/* ---- head ---- */
+.fe-share__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap) var(--fe-gap-lg);
+  border-bottom: 1px solid var(--fe-border-soft);
+}
+.fe-share__tile {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+.fe-share__headtext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.fe-share__title {
+  margin: 0;
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  color: var(--fe-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-share__path {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-share__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-share__close:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+
+.fe-share__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--fe-gap-lg);
+}
+
+/* ---- tier 1: the switch, the sentence, the link ---- */
+.fe-share__switchrow {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-height: var(--fe-h-md);
+}
+.fe-share__leadicon {
+  display: inline-flex;
+  color: var(--fe-primary);
+}
+.fe-share__leadicon .fe-aicon {
+  color: inherit;
+}
+.fe-share__leadlabel {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+/* The one switch. 40×24 with an 18px knob — a track wide enough that the two
+   states differ by more than a shade, which is the whole job of a control
+   whose meaning is "the public can read this file". */
+.fe-share__switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--fe-border-strong);
+  border-radius: 999px;
+  background: var(--fe-bg-hover);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.fe-share__switch[aria-checked='true'] {
+  background: var(--fe-primary);
+  border-color: var(--fe-primary);
+}
+.fe-share__switch:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.fe-share__switch:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+.fe-share__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--fe-text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.fe-share__switch[aria-checked='true'] .fe-share__knob {
+  background: var(--fe-text-on-primary);
+  transform: translateX(16px);
+}
+
+/* The sentence. Full-strength text on purpose: it is the answer to the
+   question the dialog was opened to ask, not a caption under a control. */
+.fe-share__who {
+  margin: var(--fe-gap-xs) 0 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text);
+}
+.fe-share__detail {
+  margin: var(--fe-gap-xs) 0 0;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+
+.fe-share__linkrow {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  margin-top: var(--fe-gap);
+}
+.fe-share__url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fe-primary);
+  text-decoration: none;
+}
+.fe-share__url:hover {
+  text-decoration: underline;
+}
+/* Inside the lead row the link sits in a field-shaped box, so "copy this"
+   reads as one control pair rather than as a paragraph with a button after
+   it. */
+.fe-share__linkrow > .fe-share__url {
+  flex: 1 1 auto;
+  height: var(--fe-h-lg);
+  line-height: calc(var(--fe-h-lg) - 2px);
+  padding: 0 var(--fe-gap);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
+.fe-share__copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  height: var(--fe-h-lg);
+  padding: 0 var(--fe-gap);
+  border: 1px solid var(--fe-primary);
+  border-radius: var(--fe-radius);
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  cursor: pointer;
+}
+.fe-share__copy .fe-aicon {
+  color: inherit;
+}
+.fe-share__copy:hover {
+  background: var(--fe-primary-hover);
+  border-color: var(--fe-primary-hover);
+}
+
+.fe-share__pinrow {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  margin-top: var(--fe-gap-sm);
+}
+.fe-share__pinlabel {
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fe-text-muted);
+}
+.fe-share__pin {
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-md);
+  background: var(--fe-bg-hover);
+  padding: 2px var(--fe-gap-sm);
+  border-radius: var(--fe-radius-sm);
+}
+
+/* ---- tier 2: the named sections ---- */
+.fe-share__sections {
+  margin-top: var(--fe-gap-lg);
+  border-top: 1px solid var(--fe-border-soft);
+}
+.fe-share__section + .fe-share__section {
+  border-top: 1px solid var(--fe-border-soft);
+}
+.fe-share__sechead {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  width: 100%;
+  min-height: var(--fe-h-lg);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fe-text);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.fe-share__sechead:hover .fe-share__seclabel {
+  color: var(--fe-primary);
+}
+.fe-share__sechead:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+  border-radius: var(--fe-radius-sm);
+}
+.fe-share__caret {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--fe-text-muted);
+  transition: transform 0.15s ease;
+}
+.fe-share__caret.is-open {
+  transform: rotate(90deg);
+}
+.fe-share__seclabel {
+  flex: 0 0 auto;
+}
+/* The state summary. Trailing edge, muted, small — it is there to be glanced
+   at, and it must never compete with the label it follows. */
+.fe-share__secmeta {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-size: var(--fe-text-xs);
+  font-weight: 400;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Indented to the label, not to the caret: the panel belongs to the heading
+   it opened from. */
+.fe-share__panel {
+  padding: 0 0 var(--fe-gap) calc(var(--fe-gap-lg) + var(--fe-gap-sm));
+}
+
+/* ---- fields ---- */
+.fe-share__opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--fe-gap-sm) var(--fe-gap);
+  align-items: end;
+}
+.fe-share__opts > .fe-share__check {
+  grid-column: 1 / -1;
+}
+.fe-share__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-xs);
+  min-width: 0;
+}
+.fe-share__fieldlabel {
+  font-size: var(--fe-text-xs);
+  font-weight: 500;
+  color: var(--fe-text-muted);
+}
+.fe-share__select,
+.fe-share__input {
+  width: 100%;
+  box-sizing: border-box;
+  height: var(--fe-h-lg);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+}
+.fe-share__select:focus,
+.fe-share__input:focus {
+  outline: none;
+  border-color: var(--fe-primary);
+}
+/* The per-row level select sits in a 34px row and takes that height rather
+   than stretching the row it lives in. */
+.fe-share__select--sm {
+  width: auto;
+  height: var(--fe-h-md);
+  font-size: var(--fe-text-sm);
+}
+.fe-share__input--sm {
+  flex: 0 0 140px;
+  width: 140px;
+  height: var(--fe-h-md);
+}
+.fe-share__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  font-size: var(--fe-text-md);
+  color: var(--fe-text);
+  cursor: pointer;
+}
+
+/* ---- buttons ---- */
+.fe-share__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fe-gap-xs);
+  height: var(--fe-h-lg);
+  padding: 0 var(--fe-gap);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fe-share__btn:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-share__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.fe-share__btn--primary {
+  background: var(--fe-primary);
+  border-color: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-weight: 500;
+}
+.fe-share__btn--primary:hover:not(:disabled) {
+  background: var(--fe-primary-hover);
+  border-color: var(--fe-primary-hover);
+}
+.fe-share__btn--wide {
+  width: 100%;
+  margin-top: var(--fe-gap);
+}
+.fe-share__btn .fe-aicon {
+  color: inherit;
+}
+.fe-share__mini {
+  flex: 0 0 auto;
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: inherit;
+  font-size: var(--fe-text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fe-share__mini:hover {
+  background: var(--fe-bg-hover);
+}
+/* A verb rendered as text, for the two doors that lead somewhere else
+   ("just send a link", "upload limits") rather than acting here. */
+.fe-share__linkbtn {
+  display: inline-block;
+  margin-top: var(--fe-gap-sm);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fe-primary);
+  font-family: inherit;
+  font-size: var(--fe-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.fe-share__linkbtn:hover {
+  text-decoration: underline;
+}
+.fe-share__del {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-share__del:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  color: var(--fe-danger);
+}
+.fe-share__del .fe-aicon {
+  color: inherit;
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- people ---- */
+.fe-share__add {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+}
+.fe-share__add .fe-share__select {
+  width: auto;
+  flex: 0 0 auto;
+}
+.fe-share__emailwrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-share__suggest {
+  position: absolute;
+  top: calc(100% + var(--fe-gap-xs));
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 0;
+  padding: var(--fe-gap-xs);
+  list-style: none;
+  max-height: 210px;
+  overflow: auto;
+  background: var(--fe-bg);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  box-shadow: var(--fe-shadow);
+}
+.fe-share__suggest li {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+}
+.fe-share__suggest li:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-share__suggesttxt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fe-share__suggestname {
+  font-size: var(--fe-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-share__suggestmeta {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-share__av {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  border-radius: 50%;
+  background: var(--fe-primary);
+  color: var(--fe-text-on-primary);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+}
+.fe-share__av--dim {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text-muted);
+}
+.fe-share__person {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-share__badge {
+  flex: 0 0 auto;
+  padding: 2px var(--fe-gap-sm);
+  border-radius: 999px;
+  background: var(--fe-bg-hover);
+  font-size: var(--fe-text-xs);
+}
+.fe-share__from {
+  flex: 0 0 auto;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  white-space: nowrap;
+}
+.fe-share__invite {
+  margin-top: var(--fe-gap);
+  padding-top: var(--fe-gap);
+  border-top: 1px dashed var(--fe-border);
+}
+.fe-share__inviterow {
+  display: flex;
+  gap: var(--fe-gap-sm);
+  margin-top: var(--fe-gap-sm);
+}
+.fe-share__inviterow .fe-share__btn {
+  flex: 1 1 auto;
+}
+
+/* ---- lists ---- */
+.fe-share__list {
+  margin-top: var(--fe-gap);
+}
+.fe-share__listhead {
+  margin: 0 0 var(--fe-gap-xs);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-share__row {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-height: var(--fe-h-md);
+  padding: var(--fe-gap-xs) 0;
+}
+.fe-share__row + .fe-share__row {
+  border-top: 1px solid var(--fe-border-soft);
+}
+.fe-share__row > .fe-share__url {
+  flex: 1 1 auto;
+}
+.fe-share__row--dim {
+  color: var(--fe-text-muted);
+}
+.fe-share__empty {
+  margin: 0;
+  padding: var(--fe-gap-xs) 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+
+/* ---- the rest of the link panel ---- */
+.fe-share__cli {
+  margin-top: var(--fe-gap);
+}
+.fe-share__clirow {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  margin-top: var(--fe-gap-xs);
+}
+.fe-share__clicmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-xs);
+}
+.fe-share__mailrow {
+  display: flex;
+  gap: var(--fe-gap-sm);
+  margin-top: var(--fe-gap);
+}
+.fe-share__mailrow .fe-share__input {
+  flex: 1 1 auto;
+}
+.fe-share__adv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-sm);
+  margin-top: var(--fe-gap-sm);
+  padding-top: var(--fe-gap-sm);
+  border-top: 1px dashed var(--fe-border);
+}
+.fe-share__advrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fe-gap-sm);
+}
+.fe-share__hint {
+  margin: var(--fe-gap-sm) 0 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+.fe-share__notice {
+  margin-top: var(--fe-gap-sm);
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+/* A warning is a boundary, so it gets a line rather than a tint — and the
+   tokenised warning colour, not an rgba() no theme can reach. */
+.fe-share__warn {
+  margin-top: var(--fe-gap-sm);
+  padding: var(--fe-gap-sm);
+  border: 1px solid var(--fe-warning);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text);
+}
+
+/* ---- foot ---- */
+.fe-share__foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--fe-gap) var(--fe-gap-lg);
+  border-top: 1px solid var(--fe-border-soft);
+}
+
+/* One column once two 1fr fields would each be too narrow to show their own
+   value, and the add-row stacks for the same reason. */
+@media (max-width: 420px) {
+  .fe-share__opts {
+    grid-template-columns: 1fr;
+  }
+  .fe-share__add {
+    flex-wrap: wrap;
+  }
+  .fe-share__add .fe-share__select,
+  .fe-share__add .fe-share__btn {
+    flex: 1 1 auto;
+  }
+}
+/* === /gorunum:v2-share === */
+
+/* === gorunum:v3-shell — the shell is the product ==========================
+ * Appended block (agent: app-shell). Three things live here:
+ *
+ *   1. the top bar's far-left corner (`.fe-toolbar__brand`) — the collapse
+ *      control and the host's product mark, above the navigation panel rather
+ *      than inside it;
+ *   2. the navigation panel's top edge, now that the panel draws no header of
+ *      its own above 560px;
+ *   3. the Home view (`.fe-home*`).
+ *
+ * ⚠ Declared `--fe-*` tokens only, no raw colour: a literal here cannot be
+ * reached by a theme, by the palette gallery or by a host override
+ * (web/tests/api/themeTokens.test.ts fails the build over it).
+ * ------------------------------------------------------------------------ */
+
+/* ── 1. the top bar's left corner ─────────────────────────────────────── */
+/* Fixed to the panel's own width so the search field starts exactly where the
+   content area does, the way the reference draws it. It does NOT follow the
+   rail: shrinking this to 56px would slide the whole header sideways every
+   time somebody collapsed the panel, which is a 176px jolt for a control that
+   did not move. `flex: 0 0 auto` + `min-width` rather than a fixed width so a
+   long wordmark pushes rather than clips. */
+.fe-toolbar__brand {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+}
+/* ⚠ Measured, not styled by eye. `.fe:not(.fe--narrow) .fe-toolbar__primary`
+   (the ui-fix block above) gives that element `flex: 1 1 auto` — it was the
+   folding row of action buttons, and both the buttons and the measuring strip
+   that sizing was for now live in the selection bar. What is left in it renders
+   only when a deployment has NO navigation panel, i.e. nobody by default, so an
+   element with nothing in it was GROWING to 268px: measured, the search field
+   started at x=535 on a 1440px viewport where the reference starts it at 207.
+   `0 1 auto` — it may still shrink when it does hold Upload / New folder on a
+   panel-less embed at 600px; it may not claim space it is not using.
+   ⚠ Not `:empty`: measured in Chrome, that selector does NOT match here (the
+   block still carries text nodes from the template), which is exactly the kind
+   of rule that looks right and does nothing. */
+.fe:not(.fe--narrow) .fe-toolbar__primary {
+  flex: 0 1 auto;
+}
+/* The gutter that lines the search field up with the content area: the panel's
+   own column width, less this row's left padding.
+   ⚠ Derived, not typed in: `--fe-sidenav-w` is the same token `.fe-sidenav`
+   sizes itself with, so widening the panel moves this with it. A pixel number
+   copied from the panel is a number that is correct until somebody changes the
+   panel, and then wrong with nothing to say so — there is a browser assertion
+   for it in the shell walk, because a comment cannot fail.
+   ⚠ Only when there IS a panel. An embed confined with `rootPath` has none
+   (`sideNav` defaults off there), and reserving a quarter of its header for a
+   column that is not on screen would push its search field into the middle of
+   nothing.
+   ⚠ It does NOT follow the rail. Shrinking to 56px when somebody collapses the
+   panel would slide the whole header 176px sideways, which is a jolt on every
+   control in the row for a control that did not move. */
+.fe-toolbar__brand--gutter {
+  min-width: calc(var(--fe-sidenav-w) - 12px);
+  padding-right: var(--fe-gap-sm);
+}
+/* At 390px there is no room to reserve anything: the row is toggle · field ·
+   "⋯" and the brand mark is not rendered at all (Toolbar.vue). */
+.fe--narrow .fe-toolbar__brand--gutter {
+  min-width: 0;
+  padding-right: 0;
+}
+/* The host's mark. It is a slot, so this styles whatever arrives: enough room
+   for a 22px logo beside a word, ellipsised rather than wrapped — a two-line
+   wordmark would make the whole header 20px taller for one embed. */
+.fe-toolbar__mark {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-width: 0;
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  color: var(--fe-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── 2. the panel, with no header of its own ──────────────────────────── */
+/* The 37px head used to provide this. Without it the "+ New" button would sit
+   flush against the top border, 8px higher than the breadcrumb beside it. */
+.fe-sidenav__primary {
+  padding-top: var(--fe-gap-sm);
+}
+/* …except in the drawer, where the head is still drawn (it carries the
+   dismiss) and would otherwise double the gap. */
+.fe-sidenav--drawer .fe-sidenav__primary {
+  padding-top: 0;
+}
+
+/* ── 3. the Home view ─────────────────────────────────────────────────── */
+/* Its own scroller: `.fe__body` is a flex column that the listing fills, and
+   Home is taller than the pane as soon as somebody has a dozen recents. */
+.fe-home {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--fe-gap-lg);
+}
+/* The heading on the breadcrumb row, in the crumbs' place. Matched to
+   `.fe-breadcrumb`'s own type so the two rows read as one row in two states,
+   not as two different bars. It grows for the same reason the breadcrumb does
+   (`.fe-subhead > .fe-breadcrumb`): the details toggle belongs on the far
+   right of the row whichever of the two is on screen. */
+.fe-subhead__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding-left: var(--fe-gap-xs);
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fe-text);
+}
+/* ~28px between blocks, none above the first — the rhythm the listing's own
+   section headings keep. */
+.fe-home__section + .fe-home__section {
+  margin-top: 28px;
+}
+.fe-home__heading {
+  margin: 0 2px var(--fe-gap-sm);
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fe-text);
+}
+/* A fixed 186px track, not a stretching one: the card's width is part of the
+   look, and a grid that stretches its last row makes the same drive a
+   different size on two screens. */
+.fe-home__storages {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 186px);
+  gap: var(--fe-gap);
+  align-content: start;
+  align-items: start;
+}
+/* The storage card IS the grid's folder card — 186×56, the solid glyph inset
+   12px — because in the explorer's own root listing a storage is a folder row.
+   The only thing it adds is a caption the listing has no room for. */
+.fe-home__storage {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--fe-gap);
+  width: 186px;
+  min-height: 56px;
+  padding: 0 var(--fe-gap);
+  text-align: left;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: var(--fe-font);
+  font-size: var(--fe-text-md);
+  cursor: pointer;
+}
+.fe-home__storage:hover {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-home__storage:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+/* The tile is `.fe-ftile`, which sizes itself in `em` — a 24px tinted rounded
+   square with the drive glyph inside it, the same object the Type column and
+   the grid card draw. `font-size` is what scales it; the box is only here so a
+   card with no tile (should one ever exist) keeps its columns. */
+.fe-home__storage-tile {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  line-height: 1;
+}
+.fe-home__storage-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.fe-home__storage-label {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--fe-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-home__storage-meta {
+  margin-top: 2px;
+  font-size: var(--fe-text-xs);
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-home__loading {
+  margin: 0 2px;
+  padding: var(--fe-gap) 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+/* `.fe-state` is the product's empty state — same title, same one explaining
+   line. It is written to fill a pane; here it fills a block. */
+.fe-home__state {
+  min-height: 0;
+  height: auto;
+  align-items: flex-start;
+  text-align: left;
+  padding: var(--fe-gap) 2px var(--fe-gap-lg);
+}
+/* The grids inside Home are GridView's, and GridView fills its pane. Inside a
+   section it has to be as tall as its rows and no taller, or the Starred block
+   would start a screen below the Recent one. */
+.fe-home .fe-grid {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+  padding: 0 2px;
+}
+/* === /gorunum:v3-shell === */
+
+/* === gorunum:v4-dialogs — dialogs and panels ===============================
+ *
+ * The reference shell's dialogs, measured off it at 1280×900 in both themes
+ * (owner's call, 2026-09-12: "görüntü birebir yapalım" — make ours look
+ * identical to his). Three surfaces live here: the Advanced search dialog,
+ * the details panel and the context menu.
+ *
+ * ⚠ APPEND-ONLY REGION. Three other agents own the rest of this file; this
+ * block is last on purpose, so the overrides below beat the earlier rules at
+ * the same specificity without anybody editing anybody else's lines. Only
+ * declared `--fe-*` tokens — web/tests/api/themeTokens.test.ts fails the
+ * build on a phantom one, and a raw hex cannot be reached by a theme.
+ * ------------------------------------------------------------------------ */
+
+/* ── Advanced search ──────────────────────────────────────────────────── */
+
+/* The dialog draws its own head (mark + title + sentence + ×) across the full
+ * width, so Modal's plain title bar folds away. The <h2> in there stays in the
+ * DOM — it is what the dialog's `aria-labelledby` points at — which is why
+ * this hides the bar rather than the component dropping the `title` prop. */
+.fe-modal__card:has(.fe-advsearch) .fe-modal__head {
+  display: none;
+}
+.fe-modal__card:has(.fe-advsearch) .fe-modal__body {
+  padding: var(--fe-gap-lg) 20px;
+}
+.fe-modal__card:has(.fe-advsearch) .fe-modal__actions {
+  padding: var(--fe-gap) 20px var(--fe-gap-lg);
+  border-top: 1px solid var(--fe-border);
+}
+
+.fe-advsearch {
+  gap: var(--fe-gap-lg);
+}
+.fe-advsearch__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--fe-gap);
+}
+.fe-advsearch__head-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fe-advsearch__head-icon .fe-aicon {
+  width: 18px;
+  height: 18px;
+}
+.fe-advsearch__head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-advsearch__head-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--fe-text);
+}
+.fe-advsearch__head-sub {
+  margin: 3px 0 0;
+  font-size: var(--fe-text-sm);
+  line-height: 1.4;
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__head-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  margin: -2px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-advsearch__head-close:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-advsearch__head-close .fe-aicon {
+  width: 16px;
+  height: 16px;
+}
+
+/* The query field is the widest thing in the dialog: one box, full width. */
+.fe-advsearch__box {
+  width: 100%;
+  height: 44px;
+  border-radius: var(--fe-radius-md);
+}
+
+/* Scope tabs — the segmented control opened out to the full width, one equal
+   share per scope. Same element class as the ± span picker (the mounted test
+   counts `.fe-advsearch__seg-btn[role="tab"]`), so the shape is a modifier. */
+.fe-advsearch__seg--tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0;
+  width: 100%;
+  padding: 0;
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+  overflow: hidden;
+}
+.fe-advsearch__seg--tabs .fe-advsearch__seg-btn {
+  height: 38px;
+  gap: var(--fe-gap-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  border-right: 1px solid var(--fe-border);
+  padding: 0 var(--fe-gap-sm);
+  min-width: 0;
+}
+.fe-advsearch__seg--tabs .fe-advsearch__seg-btn:last-child {
+  border-right: 0;
+}
+.fe-advsearch__seg--tabs .fe-advsearch__seg-btn.is-active {
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fe-advsearch__seg-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.fe-advsearch__seg-icon .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+
+/* Two columns, because a single column pushed the count below the fold and a
+   dialog whose measurement you have to scroll to is a dialog without one. */
+.fe-advsearch__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--fe-gap-lg) 34px;
+  align-items: start;
+}
+.fe-advsearch__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-lg);
+  min-width: 0;
+}
+.fe-advsearch__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-sm);
+  min-width: 0;
+}
+.fe-advsearch__sublabel {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__grouphead {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  margin: 0;
+  font-size: var(--fe-text-sm);
+  font-weight: 600;
+  color: var(--fe-text);
+}
+.fe-advsearch__grouphead-icon {
+  display: inline-flex;
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__grouphead-icon .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+
+/* Controls take the shell's control height and radius so a select here and a
+   select in the filter row are the same object. */
+.fe-advsearch .fe-input {
+  height: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  border-radius: var(--fe-radius);
+  font-size: var(--fe-text-sm);
+}
+.fe-advsearch .fe-advsearch__num,
+.fe-advsearch .fe-advsearch__unit {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.fe-advsearch__dash {
+  flex: 0 0 auto;
+  color: var(--fe-text-muted);
+}
+.fe-advsearch__pair {
+  gap: var(--fe-gap-xs);
+  flex-wrap: nowrap;
+}
+.fe-advsearch__seg--wide {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: 100%;
+  align-self: stretch;
+}
+.fe-advsearch__seg--wide .fe-advsearch__seg-btn {
+  padding: 0 var(--fe-gap-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The count is a measurement, not a caption — a rule above it and the
+   sentence that says what the server did NOT do directly underneath. */
+.fe-advsearch__count {
+  margin-top: 0;
+  padding: var(--fe-gap) 0 0;
+  border: 0;
+  border-top: 1px solid var(--fe-border);
+  border-radius: 0;
+  background: transparent;
+  gap: var(--fe-gap-sm);
+}
+.fe-advsearch__count-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--fe-gap);
+}
+.fe-advsearch__count-line {
+  font-size: var(--fe-text-md);
+}
+.fe-advsearch__viewall {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--fe-primary);
+  font: inherit;
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fe-advsearch__viewall::after {
+  content: ' \2192';
+}
+.fe-advsearch__viewall:hover {
+  text-decoration: underline;
+}
+
+.fe-advsearch__btn-icon {
+  display: inline-flex;
+  margin-right: 6px;
+  vertical-align: -3px;
+}
+.fe-advsearch__btn-icon .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+
+/* One column on a phone. The tabs stay a row — three 1fr cells of an icon and
+   a short word fit at 390; stacked they would be three full-width bars and
+   the dialog would open on nothing but its own tabs. */
+@media (max-width: 720px) {
+  .fe-advsearch__cols {
+    grid-template-columns: 1fr;
+    gap: var(--fe-gap-lg);
+  }
+}
+/* ⚠ Measured at 390: three tabs share 316px, and "Names and paths" plus its
+   glyph needs 118 of the 105 it gets — the label came out clipped mid-word.
+   The glyph is what goes: it repeats what the word says, and a tab whose
+   WORD is cut is a tab nobody can read. The ellipsis is the floor under
+   that, not the plan. */
+@media (max-width: 560px) {
+  .fe-advsearch__seg--tabs .fe-advsearch__seg-btn {
+    font-size: var(--fe-text-xs);
+    gap: var(--fe-gap-xs);
+    padding: 0 var(--fe-gap-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    line-height: 38px;
+  }
+  .fe-advsearch__seg--tabs .fe-advsearch__seg-icon {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .fe-advsearch__pair {
+    flex-wrap: wrap;
+  }
+  .fe-advsearch .fe-advsearch__num {
+    flex: 1 1 40%;
+  }
+}
+
+/* The footer takes the shell's large control height — these three are the
+   dialog's verbs and they sit on the same line as the reference shell's. */
+.fe-modal__card:has(.fe-advsearch) .fe-modal__actions .fe-btn {
+  height: var(--fe-h-lg);
+  padding: 0 var(--fe-gap-lg);
+  border-radius: var(--fe-radius);
+  font-size: var(--fe-text-md);
+}
+
+/* ── the details panel ────────────────────────────────────────────────── */
+
+/* The head is about the ITEM: glyph, name, one caption naming what it is,
+   then the two icon buttons. It used to say "Details" and put the item's name
+   a section lower, under a second heading — a label on the frame rather than
+   on the thing inside it. */
+.fe-inspector__head {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: var(--fe-gap) var(--fe-gap);
+  border-bottom: 0;
+}
+.fe-inspector__head-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 1px;
+}
+/* `fileIconTile` is em-sized (`.fe-ftile { width: 1em }`) so it scales with
+   whatever it sits in — the head sets that em rather than pixel-sizing the
+   glyph, which is what the listing does and why the two always match. */
+.fe-inspector__head-icon {
+  font-size: 28px;
+}
+.fe-inspector__head-icon .fe-ftile--folder .fe-ficon {
+  width: 1em;
+  height: 1em;
+}
+/* The thumbnail, moved out of the head and into the panel proper: wide and
+   short, where a picture is legible as a picture. */
+.fe-inspector__preview {
+  display: block;
+  width: 100%;
+  max-height: 140px;
+  margin: 0 0 var(--fe-gap);
+  object-fit: cover;
+  border-radius: var(--fe-radius);
+  border: 1px solid var(--fe-border);
+  background: var(--fe-bg-elev);
+}
+.fe-inspector__head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-inspector__title {
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.fe-inspector__caption {
+  margin: 3px 0 0;
+  font-size: var(--fe-text-xs);
+  line-height: 1.2;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-inspector__iconbtn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  margin-top: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-inspector__iconbtn:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-inspector__iconbtn .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+/* The close button inherits the icon-button shape now; the old rule sized it
+   as a text "×" and would otherwise fight the SVG inside it. */
+.fe-inspector__close {
+  font-size: 0;
+  padding: 0;
+  margin-right: -4px;
+}
+
+/* Tabs: two equal halves under the head, the active one underlined. */
+.fe-inspector__tabs {
+  gap: 0;
+  margin: 0 var(--fe-gap);
+  padding: 0;
+}
+.fe-inspector__tab {
+  flex: 1 1 0;
+  height: 38px;
+  padding: 0;
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+}
+.fe-inspector__tab.is-active {
+  font-weight: 600;
+}
+
+/* Section headings sit closer to their table, and every section after the
+   first is separated by a hairline instead of by air alone. */
+.fe-inspector__scroll {
+  padding: var(--fe-gap-lg) var(--fe-gap) var(--fe-gap);
+}
+.fe-inspector__section {
+  margin-bottom: 0;
+  padding-bottom: var(--fe-gap);
+}
+.fe-inspector__section + .fe-inspector__section {
+  margin-top: var(--fe-gap);
+  padding-top: var(--fe-gap-lg);
+  border-top: 1px solid var(--fe-border);
+}
+.fe-inspector__heading {
+  margin: 0 0 var(--fe-gap-sm);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fe-text);
+}
+
+/* The General table. Fixed label column and a fixed row height: a panel whose
+   left edge wanders line by line reads as a list of unrelated facts. */
+.fe-inspector__meta {
+  margin: 0;
+  gap: 0;
+}
+.fe-inspector__row {
+  align-items: center;
+  min-height: 25px;
+  gap: var(--fe-gap-sm);
+  font-size: var(--fe-text-sm);
+}
+.fe-inspector__row dt {
+  flex: 0 0 76px;
+}
+
+/* ── the context menu ─────────────────────────────────────────────────── */
+
+/* A menu is not a modal: it takes the small shadow. The large one
+   (`--fe-shadow`, 0 20px 60px) is the dialog's, and a right-click menu
+   wearing it floats a centimetre off the page. */
+.fe-ctx {
+  box-shadow: var(--fe-shadow-sm);
+  border-radius: var(--fe-radius);
+  padding: var(--fe-gap-xs);
+}
+.fe-ctx__item {
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  font-size: var(--fe-text-md);
+  border-radius: var(--fe-radius-sm);
+}
+.fe-ctx__key {
+  font-size: var(--fe-text-xs);
+}
+
+/* The share-link row: the glyph is the shared stroked one now, in a soft
+   round well, the way the reference shell draws it. */
+.fe-inspector__linkicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--fe-bg-hover);
+  color: var(--fe-text-muted);
+}
+.fe-inspector__linkicon .fe-aicon {
+  width: 14px;
+  height: 14px;
+}
+/* The inline copy buttons carry the same stroked glyph the head does, so the
+   panel has one copy mark rather than a symbol here and an icon there. */
+.fe-inspector__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: var(--fe-radius-sm);
+  font-size: 0;
+}
+.fe-inspector__copy .fe-aicon {
+  width: 13px;
+  height: 13px;
+}
+.fe-inspector__copy:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+/* === /gorunum:v4-dialogs === */
+
+/* === gorunum:v1-preview — the card shows as much of the file as fits ======
+ *
+ * Appended block. ⚠ Everything above is owned by other work in flight; these
+ * rules are here, at the end, because the cascade is what makes them win
+ * without editing a line anybody else is holding.
+ *
+ * The owner, 2026-09-12, on the grid cards (translated from Turkish): "about
+ * the previews — I said the first line, I've changed my mind, let's do as
+ * much as we can fit. For videos put the video's first frame. For a PDF the
+ * part of the first page that fits."
+ */
+
+/* A blank line in the file is part of what the file looks like, and it was
+ * disappearing. `.fe-fprev__line` has no content on an empty line, so the div
+ * collapsed to zero height: the preview drew a markdown document as though it
+ * were dense code, and — because the old ten-line budget counted the blanks
+ * it then failed to draw — left the bottom of the box empty as well. Measured
+ * before this change: README.md filled 75 of a 108px box and 110 of a 220px
+ * one. A non-breaking space gives every line a line box at whatever
+ * line-height the view is using, so the same rule holds in the grid (11px)
+ * and the gallery (14px) without either number appearing here. */
+.fe-fprev__line::after {
+  content: '\00a0';
+}
+
+/* Columns follow the box. `lib/filePreview.ts` now parses up to eight, and a
+ * hard minimum track width decides how many of them are actually drawn: the
+ * grid card shows about four, the larger gallery tile about five, and the
+ * rest is clipped by the `overflow: hidden` the box already had. A table
+ * that runs past the edge reads as "there is more to the right", which is
+ * true — and is the same thing the bottom fade says about the rows. */
+.fe-fprev--table {
+  grid-template-columns: repeat(var(--fprev-cols, 3), minmax(40px, 1fr));
+  /* ⚠ And the rows have to be told to keep their height, or asking for more
+   * of them makes the table WORSE. `.fe-fprev__cell` is `overflow: hidden`,
+   * which sets its automatic minimum size to zero, so `auto` rows in a grid
+   * with a definite height are free to shrink — and they did: sixteen rows in
+   * a 108px box came out 6px tall each, every line of the table clipped
+   * through the middle of its own glyphs. It was invisible while the cap was
+   * six rows, because six rows fit. `max-content` sizes each row to its line
+   * and lets the surplus overflow, which is what the box's `overflow: hidden`
+   * and the fade at the bottom are there to finish. */
+  grid-auto-rows: max-content;
+}
+
+/* A PAGE crops from its TOP.
+ *
+ * `object-fit: cover` on a portrait page in a landscape box has to discard
+ * most of the height, and centred — the default — it discards the letterhead,
+ * the title and the date, which is the only part of a document that says
+ * which document it is. Measured on a reference deployment carrying exactly
+ * this default: five PDFs built from one template produced five cards that
+ * could not be told apart, because the sole difference between them was the
+ * title that had been cropped away.
+ *
+ * Photographs keep the centred crop — a photo's subject is usually in the
+ * middle, and a portrait photo cropped to its top is a picture of somebody's
+ * forehead. `lib/filePreview.ts drawsAsPage()` is the one place that decides
+ * which a file is, and both views ask it. */
+.fe-grid__thumb img.fe-thumb--page,
+.fe-gal__thumb img.fe-thumb--page {
+  object-position: 50% 0;
+}
+
+/* A still from a moving picture, marked as one.
+ *
+ * With the first frame now actually landing on the card, a video became
+ * indistinguishable from a photograph at a glance — which is the one thing
+ * worth knowing before clicking. Drawn from tokens so it survives both
+ * themes over any frame: the disc is the elevated surface at near-full
+ * opacity, the triangle is body text. */
+.fe-thumb__play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--fe-bg-elev) 88%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--fe-text) 22%, transparent);
+  /* The card owns every gesture — the badge must not swallow a click, a
+     double-click or the start of a drag. */
+  pointer-events: none;
+}
+.fe-thumb__play::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: -6px 0 0 -4px;
+  border-style: solid;
+  border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent var(--fe-text);
+}
+/* The gallery tile is several times the area of a grid card's preview box, so
+   the badge scales with it. Scale only: one badge, one rule, two sizes. */
+.fe-gal__thumb .fe-thumb__play {
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+}
+.fe-gal__thumb .fe-thumb__play::after {
+  margin: -8px 0 0 -5px;
+  border-width: 8px 0 8px 13px;
+}
+/* === /gorunum:v1-preview === */
+
+/* The two families that are PLACES rather than file types. Same two rules
+ * every other family gets (`.fe-ficon--x` tints the glyph, `.fe-ftile--x`
+ * fills the chip behind it) — they are only down here because the block they
+ * belong with is in the middle of a file three other pieces of work are
+ * holding open. */
+.fe-ficon--storage { color: var(--fe-icon-storage); }
+.fe-ficon--trash { color: var(--fe-icon-trash); }
+.fe-ftile--storage { background: var(--fe-icon-storage); }
+.fe-ftile--trash { background: var(--fe-icon-trash); }
+
+/* === surucu:d1-sort — the sort control at the filter row's trailing edge ===
+   Two controls, flush against each other: a text button that NAMES the active
+   sort and flips its direction, and a 28px chevron whose menu picks the key.
+   Both drive `lib/sortOrder`, the same singleton the list view's column
+   headers drive — one sort, two handles.
+   ---------------------------------------------------------------------- */
+
+/* `display: contents` — the four chips keep being flex items of the row, so
+   nothing about the existing layout moves; the wrapper exists only to carry
+   the `role="group" aria-label="Filters"` that used to sit on the whole row.
+   The sort control is not a filter and must not be announced inside that
+   group. */
+.fe-filterbar__chips {
+  display: contents;
+}
+
+.fe-filterbar__sort {
+  flex: 0 0 auto;
+  /* The trailing edge. ⚠ `.fe-filterbar__count` carried this same `auto`
+     while it was the last child; leaving both would split the free space
+     between them and park the count in mid-row the moment a filter is set. */
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  /* Flush, deliberately: the chevron belongs TO the button on its left — it
+     opens the menu that changes what that button says. A gap would read as
+     two unrelated controls. */
+  gap: 0;
+  padding-left: var(--fe-gap-sm);
+}
+.fe-filterbar__count {
+  margin-left: 0;
+}
+
+.fe-filterbar__sortdir {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  height: var(--fe-h-sm);
+  padding: 0 var(--fe-gap-sm);
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: var(--fe-text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fe-filterbar__sortdir:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-filterbar__sortdir:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-filterbar__sortarrow {
+  width: 14px;
+  height: 14px;
+}
+
+.fe-filterbar__sortpick {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  /* Muted against the button beside it: that one states the sort, this one is
+     the way to change it. */
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-filterbar__sortpick:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-filterbar__sortpick[aria-expanded='true'] {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-filterbar__sortpick:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+
+/* The Sort-by menu is the filter popover in a narrower box. It draws NO tick:
+   the button it opens from already names the active key in full, an inch to
+   its left, and the reference build shows none either. The keyboard still
+   lands on the active row (`[data-active]`, set in FilterBar). */
+.fe-filterpop--sort {
+  min-width: 160px;
+}
+/* === /surucu:d1-sort === */
+
+/* gorunum:v3-shell — the config-driven mark (ExplorerConfig.brand), drawn as
+   the `#brand` slot's fallback for a host that cannot fill a slot at all — our
+   own desktop app among them. Sized to the panel rows' own glyph so a
+   slot-filled mark and a config-filled one come out the same height. */
+.fe-toolbar__markimg {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+/* surucu:d1-actions — the "⋮" at the end of the filter row, and its menu.
+   The button borrows the sort control's own metrics so the row ends in two
+   controls of one height rather than a button and an afterthought. */
+.fe-filterbar__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fe-filterbar__actions:hover,
+.fe-filterbar__actions[aria-expanded='true'] {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-filterbar__actions:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+/* 232px — the reference's width, and wide enough that "Deselect all" and
+   "Upload files" never wrap; the filter popovers are narrower because an
+   option label is one or two words. */
+.fe-filterpop--actions {
+  min-width: 232px;
+}
+.fe-filterpop--actions .fe-filterpop__item[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.fe-filterpop__rule {
+  height: 0;
+  margin: 4px 6px;
+  border: 0;
+  border-top: 1px solid var(--fe-border-soft);
+}
+
+/* ⚠ Pinned to the row's trailing edge while the row scrolls.
+   Measured at 390px: the filter row overflows by 260px and scrolls on itself
+   (the page does not), which left this button — and with it "Select all", the
+   only door that verb has on a phone — 260px off screen behind a scrollbar
+   that is deliberately invisible. `sticky` costs nothing at a width where the
+   row does not scroll, and the background is what stops the chips sliding
+   under a transparent button. */
+.fe-filterbar__actions {
+  position: sticky;
+  right: 0;
+  background: var(--fe-bg);
+  box-shadow: -8px 0 8px -6px var(--fe-bg);
+}
+.fe-filterbar__actions:hover,
+.fe-filterbar__actions[aria-expanded='true'] {
+  background: var(--fe-bg-hover);
+}
+
+/* ═══ surucu:d1-sort — the sort control over a RANKED listing ═══════════════
+ *
+ * A search result is in the server's order, not the active key's (see
+ * `lib/sortOrder.ListingOrder`), so the control stops claiming a key: it
+ * prints "Relevance", drops its arrow and closes. These rules are what makes
+ * "closed" read as a state rather than as a broken button — muted text, the
+ * default cursor, and no hover response at all, because a control that still
+ * lights up under the pointer is one people keep clicking.
+ *
+ * ⚠ The reason is NOT drawn here. It lives in the button's `title` and in its
+ * accessible name (`sort.relevance_why`), so it reaches a tooltip, a screen
+ * reader and a keyboard user alike; a line of helper text in the filter row
+ * would appear and disappear on every keystroke of a debounced search and
+ * reflow the chips beside it.
+ *
+ * ⚠ No `opacity`. Fading the whole button fades the WORD "Relevance" with it,
+ * and that word is the one thing the control still has to say clearly. The
+ * muted token does the same job to the chrome and leaves the text legible in
+ * both themes — which is also why it is a token and not a hex.
+ */
+.fe-filterbar__sortdir:disabled,
+.fe-filterbar__sortpick:disabled {
+  color: var(--fe-text-muted);
+  cursor: default;
+}
+.fe-filterbar__sortdir:disabled:hover,
+.fe-filterbar__sortpick:disabled:hover {
+  background: transparent;
+  color: var(--fe-text-muted);
+}
+/* The word carries the state, so it keeps the normal text colour while the
+   chrome around it recedes. */
+.fe-filterbar__sortdir.is-ranked > span:first-child {
+  color: var(--fe-text);
+}
+
+/* The list view's column headers close for the same reason and must look the
+   same way: the four of them and the filter row's button are one control with
+   two handles, and a header that still hovered would be the handle that
+   pretends the sort is live. */
+.fe-list__sort:disabled {
+  cursor: default;
+}
+.fe-list__sort:disabled:hover {
+  color: inherit;
+}
+
+/* === gorunum:v5-empty — one empty state, and it is centred ==================
+ * Appended block (agent: home-empty). Owner's report, 2026-09-13: "home benzer
+ * yakınlıkta ama starred bölgesi yanlış" — Home is close, the Starred block is
+ * not.
+ *
+ * ⚠ APPEND-ONLY REGION, last in the file on purpose: `.fe-home__state` is
+ * declared in the `gorunum:v3-shell` block above and another agent owns that
+ * region, so this overrides it at equal specificity without anybody editing
+ * anybody else's lines. Declared `--fe-*` tokens only — a raw colour or a
+ * phantom token fails web/tests/api/themeTokens.test.ts.
+ * ------------------------------------------------------------------------ */
+
+/* Measured on both builds at 1440×900, content area x∈[256,1439] (ours) and
+ * x∈[192,1440] (reference):
+ *
+ *   reference · Home → Starred   art centred at x=818 (block centre), both
+ *                                lines `text-align: center`, ~32px of air
+ *                                above the art and below the last line.
+ *   ours (before)                art at x=274 — 2px from the content's left
+ *                                edge — and both lines left-aligned, which is
+ *                                why it read as a stray icon under a heading
+ *                                rather than as an empty state.
+ *
+ * The left alignment was not an accident, it was this block: `.fe-state` (the
+ * product's one empty state, used by the folder, search, trash, not-found and
+ * every panel view) centres, and the Home override turned that off to line the
+ * art up with the section heading. Lining it up with the heading is exactly
+ * what makes it read as a loose glyph: a heading is a label for the block, the
+ * empty state IS the block, and the block is the full width of the pane.
+ *
+ * What stays from the override: `min-height: 0` / `height: auto`. `.fe-state`
+ * is written to FILL a pane (`min-height: 240px; height: 100%`); inside a Home
+ * section it has to be as tall as its own content or the Starred block starts
+ * a screen below the Recent one.
+ *
+ * 32px rather than `--fe-gap-lg` (16px): measured off the reference, and the
+ * air is what separates "this list is empty" from "this list is still
+ * loading". Derived from the token so a denser scale takes it with it. */
+.fe-home__state {
+  align-items: center;
+  text-align: center;
+  padding: calc(var(--fe-gap-lg) * 2) var(--fe-gap);
+}
+/* === /gorunum:v5-empty === */
+
+/* === gorunum:v4-hostmenu / v4-panepair ====================================
+ *
+ * Two decisions from 2026-09-13, in the header. Appended as one marked block
+ * because the file above is being edited by other hands tonight.
+ *
+ * ── the AI mark's words, on hover ──────────────────────────────────────────
+ * The mark used to carry a permanent `COMING SOON` pill (`.fe-toolbar__soon-tag`,
+ * defined further up and no longer rendered by Toolbar.vue — its rules are
+ * dead and should be swept by whoever next owns that region of this file).
+ * A caption that is always on screen spends header width on a promise; the
+ * words now arrive when the pointer does.
+ *
+ * ⚠ The tip is drawn by the WRAPPER's `:hover`, not the button's. The button
+ * is `disabled`, and a disabled control does not receive mouse events in
+ * Chromium — the hit test falls through it, so a rule hung on the button
+ * itself is a rule that fires only sometimes. The wrapper always gets it.
+ *
+ * ⚠ `pointer-events: none` on the tip: it is painted UNDER the pointer's path
+ * to the rest of the row, and a tooltip that can itself be hovered is a
+ * tooltip that flickers as the cursor crosses its own edge.
+ *
+ * ⚠ `right: 0`, never `left`: this control sits at the end of the row, and a
+ * left-anchored box the width of a sentence hangs off the viewport at 390px.
+ */
+.fe-toolbar__soon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.fe-toolbar__soon-tip {
+  position: absolute;
+  top: calc(100% + var(--fe-gap-xs));
+  right: 0;
+  z-index: 6;
+  padding: 4px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  box-shadow: var(--fe-shadow-sm);
+  font-size: var(--fe-text-xs);
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.fe-toolbar__soon-wrap:hover .fe-toolbar__soon-tip {
+  opacity: 1;
+}
+/* Someone who asked not to be moved at. The words are still in the button's
+   accessible name, which is the door this rule cannot take away. */
+@media (prefers-reduced-motion: reduce) {
+  .fe-toolbar__soon-tip {
+    transition: none;
+  }
+}
+
+/* ── the split toggle, docked beside the details toggle ────────────────────
+ * It carries `fe-btn fe-btn--icon-only` when it is docked, which is the
+ * details toggle's own class set, so the pair needs no size of its own — the
+ * glyph is `.fe-ficon` at 1em in both, and `.fe-btn.is-active` is the pressed
+ * style both already had. The one thing worth saying here is that the docked
+ * button must NOT inherit the strip's 22px box, which is why it drops
+ * `.fe-tabs__split` rather than adding to it. */
+.fe-tabs__split--docked {
+  flex: 0 0 auto;
+}
+/* === /gorunum:v4-hostmenu / v4-panepair === */
+
+/* === gorunum:v4-wordmark — the product mark, at the reference's size ========
+ *
+ * Owner's decision, 2026-09-13, verbatim: *"filex yazısını daha büyük
+ * yapalım."*
+ *
+ * ⚠ Measured off the contributor's reference build rather than chosen:
+ * https://filex.blipnova.com, signed in, 1440px — the wordmark there computes
+ * to `font-size: 18px; font-weight: 600; letter-spacing: normal;
+ * line-height: 18px` (Inter, its own class is literally `text-18 font-semibold
+ * leading-none`), with a 28×28 logo 8px to its left. Ours was 13px
+ * (`--fe-text-md`) beside a 22px mark — a third smaller in both.
+ *
+ * ⚠ A raw 18px, and deliberately not derived from `--fe-text-*`: that scale
+ * stops at 13px and it is BODY type. A wordmark is not body type — it does not
+ * get smaller because a host asked for a denser listing — and a `calc()` off
+ * a 13px token would be a number whose meaning changes the day somebody
+ * retunes the scale.
+ *
+ * ⚠ `line-height: 1` (the reference's `leading-none`) is load-bearing, not
+ * tidiness: the inherited 1.5 would give an 18px word a 27px line box, and the
+ * brand block is one of the things that sets the header's height. Measured
+ * both ways — the header stays at 59px with it.
+ *
+ * ⚠ Nothing here reserves space. An embed that passes no `config.brand` and
+ * fills no `#brand` slot renders an EMPTY `.fe-toolbar__mark`, and an empty
+ * flex box with no content has no line box and no width — so the toggle still
+ * sits at the edge on its own, at 18px exactly as it did at 13px. A `min-width`
+ * or a `min-height` here would have been the thing that broke that.
+ *
+ * ⚠ It must not push the search field. The gutter is
+ * `min-width: calc(var(--fe-sidenav-w) - 12px)` and it is the field's left
+ * edge; the brand's CONTENT has to stay under it. Measured: content 98px →
+ * 114px, against a gutter of 243px today and 180px once the panel is narrowed
+ * to 192px — 66px of headroom at the narrower width, and the field does not
+ * move at either. There is a browser assertion for both widths.
+ */
+.fe-toolbar__mark {
+  font-size: 18px;
+  line-height: 1;
+}
+/* The `config.brand` mark — the door a `<filex-explorer>` host has, since slots
+   do not reach a Vue custom element. Kept the SAME size as the slot-filled one
+   above it (`.fx-explore-logo` in the web app), which is the whole point of the
+   rule this replaces: a config-filled mark and a slot-filled mark must not come
+   out at two different heights. */
+.fe-toolbar__markimg {
+  width: 28px;
+  height: 28px;
+}
+/* === /gorunum:v4-wordmark === */
+
+/* ======================================================================
+ * belge:n1 — the "New document" picker (modals/NewDocumentModal.vue).
+ *
+ * One screen, three answers: which type, what name, which folder. It is not a
+ * wizard on purpose — a three-step flow for three fields makes the person
+ * click Next twice to do something they could see all of at once, and the
+ * destination is nearly always the folder they are already standing in.
+ *
+ * ⚠ The type tiles size their chip with `font-size`, not width/height: the
+ * chips come from lib/fileIcons `iconTile`, whose `.fe-ftile` box is measured
+ * in `em` precisely so one glyph definition serves a 13px listing row and a
+ * 28px picker tile. A pixel size here would be a second sizing system for the
+ * same element.
+ * ==================================================================== */
+
+.fe-newdoc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-lg);
+}
+
+/* --- the type grid -------------------------------------------------- */
+
+.fe-newdoc__group + .fe-newdoc__group {
+  margin-top: var(--fe-gap);
+}
+.fe-newdoc__grouplabel {
+  margin: 0 0 var(--fe-gap-sm);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+/* auto-fill rather than a fixed column count: the same grid holds six office
+   types and twelve text ones, and at 390px it has to hold either without a
+   horizontal scrollbar. */
+.fe-newdoc__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--fe-gap-sm);
+}
+.fe-newdoc__type {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  padding: var(--fe-gap) var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.fe-newdoc__type:hover {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-newdoc__type.is-selected {
+  background: var(--fe-primary-soft);
+  border-color: var(--fe-primary);
+  color: var(--fe-primary-ink);
+}
+.fe-newdoc__type:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 2px;
+}
+.fe-newdoc__tile {
+  display: inline-flex;
+  font-size: 28px;
+  line-height: 1;
+}
+.fe-newdoc__ext {
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+}
+.fe-newdoc__kind {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  /* Some kind names wrap a 96px tile ("Shell script", "Presentation").
+     Wrapping is fine; a tile that grows taller than its neighbours is not, so
+     the line box is tight rather than the default 1.5. */
+  line-height: 1.25;
+}
+.fe-newdoc__type.is-selected .fe-newdoc__kind {
+  color: var(--fe-primary-ink);
+}
+.fe-newdoc__withheld {
+  margin: var(--fe-gap) 0 0;
+  font-size: var(--fe-text-xs);
+  line-height: 1.45;
+  color: var(--fe-text-muted);
+}
+
+/* --- name + location ------------------------------------------------ */
+
+.fe-newdoc__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-sm);
+}
+.fe-newdoc__label {
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fe-text-muted);
+}
+.fe-newdoc__nameline {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+}
+.fe-newdoc__name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The extension sits beside the field rather than inside it: typed into the
+   field it would be text the person can delete, and a name that quietly loses
+   its extension is exactly the accident this label prevents. */
+.fe-newdoc__suffix {
+  flex: 0 0 auto;
+  font-size: var(--fe-text-md);
+  color: var(--fe-text-muted);
+  font-family: var(--fe-font-mono);
+}
+
+.fe-newdoc__dest {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-height: var(--fe-h-md);
+  padding: 0 var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
+.fe-newdoc__destpath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fe-text-md);
+  color: var(--fe-text);
+}
+.fe-newdoc__changebtn {
+  flex: 0 0 auto;
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: none;
+  color: var(--fe-primary-ink);
+  font: inherit;
+  font-size: var(--fe-text-sm);
+  cursor: pointer;
+}
+.fe-newdoc__changebtn:hover {
+  background: var(--fe-bg-hover);
+}
+
+/* --- the folder browser --------------------------------------------- */
+
+.fe-newdoc__browser {
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  overflow: hidden;
+}
+.fe-newdoc__browserbar {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border-bottom: 1px solid var(--fe-border-soft);
+  background: var(--fe-bg-elev);
+}
+.fe-newdoc__up {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: none;
+  color: var(--fe-text);
+  cursor: pointer;
+}
+.fe-newdoc__up:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-newdoc__up:disabled {
+  color: var(--fe-text-muted);
+  cursor: default;
+}
+.fe-newdoc__up .fe-ficon {
+  width: 16px;
+  height: 16px;
+}
+.fe-newdoc__browserpath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+/* A fixed height, not max-height: this panel opens above the Create button,
+   and one that grew with the folder count would push that button off the
+   bottom of a phone screen in a busy drive. */
+.fe-newdoc__rows {
+  height: 168px;
+  margin: 0;
+  padding: var(--fe-gap-xs);
+  list-style: none;
+  overflow-y: auto;
+}
+.fe-newdoc__row {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  width: 100%;
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: none;
+  color: var(--fe-text);
+  font: inherit;
+  font-size: var(--fe-text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.fe-newdoc__row:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-newdoc__row:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+.fe-newdoc__rowicon {
+  display: inline-flex;
+  font-size: 18px;
+  line-height: 1;
+}
+.fe-newdoc__rowname {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A folder nobody may write to is still listed and still opens: the grant
+   that allows writing may live on a subfolder, so hiding the parent would
+   hide the only route to it. What it loses is the claim that you can save
+   here — the word beside it, and the Create button that stays disabled. */
+.fe-newdoc__row.is-locked .fe-newdoc__rowname {
+  color: var(--fe-text-muted);
+}
+.fe-newdoc__rowlock {
+  flex: 0 0 auto;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+.fe-newdoc__note {
+  padding: var(--fe-gap-sm);
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+.fe-newdoc__browseractions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-sm);
+  border-top: 1px solid var(--fe-border-soft);
+  background: var(--fe-bg-elev);
+}
+
+/* --- nothing to offer ------------------------------------------------ */
+
+.fe-newdoc__empty {
+  padding: var(--fe-gap-lg);
+  border: 1px dashed var(--fe-border-strong);
+  border-radius: var(--fe-radius-md);
+  text-align: center;
+}
+.fe-newdoc__empty-title {
+  margin: 0 0 var(--fe-gap-xs);
+  font-size: var(--fe-text-md);
+  font-weight: 600;
+  color: var(--fe-text);
+}
+.fe-newdoc__empty-body {
+  margin: 0;
+  font-size: var(--fe-text-sm);
+  line-height: 1.5;
+  color: var(--fe-text-muted);
+}
+
+@media (max-width: 480px) {
+  .fe-newdoc__grid {
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  }
+  .fe-newdoc__rows {
+    height: 132px;
+  }
+}
+/* === /belge:n1 === */
+
+/* === tablo:t1 — resizable / hideable columns, the column menu, the trash
+       banner. Appended at the END of the file: the list block above is a wave
+       several agents were in at once, and a block at the tail cannot collide
+       with an edit in the middle of one.
+
+   ⚠ There is deliberately NO `grid-template-columns` here. That answer is
+   computed in `ListView` from the container's own width and the person's own
+   widths (lib/viewPrefs.fitColumns) and applied inline, because it used to be
+   three stylesheet copies — a base rule, a `.fe--narrow` override and a
+   `@media` override — and they disagreed: the media query answers the VIEWPORT
+   while `.fe--narrow` answers the CONTAINER, so an embed 500px wide on a
+   1400px screen got one rule's hidden cells and the other rule's track list.
+   The cells that are not drawn are no longer RENDERED, so nothing here has to
+   agree with anything about how many tracks exist. === */
+
+/* The header cell has to be a positioning context for its drag handle. */
+.fe-list__head .fe-list__col {
+  position: relative;
+}
+
+.fe-list__head-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The drag handle straddles the divider: 9px of target over a 1px line, which
+   is the smallest a pointer reliably hits without the hit area reaching into
+   the label beside it. */
+.fe-list__resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--fe-gap-sm) / -2 - 1px);
+  width: 9px;
+  cursor: col-resize;
+  /* ⚠ `touch-action: none` or a drag on a touchscreen scrolls the listing
+     instead of moving the column — the pointer events never arrive. */
+  touch-action: none;
+  user-select: none;
+}
+.fe-list__resize::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 4px;
+  width: 1px;
+  background: var(--fe-border);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.fe-list__head:hover .fe-list__resize::after,
+.fe-list__resize:focus-visible::after {
+  opacity: 1;
+}
+.fe-list__resize:hover::after {
+  background: var(--fe-primary);
+  opacity: 1;
+}
+.fe-list__resize:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+  border-radius: var(--fe-radius-sm);
+}
+
+/* The header's own ⋮. Same box as the row's, because it is the same gesture in
+   the same column — the difference is what it is a menu ABOUT. */
+.fe-list__colmenu-btn {
+  opacity: 0.7;
+}
+.fe-list__colmenu-btn:hover,
+.fe-list__colmenu-btn[aria-expanded='true'] {
+  opacity: 1;
+}
+
+/* ── the column menu ───────────────────────────────────────────────── */
+
+.fe-colmenu__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  background: transparent;
+}
+
+.fe-colmenu {
+  position: fixed;
+  min-width: 232px;
+  max-width: 320px;
+  padding: var(--fe-gap-xs) 0;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg-elev);
+  box-shadow: var(--fe-shadow);
+  color: var(--fe-text);
+  font-family: var(--fe-font);
+  font-size: var(--fe-text-md);
+}
+.fe-colmenu:focus {
+  outline: none;
+}
+
+.fe-colmenu__title {
+  margin: 0;
+  padding: var(--fe-gap-xs) var(--fe-gap);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  color: var(--fe-text-muted);
+}
+
+.fe-colmenu__hint {
+  margin: 0;
+  padding: 0 var(--fe-gap) var(--fe-gap-xs);
+  font-size: var(--fe-text-xs);
+  line-height: 1.45;
+  color: var(--fe-text-muted);
+}
+
+.fe-colmenu__row {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  width: 100%;
+  min-height: var(--fe-h-sm);
+  padding: var(--fe-gap-xs) var(--fe-gap);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fe-colmenu__row:hover {
+  background: var(--fe-bg-hover);
+}
+.fe-colmenu__row:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+/* The tick reuses the list's own checkbox look, so "shown" means the same
+   shape here as a selected row's box does two inches away. */
+.fe-colmenu__tick {
+  pointer-events: none;
+}
+
+.fe-colmenu__label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-colmenu__note {
+  flex: 0 0 auto;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+
+.fe-colmenu__sep {
+  height: 1px;
+  margin: var(--fe-gap-xs) 0;
+  background: var(--fe-border-soft);
+}
+
+/* ── the trash banner ──────────────────────────────────────────────── */
+
+/* One row above the listing: what the trash IS on the left, the one
+   irreversible action on the right. */
+.fe-trashbar {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap);
+  flex-wrap: wrap;
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  border-bottom: 1px solid var(--fe-border-soft);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-md);
+}
+.fe-trashbar__text {
+  flex: 1 1 240px;
+  margin: 0;
+  line-height: 1.45;
+}
+.fe-trashbar__action {
+  flex: 0 0 auto;
+}
+
+/* tablo:t1 — the row's real thumbnail. Exactly the type tile's box (24px), so
+   turning a glyph into a picture does not move a single row. */
+.fe-list__icon--img {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--fe-radius-sm);
+  object-fit: cover;
+  background: var(--fe-bg-elev);
+}
+/* A page is cropped from its TOP — the half of a document that says what it
+   is. Same rule the grid and the gallery already apply to a page thumbnail. */
+.fe-list__icon--img.fe-thumb--page {
+  object-position: 50% 0;
+}
+
+/* === gezinti:g3 — the header follows the panel, in BOTH states =============
+ *
+ * The owner reported that collapsing the navigation panel *"düzgün
+ * çalışmıyor"*. The mechanism was fine — the panel goes 192 ↔ 56, the state
+ * persists, the toggle's label is right. What was wrong is that the HEADER did
+ * not move with it. Measured at 960 before this block:
+ *
+ *   expanded   nav 1→193 · brand gutter 13→193 · search 210 · content 193
+ *   collapsed  nav 1→ 57 · brand gutter 13→193 · search 210 · content  57
+ *
+ * — the panel and the content column go to 57 and the gutter and the field
+ * stay, leaving a ~136px band of empty header standing over the content. The
+ * cause is that `.fe-toolbar__brand--gutter`'s `min-width` is
+ * `calc(var(--fe-sidenav-w) - 12px)`, a STATIC token: it describes the
+ * expanded panel and nothing tells it the panel collapsed.
+ *
+ * ⚠⚠ This REVERSES a decision documented twice further up this file ("It does
+ * NOT follow the rail. Shrinking to 56px when somebody collapses the panel
+ * would slide the whole header 176px sideways, which is a jolt on every
+ * control in the row for a control that did not move."). Two things overrule
+ * it: the owner reported the result as broken, and the contributor's reference
+ * build does follow the rail — measured signed-in on filex.blipnova.com,
+ * collapsing its panel moves its search field from x=236 to x=104 and drops
+ * its logo and wordmark entirely, re-centring the `☰` in the rail.
+ * ⚠ Those two comments above are now describing behaviour that no longer
+ * exists. They are mid-file and this block may only append; whoever next owns
+ * that region should strike them — a comment that confidently states the
+ * opposite of what the code does is worse than no comment.
+ *
+ * ⚠ The jolt the old comment feared is real, and it is answered rather than
+ * ignored: the same `0.14s ease` the panel animates its own width with, so the
+ * header slides WITH the panel instead of teleporting a frame later.
+ *
+ * ⚠ 56px is `.fe-sidenav--rail`'s own width and there is no token for it. The
+ * literal is not the contract — the browser gate is: the search field's left
+ * edge has to land within 0–24px of the panel's right edge in BOTH states, and
+ * that assertion fails if either number moves. (It was passing while the
+ * layout was visibly wrong, because it only ever measured the expanded state;
+ * extended, it produced 8 red checks against the old behaviour.)
+ *
+ * ⚠ Nothing here touches 390px: the `--rail` class is only applied when the
+ * explorer is wide, because below 560px the panel is a drawer, not a rail, and
+ * `.fe--narrow .fe-toolbar__brand--gutter` already drops the gutter to 0.
+ */
+.fe-toolbar__brand--gutter {
+  transition: min-width 0.14s ease;
+}
+.fe-toolbar__brand--rail.fe-toolbar__brand--gutter {
+  min-width: calc(56px - 12px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-toolbar__brand--gutter {
+    transition: none;
+  }
+}
+/* === /gezinti:g3 === */
+
+/* ══ gorunum:v1-advsearch — the Owner filter's off state ═══════════════════
+   (appended block, agent: advanced-search / 2026-09-13)
+
+   The Owner select is disabled under the content scopes, because a content
+   hit reaches the client without an owner and every row would read as
+   "System" (see `AdvancedSearch.ownerFilterable`). Nothing in the shell
+   styled a disabled `.fe-input`, so the browser's default was a control that
+   looked exactly like a working one — which is the whole failure this dialog
+   exists to avoid, moved from the wire to the paint. */
+.fe-advsearch .fe-input:disabled {
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  border-color: var(--fe-border-soft);
+  cursor: not-allowed;
+}
+
+/* belge:n1 addendum — keep Name and Location on screen.
+ *
+ * Measured at 390×780 (Turkish, dark): the type grid filled the whole dialog
+ * and both fields sat below the fold, so the first thing the person saw after
+ * choosing a type was a Create button for a document whose name and
+ * destination they had not seen. The grid is the part that can grow without
+ * limit — a deployment may offer nineteen types — so the grid is the part that
+ * gets a ceiling and its own scrollbar.
+ *
+ * `min()` rather than a media query: a short landscape window on a laptop has
+ * the same problem as a phone and no media query for width would catch it.
+ * The 420px arm keeps it off on a normal desktop dialog, where the grid is
+ * ~370px tall and a scrollbar would be noise.
+ */
+.fe-newdoc__types {
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+}
+/* === /belge:n1 addendum === */
+
+/* ⚠⚠ The header cell must NOT clip. `.fe-list__col--type/--owner/--mod/--size`
+   set `overflow: hidden` so a long value ellipsises inside its column — right
+   for a ROW, fatal for a HEADER, because the drag handle is absolutely
+   positioned to straddle the divider and half of it therefore sits outside the
+   cell box. Measured 2026-09-13: a drag on the handle changed the column width
+   by 0px, and a person would never have seen the handle to try.
+
+   The ellipsis is kept where it belongs — on the label and the sort button
+   inside the cell — so nothing about the header's text behaviour changes. */
+.fe-list__head .fe-list__col {
+  overflow: visible;
+}
+.fe-list__head .fe-list__sort,
+.fe-list__head .fe-list__head-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The header a column is being dragged out of, and the gap it would land in. */
+.fe-list__head.is-dragging-col {
+  cursor: grabbing;
+  user-select: none;
+}
+.fe-list__head .fe-list__col.is-movable .fe-list__sort,
+.fe-list__head .fe-list__col.is-movable .fe-list__head-label {
+  cursor: grab;
+}
+.fe-list__col.is-col-dragging {
+  opacity: 0.45;
+}
+/* The drop indicator: a line in the gap the column would land in, drawn on the
+   cell that would come after it — so the mark is always between two columns
+   rather than on top of one. */
+.fe-list__col.is-drop-before::before,
+.fe-list__col.is-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--fe-primary);
+}
+.fe-list__col.is-drop-before::before {
+  left: calc(var(--fe-gap-sm) / -2 - 1px);
+}
+.fe-list__col.is-drop-after::after {
+  right: calc(var(--fe-gap-sm) / -2 - 1px);
+}
+
+/* ══ tasi:m1 — the destination picker ("Move to" / "Copy to") ══════════
+   (appended block, agent: multi-selection / 2026-09-13)
+
+   The dialog is a one-level-at-a-time folder browser, not a tree: a tree's
+   expand arrows are a second navigation model to learn, and on a storage whose
+   listing is a network round trip each one is a request whose latency the user
+   did not ask for. The rows list, the breadcrumb walks back.
+
+   ⚠ The list has a FIXED height, deliberately. A picker that grows with the
+   folder makes the Choose button move between clicks — the same reason
+   .fe-newdoc__rows is pinned. Everything below uses declared --fe-* tokens so
+   the panel follows the active theme in both light and dark. */
+.fe-destpick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-sm);
+}
+
+.fe-destpick__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-height: var(--fe-h-md);
+}
+
+.fe-destpick__up {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--fe-h-md);
+  height: var(--fe-h-md);
+  padding: 0;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  cursor: pointer;
+}
+.fe-destpick__up:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  border-color: var(--fe-border-strong);
+}
+.fe-destpick__up:disabled {
+  color: var(--fe-text-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.fe-destpick__up .fe-ficon {
+  width: 16px;
+  height: 16px;
+}
+
+/* The breadcrumb scrolls sideways rather than wrapping: a wrapping crumb line
+   changes the dialog's height as you walk down a tree, which moves everything
+   under it. */
+.fe-destpick__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.fe-destpick__crumb {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+  cursor: pointer;
+}
+.fe-destpick__crumb:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-destpick__crumb.is-current {
+  color: var(--fe-text);
+  font-weight: 600;
+}
+
+.fe-destpick__sep {
+  flex: 0 0 auto;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+}
+
+.fe-destpick__rows {
+  height: 216px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+}
+
+.fe-destpick__note {
+  padding: 10px 8px;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+}
+
+.fe-destpick__row {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text);
+  font-size: var(--fe-text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.fe-destpick__row:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+}
+.fe-destpick__row:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+/* Unwritable is DIMMED, not hidden: the grant that allows writing may live on
+   a subfolder, so the row still has to be openable. Blocked (the folder being
+   moved, or something inside it) is dimmed AND disabled, because everything
+   under it is blocked too and walking in would be a dead end. */
+.fe-destpick__row.is-locked .fe-destpick__rowname {
+  color: var(--fe-text-muted);
+}
+.fe-destpick__row.is-blocked {
+  color: var(--fe-text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.fe-destpick__rowicon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+}
+.fe-destpick__rowicon .fe-ficon {
+  width: 18px;
+  height: 18px;
+}
+
+.fe-destpick__rowname {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-destpick__rowtag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+}
+
+.fe-destpick__rowinto {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--fe-text-muted);
+}
+.fe-destpick__row.is-blocked .fe-destpick__rowinto {
+  visibility: hidden;
+}
+
+/* One line under the list, and it is always one of the two: where the file is
+   going, or why it cannot go here. A dialog whose primary button is disabled
+   without saying why is a dialog people report as broken. */
+.fe-destpick__target,
+.fe-destpick__reason {
+  margin: 0;
+  min-height: 18px;
+  font-size: var(--fe-text-sm);
+}
+.fe-destpick__target {
+  color: var(--fe-text-muted);
+}
+.fe-destpick__reason {
+  color: var(--fe-danger);
+}
+/* …except when the line is a prompt rather than a refusal. "Open a storage to
+   choose a folder inside it" is the drives level saying what to do next, and in
+   the danger colour it made the dialog's FIRST screen look broken. */
+.fe-destpick__reason.is-hint {
+  color: var(--fe-text-muted);
+}
+
+@media (max-width: 560px) {
+  .fe-destpick__rows {
+    height: 168px;
+  }
+}
+/* === /tasi:m1 === */
+
+/* === gorunum:v5-panerow — the strip's third control ========================
+ * The details toggle's home once the row becomes the WINDOW's row rather than
+ * the left pane's (see the handover diff for FileExplorer.vue). Until that
+ * diff lands `inspectorEnabled` is passed by nobody and this button is not
+ * rendered at all — the ⓘ is still drawn in the breadcrumb row, and two of
+ * them on screen is exactly the duplicate this wave removes.
+ *
+ * ⚠ These metrics are `.fe-tabs__new` / `.fe-tabs__split`'s, restated rather
+ * than shared, because that rule is mid-file and this block may only append.
+ * The three controls in this row are one control family and want ONE selector;
+ * whoever next owns that region should fold this into it. If they drift, the
+ * row ends with a 22px box beside a 27px one — which is the mismatch the
+ * teleported version was measured and rejected for.
+ */
+.fe-tabs__inspector {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.fe-tabs__inspector .fe-ficon {
+  width: 14px;
+  height: 14px;
+}
+.fe-tabs__inspector:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-tabs__inspector.is-active {
+  background: var(--fe-bg-selected);
+  color: var(--fe-primary);
+  border-color: var(--fe-border);
+}
+/* === /gorunum:v5-panerow === */
+
+/* === gorunum:v5-panestack — the tab strip belongs to the WINDOW ============
+ *
+ * Owner's decision, 2026-09-13, verbatim: *"tab içinde split yapman lazım,
+ * dışında yapıyorsun, bok gibi duruyor o yüzden."* Measured at 1440 with the
+ * split on: the strip sits INSIDE the left pane (x=193→816, 623px), so the
+ * left half carries breadcrumb + tabs + filter row + listing while the right
+ * half gets a bare crumb line and a table. A tab is a location the window is
+ * showing; the split happens WITHIN that location, so the strip is above both
+ * panes, full width, and each pane carries only its own address and listing.
+ *
+ * ⚠ These rules are inert until the FileExplorer.vue diff in the handover is
+ * applied — nothing renders `.fe__stack` or `.fe__panes` yet. They are here so
+ * that diff is a pure template move with no CSS work attached to it, and so
+ * the two rules it BREAKS are already replaced:
+ *   · `.fe__main--split > .fe__primary` (flex basis) and
+ *   · `.fe__main--split > .fe__primary.fe-pane--focus` (the active-pane accent)
+ * both use a direct-child selector on `.fe__main`, and after the move
+ * `.fe__primary` is a child of `.fe__panes`. ⚠ Losing the second one silently
+ * would take away the only thing that says WHICH pane the keyboard is in.
+ * The replacements below are more specific, so they win where they match and
+ * the originals simply stop matching.
+ *
+ * ⚠ `.fe__primary > .fe-tabs`'s own padding/ground/border (mid-file) stops
+ * matching for the same reason; restated here against the new parent.
+ */
+.fe__stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.fe__panes {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.fe__stack > .fe-tabs {
+  padding: var(--fe-gap-xs) var(--fe-gap-sm) 0;
+  background: var(--fe-bg);
+  border-bottom: 1px solid var(--fe-border);
+}
+.fe__stack > .fe-tabs .fe-tabs__new,
+.fe__stack > .fe-tabs .fe-tabs__split,
+.fe__stack > .fe-tabs .fe-tabs__inspector {
+  align-self: center;
+  border-radius: var(--fe-radius-sm);
+}
+.fe__main--split .fe__panes > .fe__primary {
+  flex: 1 1 50%;
+}
+.fe__main--split .fe__panes > .fe__primary,
+.fe__panes > .fe-split {
+  box-shadow: inset 0 2px 0 transparent;
+}
+.fe__main--split .fe__panes > .fe__primary.fe-pane--focus,
+.fe__panes > .fe-split.fe-pane--focus {
+  box-shadow: inset 0 2px 0 var(--fe-primary);
+}
+/* === /gorunum:v5-panestack === */
+
+/* tablo:t1 — a column's row in the menu: the tick and the name on the left,
+   the two move buttons on the right, all on ONE line. Without this the
+   buttons wrap under the checkbox and their arrows read as stray dashes. */
+.fe-colmenu__line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: var(--fe-gap-xs);
+}
+.fe-colmenu__line .fe-colmenu__row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fe-colmenu__nudge {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font-family: inherit;
+  font-size: var(--fe-text-md);
+  line-height: 1;
+  cursor: pointer;
+}
+.fe-colmenu__nudge:hover:not(:disabled) {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fe-colmenu__nudge:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.fe-colmenu__nudge:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
+
+/* gorunum:v5-panerow — the row with no tabs in it (the `simple` profile, where
+   tabs are deliberately not offered but the details toggle still needs a home).
+   Without this the trailing controls sit hard against the left edge, because
+   the scrolling tab area was the only thing pushing them right. */
+.fe-tabs:not(:has(.fe-tabs__scroll)) {
+  justify-content: flex-end;
+}
+
+/* === pane:p1 — ONE PANE, RENDERED TWICE =================================
+ *
+ * Owner's ruling, 2026-09-13: *"split pane ile gelen yeni pane aslında
+ * yandaki pane ile birebir olması lazım — sen yine yapmıyorsun, bunun için
+ * bayağı savaş verdik hatırlatayım sana."* The two halves of a split are now
+ * one component (`FilePane.vue`), so almost everything that used to be styled
+ * twice is styled once, by the rules the left pane already had:
+ *
+ *   · both panes carry `.fe__primary`, so the flex column, the 50/50 basis
+ *     (`gorunum:v5-panestack`, above) and the focus accent all apply to both;
+ *   · both draw `.fe-subhead`, `.fe-selbar-slot`, `.fe-filterbar` and
+ *     `.fe__body`, so those four rule-sets serve both halves.
+ *
+ * ⚠ The whole `.fe-split*` family (mid-file, ~3440-3600) is INERT from this
+ * commit: nothing renders `.fe-split`, `.fe-split__crumbs`, `.fe-split__row`
+ * or their nine siblings any more. Left in place rather than deleted here
+ * because this block is append-only while other agents are live in the file;
+ * it is ~160 lines of dead stylesheet and deleting it is a follow-up, not a
+ * behaviour change.
+ *
+ * What genuinely differs is what this block is for: which side the pane is on,
+ * and that only the second one can be closed.
+ */
+.fe-pane--split {
+  border-left: 1px solid var(--fe-border);
+}
+/* The pane's × — the one control the main pane does not have. Sized like the
+   view switcher beside it so the address row keeps its 37px height, which is
+   what lines the crumbs up with the navigation panel's own head. */
+.fe-pane__close {
+  flex: 0 0 auto;
+}
+/* The drop highlight, on the pane BODY. It used to be `.fe-split__body`, i.e.
+   the right pane only: dragging onto the left pane's empty space showed
+   nothing at all even though the drop worked. One rule, both panes. */
+.fe__body.is-dropover {
+  outline: 2px dashed var(--fe-primary);
+  outline-offset: -4px;
+}
+/* ⚠ The address row must not collapse when a pane is narrow. `.fe-subhead` is
+   a flex row and the breadcrumb inside it will happily shrink to nothing,
+   which at 960px with the split on left the right pane's crumbs as a bare
+   chevron. The actions cluster keeps its intrinsic width; the crumbs take the
+   rest and scroll. */
+.fe-pane .fe-subhead__actions {
+  flex: 0 0 auto;
+}
+.fe-pane > .fe-subhead > .fe-breadcrumb {
+  min-width: 0;
+}
+/* === /pane:p1 === */
+
+/* pane:p1 — the filter row already says it "scrolls sideways ON ITSELF at 390px
+   rather than widening the explorer" (`overflow-x: auto`, mid-file), and it does
+   — visually. What it does NOT do is stop its content being counted in an
+   ANCESTOR's scrollable overflow: measured 2026-09-13 at 390px with a real
+   folder open, the row's own box was 388px wide with 648px of content, and
+   `.fe` reported `scrollWidth` 513 against `clientWidth` 388. `overflow: hidden`
+   on any ancestor — the pane, the pane row, the stack, `.fe__main` — changed
+   nothing; `contain: paint` on the row itself brought `.fe` back to 388/388.
+   ⚠ This matters because it is what the release gate asserts
+   (`e2e/shots/driveshell.mjs`, "the explorer's own box does not scroll
+   horizontally", measured on `.fe`), and a number that says the shell scrolls
+   sideways when it visibly does not is a gate nobody will trust for long.
+   ⚠ Safe here specifically because the row's popover is teleported to <body>:
+   `contain: paint` clips painting to the padding box (which `overflow-x: auto`
+   already did) and makes the row a containing block for fixed descendants —
+   and it has none. */
+.fe-pane > .fe-filterbar {
+  contain: paint;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   inceleme:r1 — the owner's 2026-09-13 review pass.
+
+   ⚠ APPENDED, and appended as one block, because the body of this file was
+   being edited by somebody else the same night. Everything below either
+   re-sizes a control the review named or dresses markup this pass added; it
+   overrides by ORDER, not by piling on specificity, so each rule stays at the
+   weight of the one it is answering and the two read together.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the view switcher, in proportion to the row it now lives on ────────────
+   Owner: "ızgara görüntüleme değiştirme butonları çok büyük, onlara bir el
+   atarsın."
+
+   ⚠ The control did not change — its ROW did. It used to sit in the 48px
+   header beside other 28px icon buttons, which is where the reference build
+   still draws it (measured on filex.blipnova.com: cells 28.3×26.7 among
+   28×28 neighbours — in proportion). `gorunum:v2-topbar` moved it onto the
+   breadcrumb row, whose other two icon buttons — the path editor and the
+   Subfolders chevron — are 24×24, and where the row itself is pinned at
+   ~37px. At 32×28 in a 2px pill the cluster measured 102×34: 92% of the row's
+   height, and half again the height of the buttons it now sits beside.
+
+   So: the CELL matches the pencil (24px tall), and the pill comes to 28 —
+   which is what makes it read as one small segmented control instead of a
+   second toolbar.
+
+   ⚠⚠ The HIT box does not shrink with it. `::after` carries the target back
+   out to 28×32 per cell, which is larger than the 28×28 the cell had before;
+   the three are contiguous (no gap between them), so there is no dead strip
+   between neighbours either. Visual weight and pointer target are two
+   different measurements and this rule changes only the first. */
+.fe-subhead .fe-toolbar__view .fe-btn {
+  position: relative;
+  height: 24px;
+  padding: 0 6px;
+}
+.fe-subhead .fe-toolbar__view .fe-btn::after {
+  content: '';
+  position: absolute;
+  /* Vertically only: widening it sideways would push each cell's target over
+     its neighbour's face, and a segmented control whose cells overlap is one
+     that hands clicks to the wrong tab. */
+  inset: -4px 0;
+}
+
+/* ── Home: a block the filter emptied ──────────────────────────────────────
+   surucu:d1-scope. ⚠ Not `.fe-state`: that is the product's "there is nothing
+   here" and it carries an illustration and two lines. "Your filter matched
+   none of them" is a smaller, temporary fact about a block that is not empty,
+   and it must not be dressed as the permanent one. Same box as
+   `.fe-home__loading`, which is the other transient line in this view. */
+.fe-home__nomatch {
+  margin: 0 2px;
+  padding: var(--fe-gap) 0;
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text-muted);
+}
+
+/* ── "+ New": the caret half ───────────────────────────────────────────────
+   inceleme:r1. Owner asked twice; the reference build's own pill was measured
+   for the spec (179×34, radius 8, no border, a 1×16px hairline at 25% white,
+   a fixed 32px chevron half) and ours was 171×45 with a 999px radius — a
+   different control wearing the same words.
+
+   ⚠ Tokens, not the measured literals: `--fe-h-md` IS 34px and `--fe-radius`
+   IS 8px, so the two numbers that mattered are already named here. Writing
+   `34px` would have pinned this pill to a height nothing else follows the next
+   time the scale moves.
+
+   ⚠ The border goes. A 1px `--fe-primary` border around a `--fe-primary` fill
+   is invisible until the hover darkens the fill and leaves the old border
+   ringing it — which is what "the whole pill darkens together" is about. The
+   height then has to be re-stated, because the padding that used to make it
+   was doing so through that border box. */
+.fe-sidenav__new {
+  gap: 0;
+  height: var(--fe-h-md);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius);
+  font-size: var(--fe-text-md);
+}
+/* The label half takes the slack; the chevron half is fixed, so the caret sits
+   on the trailing edge at every panel width instead of drifting with the word. */
+.fe-sidenav__new-main {
+  flex: 1 1 0%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fe-gap-sm);
+  min-width: 0;
+  padding: 0 var(--fe-gap-sm);
+}
+.fe-sidenav__new-rule {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 16px;
+  background: var(--fe-text-on-primary);
+  opacity: 0.25;
+}
+.fe-sidenav__new-caret {
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-sidenav__new-caret .fe-ficon {
+  width: 16px;
+  height: 16px;
+}
+/* One ring around the whole pill — it is one control, so it gets one focus
+   shape. `box-shadow` rather than `outline`, so the ring follows the 8px
+   corners instead of boxing them. */
+.fe-sidenav__new:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fe-primary-soft), var(--fe-shadow-sm);
+}
+/* The rail is a circle with no label, so the two halves are not drawn at all
+   (`v-if="showLabels"`) and the plus re-centres itself. */
+.fe-sidenav--rail .fe-sidenav__new-main {
+  padding: 0;
+}
+
+/* ── the details panel's "held subject" line ───────────────────────────────
+   pane:p1. Quieter than the caption above it and on its own line: it is not
+   another property of the file, it is the panel saying which file this is
+   about. */
+.fe-inspector__held {
+  margin: 2px 0 0;
+  font-size: var(--fe-text-xs);
+  line-height: 1.3;
+  color: var(--fe-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── the drop overlay's mark ───────────────────────────────────────────────
+   inceleme:r1. `.fe__dragover-card .fe-icon` sets `font-size: 32px`, which is
+   how you size a TEXT glyph; the `.fe-aicon` that replaced it is a box pinned
+   at 16px and would have come out half-size on the one screen whose entire
+   content is a glyph and a sentence. Sized explicitly rather than by leaving
+   the font-size to do nothing. */
+.fe__dragover-card .fe-icon > .fe-aicon {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto;
+  color: inherit;
+}
+
+/* ══ tablo:t2 — the listing is a TABLE, and a table scrolls ════════════════
+   (appended block, agent: list-table / 2026-09-13)
+
+   The model this replaces sized the columns to the pane and, when they stopped
+   fitting, dropped the least informative one and told the person "no room" in
+   the header menu. The owner rejected it, verbatim: "büyütme küçültme düzgün
+   çalışmıyor, tablo gibi durmuyor orası. Çok büyütünce yok oluyor, 'no room'
+   diyor — no room demesin, kenara devam eden bir scroll getirsin. Sadece
+   sondaki actions üç noktaları en sonda kalacak… ayrıca çok küçük tablolar
+   sola yatıyor olsun."
+
+   Four rules, and every declaration below serves one of them:
+     1. the table's width is the sum of its columns; when that is more than the
+        pane, the pane scrolls sideways — nothing is ever dropped;
+     2. the ⋮ column stays pinned to the right edge while the rest scrolls
+        under it, and the header scrolls sideways WITH the body while staying
+        pinned vertically;
+     3. Name is an ordinary column with a width of its own;
+     4. a table narrower than its pane sits at the LEFT, with the slack after
+        it — it does not stretch and it does not centre.
+
+   ⚠ The `tablo:t1` block further up this file still describes that model in
+   its own words — "computed in ListView from the container's own width…
+   (lib/viewPrefs.fitColumns)". `fitColumns` does not exist any more; the
+   function is `tableLayout` and it fits nothing to the container unless nobody
+   has ever sized a column. This block is appended rather than written there
+   because another agent is editing the same file tonight.
+
+   ⚠⚠ `.fe-list` owns BOTH scroll axes, and it has to. The vertical scroll used
+   to belong to `.fe__body`; a header pinned with `position: sticky` sticks to
+   the nearest scrollport, so leaving the two axes in two boxes means either the
+   header drifts vertically or the body does not scroll sideways. Keeping the
+   overflow inside `.fe-list` is also what stops the grid and the gallery — the
+   other two views in that same `.fe__body` — ever seeing a horizontal
+   scrollbar of the list's making. */
+
+.fe-list {
+  display: block;
+  height: 100%;
+  overflow: auto;
+}
+
+/* ⚠⚠ FLEX ROWS, not grid rows. A sticky GRID item is confined to its own grid
+   area, which has exactly zero room to move in — so `position: sticky` on a ⋮
+   cell of a grid row does nothing at all. A flex item's containing block is
+   the flex container's content box, i.e. the whole row, which is the range the
+   pinned column needs. */
+.fe-list__head,
+.fe-list__row,
+.fe-list__body {
+  display: flex;
+}
+.fe-list__head,
+.fe-list__row {
+  flex-direction: row;
+  align-items: center;
+  /* The width is inline, from `tableLayout.total` — one number for the header
+     and every row, so they cannot disagree about where a column starts.
+     `min-width: 100%` is rule 4's other half: a narrow table's ROWS still span
+     the pane, so hover and selection do not stop halfway across, while the
+     cells inside them pack left and leave the slack on the right. */
+  min-width: 100%;
+}
+.fe-list__body {
+  flex-direction: column;
+}
+
+/* Rule 2, vertical half: the header stays put while the rows scroll under it.
+   It needs an opaque ground to do that — it was `transparent`, which was
+   invisible only because nothing ever scrolled beneath it. */
+.fe-list__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--fe-bg);
+}
+
+/* Every cell is sized by its inline `flex: 0 0 <width>px`.
+   ⚠⚠ `min-width: 0` is not decoration. A flex item's automatic minimum size is
+   its MIN-CONTENT size, so one unbreakable filename would push its cell wider
+   than the track the header allocated and every column after it would sit a
+   few pixels off — the drift that makes a header worse than no header.
+   ⚠ This also has to out-specify the two `display: none` blocks further up the
+   file (`.fe--narrow …` and `@media (max-width: 640px) …`), which hid Type,
+   Owner, Modified and the star on a narrow screen. That was the old model's
+   shedding wearing a media query; at 390px the honest answer is now the same
+   one as everywhere else — the table is wider than the pane and scrolls. */
+.fe-list__head .fe-list__col,
+.fe-list__row .fe-list__col,
+.fe--narrow .fe-list__head .fe-list__col,
+.fe--narrow .fe-list__row .fe-list__col {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.fe-list__col--check {
+  flex: 0 0 28px;
+  justify-content: center;
+}
+.fe-list__col--star {
+  justify-content: center;
+}
+/* Location was never in the muted-value rule above it — it is a value like
+   Type and Owner and reads like one. */
+.fe-list__col--location {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fe-text-md);
+  color: var(--fe-text-muted);
+}
+
+/* Rule 2, horizontal half: the ⋮ stays at the right edge while everything else
+   scrolls under it.
+
+   ⚠⚠ `right: 0`, and the row's trailing padding moves INTO this cell to pay
+   for it. Pinning at `right: var(--fe-gap)` reads better on paper — the pinned
+   ⋮ keeps the inset an unpinned one has — and it is wrong: it leaves a 12px
+   channel between the pinned cell and the edge of the scrollport, and the
+   columns sliding underneath show through it. Measured at 390px, where half a
+   letter of the Owner column travelled up the right-hand edge of every row.
+   The track is the same total width either way (12px of row padding + a 28px
+   cell = a 40px cell with 12px of padding), so the layout arithmetic in
+   `tableLayout` is untouched.
+
+   Sticky only ever SHIFTS a box that would otherwise be further right than its
+   offset, so when the table is narrower than the pane (rule 4) this cell does
+   not move at all: it stays where the columns end and the slack is after it. */
+.fe-list__head,
+.fe-list__row,
+.fe--density-compact .fe-list__head,
+.fe--density-compact .fe-list__row {
+  padding-right: 0;
+}
+.fe-list__head .fe-list__col--menu,
+.fe-list__row .fe-list__col--menu {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  flex: 0 0 calc(var(--fe-h-sm) + var(--fe-gap));
+  padding-right: var(--fe-gap);
+  justify-content: center;
+  background: var(--fe-bg);
+}
+/* The pinned cell has to carry the row's own ground, or the columns sliding
+   beneath it show through. */
+.fe-list__row:hover .fe-list__col--menu {
+  background: var(--fe-bg-hover);
+}
+.fe-list__row.is-selected .fe-list__col--menu,
+.fe-list__row.is-droptarget .fe-list__col--menu {
+  background: var(--fe-bg-selected);
+}
+/* The edge, only while there is something scrolled underneath. A permanent
+   divider would claim the column is floating when it is simply the last cell
+   of a table that fits. `box-shadow` rather than a border so turning it on
+   moves nothing. */
+.fe-list.is-scrolled-x .fe-list__col--menu {
+  box-shadow: -1px 0 0 0 var(--fe-border);
+}
+
+/* The date headings travel with the horizontal scroll rather than sliding off
+   the left edge — they are `max-content` wide so sticky has somewhere to move
+   them to (a full-width block has none). */
+.fe-list__group {
+  position: sticky;
+  left: 0;
+  width: max-content;
+  max-width: 100%;
+}
+
+/* Name's handle sits on its trailing edge like every other column's. The cell
+   is `display: flex` with the sort button as its first child, so without this
+   the absolutely positioned handle would have no positioned ancestor inside
+   the header row. */
+.fe-list__head .fe-list__col--name {
+  position: relative;
+  overflow: visible;
+}
+/* === /tablo:t2 === */
+
+
+/* === ikon:emoji =======================================================
+ * The boxes that used to hold an emoji and now hold a drawing.
+ *
+ * Sizing only — every mark here comes from `lib/actionIcons.ts` or
+ * `lib/fileIcons.ts` and paints on `currentColor`, so the surface it sits in
+ * keeps deciding its colour. Two shapes need a box: `.fe-aicon` is a fixed
+ * 16px (right for a menu row, far too small for a 48px fallback screen), and
+ * `.fe-ftile` is `1em` (so its box is the `font-size` the slot already had —
+ * which is why most of the rules below only have to switch a text span into
+ * a flex one).
+ * ==================================================================== */
+
+/* --- the command palette's 20px column ------------------------------- */
+.fe-cmdp__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* The em the file tiles size themselves from. Slightly over the 16px an
+     action icon draws at, because a tile is the full box and a stroked glyph
+     is not — at a shared 20 the tiles shouted over the commands. */
+  font-size: 18px;
+}
+.fe-cmdp__icon .fe-aicon {
+  width: 18px;
+  height: 18px;
+}
+.fe-cmdp__del .fe-aicon {
+  width: 15px;
+  height: 15px;
+}
+
+/* --- the viewer / preview fallback screen ---------------------------- */
+/* Both slots were `font-size: 48px` text boxes. A tile obeys that already; an
+   action icon has to be told, and both need centring once they are elements
+   rather than glyphs on a text baseline. */
+.fe-preview__fallback-icon,
+.filex-viewer-fallback__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-preview__fallback-icon .fe-aicon,
+.filex-viewer-fallback__icon .fe-aicon {
+  width: 44px;
+  height: 44px;
+}
+/* "Still loading" cannot be said by a still picture: the open ring turns.
+   `fe-spin` is the keyframe the initial-load spinner at the top of this file
+   already uses, so there is one rotation in the package. */
+.fe-preview__fallback-icon--spin .fe-aicon,
+.filex-viewer-fallback__icon--spin .fe-aicon {
+  animation: fe-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fe-preview__fallback-icon--spin .fe-aicon,
+  .filex-viewer-fallback__icon--spin .fe-aicon {
+    animation-duration: 2.4s;
+  }
+}
+/* The one state that is an ERROR rather than a kind of file keeps saying so
+   in colour, which the emoji it replaces could not do (a colour emoji paints
+   its own palette and ignores the row it is in). */
+.fe-preview__fallback-icon--alert .fe-aicon {
+  color: var(--fe-danger);
+}
+/* Inside the archive listing the tile sits on a text baseline in a 13px
+   table, so it needs the alignment a glyph got for free. */
+.filex-viewer-archive__icon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -0.18em;
+}
+
+/* --- panel closers, shortcut rows, the encrypted-folder link --------- */
+/* `.fe-conn__btn` is the connections panel's own ✕; the other two closers
+   are styled in the SFCs that own them, because their rules live there and a
+   half of a button's box in each file is how a rule ends up losing to the one
+   beside it. */
+.fe-conn__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* The "create an encrypted folder" link is a bare text button — it has no
+   `.fe-btn` box, so it gets the icon gap here. */
+.fe-e2e-optlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The unlocked-folder strip's padlock. The rule is here rather than in the
+   hunk that swaps the glyph, so that hunk stays one line. */
+.fe-e2e-strip__icon {
+  display: inline-flex;
+  align-items: center;
+}
+.fe-e2e-strip__icon .fe-aicon {
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+}
+.fe-e2e-optlink .fe-aicon {
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+}
+.fe-shortset__btn .fe-aicon,
+.fe-shortset__reset-all .fe-aicon {
+  color: currentColor;
+}
+/* === /ikon:emoji === */
+
+/* === tur:sweep — list cells ELLIPSISE instead of being guillotined ======
+   `.fe-list__col--type/--owner/--mod/--size` ask for `text-overflow: ellipsis`
+   but also set `display: flex`. On a flex container that property does
+   NOTHING: the cell's text is a bare text node, so it becomes an ANONYMOUS
+   flex item, and `text-overflow` only ever applies to a block container's own
+   inline content. The value was therefore sliced mid-glyph with no ellipsis —
+   measured 2026-09-13 at 960px, where "Hesap tablosu" painted as "Hesap
+   tablos" + half a "u" (scrollWidth 82 / clientWidth 79) and "Tasarım
+   dosyası" lost its last four characters, in both languages.
+
+   `.fe-list__col--location` is the control: same markup, same ellipsis
+   request, no `display: flex` — and it truncates correctly. So these four
+   simply stop being flex containers. Vertical centring is untouched: the row
+   is `display: grid` with `align-items: center`, which centres the cell box
+   itself, and every one of these cells holds text and nothing else
+   (ListView.vue renders `<div :class="colClass(id)">{{ cellText(id, n) }}`).
+
+   ⚠ Scoped to `.fe-list__row` on purpose. The HEADER reuses the same class
+   names, but its cells contain the sort button and the absolutely-positioned
+   resize handle, and it already has its own `overflow: visible` carve-out.
+
+   ⚠⚠ The doubled class (`.fe-list__col.fe-list__col--type`) is load-bearing,
+   not style. The rule that gives every cell `display: flex` is written
+   `.fe--narrow .fe-list__row .fe-list__col` — weight 0,3,0 — so a plain
+   `.fe-list__row .fe-list__col--type` (0,2,0) loses to it and the fix silently
+   did nothing below 640px, where the table scrolls sideways and long values
+   are MORE likely to be cut. Measured at 390px: "Tasarım dosyası" still
+   painted as "Tasarım do" + half an "s". Matching 0,3,0 and sitting later in
+   the file wins in both modes. */
+.fe-list__row .fe-list__col.fe-list__col--type,
+.fe-list__row .fe-list__col.fe-list__col--owner,
+.fe-list__row .fe-list__col.fe-list__col--mod,
+.fe-list__row .fe-list__col.fe-list__col--size {
+  display: block;
+}
+/* === /tur:sweep === */
+
+/* === agent-fix2 — release screenshot pass fixes, 2026-09-14 ===
+ *
+ * 1. Rendered markdown keeps its list markers.
+ *    `.fe-preview__md ul/ol` set an indent and nothing else, and the host
+ *    page's CSS reset decides the rest: under the admin SPA's Tailwind
+ *    preflight (`ol, ul { list-style: none }`) a bulleted list rendered as
+ *    indented loose lines and a NUMBERED list lost its numbers — measured in
+ *    the markdown viewer, `list-style-type: none` on every <li>. The shadow-
+ *    DOM embed has no preflight, so the same file read correctly there. The
+ *    type is stated here so the viewer does not depend on who hosts it. The
+ *    notebook viewer's markdown cells are the same markdown and get the same.
+ */
+.fe-preview__md ul,
+.filex-viewer-ipynb__md ul {
+  list-style: disc outside;
+}
+.fe-preview__md ul ul,
+.filex-viewer-ipynb__md ul ul {
+  list-style-type: circle;
+}
+.fe-preview__md ol,
+.filex-viewer-ipynb__md ol {
+  list-style: decimal outside;
+}
+.filex-viewer-ipynb__md ul,
+.filex-viewer-ipynb__md ol {
+  padding-left: 2em;
+}
+
+/* 2. A form field with a visible name (EncryptedFolderModal, NewFolderModal).
+ *    A placeholder disappears as soon as the field has a value, and on a
+ *    password field the value is dots — so the name goes above the box. */
+.fe-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fe-field__label {
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  color: var(--fe-text-muted);
+}
+/* === /agent-fix2 === */

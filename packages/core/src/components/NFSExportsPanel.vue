@@ -30,7 +30,7 @@ const emit = defineEmits<{
 }>();
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
-const { t } = useLocale(locale);
+const { t, formatDate } = useLocale(locale);
 
 const {
   exports,
@@ -156,10 +156,13 @@ async function copyLine() {
   copyTimer = setTimeout(() => (copied.value = false), 1600);
 }
 
+/* zaman:z1 — one date formatter for the package. This was a bare
+ * `toLocaleDateString()`: the browser's locale and the browser's zone, so a
+ * key minted at 23:30 in Istanbul was dated a day early for a viewer reading
+ * UTC and came out in the wrong language besides. */
 function shortDate(v?: string | null): string {
-  if (!v) return '';
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+  const ms = new Date(v ?? '').getTime();
+  return Number.isNaN(ms) ? '' : formatDate(ms);
 }
 
 function scopeOf(e: NFSExport): string {

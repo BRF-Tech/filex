@@ -18,6 +18,27 @@ export function stripAdapter(p: string): string {
 }
 
 /**
+ * The folder a row sits in, without its storage: `My files://Photos/a.jpg` →
+ * `Photos`, and `''` for a row at a storage's root.
+ *
+ * ⚠⚠ Split on the FIRST `://` (`stripAdapter`), never with a URL-scheme
+ * pattern. The list, the grid and the gallery each carried their own copy that
+ * stripped `[a-z][a-z0-9+.-]*` followed by `://` — the RFC 3986 shape of a SCHEME, which a
+ * storage name is not. A name with a space in it (`My files`, the one the
+ * screenshot fixtures use, and a perfectly ordinary thing to call a drive)
+ * does not match it, so nothing was stripped, the "folder" became
+ * `My files://Photos`, and the Location column printed
+ * `My files/My files://Photos` — the storage twice and the scheme on show.
+ * Measured on Starred, 2026-09-14. An underscore or a leading digit broke it
+ * the same way.
+ */
+export function parentDirOf(path: string): string {
+  const rel = stripAdapter(String(path ?? ''));
+  const idx = rel.lastIndexOf('/');
+  return idx === -1 ? '' : rel.slice(0, idx);
+}
+
+/**
  * Hide system/internal entries the user must never see as files:
  * thumbnails, version history, the soft-delete store, keepdir markers,
  * the desktop app's open-with scratch area and the E2E marker. Shared by
@@ -220,6 +241,11 @@ export async function hydrateTrashRow(
  * 2026-09-04). A second copy of a mapping is a second chance to forget it.
  */
 export const VIRTUAL_SEGMENTS: Record<string, string> = {
+  /* gorunum:v3-shell — Home is a destination like the rest, so it gets a
+     sentinel like the rest: a restored tab, a reload and a pasted `#.home`
+     all have to reopen the overview instead of asking the backend for a
+     folder called `.home` and landing on "not found". */
+  '.home': 'node.home',
   '.trash': 'node.trash',
   '.recent': 'node.recent',
   '.starred': 'node.starred',
@@ -284,4 +310,50 @@ export function virtualSegmentLabel(segment: string, t: (key: string) => string)
   if (key) return t(key);
   const tag = tagOfSegment(segment);
   return tag ? `#${tag}` : '';
+}
+
+/**
+ * True when a USER PATH is one of the virtual views rather than a folder that
+ * lives in a storage — `.trash`, `.recent`, `.starred`, `.shared`, `.home`,
+ * `.tag~<name>`.
+ *
+ * ⚠⚠ Why a predicate and not just "call `virtualSegmentLabel` and see". The
+ * caller that needs this is deciding whether to QUALIFY the path, and
+ * qualifying a sentinel destroys it: in multi-storage mode `qualify('.starred')`
+ * splits the first segment off as the adapter and answers `.starred://`, so
+ * from there on the sentinel is a STORAGE NAME. A storage name is not a path
+ * segment, `virtualSegmentLabel` is never asked about it, and the breadcrumb
+ * prints `.starred` — which is exactly what the owner saw on 2026-09-13, in
+ * every virtual view at once, the night the pane was extracted into
+ * `FilePane.vue` and each pane began deriving its own crumb inputs. The
+ * resolver was being called the whole time, with an argument that could not
+ * match.
+ *
+ * ⚠ One definition, here beside the map and the tag prefix it asks about, so
+ * "is this a view or a folder?" cannot be answered two ways: `FileExplorer`'s
+ * `virtualViewOf()` (which also names the KIND) is built on this one.
+ */
+export function isVirtualViewPath(path: string): boolean {
+  const clean = String(path ?? '').replace(/^\/+|\/+$/g, '');
+  if (!clean) return false;
+  return !!VIRTUAL_SEGMENTS[clean] || !!tagOfSegment(clean);
+}
+
+/**
+ * gorunum:v1 — folders before files, whatever the sort column is.
+ *
+ * Every file manager a person has used puts directories first, and the reason
+ * is not taste: a directory is a place and a file is a thing, and a listing
+ * that interleaves them makes the reader check the icon of every row to find
+ * out where they can go next. Sorting by size or date interleaves them worst
+ * of all, because a folder has neither.
+ *
+ * Applied as the PRIMARY comparator by both views, so it cannot mean one
+ * thing in the list and another in the grid — the two sorts are separate code
+ * and this is the rule they have to share (filex lesson #67).
+ */
+export function byFoldersFirst(a: { type?: string }, b: { type?: string }): number {
+  const ad = a.type === 'dir' ? 0 : 1;
+  const bd = b.type === 'dir' ? 0 : 1;
+  return ad - bd;
 }

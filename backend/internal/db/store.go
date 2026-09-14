@@ -365,9 +365,24 @@ type Store interface {
 	SetUserEnabled(ctx context.Context, userID int64, enabled bool) error
 	RecomputeUserUsage(ctx context.Context, userID int64) (int64, error)
 
-	// Node owner
+	// Node owner / attribution (migration 00004 + 00038)
+	//
+	// owner_id is who PUT THE THING HERE; last_actor_id is who touched it
+	// last; external_upload says it arrived through an anonymous drop link.
+	// NULL means SYSTEM in both id columns — see model.Node.
+	//
+	// A CREATE does not use these: internal/quotastore stamps the model and
+	// the INSERT carries the values, so a bulk write costs no extra queries.
+	// They exist for the mutations that change attribution on a row that
+	// already exists (overwrite, move, restore).
 	SetNodeOwner(ctx context.Context, nodeID int64, ownerID *int64) error
 	GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error)
+	SetNodeActor(ctx context.Context, nodeID int64, actorID *int64) error
+	SetNodeExternalUpload(ctx context.Context, nodeID int64, external bool) error
+	// GetUserDisplayNames resolves a batch of user ids to the label an Owner
+	// column shows. One query for a whole listing page, names only — never
+	// full user rows. See the sqlite driver for why.
+	GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// Trash retention
 	ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error)
@@ -389,6 +404,14 @@ type Store interface {
 	GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error)
 	ListUserNodeMetaForNode(ctx context.Context, userID, nodeID int64, prefix string) (map[string]string, error)
 	ListNodesByUserMeta(ctx context.Context, userID int64, key string, limit int) ([]*model.Node, error)
+
+	// Per-user VIEW preferences (00039): how this person left each folder, as
+	// one JSON document read whole and written whole. Not per-node and not
+	// queried by folder, so it is deliberately not user_node_meta — see
+	// db/migrations/sqlite/00039_user_view_prefs.sql. "" = nothing stored yet,
+	// which is not an error.
+	GetUserViewPrefs(ctx context.Context, userID int64) (string, error)
+	SetUserViewPrefs(ctx context.Context, userID int64, doc string) error
 
 	// Tags use the shared node_meta table (key='tag:<name>', value='1').
 	SetNodeTags(ctx context.Context, nodeID int64, tags []string) error

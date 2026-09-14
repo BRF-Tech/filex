@@ -72,9 +72,15 @@ if (!opened) {
 }
 await sleep(1500);
 check('the Share / Permissions panel opens', opened && (await win.locator('.fx-perm-modal').count()) > 0);
-const onLink = await clickText(/^Ba[gğ]lant[iı]$|^Link$/);
+// gorunum:v2-share — the download limit moved from the `Link` tab into the
+// named "Link options" section, one click under the link switch.
+const onLink = await win.evaluate(() => {
+  const el = document.querySelector('[data-testid="share-options-toggle"]');
+  el?.click();
+  return !!el;
+});
 await sleep(900);
-check('…and the Link tab is reachable', onLink);
+check('…and the Link options section is reachable', onLink);
 
 // ── the control itself ───────────────────────────────────────────────
 const found = await win.evaluate(() => {

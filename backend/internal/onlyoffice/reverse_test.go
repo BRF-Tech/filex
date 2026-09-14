@@ -87,6 +87,9 @@ func TestReversePath_ArrivalIsTheVerdict(t *testing.T) {
 		require.False(t, res.OK)
 		require.Equal(t, -4, res.Code)
 		require.Contains(t, res.Detail, "could not download")
+		// The refusal a stock document server applies to a container
+		// network produces the same -4; the sentence has to name it.
+		require.Contains(t, res.Detail, "ALLOW_PRIVATE_IP_ADDRESS")
 	})
 
 	t.Run("a rejected signature is not a broken route", func(t *testing.T) {

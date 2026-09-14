@@ -72,13 +72,15 @@ const out = await w.evaluate(() => {
   const modal = document.querySelector('.fx-perm-modal');
   const attrs = el ? [...el.attributes].map((a) => a.name) : null;
   const cs = modal ? getComputedStyle(modal) : null;
-  // Which selectors in the sheets mention fx-perm-modal, and do they match?
+  // Which selectors in the sheets style the dialog card, and do they match?
+  // gorunum:v2-share — the card is `.fe-share` (styled from base.css); the
+  // `.fx-perm-modal` beside it is only a test hook and carries no rules.
   const selectors = [];
   for (const sh of document.styleSheets) {
     let rules = [];
     try { rules = [...sh.cssRules]; } catch { continue; }
     for (const r of rules) {
-      if (r.selectorText?.includes('fx-perm-modal')) selectors.push(r.selectorText);
+      if (r.selectorText?.includes('fe-share')) selectors.push(r.selectorText);
     }
   }
   return {

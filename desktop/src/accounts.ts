@@ -43,6 +43,23 @@ export interface DesktopState {
    *  read this one value: a Turkish shell around an English file list is one
    *  app pretending to be two. */
   locale: DesktopLocale;
+  /** Show a native OS notification when something new lands in the bell.
+   *  Default ON — the desktop window has no bell of its own, so off would mean
+   *  the always-running client is the one that never tells you anything. */
+  notifications: boolean;
+  /**
+   * The ground the window last painted, as the RENDERER resolved it — the
+   * palette's own `--fe-bg`, in whichever variant was active.
+   *
+   * ⚠ This is not a preference and nothing reads it as one. It exists because
+   * `BrowserWindow.backgroundColor` has to be decided BEFORE the page that
+   * knows the answer has loaded, and Electron paints its default white in the
+   * meantime. The theme mode and the palette both live in the renderer's
+   * localStorage (packages/core/src/lib/themes.ts), which the main process
+   * cannot read at construction — so the window remembers what it painted last
+   * time and opens on that. Absent (a first-ever launch) falls back to the OS.
+   */
+  themeBg?: string;
 }
 
 /** 'system' resolves against the OS at read time, so moving a laptop between
@@ -66,6 +83,7 @@ const EMPTY: DesktopState = {
   runInBackground: true,
   launchAtLogin: false,
   locale: 'system',
+  notifications: true,
 };
 
 function file(): string {

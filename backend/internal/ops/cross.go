@@ -81,6 +81,25 @@ func UniqueDest(ctx context.Context, drv storage.Driver, dst string) string {
 	return uniqueCopyDest(ctx, drv, "", dst)
 }
 
+// MoveDest is where a same-storage move of `src` to `dst` lands: `dst` when
+// nothing holds it, a free name beside it when something does, and `src`
+// itself when the move would put the item back where it already is.
+//
+// ⚠⚠ The one rule for every same-storage move — the queued worker and the
+// manager's synchronous `?action=move` both call it. A driver's Move onto an
+// occupied path REPLACES what is there (a local rename does, and so does an
+// object store's copy-then-delete), and neither caller checked: measured
+// 2026-09-14, moving `a.txt` into a folder holding an `a.txt` finished `ok`
+// and the file that had been there was gone, not even in the trash. A copy and
+// a cross-storage move already kept both; this makes the same-storage move
+// agree with them rather than invent a third behaviour.
+func MoveDest(ctx context.Context, drv storage.Driver, src, dst string) string {
+	if normOpPath(src) == normOpPath(dst) {
+		return src
+	}
+	return uniqueCopyDest(ctx, drv, src, dst)
+}
+
 // isCross reports whether this op's two ends live in different storages.
 func (s *Service) isCross(op *Op) bool {
 	return op.DestStorageID != 0 && op.DestStorageID != op.StorageID

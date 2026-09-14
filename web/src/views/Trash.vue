@@ -13,8 +13,9 @@ import Button from '@/components/ui/Button.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Modal from '@/components/ui/Modal.vue';
 import { Trash2, RotateCcw, AlertTriangle } from 'lucide-vue-next';
+import { formatBytes, formatDate } from '@/lib/format';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const toast = useToastStore();
 const storages = useStoragesStore();
 
@@ -51,6 +52,13 @@ async function restore(entry: TrashEntry) {
     toast.success(t('trash.restored', { name: entry.name }));
     await load();
   } catch (err: any) {
+    // 409 EXISTS: something holds the original path, and the server refused
+    // rather than overwrite it. Said in the reader's language — the server's
+    // own sentence is English and names no remedy.
+    if (err?.response?.status === 409 && err?.response?.data?.code === 'EXISTS') {
+      toast.error(t('trash.restore_taken', { name: err.response.data.name || entry.name }));
+      return;
+    }
     toast.error(err?.response?.data?.error ?? String(err));
   }
 }
@@ -73,7 +81,7 @@ async function emptyTrash() {
       storage_id: selectedStorage.value,
       older_than_days: olderThanDays.value,
     });
-    toast.success(t('trash.empty_done', { count: res.purged ?? '?' }));
+    toast.success(t('trash.empty_done', { count: res.purged ?? '?' }, res.purged ?? 2));
     await load();
   } catch (err: any) {
     toast.error(err?.response?.data?.error ?? String(err));
@@ -81,15 +89,20 @@ async function emptyTrash() {
 }
 
 const fmt = new Intl.NumberFormat();
+
+/* The size column goes through the app's one byte formatter, imported from
+ * the same module as fmtDate below. There was a private copy here — a
+ * different base and different rounding from every other admin page, in a
+ * file that was already importing its neighbour. */
 function fmtBytes(n: number) {
-  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
+  return formatBytes(n, locale.value);
 }
 
+/* zaman:z1 — the app's one date formatter. This was a bare `toLocaleString()`:
+ * the browser's locale and the browser's zone, so "when was this deleted" was
+ * answered on a clock nobody chose. */
 function fmtDate(s: string) {
-  return new Date(s).toLocaleString();
+  return formatDate(s, locale.value);
 }
 
 const hasItems = computed(() => entries.value.length > 0);

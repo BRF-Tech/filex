@@ -15,6 +15,7 @@
  * (drawio uses the same shape: POST `{path, content}` body).
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerText } from '../composables/useViewerFetch';
 
 const props = defineProps<{
@@ -180,12 +181,22 @@ onBeforeUnmount(() => {
 function tt(key: string, fallback: string): string {
   return props.t ? props.t(key) : fallback;
 }
+
+/* === ikon:emoji — the fallback screen's mark ==========================
+ * Every viewer opened its "cannot show this" / "still loading" screen with a
+ * 48px colour emoji, one per format, each from whatever emoji font the OS
+ * shipped. The format mark is `lib/fileIcons`'s tile — the SAME tile the row
+ * the person just clicked is wearing, so the fallback is recognisably about
+ * that file — and "loading" is the stroked ring, spun by CSS, because no
+ * still picture can say "still going". */
+const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
 </script>
 
 <template>
   <div class="filex-viewer-drawio">
     <div v-if="error" class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">📐</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
       <p>{{ error }}</p>
     </div>
     <iframe

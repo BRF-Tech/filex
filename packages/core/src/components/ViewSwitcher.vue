@@ -3,7 +3,8 @@
  * ViewSwitcher — the list / grid / gallery toggle.
  *
  * Lifted out of Toolbar.vue unchanged (same classes, same glyphs, same
- * `role="tablist"` semantics) because the `drive` profile puts it on the
+ * `role="tablist"` semantics — the glyphs moved to lib/actionIcons with the
+ * rest of the emoji, see `gorunum:v1-icons`) because the `drive` profile puts it on the
  * breadcrumb row instead of in the header, and two copies of a switcher is
  * how the two rows end up offering different modes. One component, mounted
  * in whichever row the profile asks for.
@@ -15,6 +16,7 @@
  * block's `data-v` hash does not match in the web-component build).
  */
 import { useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { ViewMode } from '../types/FileNode';
 
@@ -47,7 +49,8 @@ function offers(v: ViewMode): boolean {
       data-testid="view-list"
       @click="emit('update:viewMode', 'list')"
     >
-      <span class="fe-icon" aria-hidden="true">☰</span>
+      <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+      <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('view-list')"></span>
     </button>
     <button
       v-if="offers('grid')"
@@ -61,7 +64,8 @@ function offers(v: ViewMode): boolean {
       data-testid="view-grid"
       @click="emit('update:viewMode', 'grid')"
     >
-      <span class="fe-icon" aria-hidden="true">▦</span>
+      <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+      <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('view-grid')"></span>
     </button>
     <button
       v-if="offers('gallery')"
@@ -75,7 +79,8 @@ function offers(v: ViewMode): boolean {
       data-testid="view-gallery"
       @click="emit('update:viewMode', 'gallery')"
     >
-      <span class="fe-icon" aria-hidden="true">▣</span>
+      <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+      <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('view-gallery')"></span>
     </button>
   </div>
 </template>

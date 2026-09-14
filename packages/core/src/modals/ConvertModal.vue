@@ -17,6 +17,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 
 const props = defineProps<{
   /** Converter base, e.g. https://fm.example.com/convert */
@@ -152,7 +153,16 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
     <div class="filex-cv">
       <header class="filex-cv__head">
         <h3>{{ t('convert.title') }} — {{ fileName }}</h3>
-        <button class="filex-cv__x" @click="emit('close')">✕</button>
+        <button
+          class="filex-cv__x"
+          type="button"
+          :title="t('convert.close')"
+          :aria-label="t('convert.close')"
+          @click="emit('close')"
+        >
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+          <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
+        </button>
       </header>
 
       <div v-if="status === 'loading'" class="filex-cv__msg">
@@ -160,7 +170,11 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
       </div>
 
       <div v-else-if="status === 'done'" class="filex-cv__msg filex-cv__ok">
-        <p>✓ {{ t('convert.done') }}</p>
+        <p>
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+          <span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('check')"></span>
+          {{ t('convert.done') }}
+        </p>
         <button class="filex-cv__convert" @click="emit('close')">{{ t('convert.close') }}</button>
       </div>
 
@@ -231,7 +245,13 @@ onBeforeUnmount(() => window.removeEventListener('message', onMessage));
   padding: 12px 16px; border-bottom: 1px solid var(--fe-border, #e2e6ed);
 }
 .filex-cv__head h3 { margin: 0; font-size: 14px; font-weight: 600; }
-.filex-cv__x { border: 0; background: none; cursor: pointer; font-size: 16px; color: var(--fe-text-muted, #5a6475); }
+.filex-cv__x {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: none; cursor: pointer; font-size: 16px;
+  color: var(--fe-text-muted, #5a6475);
+}
+.filex-cv__x .fe-aicon { color: currentColor; }
+.filex-cv__ok .fe-icon { display: inline-flex; vertical-align: -0.2em; }
 .filex-cv__msg { padding: 28px; text-align: center; color: var(--fe-text-muted, #5a6475); }
 .filex-cv__ok { color: #059669; }
 .filex-cv__src { padding: 12px 16px 0; font-size: 13px; color: var(--fe-text-muted, #5a6475); }

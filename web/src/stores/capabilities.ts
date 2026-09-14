@@ -19,6 +19,7 @@ const EMPTY: Capabilities = {
   db_driver: 'sqlite',
   search_enabled: false,
   oidc_auto_redirect: false,
+  auth_recovery_login: false,
   demo_mode: false,
   demo_user: '',
   demo_pass: '',

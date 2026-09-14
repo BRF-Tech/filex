@@ -295,12 +295,51 @@ preview/download for those.
 
 ---
 
+## Creating new documents
+
+**+ New → New document** makes an empty Word, Excel, PowerPoint or OpenDocument
+file and opens it in the editor that handles it.
+
+⚠ The bytes do **not** come from the Document Server, and they do not come from
+LibreOffice either. They are minimal valid documents embedded in the filex
+binary (`backend/internal/newdoc` — XML parts zipped in memory), because `:slim`
+and the bare binary deliberately carry no external tools and a feature that
+works on one image and 500s on another is worse than one with a narrower
+promise. So a `.docx` can be created on an install with no LibreOffice
+anywhere near it.
+
+What OnlyOffice decides is whether the type is **offered at all**.
+`GET /api/files/capabilities` publishes `newdoc_types` — every type this build
+can create, each as `{ext, group, mime, requires}` — and `requires` names the
+service the *editor* needs: `"onlyoffice"`, `"drawio"`, or empty for the
+built-in code and markdown editors. The client crosses that against the
+`external` block, so with no Document Server configured the six office formats
+(`docx`, `xlsx`, `pptx`, `odt`, `ods`, `odp`) are not in the picker and the
+dialog says why — *"Office documents need a document server (OnlyOffice), which
+is not configured here."* — rather than creating a file nobody on this install
+could then open.
+
+⚠ The server states the dependency and the client resolves it, deliberately:
+an embedder may point at a document server this process cannot reach, so the
+client is the only place that knows the true answer. What it must not do is
+re-derive the dependency from an extension list of its own — that list rots the
+moment the registry grows a type.
+
+The create itself is `POST /api/files/manager?action=newfile` with
+`{path, name, type}`, where `type` is one of the `newdoc_types` keys.
+
+---
+
 ## What happens if it's not configured
 
 Nothing breaks. With no URL and secret — from either source:
 
 - filex reports OnlyOffice as **disabled** in its capabilities.
 - Office files open in the **read-only preview** (or download), not an editor.
+- **+ New → New document** offers only the types a built-in editor opens —
+  Markdown, plain text, CSV, JSON, YAML, XML, HTML and the code formats — and
+  names the missing service for the rest (see
+  [Creating new documents](#creating-new-documents)).
 - The editor endpoint returns `onlyoffice: not configured` if called directly.
 
 You can add OnlyOffice later at any time — it's purely additive.
@@ -343,6 +382,30 @@ address — the route from the Document Server back to filex. Press **Test** in
 *Settings → External services* and read the third leg: it reports *reached*,
 *did not reach*, or *could not be measured*, and the last of those is **not** a
 pass. See [Three machines, three addresses](#three-machines-three-addresses).
+
+⚠ **A private address is refused, not unreachable.** Since ONLYOFFICE Docs 7.4
+the Document Server refuses by default to download from a private IP address,
+and a docker or podman network (`10.x`, `172.16–31.x`, `192.168.x`) is exactly
+that. It then gives up before sending anything: filex logs nothing, the editor
+says "Download failed", and the Test button reports error -4 — the same picture
+as a route that does not exist. The Document Server's own log tells them apart:
+
+```
+... is not allowed. Because, It is private IP address
+```
+
+If that line is there, allow private addresses on the Document Server and
+restart it — either the environment variable on its container:
+
+```bash
+ALLOW_PRIVATE_IP_ADDRESS=true
+```
+
+or, in its `local.json`:
+
+```json
+{ "services": { "CoAuthoring": { "request-filtering-agent": { "allowPrivateIPAddress": true } } } }
+```
 
 ### Failure: "token" error on open
 The two JWT secrets don't match. The secret filex holds — the `external_services`

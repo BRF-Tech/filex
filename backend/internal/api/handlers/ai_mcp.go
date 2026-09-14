@@ -11,7 +11,6 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
-	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -133,8 +132,11 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	registerFilexTools(srv, ops, h.searchIndex())
 
 	// Admin tools are gated by the `admin` token scope (on top of the route's
-	// `mcp` scope). A token without `admin` never sees admin_* in tools/list.
-	if tok := auth.TokenFrom(r.Context()); h.admin != nil && tok != nil && tok.HasScope(apitoken.ScopeAdmin) {
+	// `mcp` scope) and by the token not being confined to a folder — the same
+	// rule as the /api/ai/admin routes, from the same place
+	// (auth.TokenMayAdminister). A token that fails it never sees admin_* in
+	// tools/list, and so cannot call one.
+	if tok := auth.TokenFrom(r.Context()); h.admin != nil && auth.TokenMayAdminister(tok) {
 		principal := h.admin.elevatedPrincipal(auth.UserFrom(r.Context()))
 		registerAdminTools(srv, h.admin, principal)
 	}

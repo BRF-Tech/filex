@@ -106,6 +106,13 @@ func (s *Store) upsert(q string) string {
 	if !s.mysql {
 		return q
 	}
+	return UpsertForMySQL(q)
+}
+
+// UpsertForMySQL is the rewrite upsert applies in MySQL mode, exported so the
+// cross-engine gate in backend/internal/db can prepare every statement in this
+// file exactly as a MySQL server receives it.
+func UpsertForMySQL(q string) string {
 	loc := upsertClause.FindStringIndex(q)
 	if loc == nil {
 		return q
@@ -353,10 +360,16 @@ func (s *Store) CreateNode(ctx context.Context, n *model.Node) (*model.Node, err
 	if transferState == "" {
 		transferState = model.TransferStateStored
 	}
+	// Attribution is written by the INSERT, not by a follow-up UPDATE: the
+	// decorator that resolves the acting identity (internal/quotastore) stamps
+	// the model before it gets here, so a bulk write — an archive extract, a
+	// desktop sync, a scanner walk — costs the same number of round trips it
+	// did before ownership existed. nil owner/actor is SYSTEM and is written
+	// as NULL on purpose (see migration 00038).
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state, transfer_state)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState, transferState)
+		`INSERT INTO nodes (storage_id, parent_id, name, path, path_hash, storage_key, type, size, mime, etag, backend_mtime, sync_state, transfer_state, owner_id, last_actor_id, external_upload)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		n.StorageID, n.ParentID, n.Name, n.Path, n.PathHash, n.StorageKey, n.Type, n.Size, n.Mime, n.Etag, n.BackendMtime, n.SyncState, transferState, n.OwnerID, n.LastActorID, n.ExternalUpload)
 	if err != nil {
 		return nil, err
 	}
@@ -962,7 +975,15 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND name LIKE ? AND deleted_at IS NULL ORDER BY name LIMIT ?`,
+	// ⚠ On MySQL, nodes.name compares byte for byte since migration 00041 —
+	// two files that differ only by case are two files. A search is the one
+	// place that should still ignore case (the fallback planner hands in a
+	// lower-cased word), so it names the collation it wants explicitly.
+	nameMatch := `name LIKE ?`
+	if s.mysql {
+		nameMatch = `name COLLATE utf8mb4_0900_ai_ci LIKE ?`
+	}
+	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND `+nameMatch+` AND deleted_at IS NULL ORDER BY name LIMIT ?`,
 		storageID, like, limit)
 	if err != nil {
 		return nil, err
@@ -2029,8 +2050,15 @@ func (s *Store) ListSyncRunsAcrossAll(ctx context.Context, storageID int64, stat
 	if limit <= 0 {
 		limit = 50
 	}
-	where := []string{"started_at >= datetime('now', '-5 days')"}
-	args := []any{}
+	// ⚠ The cutoff is computed here and bound, not written as SQL. This Store
+	// also serves MySQL, and `datetime('now', '-5 days')` is SQLite's own
+	// function: on MySQL the statement was a syntax error, so the admin Sync
+	// history page and every storage's sync-run list answered 500 there. The
+	// layout matches what CURRENT_TIMESTAMP writes on SQLite, so the text
+	// comparison orders correctly, and MySQL converts it to a DATETIME.
+	cutoff := time.Now().UTC().Add(-5 * 24 * time.Hour).Format("2006-01-02 15:04:05")
+	where := []string{"started_at >= ?"}
+	args := []any{cutoff}
 	if storageID > 0 {
 		where = append(where, `storage_id=?`)
 		args = append(args, storageID)
@@ -2371,13 +2399,30 @@ type rowScanner interface {
 	Scan(dst ...any) error
 }
 
+// nodeColumnsFmt is the ONE place the node column order is written down.
+// %[1]s is the table alias ("" for a plain SELECT, "n." for the ones that JOIN
+// node_meta and have to disambiguate).
+//
+// ⚠ It is a format string rather than four hand-kept copies because four is
+// what there were, and a column added to `nodes` reached the ordinary listing,
+// the search rebuild — and silently missed the tag and starred reads, whose
+// scan then failed at runtime on a path the suite only walks in one test.
+const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,0)`
+
+var (
+	// nodeColumnList is the unqualified list; nodeColumnsN is the "n."-aliased
+	// one. Both feed the same scanNode, which is why they cannot drift.
+	nodeColumnList = fmt.Sprintf(nodeColumnsFmt, "")
+	nodeColumnsN   = fmt.Sprintf(nodeColumnsFmt, "n.")
+)
+
 func nodeSelectColumns() string {
-	return `SELECT id, storage_id, parent_id, name, path, path_hash, COALESCE(storage_key,''), type, size, COALESCE(mime,''), COALESCE(etag,''), backend_mtime, db_mtime, sync_state, COALESCE(transfer_state,'stored'), seen_at, deleted_at, created_at, updated_at`
+	return `SELECT ` + nodeColumnList
 }
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt)
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload)
 	if err != nil {
 		return nil, err
 	}
@@ -2539,7 +2584,7 @@ func scanConflicts(rows *sql.Rows) ([]*model.SyncConflict, error) {
 
 // ─────────────────── Search rebuild support ───────────────────
 
-const nodeColumnsForIndex = `id, storage_id, parent_id, name, path, path_hash, COALESCE(storage_key,''), type, size, COALESCE(mime,''), COALESCE(etag,''), backend_mtime, db_mtime, sync_state, COALESCE(transfer_state,'stored'), seen_at, deleted_at, created_at, updated_at`
+var nodeColumnsForIndex = nodeColumnList
 
 // AllNodesForIndex returns every non-deleted node for the search rebuild job.
 func (s *Store) AllNodesForIndex(ctx context.Context) ([]*model.Node, error) {
@@ -2698,12 +2743,17 @@ func (s *Store) DeleteOldNodeVersions(ctx context.Context, nodeID int64, keep in
 	if keep < 0 {
 		keep = 0
 	}
+	// ⚠ Not `LIMIT -1`: that is SQLite's spelling of "no limit", and MySQL —
+	// which this Store also serves — rejects it as a syntax error. The prune
+	// failed on every snapshot there, and Snapshot deliberately ignores a
+	// cleanup error, so version history grew without bound and nobody was
+	// told. The largest signed 64-bit value means "no limit" to both engines.
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, node_id, version_n, COALESCE(storage_key,''), size, COALESCE(etag,''), created_at
 		 FROM node_versions
 		 WHERE node_id=?
 		 ORDER BY version_n DESC
-		 LIMIT -1 OFFSET ?`, nodeID, keep)
+		 LIMIT 9223372036854775807 OFFSET ?`, nodeID, keep)
 	if err != nil {
 		return nil, err
 	}
@@ -2762,9 +2812,18 @@ func (s *Store) GetUserUsage(ctx context.Context, userID int64) (int64, int64, e
 
 // IncrementUserUsage atomically adjusts usage_bytes (delta may be negative);
 // clamps the resulting value at 0 to keep it sane.
+//
+// ⚠ Not `MAX(0, …)`. SQLite has a two-argument scalar max(); in MySQL, which
+// this Store also serves, MAX is an aggregate only and the statement was a
+// syntax error. quotastore logs that error and lets the write through, so on
+// MySQL every upload succeeded, usage_bytes never moved, and no quota was ever
+// enforced. CASE means the same thing to both engines.
 func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int64) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET usage_bytes = MAX(0, COALESCE(usage_bytes,0) + ?) WHERE id=?`, delta, userID)
+		`UPDATE users SET usage_bytes = CASE
+		   WHEN COALESCE(usage_bytes,0) + ? < 0 THEN 0
+		   ELSE COALESCE(usage_bytes,0) + ?
+		 END WHERE id=?`, delta, delta, userID)
 	return err
 }
 
@@ -2817,6 +2876,73 @@ func (s *Store) RecomputeUserUsage(ctx context.Context, userID int64) (int64, er
 // SetNodeOwner updates the owner_id column for one node.
 func (s *Store) SetNodeOwner(ctx context.Context, nodeID int64, ownerID *int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET owner_id=? WHERE id=?`, ownerID, nodeID)
+	return err
+}
+
+// GetUserDisplayNames answers "what do I call these ids" for a whole listing
+// page in ONE query.
+//
+// ⚠ It deliberately returns names, not users. The Owner column needs a label
+// and nothing else, and hydrating full user rows to read one field would drag
+// password hashes, TOTP secrets and recovery codes through the listing path
+// for every account that happens to own a file in the folder.
+//
+// The fallback chain is display_name → username → email, because a row with an
+// empty display_name is common (OIDC providers that send no name) and an
+// Owner column that reads blank is worse than one that reads an address.
+func (s *Store) GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT id, COALESCE(NULLIF(display_name,''), NULLIF(username,''), email) FROM users WHERE id IN (`+ph+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[id] = name
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// SetNodeActor updates the last_actor_id column for one node. A nil actor is
+// SYSTEM — a change that arrived from outside filex has nobody to name, and
+// writing the previous actor there instead would be a lie the UI cannot see
+// through.
+func (s *Store) SetNodeActor(ctx context.Context, nodeID int64, actorID *int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET last_actor_id=? WHERE id=?`, actorID, nodeID)
+	return err
+}
+
+// SetNodeExternalUpload marks (or unmarks) a node as having arrived through an
+// anonymous drop link. Only ever set to true, by the drop handler.
+func (s *Store) SetNodeExternalUpload(ctx context.Context, nodeID int64, external bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE nodes SET external_upload=? WHERE id=?`, external, nodeID)
 	return err
 }
 
@@ -3048,7 +3174,7 @@ func (s *Store) ListNodesByUserMeta(ctx context.Context, userID int64, key strin
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		`SELECT `+nodeColumnsN+`
 		 FROM user_node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
 		 WHERE m.user_id=? AND m.meta_key=? AND n.deleted_at IS NULL
@@ -3173,7 +3299,7 @@ func (s *Store) ListNodesByTag(ctx context.Context, tag string, limit int) ([]*m
 		limit = 500
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT n.id, n.storage_id, n.parent_id, n.name, n.path, n.path_hash, COALESCE(n.storage_key,''), n.type, n.size, COALESCE(n.mime,''), COALESCE(n.etag,''), n.backend_mtime, n.db_mtime, n.sync_state, COALESCE(n.transfer_state,'stored'), n.seen_at, n.deleted_at, n.created_at, n.updated_at
+		`SELECT `+nodeColumnsN+`
 		 FROM node_meta m
 		 INNER JOIN nodes n ON n.id = m.node_id
 		 WHERE m.meta_key=? AND n.deleted_at IS NULL

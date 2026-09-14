@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 	"path"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -149,24 +151,18 @@ func (h *Manager) SyncCopyAcross(ctx context.Context, srcStorageID int64, src st
 	srcClean := normalizeDBPath(src)
 	if srcNode, serr := h.Store.GetNodeByPath(ctx, srcStorageID, pathkey.Hash(srcStorageID, srcClean)); serr == nil && srcNode != nil {
 		n.Type, n.Size, n.Mime = srcNode.Type, srcNode.Size, srcNode.Mime
-		// Bill the new bytes to whoever owned the original, exactly as the
-		// same-storage copy does — the copy is a duplicate of their file.
-		if owner, oerr := h.Store.GetNodeOwner(ctx, srcNode.ID); oerr == nil && owner != nil && *owner > 0 {
-			ctx = quotastore.WithOwner(ctx, *owner)
+		// Same fallback as the same-storage copy below: only when the queue row
+		// does not name the person who asked.
+		if quotastore.OwnerFrom(ctx) <= 0 {
+			if owner, oerr := h.Store.GetNodeOwner(ctx, srcNode.ID); oerr == nil && owner != nil && *owner > 0 {
+				ctx = quotastore.WithOwner(ctx, *owner)
+			}
 		}
-	} else if h.StorageResolver != nil {
+	} else {
 		// No cached source row — ask the destination driver what actually
 		// landed. Guessing "file, 0 bytes" would put a wrong size in the
 		// listing and in the quota.
-		if drv, derr := h.StorageResolver(dstStorageID); derr == nil {
-			if o, oerr := drv.Stat(ctx, strings.TrimPrefix(dstClean, "/")); oerr == nil {
-				n.Size, n.Mime = o.Size, o.Mime
-				if o.Kind == storage.KindDirectory {
-					n.Type = model.NodeTypeDirectory
-					n.Size = 0
-				}
-			}
-		}
+		h.describeLanded(ctx, dstStorageID, n)
 	}
 	if created, cerr := h.Store.CreateNode(ctx, n); cerr == nil && created != nil {
 		h.indexNode(ctx, created)
@@ -183,43 +179,56 @@ func (h *Manager) SyncCopyAcross(ctx context.Context, srcStorageID int64, src st
 func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string) {
 	dstClean := normalizeDBPath(dst)
 	dstHash := pathkey.Hash(storageID, dstClean)
-	if existing, _ := h.Store.GetNodeByPath(ctx, storageID, dstHash); existing != nil {
-		return
-	}
 	srcClean := normalizeDBPath(src)
-	srcHash := pathkey.Hash(storageID, srcClean)
-	srcNode, err := h.Store.GetNodeByPath(ctx, storageID, srcHash)
-	if err != nil || srcNode == nil {
-		return
+	srcNode, _ := h.Store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, srcClean))
+	// A copy is a NEW FILE, so the person who made the copy owns it — not the
+	// person who owned the original. The copier reaches this server-lifetime
+	// worker context through `pending_ops.actor_id` (migration 00038), which
+	// ops.execute puts back on the context before calling us.
+	//
+	// ⚠ The old rule is kept as a FALLBACK, not deleted: a queue row written
+	// before the column existed names nobody, and billing such a copy to the
+	// source's owner is still better than leaving a second set of real bytes
+	// uncounted. An unowned source stays unowned, exactly as the original is.
+	if srcNode != nil && quotastore.OwnerFrom(ctx) <= 0 {
+		if owner, oerr := h.Store.GetNodeOwner(ctx, srcNode.ID); oerr == nil && owner != nil && *owner > 0 {
+			ctx = quotastore.WithOwner(ctx, *owner)
+		}
 	}
-	// Same reasoning as SyncCopyAcross: `path.Dir("orig-copy.txt")` is "." —
-	// a directory that is never in the index — so a copy pasted at the STORAGE
-	// ROOT found no parent and was never mirrored. `path.Dir("/orig-copy.txt")`
-	// is "/", which ensureDirChain reads as the root.
-	parentID, err := h.ensureDirChain(ctx, storageID, path.Dir(dstClean))
-	if err != nil {
-		return
-	}
-	// A copy is a second set of bytes on the disk and has to be counted, but
-	// this runs on the ops worker's server-lifetime context — the requesting
-	// user is long gone and the legacy `pending_ops` row does not carry them.
-	// Bill the copy to whoever owns the ORIGINAL: the bytes are a duplicate of
-	// theirs, and it needs no schema change to be true. Unowned source (a file
-	// the scanner found) stays unowned, exactly as the original is.
-	if owner, oerr := h.Store.GetNodeOwner(ctx, srcNode.ID); oerr == nil && owner != nil && *owner > 0 {
-		ctx = quotastore.WithOwner(ctx, *owner)
-	}
-	n := &model.Node{
-		StorageID: storageID,
-		ParentID:  parentID,
-		Name:      path.Base(dstClean),
-		Path:      dstClean,
-		PathHash:  dstHash,
-		Type:      srcNode.Type,
-		Size:      srcNode.Size,
-		Mime:      srcNode.Mime,
-	}
-	if created, err := h.Store.CreateNode(ctx, n); err == nil && created != nil {
+	top, _ := h.Store.GetNodeByPath(ctx, storageID, dstHash)
+	if top == nil {
+		// Same reasoning as SyncCopyAcross: `path.Dir("orig-copy.txt")` is "." —
+		// a directory that is never in the index — so a copy pasted at the
+		// STORAGE ROOT found no parent and was never mirrored. `path.Dir("/orig-copy.txt")`
+		// is "/", which ensureDirChain reads as the root.
+		parentID, err := h.ensureDirChain(ctx, storageID, path.Dir(dstClean))
+		if err != nil {
+			return
+		}
+		n := &model.Node{
+			StorageID: storageID,
+			ParentID:  parentID,
+			Name:      path.Base(dstClean),
+			Path:      dstClean,
+			PathHash:  dstHash,
+			Type:      model.NodeTypeFile,
+		}
+		if srcNode != nil {
+			n.Type, n.Size, n.Mime = srcNode.Type, srcNode.Size, srcNode.Mime
+		} else if !h.describeLanded(ctx, storageID, n) {
+			// ⚠ A source with no row is not a reason to mirror nothing — a
+			// storage mid-first-walk serves its listings from the driver, so a
+			// user can copy what the cache has never seen. Only when the
+			// destination cannot say what landed either is there no honest row
+			// to write; the next sync pass catalogues it.
+			slog.Warn("manager: copy mirror skipped, nothing describes the copy",
+				slog.Int64("storage", storageID), slog.String("path", dstClean))
+			return
+		}
+		created, err := h.Store.CreateNode(ctx, n)
+		if err != nil || created == nil {
+			return
+		}
 		h.indexNode(ctx, created)
 		/* bag:b3 event + koru:k2 av — a copy writes fresh bytes; the gate
 		   itself skips directories, so folder-copy rows stay silent. */
@@ -228,5 +237,74 @@ func (h *Manager) SyncCopy(ctx context.Context, storageID int64, src, dst string
 		emitFolderChange(storageID, path.Dir(dstClean), realtime.ChangeEvent{
 			Action: "upload", Name: created.Name,
 		})
+		top = created
 	}
+	// ⚠ Not only on a fresh top row: a worker that died between the top row and
+	// the subtree replays into an existing folder row, and the subtree still
+	// has to land. The walk leaves rows it already has alone.
+	if top.Type == model.NodeTypeDirectory {
+		h.mirrorCopiedTree(ctx, storageID, dstClean, top.ID)
+	}
+}
+
+// mirrorCopiedTree catalogues every descendant of a copied DIRECTORY.
+//
+// A same-storage copy is ONE driver call that writes the whole subtree, so —
+// unlike the cross-storage transfer, whose per-node hooks call SyncCopyAcross
+// for each file — there is no per-node signal to mirror from. Recording only
+// the top row left the tree on the disk with one row in the index, and
+// listings are cache-first once a storage has synced: the copied folder OPENED
+// EMPTY until the next sync pass.
+//
+// It reads the DESTINATION, through the sync walk itself (sync.CatalogueTree):
+// what landed is the only honest account, and the walk's rules — including
+// cataloguing an encrypted folder's marker before any sibling — then hold for
+// copies too. Descendants are billed to the owner on ctx and handed to the
+// antivirus queue exactly as scanned-in files are.
+func (h *Manager) mirrorCopiedTree(ctx context.Context, storageID int64, dirClean string, dirID int64) {
+	if h.StorageResolver == nil {
+		return
+	}
+	st, err := h.Store.GetStorage(ctx, storageID)
+	if err != nil || st == nil {
+		slog.Warn("manager: copy mirror skipped, storage lookup failed",
+			slog.Int64("storage", storageID), slog.String("path", dirClean))
+		return
+	}
+	drv, err := h.StorageResolver(storageID)
+	if err != nil {
+		slog.Warn("manager: copy mirror skipped, storage driver unavailable",
+			slog.Int64("storage", storageID), slog.String("path", dirClean), slog.String("err", err.Error()))
+		return
+	}
+	parent := dirID
+	if err := syncpkg.CatalogueTree(ctx, h.Store, h.Index, enqueueAntivirusScan, st, drv, dirClean, &parent); err != nil {
+		// The op still reports OK and nothing else tells anyone the folder is
+		// only partly listed; the next sync pass completes it.
+		slog.Warn("manager: copy mirror incomplete, the copied folder lists partly until the next sync",
+			slog.Int64("storage", storageID), slog.String("path", dirClean), slog.String("err", err.Error()))
+	}
+}
+
+// describeLanded fills n's kind, size and mime from what the destination
+// driver says is at n.Path, and reports whether it could. It is the answer a
+// copy mirror falls back on when the cache has no row for the source.
+func (h *Manager) describeLanded(ctx context.Context, storageID int64, n *model.Node) bool {
+	if h.StorageResolver == nil {
+		return false
+	}
+	drv, err := h.StorageResolver(storageID)
+	if err != nil {
+		return false
+	}
+	o, err := drv.Stat(ctx, strings.TrimPrefix(n.Path, "/"))
+	if err != nil {
+		return false
+	}
+	n.Size, n.Mime = o.Size, o.Mime
+	if o.Kind == storage.KindDirectory {
+		n.Type = model.NodeTypeDirectory
+		n.Size = 0
+	}
+	return true
 }

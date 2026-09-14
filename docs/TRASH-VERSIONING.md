@@ -67,12 +67,13 @@ replaced it and for how an install that already took the damage repairs itself.
 
 ### Every delete surface uses the same trash
 
-Deletion is not a web‑UI‑only concept. The web explorer, **WebDAV**, the
-**AI/REST** endpoints, the **MCP** tools, the **CLI/sync client** and the
-asynchronous batch‑ops worker all go through one shared helper (`trash.Put`),
-so an item deleted from any of them lands in the trash the same way and is
-restored the same way. A protocol added later inherits the behaviour by calling
-that helper instead of driving the storage driver itself.
+Deletion is not a web‑UI‑only concept. The web explorer, **WebDAV**, **SFTP**,
+**FTPS**, **NFS**, the **S3 gateway**, the **AI/REST** endpoints, the **MCP**
+tools, the **CLI/sync client** and the asynchronous batch‑ops worker all go
+through one shared helper (`trash.Put`), so an item deleted from any of them
+lands in the trash the same way and is restored the same way. A protocol added
+later inherits the behaviour by calling that helper instead of driving the
+storage driver itself.
 
 The helper never destroys data: when a backend cannot preserve the bytes it
 reports that instead of deleting them, and the caller decides what to do. That
@@ -136,12 +137,18 @@ rows at a time) and reports a summary (`scanned` / `deleted` / `failed` /
 | Method & path | Body / query | Notes |
 |---|---|---|
 | `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft‑deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, and **`ttl_days`** (days remaining before purge, floored at 0). |
-| `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. |
+| `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re‑attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
 
 Both are **filtered by access**: a [confined](RBAC.md) (root‑locked) caller only
 sees / can restore items whose original path is inside its root, and
 [RBAC](RBAC.md) requires **≥viewer** to see an item in the list and **≥editor**
 on its original path to restore it (restore writes the file back).
+
+An entry is judged on the path it was deleted **from**, never on its trash key.
+A row old enough to record no original path — its path is still inside
+`.filex-trash/` — has nothing to judge, so it is neither listed nor restorable,
+for anybody; an admin can still purge it. Judging it on the bin would hand the
+answer to whoever holds a grant on `.filex-trash/`.
 
 **Admin only:**
 
@@ -156,6 +163,11 @@ on its original path to restore it (restore writes the file back).
 Its original parent directory was itself deleted in the meantime. filex prefers
 a **root restore** over orphaning the row — move the file back manually once the
 folder exists again.
+
+**Restore answers 409 `EXISTS`.**
+A file or folder now holds the original path. filex refuses rather than
+overwrite it or pour one folder into another. Rename or move what is there,
+then restore again.
 
 **Restore reports success but the file isn't back on disk.**
 The DB flag is cleared **best‑effort**: if the driver's move step fails, filex
@@ -227,13 +239,20 @@ an infected file live. The restore is where that is closed; see
 
 ### Version retention
 
-| Setting | Value | Meaning |
-|---|---|---|
-| Versions kept per file | **20** (compile‑time default) | After each new snapshot, versions beyond the newest 20 are trimmed automatically. |
+| Setting | Where | Default | Meaning |
+|---|---|---|---|
+| `versions.keep_n` | DB `settings` table, written by **Protection → Version retention** (`PATCH /api/admin/protection`, accepted range 0–1000) | **0** | How many versions of a file to keep. `0` means "not configured": the daily retention sweep is off and the snapshot path applies its compile‑time safety trim of **20** instead. |
+
+So a file's history is trimmed to the newest **20** snapshots out of the box,
+and to `keep_n` when an operator sets one — the snapshot path honours the
+setting inline, so a value **above** 20 really does keep more (it used to claw
+every node back to 20 on the next snapshot, which made larger values
+meaningless). A `keep_n > 0` additionally runs a **daily sweep** over every node
+that has version rows, so lowering the number reaches files nobody is editing;
+see [Protection → Version retention](PROTECTION.md#version-retention-versionskeep_n).
 
 Trimming removes both the `node_versions` row and the backing `.versions/…`
-object (best‑effort per object). Unlike trash's retention, the version count is
-a fixed default rather than a DB‑tunable setting.
+object (best‑effort per object).
 
 ### What triggers a snapshot
 
@@ -321,7 +340,7 @@ non‑default state is visible without reading the config.
 | Method & path | Body / query | Permission | Notes |
 |---|---|---|---|
 | `GET /api/files/versions` | `?node_id=N` | **≥viewer** | Lists that node's snapshots, **newest first** (version number, size, etag, created). |
-| `POST /api/files/versions/snapshot` | `{ "node_id": N }` | **≥editor** | Records the current content as a new version on demand — the inspector's "take a version now" button. Writes an object into the node's storage. |
+| `POST /api/files/versions/snapshot` | `{ "node_id": N }` | **≥editor** | Records the current content as a new version on demand — the "take a version now" button in the details panel's **Activity** tab, which is where a file's history and its comments live. Writes an object into the node's storage. |
 | `POST /api/files/versions/restore` | `{ "node_id": N, "version_id": V, "snapshot_current": true }` | **≥editor** | Copies version `V` back over the live file. |
 | `POST /api/files/save-text` | `{ "path": "adapter://rel", "content": "…" }` | **≥editor** | Saves text and snapshots the previous content first (see above). |
 
@@ -378,16 +397,18 @@ retention slot on the duplicate.
 ### Versioning — failure modes & troubleshooting
 
 **Version history is empty even though I've edited the file.**
-Most often because the writes weren't text‑editor saves. In v0.1 **only
-`save-text` snapshots** — re‑uploading a binary, extracting an archive, or
-editing through another channel won't add history. Also note: directories and
-symlinks are **never** versioned, and the **first** save of a new file has no
-prior content to snapshot.
+Check which surface wrote it. **SFTP, FTPS and NFS take no snapshot at all**
+(see the table above) — that is the likeliest answer, and it fails silently. The
+other three: the guard is switched off
+([`FILEX_VERSIONS_ON_OVERWRITE=0`](CONFIGURATION.md#versioning-on-overwrite),
+which logs a WARN at boot); directories and symlinks are **never** versioned;
+and the **first** save of a new file has no prior content to snapshot.
 
 **A version I wanted is gone / "restore" can't find it.**
-Retention keeps only the **newest 20** versions per file — older snapshots are
-trimmed after each new save. An admin `DELETE /api/admin/versions/{id}` also
-removes one permanently. Once trimmed/deleted, a version is unrecoverable.
+Retention keeps only the newest **20** versions per file — or `versions.keep_n`
+when an operator has set one — and older snapshots are trimmed after each new
+save. An admin `DELETE /api/admin/versions/{id}` also removes one permanently.
+Once trimmed/deleted, a version is unrecoverable.
 
 **`version belongs to a different node`.**
 The `version_id` in a restore request doesn't belong to the `node_id` you sent.

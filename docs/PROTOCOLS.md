@@ -37,10 +37,18 @@ pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those th
 destroys the previous bytes silently. See
 [TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
 
-**The connection instructions are in the app**, not here: *Connections → Connect*, in the
-web UI and the desktop app, builds every command from *this* deployment — its host, its
-port, your login, the key or export you just minted. This document is the map; that page
-is the thing you copy from.
+Every one of them addresses a storage the same way — the first path segment, or the
+bucket over S3 — and every one accepts either the storage's **name** or its immutable
+**uid**. Give a machine the uid and the mount survives a rename; the rule is one function
+(`internal/storageref`) rather than five, so there is no protocol where only one of the
+two works. See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
+
+**The connection instructions are in the app**, not here: **How to connect** — the entry
+in the file explorer's navigation panel, on every surface that draws it (the web app, the
+desktop app, any embed) — builds every command from *this* deployment: its host, its port,
+your login, the key or export you just minted. Admins reach the same panel from
+*Connections* in the admin sidebar. This document is the map; that page is the thing you
+copy from.
 
 ---
 
@@ -51,12 +59,12 @@ password and without disturbing the others.
 
 | Protocol | What you present | Where it is minted |
 |---|---|---|
-| S3 | access key id + secret (SigV4) | Connections → S3 |
-| SFTP | your login + an **API token** as the password, or a registered **SSH public key** | Connections → SFTP |
-| FTPS | your login + an **API token** as the password | Connections → FTPS |
-| NFSv3 | **the export path itself** — it carries 32 bytes of entropy | Connections → NFS |
+| S3 | access key id + secret (SigV4) | How to connect → S3 |
+| SFTP | your login + an **API token** as the password, or a registered **SSH public key** | How to connect → SFTP |
+| FTPS | your login + an **API token** as the password | How to connect → FTPS |
+| NFSv3 | **the export path itself** — it carries 32 bytes of entropy | How to connect → NFS |
 | WebDAV | your login + an **API token** as the password | any token |
-| `filex mount` | `FILEX_URL` + an **API token** | Tokens |
+| `filex mount` | `FILEX_URL` + an **API token** | any token |
 
 Every credential in that table is a **person's** — mint them while signed in as
 yourself, or from a `user` API token. An *app* token (a host app's proxy, a bot)

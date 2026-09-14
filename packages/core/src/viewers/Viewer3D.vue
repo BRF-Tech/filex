@@ -19,6 +19,8 @@
  * (sweep-2026-05-09 bug 21.)
  */
 import { computed, onMounted, ref, watch } from 'vue';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 
 const props = defineProps<{
   url: string;
@@ -57,6 +59,22 @@ async function load(): Promise<void> {
   }
 }
 
+/**
+ * model-viewer failed to FETCH or PARSE the model.
+ *
+ * ⚠ `ready` only means the ~80 KB web component imported. The model itself is
+ * fetched and decoded by model-viewer AFTER it mounts, and when that throws
+ * (a truncated or non-glTF file) it renders an empty canvas and reports the
+ * failure only on this event. Without the listener the person got a silent
+ * black rectangle and nothing else — measured 2026-09-13 on an 8-byte
+ * `turbine.glb`, where the console had `RangeError: Invalid DataView length 12`
+ * and the pane had no text at all.
+ */
+function onModelError(): void {
+  ready.value = false;
+  error.value = props.t ? props.t('viewer.failed_to_load') : 'Failed to load file';
+}
+
 onMounted(load);
 
 watch(() => props.url, () => {
@@ -64,6 +82,15 @@ watch(() => props.url, () => {
   // fallback message).
   load();
 });
+
+/* === ikon:emoji — the fallback screen's mark ==========================
+ * Every viewer opened its "cannot show this" / "still loading" screen with a
+ * 48px colour emoji, one per format, each from whatever emoji font the OS
+ * shipped. The format mark is `lib/fileIcons`'s tile — the SAME tile the row
+ * the person just clicked is wearing, so the fallback is recognisably about
+ * that file — and "loading" is the stroked ring, spun by CSS, because no
+ * still picture can say "still going". */
+const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
 </script>
 
 <template>
@@ -77,13 +104,20 @@ watch(() => props.url, () => {
       shadow-intensity="1"
       :alt="ext + ' model'"
       style="width: 100%; height: 100%; min-height: 480px; display: block"
+      @error="onModelError"
     />
     <div v-else-if="error" class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">📦</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
       <p>{{ error }}</p>
     </div>
     <div v-else class="filex-viewer-fallback">
-      <span class="filex-viewer-fallback__icon">⏳</span>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span
+        class="filex-viewer-fallback__icon filex-viewer-fallback__icon--spin"
+        aria-hidden="true"
+        v-html="actionIconSvg('progress')"
+      ></span>
       <p>{{ t ? t('viewer.loading') : 'Loading…' }}</p>
     </div>
   </div>

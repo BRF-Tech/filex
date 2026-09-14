@@ -5,44 +5,122 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+      content="default-src 'none'; style-src 'unsafe-inline' app://filex; script-src 'unsafe-inline'"
     />
     <title>filex</title>
+    <!-- gorunum:v2-desktop — the product's own tokens, on the product's FIRST
+         screen.
+
+         ⚠⚠ This window used to be a forced dark page (#0b0b0f) with an indigo
+         accent (the old logo indigo) — a palette that exists nowhere else in
+         filex; the product's primary is --fe-primary (#2f6ceb). It is
+         also the first surface anybody sees, so "the app I signed in to looks
+         like a different application from the one that opened" was the first
+         impression the product made.
+
+         It comes from `app://filex` rather than from a copy in this file: the
+         shell page is served from a different host of the same scheme
+         (app://shell → desktop/ui, app://filex → desktop/app), and a second
+         hand-written palette is exactly the thing that drifted. Hence the
+         `app://filex` source in the CSP above — `'self'` is app://shell and
+         would not reach it.
+
+         ⚠ If the stylesheet ever fails to load, every var() resolves to
+         nothing and the page is unreadable rather than merely unstyled. The
+         guard below detects that and falls back to the platform's own colours,
+         which is ugly and legible instead of pretty and invisible. -->
+    <link rel="stylesheet" href="app://filex/style.css" />
+    <script>
+      // The OS decides, and it is allowed to change while this window is open.
+      //
+      // ⚠ NOT the product's theme preference. This page is served from
+      // `app://shell`, a different origin from the app window, so it cannot
+      // read `filex.thememode` — and it should not: there is no account yet,
+      // so there is nobody whose preference it could be. The app window adopts
+      // the preference the moment there is one.
+      (function () {
+        var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+        function apply() {
+          var dark = !!(mq && mq.matches);
+          document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        }
+        apply();
+        if (mq && mq.addEventListener) mq.addEventListener('change', apply);
+      })();
+    </script>
     <style>
-      :root { color-scheme: dark; }
+      /* gorunum:v2-desktop — the connect window, in the product's vocabulary:
+         --fe-* for every colour, 34px controls, the 12/12.5/13px scale. There
+         is no palette in this file. */
+
+      /* ⚠ The fallback the comment above promises. `@supports not (color: var(--fe-bg))`
+         does not answer "did the sheet load" — the syntax is valid either way —
+         so the guard is on the one thing that differs: with no stylesheet the
+         page has no --fe-bg at all, and `var(--fe-bg, Canvas)` resolves to the
+         platform's own window colour. Every rule below uses the two-argument
+         form for exactly that reason, and the second argument is a CSS SYSTEM
+         COLOUR, not a hex — it follows the OS light/dark setting by itself. */
       * { box-sizing: border-box; }
       body {
-        margin: 0; padding: 28px 30px;
-        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-        background: #0b0b0f; color: #e7e7ea;
+        margin: 0;
+        padding: 28px 30px;
+        font: var(--fe-text-md, 13px) / 1.5 var(--fe-font, system-ui), sans-serif;
+        background: var(--fe-bg, Canvas);
+        color: var(--fe-text, CanvasText);
       }
-      h1 { font-size: 18px; margin: 0 0 4px; }
-      p.sub { margin: 0 0 22px; color: #9a9aa4; font-size: 13px; }
-      label { display: block; font-size: 12px; color: #b8b8c0; margin: 14px 0 6px; }
+      /* The app's own mark above the title: this is filex asking, and until an
+         account exists it is the only thing on screen that says so. Its fill is
+         the palette's own --fe-primary — see MARK below. */
+      .mark { width: 36px; height: 36px; display: block; margin-bottom: 14px; }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+      p.sub { margin: 0 0 22px; color: var(--fe-text-muted, GrayText); font-size: var(--fe-text-sm, 12.5px); }
+      label {
+        display: block;
+        font-size: var(--fe-text-sm, 12.5px);
+        font-weight: 500;
+        color: var(--fe-text, CanvasText);
+        margin: 14px 0 6px;
+      }
       input[type=text] {
-        width: 100%; padding: 10px 12px; border-radius: 8px;
-        border: 1px solid #2a2a33; background: #14141a; color: #e7e7ea; font-size: 14px;
+        width: 100%;
+        height: var(--fe-h-md, 34px);
+        padding: 0 10px;
+        border-radius: var(--fe-radius, 8px);
+        border: 1px solid var(--fe-border, GrayText);
+        background: var(--fe-bg, Canvas);
+        color: var(--fe-text, CanvasText);
+        font: inherit;
+        font-size: var(--fe-text-sm, 12.5px);
       }
-      input[type=text]:focus { outline: 2px solid #6366f1; outline-offset: 1px; border-color: transparent; }
+      input[type=text]:focus { outline: none; border-color: var(--fe-primary, Highlight); }
       button {
-        border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
-        background: #6366f1; color: #fff; cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: var(--fe-h-md, 34px);
+        padding: 0 var(--fe-gap, 12px);
+        border: 1px solid var(--fe-primary, Highlight);
+        border-radius: var(--fe-radius, 8px);
+        font: inherit;
+        font-size: var(--fe-text-sm, 12.5px);
+        font-weight: 500;
+        background: var(--fe-primary, Highlight);
+        color: var(--fe-text-on-primary, HighlightText);
+        cursor: pointer;
+        white-space: nowrap;
       }
-      button.ghost { background: #1c1c24; color: #d7d7de; border: 1px solid #2a2a33; }
-      button.danger { background: #2a1416; color: #fca5a5; border: 1px solid #4a1f24; }
-      button:hover { filter: brightness(1.1); }
-      .row { display: flex; align-items: center; gap: 10px; }
-      .between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      .card { border: 1px solid #23232c; background: #121218; border-radius: 10px; padding: 14px; margin-bottom: 10px; }
-      .muted { color: #8b8b95; font-size: 12px; }
-      .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #1c1c24; color: #b8b8c0; border: 1px solid #2a2a33; }
-      .pill.on { background: #10231a; color: #86efac; border-color: #1f4030; }
-      .empty { color: #8b8b95; font-size: 13px; padding: 18px 0; }
-      .err { color: #fca5a5; font-size: 13px; margin-top: 12px; min-height: 18px; }
-      nav { display: flex; gap: 6px; margin-bottom: 20px; }
-      nav button { background: #14141a; color: #b8b8c0; border: 1px solid #23232c; }
-      nav button.active { background: #6366f1; color: #fff; border-color: transparent; }
-      code { background: #14141a; padding: 1px 5px; border-radius: 4px; font-size: 12px; color: #c7c7d1; }
+      button:hover:not(:disabled) { background: var(--fe-primary-hover, Highlight); border-color: var(--fe-primary-hover, Highlight); }
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      button.ghost {
+        background: var(--fe-bg, Canvas);
+        color: var(--fe-text, CanvasText);
+        border-color: var(--fe-border-strong, GrayText);
+      }
+      button.ghost:hover:not(:disabled) { background: var(--fe-bg-hover, Canvas); border-color: var(--fe-border-strong, GrayText); }
+      .row { display: flex; align-items: center; gap: var(--fe-gap-sm, 8px); }
+      .muted { color: var(--fe-text-muted, GrayText); font-size: var(--fe-text-xs, 12px); }
+      .err { color: var(--fe-danger, LinkText); font-size: var(--fe-text-sm, 12.5px); margin-top: 12px; min-height: 18px; }
     </style>
   </head>
   <body>
@@ -136,10 +214,28 @@
           </div>`;
       }
 
+      // The product's logo (web/src/components/LogoMark.vue), verbatim —
+      // including its fill. gorunum:v1 made the mark flat product blue rather
+      // than the old indigo→violet gradient, and it is painted with the
+      // palette's own `--fe-primary`: #2f6ceb light, #5b8cff dark.
+      //
+      // ⚠ The literal after the comma is a floor, not the value in use. `fill`
+      // has no inherited value to fall back to, so if the stylesheet this page
+      // pulls from app://filex ever failed to load the mark would paint BLACK
+      // rather than blue. Measured 2026-09-12: the sheet loads (1410 rules) and
+      // the computed fill is rgb(47, 108, 235).
+      const MARK =
+        '<svg class="mark" viewBox="0 0 32 32" aria-hidden="true">' +
+        '<rect width="32" height="32" rx="7" fill="var(--fe-primary, #2f6ceb)"/>' +
+        '<path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z" ' +
+        'fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>' +
+        '<path d="M11.5 17.5l3 2.5 5.5-6" fill="none" stroke="#fff" stroke-width="1.8" ' +
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
       async function render() {
         state = await window.filexShell.getState();
         root.innerHTML = '';
-        root.appendChild($(`<div>${connectView()}</div>`));
+        root.appendChild($(`<div>${MARK}${connectView()}</div>`));
         wire();
       }
 

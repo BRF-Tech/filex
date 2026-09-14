@@ -9,6 +9,8 @@
 // from the same rule. A surface that clamps differently would mean the same
 // product behaves two ways.
 
+import { formatInstant } from '../composables/useLocale'; /* zaman:z1 */
+
 export interface ExpiryOption {
   /** Days; 0 = never. */
   v: number;
@@ -75,9 +77,17 @@ export function expiryInputMax(maxDays: number | undefined, now: Date = new Date
 export function validUntilLine(expiresAt: string | null | undefined, locale: 'tr' | 'en'): string {
   if (!expiresAt) return locale === 'tr' ? 'Bu bağlantının süresi yoktur.' : 'This link does not expire.';
   const d = new Date(expiresAt);
+  // zaman:z1 — the viewer's chosen clock, not the browser's. "Valid until
+  // 14:05" is a deadline, and a deadline printed in somebody else's zone is
+  // the worst kind of wrong: it looks actionable. Both halves of that — the
+  // zone AND the locale tag — come from `formatInstant`, which is the one
+  // place either is decided. This file used to pass the zone correctly and
+  // then map the tag itself, to 'en-GB', while useLocale mapped it to
+  // 'en-US': the same deadline was spelled "20 Sept 2026, 13:53" in the share
+  // dialog and "Sep 20, 2026, 1:53 PM" in the listing behind it.
   const when = Number.isNaN(d.getTime())
     ? expiresAt
-    : d.toLocaleString(locale === 'tr' ? 'tr-TR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    : formatInstant(d, locale, { dateStyle: 'medium', timeStyle: 'short' });
   return locale === 'tr' ? `Bu bağlantı ${when} tarihine kadar geçerli.` : `This link is valid until ${when}.`;
 }
 

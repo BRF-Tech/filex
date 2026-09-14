@@ -37,7 +37,10 @@ function implementedSyncModes(): string[] {
 
 /** Every `sync_mode: '…'` a fixture script hardcodes, with the file it is in. */
 function hardcodedSyncModes(): Array<{ file: string; value: string }> {
-  const dirs = [path.join(REPO, 'e2e', 'shots'), path.join(REPO, 'e2e', 'helpers')];
+  // e2e/tests too: 70-multi-storage.spec.ts still seeded 'manual' in 0.41.0's
+  // cycle, a week after the scripts here were fixed. It only runs with S3_*
+  // set, so it rotted where no run would ever show it.
+  const dirs = ['shots', 'helpers', 'tests'].map((d) => path.join(REPO, 'e2e', d));
   const out: Array<{ file: string; value: string }> = [];
   for (const dir of dirs) {
     for (const name of readdirSync(dir)) {

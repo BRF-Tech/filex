@@ -114,35 +114,20 @@ func (p *Pipeline) generateOffice(ctx context.Context, node *model.Node, drv sto
 	}
 pdfFound:
 
-	// Now reuse the gs/pdftoppm path.
+	// ⚠ ONE renderer, shared with generatePDF. This function used to carry
+	// its own transcription of the gs/pdftoppm block, which is exactly how
+	// the office path kept every bug the PDF path had already been fixed
+	// for: the missing downscale (a 358 KB full-page JPEG behind a 184×108
+	// card), the zero-exit-but-no-file case, and pdftoppm's zero-padded
+	// output name. A document that reaches a card through LibreOffice and
+	// one that arrives as a PDF are the same picture of the same page —
+	// they must not be produced by two pieces of code.
 	if err := os.MkdirAll(p.cacheDir, 0o755); err != nil {
 		return err
 	}
 	out := filepath.Join(p.cacheDir, fmt.Sprintf("%d.jpg", node.ID))
-	if path, _ := exec.LookPath("gs"); path != "" {
-		cmd := exec.CommandContext(ctx, path,
-			"-sDEVICE=jpeg",
-			"-dFirstPage=1", "-dLastPage=1",
-			"-r96",
-			"-dJPEGQ=80",
-			"-o", out,
-			pdfPath,
-		)
-		if outBytes, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("thumb: gs after libreoffice: %w (%s)", err, string(outBytes))
-		}
-		return nil
+	if err := renderPDFPage1(ctx, pdfPath, out); err != nil {
+		return fmt.Errorf("thumb: after libreoffice: %w", err)
 	}
-	if path, _ := exec.LookPath("pdftoppm"); path != "" {
-		cmd := exec.CommandContext(ctx, path,
-			"-jpeg", "-f", "1", "-l", "1", "-r", "96",
-			pdfPath, out[:len(out)-4],
-		)
-		if outBytes, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("thumb: pdftoppm after libreoffice: %w (%s)", err, string(outBytes))
-		}
-		_ = os.Rename(out[:len(out)-4]+"-1.jpg", out)
-		return nil
-	}
-	return fmt.Errorf("thumb: libreoffice OK but no PDF→JPG renderer")
+	return nil
 }

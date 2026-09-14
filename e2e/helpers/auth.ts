@@ -30,7 +30,8 @@ export async function dismissInstallBanner(page: Page) {
 }
 
 /**
- * Log in via the Vue admin form. Lands on /admin/dashboard on success.
+ * Log in via the Vue admin form. Lands on the account's start page on success:
+ * Home for everyone by default, the dashboard for an admin who picked it.
  *
  * The login page in OIDC-enabled builds shows TWO buttons: the local submit
  * and a `Sign in with SSO (Keycloak)` redirect, so the submit is picked by
@@ -69,7 +70,12 @@ export async function loginAs(page: Page, email = ADMIN_EMAIL, password = ADMIN_
   // it looks like the machine being busy (the suite spawns thumbnail
   // subprocesses), not a defect. What is certain is only that the number being
   // removed was arbitrary and smaller than the project's own.
-  await page.waitForURL(/\/admin\/dashboard/);
+  //
+  // ⚠ The start page, not the dashboard. Since 0.41.0 everybody — admins
+  // included — lands on Home unless they chose the dashboard in user settings
+  // (web/src/lib/startPage.ts). Waiting for /admin/dashboard timed out on a
+  // login that had worked, and every spec behind this helper went red for it.
+  await page.waitForURL(/\/admin\/(home|dashboard)([?#]|$)/);
 }
 
 /**
@@ -101,13 +107,26 @@ export async function apiLogin(
  */
 export async function logout(page: Page) {
   try {
-    const trigger = page.getByTestId('user-menu-button')
+    // Since 0.41.0 the landing page is the explorer, whose avatar menu is
+    // `explore-account` with an `explore-signout` row; the admin pages keep
+    // their own top bar menu.
+    const trigger = page
+      .getByTestId('explore-account')
+      .or(page.getByTestId('user-menu-button'))
       .or(page.getByRole('button', { name: /admin@local|profile|user|hesap/i }));
     await trigger.first().click({ timeout: 3_000 });
-    await page.getByRole('menuitem', { name: /logout|çıkış|sign out/i }).click({ timeout: 2_000 });
+    await page
+      .getByTestId('explore-signout')
+      .or(page.getByRole('menuitem', { name: /logout|çıkış|sign out/i }))
+      .first()
+      .click({ timeout: 2_000 });
   } catch {
-    // Last-resort: hit the API directly and bounce to login.
+    // Last resort. ⚠ The web app authenticates with a bearer kept in
+    // sessionStorage as well as the cookie, so clearing cookies alone leaves
+    // the session alive and a following "is the session gone?" assertion
+    // fails for a reason that has nothing to do with sign-out.
     await page.context().clearCookies();
+    await page.evaluate(() => sessionStorage.removeItem('filex.bearer')).catch(() => undefined);
     await page.goto('/admin/login');
   }
   await page.waitForURL(/\/admin\/login/);

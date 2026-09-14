@@ -14,7 +14,8 @@
 // Environment:
 //   FILEX_BIN     binary to run (default: bin/filex-starstags.exe, bin/filex.exe, bin/filex)
 //   SHOTS_URL     use an ALREADY-RUNNING instance instead of spawning one
-//   SHOTS_OUT     output directory (default: ../docs/screenshots/starstags)
+//   SHOTS_OUT     output directory (default: docs/screenshots/<release>/starstags,
+//                 the release named in ./release.mjs)
 //   SHOTS_KEEP=1  leave the instance running afterwards
 //
 // ⚠ Every shot is in English three ways over — browser locale, the stored
@@ -28,6 +29,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { seedFixtures } from './fixtures.mjs';
+import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -37,13 +39,32 @@ const PORT = Number(process.env.SHOTS_PORT ?? 5311);
 // a server bound to 127.0.0.1 answers that with ECONNREFUSED — which looks
 // exactly like a server that failed to start (e2e/README.md).
 const URL = process.env.SHOTS_URL ?? `http://127.0.0.1:${PORT}`;
-const OUT = process.env.SHOTS_OUT ?? join(REPO, 'docs/screenshots/starstags');
+const OUT = process.env.SHOTS_OUT ?? shotsDir('starstags');
 const DATA = join(tmpdir(), 'filex-starstags-data');
 
 const ADMIN = { email: 'admin@local', password: 'admin' };
 
 const log = (...a) => console.log('•', ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Collapse/expand the navigation panel.
+ *
+ * ⚠ The control is `toolbar-nav`, in the top bar's left corner, and it has ONE
+ * definition at every width (gorunum:v2-topbar). The panel's own
+ * `sidenav-toggle` survives only inside `v-if="narrow"`, as the 390px drawer's
+ * dismiss — so clicking it at 1440 waits 30 seconds and then says "timeout",
+ * which tells the next reader nothing about what actually moved. Same helper,
+ * same message as e2e/shots/sidenav.mjs.
+ */
+async function toggleNav(page) {
+  const n = await page.locator('[data-testid="toolbar-nav"]').count();
+  if (n !== 1) {
+    throw new Error(`expected exactly one [data-testid="toolbar-nav"], found ${n}`);
+  }
+  await page.locator('[data-testid="toolbar-nav"]').click();
+  await sleep(500);
+}
 
 const results = [];
 function check(name, ok, detail) {
@@ -267,7 +288,7 @@ async function signIn(page, base, who) {
   await page.fill('#email', who.email);
   await page.fill('#password', who.password);
   await page.click('button[type="submit"]');
-  await page.waitForURL(/\/(admin|drive)\/(dashboard|explore)/, { timeout: 25_000 });
+  await page.waitForURL(/\/(admin|drive)\/(dashboard|explore|home)/, { timeout: 25_000 });
 }
 
 async function waitForExplorer(page) {
@@ -710,8 +731,7 @@ async function run(seeded) {
     // ── 9. the rail ──────────────────────────────────────────────────────
     await page.goto(`${URL}/admin/explore`);
     await waitForExplorer(page);
-    await page.locator('[data-testid="sidenav-toggle"]').click();
-    await sleep(500);
+    await toggleNav(page);
     check(
       'the rail keeps ONE Tags button instead of a column of identical glyphs',
       (await page.locator('[data-testid="sidenav-tags-rail"]').count()) === 1 &&

@@ -11,13 +11,35 @@ import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
 import { menuShortcutHint } from '../composables/useKeyboardShortcuts';
+import { actionIconSvg } from '../lib/actionIcons';
 
 export interface ContextAction {
   key: string;
   label: string;
+  /**
+   * gorunum:v1-icons — OPTIONAL icon override. Rows normally need nothing
+   * here: the glyph is looked up by `key` in lib/actionIcons. Set this to
+   *   • another icon key, when one action has two faces (`star` / `unstar`);
+   *   • any literal string (an emoji), when an embedder wants its own mark —
+   *     an unknown name draws no SVG and the string is printed as-is.
+   */
   icon?: string;
   danger?: boolean;
   disabled?: boolean;
+  /**
+   * tasi:m1 — WHY, in one sentence, for a row that is greyed out.
+   *
+   * ⚠ A disabled control has to explain itself or it is indistinguishable from
+   * a broken one. Sharing works on one item at a time, so "Paylaş / İzinler"
+   * greys out above a multi-selection — grey with a reason reads as a rule,
+   * grey without one reads as a bug, and HIDING it (which is what this row did
+   * until 2026-09-13) reads as the feature not existing.
+   *
+   * Rendered as the native `title` on both surfaces. Absent leaves the
+   * tooltip each surface already builds — the label plus its shortcut in the
+   * selection bar, nothing in the menu.
+   */
+  title?: string;
   hidden?: boolean;
   divider?: boolean;
   /**
@@ -59,6 +81,15 @@ const { t } = useLocale(() => props.locale); // bag:b4 — sheet aria labels nee
  * otherwise the row's own key is looked up in the shared menu map. */
 function hintFor(a: ContextAction): string {
   return menuShortcutHint(a.shortcutId ?? a.key);
+}
+
+/* gorunum:v1-icons — the row's glyph. `icon` is consulted FIRST because that
+ * is where a two-faced action names its variant (`star` vs `unstar`) and where
+ * an embedder puts its own mark; the action's own key is the default. An
+ * unrecognised name returns '' and the template falls back to printing the
+ * string, so a host that still passes an emoji keeps it. */
+function iconFor(a: ContextAction): string {
+  return actionIconSvg(a.icon || a.key);
 }
 
 const open = ref(false);
@@ -328,10 +359,13 @@ defineExpose({ show, hide });
                 class="fe-ctx__item fe-sheet__item"
                 :class="{ 'is-danger': a.danger, 'is-disabled': a.disabled }"
                 :disabled="a.disabled"
+                :title="a.title"
                 role="menuitem"
                 @click="pick(a)"
               >
-                <span v-if="a.icon" class="fe-ctx__icon" aria-hidden="true">{{ a.icon }}</span>
+                <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+                <span v-if="iconFor(a)" class="fe-ctx__icon" aria-hidden="true" v-html="iconFor(a)"></span>
+                <span v-else-if="a.icon" class="fe-ctx__icon" aria-hidden="true">{{ a.icon }}</span>
                 <span class="fe-ctx__label">{{ a.label }}</span>
                 <span v-if="hintFor(a)" class="fe-ctx__key" aria-hidden="true">{{ hintFor(a) }}</span>
               </button>
@@ -356,10 +390,13 @@ defineExpose({ show, hide });
               class="fe-ctx__item"
               :class="{ 'is-danger': a.danger, 'is-disabled': a.disabled }"
               :disabled="a.disabled"
+              :title="a.title"
               role="menuitem"
               @click="pick(a)"
             >
-              <span v-if="a.icon" class="fe-ctx__icon" aria-hidden="true">{{ a.icon }}</span>
+              <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+              <span v-if="iconFor(a)" class="fe-ctx__icon" aria-hidden="true" v-html="iconFor(a)"></span>
+              <span v-else-if="a.icon" class="fe-ctx__icon" aria-hidden="true">{{ a.icon }}</span>
               <span class="fe-ctx__label">{{ a.label }}</span>
               <!-- tus:t1 — the key that does this from the keyboard, read from
                    the registry so a remap reaches it. Empty for a verb with no

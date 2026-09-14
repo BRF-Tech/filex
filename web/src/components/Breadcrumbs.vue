@@ -9,21 +9,32 @@ const { t } = useI18n();
 
 interface Crumb {
   label: string;
+  /** The route this crumb stands for — the leaf's is the current route. */
+  name: string;
   to?: { name: string };
 }
 
+/**
+ * Dashboard › parent › this page — with no step named twice.
+ *
+ * ⚠ The trail always starts at the dashboard, and the dashboard's own leaf is
+ * the dashboard, so standing on it read "Dashboard › Dashboard" (v0.41.0
+ * screenshot pass). A crumb that names the route the previous crumb already
+ * names is dropped — which leaves the dashboard a single crumb and hides the
+ * trail there, and also covers a page whose `meta.parent` is the dashboard.
+ */
 const crumbs = computed<Crumb[]>(() => {
-  const out: Crumb[] = [{ label: t('nav.dashboard'), to: { name: 'dashboard' } }];
+  const out: Crumb[] = [{ label: t('nav.dashboard'), name: 'dashboard', to: { name: 'dashboard' } }];
   const parent = route.meta?.parent as string | undefined;
   if (parent) {
     // Best-effort label: nav.<parent> if it exists, else the route name itself.
     const key = `nav.${parent}`;
-    out.push({ label: t(key, parent), to: { name: parent } });
+    out.push({ label: t(key, parent), name: parent, to: { name: parent } });
   }
   if (route.meta?.breadcrumb) {
-    out.push({ label: t(route.meta.breadcrumb as string) });
+    out.push({ label: t(route.meta.breadcrumb as string), name: String(route.name ?? '') });
   }
-  return out;
+  return out.filter((c, i) => i === 0 || c.name !== out[i - 1].name);
 });
 
 const single = computed(() => crumbs.value.length <= 1);

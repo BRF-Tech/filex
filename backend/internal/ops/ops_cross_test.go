@@ -188,6 +188,29 @@ func TestCross_CopyTree_TakesTheWholeSubtree(t *testing.T) {
 	fi, err := os.Stat(filepath.Join(f.rootB, "proje", "bos"))
 	require.NoError(t, err, "empty subfolder must survive the trip")
 	require.True(t, fi.IsDir())
+
+	// …and the DESTINATION's index knows the whole subtree: listings are
+	// cache-first once a storage has synced. This is the cross-storage mirror
+	// (the transfer's per-node hooks calling SyncCopyAcross); the same-storage
+	// copy is one driver call and is guarded by
+	// TestOpsWorker_CopyDir_MirrorsTheWholeSubtree. (Assertion from @alfatm's
+	// fork, dbf94c23.)
+	ctx := context.Background()
+	for _, want := range []struct {
+		rel string
+		typ model.NodeType
+	}{
+		{"proje", model.NodeTypeDirectory},
+		{"proje/README.md", model.NodeTypeFile},
+		{"proje/src", model.NodeTypeDirectory},
+		{"proje/src/main.go", model.NodeTypeFile},
+		{"proje/bos", model.NodeTypeDirectory},
+	} {
+		n, err := f.store.GetNodeByPath(ctx, f.stB.ID, crossHash(f.stB.ID, want.rel))
+		require.NoError(t, err)
+		require.NotNilf(t, n, "the destination index must hold a node for %s", want.rel)
+		require.Equalf(t, want.typ, n.Type, "node type for %s", want.rel)
+	}
 }
 
 func TestCross_Copy_KeepsTheSourceMtime(t *testing.T) {

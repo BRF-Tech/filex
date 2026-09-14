@@ -28,9 +28,12 @@ import type { FileApi, Grant, NodeVersion } from '../composables/useFileApi';
 import type { FileNode, ShareInfo } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { fileIconSvg } from '../lib/fileIcons';
+import { fileIconTile, typeLabelFor } from '../lib/fileIcons';
+import { actionIconSvg } from '../lib/actionIcons';
+import TagPicker from './TagPicker.vue';
 
-const props = defineProps<{
+const props = withDefaults(
+  defineProps<{
   api: FileApi;
   /** Current selection (empty array → current-folder summary). */
   nodes: FileNode[];
@@ -40,6 +43,19 @@ const props = defineProps<{
   dirCount: number;
   /** RBAC effective level of the current dir ('' = ACL not enforced). */
   dirPerm?: string;
+  /**
+   * pane:p1 — non-empty ⇒ `nodes` is the LAST selected thing, not what is
+   * ticked in the pane the person is looking at; the value NAMES where it
+   * lives.
+   *
+   * ⚠ The panel holds its subject on purpose (owner, 2026-09-13: "son seçilen
+   * şeyi tutsun"), which means it can be describing a file in the other half of
+   * a split window — so it has to SAY so. Without this line the panel would be
+   * a fact with no address: three sections about `report.pdf` over a listing
+   * with nothing ticked in it, and no way to tell whether that is the file you
+   * just clicked or the one you clicked five minutes ago.
+   */
+  heldIn?: string;
   locale: LocaleCode;
   /** Narrow/embed mode → full-size overlay presentation. */
   narrow?: boolean;
@@ -61,7 +77,42 @@ const props = defineProps<{
    * would be worse than the two real feeds.
    */
   tabs?: boolean;
-}>();
+  /* === etiket:t1 — the Tags section ==================================
+   *
+   * The three props a self-fetching child in this package takes, passed
+   * straight through to `TagPicker`: it talks to
+   * `/api/files/manager/tags` itself and needs all three to do it.
+   *
+   * ⚠ `authCredentials` is not decoration. A credentialed cross-origin
+   * request cannot be answered with `Access-Control-Allow-Origin: *`, so
+   * an embed served from a different origin to the API loses its tags
+   * without it — the same reason TagPicker's own prop documents.
+   *
+   * All three optional: a host that passes none gets no Tags section
+   * rather than a control that reads nothing. That is the honest failure
+   * for this panel, which hides every section it cannot fill.
+   */
+  /** API origin for the tag routes. `''` is valid — it means "same origin". */
+  apiBase?: string;
+  authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  authCredentials?: RequestCredentials;
+  }>(),
+  {
+    /* ⚠ ON by default, and that is the owner's call of 2026-09-12, not a
+     * taste: the Details/Activity split, "People with access" and the share
+     * link row used to arrive only with `uiProfile: 'drive'`, which meant the
+     * screen the owner actually uses — the admin one — was the only screen
+     * that never got them ("their app and our app will be one to one";
+     * web/src/views/Explore.vue carries the full quote). The profile string
+     * is gone; this is the last gate that answered to it, so it answers yes.
+     * An embedder that wants the old flat scroll can still pass `:tabs="false"`.
+     */
+    tabs: true,
+    narrow: false,
+    dirPerm: '',
+    thumbSrc: undefined,
+  },
+);
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -71,9 +122,31 @@ const emit = defineEmits<{
   (e: 'toast', message: string): void;
   /** Fired after a successful restore/snapshot so the host can reload. */
   (e: 'changed'): void;
+  /**
+   * etiket:t1 — tags on this node were edited here.
+   *
+   * ⚠ The host drops its cached tag list on this, refreshes the panel's
+   * Tags section and reloads an open tag view — exactly what the
+   * context-menu tag modal already causes. Without the emit the edit
+   * lands on the server and the sidebar keeps showing the list from
+   * before it, which is the kind of staleness nobody notices until they
+   * go looking for the tag they just made.
+   */
+  (e: 'tags-changed', tags: string[]): void;
+  /**
+   * etiket:t1 — a tag chip was clicked: open that tag's view.
+   *
+   * ⚠ Re-emitted rather than handled, like every other navigation this panel
+   * offers. The panel knows a tag's NAME; only the host knows that the tag view
+   * is a `.tag~<name>` sentinel, how to leave whatever view is on screen to get
+   * there, and what that does to the tab strip.
+   */
+  (e: 'open-tag', tag: string): void;
 }>();
 
-const { t, formatSize, nodeDisplayName } = useLocale(() => props.locale);
+const { t, formatSize, formatDate: formatDateOf, nodeDisplayName } = useLocale(
+  () => props.locale,
+);
 
 // ── selection shape ──────────────────────────────────────────────────
 const single = computed<FileNode | null>(() =>
@@ -95,20 +168,100 @@ const thumb = computed<string | null>(() =>
   single.value && isFile.value && props.thumbSrc ? props.thumbSrc(single.value) : null,
 );
 
+/* === gorunum:v4-dialogs — what the head says =============================
+ *
+ * The panel used to open with the word "Details" and put the item's own name
+ * a section lower, under a second heading. The reference shell puts the item
+ * in the head — its glyph, its name, and one caption naming what it is — and
+ * that is the right way round: the panel is ABOUT the item, and a header that
+ * names the panel instead of its subject is a label on the frame.
+ *
+ * All three fall back cleanly: a multi-selection is counted, no selection at
+ * all describes the folder being viewed. Nothing here invents a fact — the
+ * caption is the same kind name the listing's Type column prints
+ * (`typeLabelFor`) and the same size formatter the rows use.
+ * ---------------------------------------------------------------------- */
+
+/** The name in the head: the item, the count, or the folder you are in. */
+const headName = computed<string>(() => {
+  if (isMulti.value) return t('inspector.items', { n: props.nodes.length });
+  if (single.value) return nodeDisplayName(single.value);
+  return props.dirLabel;
+});
+
+/** The line under it — "Folder", "TypeScript · 4.8 KB", "12.4 MB in total". */
+const headCaption = computed<string>(() => {
+  if (isMulti.value) return formatSize(multiTotal.value);
+  const n = single.value;
+  if (n) {
+    const kind = typeLabelFor(n, t);
+    if (n.type === 'dir') return kind;
+    const size = typeof n.size === 'number' ? formatSize(n.size) : '';
+    return size ? `${kind} · ${size}` : kind;
+  }
+  return t('inspector.folder_items', { n: props.dirCount });
+});
+
+/**
+ * Whether the thumbnail is worth the space it takes.
+ *
+ * ⚠ `thumbSrc` answers for text files too — the host renders the source and
+ * hands back a picture of it — and at panel width that came out as a blank
+ * olive rectangle with "TS" in the middle of it: a large, prominent block
+ * that tells the reader less than the one-word caption already did. A
+ * thumbnail earns its place when the file IS a picture; for everything else
+ * the type tile and the kind name are the whole of what an image could say.
+ */
+const previewSrc = computed<string | null>(() =>
+  thumb.value && /^(image|video)[/]/.test(String(single.value?.mime_type ?? ''))
+    ? thumb.value
+    : null,
+);
+
+/**
+ * The glyph — the LISTING'S tile, not a second drawing of the same idea and
+ * not the thumbnail.
+ *
+ * ⚠ It was the thumbnail first, and that was wrong twice over: the host
+ * resolves a thumbnail for text files too, so `app.ts` came out as a 30px
+ * smudge of rendered source with no glyph in it at all, and the panel's mark
+ * then disagreed with the mark on the row it describes. `fileIconTile` is the
+ * same object the row draws, so the head and the row match by construction.
+ * The thumbnail is still shown — below, at a size where a picture is a
+ * picture.
+ */
+const headIcon = computed<string>(() =>
+  fileIconTile(single.value && !isMulti.value ? single.value : { type: 'dir' }),
+);
+
+/**
+ * Whether the Tags section has everything it needs.
+ *
+ * A node id, because the tag routes are keyed by it (a client-synthesized row
+ * — a multi-storage virtual folder — has none), and a host that wired the
+ * three props. Missing either, the section is not drawn at all rather than
+ * drawn empty: an "Add tag" button that cannot save is worse than no button.
+ */
+const canTag = computed(
+  () => nodeId.value != null && props.apiBase !== undefined && !isMulti.value,
+);
+
 function shortHash(h: string): string {
   return h.length > 12 ? `${h.slice(0, 12)}…` : h;
 }
 
+/**
+ * zaman:z1 — the panel prints the SAME string the row behind it prints.
+ *
+ * This used to be a private `formatDate()` that called `toLocaleString` with
+ * no `timeZone` at all, so the details panel answered on the BROWSER's clock
+ * while the listing cell four pixels away answered on the zone the viewer
+ * chose. It also mapped the locale by hand ('en-GB'), so even in one zone the
+ * two disagreed about the shape of a date. Both halves live in
+ * `useLocale.formatDate` now; `{ time: true }` is the listing's own variant.
+ */
 function formatDate(ms: number | undefined): string {
-  if (!ms) return '—';
-  try {
-    return new Date(ms).toLocaleString(props.locale === 'en' ? 'en-GB' : 'tr-TR', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-  } catch {
-    return new Date(ms).toISOString();
-  }
+  return formatDateOf(ms, { time: true }) || '—';
 }
 
 function formatDateStr(s: string | undefined | null): string {
@@ -359,7 +512,7 @@ const activityUsable = computed(
 /* === /surucu:d1 === */
 
 watch(
-  () => props.nodes.map((n) => n.path).join(' '),
+  () => props.nodes.map((n) => n.path).join('\u0000'),
   () => void refresh(),
   { immediate: true },
 );
@@ -480,15 +633,46 @@ watch(
     role="complementary"
     :aria-label="t('inspector.title')"
   >
+    <!-- The head is about the ITEM, not about the panel: its glyph, its name
+         and one caption naming what it is. "Copy name" is next to the name it
+         copies; the close button is last, on the edge. -->
     <header class="fe-inspector__head">
-      <h2 class="fe-inspector__title">{{ t('inspector.title') }}</h2>
+      <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
+      <span class="fe-inspector__head-icon" aria-hidden="true" v-html="headIcon"></span>
+      <div class="fe-inspector__head-text">
+        <h2 class="fe-inspector__title" :title="headName">{{ headName }}</h2>
+        <p class="fe-inspector__caption">{{ headCaption }}</p>
+        <!-- pane:p1 — the held-subject line. Drawn ONLY while this panel is
+             describing the last selected thing rather than a live selection,
+             and it names the folder that thing is in, because with a split
+             window that folder may not be the one on screen. `role="note"`:
+             it is a fact about the panel, not another fact about the file. -->
+        <p v-if="heldIn" class="fe-inspector__held" role="note" data-testid="inspector-held">
+          {{ t('inspector.held', { where: heldIn }) }}
+        </p>
+      </div>
+      <button
+        v-if="single"
+        type="button"
+        class="fe-inspector__iconbtn"
+        :title="t('inspector.copy_name')"
+        :aria-label="t('inspector.copy_name')"
+        data-testid="inspector-copy-name"
+        @click="copyText(headName)"
+      >
+        <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+        <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+      </button>
       <button
         type="button"
-        class="fe-inspector__close"
+        class="fe-inspector__iconbtn fe-inspector__close"
         :title="t('inspector.close')"
         :aria-label="t('inspector.close')"
         @click="emit('close')"
-      >×</button>
+      >
+        <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+        <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
+      </button>
     </header>
 
     <!-- surucu:d1 — Details / Activity. Rendered only in the drive shell; the
@@ -519,35 +703,40 @@ watch(
       <section v-if="!tabs || tab === 'details'" class="fe-inspector__section">
         <h3 class="fe-inspector__heading">{{ t('inspector.section.general') }}</h3>
 
-        <!-- Multi selection → summary -->
-        <div v-if="isMulti" class="fe-inspector__hero">
-          <span class="fe-inspector__bigicon" v-html="fileIconSvg({ type: 'dir' })"></span>
-          <p class="fe-inspector__name">
-            {{ t('inspector.items_summary', { n: nodes.length, size: formatSize(multiTotal) }) }}
-          </p>
-        </div>
-
-        <!-- Single selection → full meta -->
-        <template v-else-if="single">
-          <div class="fe-inspector__hero">
-            <img
-              v-if="thumb"
-              class="fe-inspector__thumb"
-              :src="thumb"
-              alt=""
-              aria-hidden="true"
-            />
-            <span
-              v-else
-              class="fe-inspector__bigicon"
-              v-html="fileIconSvg(single)"
-            ></span>
-            <p class="fe-inspector__name" :title="single.basename">
-              {{ nodeDisplayName(single) }}
-            </p>
+        <!-- Multi selection → summary. The head already counts them, so this
+             is the one fact the head does not carry. -->
+        <dl v-if="isMulti" class="fe-inspector__meta">
+          <div class="fe-inspector__row">
+            <dt>{{ t('inspector.size') }}</dt>
+            <dd>{{ formatSize(multiTotal) }}</dd>
           </div>
+        </dl>
 
+        <!-- Single selection → full meta.
+             ⚠ No Owner row. There is no per-node owner on the wire
+             (`handlers/shared.go`: "There is no per-node owner"), so the
+             reference shell's "Owner: You" would be a constant wearing the
+             shape of a fact. -->
+        <template v-else-if="single">
+          <!-- The thumbnail, when the host resolved one. Wide and short: this
+               is the one place in the panel where a picture beats a word, and
+               the 30px square in the head is not that place.
+               ⚠ INSIDE this branch, not before it: a `v-if` sibling between
+               `v-if="isMulti"` and this `v-else-if` silently captures the
+               else — which is exactly what happened, and the whole General
+               table stopped rendering while the heading above it stayed. -->
+          <img
+            v-if="previewSrc"
+            class="fe-inspector__preview"
+            :src="previewSrc"
+            alt=""
+            aria-hidden="true"
+          />
           <dl class="fe-inspector__meta">
+            <div class="fe-inspector__row">
+              <dt>{{ t('inspector.type') }}</dt>
+              <dd>{{ typeLabelFor(single, t) }}</dd>
+            </div>
             <div class="fe-inspector__row">
               <dt>{{ t('inspector.path') }}</dt>
               <dd class="fe-inspector__pathcell">
@@ -558,7 +747,10 @@ watch(
                   :title="t('inspector.copy')"
                   :aria-label="t('inspector.copy')"
                   @click="copyText(single.path)"
-                >⧉</button>
+                >
+                  <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+                  <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                </button>
               </dd>
             </div>
             <div v-if="isFile" class="fe-inspector__row">
@@ -573,6 +765,30 @@ watch(
               <dt>{{ t('inspector.mime') }}</dt>
               <dd class="fe-inspector__mime">{{ single.mime_type }}</dd>
             </div>
+            <!-- ⚠ The node id lives HERE and nowhere else (owner's call,
+                 2026-09-13). It used to be a row in the right-click menu and the
+                 selection bar — a developer's handle on a support ticket sitting
+                 in front of everyone, twice. This panel is where the other
+                 technical facts about a file already are (Path, MIME, ETag), and
+                 it is still one click to copy. Drawn only when the row actually
+                 has one: a client-synthesized row (a multi-storage folder) has
+                 no backend id, and an empty "ID —" teaches nothing. -->
+            <div v-if="typeof single.id === 'number'" class="fe-inspector__row">
+              <dt>{{ t('inspector.nodeId') }}</dt>
+              <dd class="fe-inspector__pathcell">
+                <span class="fe-inspector__path">{{ single.id }}</span>
+                <button
+                  type="button"
+                  class="fe-inspector__copy"
+                  :title="t('inspector.copy')"
+                  :aria-label="t('inspector.copy')"
+                  @click="copyText(String(single.id))"
+                >
+                  <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+                  <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                </button>
+              </dd>
+            </div>
             <div v-if="etag" class="fe-inspector__row">
               <dt>{{ t('inspector.etag') }}</dt>
               <dd class="fe-inspector__pathcell">
@@ -583,18 +799,41 @@ watch(
                   :title="t('inspector.copy')"
                   :aria-label="t('inspector.copy')"
                   @click="copyText(etag)"
-                >⧉</button>
+                >
+                  <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+                  <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                </button>
               </dd>
             </div>
           </dl>
         </template>
 
-        <!-- No selection → current folder summary -->
-        <div v-else class="fe-inspector__hero">
-          <span class="fe-inspector__bigicon" v-html="fileIconSvg({ type: 'dir' })"></span>
-          <p class="fe-inspector__name" :title="dirLabel">{{ dirLabel }}</p>
-          <p class="fe-inspector__sub">{{ t('inspector.folder_items', { n: dirCount }) }}</p>
-        </div>
+        <!-- No selection → nothing more to say. The head already names the
+             folder you are in and counts what is in it. -->
+        <p v-else class="fe-inspector__empty">{{ t('inspector.select_hint') }}</p>
+      </section>
+
+      <!-- ══ etiket:t1 — Etiketler ══
+           The SAME `TagPicker` the context menu opens in a modal, mounted
+           inline. Not a second tag editor: one component, so the chips, the
+           colours and the add flow are identical wherever tags are edited,
+           and a fix to any of them reaches both places at once. -->
+      <section
+        v-if="canTag && (!tabs || tab === 'details')"
+        class="fe-inspector__section"
+        data-testid="inspector-tags"
+      >
+        <h3 class="fe-inspector__heading">{{ t('inspector.section.tags') }}</h3>
+        <TagPicker
+          :node-id="nodeId as number"
+          :locale="locale"
+          :api-base="apiBase"
+          :auth-headers="authHeaders"
+          :auth-credentials="authCredentials"
+          @change="(tags: string[]) => emit('tags-changed', tags)"
+          @open="(tag: string) => emit('open-tag', tag)"
+          @error="() => emit('toast', t('inspector.error'))"
+        />
       </section>
 
       <!-- ══ Sürümler ══ -->
@@ -736,7 +975,8 @@ watch(
              button that changes it. Only when there is no link yet; the list
              below is what an item that HAS links has always shown. -->
         <div v-if="tabs && shares.length === 0" class="fe-inspector__linkrow">
-          <span class="fe-inspector__linkicon" aria-hidden="true">🔗</span>
+          <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+          <span class="fe-inspector__linkicon" aria-hidden="true" v-html="actionIconSvg('link')"></span>
           <span class="fe-inspector__linknone">{{ t('inspector.link.none') }}</span>
           <button
             type="button"
@@ -762,7 +1002,10 @@ watch(
               :title="t('inspector.shares.copy')"
               :aria-label="t('inspector.shares.copy')"
               @click="copyText(s.url)"
-            >⧉</button>
+            >
+              <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
+              <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+            </button>
           </li>
         </ul>
       </section>

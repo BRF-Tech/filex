@@ -14,6 +14,8 @@
  *   - tab vs comma auto-detection (manual override via toolbar)
  */
 import { computed, onMounted, ref, watch } from 'vue';
+import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
+import { fileIconTile } from '../lib/fileIcons'; /* ikon:emoji */
 import { fetchViewerText } from '../composables/useViewerFetch';
 
 const props = defineProps<{
@@ -147,17 +149,32 @@ watch(filter, () => {
 function tt(key: string, fallback: string, vars?: Record<string, string | number>): string {
   return props.t ? props.t(key, vars) : fallback;
 }
+
+/* === ikon:emoji — the fallback screen's mark ==========================
+ * Every viewer opened its "cannot show this" / "still loading" screen with a
+ * 48px colour emoji, one per format, each from whatever emoji font the OS
+ * shipped. The format mark is `lib/fileIcons`'s tile — the SAME tile the row
+ * the person just clicked is wearing, so the fallback is recognisably about
+ * that file — and "loading" is the stroked ring, spun by CSS, because no
+ * still picture can say "still going". */
+const typeTile = computed(() => fileIconTile({ type: 'file', extension: props.ext }));
 </script>
 
 <template>
   <div class="filex-viewer-csv">
     <div class="filex-viewer-csv__pane">
       <div v-if="error" class="filex-viewer-fallback">
-        <span class="filex-viewer-fallback__icon">📊</span>
+        <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span class="filex-viewer-fallback__icon" aria-hidden="true" v-html="typeTile"></span>
         <p>{{ error }}</p>
       </div>
       <div v-else-if="loading" class="filex-viewer-fallback">
-        <span class="filex-viewer-fallback__icon">⏳</span>
+        <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons + lib/actionIcons -->
+      <span
+        class="filex-viewer-fallback__icon filex-viewer-fallback__icon--spin"
+        aria-hidden="true"
+        v-html="actionIconSvg('progress')"
+      ></span>
         <p>{{ tt('viewer.loading', 'Loading…') }}</p>
       </div>
       <table v-else class="filex-viewer-csv__table">

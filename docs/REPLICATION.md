@@ -66,7 +66,9 @@ driver* that fans its writes out to the target. The target itself is invisible �
 it will never appear as a folder and users can't browse it.
 
 Both a storage and a target use the **same adapters** (`local` · `s3` · `sftp` ·
-`webdav` · `ftp`) and the **same `config` shape**. See
+`webdav` · `ftp` · `smb`) and the **same `config` shape** — the target dialog
+renders from the same driver descriptors the storage form does, so a driver
+cannot be offered for one and missing from the other. See
 [STORAGE.md → Adapters](STORAGE.md#adapters) for every adapter's config keys.
 
 > **Pick a *different* backend for the target.** Mirroring an S3 bucket to
@@ -138,7 +140,7 @@ curl -X POST https://files.example.com/api/admin/replication-targets \
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `name` | string | — | Display name for the target. Required. |
-| `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp`. Required. |
+| `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`. Required. |
 | `config` | object | `{}` | Per‑adapter settings — see [STORAGE.md → Adapters](STORAGE.md#adapters). |
 | `mode` | string | `async` | Fan‑out mode. `async` (default) fans writes out in the background. |
 | `enabled` | bool | `true` | Disabled targets are ignored by the fan‑out engine. |

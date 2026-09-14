@@ -38,7 +38,7 @@ Admin → Plugins → Install          Connections → Add a storage
 | **From a URL** | Downloaded, checked against a **required** SHA256, then as above. | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.41.0/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust — the same
@@ -283,7 +283,9 @@ be refused because users are keeping the plugin busy.
 > address already in use". Memory and file-descriptor limits are **not** set:
 > Go cannot apply an rlimit to a child between fork and exec, and setting one in
 > the parent would cap filex itself. On Windows there is no process group in the
-> POSIX sense either, so a plugin's children survive it there. Real isolation
+> POSIX sense, so a helper a plugin spawned **outlives a plugin stop or
+> restart** there, and dies only when filex itself exits and the job object
+> above closes. Real isolation
 > means namespaces, seccomp or a container runtime — run the plugin as a
 > **remote** service in its own container if you need that.
 
@@ -364,7 +366,7 @@ Two complete, working examples live in the repository, and filex's own tests
 install and drive them, so neither can rot:
 
 - [`backend/examples/plugin-memfs`](../backend/examples/plugin-memfs/main.go) —
-  the Go SDK, about a hundred lines, in-memory, with a `SelfTest` area.
+  the Go SDK in a single short file, in-memory, with a `SelfTest` area.
 - [`backend/examples/plugin-diskfs/plugin.py`](../backend/examples/plugin-diskfs/plugin.py) —
   **Python, standard library only, no SDK**: the same protocol implemented by
   hand, backed by a real directory, with every optional capability (ranged
@@ -560,13 +562,13 @@ restart invisible to the person using the file manager.
 | The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous`, removed once the new one is up (and used to roll back when it is not) |
 | Conformance probe leftovers | `.filex-conformance-<random>/` at a storage's root — named so an operator who finds one knows what made it |
 | Host implementation | [`backend/internal/plugin`](../backend/internal/plugin) |
-| Driver shapes | `internal/plugin/driver_shapes.go` — **generated**, 20 combinations: `go run ./internal/plugin/gen > internal/plugin/driver_shapes.go`. ⚠ Regenerate it by hand after touching the generator; nothing in CI compares the two today |
+| Driver shapes | `internal/plugin/driver_shapes.go` — **generated**, 20 combinations: `go run ./internal/plugin/gen > internal/plugin/driver_shapes.go`. ⚠ Regenerate it after touching the generator: `TestGeneratedShapesAreCurrent` runs the generator and fails CI when the file differs (it skips under `go test -short`) |
 | SDK | [`backend/pkg/pluginsdk`](../backend/pkg/pluginsdk) |
 | Metrics | `filex_plugin_*` — see [METRICS.md](METRICS.md#storage-plugins) |
 
 > ⚠ Why the shapes are generated rather than written: filex decides what a
-> storage can do by **type-asserting** optional interfaces at forty-odd call
-> sites, so a plugin that cannot write must be handed to filex as a value with
+> storage can do by **type-asserting** optional interfaces wherever an
+> operation needs one, so a plugin that cannot write must be handed to filex as a value with
 > **no** `Write` method — not one that returns an error, or the UI offers an
 > upload button that fails at the last moment. With five optional axes (write,
 > mtime, watch, presign, multipart) that is twenty structs, and twenty

@@ -162,6 +162,30 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 // those would make "shared with me" quietly incomplete for exactly the folder
 // somebody just shared. So an un-indexed grant becomes a synthetic row built
 // from the grant itself: enough to render and to navigate into.
+// hydrateOwnerName is Manager.hydrateOwnerNames for a single row.
+func (h *Shared) hydrateOwnerName(ctx context.Context, n *model.Node) {
+	ids := make([]int64, 0, 2)
+	if n.OwnerID != nil && *n.OwnerID > 0 {
+		ids = append(ids, *n.OwnerID)
+	}
+	if n.LastActorID != nil && *n.LastActorID > 0 && (n.OwnerID == nil || *n.LastActorID != *n.OwnerID) {
+		ids = append(ids, *n.LastActorID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	names, err := h.Store.GetUserDisplayNames(ctx, ids)
+	if err != nil {
+		return
+	}
+	if n.OwnerID != nil {
+		n.OwnerName = names[*n.OwnerID]
+	}
+	if n.LastActorID != nil {
+		n.LastActorName = names[*n.LastActorID]
+	}
+}
+
 func (h *Shared) project(ctx context.Context, st *model.Storage, g *model.FileGrant, rel string) map[string]any {
 	var entry map[string]any
 	hash := pathkey.Hash(st.ID, normalizeDBPath(rel))
@@ -173,7 +197,14 @@ func (h *Shared) project(ctx context.Context, st *model.Storage, g *model.FileGr
 		// grant. Passing an acl.Set here would re-derive the same answer and
 		// stamp `perm` from it; the grant's own level is the more precise
 		// value and is written below.
-		if projected := projectFileNodes(st.Name, []*model.Node{node}, false, nil, h.ThumbSigner); len(projected) == 1 {
+		// No batch to build here — one node, so the owner lookup is one query
+		// with one id in it, and only when the row actually has an owner.
+		var viewer int64
+		if u := auth.UserFrom(ctx); u != nil {
+			viewer = u.ID
+		}
+		h.hydrateOwnerName(ctx, node)
+		if projected := projectFileNodes(st.Name, []*model.Node{node}, false, nil, h.ThumbSigner, viewer); len(projected) == 1 {
 			entry = projected[0]
 		}
 	}

@@ -6,6 +6,11 @@ filex serves every configured storage over **WebDAV** at:
 https://<your-filex>/dav/<storage-name>/<path>
 ```
 
+The first segment also accepts the storage's **uid** — assigned once, never
+changed — which is what a permanent mount should be given, because renaming the
+storage re-addresses the name and every mount written against it answers 404.
+See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
+
 Mount your filex drives in Windows Explorer, macOS Finder, or any WebDAV
 client (rclone, Cyberduck, WinSCP, davfs2, Kodi, Documents by Readdle, …) —
 uploads, downloads, rename/move, delete and folder creation all work, and
@@ -81,11 +86,11 @@ Notes:
 > available inside the app with your real host, your storage name and your
 > own username already substituted, plus a copy button per command:
 >
-> - web: **Connections → How to connect** (admins), or the plug icon in the
->   file explorer's header (every signed-in user);
-> - desktop app: **Settings → Storage connections → How to connect**.
+> - the file explorer's navigation panel → **How to connect** — the same entry
+>   on every surface that draws the panel, for every signed-in user;
+> - admins also reach it from **Connections** in the admin sidebar.
 >
-> Both surfaces render the same component from `@brftech/filex-core`, so they
+> Both routes render the same component from `@brftech/filex-core`, so they
 > cannot drift apart from each other — but they *can* drift from this file.
 > A correction here belongs in `packages/core/src/lib/connectionGuides.ts`
 > too, and the other way round.

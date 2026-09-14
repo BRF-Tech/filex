@@ -17,7 +17,21 @@
     "desktopTitle": "Get the filex desktop app",
     "desktopSubtitle": "Sync folders to this computer and keep them up to date in the background. Available for {platform}.",
     "desktopDownload": "Download for {platform}",
-    "desktopAllDownloads": "All downloads and release notes"
+    "desktopAllDownloads": "All downloads and release notes",
+    "expand": "Show details",
+    "collapse": "Hide details",
+    "dl": {
+      "win_setup": "Windows installer (.exe)",
+      "win_setup_hint": "Installs filex and adds it to the Start menu, and updates itself · ~92 MB",
+      "win_portable": "Windows portable (.exe)",
+      "win_portable_hint": "Runs from anywhere — a USB stick, Downloads — and keeps its files beside itself. Does not update itself · ~92 MB",
+      "appimage": "Linux (.AppImage)",
+      "appimage_hint": "Portable — no installation, just make it executable and run · ~140 MB",
+      "deb": "Debian / Ubuntu (.deb)",
+      "deb_hint": "Installs system-wide with apt · ~99 MB",
+      "dmg": "macOS (.dmg, Apple Silicon)",
+      "dmg_hint": "Unsigned — first launch: System Settings → Privacy & Security → Open Anyway"
+    }
   },
   "common": {
     "save": "Save",
@@ -105,7 +119,6 @@
     "webhooks": "Webhooks",
     "about": "About",
     "adminFiles": "File history",
-    "profile": "My profile",
     "logout": "Sign out",
     "language": "Language",
     "theme": "Theme",
@@ -123,13 +136,20 @@
     "title": "Sign in",
     "subtitle": "Sign in with your account on this server",
     "identifier": "E-mail or username",
-    "remember": "Stay signed in for 30 days",
+    "remember": "Stay signed in",
     "submit": "Sign in",
     "or": "or",
     "oidc": "Sign in with SSO (Keycloak)",
     "local": "Sign in with password",
+    "recovery": "Administrator recovery sign-in",
+    "recoveryNote": "Password sign-in is off on this server. Only the administrator created at installation can sign in here, for recovery.",
     "redirecting": "Redirecting to SSO sign-in…",
     "totpHint": "Enter the 6-digit code from your authenticator app",
+    "use2fa": "Use 2FA code",
+    "hide2fa": "Hide 2FA code",
+    "totpLabel": "2FA code",
+    "showChars": "Show typed characters",
+    "hideChars": "Hide typed characters",
     "errInvalid": "E-mail, username or password is wrong",
     "errLocked": "Account is locked. Contact your administrator.",
     "errGeneric": "Something went wrong. Try again.",
@@ -285,13 +305,6 @@
     }
   },
   "profile": {
-    "title": "My profile",
-    "subtitle": "Settings that apply to your account",
-    "section": {
-      "account": "Account",
-      "security": "Security",
-      "preferences": "Preferences"
-    },
     "saved": "Profile saved",
     "passwordChanged": "Password changed",
     "totp": {
@@ -305,7 +318,6 @@
       "recoveryTitle": "Recovery codes",
       "recoveryHint": "Save these now — each one signs you in once if you lose your authenticator. They are shown only this time."
     },
-    "timezone": "Timezone",
     "locale": "Language",
     "username": {
       "label": "Username",
@@ -316,7 +328,8 @@
       "upload": "Upload photo",
       "help": "Shown next to your name, and in the file explorer's collaboration bar — on every client signed in as you. Resized to 160px automatically.",
       "notImage": "Please choose an image file.",
-      "failed": "That image could not be processed — try another one."
+      "failed": "That image could not be processed — try another one.",
+      "change": "Change photo"
     }
   },
   "settings": {
@@ -345,6 +358,14 @@
       "testTo": "Send test email to",
       "send": "Send",
       "enterEmail": "Enter a valid email address."
+    },
+    "customCss": {
+      "title": "Custom CSS",
+      "help": "Paste your own stylesheet to restyle filex on top of the selected theme. The supported surface is the --fe-* custom properties, as in the example below; class names are internal and change between releases.",
+      "scope": "This stylesheet applies to everyone using this installation, on every page — including the login screen.",
+      "hint": "Injected as the last stylesheet on the page, so your rules win ties. Leave the box empty to remove it.",
+      "count": "{used} / {max} bytes",
+      "tooBig": "The stylesheet is capped at 64 KB."
     }
   },
   "external": {
@@ -643,14 +664,20 @@
     "restore": "Restore",
     "purge": "Purge",
     "restored": "{name} restored",
+    "restore_taken": "“{name}” was not restored: something already has that name. Rename what is there, then restore again.",
     "purged": "{name} permanently deleted",
     "purge_confirm": "{name} will be permanently deleted. Continue?",
     "empty_modal_title": "Empty trash",
     "empty_modal_body": "This cannot be undone. If you picked a storage, only that one is affected.",
     "older_than_days": "Older than (days)",
     "all_ages": "any age (leave blank)",
-    "empty_done": "{count} item(s) purged",
+    "empty_done": "{count} item purged | {count} items purged",
     "total_count": "Total: {n}"
+  },
+  "home": {
+    "title": "Home",
+    "allFiles": "All files",
+    "storagesEmpty": "No drives yet"
   },
   "explore": {
     "tagline": "file manager",
@@ -659,6 +686,7 @@
     "noAccess": "Nothing has been shared with you yet. Ask whoever runs this server for access.",
     "addStorage": "Add storage",
     "gotoAdmin": "Admin panel",
+    "account": "Account",
     "root": "Root",
     "empty": "This folder is empty.",
     "download": "Download",
@@ -695,7 +723,7 @@
     "creds": "Demo account: {email} · password: {password}",
     "sandbox": "Shared sandbox — everything resets nightly, and adding storages or plugins is disabled here.",
     "adminHint": "Sign in with a non-demo account for full admin.",
-    "alsoIncluded": "Also included: RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through OnlyOffice · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "alsoIncluded": "Also included: RBAC with per-file and per-folder grants · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through OnlyOffice · creating a document from + New — Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever OnlyOffice is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
       "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree — then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
@@ -740,6 +768,22 @@
   },
   "notifications": {
     "title": "Notifications",
+    "openTarget": "Open what this is about",
+    "prefs": {
+      "title": "Your notifications",
+      "inApp": "In-app bell",
+      "inAppHint": "Turning this off empties your bell. Nothing stops being recorded — an admin still sees every event.",
+      "browser": "Browser notifications",
+      "browserHint": "Raise a notification outside the tab when something new arrives. Clicking it opens the file, folder or share it is about.",
+      "enableBrowser": "Allow notifications",
+      "permGranted": "Allowed by this browser",
+      "permDenied": "Blocked by this browser",
+      "permDeniedHint": "Re-allow notifications for this site in your browser settings.",
+      "permDefault": "Permission not asked yet",
+      "permUnsupported": "This browser cannot show notifications",
+      "desktopHandled": "The desktop app shows these itself",
+      "saved": "Preference saved"
+    },
     "adminTitle": "Notifications admin",
     "bell": "Notifications",
     "empty": "No notifications yet",
@@ -766,6 +810,12 @@
       "scope": "Scope",
       "webhook": "Webhook",
       "createdAt": "Created"
+    },
+    "severity": {
+      "info": "Info",
+      "warning": "Warning",
+      "error": "Error",
+      "critical": "Critical"
     }
   },
   "replica": {
@@ -831,7 +881,7 @@
       "fixAll": "Fix all",
       "fixOne": "Fix",
       "unresolvedOnly": "Unresolved only",
-      "queued": "{n} retries queued",
+      "queued": "{n} retry queued | {n} retries queued",
       "queuedOne": "Retry queued",
       "fields": {
         "path": "Path",
@@ -943,13 +993,13 @@
   "duplicates": {
     "title": "Duplicate files",
     "subtitle": "Copies grouped by identical size + etag — read-only report",
-    "summary": "{groups} groups, {waste} wasted in total",
+    "summary": "{groups} group, {waste} wasted in total | {groups} groups, {waste} wasted in total",
     "stats": {
       "groups": "Duplicate groups",
       "copies": "Extra copies",
       "waste": "Total waste"
     },
-    "copies": "{n} copies",
+    "copies": "{n} copy | {n} copies",
     "wasted": "{size} wasted",
     "colPath": "File / path",
     "colStorage": "Storage",
@@ -978,7 +1028,7 @@
       "share_created": "Share link created",
       "drop_received": "File received through a public request link",
       "comment_added": "Comment added to a file or folder",
-      "e2e_escrow_used": "Encrypted folder opened with the recovery key instead of its passphrase"
+      "e2e_escrow_used": "Encrypted folder opened with the escrow key instead of its password"
     },
     "secretSet": "Secret set",
     "secretUnset": "No secret",
@@ -1029,7 +1079,7 @@
       "label": "Maximum link life (days)",
       "hint": "0 = no limit. Default 7.",
       "errMin": "Enter an integer greater than or equal to 0",
-      "overMax": "{n} existing link(s) outlive this limit. They keep working — revoke them under Shares if you want them gone."
+      "overMax": "{n} existing link outlives this limit. It keeps working — revoke it under Shares if you want it gone. | {n} existing links outlive this limit. They keep working — revoke them under Shares if you want them gone."
     },
     "av": {
       "title": "Antivirus",
@@ -1090,7 +1140,7 @@
     "logoTooBig": "The image exceeds the 256 KB inline limit — use a smaller file or host it as a URL.",
     "accent": "Accent color",
     "accentHelp": "Hex color (#rrggbb) used for buttons and links on public pages.",
-    "accentInvalid": "Enter a valid hex color like #4f46e5.",
+    "accentInvalid": "Enter a valid hex color like #2f6ceb.",
     "footerText": "Footer text",
     "footerHelp": "Free text shown in the footer of public pages (e.g. a copyright line).",
     "hidePoweredBy": "Hide the \"Shared with filex\" line",
@@ -1158,7 +1208,7 @@
     "installed": "{name} installed",
     "deleted": "{name} removed",
     "deleteConfirm": "Remove the plugin “{name}”? Its files are deleted from the server.",
-    "deleteConfirmInUse": "Remove the plugin “{name}”? {count} storage(s) use its driver and will stop opening until it is installed again. The storages themselves are not deleted.",
+    "deleteConfirmInUse": "Remove the plugin “{name}”? {count} storage uses its driver and will stop opening until it is installed again. The storage itself is not deleted. | Remove the plugin “{name}”? {count} storages use its driver and will stop opening until it is installed again. The storages themselves are not deleted.",
     "errName": "A name is required",
     "errFile": "Choose the plugin binary to upload",
     "nameHint": "Lower-case letters, digits, - and _ (max 32). Names the plugin's folder on the server; the storage driver name comes from the plugin itself.",
@@ -1208,7 +1258,7 @@
     "conformance": {
       "verified": "Verified",
       "unverified": "Unverified — probes owed",
-      "failed": "{count} probe(s) failed",
+      "failed": "{count} probe failed | {count} probes failed",
       "unverifiedHint": "No report: the plugin offers no self-test endpoint, or verification is off on this instance. Nothing failed — nothing was checked.",
       "reportTitle": "Conformance report — {name}",
       "summary": "{pass} passed, {fail} failed, {skip} skipped",
@@ -1296,6 +1346,84 @@
     },
     "trend": {
       "title": "Daily"
+    }
+  },
+  "userSettings": {
+    "title": "Settings",
+    "open": "User settings",
+    "saveChanges": "Save changes",
+    "demoReadOnly": "This is a shared demo account, so its profile, password and second factor cannot be changed.",
+    "tabs": {
+      "profile": "Profile",
+      "preferences": "Preferences",
+      "notifications": "Notifications",
+      "security": "Security",
+      "ai": "AI assistant"
+    },
+    "subtitle": {
+      "profile": "Your name, e-mail and picture — what other people see.",
+      "preferences": "How this app looks and reads on your devices.",
+      "notifications": "What reaches your bell, and what reaches your desktop.",
+      "security": "Your password and second factor.",
+      "ai": "Nothing for you to set here yet."
+    },
+    "footNote": {
+      "profile": "Changes on this tab are saved when you press Save.",
+      "preferences": "Saved as you change them.",
+      "notifications": "Saved as you change them.",
+      "security": "Each action here applies on its own.",
+      "ai": "There is nothing on this tab to save."
+    },
+    "prefs": {
+      "languageHint": "Applies here right away, and is saved on your account for the next browser you sign in from.",
+      "compact": "Use compact file list",
+      "compactHint": "Tighter rows in the file explorer.",
+      "timezone": "Time zone",
+      "timezoneHint": "Dates are stored as a moment in time and shown on the clock you pick here, so everyone sees the same instant on their own clock. Saved to your account, so it follows you to another browser.",
+      "timezoneNow": "Right now in {zone}: {time}",
+      "startPage": "Start page",
+      "startPage_home": "Home",
+      "startPage_files": "Files",
+      "startPage_admin": "Admin panel",
+      "startPageHint": "Where filex opens when you sign in or go to the front door. Following a link straight to a page still takes you there.",
+      "appearance": "Appearance",
+      "mode": "Light or dark",
+      "modeHint": "Which variant is painted. Auto follows your operating system.",
+      "palette": "Colour palette",
+      "paletteHint": "Which colours that variant is made of. Every palette has a light and a dark version, so this and the setting above work together.",
+      "folderMemory": "Remember each folder’s view",
+      "folderMemoryHint": "A folder opens the way you last left it — list or grid, and its sort. Off by default; your last choice applies everywhere instead.",
+      "desktopApp": "Desktop app",
+      "desktopAppHint": "The reminder in the corner of the app can be closed for good — these downloads stay here."
+    },
+    "notifications": {
+      "eventsTitle": "What to tell me about",
+      "eventsHint": "Turning one off keeps it out of your bell. Nothing stops being recorded — an administrator still sees every event.",
+      "events": {
+        "file_uploaded": "A new file arrives",
+        "file_updated": "A file is changed",
+        "file_upload_failed": "An upload does not finish",
+        "file_infected": "A virus is found in a file",
+        "file_deleted": "A file is deleted for good",
+        "file_trashed": "A file goes to the trash",
+        "file_moved": "A file is moved or renamed",
+        "share_created": "Someone creates a share link",
+        "drop_received": "A file arrives through a request link",
+        "comment_added": "Someone comments on a file",
+        "e2e_escrow_used": "An encrypted folder is opened with the escrow key"
+      }
+    },
+    "security": {
+      "passwordTitle": "Change password",
+      "totpEnabled": "Two-factor authentication is on",
+      "totpDisabled": "Two-factor authentication is off"
+    },
+    "heading": "User settings",
+    "headingSub": "Manage your profile, preferences, and security.",
+    "adminBadge": "Admin",
+    "ai": {
+      "soon": "Coming soon",
+      "body": "This release has no per-user assistant settings. The AI features filex does ship are configured for the whole instance by an administrator, so there is nothing here for you to turn on or off yet."
     }
   }
 }

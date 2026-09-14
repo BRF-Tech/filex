@@ -26,6 +26,8 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import type { FileNode, ViewMode } from '../types/FileNode';
 import type { GlobalSearchHit } from '../composables/useFileApi';
 import { matchedInContent, snippetSegments } from '../lib/snippet';
+import { actionIconSvg } from '../lib/actionIcons';
+import { fileIconTile } from '../lib/fileIcons';
 import { useLocale } from '../composables/useLocale';
 
 const props = defineProps<{
@@ -93,6 +95,41 @@ type PaletteItem =
 type HitItem = Extract<PaletteItem, { kind: 'hit' }>;
 type SavedGroupItem = Extract<PaletteItem, { kind: 'saved' | 'save' }>;
 
+/* === ikon:emoji — the palette's marks =================================
+ *
+ * `icon` used to be the glyph itself and the template printed it as TEXT:
+ * `➜ 📁 📄 ⬆ ▦ 🗑 ⟳ ↑ 🎨 ⌨ 🎓 ⧉ ◫ 💾 🔖`, i.e. two colour-emoji sets, a
+ * geometric-shapes set and an arrows set, in one 20px column — beside a
+ * context menu and a toolbar that draw the same actions from
+ * `lib/actionIcons`. It is a KEY now, resolved the way ContextMenu resolves
+ * a row's key, and the two groups that list FILES resolve through
+ * `lib/fileIcons` instead, so a result row in the palette wears the same
+ * tile as the same file in the listing behind it.
+ */
+
+/** `name.ext` → `ext`, for a search hit (which carries no `extension`). */
+function extOf(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1) : '';
+}
+
+/**
+ * The row's mark. Static markup from our own two icon modules — never a
+ * string that came off the wire, which is what lets the template v-html it.
+ */
+function iconHtml(it: PaletteItem): string {
+  if (it.kind === 'file') return fileIconTile(it.node);
+  if (it.kind === 'hit') {
+    const name = String(it.hit.name ?? '');
+    return fileIconTile({
+      type: it.hit.type === 'dir' ? 'dir' : 'file',
+      extension: extOf(name),
+      basename: name,
+    });
+  }
+  return actionIconSvg(it.icon);
+}
+
 /**
  * Scored includes: -1 = no match; otherwise earlier + prefix matches rank
  * higher and shorter names get a small edge. Good enough without a fuzzy
@@ -116,7 +153,7 @@ const gotoItems = computed<PaletteItem[]>(() => {
   const clean = q.replace(/^\/+|\/+$/g, '');
   if (!clean) return [];
   return [
-    { kind: 'goto', id: `goto:${clean}`, label: `${t('palette.goto')}: ${clean}`, icon: '➜', path: clean },
+    { kind: 'goto', id: `goto:${clean}`, label: `${t('palette.goto')}: ${clean}`, icon: 'goto', path: clean },
   ];
 });
 
@@ -130,7 +167,7 @@ const fileItems = computed<PaletteItem[]>(() => {
     kind: 'file' as const,
     id: `file:${r.f.path}`,
     label: r.name,
-    icon: r.f.type === 'dir' ? '📁' : '📄',
+    icon: '', // file rows draw their real tile — see iconHtml()
     node: r.f,
   }));
 });
@@ -138,19 +175,21 @@ const fileItems = computed<PaletteItem[]>(() => {
 const commandItems = computed<PaletteItem[]>(() => {
   const q = query.value.trim();
   const defs: Array<{ command: string; label: string; icon: string; enabled: boolean }> = [
-    { command: 'new-folder', label: t('toolbar.new_folder'), icon: '📁', enabled: props.canWrite !== false },
-    { command: 'upload', label: t('toolbar.upload'), icon: '⬆', enabled: props.canWrite !== false },
-    { command: 'toggle-view', label: t('cmd.view_toggle'), icon: props.viewMode === 'list' ? '▦' : props.viewMode === 'grid' ? '▣' : '☰', enabled: true /* wiring:d2 — icon of the NEXT mode (list→grid→gallery→list) */ },
-    { command: 'open-trash', label: t('cmd.trash'), icon: '🗑', enabled: true },
-    { command: 'refresh', label: t('toolbar.refresh'), icon: '⟳', enabled: true },
-    { command: 'go-up', label: t('toolbar.go_up'), icon: '↑', enabled: props.canGoUp !== false },
+    { command: 'new-folder', label: t('toolbar.new_folder'), icon: 'new-folder', enabled: props.canWrite !== false },
+    { command: 'upload', label: t('toolbar.upload'), icon: 'upload', enabled: props.canWrite !== false },
+    /* wiring:d2 — the mark is the NEXT mode (list→grid→gallery→list), which is
+       what pressing the row gets you; the three keys are the ViewSwitcher's own. */
+    { command: 'toggle-view', label: t('cmd.view_toggle'), icon: props.viewMode === 'list' ? 'view-grid' : props.viewMode === 'grid' ? 'view-gallery' : 'view-list', enabled: true },
+    { command: 'open-trash', label: t('cmd.trash'), icon: 'open-trash', enabled: true },
+    { command: 'refresh', label: t('toolbar.refresh'), icon: 'refresh', enabled: true },
+    { command: 'go-up', label: t('toolbar.go_up'), icon: 'go-up', enabled: props.canGoUp !== false },
     /* wiring:int */
-    { command: 'open-theme', label: t('theme.menu'), icon: '🎨', enabled: true },
-    { command: 'open-shortcut-settings', label: t('shortcuts.settings.menu'), icon: '⌨', enabled: true },
-    { command: 'start-tour', label: t('tour.restart'), icon: '🎓', enabled: true },
+    { command: 'open-theme', label: t('theme.menu'), icon: 'theme', enabled: true },
+    { command: 'open-shortcut-settings', label: t('shortcuts.settings.menu'), icon: 'shortcut-settings', enabled: true },
+    { command: 'start-tour', label: t('tour.restart'), icon: 'tour', enabled: true },
     /* wiring:d1 — tabs + split */
-    { command: 'tab-new', label: t('cmd.tab_new'), icon: '⧉', enabled: true },
-    { command: 'split-toggle', label: t('cmd.split_toggle'), icon: '◫', enabled: props.splitEnabled !== false },
+    { command: 'tab-new', label: t('cmd.tab_new'), icon: 'tab-new', enabled: true },
+    { command: 'split-toggle', label: t('cmd.split_toggle'), icon: 'split', enabled: props.splitEnabled !== false },
   ];
   return defs
     .filter((d) => d.enabled && matchScore(d.label, q) >= 0)
@@ -210,7 +249,7 @@ const hitItems = computed<HitItem[]>(() =>
     kind: 'hit' as const,
     id: `hit:${h.storage_id ?? ''}:${h.path ?? ''}:${h.id ?? ''}`,
     label: String(h.name ?? h.path ?? ''),
-    icon: h.type === 'dir' ? '📁' : '📄',
+    icon: '', // hit rows draw their real tile — see iconHtml()
     hit: h,
     crumb: hitCrumb(h),
     inContent: matchedInContent(h.matched),
@@ -264,13 +303,13 @@ const savedItems = computed<SavedGroupItem[]>(() => {
   const out: SavedGroupItem[] = [];
   // "Save this query" command — only when there IS a query and it isn't saved yet.
   if (q && !savedSearches.value.includes(q)) {
-    out.push({ kind: 'save', id: `save:${q}`, label: `${t('palette.save')}: ${q}`, icon: '💾', query: q });
+    out.push({ kind: 'save', id: `save:${q}`, label: `${t('palette.save')}: ${q}`, icon: 'save-search', query: q });
   }
   const scored = savedSearches.value
     .map((s) => ({ s, sc: matchScore(s, q) }))
     .filter((r) => r.sc >= 0 || !q);
   for (const r of scored) {
-    out.push({ kind: 'saved', id: `saved:${r.s}`, label: r.s, icon: '🔖', query: r.s });
+    out.push({ kind: 'saved', id: `saved:${r.s}`, label: r.s, icon: 'bookmark', query: r.s });
   }
   return out;
 });
@@ -457,7 +496,8 @@ onBeforeUnmount(() => {
             @mouseenter="active = i"
             @click="choose(it)"
           >
-            <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+            <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
+            <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
             <span class="fe-cmdp__label">{{ it.label }}</span>
           </button>
 
@@ -474,7 +514,8 @@ onBeforeUnmount(() => {
               @mouseenter="active = fileOffset + i"
               @click="choose(it)"
             >
-              <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+              <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
+              <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
               <span class="fe-cmdp__label">{{ it.label }}</span>
             </button>
           </template>
@@ -496,7 +537,8 @@ onBeforeUnmount(() => {
               @mouseenter="active = hitOffset + i"
               @click="choose(it)"
             >
-              <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+              <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
+              <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
               <span class="fe-cmdp__hitbody">
                 <span class="fe-cmdp__hitline">
                   <span class="fe-cmdp__label">{{ it.label }}</span>
@@ -529,7 +571,8 @@ onBeforeUnmount(() => {
               @click="choose(it)"
               @keydown.enter.prevent="choose(it)"
             >
-              <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+              <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
+              <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
               <span class="fe-cmdp__label">{{ it.label }}</span>
               <button
                 v-if="it.kind === 'saved'"
@@ -538,7 +581,7 @@ onBeforeUnmount(() => {
                 :title="t('palette.saved.delete')"
                 :aria-label="t('palette.saved.delete')"
                 @click.stop="removeSavedSearch(it.query)"
-              >🗑</button>
+              ><!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons --><span aria-hidden="true" v-html="actionIconSvg('delete')"></span></button>
             </div>
           </template>
 
@@ -555,7 +598,8 @@ onBeforeUnmount(() => {
               @mouseenter="active = cmdOffset + i"
               @click="choose(it)"
             >
-              <span class="fe-cmdp__icon" aria-hidden="true">{{ it.icon }}</span>
+              <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons + lib/fileIcons -->
+              <span class="fe-cmdp__icon" aria-hidden="true" v-html="iconHtml(it)"></span>
               <span class="fe-cmdp__label">{{ it.label }}</span>
             </button>
           </template>
