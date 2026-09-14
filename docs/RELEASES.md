@@ -19,16 +19,135 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.41.0, 14 September 2026
-The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred and Trash, a filter row, a selection bar and a details panel with Activity. The admin app, the desktop app and every embed draw the same layout, and the split pane is the same pane twice. Built on it: a listing that behaves like a table, per-folder view memory kept per person on the server, date headings, an owner on every file, archive download of a selection, Move to and Copy to across storages, New document, thumbnails you can read, and a notification bell for every account.
+::: tip Latest — v0.41.1, 14 September 2026
+A fix release for three reports and the rough edges left after 0.41.0. Moving a file larger than 8 MiB onto an S3 storage served over plain http (Garage or MinIO on a container network) works again (#27). On a phone a tap now opens a file or folder and a long press selects it (#26). The password reset in Users asks the right question and shows the new password, and an account can be created without one (#25).
 
-Upgrade notes that matter: sign-in with SSO alone (FILEX_AUTH_DRIVERS=oidc) works now, and the administrator created at installation keeps a password recovery sign-in for the day the identity provider is down. A cancelled request can no longer lock a SQLite server into refusing every sign-in until a restart. A move or a restore no longer overwrites the file that holds the name. MySQL needs 8.0.17 or MariaDB 11.4, and migration 00041 rebuilds the nodes table there. Tokens are now limited to their own scopes on the admin routes - review scoped tokens minted on administrator accounts.
+Upgrade notes that matter: with an OIDC admin group configured, the admin role now follows the group at every sign-in — someone removed from the group goes back to user at their next sign-in; the setup account and the last admin are never demoted. Content-Range joins the default CORS allow-list, so large cross-origin uploads from an embed work without a config change. FILEX_USAGE_* variables now seed the usage settings on first boot. Also: notifications, the audit log and the dashboard read in the panel's language, two explorers on one page keep their own clocks, and the update manifest's migrations flag is derived from the tags.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.41.0
-docker pull ghcr.io/brf-tech/filex:full-v0.41.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.41.1
+docker pull ghcr.io/brf-tech/filex:full-v0.41.1
 ```
+
+## v0.41.1
+
+<span class="filex-release-date">14 September 2026</span>
+
+A fix release for three reports and the rough edges left after 0.41.0. Moving a file larger than 8 MiB onto an S3 storage served over plain http (Garage or MinIO on a container network) works again (#27). On a phone a tap now opens a file or folder and a long press selects it (#26). The password reset in Users asks the right question and shows the new password, and an account can be created without one (#25).
+
+Upgrade notes that matter: with an OIDC admin group configured, the admin role now follows the group at every sign-in — someone removed from the group goes back to user at their next sign-in; the setup account and the last admin are never demoted. Content-Range joins the default CORS allow-list, so large cross-origin uploads from an embed work without a config change. FILEX_USAGE_* variables now seed the usage settings on first boot. Also: notifications, the audit log and the dashboard read in the panel's language, two explorers on one page keep their own clocks, and the update manifest's migrations flag is derived from the tags.
+
+## What changed
+
+### Changed
+
+- **The OIDC admin mapping now holds on every sign-in, not only when the account
+  is created.** With `FILEX_OIDC_ROLE_CLAIM` and `FILEX_OIDC_ADMIN_GROUP` set,
+  someone added to the admin group becomes an admin at their next sign-in, and
+  someone **removed** from it goes back to `user` — before this, an ex-admin in
+  the identity provider kept administering filex for good. The mapping owns the
+  admin role and nothing else: a `viewer` set by hand stays a viewer unless the
+  group now grants admin. Two accounts are never demoted, because demoting
+  either could leave nobody able to administer filex: the account filex was set
+  up with (the one the recovery sign-in admits) and the last admin; each such
+  sign-in logs a `WARN`. Measured against a real OIDC provider: added to the
+  group → `admin` on the next sign-in, removed → `user`, the setup account kept
+  `admin` ([docs/SSO.md](./SSO.md#roles--admin-access)).
+
+- **`Content-Range` is in the default CORS allow-list.** An explorer on another
+  origin uploads a file past one chunk (8 MiB) as PUTs carrying that header, and
+  the default preflight refused it — every small upload worked and every large
+  one failed, which reads as a size limit. If you set `cors.allowed_headers`
+  yourself, keep it in the list.
+
+### Fixed
+
+- **Moving a file larger than 8 MiB onto an S3 storage served over plain
+  `http://` failed** (#27) with `failed to compute payload hash: failed to seek
+  body to start, request stream is not seekable` — Garage or MinIO on a
+  container network, for instance. Over `http://` the S3 signer hashes the body
+  and rewinds it to send it, and a move hands the writer the source storage's
+  stream, which cannot rewind. It is the #16 fault one method over: part uploads
+  learned to accept such a body, whole-object writes had not. A body that is too
+  large to hold and cannot rewind now goes out as a multipart upload in 8 MiB
+  parts: memory stays bounded by one part, every part is retryable on its own,
+  and a body that ends early aborts the upload instead of publishing a truncated
+  object. Reproduced and verified against a real MinIO by moving 20 MiB between
+  two S3 storages.
+
+- **On a phone, a tap selected a file or folder instead of opening it** (#26),
+  in every browser: the explorer spoke the mouse's grammar — click selects,
+  double-click opens — and a finger has no double-click. A tap now opens what it
+  lands on; a long press selects it (and opens its menu), and while something is
+  selected a tap adds to or removes from the selection. The decision is made
+  from the gesture, not the screen size, so a touch laptop's trackpad keeps
+  click-to-select. The long-press code the list, grid and gallery each carried a
+  copy of is one composable now.
+
+- **The password reset button in *Users* asked "Delete user …?"** (#25) — its
+  dialog showed the delete confirmation, so the key icon read as a second delete
+  button. Confirming it anyway was worse: the password was reset and the account
+  signed out everywhere, and the new password was never shown (the server
+  answers `new_password`, the page read `password`). The list and the user page
+  each had their own copy of the dialog, and the copies had drifted; there is
+  one now. The same page offered two fields the server ignored: **Add user**
+  marked the password optional and then refused every request without one — an
+  account can now be created without a password, for SSO or API-token use — and
+  an *OIDC subject* field was sent and dropped (SSO matches accounts by e-mail),
+  so it is gone, as is the editable e-mail on the user page, which the server
+  never changed.
+
+- **Saving from the editor into a folder the catalogue had not seen yet** filed
+  the new file at the storage root, where it listed under neither folder until
+  the next scan. The folder rows are created on the way.
+
+- **Operational notifications were written in English** on every panel —
+  `filex 0.42.0 available`, the replica alarms. They are phrased on the reader's
+  side now, in both languages, like the file events.
+
+- **The dashboard's *Recent activity* and the audit log printed wire names**
+  (`user.update` over `— · user:12`). They read `User: updated` and `User #12`,
+  in the panel's language; the raw action stays in the tooltip. A gate reads the
+  Go that writes audit rows and fails on an action with no translation. The
+  dashboard's rows never named who acted — the payload carried no e-mail, so
+  every line began with a dash; they do now. The storage card's bare count reads
+  `12 files`.
+
+- **Every `FILEX_USAGE_*` variable was declared and never read.** They now seed
+  the *Usage & cost* settings on first boot, like the antivirus family.
+
+- **Two explorers on one page shared one clock.** Each printed dates in the
+  zone of whichever explorer mounted last; each now reads its own
+  `config.timeZone` and account, while the viewer's own choice still applies to
+  both.
+
+- **On the sign-in page the desktop-app card covered the sign-in form** when SSO
+  was offered too (1280×800: the element at the submit button's centre was the
+  card's subtitle). When the card and the form would overlap, the page shows the
+  corner chip every other page uses.
+
+- The share dialog's detail line read `… 10:00 AM. · 3 downloads`; the API key
+  name field suggested the address the page happened to talk to
+  (`127.0.0.1:5297`, visible in the README screenshots) and now suggests a name;
+  the list view printed "Folder" twice per row while the Type column was on; the
+  service worker's source map shipped the build machine's temp path, user name
+  included — `scripts/check-embed.mjs` now refuses any shipped map that names an
+  absolute path.
+
+- **The update manifest's `migrations` flag is derived from the tags.**
+  `scripts/gen-update-manifest.py` marks a release whose tag holds a migration
+  file no earlier tag held, and lists every published release. The hand-kept
+  list it replaces had gone stale: the published manifest never marked v0.31.0.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0411---2026-09-15)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.1`
 
 ## v0.41.0
 
@@ -2952,32 +3071,13 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.28.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.28.0`
 
-## v0.27.6
-
-<span class="filex-release-date">1 September 2026</span>
-
-## What changed
-
-### Changed
-
-- **Release tags are signed from here on, and there is finally a key to sign
-  them with.** `CONTRIBUTING.md` had said `git tag -s` for months while no
-  signing key existed on the release machine, so every tag through v0.27.5 is a
-  plain annotated one — an instruction nobody can follow is not a policy, it is
-  a lie the document tells. The step now also requires `git tag -v` to answer
-  `Good signature` before the tag is pushed, and says where the key and its
-  passphrase live. Nothing in the shipped software changes in this release.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0276---2026-09-01)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.6) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.6`
-
 ## Earlier releases
 
-The 93 releases before v0.27.6, in brief. Full notes are on GitHub.
+The 94 releases before v0.28.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.27.6](https://github.com/BRF-Tech/filex/releases/tag/v0.27.6) | 1 September 2026 | them with.** `CONTRIBUTING.md` had said `git tag -s` for months while no |
 | [v0.27.5](https://github.com/BRF-Tech/filex/releases/tag/v0.27.5) | 1 September 2026 | budget was widened to six attempts a release ago, and a test proves a 503 is |
 | [v0.27.4](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) | 29 August 2026 | image tag empty, which the chart resolves to `.Chart.appVersion` — so |
 | [v0.27.3](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) | 29 August 2026 | finds where a stand-in landed was started *after* `webContents.startDrag()` — |
@@ -3074,4 +3174,4 @@ The 93 releases before v0.27.6, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-14 from 113 published releases.</small>
+<small>Last refreshed 2026-09-14 from 114 published releases.</small>

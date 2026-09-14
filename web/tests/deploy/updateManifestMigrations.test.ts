@@ -65,6 +65,34 @@ describe('update manifest: migrations come from the tags', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it('a regenerated manifest keeps the decisions a person made in the previous one', () => {
+    // Measured 2026-09-15: without --previous, every hand-written note in the
+    // live feed became the release body's heading ("filex v0.39.1"), and a
+    // kill switch would have come back on at the next run.
+    const script = [
+      'import importlib.util, json, sys',
+      'spec = importlib.util.spec_from_file_location("gen", sys.argv[1])',
+      'gen = importlib.util.module_from_spec(spec); spec.loader.exec_module(gen)',
+      'new = {"version": "v1.2.3", "auto_ok": True, "migrations": False, "notes": "filex v1.2.3"}',
+      'prev = {"version": "v1.2.3", "auto_ok": False, "migrations": True, "notes": "A hand-written summary.", "severity": "security", "min_version": "v1.0.0"}',
+      'print(json.dumps(gen.inherit(dict(new), prev)))',
+      'kept = {"version": "v2.0.0", "auto_ok": True, "migrations": False, "notes": "A fresh summary."}',
+      'print(json.dumps(gen.inherit(dict(kept), {"version": "v2.0.0", "notes": "filex v2.0.0"})))',
+    ].join('\n');
+    const [first, second] = execFileSync(PYTHON, ['-c', script, GEN], { encoding: 'utf8' })
+      .trim()
+      .split(/\r?\n/)
+      .map((l) => JSON.parse(l));
+    expect(first).toMatchObject({
+      auto_ok: false,
+      migrations: true,
+      notes: 'A hand-written summary.',
+      severity: 'security',
+      min_version: 'v1.0.0',
+    });
+    expect(second.notes, 'a real new summary is not replaced by an old heading').toBe('A fresh summary.');
+  });
+
   // ⚠ A CI checkout without tags (fetch-depth 1) has nothing to read; the
   // skip says so instead of passing quietly.
   const hasTag = execFileSync('git', ['-C', REPO, 'tag', '-l', 'v0.31.0'], { encoding: 'utf8' }).trim() !== '';

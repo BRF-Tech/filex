@@ -121,3 +121,6 @@ e2e/.artifacts/
 # A local development data directory (a dev server's store and a generated
 # secret). It holds credentials, so it must never be swept into a commit.
 /_livedata/
+
+# Python bytecode (scripts/ tests import gen-update-manifest.py)
+__pycache__/

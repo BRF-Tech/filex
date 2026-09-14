@@ -645,9 +645,12 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
    - `filex.sh/updates/stable.json` — **the server and CLI**. Every install with
      `AUTO_UPGRADE` reads this and nothing else. Generate it, do not hand-edit
      it: `python3 scripts/gen-update-manifest.py --repo-dir <the export checkout>
-     --out stable.json` lists every published release with its digests and
-     derives `migrations` from the tags (`--no-auto vX.Y.Z` pulls a release out
-     of automatic upgrades). Point `--repo-dir` at the checkout the signed tags
+     --previous <the live stable.json> --out stable.json` lists every published
+     release with its digests, derives `migrations` from the tags, and carries
+     over what a person decided in the live file — a kill switch, a security
+     flag, a `min_version`, hand-written notes (`--no-auto vX.Y.Z` pulls a
+     release out of automatic upgrades). Without `--previous` those decisions
+     are silently undone. Point `--repo-dir` at the checkout the signed tags
      were made in: a release it has no tag for stops the generator rather than
      publishing a guessed `migrations: false`. Diff the result against the live
      file before you upload it.

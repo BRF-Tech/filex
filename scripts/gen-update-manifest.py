@@ -96,6 +96,73 @@ def migration_releases(repo_dir: str) -> tuple[set, set]:
     return marked, {t.lstrip("v") for t in tags}
 
 
+def is_bare_title(notes: str, tag: str) -> bool:
+    """The release body's heading ("filex v0.41.1") says nothing about the release."""
+    return notes.strip().lower() in {f"filex {tag}".lower(), tag.lower(), tag.lstrip("v").lower()}
+
+
+def load_highlights(repo_dir: str) -> dict:
+    """First sentence of each hand-written Releases-page summary, keyed by tag."""
+    path = os.path.join(repo_dir, "docs-site", "data", "release-highlights.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for tag, text in data.items():
+        if tag.startswith("_") or not isinstance(text, str):
+            continue
+        first = text.strip().split("\n", 1)[0]
+        m = re.match(r"(.+?[.!?])(\s|$)", first)
+        out[tag] = (m.group(1) if m else first)[:300]
+    return out
+
+
+def load_previous(source) -> dict:
+    """The manifest being replaced, keyed by version ({} when none is given)."""
+    if not source:
+        return {}
+    if re.match(r"^https?://", source):
+        req = urllib.request.Request(source, headers={"User-Agent": "filex-manifest-builder"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            doc = json.load(r)
+    else:
+        with open(source, encoding="utf-8") as f:
+            doc = json.load(f)
+    return {rel["version"]: rel for rel in doc.get("releases", []) if "version" in rel}
+
+
+def inherit(entry: dict, prev) -> dict:
+    """Carry the decisions a person made in the previous manifest into the new one.
+
+    ⚠⚠ A regenerated manifest must not undo them. Measured 2026-09-14: the live
+    feed's notes were written by hand, and a run of this generator replaced
+    every one with the release body's heading ("filex v0.39.1"). Worse, a kill
+    switch set by a past `--no-auto` would come back on at the next run unless
+    somebody remembered to pass it again. So, from the previous record:
+
+      auto_ok false, a security severity and a min_version stay;
+      migrations true stays (nothing may take a schema flag away);
+      notes stay when the new ones are only the heading.
+    """
+    if not prev:
+        return entry
+    if prev.get("auto_ok") is False:
+        entry["auto_ok"] = False
+    if prev.get("migrations") is True:
+        entry["migrations"] = True
+    if prev.get("severity") == "security":
+        entry["severity"] = "security"
+    if prev.get("min_version") and "min_version" not in entry:
+        entry["min_version"] = prev["min_version"]
+    prev_notes = (prev.get("notes") or "").strip()
+    if prev_notes and not is_bare_title(prev_notes, entry["version"]):
+        if not entry.get("notes") or is_bare_title(entry["notes"], entry["version"]):
+            entry["notes"] = prev_notes
+    return entry
+
+
 def http_json(url: str):
     req = urllib.request.Request(url, headers=gh_headers())
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -199,6 +266,8 @@ def main() -> int:
     )
     ap.add_argument("--min-version", action="append", default=[], metavar="VERSION=MIN",
                     help="a version that must not be jumped to directly, e.g. v1.0.0=v0.9.0")
+    ap.add_argument("--previous", metavar="FILE_OR_URL",
+                    help="the manifest being replaced; its hand-made decisions are carried over (see inherit)")
     args = ap.parse_args()
 
     derived, local_tags = migration_releases(args.repo_dir)
@@ -211,6 +280,10 @@ def main() -> int:
     no_auto = {v.lstrip("v") for v in args.no_auto}
     migrations = derived | {v.lstrip("v") for v in args.migrations}
     security = {v.lstrip("v") for v in args.security}
+    previous = load_previous(args.previous)
+    # From the checkout this script lives in, not --repo-dir: the summaries are
+    # written with the release, the tags may be read from another checkout.
+    highlights = load_highlights(REPO_DIR)
     min_versions = {}
     for pair in args.min_version:
         if "=" in pair:
@@ -253,6 +326,10 @@ def main() -> int:
             entry["severity"] = "security"
         if bare in min_versions:
             entry["min_version"] = min_versions[bare]
+        entry = inherit(entry, previous.get(tag))
+        # Still only the heading: the hand-written Releases-page summary says more.
+        if not entry["notes"] or is_bare_title(entry["notes"], tag):
+            entry["notes"] = highlights.get(tag, "") or entry["notes"]
         out.append(entry)
 
     doc = {"channel": args.channel, "releases": out}
