@@ -19,16 +19,240 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.39.1, 12 September 2026
-The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being previewed. The hint carries the explorer's root class so it can read the theme variables, and the admin UI sized the embedded explorer with a rule that reached every descendant carrying that class - a host selector outranks the package's own, so the pill inherited the window height. The desktop app has no such wrapper, which is why the same build looked right there.
+::: tip Latest — v0.41.0, 14 September 2026
+The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred and Trash, a filter row, a selection bar and a details panel with Activity. The admin app, the desktop app and every embed draw the same layout, and the split pane is the same pane twice. Built on it: a listing that behaves like a table, per-folder view memory kept per person on the server, date headings, an owner on every file, archive download of a selection, Move to and Copy to across storages, New document, thumbnails you can read, and a notification bell for every account.
 
-The same audit found the legend lying for a second reason. Shortcuts are remappable, and three surfaces spelled a key out by hand: this legend, the drive shell's search chip and two steps of the onboarding tour. The quick-look overlay also compared against the default key, so remapping it gave three different answers to one question - the new key opened the peek, the old one still closed it, and the pill named the old one. Every hint reads the binding now, and shortcutHint() is exported for embedders who draw their own.
+Upgrade notes that matter: sign-in with SSO alone (FILEX_AUTH_DRIVERS=oidc) works now, and the administrator created at installation keeps a password recovery sign-in for the day the identity provider is down. A cancelled request can no longer lock a SQLite server into refusing every sign-in until a restart. A move or a restore no longer overwrites the file that holds the name. MySQL needs 8.0.17 or MariaDB 11.4, and migration 00041 rebuilds the nodes table there. Tokens are now limited to their own scopes on the admin routes - review scoped tokens minted on administrator accounts.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.39.1
-docker pull ghcr.io/brf-tech/filex:full-v0.39.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.41.0
+docker pull ghcr.io/brf-tech/filex:full-v0.41.0
 ```
+
+## v0.41.0
+
+<span class="filex-release-date">14 September 2026</span>
+
+The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred and Trash, a filter row, a selection bar and a details panel with Activity. The admin app, the desktop app and every embed draw the same layout, and the split pane is the same pane twice. Built on it: a listing that behaves like a table, per-folder view memory kept per person on the server, date headings, an owner on every file, archive download of a selection, Move to and Copy to across storages, New document, thumbnails you can read, and a notification bell for every account.
+
+Upgrade notes that matter: sign-in with SSO alone (FILEX_AUTH_DRIVERS=oidc) works now, and the administrator created at installation keeps a password recovery sign-in for the day the identity provider is down. A cancelled request can no longer lock a SQLite server into refusing every sign-in until a restart. A move or a restore no longer overwrites the file that holds the name. MySQL needs 8.0.17 or MariaDB 11.4, and migration 00041 rebuilds the nodes table there. Tokens are now limited to their own scopes on the admin routes - review scoped tokens minted on administrator accounts.
+
+## What changed
+
+> ⚠ **0.40.0 was never finished.** Its npm packages and git tag were published,
+> but the container images, the binaries, the desktop builds and the GitHub
+> Release were not — so the app-store manifests that pinned `v0.40.0` pointed
+> at an image that does not exist. This release is the first complete one after
+> 0.39.1, it carries everything listed under 0.40.0 below except the **Drive**
+> theme (removed here — see *Changed*), and it moves every pin to itself.
+
+### Added
+
+- **A new face for the whole product.** The explorer was rebuilt around the
+  end-user shell [@alfatm](https://github.com/alfatm) designed on top of filex
+  and put up for review in #14 — measured screen by screen and adopted as
+  filex's own look rather than offered as a theme. One layout for the operator
+  and the end user alike, in the admin app, the desktop app and every embed:
+  a full-width top bar with the product mark, one search field, a **+ New**
+  menu, a 192px navigation panel with **Home · Shared with me · Recent ·
+  Starred · Trash**, the storages and the connection guides, a breadcrumb row
+  with the view switcher, a **Type · People · Modified · Size** filter row with
+  a sort control, a selection bar that replaces the filter row while anything is
+  ticked, and an info panel split into **Details** and **Activity**. The palette,
+  metrics, type scale and control heights are `--fe-*` tokens, so a theme or a
+  host page restyles all of it without forking a stylesheet. The tab strip, the
+  split pane, the gallery view, the palettes and the keyboard editor — filex's
+  own additions — are kept.
+
+- **Home is a view inside the explorer**, not a page beside it: your storages,
+  what you opened last and what you starred, under the same panel and header as
+  the files. It is where everybody lands, administrators included; an operator
+  who prefers the dashboard picks it under **User settings → Preferences →
+  Start page**.
+
+- **User settings**, one dialog behind the avatar: profile and photo, language,
+  time zone (a search field with the offset and local time on each row), start
+  page, light/dark and palette, density, per-folder view memory, notification
+  switches, password and two-factor. Language and theme moved here from the
+  header, so no preference has two controls.
+
+- **A listing that behaves like a table.** Resize a column, hide one, drag one
+  to a new place; the table scrolls sideways when the columns outgrow the pane,
+  with the actions column pinned right, instead of dropping a column. Name is an
+  ordinary column you can narrow. **The grid and the list obey the same sort** —
+  it used to be private state inside the list, so switching views reordered the
+  rows under you.
+
+- **Per-folder view memory** — optional, from user settings. The view mode and
+  sort of each folder you set up, stored **per person on the server**
+  (`GET/PUT /api/files/manager/view-prefs`, migration `00039`), so it follows you
+  to another machine and never leaks to anyone else looking at the same folder.
+  Capped and least-recently-used. An embed turns it off with
+  `rememberFolderView: false`.
+
+- **Who owns a file.** Every node records its owner and its last writer
+  (migration `00038`); the list has an **Owner** column and the filter row a
+  **People** filter; quota counts against the owner. A storage scan no longer
+  attributes a whole bucket to whoever pressed *Scan now*. Search hits carry the
+  storage name and the owner too, which lifts the old single-storage limit on
+  content search in the advanced search dialog.
+
+- **Download a selection as one archive.** Pick several files and folders and
+  Download streams a ZIP built on the fly (`POST /api/files/archive/download`
+  mints a single-use ticket, `GET /z/<token>` streams it): nothing is written
+  into your storage, nothing is buffered in the tab, and a 700 MB archive costs
+  the server under a megabyte. Every member is re-checked against the caller's
+  own permissions on the server.
+
+- **Move to / Copy to**, with a folder chooser that spans every storage, lists a
+  read-only folder as read-only, and refuses a destination you cannot write to —
+  and the server refuses it regardless of what the dialog offered.
+
+- **New document** under **+ New**: a Word, Excel, PowerPoint or OpenDocument
+  file, or any text or code format — name it, choose where it goes, and it opens
+  in the editor that handles it. The Office templates are minimal valid
+  documents compiled into the binary (verified by LibreOffice and by
+  OnlyOffice's own converter), so this works on the slim image; a type this
+  deployment could not then open is not offered, and the dialog says why.
+
+- **Thumbnails you can read.** A PDF shows its first page, top-anchored so the
+  title is in the card; a video its first frame that is not black; an Office
+  document its rendered first page; a text, code or CSV file fills the card with
+  its own content. A server missing ffmpeg, ghostscript or LibreOffice now says
+  so in its log at boot instead of quietly drawing coloured rectangles.
+
+- **Date headings in every view.** A listing sorted by Modified groups itself
+  under **Today · Yesterday · This Week · This Month · *September 2026*** — in
+  the list, the grid and the gallery. The ladder lives in one module
+  (`packages/core/src/lib/dateGroups.ts`) and all three views read it.
+  - ⚠ A heading is drawn **only when it is true**. Any other sort key draws
+    none, and neither does a search's ranked answer.
+  - ⚠ "This Week" is the six days before yesterday, not a calendar week.
+  - In the grid the date headings **replace** "Files" rather than stacking on
+    it; "Folders" stays as one run at the top.
+  - The boundary between today and yesterday is midnight in the **viewer's**
+    chosen time zone, not the browser's.
+
+- **Tags you can follow.** A tag chip in the details panel opens the tag view:
+  everything carrying that tag, folders as well as files, across storages, with
+  the ordinary filter row and sort on top.
+
+- **A notification bell in the top bar**, for every account. Non-admins were
+  raised browser notifications but had no way to open the list, mark one read
+  or follow one to what it was about.
+
+- **The desktop-app offer is a chip in the corner** of the app, not a card over
+  the file listing, with a permanent home under User settings. "Do not show this
+  again" is remembered against the account, not the browser.
+
+- **Browser notifications**, and a notification opens the thing it is about.
+
+- **The split pane is one pane component rendered twice**, so the right-hand
+  pane has the same breadcrumb, filter row, sort, view switcher and selection
+  bar as the left — it used to be a separate, thinner implementation.
+
+- **Time zones resolve the same way everywhere.** One ordered list decides the
+  zone every date is printed in: **the viewer's own pick → the host page's
+  `config.timeZone` → the account behind the token → the device.** The account
+  tier applies only to a person's token; an `app` token shared by many visitors
+  never imposes one account's zone on all of them. An embed gains a **Time zone**
+  row in its `⋯` menu, stored in the browser, because it has no settings dialog;
+  the web app and an embed use the same picker and the same resolver, so the two
+  can no longer disagree. New: `config.timeZone`, and a `time-zone` attribute on
+  `<filex-explorer>`.
+
+- **Operator custom CSS.** A stylesheet pasted under *Settings* is served with
+  the branding payload and applied last on every browser surface, the sign-in
+  page included, so an installation can override the `--fe-*` tokens without
+  forking anything. It is capped at 64 KB, stored as one global row (in
+  multi-tenant mode only the supertenant may set it), and injected as the text
+  of a single `<style>` element, never parsed as HTML. See
+  [docs/INTEGRATION.md](./INTEGRATION.md#operator-custom-css).
+
+- **Home tells everyone how full a storage is**, not only an administrator:
+  `GET /api/files/quota/storages` answers the same figure the admin storage list
+  carries, for the storages the caller may see and nothing about the others.
+
+- **Recovery sign-in for SSO-only installations.** With no `local` driver
+  enabled, the administrator filex created at installation can still sign in
+  with its password — and no other account can — so an identity provider that
+  is down, a client secret that expired or a broken realm no longer locks out
+  the one person who can fix it. The login page offers it behind an
+  *Administrator recovery sign-in* link; two-factor still applies and every
+  such sign-in is logged at WARN. On by default, `FILEX_AUTH_RECOVERY_LOGIN=false`
+  turns it off. Installations from before this release get the account worked
+  out once at startup: the oldest administrator that has a local password. See
+  [docs/SSO.md](./SSO.md#the-identity-provider-is-down-and-nobody-can-sign-in).
+
+- **Brand config for embeds**: `config.brand` (`name`, `markUrl`). A host
+  cannot fill any slot in `<filex-explorer>` — Vue projects light DOM only
+  through a shadow root and the element deliberately has none — so this is how
+  an embed puts its mark in the corner.
+
+- **A duplicate-code gate** (`scripts/dup-scan.mjs`, run by the web test suite):
+  near-duplicate fragments, the same concept implemented outside its one home,
+  and listing surfaces that build their own chrome. The rule and how to answer it
+  are in `docs/CONTRIBUTING.md`.
+
+### Changed
+
+- ⚠⚠ **`uiProfile: 'drive'` is removed.** It shipped as a third profile in
+  0.32.0 and became an alias of `'simple'` during this cycle; there are now two
+  profiles, `'standard'` and `'simple'`, and no alias of either.
+
+  **If you pass `'drive'`, pass `'simple'` instead.** An unrecognised value —
+  a typo, or this retired name — resolves to `'standard'` (the documented
+  default) and logs one console line naming it. That direction is deliberate:
+  mapping the retired name onto `'simple'` would be the alias again under
+  another name, and it would also mean a plain typo silently REDUCED somebody's
+  UI, which looks like features going missing and points at nothing. The
+  argument is written out in `packages/core/src/lib/uiProfile.ts`.
+
+- ⚠ **The Drive theme added in 0.40.0 is removed.** Its palette became the
+  product's stock palette, so the theme had nothing left to change.
+
+- **The product colour is blue** (`#2f6ceb` light, `#5b8cff` dark) — the mark,
+  the favicon and PWA icon, the admin panel, the desktop app, the public share
+  page and the project site all moved off indigo together.
+
+- **Byte sizes are decimal everywhere** (1 KB = 1000 B). The explorer used 1024
+  and the admin panel 1000, so the same file read `1.43 MB` in one and `1.5 MB`
+  in the other; a quota typed as 10 GB read back as 9.31 GB in the side panel.
+  Turkish gets its own decimal separator.
+
+- **The sign-in page follows the operating system's light/dark setting and the
+  browser's language**; both are chosen in user settings once you are in.
+
+- **`/admin/profile` opens user settings.** The profile page is gone — every
+  field it had lives in the user settings dialog, which a non-admin can open
+  too. The address keeps working, because the startup banner and
+  `<data>/.first-run.txt` on existing installs still point a new operator at it.
+
+- **"Copy node id" left the right-click menu** and the selection bar; the id is
+  in the details panel, beside Path and ETag, one click to copy.
+
+- **`@brftech/filex-react` needs no stylesheet import** — the look is injected
+  by the bundle. A bundler build needs the optional viewer packages
+  externalized; see `docs/INTEGRATION.md`.
+
+- ⚠ **MySQL needs 8.0.17 or newer, MariaDB 11.4 or newer.** Migration `00041`
+  compares file names byte for byte with `utf8mb4_0900_bin`, which MySQL added
+  in 8.0.17, and it rebuilds the `nodes` table — on a large catalogue that takes
+  as long as an `ALTER TABLE` of that table takes on your server. The previous
+  documentation promised MariaDB 10.5.2; MariaDB 10.x never got past migration
+  `00001`. Measured versions are listed in
+  [docs/DATABASES.md](./DATABASES.md#supported-versions).
+
+**This release has more to it than fits on one page.** The rest of the
+entry — and every earlier release — is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0410---2026-09-14).
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.0`
 
 ## v0.39.1
 
@@ -2748,49 +2972,13 @@ If you run filex against LDAP or Active Directory, this is the release where tha
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.6) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.6`
 
-## v0.27.5
-
-<span class="filex-release-date">1 September 2026</span>
-
-## What changed
-
-### Fixed
-
-- **A transient `503` from an object store sank the whole upload.** The retry
-  budget was widened to six attempts a release ago, and a test proves a 503 is
-  classified as retryable — but for an upload none of that could ever fire.
-  The SDK rewinds a request body before retrying it, and every upload surface
-  hands the S3 driver a plain stream (the handler sniffs the first bytes to
-  detect the type and rejoins them), so there was nothing to rewind: the second
-  attempt died before it was made and a brief upstream wobble became a
-  permanent failure, reported as *"failed to rewind transport stream for retry,
-  request stream is not seekable"* — a message about filex's plumbing rather
-  than the outage behind it. The budget was real for listings and reads and a
-  no-op for writes. An upload that declares a size of at most 8 MiB is now held
-  in memory while it is sent, so a retry replays it byte for byte; a larger one
-  streams through as before, because buffering every body would trade a rare
-  failed upload for an out-of-memory kill. See
-  [STORAGE.md](./STORAGE.md#s3--s3-compatible).
-
-### Changed
-
-- `pnpm run build:packages` / `build:web` / `build` now quote their workspace
-  filters in a way `cmd.exe` also understands. They matched nothing on Windows
-  — the single quotes reached pnpm literally — so `build:all`, a documented
-  release step, could not run on a Windows workstation at all.
-- `CONTRIBUTING.md` says what to do when Go lives in WSL and pnpm does not:
-  `build:all` ends in a plain `go build`, and the screenshots boot that binary.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0275---2026-09-01)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.27.5) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.27.5`
-
 ## Earlier releases
 
-The 92 releases before v0.27.5, in brief. Full notes are on GitHub.
+The 93 releases before v0.27.6, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.27.5](https://github.com/BRF-Tech/filex/releases/tag/v0.27.5) | 1 September 2026 | budget was widened to six attempts a release ago, and a test proves a 503 is |
 | [v0.27.4](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) | 29 August 2026 | image tag empty, which the chart resolves to `.Chart.appVersion` — so |
 | [v0.27.3](https://github.com/BRF-Tech/filex/releases/tag/v0.27.3) | 29 August 2026 | finds where a stand-in landed was started *after* `webContents.startDrag()` — |
 | [v0.27.2](https://github.com/BRF-Tech/filex/releases/tag/v0.27.2) | 29 August 2026 | reading it.** `Content-Disposition` carried the filename raw, so a name like |
@@ -2886,4 +3074,4 @@ The 92 releases before v0.27.5, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-12 from 112 published releases.</small>
+<small>Last refreshed 2026-09-14 from 113 published releases.</small>

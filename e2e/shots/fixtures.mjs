@@ -106,6 +106,40 @@ const NOTES = `# Release notes — draft
 `;
 
 /**
+ * syncAndWait starts a sync of one storage and returns once that run has
+ * FINISHED.
+ *
+ * ⚠⚠ `POST /api/admin/storages/:id/sync` answers 202 and walks the storage in
+ * the background (since 0.38.1). A script that carries on straight away stars,
+ * opens and thumbnails the rows that happen to exist at that moment — which on
+ * a fast workstation is all of them and on a CI runner is none. Measured on the
+ * v0.41.0 tag: the seed reported "starred 4, recent 6" and the Starred and
+ * Recent views came out empty on GitHub while the same script passed locally.
+ *
+ * `api` is the calling script's own request helper; the run is matched by its
+ * start time so an earlier run of the same storage cannot answer for this one.
+ */
+export async function syncAndWait(api, token, storageId, { timeoutMs = 120000 } = {}) {
+  const asked = Date.now() - 2000;
+  const res = await api(token, `/api/admin/storages/${storageId}/sync`, { method: 'POST' });
+  if (!res.ok) throw new Error(`sync ${storageId}: ${res.status} ${await res.text()}`);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const list = await api(token, `/api/admin/storages/${storageId}/sync-runs?limit=5`);
+    if (list.ok) {
+      const { entries = [] } = await list.json();
+      const run = entries.find((r) => Date.parse(r.started_at) >= asked && r.finished_at);
+      if (run) {
+        if (run.status !== 'ok') throw new Error(`sync ${storageId} finished ${run.status}`);
+        return run;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`sync ${storageId} did not finish within ${timeoutMs / 1000}s`);
+}
+
+/**
  * seedFixtures materialises the screenshot world under `root` and returns the
  * folder the explorer should open on.
  */

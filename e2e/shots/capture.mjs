@@ -40,7 +40,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { goBuild } from '../../scripts/lib/go-build.mjs';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, syncAndWait } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -228,7 +228,7 @@ async function seed() {
   // …and run a sync, which is what enqueues the thumbnail jobs. Listing alone
   // does not: the grid renders generic icons and the hero shot looks like a
   // product with no previews.
-  await api(token, `/api/admin/storages/${storage.id}/sync`, { method: 'POST' });
+  await syncAndWait(api, token, storage.id);
   return token;
 }
 

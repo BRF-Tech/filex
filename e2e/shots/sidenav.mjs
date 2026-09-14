@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, syncAndWait } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -206,7 +206,7 @@ async function seed() {
     [team, ['Marketing://', 'Marketing://Q3 campaign', 'Marketing://Brand assets', 'Marketing://Payroll']],
   ]) {
     for (const p of paths) await indexPath(adminToken, p);
-    await api(adminToken, `/api/admin/storages/${st.id}/sync`, { method: 'POST' });
+    await syncAndWait(api, adminToken, st.id);
   }
 
   // The end user this whole change is for.
@@ -481,7 +481,11 @@ async function run(tokens) {
       );
       real.find((b) => /grid/i.test(b.getAttribute('title') ?? ''))?.click();
     });
-    await sleep(1200);
+    // Thumbnails arrive as authorised blob fetches after the cards render, so
+    // the picture and the count below wait for them rather than for a clock.
+    await page
+      .waitForFunction(() => document.querySelectorAll('.fe-grid__thumb img').length >= 6, null, { timeout: 15000 })
+      .catch(() => undefined);
     await shot(page, 'sidenav-expanded-1440.png');
     const wideExpanded = await primaryWidth(page);
     const navExpanded = await navWidth(page);

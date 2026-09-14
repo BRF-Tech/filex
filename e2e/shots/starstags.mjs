@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, syncAndWait } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -224,7 +224,7 @@ async function seed() {
   for (const p of ['My files://', 'My files://Photos', 'My files://Documents']) {
     await indexPath(token, p);
   }
-  await api(token, `/api/admin/storages/${storage.id}/sync`, { method: 'POST' });
+  await syncAndWait(api, token, storage.id);
   await backfillThumbs();
 
   const photos = await indexPath(token, 'My files://Photos');
