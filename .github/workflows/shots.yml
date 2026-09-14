@@ -1,0 +1,80 @@
+name: Screenshots
+
+# Every screenshot script, against the build of this commit: `pnpm shots`.
+#
+# ⚠⚠ Why this exists. The scripts in e2e/shots/ only ever ran when a release
+# needed pictures, so when the UI was rebuilt five of the six still encoded the
+# old layout and nobody knew until release night. Run on every tag, a script
+# that no longer fits the product turns this job red instead.
+#
+# One command, the same one a maintainer runs (docs/CONTRIBUTING.md -> Release
+# process): builds packages -> web -> embed -> binary, proves the binary serves
+# the UI it was just built with (scripts/check-embed.mjs), runs every shot
+# script — the escrow instance and its throwaway key pair included — and writes
+# e2e/.artifacts/shots/contact-sheet.html. No secrets and no live host: every
+# instance is booted by the scripts, on loopback.
+#
+# The artefact holds the pictures and the sheet side by side, so the sheet's
+# relative links work after download. site/ is not part of this repository, so
+# the command's site-asset sync reports that and moves on.
+#
+# ⚠ This file lives in the public checkout only (scripts/export-public.sh keeps
+# .github/workflows across an export); the private repository's twin is the
+# `shots` job in .gitlab-ci.yml.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    name: pnpm shots
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/go.sum
+      - run: pnpm install --frozen-lockfile
+
+      # The browser the scripts drive, at the version pnpm-lock.yaml pins, with
+      # its system libraries. Not cached: this job runs on tags and on demand.
+      - name: Install Playwright's Chromium
+        run: pnpm --dir e2e exec playwright install --with-deps chromium
+
+      - name: Build, verify the embedded UI, take every screenshot
+        env:
+          # vue-tsc needs headroom on the full component bundle.
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: pnpm shots
+
+      # ⚠ include-hidden-files: e2e/.artifacts is a dot-directory, and
+      # upload-artifact v4.4+ silently leaves hidden paths out of the archive.
+      - name: Upload the pictures and the contact sheet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.ref_name }}
+          path: |
+            docs/screenshots/
+            e2e/.artifacts/shots/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30

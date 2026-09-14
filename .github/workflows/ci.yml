@@ -75,7 +75,9 @@ jobs:
           --health-cmd "pg_isready -U filex"
           --health-interval 5s --health-timeout 5s --health-retries 20
       mysql:
-        image: mysql:8
+        # 8.4 is the MySQL LTS docs/DATABASES.md names; pinned so the version
+        # the docs promise is the version this job measures.
+        image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: filex
           MYSQL_DATABASE: filex
@@ -189,6 +191,10 @@ jobs:
             web/cypress/screenshots
             web/cypress/videos
             e2e/.artifacts/server.log
+          # ⚠ e2e/.artifacts is a dot-directory: upload-artifact v4.4+ leaves
+          # hidden paths out unless told otherwise, so without this line the
+          # server log this step exists to keep was never in the archive.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
