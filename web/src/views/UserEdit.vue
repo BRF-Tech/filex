@@ -17,7 +17,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
-import CopyButton from '@/components/ui/CopyButton.vue';
+import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 
 const { t, locale } = useI18n();
@@ -34,11 +34,8 @@ const saving = ref(false);
 const email = ref('');
 const displayName = ref('');
 const role = ref<UserRole>('viewer');
-const oidcSubject = ref('');
 
 const showReset = ref(false);
-const resetting = ref(false);
-const resetPassword = ref<string | null>(null);
 
 const showDelete = ref(false);
 const deleting = ref(false);
@@ -51,7 +48,6 @@ async function load() {
     email.value = u.email;
     displayName.value = u.display_name;
     role.value = u.role;
-    oidcSubject.value = u.oidc_subject ?? '';
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
     router.replace({ name: 'users' });
@@ -64,10 +60,8 @@ async function save() {
   saving.value = true;
   try {
     const updated = await users.update(id.value, {
-      email: email.value.trim(),
       display_name: displayName.value.trim(),
       role: role.value,
-      oidc_subject: oidcSubject.value.trim() || null,
     });
     user.value = updated;
     toast.success(t('users.updatedOk'));
@@ -75,18 +69,6 @@ async function save() {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     saving.value = false;
-  }
-}
-
-async function doReset() {
-  resetting.value = true;
-  try {
-    resetPassword.value = await users.resetPassword(id.value);
-    toast.success(t('users.resetPasswordOk'));
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    resetting.value = false;
   }
 }
 
@@ -208,20 +190,16 @@ onMounted(() => {
     </div>
 
     <form class="card card-body space-y-3" @submit.prevent="save">
-      <Input v-model="email" type="email" :label="t('common.email')" required />
+      <!-- The server does not change an account's e-mail (it is the identity an
+           SSO sign-in is matched on), so the field is shown, not offered. -->
+      <Input v-model="email" type="email" :label="t('common.email')" readonly disabled />
       <Input v-model="displayName" :label="t('users.fields.displayName')" required />
       <Select v-model="role" :options="roleOptions" :label="t('common.role')" />
-      <Input
-        v-model="oidcSubject"
-        :label="t('users.fields.oidcSubject')"
-        monospace
-        :hint="t('common.optional')"
-      />
 
       <div class="flex justify-between items-center pt-2 gap-2">
         <Button type="button" variant="outline" @click="showReset = true">
           <KeyRound class="h-4 w-4" />
-          {{ t('users.resetPasswordOk') }}
+          {{ t('users.resetPassword') }}
         </Button>
         <div class="flex items-center gap-2">
           <Button type="button" variant="danger" @click="showDelete = true">
@@ -295,42 +273,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Reset password -->
-    <Modal
-      v-model="showReset"
-      :title="t('users.resetPasswordTitle')"
-      size="sm"
-      :prevent-close="resetting"
-      @close="(resetPassword = null)"
-    >
-      <div v-if="!resetPassword" class="text-sm">
-        <p>{{ t('users.resetPasswordSubtitle') }}</p>
-      </div>
-      <div v-else class="space-y-2">
-        <p class="text-sm text-zinc-600 dark:text-zinc-400">
-          {{ t('users.resetPasswordSubtitle') }}
-        </p>
-        <div class="flex items-center gap-2">
-          <code
-            class="flex-1 select-all rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-2 text-sm font-mono break-all"
-          >
-            {{ resetPassword }}
-          </code>
-          <CopyButton :value="resetPassword" />
-        </div>
-      </div>
-      <template #footer>
-        <Button v-if="!resetPassword" variant="ghost" @click="showReset = false">
-          {{ t('common.cancel') }}
-        </Button>
-        <Button v-if="!resetPassword" :loading="resetting" @click="doReset">
-          {{ t('common.confirm') }}
-        </Button>
-        <Button v-else @click="(showReset = false), (resetPassword = null)">
-          {{ t('common.close') }}
-        </Button>
-      </template>
-    </Modal>
+    <ResetPasswordModal :user="showReset ? user : null" @close="showReset = false" />
 
     <Modal v-model="showDelete" :title="t('common.delete')" size="sm">
       <p class="text-sm">{{ t('users.deleteConfirm', { email: user.email }) }}</p>

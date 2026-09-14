@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.41.0"
+version: "0.41.1"
 releaseNotes: |-
-  filex v0.41.0 — 2026-09-14
-  • A new face for the whole product.
-  • Home is a view inside the explorer
-  • User settings
-  • A listing that behaves like a table.
-  • Per-folder view memory
+  filex v0.41.1 — 2026-09-15
+  • The OIDC admin mapping now holds on every sign-in, not only when the account is created.
+  • Content-Range is in the default CORS allow-list.
+  • Moving a file larger than 8 MiB onto an S3 storage served over plain http:// failed
+  • On a phone, a tap selected a file or folder instead of opening it
+  • The password reset button in Users asked "Delete user …?"
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

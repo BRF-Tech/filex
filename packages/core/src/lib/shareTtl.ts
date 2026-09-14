@@ -74,7 +74,12 @@ export function expiryInputMax(maxDays: number | undefined, now: Date = new Date
 }
 
 /** "Valid until 30 Aug 2026, 14:05" / "Does not expire" from the server's `expires_at`. */
-export function validUntilLine(expiresAt: string | null | undefined, locale: 'tr' | 'en'): string {
+export function validUntilLine(
+  expiresAt: string | null | undefined,
+  locale: 'tr' | 'en',
+  /** The explorer whose clock applies (lib/timezone EXPLORER_CLOCK). */
+  clock?: symbol,
+): string {
   if (!expiresAt) return locale === 'tr' ? 'Bu bağlantının süresi yoktur.' : 'This link does not expire.';
   const d = new Date(expiresAt);
   // zaman:z1 — the viewer's chosen clock, not the browser's. "Valid until
@@ -87,7 +92,7 @@ export function validUntilLine(expiresAt: string | null | undefined, locale: 'tr
   // dialog and "Sep 20, 2026, 1:53 PM" in the listing behind it.
   const when = Number.isNaN(d.getTime())
     ? expiresAt
-    : formatInstant(d, locale, { dateStyle: 'medium', timeStyle: 'short' });
+    : formatInstant(d, locale, { dateStyle: 'medium', timeStyle: 'short' }, clock);
   return locale === 'tr' ? `Bu bağlantı ${when} tarihine kadar geçerli.` : `This link is valid until ${when}.`;
 }
 
@@ -98,4 +103,18 @@ export function ttlCeilingHint(maxDays: number | undefined, locale: 'tr' | 'en')
   return locale === 'tr'
     ? `Bağlantılar en fazla ${max} gün geçerli olabilir (sunucu ayarı).`
     : `Links can be valid for at most ${max} day${max === 1 ? '' : 's'} (server setting).`;
+}
+
+/**
+ * The share dialog's muted detail line: its facts joined with " · ".
+ *
+ * ⚠ The first fact is a whole sentence ("This link is valid until …, 10:00
+ * AM.") and the ones after it are fragments ("3 downloads"), so a plain join
+ * printed "10:00 AM. · 3 downloads" — a full stop in the middle of a line. A
+ * fact that is followed by another loses its closing full stop; the last one
+ * keeps whatever it has.
+ */
+export function shareDetailLine(facts: Array<string | null | undefined>): string {
+  const kept = facts.filter((f): f is string => !!f);
+  return kept.map((f, i) => (i < kept.length - 1 ? f.replace(/\.\s*$/, '') : f)).join(' · ');
 }

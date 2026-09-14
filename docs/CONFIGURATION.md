@@ -225,7 +225,7 @@ wins). The **API‑token driver is always on** regardless.
 | `FILEX_OIDC_CLIENT_SECRET` | Client secret |
 | `FILEX_OIDC_REDIRECT_URL` | `<public>/api/auth/oidc/callback` |
 | `FILEX_OIDC_ROLE_CLAIM` | Claim carrying roles/groups |
-| `FILEX_OIDC_ADMIN_GROUP` | Value that elevates to admin |
+| `FILEX_OIDC_ADMIN_GROUP` | Value that elevates to admin. Applied at **every** sign-in since 0.41.1 — added to the group → admin, removed → `user`; the setup account and the last admin are never demoted ([SSO.md](SSO.md#roles--admin-access)) |
 | `FILEX_OIDC_AUTO_REDIRECT` | **SSO-first login** (default `false`): the login page starts the OIDC flow immediately instead of showing the password form. Local login stays available behind a "Sign in with password" link (`/admin/login?local=1`) for break-glass/`admin@local`. The redirect is skipped on `?local=1`, after a failed IdP round-trip (`?error=oidc`) and on `?maintenance=1`, so a broken IdP can never cause a redirect loop. Requires `oidc` in `FILEX_AUTH_DRIVERS`. Multi-tenant: the flag is instance-global; the flow itself already dispatches per request host to the right tenant realm. |
 
 **LDAP** (enable with `FILEX_AUTH_DRIVERS=local,ldap`):
@@ -686,13 +686,21 @@ Index path is `config.yaml` only (`search.index_path`, default
 
 ## Usage & cost
 
-⚠ **This one has no environment variables and no `config.yaml` block.** The
-*Admin → Usage & cost* page is configured entirely from the settings table —
-`usage.provider`, `usage.report_storage`, `usage.account_id`, `usage.prefix`
-and `usage.pricing` — written from that page or through
-`PATCH /api/admin/settings`. Unlike the [ClamAV family](#antivirus-clamav), nothing seeds them
-at first boot, so a compose file cannot bring this page up configured. See
-[USAGE.md](USAGE.md).
+The *Admin → Usage & cost* page reads five rows of the settings table, written
+from that page or through `PATCH /api/admin/settings`. Like the
+[ClamAV family](#antivirus-clamav), each is **seeded from its variable on first
+boot only** — once a row exists the variable is inert and the page's value wins.
+There is no `config.yaml` block.
+
+| Variable | Setting | What |
+|---|---|---|
+| `FILEX_USAGE_PROVIDER` | `usage.provider` | `b2`, or empty for none |
+| `FILEX_USAGE_REPORT_STORAGE` | `usage.report_storage` | the filex storage whose root is the provider's report bucket |
+| `FILEX_USAGE_ACCOUNT_ID` | `usage.account_id` | the provider account id (optional for B2) |
+| `FILEX_USAGE_PREFIX` | `usage.prefix` | folder inside that storage holding the dated reports |
+| `FILEX_USAGE_PRICING` | `usage.pricing` | the price table, as JSON |
+
+See [USAGE.md](USAGE.md).
 
 ---
 
@@ -752,14 +760,15 @@ See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 | `FILEX_CORS_ALLOWED_ORIGINS` | `*` | Comma list. Restrict when embedding the component from specific origins. |
 
 `allowed_methods` / `allowed_headers` are `config.yaml` only. Default allowed
-headers: `Authorization, Content-Type, X-Filex-Pin`. If you use API‑token root
-confinement from a browser, add `X-Filex-Token` / `X-Filex-Root`.
+headers: `Authorization, Content-Type, X-Filex-Pin, Content-Range`. If you use
+API‑token root confinement from a browser, add `X-Filex-Token` / `X-Filex-Root`.
 
-⚠ A page on **another origin** that uploads files larger than the chunk size
-(8 MiB by default) needs **`Content-Range`** in that list too: every chunk is a
-`PUT` carrying it, the default preflight does not allow it, and the browser
-refuses the chunk — small uploads keep working, which makes it look like a size
-limit rather than CORS. A same-origin deployment is unaffected.
+⚠ If you set `allowed_headers` yourself, keep **`Content-Range`** in it: every
+chunk of an upload larger than the chunk size (8 MiB by default) is a `PUT`
+carrying it, and a preflight that does not allow it makes the browser refuse
+the chunk — small uploads keep working, which looks like a size limit rather
+than CORS. (It was missing from the default before 0.41.1.) A same-origin
+deployment is unaffected.
 
 ---
 

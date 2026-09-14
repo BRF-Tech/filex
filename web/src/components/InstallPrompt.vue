@@ -89,7 +89,61 @@ const {
  * chip everywhere rather than to a card over every listing — the cheaper of
  * the two failures by a wide margin. */
 const route = useRoute();
-const loud = computed(() => route?.name === 'login');
+/** Whether the full card fits on the sign-in page without standing on the form.
+ *
+ * ⚠⚠ The page reserves the card's height at the bottom and compacts itself,
+ * and that is enough for the plain password form — not for SSO + the "or"
+ * divider + the password form. Measured at 1280x800 with SSO offered: the
+ * element at the submit button's centre was the card's subtitle, so nobody
+ * could sign in without scrolling first, and nothing said to scroll. When the
+ * card would cover a control of the form (`[data-install-clear]`), the sign-in page gets the
+ * corner chip instead — the shape every other page already wears, the owner's
+ * ruling of 2026-09-13. A resize re-arms the full card and measures again. */
+const fits = ref(true);
+const loud = computed(() => route?.name === 'login' && fits.value);
+
+function overlaps(a: DOMRect, b: DOMRect): boolean {
+  return a.bottom > b.top && a.top < b.bottom && a.left < b.right && a.right > b.left;
+}
+
+function checkFit() {
+  if (typeof document === 'undefined' || !loud.value) return;
+  const area = document.querySelector('[data-install-clear]');
+  const card = installEl.value?.querySelector('.ip-card');
+  if (!area || !card) return;
+  // What must stay reachable is a CONTROL — a field, a button, a link — not the
+  // card's own padding, which may run under the offer's top edge harmlessly.
+  const box = card.getBoundingClientRect();
+  const controls = area.querySelectorAll('button, input, select, textarea, a[href]');
+  for (const el of Array.from(controls)) {
+    if (overlaps(el.getBoundingClientRect(), box)) {
+      fits.value = false;
+      return;
+    }
+  }
+}
+
+function rearmFit() {
+  fits.value = true;
+}
+/* ⚠⚠ Re-arm on a REAL viewport change only. Switching shapes changes the page's
+ * height, which shows or hides the scrollbar, and Chromium reports that as a
+ * `resize` of the window's width. Re-arming on it flipped card → chip → card
+ * for as long as the page was open (measured: the tab never fired `load`). A
+ * scrollbar is at most ~20px of width and none of height. */
+let lastW = typeof window !== 'undefined' ? window.innerWidth : 0;
+let lastH = typeof window !== 'undefined' ? window.innerHeight : 0;
+function onViewportResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const real = h !== lastH || Math.abs(w - lastW) > 24;
+  lastW = w;
+  lastH = h;
+  if (real) rearmFit();
+}
+if (typeof window !== 'undefined') window.addEventListener('resize', onViewportResize);
+// Leaving the sign-in page and coming back measures again, from the full card.
+watch(() => route?.name, rearmFit);
 
 /** Corner chip: closed until it is asked to open. Never persisted — this is
  *  "I am looking at it now", not a preference. */
@@ -157,16 +211,26 @@ function publishBannerHeight() {
   // page that has to give something up to make room needs to know whether
   // there is anything to make room for.
   document.documentElement.classList.toggle(BANNER_CLASS, h > 0);
+  // ⚠ Measure AFTER the page has made its room: the reserved padding and the
+  // compact card both hang off the variable and the class set just above, and
+  // measuring before they apply found the full-size form under the card at
+  // 1280x800 — where, with the room made, no control is.
+  if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(() => checkFit());
+  else checkFit();
 }
 
 watch(
-  [updateEl, installEl, loud],
+  [updateEl, installEl, loud, () => route?.name],
   ([u, i]) => {
     ro?.disconnect();
     if (typeof ResizeObserver !== 'undefined') {
       ro ??= new ResizeObserver(() => publishBannerHeight());
       if (u) ro.observe(u as HTMLElement);
       if (i) ro.observe(i as HTMLElement);
+      // The form grows after first paint (capabilities add the SSO button),
+      // and that is exactly when it starts to reach the card.
+      const form = typeof document !== 'undefined' ? document.querySelector('[data-install-clear]') : null;
+      if (form) ro.observe(form);
     }
     publishBannerHeight();
   },
@@ -174,6 +238,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', onViewportResize);
   ro?.disconnect();
   ro = null;
   if (typeof document !== 'undefined') {

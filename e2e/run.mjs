@@ -609,31 +609,37 @@ async function startS3(baseURL) {
   if (!login.ok) throw new Error(`admin login failed: ${login.status} ${await login.text()}`);
   const cookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
 
-  const storageName = 's3-e2e';
-  const create = await fetch(`${baseURL}/api/admin/storages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie },
-    body: JSON.stringify({
-      name: storageName,
-      driver: 's3',
-      mount_path: '/',
-      enabled: true,
-      config: {
-        endpoint: `http://127.0.0.1:${port}`,
-        region: 'us-east-1',
-        bucket,
-        prefix: 'e2e',
-        access_key: access,
-        secret_key: secret,
-        path_style: true,
-      },
-    }),
-  });
-  if (!create.ok) {
-    throw new Error(`registering the s3 storage failed: ${create.status} ${await create.text()}`);
+  // Two storages on the one server. The second lets a spec move between two
+  // object stores: the source then hands the writer a network stream that
+  // cannot rewind, a case a local-disk source never reaches (a file on disk
+  // is seekable). Issue #27 lived exactly there.
+  const [storageName, secondStorageName] = ['s3-e2e', 's3-e2e-b'];
+  for (const [nameOf, prefix] of [[storageName, 'e2e'], [secondStorageName, 'e2e-b']]) {
+    const create = await fetch(`${baseURL}/api/admin/storages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        name: nameOf,
+        driver: 's3',
+        mount_path: '/',
+        enabled: true,
+        config: {
+          endpoint: `http://127.0.0.1:${port}`,
+          region: 'us-east-1',
+          bucket,
+          prefix,
+          access_key: access,
+          secret_key: secret,
+          path_style: true,
+        },
+      }),
+    });
+    if (!create.ok) {
+      throw new Error(`registering the s3 storage ${nameOf} failed: ${create.status} ${await create.text()}`);
+    }
+    log(`s3 storage "${nameOf}" registered`);
   }
-  log(`s3 storage "${storageName}" registered`);
-  return { storageName, endpoint: `http://127.0.0.1:${port}`, bucket };
+  return { storageName, secondStorageName, endpoint: `http://127.0.0.1:${port}`, bucket };
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -681,6 +687,7 @@ async function main() {
   if (flag('s3')) {
     const s3 = await startS3(baseURL);
     env.E2E_S3_STORAGE = s3.storageName;
+    env.E2E_S3_STORAGE_B = s3.secondStorageName;
   }
 
   const specs = localSpecs().map((f) => `tests/${f}`);

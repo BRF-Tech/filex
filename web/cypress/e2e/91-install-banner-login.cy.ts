@@ -64,6 +64,47 @@ describe('the sign-in page is not covered by the install banner', () => {
     }
   });
 
+  // The SSO button and the "or" divider make the card taller than the plain
+  // form this spec measured first, and on an 800px screen the banner covered
+  // the password form again — the case every SSO deployment with local sign-in
+  // (or the recovery sign-in) is in. The capabilities answer is stubbed to name
+  // `oidc`; the button is only drawn, never pressed.
+  it('with SSO offered too, every control of the form is on top at 1280x800', () => {
+    cy.intercept('GET', '**/api/**capabilities*', (req) => {
+      req.continue((res) => {
+        const body = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+        const drivers: string[] = body.auth_drivers ?? [];
+        if (!drivers.includes('oidc')) body.auth_drivers = [...drivers, 'oidc'];
+        res.send(body);
+      });
+    });
+    cy.viewport(1280, 800);
+    cy.visit('/admin/login');
+    cy.contains('button', /sso|single sign-on|oidc|tek oturum/i).should('be.visible');
+    // The offer is still on the page — in whichever shape fits. Without this
+    // the spec would also pass on a build that simply stopped offering it.
+    cy.get('[data-testid="pwa-install-banner"]').should('exist');
+    for (const sel of ['form input[type="password"]', 'form button[type="submit"]']) {
+      cy.get(sel)
+        .first()
+        .should('be.visible')
+        .then(($el) => {
+          const r = $el[0].getBoundingClientRect();
+          const x = Math.round(r.left + r.width / 2);
+          const y = Math.round(r.top + r.height / 2);
+          cy.document().then((doc) => {
+            const top = doc.elementFromPoint(x, y);
+            expect(
+              $el[0].contains(top) || top === $el[0],
+              `with SSO on, the element at ${sel}'s centre is <${top?.tagName.toLowerCase()} class="${
+                (top as HTMLElement)?.className ?? ''
+              }">`,
+            ).to.eq(true);
+          });
+        });
+    }
+  });
+
   it('signing in still works with a clean profile', () => {
     cy.viewport(1280, 800);
     cy.visit('/admin/login');

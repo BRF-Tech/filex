@@ -57,10 +57,13 @@ endpoint `https://s3.<region>.backblazeb2.com`, bucket `b2-reports-<accountId>`,
 
 The same values are rows in the settings table — `usage.provider`,
 `usage.report_storage`, `usage.account_id`, `usage.prefix` and `usage.pricing`
-— so they can also be written through `PATCH /api/admin/settings`. ⚠ There is
-**no environment variable** for any of them: unlike the antivirus family they
-are not seeded at first boot, so a compose file cannot configure this page.
-Set them here, or through the settings API.
+— so they can also be written through `PATCH /api/admin/settings`, or seeded
+from the environment on **first boot**, like the antivirus family:
+`FILEX_USAGE_PROVIDER`, `FILEX_USAGE_REPORT_STORAGE`, `FILEX_USAGE_ACCOUNT_ID`,
+`FILEX_USAGE_PREFIX` and `FILEX_USAGE_PRICING` (the JSON price table). A
+variable only fills a row that does not exist yet; once the page has saved a
+value, the page's value wins. (Before 0.41.1 the variables were declared and
+never read.)
 
 > **The report appears the day after the account does.** A brand-new B2 account
 > has no `b2-reports-…` bucket at all until Backblaze writes its first daily

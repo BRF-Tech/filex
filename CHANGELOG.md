@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-09-15
+
+### Changed
+
+- **The OIDC admin mapping now holds on every sign-in, not only when the account
+  is created.** With `FILEX_OIDC_ROLE_CLAIM` and `FILEX_OIDC_ADMIN_GROUP` set,
+  someone added to the admin group becomes an admin at their next sign-in, and
+  someone **removed** from it goes back to `user` — before this, an ex-admin in
+  the identity provider kept administering filex for good. The mapping owns the
+  admin role and nothing else: a `viewer` set by hand stays a viewer unless the
+  group now grants admin. Two accounts are never demoted, because demoting
+  either could leave nobody able to administer filex: the account filex was set
+  up with (the one the recovery sign-in admits) and the last admin; each such
+  sign-in logs a `WARN`. Measured against a real OIDC provider: added to the
+  group → `admin` on the next sign-in, removed → `user`, the setup account kept
+  `admin` ([docs/SSO.md](docs/SSO.md#roles--admin-access)).
+
+- **`Content-Range` is in the default CORS allow-list.** An explorer on another
+  origin uploads a file past one chunk (8 MiB) as PUTs carrying that header, and
+  the default preflight refused it — every small upload worked and every large
+  one failed, which reads as a size limit. If you set `cors.allowed_headers`
+  yourself, keep it in the list.
+
+### Fixed
+
+- **Moving a file larger than 8 MiB onto an S3 storage served over plain
+  `http://` failed** (#27) with `failed to compute payload hash: failed to seek
+  body to start, request stream is not seekable` — Garage or MinIO on a
+  container network, for instance. Over `http://` the S3 signer hashes the body
+  and rewinds it to send it, and a move hands the writer the source storage's
+  stream, which cannot rewind. It is the #16 fault one method over: part uploads
+  learned to accept such a body, whole-object writes had not. A body that is too
+  large to hold and cannot rewind now goes out as a multipart upload in 8 MiB
+  parts: memory stays bounded by one part, every part is retryable on its own,
+  and a body that ends early aborts the upload instead of publishing a truncated
+  object. Reproduced and verified against a real MinIO by moving 20 MiB between
+  two S3 storages.
+
+- **On a phone, a tap selected a file or folder instead of opening it** (#26),
+  in every browser: the explorer spoke the mouse's grammar — click selects,
+  double-click opens — and a finger has no double-click. A tap now opens what it
+  lands on; a long press selects it (and opens its menu), and while something is
+  selected a tap adds to or removes from the selection. The decision is made
+  from the gesture, not the screen size, so a touch laptop's trackpad keeps
+  click-to-select. The long-press code the list, grid and gallery each carried a
+  copy of is one composable now.
+
+- **The password reset button in *Users* asked "Delete user …?"** (#25) — its
+  dialog showed the delete confirmation, so the key icon read as a second delete
+  button. Confirming it anyway was worse: the password was reset and the account
+  signed out everywhere, and the new password was never shown (the server
+  answers `new_password`, the page read `password`). The list and the user page
+  each had their own copy of the dialog, and the copies had drifted; there is
+  one now. The same page offered two fields the server ignored: **Add user**
+  marked the password optional and then refused every request without one — an
+  account can now be created without a password, for SSO or API-token use — and
+  an *OIDC subject* field was sent and dropped (SSO matches accounts by e-mail),
+  so it is gone, as is the editable e-mail on the user page, which the server
+  never changed.
+
+- **Saving from the editor into a folder the catalogue had not seen yet** filed
+  the new file at the storage root, where it listed under neither folder until
+  the next scan. The folder rows are created on the way.
+
+- **Operational notifications were written in English** on every panel —
+  `filex 0.42.0 available`, the replica alarms. They are phrased on the reader's
+  side now, in both languages, like the file events.
+
+- **The dashboard's *Recent activity* and the audit log printed wire names**
+  (`user.update` over `— · user:12`). They read `User: updated` and `User #12`,
+  in the panel's language; the raw action stays in the tooltip. A gate reads the
+  Go that writes audit rows and fails on an action with no translation. The
+  dashboard's rows never named who acted — the payload carried no e-mail, so
+  every line began with a dash; they do now. The storage card's bare count reads
+  `12 files`.
+
+- **Every `FILEX_USAGE_*` variable was declared and never read.** They now seed
+  the *Usage & cost* settings on first boot, like the antivirus family.
+
+- **Two explorers on one page shared one clock.** Each printed dates in the
+  zone of whichever explorer mounted last; each now reads its own
+  `config.timeZone` and account, while the viewer's own choice still applies to
+  both.
+
+- **On the sign-in page the desktop-app card covered the sign-in form** when SSO
+  was offered too (1280×800: the element at the submit button's centre was the
+  card's subtitle). When the card and the form would overlap, the page shows the
+  corner chip every other page uses.
+
+- The share dialog's detail line read `… 10:00 AM. · 3 downloads`; the API key
+  name field suggested the address the page happened to talk to
+  (`127.0.0.1:5297`, visible in the README screenshots) and now suggests a name;
+  the list view printed "Folder" twice per row while the Type column was on; the
+  service worker's source map shipped the build machine's temp path, user name
+  included — `scripts/check-embed.mjs` now refuses any shipped map that names an
+  absolute path.
+
+- **The update manifest's `migrations` flag is derived from the tags.**
+  `scripts/gen-update-manifest.py` marks a release whose tag holds a migration
+  file no earlier tag held, and lists every published release. The hand-kept
+  list it replaces had gone stale: the published manifest never marked v0.31.0.
+
 ## [0.41.0] - 2026-09-14
 
 > ⚠ **0.40.0 was never finished.** Its npm packages and git tag were published,

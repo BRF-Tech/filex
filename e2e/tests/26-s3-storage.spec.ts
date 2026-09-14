@@ -20,12 +20,21 @@
  *      layer and the driver have to disagree about part size and still work.
  *   4. Deleting goes to trash on S3 too, where "rename" is a copy and a
  *      delete rather than an atomic operation.
+ *   5. **A move between two S3 storages of a file past 8 MiB** (issue #27). The harness's
+ *      MinIO is plaintext http://, which is what makes this worth a real
+ *      server: over http the SDK signs the payload hash and must rewind the
+ *      body, and a cross-storage move hands it the source's stream, which
+ *      cannot rewind (a local source is a file, which can — measured: the
+ *      same move from local disk passed on the unfixed build). It failed with "failed to compute payload hash … request
+ *      stream is not seekable" before a byte left the process.
  */
 import { test as base, expect, type APIRequestContext } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { newAuthedRequest, waitForOp } from '../helpers/seed';
 
 const STORAGE = process.env.E2E_S3_STORAGE ?? '';
+/** A second s3 storage on the same MinIO, for moves between object stores. */
+const STORAGE_B = process.env.E2E_S3_STORAGE_B ?? '';
 /** 12 MiB: more than two 5 MiB backend parts, so re-chunking is exercised. */
 const BIG = 12 * 1024 * 1024;
 /** Deliberately far below S3's 5 MiB floor. */
@@ -46,6 +55,49 @@ function payload(n: number): Buffer {
 }
 
 const sha256 = (b: Buffer | Uint8Array) => createHash('sha256').update(b).digest('hex');
+
+/**
+ * Push `data` into `dir` through the staged upload (begin → chunks → commit)
+ * and wait for the commit's op. Returns the chunk size the server granted.
+ */
+async function stagedUpload(
+  request: APIRequestContext,
+  dir: string,
+  name: string,
+  data: Buffer,
+  chunkSize: number,
+): Promise<number> {
+  const begin = await request.post('/api/files/upload/begin', {
+    data: {
+      path: dir,
+      name,
+      size: data.length,
+      mime: 'application/octet-stream',
+      hash: `sha256:${sha256(data)}`,
+      chunk_size: chunkSize,
+    },
+  });
+  expect(begin.ok(), `begin: ${begin.status()} ${await begin.text()}`).toBeTruthy();
+  const { id, chunk_size: chunk } = await begin.json();
+
+  for (let start = 0; start < data.length; start += chunk) {
+    const end = Math.min(start + chunk, data.length) - 1;
+    const put = await request.put(`/api/files/upload/${id}`, {
+      headers: {
+        'content-range': `bytes ${start}-${end}/${data.length}`,
+        'content-type': 'application/octet-stream',
+      },
+      data: data.subarray(start, end + 1),
+    });
+    expect(put.ok(), `chunk at ${start}: ${put.status()} ${await put.text()}`).toBeTruthy();
+  }
+
+  const commit = await request.post(`/api/files/upload/${id}/commit`);
+  expect(commit.status(), 'commit acknowledges before the bytes have moved').toBe(202);
+  const { op_id: opId } = await commit.json();
+  await waitForOp(request, opId, 120_000);
+  return chunk;
+}
 
 test.describe('s3 storage', () => {
   test.skip(!STORAGE, 'no S3 backend — run with `node e2e/run.mjs local --s3`');
@@ -112,36 +164,8 @@ test.describe('s3 storage', () => {
     const data = payload(BIG);
     const name = `s3-staged-${Date.now()}.bin`;
 
-    const begin = await request.post('/api/files/upload/begin', {
-      data: {
-        path: `${STORAGE}://`,
-        name,
-        size: BIG,
-        mime: 'application/octet-stream',
-        hash: `sha256:${sha256(data)}`,
-        chunk_size: CLIENT_CHUNK,
-      },
-    });
-    expect(begin.ok(), `begin: ${begin.status()} ${await begin.text()}`).toBeTruthy();
-    const { id, chunk_size: chunk } = await begin.json();
+    const chunk = await stagedUpload(request, `${STORAGE}://`, name, data, CLIENT_CHUNK);
     expect(chunk, 'the server decides the chunk size and must honour ours here').toBe(CLIENT_CHUNK);
-
-    for (let start = 0; start < BIG; start += chunk) {
-      const end = Math.min(start + chunk, BIG) - 1;
-      const put = await request.put(`/api/files/upload/${id}`, {
-        headers: {
-          'content-range': `bytes ${start}-${end}/${BIG}`,
-          'content-type': 'application/octet-stream',
-        },
-        data: data.subarray(start, end + 1),
-      });
-      expect(put.ok(), `chunk at ${start}: ${put.status()} ${await put.text()}`).toBeTruthy();
-    }
-
-    const commit = await request.post(`/api/files/upload/${id}/commit`);
-    expect(commit.status(), 'commit acknowledges before the bytes have moved').toBe(202);
-    const { op_id: opId } = await commit.json();
-    await waitForOp(request, opId);
 
     // The proof is the object in the bucket, not the op's status: an upload
     // rejected by S3 for a too-small part fails here and nowhere else.
@@ -186,5 +210,31 @@ test.describe('s3 storage', () => {
       (t: { name?: string; path?: string }) => t.name === name || t.path?.endsWith(name),
     );
     expect(found, 'an S3 delete must be recoverable, not permanent').toBeTruthy();
+  });
+
+  test('a file past 8 MiB moves from one S3 storage onto another (issue #27)', async ({
+    authedRequest: request,
+  }) => {
+    test.skip(!STORAGE_B, 'the harness registered only one s3 storage');
+    const data = payload(20 * 1024 * 1024 + 12345);
+    const name = `s3-move-${Date.now()}.mp4`;
+
+    await stagedUpload(request, `${STORAGE_B}://`, name, data, 8 * 1024 * 1024);
+
+    const mv = await request.post('/api/files/move', {
+      data: { source: [`${STORAGE_B}://${name}`], target: `${STORAGE}://` },
+    });
+    expect(mv.status(), `move: ${mv.status()} ${await mv.text()}`).toBe(202);
+    const { op } = (await mv.json()) as { op: { id: number } };
+    const final = await waitForOp(request, op.id, 120_000);
+    expect(final.status, `the move ended ${final.status}: ${final.error ?? ''}`).toBe('ok');
+
+    const dl = await request.get(
+      `/api/files/manager?action=download&path=${encodeURIComponent(`${STORAGE}://${name}`)}`,
+    );
+    expect(dl.ok(), `download from S3: ${dl.status()}`).toBeTruthy();
+    const back = await dl.body();
+    expect(back.length).toBe(data.length);
+    expect(sha256(back), 'what S3 holds must be what was moved').toBe(sha256(data));
   });
 });

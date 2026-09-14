@@ -6,15 +6,12 @@ export interface UserCreateRequest {
   display_name: string;
   password?: string;
   role: UserRole;
-  oidc_subject?: string | null;
   send_invite?: boolean;
 }
 
 export interface UserUpdateRequest {
-  email?: string;
   display_name?: string;
   role?: UserRole;
-  oidc_subject?: string | null;
   password?: string;
   locale?: string;
   timezone?: string;
@@ -69,8 +66,11 @@ export const UsersApi = {
     await api.delete(`/admin/users/${id}`);
   },
 
-  async resetPassword(id: number): Promise<{ password: string }> {
-    const { data } = await api.post<{ password: string }>(`/admin/users/${id}/reset-password`);
+  // ⚠ The server answers `new_password` (handlers/users_admin.go). Reading
+  // `password` here dropped the one-time value on the floor: the account was
+  // reset and signed out, and nobody ever saw what it was reset to (issue #25).
+  async resetPassword(id: number): Promise<{ new_password: string }> {
+    const { data } = await api.post<{ new_password: string }>(`/admin/users/${id}/reset-password`);
     return data;
   },
 };

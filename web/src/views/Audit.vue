@@ -6,6 +6,7 @@ import { RefreshCcw } from 'lucide-vue-next';
 import { useAuditStore } from '@/stores/audit';
 import type { AuditEntry } from '@/api/types';
 import { formatDate } from '@/lib/format';
+import { auditActionLabel, auditTargetLabel } from '@/lib/auditLabel';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -13,7 +14,7 @@ import Table, { type Column } from '@/components/ui/Table.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Badge from '@/components/ui/Badge.vue';
 
-const { t, locale } = useI18n();
+const { t, te, locale } = useI18n();
 const audit = useAuditStore();
 
 const action = ref('');
@@ -121,14 +122,13 @@ onMounted(load);
       </template>
 
       <template #cell-action="{ row }">
-        <Badge size="xs" tone="violet">{{ (row as AuditEntry).action }}</Badge>
+        <Badge size="xs" tone="violet" :title="(row as AuditEntry).action">{{
+          auditActionLabel((row as AuditEntry).action, t, te)
+        }}</Badge>
       </template>
       <template #cell-target_type="{ row }">
         <span class="text-xs text-zinc-500">
-          {{ (row as AuditEntry).target_type ?? '—' }}
-          <template v-if="(row as AuditEntry).target_id">
-            :<span class="font-mono">{{ (row as AuditEntry).target_id }}</span>
-          </template>
+          {{ auditTargetLabel((row as AuditEntry).target_type, (row as AuditEntry).target_id, t, te) || '—' }}
         </span>
       </template>
     </Table>

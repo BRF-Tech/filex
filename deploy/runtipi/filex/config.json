@@ -6,8 +6,8 @@
   "dynamic_config": true,
   "port": 5212,
   "id": "filex",
-  "tipi_version": 15,
-  "version": "0.41.0",
+  "tipi_version": 16,
+  "version": "0.41.1",
   "categories": ["utilities", "data"],
   "description": "filex is a fast, self-hosted file manager: browse, upload, preview, share and edit files across local folders, S3/MinIO, SFTP, WebDAV, FTP and SMB/NAS shares. Browsing opens on Home — your storages, what you opened last, what you starred — and + New makes a folder or a document: Markdown, text, CSV or code straight away, and Word, Excel, PowerPoint or OpenDocument once you connect an OnlyOffice server — the templates are real documents compiled into the binary, so no LibreOffice is installed anywhere. A multi-file selection downloads as one streamed ZIP. Public share links with PIN and expiry, file-drop upload links, full-text search, thumbnails of the file itself (a PDF's first page, a video's first frame that is not black, a text file's first lines), trash and versioning, file ownership with an Owner column and a People filter, end-to-end encrypted folders with a recovery key, RBAC, TOTP 2FA, optional SSO (OIDC/LDAP), a desktop app with two-way folder sync and an AI/MCP API for agents. An open folder updates itself over a WebSocket, and pointing filex at a ClamAV container turns on virus scanning of every file written, with infected ones quarantined into the trash. The same tree is also reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic or WinSCP can point straight at it. Leave the admin fields empty to get a random admin@local password printed once in the app logs (also saved to /data/.first-run.txt).",
   "short_desc": "Self-hosted file manager for all your storages",
@@ -32,6 +32,6 @@
   ],
   "supported_architectures": ["amd64", "arm64"],
   "created_at": 1784246400000,
-  "updated_at": 1789383289656,
+  "updated_at": 1789415406597,
   "min_tipi_version": "4.5.0"
 }

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -197,7 +199,9 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	// "realm_access.roles" in the ACCESS token, not the id_token — so check
 	// both tokens and traverse the dotted path.
 	role := d.defaultRole
-	if roleClaim != "" && adminGroup != "" {
+	mapping := roleClaim != "" && adminGroup != ""
+	claimAdmin := false
+	if mapping {
 		claimSets := []map[string]any{claims}
 		if at, _ := tok.Extra("access_token").(string); at != "" {
 			if ac := parseJWTClaims(at); ac != nil {
@@ -207,6 +211,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 		for _, cs := range claimSets {
 			if claimContains(cs, roleClaim, adminGroup) {
 				role = model.RoleAdmin
+				claimAdmin = true
 				break
 			}
 		}
@@ -219,6 +224,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	ctx := r.Context()
 	lower := strings.ToLower(email)
 	var user *model.User
+	created := false
 	if providerID != 0 {
 		user, err = d.store.GetUserByProviderEmail(ctx, providerID, lower)
 		if err != nil {
@@ -229,6 +235,7 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 			if err != nil {
 				return nil, "", fmt.Errorf("oidc: this email is registered to another tenant: %w", err)
 			}
+			created = true
 			if err := d.store.SetUserProvider(ctx, user.ID, providerID, idTok.Subject); err != nil {
 				return nil, "", fmt.Errorf("oidc: stamp tenant: %w", err)
 			}
@@ -246,7 +253,11 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 			if err != nil {
 				return nil, "", fmt.Errorf("oidc: upsert user: %w", err)
 			}
+			created = true
 		}
+	}
+	if mapping && !created {
+		d.syncMappedRole(ctx, user, claimAdmin)
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)
 
@@ -259,6 +270,75 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 		return nil, "", err
 	}
 	return user, sessionToken, nil
+}
+
+// mappedRoleOnLogin is the role an EXISTING account holds after an SSO sign-in
+// while an admin mapping (role claim + admin group) is configured.
+//
+// ⚠⚠ The mapping used to be read once, at account creation. Adding someone to
+// the admin group after their first filex login did nothing, and removing
+// someone from it did nothing either — an ex-admin in the IdP kept
+// administering filex. The mapping owns exactly one fact, "is this account an
+// admin", so that is all it changes: a role set by hand below admin (viewer)
+// is left alone unless the group now grants admin.
+//
+// `protected` names the two accounts it never demotes, because demoting either
+// can lock every administrator out: the account filex was set up with (the
+// recovery login's account, local.BootstrapAdminSetting) and the last admin.
+func mappedRoleOnLogin(current string, claimAdmin bool, defaultRole string, protected bool) string {
+	switch {
+	case claimAdmin && current != model.RoleAdmin:
+		return model.RoleAdmin
+	case !claimAdmin && current == model.RoleAdmin && !protected:
+		return defaultRole
+	}
+	return current
+}
+
+// syncMappedRole applies mappedRoleOnLogin to a signed-in account and records
+// the change in the log, since it is a privilege change nobody clicked.
+func (d *Driver) syncMappedRole(ctx context.Context, user *model.User, claimAdmin bool) {
+	protected := false
+	if !claimAdmin && user.Role == model.RoleAdmin {
+		protected = d.isProtectedAdmin(ctx, user.ID)
+	}
+	next := mappedRoleOnLogin(user.Role, claimAdmin, d.defaultRole, protected)
+	if next == user.Role {
+		if protected {
+			slog.Warn("oidc: account is not in the admin group but keeps its admin role (setup account or last admin)",
+				slog.Int64("user_id", user.ID), slog.String("email", user.Email))
+		}
+		return
+	}
+	if err := d.store.UpdateUserRole(ctx, user.ID, next); err != nil {
+		slog.Warn("oidc: could not apply the mapped role",
+			slog.Int64("user_id", user.ID), slog.String("role", next), slog.String("err", err.Error()))
+		return
+	}
+	slog.Info("oidc: role changed by the IdP admin mapping",
+		slog.Int64("user_id", user.ID), slog.String("email", user.Email),
+		slog.String("from", user.Role), slog.String("to", next))
+	user.Role = next
+}
+
+// isProtectedAdmin reports whether demoting this admin could leave filex with
+// nobody able to administer it. An error while checking counts as protected:
+// refusing a demotion is recoverable, a lockout is not.
+func (d *Driver) isProtectedAdmin(ctx context.Context, userID int64) bool {
+	if id, err := authlocal.BootstrapAdminID(ctx, d.store); err != nil || id == userID {
+		return true
+	}
+	users, err := d.store.ListUsers(ctx)
+	if err != nil {
+		return true
+	}
+	admins := 0
+	for _, u := range users {
+		if u.IsAdmin() {
+			admins++
+		}
+	}
+	return admins <= 1
 }
 
 // parseJWTClaims decodes a JWT payload WITHOUT verifying the signature. It is

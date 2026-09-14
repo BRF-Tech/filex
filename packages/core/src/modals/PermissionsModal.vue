@@ -27,11 +27,19 @@
  * (`gorunum:v2-share`). A scoped style block here is silently dropped in the
  * web-component build — see web/tests/api/scopedStyles.test.ts.
  */
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed, inject, watch } from 'vue';
 import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
 import { shareCliCommand } from '../lib/shareCli';
-import { STOCK_EXPIRY_DAYS, clampExpiryOptions, defaultExpiryDays, ttlCeilingHint, validUntilLine } from '../lib/shareTtl';
+import {
+  STOCK_EXPIRY_DAYS,
+  clampExpiryOptions,
+  defaultExpiryDays,
+  shareDetailLine,
+  ttlCeilingHint,
+  validUntilLine,
+} from '../lib/shareTtl';
+import { EXPLORER_CLOCK } from '../lib/timezone';
 import { resolveLocale } from '../locales/resolve';
 import { formatByteSize, useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons';
@@ -636,8 +644,11 @@ function expiryLine(days: number): string {
 }
 // What the server actually stored — shown under a fresh link so the real
 // expiry is visible even when the server shortened the request.
+// The explorer this dialog belongs to reads deadlines on its own clock.
+const clock = inject(EXPLORER_CLOCK, undefined);
+
 function validUntil(r: { expiresAt?: string | null } | null): string {
-  return validUntilLine(r?.expiresAt ?? null, tr.value ? 'tr' : 'en');
+  return validUntilLine(r?.expiresAt ?? null, tr.value ? 'tr' : 'en', clock);
 }
 
 /* ── the top tier: one switch, one sentence, one link ──────────────────── */
@@ -671,10 +682,10 @@ const linkDetail = computed(() => {
     if (shareMaxDl.value) bits.push(maxDlOptions.find((o) => o.v === shareMaxDl.value)?.l ?? '');
   } else if (downloadShares.value[0]) {
     const s = downloadShares.value[0];
-    bits.push(validUntilLine(s.expires_at ?? null, tr.value ? 'tr' : 'en'));
+    bits.push(validUntil({ expiresAt: s.expires_at ?? null }));
     if (s.max_downloads) bits.push(maxDlOptions.find((o) => o.v === s.max_downloads)?.l ?? String(s.max_downloads));
   }
-  return bits.filter(Boolean).join(' · ');
+  return shareDetailLine(bits);
 });
 
 /* Section summaries — a named section still has to say what is inside it, or

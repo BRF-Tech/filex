@@ -236,7 +236,7 @@ const emit = defineEmits<{
   /** The virtual `.trash` row was opened — the trash view carries the restore
    *  actions and belongs to the main pane, so the host decides. */
   (e: 'open-trash'): void;
-  (e: 'click-row', node: FileNode, mod: { ctrl: boolean; shift: boolean }): void;
+  (e: 'click-row', node: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }): void;
   /** Right-click. `null` = empty space (nothing selected → "Paste" only). */
   (e: 'context', node: FileNode | null, ev: MouseEvent): void;
   (e: 'clear-selection'): void;
@@ -443,7 +443,19 @@ const paneSubfolders = computed(() =>
  * `useSelection` instance for this pane answers. One set of Ctrl/Shift
  * semantics for both panes — the old right pane had a simplified copy in
  * which Shift behaved as Ctrl. */
-function onViewClick(n: FileNode, mod: { ctrl: boolean; shift: boolean }) {
+function onViewClick(n: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }) {
+  /* issue #26 — a finger has no double-click, so a TAP is the open gesture:
+   * with nothing selected it opens what it lands on, exactly as a double-click
+   * would. Once something is selected (a long press selects, via its menu) a
+   * tap adds to or removes from the selection, so picking several files still
+   * works. A mouse keeps click-to-select; see composables/useRowTouch. */
+  if (mod.touch && !mod.ctrl && !mod.shift) {
+    if (props.selected.size === 0) {
+      onRowOpen(n);
+      return;
+    }
+    mod = { ...mod, ctrl: true };
+  }
   emit('activate');
   emit('click-row', n, mod);
 }

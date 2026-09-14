@@ -113,3 +113,57 @@ func TestDisplayNameRoundTrip(t *testing.T) {
 		t.Fatalf("update did not persist display_name: %q", refreshed.DisplayName)
 	}
 }
+
+// TestCreateUserWithoutPassword — issue #25. The admin "Add user" dialog marks
+// the password optional, which is how an SSO account is added ahead of its
+// first sign-in, and the server refused every such request with "email and
+// password required". An account created without a password must exist, must
+// refuse every password (it has none to match), and must become usable with
+// the password an admin then resets it to — the reporter's WebDAV case.
+func TestCreateUserWithoutPassword(t *testing.T) {
+	srv, client, store := testutil.NewTestServer(t)
+	ctx := context.Background()
+
+	email, password := testutil.SeedAdmin(t, store)
+	testutil.LoginAs(t, srv, client, email, password)
+
+	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/users", map[string]string{
+		"email": "sso-only@test.local", "display_name": "SSO Only", "role": "user",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create without a password: want 200, got %d (%v)", status, body)
+	}
+	u, err := store.GetUserByEmail(ctx, "sso-only@test.local")
+	if err != nil || u == nil {
+		t.Fatalf("account not created: %v", err)
+	}
+	if u.PasswordHash != "" {
+		t.Fatalf("an account created without a password must not have one")
+	}
+
+	for _, guess := range []string{"", "x", "SSO Only"} {
+		st, _ := doJSON(t, &http.Client{}, http.MethodPost, srv.URL+"/api/auth/login", map[string]string{
+			"email": "sso-only@test.local", "password": guess,
+		})
+		if st == http.StatusOK {
+			t.Fatalf("an account without a password accepted %q", guess)
+		}
+	}
+
+	status, reset := doJSON(t, client, http.MethodPost, fmt.Sprintf("%s/api/admin/users/%d/reset-password", srv.URL, u.ID), nil)
+	fresh, _ := reset["new_password"].(string)
+	if status != http.StatusOK || fresh == "" {
+		t.Fatalf("reset-password: want 200 with new_password, got %d (%v)", status, reset)
+	}
+	st, _ := doJSON(t, &http.Client{}, http.MethodPost, srv.URL+"/api/auth/login", map[string]string{
+		"email": "sso-only@test.local", "password": fresh,
+	})
+	if st != http.StatusOK {
+		t.Fatalf("the reset password does not sign in: %d", st)
+	}
+
+	status, _ = doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/users", map[string]string{"password": "NoEmail!1"})
+	if status != http.StatusBadRequest {
+		t.Fatalf("create without an e-mail: want 400, got %d", status)
+	}
+}

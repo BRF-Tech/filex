@@ -16,8 +16,8 @@ background folder sync**, and a **built-in MCP server** so AI agents can drive i
 natively.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.41.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.41.0/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.41.1/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.41.1/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -155,35 +155,35 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 | Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
-| ![Share modal](docs/screenshots/v0.41.0/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.41.0/viewer-markdown.png) |
+| ![Share modal](docs/screenshots/v0.41.1/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.41.1/viewer-markdown.png) |
 
 | Admin panel | Demo landing |
 |---|---|
-| ![Admin dashboard](docs/screenshots/v0.41.0/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.41.0/demo-landing.png) |
+| ![Admin dashboard](docs/screenshots/v0.41.1/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.41.1/demo-landing.png) |
 
 | The shell — what everybody lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
 |---|---|
-| ![The filex shell](docs/screenshots/v0.41.0/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.41.0/driveshell/driveshell-search-1440.png) |
+| ![The filex shell](docs/screenshots/v0.41.1/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.41.1/driveshell/driveshell-search-1440.png) |
 
 | Navigation panel — Home, My files, Shared with me, Recent, Starred, Trash, and your storages | Collapsed to the icon rail |
 |---|---|
-| ![Navigation panel](docs/screenshots/v0.41.0/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.41.0/sidenav/sidenav-rail-1440.png) |
+| ![Navigation panel](docs/screenshots/v0.41.1/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.41.1/sidenav/sidenav-rail-1440.png) |
 
 | Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.41.0/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.41.0/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.41.1/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.41.1/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
-| ![How to connect](docs/screenshots/v0.41.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.41.0/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.41.1/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.41.1/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
-| ![Connection guide](docs/screenshots/v0.41.0/connections-guide.png) |
+| ![Connection guide](docs/screenshots/v0.41.1/connections-guide.png) |
 
 | A storage filex does not ship — installed as a plugin, describing its own config form |
 |---|
-| ![Plugins](docs/screenshots/v0.41.0/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.41.1/admin-plugins.png) |
 
 ## Quick start — binary
 
@@ -371,7 +371,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **E2E encrypted folders** — client-side WebCrypto; the server stores ciphertext and never receives a key. Each folder gets a **recovery key**, shown once, so a forgotten password is not automatically lost data; an operator can optionally enable **key escrow** — at install, or adopted later on a running installation; it never reaches existing folders on its own, but their owners are offered the choice at unlock — and its use notifies the folder's owner ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)).
 - **Native multi-tenancy** — provider/tenant mode with per-tenant isolation on one instance ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)).
 - **Driver-pluggable everything** — storage / auth / DB / queue drivers opt-in via env (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …).
-- **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`).
+- **OIDC SSO-first** — optional auto-redirect to your IdP with break-glass local login (`?local=1`), and the admin role follows an IdP group at every sign-in.
 - **LDAP / Active Directory** — directory accounts sign in on the same password form as local ones, and on WebDAV/SFTP/FTPS/S3/NFS too; private-CA support, and `local` stays first so `admin@local` works while the directory is down ([docs/LDAP.md](docs/LDAP.md)).
 - **Replica + reconciliation** — primary→replica fan-out (mirror / append-only / skip per path-glob rule), read fallback, scheduled status report, one-click "Fix all".
 - **Persistent op queue** — restart-safe queue in your own database (SQLite / Postgres / MySQL) or in Redis, worker pool with retries + cancel + admin dashboard. Every driver orders by priority, so the antivirus scan for a file somebody just uploaded is served ahead of the twenty thousand a first import queued. Unset, the driver follows the database rather than defaulting to SQLite — pointing SQLite statements at a Postgres server is a syntax error on every poll and no job ever runs.

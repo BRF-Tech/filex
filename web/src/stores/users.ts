@@ -48,8 +48,8 @@ export const useUsersStore = defineStore('users', () => {
   }
 
   async function resetPassword(id: number): Promise<string> {
-    const { password } = await UsersApi.resetPassword(id);
-    return password;
+    const { new_password } = await UsersApi.resetPassword(id);
+    return new_password;
   }
 
   return { page, loading, error, fetch, create, update, remove, resetPassword };

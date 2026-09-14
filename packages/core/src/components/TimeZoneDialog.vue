@@ -17,15 +17,16 @@
  * device's — by asking the resolver with the viewer tier blanked. A reset
  * whose outcome you have to guess is not a reset.
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { formatInstant, useLocale } from '../composables/useLocale';
 import {
+  EXPLORER_CLOCK,
   deviceTimeZone,
   resolveTimeZone,
-  resolvedTimeZone,
+  resolvedTimeZoneFor,
   setViewerTimeZone,
-  timeZoneSources,
+  timeZoneSourcesFor,
   viewerTimeZone,
 } from '../lib/timezone';
 import Modal from '../modals/Modal.vue';
@@ -43,8 +44,10 @@ const { t } = useLocale(() => props.locale);
 
 const inputId = `fe-tzdialog-${Math.random().toString(36).slice(2, 9)}`;
 
-const fallback = computed(() => resolveTimeZone({ ...timeZoneSources(), viewer: '' }));
-const inForce = computed(() => resolvedTimeZone());
+// This explorer's clock, not the page's newest (lib/timezone, timeZoneSourcesFor).
+const clock = inject(EXPLORER_CLOCK, undefined);
+const fallback = computed(() => resolveTimeZone({ ...timeZoneSourcesFor(clock), viewer: '' }));
+const inForce = computed(() => resolvedTimeZoneFor(clock));
 const inForceZone = computed(() => inForce.value.zone ?? deviceTimeZone());
 
 /** "Right now in Asia/Tokyo: 14:05:09" — the fastest way to see a wrong pick. */
@@ -54,11 +57,16 @@ function refresh(): void {
   // Through the shared formatter, which reads the RESOLVED zone — the readout
   // must say what every date on the page is actually drawn in, not what this
   // dialog thinks it chose.
-  now.value = formatInstant(new Date(), props.locale, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  now.value = formatInstant(
+    new Date(),
+    props.locale,
+    {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    },
+    clock,
+  );
 }
 watch(
   () => props.open,

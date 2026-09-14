@@ -26,8 +26,9 @@ import Badge from '@/components/ui/Badge.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import { syncTone } from '@/lib/syncTone';
+import { auditActionLabel, auditTargetLabel } from '@/lib/auditLabel';
 
-const { t, locale } = useI18n();
+const { t, te, locale } = useI18n();
 const router = useRouter();
 const storages = useStoragesStore();
 const sync = useSyncStore();
@@ -94,6 +95,10 @@ async function syncOne(id: number) {
   }
 }
 
+
+/** How many files a storage card counts — the number the "N files" label pluralises on. */
+const fileCountOf = (s: { stats?: { file_count?: number } | null; file_count?: number }) =>
+  s.stats?.file_count ?? s.file_count ?? 0;
 
 const totalBytesLabel = computed(() => formatBytes(stats.value?.total_bytes ?? 0, locale.value));
 const totalFilesLabel = computed(() => formatNumber(stats.value?.total_files ?? 0, locale.value));
@@ -195,9 +200,11 @@ onMounted(load);
               </RouterLink>
               <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                 <span class="font-mono">{{ driverIcon(s.driver) }}</span>
-                · {{ s.driver }}
+                {{ s.driver }}
                 · {{ formatBytes(s.stats?.total_size_bytes ?? s.total_bytes ?? 0, locale) }}
-                · {{ formatNumber(s.stats?.file_count ?? s.file_count ?? 0, locale) }}
+                · {{
+                  t('dashboard.fileCount', { n: formatNumber(fileCountOf(s), locale) }, fileCountOf(s))
+                }}
               </p>
             </div>
             <Badge :tone="syncTone(s.last_sync_state)" dot>
@@ -262,13 +269,15 @@ onMounted(load);
         >
           <li v-for="row in stats.recent_audit" :key="row.id" class="px-4 py-2 text-sm">
             <div class="flex items-center justify-between gap-2">
-              <span class="font-medium">{{ row.action }}</span>
+              <span class="font-medium" :title="row.action" data-testid="dashboard-activity-action">{{
+                auditActionLabel(row.action, t, te)
+              }}</span>
               <span class="text-xs text-zinc-500">{{ formatRelative(row.at, locale) }}</span>
             </div>
             <p class="text-xs text-zinc-500 dark:text-zinc-400 truncate">
               {{ row.user_email ?? '—' }}
               <template v-if="row.target_type">
-                · {{ row.target_type }}{{ row.target_id ? `:${row.target_id}` : '' }}
+                · {{ auditTargetLabel(row.target_type, row.target_id, t, te) }}
               </template>
             </p>
           </li>

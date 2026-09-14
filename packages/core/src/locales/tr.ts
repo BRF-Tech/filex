@@ -1079,6 +1079,8 @@ export const tr: Record<string, string> = {
   'conn.tokens.rootPlaceholder': 'depo://klasör',
   'conn.tokens.expiry': 'Geçerlilik (gün)',
   'conn.tokens.expiryNever': 'süresiz',
+  'conn.tokens.defaultName': 'API anahtarı {date}',
+  'conn.tokens.namePlaceholder': 'Ad — ör. yedekleme betiği',
   'conn.tokens.capNote': 'Tavan hesabın ve yetkilerin — sahip olduğundan fazlasını istemek reddedilir, verilmez.',
   /* === /gezinti:g1 === */
 

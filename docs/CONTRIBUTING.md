@@ -642,10 +642,15 @@ CI does the rest (GitHub Actions `release.yml`, five jobs):
    are deliberately excluded from `scripts/sync-site.sh` (so a website deploy
    cannot delete them) — which also means nothing refreshes them but you.
 
-   - `filex.sh/updates/stable.json` — **the server and CLI**. Prepend a record
-     for the new version: `version`, `date`, `auto_ok`, `migrations`, `notes`,
-     `notes_url`, `image`, `assets`. Every install with `AUTO_UPGRADE` reads
-     this and nothing else.
+   - `filex.sh/updates/stable.json` — **the server and CLI**. Every install with
+     `AUTO_UPGRADE` reads this and nothing else. Generate it, do not hand-edit
+     it: `python3 scripts/gen-update-manifest.py --repo-dir <the export checkout>
+     --out stable.json` lists every published release with its digests and
+     derives `migrations` from the tags (`--no-auto vX.Y.Z` pulls a release out
+     of automatic upgrades). Point `--repo-dir` at the checkout the signed tags
+     were made in: a release it has no tag for stops the generator rather than
+     publishing a guessed `migrations: false`. Diff the result against the live
+     file before you upload it.
    - `filex.sh/desktop/` — the desktop app. Upload the installers, the
      AppImage/deb, the dmg/zip, the portable `.exe`, and all three
      `latest*.yml`.

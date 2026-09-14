@@ -722,7 +722,10 @@ func Default() Config {
 		CORS: CORSConfig{
 			AllowedOrigins: []string{"*"},
 			AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin"},
+			// Every header the explorer itself sends. ⚠ Content-Range rides on
+			// each chunk of an upload past one chunk (8 MiB); without it the
+			// preflight fails and only LARGE cross-origin uploads break.
+			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Filex-Pin", "Content-Range"},
 		},
 	}
 }

@@ -36,7 +36,7 @@
  * that is shared state by nature — the browser's.
  */
 
-import { computed, ref, type Ref } from 'vue';
+import { computed, ref, type InjectionKey, type Ref } from 'vue';
 
 /* ── the order ────────────────────────────────────────────────────────── */
 
@@ -312,6 +312,11 @@ function ownedTier() {
       const list = entries.value;
       return list.length ? list[list.length - 1].zone : '';
     },
+    /** The newest answer among the owners `pick` accepts. */
+    currentWhere(pick: (owner: symbol) => boolean): string {
+      const list = entries.value.filter((e) => pick(e.owner));
+      return list.length ? list[list.length - 1].zone : '';
+    },
   };
 }
 
@@ -343,6 +348,46 @@ export function activeTimeZone(): string | undefined {
 /** The resolved zone AND the tier it came from. Reactive. */
 export function resolvedTimeZone(): ResolvedTimeZone {
   return resolved.value;
+}
+
+/**
+ * The owner key an explorer PROVIDES to its components, so the dates they
+ * print resolve against that explorer's own tiers (useLocale injects it).
+ */
+export const EXPLORER_CLOCK: InjectionKey<symbol> = Symbol('filex-explorer-clock');
+
+/**
+ * What the tiers hold for ONE explorer.
+ *
+ * ⚠⚠ The page-wide tiers answer with the NEWEST write, which is right for a
+ * surface outside every explorer and wrong inside one: two explorers on one
+ * page with different `config.timeZone` both printed the zone of whichever
+ * mounted last. The host tier is by definition one explorer's setting, so an
+ * explorer reads only its own. Its account tier is its own too; the only other
+ * account it may inherit is the one a HOST APP remembered for the person
+ * signed in (the admin app's session, `remember: true`) — never a sibling
+ * explorer's, which may belong to a different key altogether. The viewer tier
+ * is this browser's, shared by everything on the page.
+ *
+ * `owner` undefined is the page-wide answer, unchanged.
+ */
+export function timeZoneSourcesFor(owner: symbol | undefined): Required<TimeZoneSources> {
+  if (!owner) return timeZoneSources();
+  return {
+    viewer: viewerZone.value,
+    host: hostTier.of(owner) ?? '',
+    account: accountTier.of(owner) ?? accountTier.currentWhere((o) => rememberingOwners.has(o)),
+  };
+}
+
+/** resolvedTimeZone for ONE explorer (see timeZoneSourcesFor). Reactive. */
+export function resolvedTimeZoneFor(owner: symbol | undefined): ResolvedTimeZone {
+  return owner ? resolveTimeZone(timeZoneSourcesFor(owner)) : resolved.value;
+}
+
+/** activeTimeZone for ONE explorer (see timeZoneSourcesFor). Reactive. */
+export function activeTimeZoneFor(owner: symbol | undefined): string | undefined {
+  return resolvedTimeZoneFor(owner).zone;
 }
 
 /** What each tier currently holds (`''` = nothing). Reactive. */

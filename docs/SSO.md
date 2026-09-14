@@ -119,15 +119,22 @@ first boot — see
 
 - An SSO account is created on its **first** login, with the **`user`** role —
   or **`admin`**, when the mapping below matches at that moment.
-- To make that first login an admin, set `FILEX_OIDC_ROLE_CLAIM` to the claim
-  that carries the user's roles/groups and `FILEX_OIDC_ADMIN_GROUP` to the value
-  that means "admin". filex reads that claim (string **or** array, in the ID
-  token or the access token) when it creates the account.
-- ⚠⚠ **The claim is read once, at account creation — not on every login.** An
-  account that already exists keeps its role whatever the IdP says later:
-  adding someone to the admin group in the IdP after their first filex login
-  does **not** make them an admin, and removing them does **not** demote them.
-  Change an existing account's role in **Admin → Users**.
+- To map admins from the IdP, set `FILEX_OIDC_ROLE_CLAIM` to the claim that
+  carries the user's roles/groups and `FILEX_OIDC_ADMIN_GROUP` to the value that
+  means "admin". filex reads that claim (string **or** array, in the ID token or
+  the access token) **on every sign-in**, since 0.41.1:
+  - someone added to the admin group becomes an admin at their next sign-in;
+  - someone removed from it goes back to the `user` role at their next sign-in;
+  - a role set by hand **below** admin (`viewer`) is left alone unless the group
+    now grants admin — the mapping owns the admin role and nothing else.
+- ⚠ Two accounts are **never demoted** by the mapping, because demoting either
+  could leave nobody able to administer filex: the account filex was set up with
+  (the one the [recovery sign-in](#the-identity-provider-is-down-and-nobody-can-sign-in) admits) and the **last** admin.
+  Each such sign-in logs a `WARN` naming the account.
+- The change applies at sign-in, not instantly: an admin removed in the IdP keeps
+  a session they already hold until it ends. Disable the account in
+  **Admin → Users** to cut access at once.
+- Before 0.41.1 the claim was read only when the account was created.
 - Example (Keycloak realm roles): `FILEX_OIDC_ROLE_CLAIM=realm_access.roles`,
   `FILEX_OIDC_ADMIN_GROUP=filex-admin`, then assign the `filex-admin` realm role
   to the users who should administer filex.
@@ -215,12 +222,12 @@ The IdP's registered redirect URI must equal `FILEX_OIDC_REDIRECT_URL` **exactly
 (scheme, host, path). Update the client in the IdP or the env var so they match.
 
 ### User logs in but isn't admin
-First: did this person sign in to filex **before** they were given the admin
-group? The mapping is applied only when the account is created, so an existing
-account is not promoted by a later login — set the role in **Admin → Users**.
-For accounts that are still to be created, confirm `FILEX_OIDC_ROLE_CLAIM` names
-the actual claim in the token (inspect it at jwt.io) and that
-`FILEX_OIDC_ADMIN_GROUP` matches a value inside it.
+The mapping is applied at every sign-in, so the person has to sign in again after
+being added to the group — an already open session keeps the role it started
+with. If a fresh sign-in still lands as `user`, confirm `FILEX_OIDC_ROLE_CLAIM`
+names the actual claim in the token (inspect it at jwt.io) and that
+`FILEX_OIDC_ADMIN_GROUP` matches a value inside it. On 0.41.0 and older the claim
+was read only at account creation; set the role in **Admin → Users** there.
 
 ---
 

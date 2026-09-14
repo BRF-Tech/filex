@@ -13,6 +13,7 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { useRowTouch } from '../composables/useRowTouch';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
 import {
   createFilePreviews,
@@ -76,7 +77,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'click-card', node: FileNode, mod: { ctrl: boolean; shift: boolean }): void;
+  (e: 'click-card', node: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }): void;
   (e: 'dbl-card', node: FileNode): void;
   (e: 'context-card', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
@@ -158,7 +159,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onClick(n: FileNode, ev: MouseEvent) {
-  emit('click-card', n, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey });
+  emit('click-card', n, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey, touch: touch.isTap(ev) });
 }
 
 function onDbl(n: FileNode) {
@@ -205,27 +206,10 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
   emit('item-drop-into', n, ev);
 }
 
-// Long-press → context menu, same as GridView (touch parity).
-let pressTimer: ReturnType<typeof setTimeout> | undefined;
-let pressTarget: FileNode | null = null;
-function onTouchStart(n: FileNode, ev: TouchEvent) {
-  pressTarget = n;
-  if (pressTimer) clearTimeout(pressTimer);
-  pressTimer = setTimeout(() => {
-    if (pressTarget) {
-      const t0 = ev.touches[0];
-      emit('context-card', pressTarget, {
-        clientX: t0.clientX,
-        clientY: t0.clientY,
-        preventDefault: () => {},
-      } as unknown as MouseEvent);
-    }
-  }, 500);
-}
-function cancelPress() {
-  if (pressTimer) clearTimeout(pressTimer);
-  pressTarget = null;
-}
+/* Long press → the card's menu; a tap is reported as a tap (issue #26). */
+const touch = useRowTouch<FileNode>((n, at) =>
+  emit('context-card', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
+);
 
 /**
  * zaman:z1 — routed through useLocale.formatDate, the package's one date
@@ -283,9 +267,9 @@ function metaFor(n: FileNode): string {
       @dragover="onItemDragOver(n, $event)"
       @dragleave="onItemDragLeave(n)"
       @drop="onItemDrop(n, $event)"
-      @touchstart.passive="onTouchStart(n, $event)"
-      @touchend="cancelPress"
-      @touchmove="cancelPress"
+      @touchstart.passive="touch.onTouchStart(n, $event)"
+      @touchend.passive="touch.onTouchEnd"
+      @touchmove.passive="touch.onTouchMove"
     >
       <div class="fe-gal__thumb" :ref="(el) => bindPreview(el, n)">
         <!-- gorunum:v1-preview — a text-readable file shows its own first

@@ -142,6 +142,42 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: { title: 'Encrypted folder opened with the escrow key', body: '{folder}' },
     tr: { title: 'Şifreli klasör emanet anahtarıyla açıldı', body: '{folder}' },
   },
+
+  // ── Operational alarms ──────────────────────────────────────────────────
+  // Not in the subscribable catalogue, and the server writes their title in
+  // English (`filex 0.42.0 available`), so a Turkish panel showed English
+  // until they were phrased here too. Each placeholder is a Meta field of the
+  // one emit site named beside it.
+  //
+  // server.go OnNewRelease: meta.{version,current}
+  update_available: {
+    en: { title: 'filex {version} is available', body: 'This server runs {current}.' },
+    tr: { title: 'filex {version} yayınlandı', body: 'Bu sunucu {current} sürümünde çalışıyor.' },
+  },
+  // replica/recorder.go NotifyReplicaFail: meta.{path,op,error}
+  replica_fail: {
+    en: { title: 'Replica {op} failed: {name}', body: '{error}' },
+    tr: { title: 'Kopyada {op} başarısız: {name}', body: '{error}' },
+  },
+  // replica/recorder.go NotifyPrimaryReadFail: meta.{path,primary_error}
+  primary_read_fail: {
+    en: { title: '{name} was served from the replica', body: 'The primary storage failed: {error}' },
+    tr: { title: '{name} kopyadan sunuldu', body: 'Birincil depo hata verdi: {error}' },
+  },
+  // replica/reconcile.go: meta.queued
+  replica_reconcile_done: {
+    en: {
+      title: '{count} replica retries queued',
+      body: 'Progress is on the queue page.',
+      one: { title: '1 replica retry queued' },
+    },
+    tr: { title: '{count} kopya yeniden denemesi kuyruğa alındı', body: 'İlerleme kuyruk sayfasında.' },
+  },
+  // replica/reconcile.go cron report: meta.{failed_count,repaired_count}
+  replica_status_report: {
+    en: { title: 'Replica report: {failed} unresolved, {repaired} repaired', body: 'Last 24 hours' },
+    tr: { title: 'Kopya raporu: {failed} çözülmemiş, {repaired} onarıldı', body: 'Son 24 saat' },
+  },
 };
 
 /** Words the templates need that are not in the row. */
@@ -194,10 +230,12 @@ export function notificationVars(
   const target = row.target ?? (asRecord(meta.target) as NotificationLike['target']);
   const words = WORDS[locale];
 
-  const path = str(node.path) || str(target?.path) || str(row.body);
+  // meta.path is the replica alarms' own field; they carry no node.
+  const path = str(node.path) || str(meta.path) || str(target?.path) || str(row.body);
   const name = str(node.name) || baseName(path) || words.unnamed;
   const uploader = str(meta.uploader).trim() || words.someone;
-  const count = typeof meta.count === 'number' ? String(meta.count) : '';
+  const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
+  const count = num(meta.count) || num(meta.queued);
 
   return {
     name,
@@ -214,6 +252,12 @@ export function notificationVars(
     // both clip, and a newline inside a toast body renders as a gap.
     body: str(meta.body).replace(/\s+/g, ' ').trim(),
     actor: str(asRecord(meta.actor).email),
+    version: str(meta.version),
+    current: str(meta.current),
+    op: str(meta.op),
+    error: str(meta.error) || str(meta.primary_error),
+    failed: num(meta.failed_count),
+    repaired: num(meta.repaired_count),
   };
 }
 

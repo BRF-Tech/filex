@@ -52,7 +52,7 @@ vi.mock('@/api/client', () => ({
       }
       if (url === '/admin/storages') {
         return {
-          data: [{ id: 8, name: 'thumbfix', driver: 'local', enabled: true, last_sync_at: iso(11_000), last_sync_state: 'ok' }],
+          data: [{ id: 8, name: 'thumbfix', driver: 'local', enabled: true, last_sync_at: iso(11_000), last_sync_state: 'ok', file_count: 12, total_bytes: 80_000 }],
         };
       }
       if (url === '/admin/sync-runs') {
@@ -122,13 +122,27 @@ describe('admin dashboard', () => {
     expect(call?.params).not.toHaveProperty('page_size');
   });
 
+  // The storage card read "📁 · local · 78.6 KB · 12" — a bare number after a
+  // size, with nothing to say it counts files (v0.41.0 screenshot).
+  it('says what the storage card counts', async () => {
+    const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), i18n()] } });
+    await flushPromises();
+    await flushPromises();
+    const card = w.findAll('p').find((p) => p.text().includes('local'));
+    expect(card, 'no storage line').toBeTruthy();
+    expect(card!.text()).toMatch(/· 12 files$/);
+    expect(card!.text()).not.toMatch(/^\S+\s*·/);
+  });
+
   it('prints a time in Recent activity, not a dash', async () => {
     const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), i18n()] } });
     await flushPromises();
     await flushPromises();
-    const activity = w.findAll('li').find((li) => li.text().includes('user.delete'));
+    const activity = w.findAll('li').find((li) => li.text().includes('User: deleted'));
     expect(activity, 'no activity row').toBeTruthy();
     expect(activity!.text()).toMatch(/minutes? ago/);
+    // The wire name is what the row used to print; it stays in the title only.
+    expect(activity!.text()).not.toContain('user.delete');
   });
 });
 

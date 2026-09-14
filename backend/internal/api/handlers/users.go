@@ -134,8 +134,11 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Email == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email and password required"})
+	// The password is optional (issue #25): an account added ahead of its
+	// first SSO sign-in has none, and an empty hash is refused by every
+	// password check (local login, recovery login, /dav, SFTP, FTP).
+	if req.Email == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email required"})
 		return
 	}
 	if req.Role == "" {
@@ -161,10 +164,13 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]string{"error": msg})
 		return
 	}
-	hash, err := local.HashPassword(req.Password)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+	hash := ""
+	if req.Password != "" {
+		var err error
+		if hash, err = local.HashPassword(req.Password); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	u, err := h.Store.CreateUser(r.Context(), req.Email, hash, req.Role, req.Locale, req.Timezone)
 	if err != nil {

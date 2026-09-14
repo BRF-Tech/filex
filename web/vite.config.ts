@@ -84,6 +84,13 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // ⚠ No map for the generated service worker. workbox builds it from a
+        // temp copy, so its map's only source was the builder's temp path —
+        // `C:/Users/<account>/AppData/Local/Temp/…/sw.js`, account name
+        // included, inside every binary built on that machine. The map
+        // describes generated code nobody debugs; scripts/check-embed.mjs
+        // refuses any shipped map that names an absolute path.
+        sourcemap: false,
         // Precache the built app shell + assets. navigateFallback keeps the
         // Vue history-mode routes (createWebHistory('/admin/')) working
         // offline by serving index.html for unmatched navigations.

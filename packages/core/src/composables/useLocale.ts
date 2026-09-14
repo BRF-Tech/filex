@@ -25,10 +25,10 @@
  *     printing the viewer's chosen one.
  */
 
-import { computed, type Ref } from 'vue';
+import { computed, getCurrentInstance, inject, type Ref } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { messages } from '../locales';
-import { activeTimeZone, deviceTimeZone } from '../lib/timezone';
+import { EXPLORER_CLOCK, activeTimeZoneFor, deviceTimeZone } from '../lib/timezone';
 
 /* ── the tag ──────────────────────────────────────────────────────────── */
 
@@ -181,8 +181,12 @@ const dtfCache = new Map<string, Intl.DateTimeFormat>();
  * was opened in. Reading `activeTimeZone()` on every call is also what keeps
  * a template that formats a date reactive to the preference changing.
  */
-function zonedFormatter(tag: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  const zone = activeTimeZone();
+function zonedFormatter(
+  tag: string,
+  opts: Intl.DateTimeFormatOptions,
+  owner?: symbol,
+): Intl.DateTimeFormat {
+  const zone = activeTimeZoneFor(owner);
   const key = `${tag}|${zone ?? `device:${deviceTimeZone()}`}|${JSON.stringify(opts)}`;
   let fmt = dtfCache.get(key);
   if (!fmt) {
@@ -201,9 +205,11 @@ export function formatInstant(
   d: Date,
   code: LocaleCode | string | undefined,
   opts: Intl.DateTimeFormatOptions,
+  /** The explorer whose clock applies (EXPLORER_CLOCK); omitted = page-wide. */
+  owner?: symbol,
 ): string {
   try {
-    return zonedFormatter(localeTag(code), opts).format(d);
+    return zonedFormatter(localeTag(code), opts, owner).format(d);
   } catch {
     return d.toISOString();
   }
@@ -259,6 +265,11 @@ export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
     typeof localeRef === 'function' ? localeRef() : localeRef.value;
 
   const lookup = computed(() => messages[code()] ?? messages.en);
+
+  // The explorer this component sits in, whose clock its dates are read on
+  // (lib/timezone, timeZoneSourcesFor). Outside a component, or outside any
+  // explorer, the page-wide answer.
+  const clock = getCurrentInstance() ? inject(EXPLORER_CLOCK, undefined) : undefined;
 
   function t(key: string, vars: Record<string, string | number> = {}): string {
     const table = lookup.value;
@@ -319,13 +330,18 @@ export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
   function formatDate(ms: number | undefined | null, opts: { time?: boolean } = {}): string {
     const d = toDate(ms);
     if (!d) return '';
-    const date = formatInstant(d, code(), {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
+    const date = formatInstant(
+      d,
+      code(),
+      {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      },
+      clock,
+    );
     if (!opts.time) return date;
-    return `${date}, ${formatInstant(d, code(), { hour: 'numeric', minute: '2-digit' })}`;
+    return `${date}, ${formatInstant(d, code(), { hour: 'numeric', minute: '2-digit' }, clock)}`;
   }
 
   /**
@@ -342,8 +358,8 @@ export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
   function formatDateFull(ms: number | undefined | null): string {
     const d = toDate(ms);
     if (!d) return '';
-    const zone = activeTimeZone() ?? deviceTimeZone();
-    const stamp = formatInstant(d, code(), { dateStyle: 'full', timeStyle: 'long' });
+    const zone = activeTimeZoneFor(clock) ?? deviceTimeZone();
+    const stamp = formatInstant(d, code(), { dateStyle: 'full', timeStyle: 'long' }, clock);
     return `${stamp} (${zone})`;
   }
 
@@ -358,7 +374,7 @@ export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
   function formatMonthYear(value: number | Date | undefined | null): string {
     const d = value instanceof Date ? value : toDate(value);
     if (!d) return '';
-    return formatInstant(d, code(), { month: 'long', year: 'numeric' });
+    return formatInstant(d, code(), { month: 'long', year: 'numeric' }, clock);
   }
 
   /**
@@ -373,7 +389,7 @@ export function useLocale(localeRef: Ref<LocaleCode> | (() => LocaleCode)) {
     const d = value instanceof Date ? value : toDate(value);
     if (!d) return '';
     try {
-      return zonedFormatter('en-CA', { year: 'numeric', month: '2-digit' }).format(d);
+      return zonedFormatter('en-CA', { year: 'numeric', month: '2-digit' }, clock).format(d);
     } catch {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }

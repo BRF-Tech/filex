@@ -7,6 +7,7 @@
 package s3
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -372,7 +373,16 @@ func isS3RangeNotSatisfiable(err error) bool {
 // transient 503 becomes a permanent failure reported as "failed to rewind
 // transport stream for retry, request stream is not seekable" — a message
 // about our plumbing rather than the outage that caused it. See rewindable.
+//
+// ⚠⚠ Rewinding is not only a retry concern. Over an http:// endpoint the
+// signer hashes the payload and rewinds to send it, so a body that cannot
+// rewind fails the FIRST attempt (issue #27). A body too large to hold in
+// memory and unable to rewind therefore goes out as a multipart upload in
+// parts that can be held — see writeInParts.
 func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) error {
+	if _, seekable := r.(io.Seeker); !seekable && size > maxRewindBytes {
+		return d.writeInParts(ctx, p, r, size)
+	}
 	body, size, release, err := measuredBody(r, size)
 	if err != nil {
 		return err
@@ -386,6 +396,70 @@ func (d *Driver) Write(ctx context.Context, p string, r io.Reader, size int64) e
 		ContentLength: aws.Int64(size),
 	})
 	return err
+}
+
+// maxUploadParts is S3's ceiling on the number of parts in one upload.
+const maxUploadParts = 10000
+
+// writeInParts streams a body of known size that can neither be held in
+// memory nor rewound as a multipart upload.
+//
+// Each part is read into one reused buffer of maxRewindBytes, which meets S3's
+// minimum part size and is exactly what Write already agrees to hold for a
+// small body — so memory stays bounded by the part, never the file, and every
+// part is seekable for the signer and retryable on its own. Only an object
+// past maxUploadParts × maxRewindBytes (~78 GiB) needs bigger parts; those are
+// handed to UploadPart as a limited stream, which spools one part to a temp
+// file.
+//
+// A body that ends before its declared size aborts the upload: completing it
+// would publish a truncated object under the name, and leaving it open would
+// keep orphaned parts billed in the bucket.
+func (d *Driver) writeInParts(ctx context.Context, p string, r io.Reader, size int64) error {
+	resp, err := d.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(d.key(p)),
+	})
+	if err != nil {
+		return err
+	}
+	uploadID := aws.ToString(resp.UploadId)
+	abort := func(cause error) error {
+		_ = d.AbortMultipart(context.WithoutCancel(ctx), p, uploadID)
+		return cause
+	}
+
+	partSize := int64(maxRewindBytes)
+	if size > partSize*maxUploadParts {
+		partSize = (size + maxUploadParts - 1) / maxUploadParts
+	}
+	var buf []byte
+	if partSize <= maxRewindBytes {
+		buf = make([]byte, partSize)
+	}
+
+	parts := make([]storage.PartCompletion, 0, (size+partSize-1)/partSize)
+	for n, sent := 1, int64(0); sent < size; n++ {
+		chunk := min(partSize, size-sent)
+		var body io.Reader = io.LimitReader(r, chunk)
+		if buf != nil {
+			got, err := io.ReadFull(r, buf[:chunk])
+			if err != nil {
+				return abort(fmt.Errorf("s3: body ended after %d bytes, declared %d: %w", sent+int64(got), size, err))
+			}
+			body = bytes.NewReader(buf[:chunk])
+		}
+		etag, err := d.UploadPart(ctx, p, uploadID, n, body, chunk)
+		if err != nil {
+			return abort(err)
+		}
+		parts = append(parts, storage.PartCompletion{PartNumber: n, Etag: etag})
+		sent += chunk
+	}
+	if err := d.CompleteMultipart(ctx, p, uploadID, parts); err != nil {
+		return abort(err)
+	}
+	return nil
 }
 
 // measuredBody returns a reader whose length is known, so PutObject can send

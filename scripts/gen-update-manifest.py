@@ -2,16 +2,26 @@
 """Build the release manifest that installs poll (docs/UPDATES.md).
 
 The manifest is filex's own document rather than a read of the git tags,
-because two of its fields cannot be derived from a tag:
+because one of its fields cannot be derived from a tag:
 
   auto_ok     — kill switch: pull a bad release out of AUTOMATIC distribution
                 without deleting it. Set to false and every install stops
                 taking it by itself; the release stays downloadable.
-  migrations  — marks releases that change the schema. Patches must not carry
-                one; the policy engine refuses to auto-apply a patch that does.
+
+  migrations  — marks releases that change the schema; the policy engine will
+                not apply one without a confirmation (so a backup is taken).
+                ⚠⚠ DERIVED, not typed: a release carries migrations when its
+                tag holds a migration file that no earlier tag held. It used to
+                be a hand-kept list in the publishing wrapper, and the list went
+                stale — measured 2026-09-14: the live manifest did not mark
+                v0.31.0 (00030_api_token_kind) at all, and a run of the wrapper
+                would also have dropped v0.34.0 … v0.41.0. `--migrations` still
+                adds a version by hand; nothing can take a derived one away.
 
 Everything else (versions, dates, asset URLs, SHA-256 digests) comes from the
-GitHub releases, so the digests are the ones goreleaser published.
+GitHub releases, so the digests are the ones goreleaser published. Every
+release is listed (paged), not the newest N: an install on an old version still
+needs the entries between it and the latest to decide a safe path.
 
 Usage:
     python3 scripts/gen-update-manifest.py > stable.json
@@ -20,8 +30,8 @@ Usage:
     # mark a release as unsafe for automatic upgrades
     python3 scripts/gen-update-manifest.py --no-auto v0.7.3 --no-auto v0.7.4
 
-    # declare which releases changed the schema
-    python3 scripts/gen-update-manifest.py --migrations v0.6.0 --migrations v0.4.2
+    # which releases change the schema, as read from the tags (no network)
+    python3 scripts/gen-update-manifest.py --print-migrations
 
 Requires only the standard library. A GITHUB_TOKEN in the environment raises
 the API rate limit but is not needed for a public repository.
@@ -31,6 +41,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -46,6 +57,43 @@ ARCH_ALIASES = {"x86_64": "amd64", "i386": "386", "aarch64": "arm64"}
 ARCHIVE_RE = re.compile(
     r"^filex_(?P<version>[0-9][^_]*)_(?P<os>[a-z]+)_(?P<arch>[a-zA-Z0-9_]+)\.(?:tar\.gz|zip)$"
 )
+
+
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SEMVER_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+# Every layout the migrations have lived in: backend/db/migrations/<dialect>/
+# today, a flat migrations/ directory in the earliest releases.
+MIGRATION_FILE = re.compile(r"(?:^|/)migrations/(?:[a-z]+/)?(\d{5}_[^/]+\.sql)$")
+
+
+def git(repo_dir: str, *args: str) -> str:
+    r = subprocess.run(["git", "-C", repo_dir, *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def migration_releases(repo_dir: str) -> tuple[set, set]:
+    """(versions that ADD a migration file, every semver tag present locally).
+
+    Walks the tags in version order and marks a tag whose tree holds a
+    migration file name no earlier tag held. Names, not paths: a migration
+    that moved directories is not a new one.
+    """
+    tags = [t for t in git(repo_dir, "tag").split() if SEMVER_TAG.match(t)]
+    tags.sort(key=lambda t: tuple(int(x) for x in SEMVER_TAG.match(t).groups()))
+    seen: set = set()
+    marked: set = set()
+    for tag in tags:
+        names = set()
+        for path in git(repo_dir, "ls-tree", "-r", "--name-only", tag).splitlines():
+            m = MIGRATION_FILE.search(path)
+            if m:
+                names.add(m.group(1))
+        if seen and names - seen:
+            marked.add(tag.lstrip("v"))
+        seen |= names
+    return marked, {t.lstrip("v") for t in tags}
 
 
 def http_json(url: str):
@@ -121,7 +169,11 @@ def first_line(body: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=30, help="how many releases to include")
+    ap.add_argument("--limit", type=int, default=0, help="how many releases to include (0 = all)")
+    ap.add_argument("--repo-dir", default=REPO_DIR,
+                    help="git checkout whose tags decide `migrations` (default: this repository)")
+    ap.add_argument("--print-migrations", action="store_true",
+                    help="print the versions that carry migrations, read from the tags, and exit")
     ap.add_argument("--channel", default="stable")
     ap.add_argument("--out", help="write here instead of stdout")
     ap.add_argument(
@@ -136,7 +188,7 @@ def main() -> int:
         action="append",
         default=[],
         metavar="VERSION",
-        help="mark a version as carrying schema migrations",
+        help="also mark a version as carrying schema migrations (on top of the derived ones)",
     )
     ap.add_argument(
         "--security",
@@ -149,8 +201,15 @@ def main() -> int:
                     help="a version that must not be jumped to directly, e.g. v1.0.0=v0.9.0")
     args = ap.parse_args()
 
+    derived, local_tags = migration_releases(args.repo_dir)
+    if args.print_migrations:
+        key = lambda v: tuple(int(x) for x in v.split("."))
+        for v in sorted(derived, key=key):
+            print(f"v{v}")
+        return 0
+
     no_auto = {v.lstrip("v") for v in args.no_auto}
-    migrations = {v.lstrip("v") for v in args.migrations}
+    migrations = derived | {v.lstrip("v") for v in args.migrations}
     security = {v.lstrip("v") for v in args.security}
     min_versions = {}
     for pair in args.min_version:
@@ -158,13 +217,28 @@ def main() -> int:
             k, v = pair.split("=", 1)
             min_versions[k.lstrip("v")] = v
 
-    releases = http_json(f"{API}?per_page={max(1, min(args.limit, 100))}")
+    releases = []
+    page = 1
+    while True:
+        batch = http_json(f"{API}?per_page=100&page={page}")
+        releases.extend(batch)
+        if len(batch) < 100 or (args.limit and len(releases) >= args.limit):
+            break
+        page += 1
     out = []
     for rel in releases:
         if rel.get("draft") or rel.get("prerelease"):
             continue
+        if args.limit and len(out) >= args.limit:
+            break
         tag = rel["tag_name"]
         bare = tag.lstrip("v")
+        # A release this checkout has no tag for cannot be judged, and a
+        # silent `migrations: false` is exactly the wrong answer to publish.
+        if SEMVER_TAG.match(tag) and bare not in local_tags:
+            print(f"error: {tag} is published but not tagged in {args.repo_dir} — "
+                  "`git fetch --tags` first", file=sys.stderr)
+            return 2
         entry = {
             "version": tag,
             "date": (rel.get("published_at") or "")[:10],

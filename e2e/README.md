@@ -90,41 +90,68 @@ visually. `pnpm test:debug` opens the inspector.
 
 ## Test layout
 
+Every spec opens with a comment naming what it pins and, for a regression, the
+report it came from — read that before changing an assertion.
+
 | File | Coverage |
 |------|----------|
-| `tests/00-smoke.spec.ts`    | server up, healthz, capabilities, login page renders |
-| `tests/10-login.spec.ts`    | bad creds rejected, good creds land on dashboard, logout |
-| `tests/20-storage.spec.ts`  | UI flow to add a local storage + verify in dashboard |
-| `tests/30-files.spec.ts`    | upload fixture, soft-delete to trash, restore from trash |
-| `tests/40-share.spec.ts`    | share token + public viewer with PIN |
-| `tests/50-search.spec.ts`   | admin search/index stats + rebuild button |
-| `tests/60-user-settings.spec.ts` | the user-settings dialog (`?settings=1`, which the retired `/admin/profile` address now forwards to): language switch, password change, TOTP enroll |
-| `tests/01-harness.spec.ts`  | the harness itself: no piped server log, isolated storages |
-| `tests/91-rounds-…`         | round 4-8 regressions; seeds its own fixture set locally, or point at a live one with `E2E_FIXTURE_STORAGE` |
+| `tests/00-smoke.spec.ts` | server up, healthz, capabilities, login page renders |
+| `tests/01-harness.spec.ts` | the harness itself: no piped server log, isolated storages |
+| `tests/10-login.spec.ts` | bad creds rejected, good creds land on **Home**, logout |
+| `tests/20-storage.spec.ts` | admin storage list + dashboard widget |
+| `tests/25-connections.spec.ts` | the connection guides (WebDAV, SFTP, S3, mount) name the real address |
+| `tests/26-s3-storage.spec.ts` | a real MinIO (`--s3`, two storages): round trip, ranged read, re-chunking, trash, a >8 MiB move between object stores |
+| `tests/27-usage.spec.ts` | the *Usage & cost* page |
+| `tests/30-files.spec.ts` | upload, list, soft-delete |
+| `tests/40-share.spec.ts` / `77-share.spec.ts` | the admin share list / share creation + public access |
+| `tests/50-search.spec.ts` | admin search index page + rebuild |
+| `tests/60-user-settings.spec.ts` | the user-settings dialog (`?settings=1`): language, password, TOTP enroll |
+| `tests/70-multi-storage.spec.ts` | adapter-prefix routing across storages |
+| `tests/75-navigation.spec.ts` | breadcrumb root crumb, go-up, Alt+↑ |
+| `tests/76-trash.spec.ts` | soft-delete, restore, admin purge |
+| `tests/78-save-text.spec.ts` / `83-meta-and-markdown.spec.ts` | the editors' write-back |
+| `tests/79-per-verb-async.spec.ts` | `/copy` `/move` `/delete` → 202 + op polling |
+| `tests/80-file-types.spec.ts` / `100-viewer-audit.spec.ts` | MIME contract / a viewer mounts for every extension |
+| `tests/82-capability-gating.spec.ts` | features hidden when the server lacks them |
+| `tests/85-resumable-upload.spec.ts` / `86-slow-storage-cache.spec.ts` | resumable chunks / prepared copies on slow storage |
+| `tests/90-deployment-smoke.spec.ts` | **deployment profile only** — read-only smoke against a live URL |
+| `tests/91-rounds-4-6-regression.spec.ts` | round 4-8 regressions; seeds its own fixtures, or `E2E_FIXTURE_STORAGE` |
+| `tests/101-quicklook-hint.spec.ts` | the quick-look legend stays a pill (issue #22) |
+| `tests/102-touch-tap-opens.spec.ts` | on a touch screen a tap opens, a long press selects (issue #26) |
 
 `helpers/auth.ts`  → `loginAs`, `apiLogin`, `logout`
-`helpers/seed.ts`  → `seedLocalStorage`, `dropStorageByName`
+`helpers/seed.ts`  → `seedLocalStorage`, `dropStorageByName`, `waitForOp`
 `fixtures/`         → small files used by upload tests
 
 ## Screenshots (`shots/`)
 
-`shots/capture.mjs` retakes every screenshot the project README shows — in
-English, against the build in this working tree. Reviewing them is a numbered
-step in the release process (`docs/CONTRIBUTING.md`): a stale screenshot is
-wrong information, not missing information.
+Every picture the README and the docs show comes from the scripts in `shots/`,
+in English, against the build in this working tree. Reviewing them is a
+numbered step in the release process (`docs/CONTRIBUTING.md`): a stale
+screenshot is wrong information, not missing information.
 
 ```bash
-pnpm run build:all              # the shots come from this binary
-node e2e/shots/capture.mjs      # → docs/screenshots/*.png
+pnpm shots                          # build → verify the embedded UI → shoot → sync → contact sheet
+pnpm shots --only sidenav,capture   # a subset
 ```
 
-It boots its own instance, generates the demo tree (`shots/fixtures.mjs` — PNGs
-encoded with Node's zlib, no image dependency), signs in and captures. Useful
-environment variables:
+`scripts/shots.mjs` builds the whole chain in order, proves with
+`scripts/check-embed.mjs` that the binary serves `web/dist` byte for byte
+**before** a picture is taken, runs every script in `shots/` (`capture`,
+`driveshell`, `sidenav`, `starstags`, `e2e-recovery`, …), syncs the site assets
+and writes one contact sheet, `e2e/.artifacts/shots/contact-sheet.html` — look
+at it. Pictures land in `docs/screenshots/<release>/`.
+
+Each script can still be run on its own (`node e2e/shots/capture.mjs`); it
+boots its own instance, generates the demo tree (`shots/fixtures.mjs` — PNGs
+encoded with Node's zlib, no image dependency) and waits for the sync a seed
+depends on (`syncAndWait`: the sync endpoint answers 202). Useful environment
+variables:
 
 | Variable | Why |
 |---|---|
 | `FILEX_BIN` | binary to run (default `bin/filex`) |
+| `SHOTS_OUT` | output directory (default `docs/screenshots/<release>/`) |
 | `SHOTS_URL` | shoot an instance that is ALREADY running instead of booting one |
 | `SHOTS_STORAGE` / `SHOTS_MOUNT` | the fixture directory as *this machine* and as the *server* see it — they differ when the server runs in a VM / WSL / container |
 | `SHOTS_SEED_ONLY`, `SHOTS_SKIP_SEED` | two passes: seed, run `filex thumb backfill` out of band, then capture. Thumbnails are rendered on UPLOAD, so fixtures written straight to disk have none and the hero shot comes out as a grid of generic icons |
@@ -154,17 +181,14 @@ environment variables:
 
 ## CI
 
-⚠ **No CI job runs this whole suite.** It gates a release because the release
-process runs it (`node e2e/run.mjs local`, `docs/CONTRIBUTING.md` → *Release
-process*), not because a pipeline does. What CI does run is one spec,
-`91-rounds-4-6-regression`, in two GitLab jobs:
+The public repository's GitHub Actions (`.github/workflows/`):
 
-| Job | When | Blocking |
+| Workflow · job | When | What |
 |---|---|---|
-| `e2e:rounds-regression` | merge requests, the default branch, tags | yes |
-| `e2e:rounds-regression-browser` | the default branch and tags, in the Playwright image with a real Chromium | no (`allow_failure: true`) |
+| `ci.yml` · `browser` | every push to `main` and every pull request | `node e2e/run.mjs cypress --build` — the Cypress suite against a throwaway build of that commit; failure screenshots and video are uploaded |
+| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux — a shot script that no longer fits the product turns red here instead of on release night |
 
-Neither job starts a filex of its own: both point Playwright at whatever
-`E2E_BASE_URL` names, signing in with `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD`
-from the CI variables. The suite that runs against a throwaway build on every
-push is Cypress (`web/cypress/README.md`).
+⚠ **No CI job runs the Playwright suite** (`node e2e/run.mjs local`). It gates a
+release because the release process runs it (`docs/CONTRIBUTING.md` → *Release
+process*, step 6, together with the Cypress profile), not because a pipeline
+does. Run both before tagging.

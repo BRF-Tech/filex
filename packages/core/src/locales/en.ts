@@ -1081,6 +1081,8 @@ export const en: Record<string, string> = {
   'conn.tokens.rootPlaceholder': 'storage://folder',
   'conn.tokens.expiry': 'Expires in (days)',
   'conn.tokens.expiryNever': 'never',
+  'conn.tokens.defaultName': 'API key {date}',
+  'conn.tokens.namePlaceholder': 'Name — e.g. backup script',
   'conn.tokens.capNote': 'Your account and its permissions are the ceiling — asking for more than you have is refused, not granted.',
   /* === /gezinti:g1 === */
 

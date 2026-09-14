@@ -536,7 +536,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.users.Get, method: http.MethodGet, path: "/api/ai/admin/users/" + itoa(in.ID),
 				urlParams: idParam(in.ID)}
 		})
-	regAdminTool(r, "admin_users_create", "Create a user. body: {email, password, display_name?, role?, locale?, timezone?}.",
+	regAdminTool(r, "admin_users_create", "Create a user. body: {email, password?, display_name?, role?, locale?, timezone?}. Without a password the account signs in through SSO or an API token only.",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.users.Create, method: http.MethodPost, path: "/api/ai/admin/users", body: in.Body}
 		})

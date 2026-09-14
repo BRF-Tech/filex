@@ -333,7 +333,7 @@ function startOidc() {
       </div>
 
       <div class="lg-col">
-        <div class="lg-card">
+        <div class="lg-card" data-install-clear>
           <div class="lg-brand">
             <!-- wiring:e1 — branded logo (a custom logo replaces the mark) -->
             <img v-if="branding?.logo_url" :src="branding.logo_url" alt="" class="lg-brand__logo" />

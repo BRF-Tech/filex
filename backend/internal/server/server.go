@@ -59,6 +59,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/update"
+	"github.com/brf-tech/filex/backend/internal/usage"
 	"github.com/brf-tech/filex/backend/internal/version"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 
@@ -746,6 +747,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// Database-backed settings seeded from the environment on first boot only.
 	// The env var is inert once a row exists (see package dbsetting).
 	antivirus.SeedSettings(ctx, store)
+	usage.SeedSettings(ctx, store)
 	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
 	// enabled / mode / clamd address are read once, here, because the lines
 	// below are the wiring itself: registering the queue handler and handing

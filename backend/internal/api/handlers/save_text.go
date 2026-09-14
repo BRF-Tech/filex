@@ -147,12 +147,12 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	if adapter == "" {
 		adapter = storages[0].Name
 	}
-	var st *storage.Object // unused, kept to mirror manager.go conventions
-	_ = st
+	var stRow *model.Storage
 	var storageID int64
 	var readOnly bool
 	for _, s := range storages {
 		if s.Name == adapter {
+			stRow = s
 			storageID = s.ID
 			readOnly = s.ReadOnly
 			break
@@ -261,11 +261,15 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		// eventually got belonged to nobody, so those bytes were never
 		// counted against anyone's quota. Create the row here, the way every
 		// other write path does.
-		var parentID *int64
-		if dir := path.Dir(clean); dir != "" && dir != "." && dir != "/" {
-			if p, perr := h.Store.GetNodeByPath(r.Context(), storageID, pathkey.Hash(storageID, dir)); perr == nil && p != nil {
-				parentID = &p.ID
-			}
+		//
+		// ⚠ The parent chain is ENSURED, not looked up. A save into a folder
+		// the catalogue has not seen yet (the driver creates it on write) used
+		// to find no parent row and file the new row at the storage root,
+		// where it listed under neither folder until the next full scan.
+		parentID, perr := sy.EnsureDirChain(r.Context(), stRow, path.Dir(clean))
+		if perr != nil {
+			slog.Warn("save-text: parent folders",
+				slog.String("path", clean), slog.String("err", perr.Error()))
 		}
 		created, cerr := h.Store.CreateNode(r.Context(), &model.Node{
 			StorageID:  storageID,

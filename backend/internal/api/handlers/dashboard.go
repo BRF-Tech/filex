@@ -53,16 +53,27 @@ type CapabilitiesShort struct {
 	OnlyOfficeReachable bool `json:"onlyoffice_reachable"`
 }
 
+// ActivityRow is one Recent activity line: the audit row, flat, plus the e-mail
+// of the account that acted.
+//
+// ⚠ The page prints the actor under every action, and the payload never had
+// one — the audit LIST joins users.email (db.AuditEntryWithUser), the dashboard
+// read the bare rows — so each line said "— · Profile".
+type ActivityRow struct {
+	*model.AuditEntry
+	UserEmail string `json:"user_email,omitempty"`
+}
+
 // Response is the shape returned to the admin UI.
 type Response struct {
-	Storages       []StorageSummary    `json:"storages"`
-	TotalUsers     int64               `json:"total_users"`
-	ActiveSessions int64               `json:"active_sessions"`
-	QueueDepth     int                 `json:"queue_depth"`
-	TotalFiles     int64               `json:"total_files"`
-	TotalBytes     int64               `json:"total_bytes"`
-	RecentActivity []*model.AuditEntry `json:"recent_activity"`
-	Capabilities   CapabilitiesShort   `json:"capabilities"`
+	Storages       []StorageSummary  `json:"storages"`
+	TotalUsers     int64             `json:"total_users"`
+	ActiveSessions int64             `json:"active_sessions"`
+	QueueDepth     int               `json:"queue_depth"`
+	TotalFiles     int64             `json:"total_files"`
+	TotalBytes     int64             `json:"total_bytes"`
+	RecentActivity []ActivityRow     `json:"recent_activity"`
+	Capabilities   CapabilitiesShort `json:"capabilities"`
 }
 
 // Get renders the dashboard payload.
@@ -155,6 +166,24 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		recent = kept
 	}
 
+	emails := map[int64]string{}
+	if users, uerr := h.Store.ListUsers(ctx); uerr == nil {
+		for _, u := range users {
+			emails[u.ID] = u.Email
+		}
+	}
+	activity := make([]ActivityRow, 0, len(recent))
+	for _, e := range recent {
+		if e == nil {
+			continue
+		}
+		row := ActivityRow{AuditEntry: e}
+		if e.UserID != nil {
+			row.UserEmail = emails[*e.UserID]
+		}
+		activity = append(activity, row)
+	}
+
 	capShort := CapabilitiesShort{}
 	if h.Caps != nil {
 		if cap, err := h.Caps.Get(ctx); err == nil && cap != nil {
@@ -174,7 +203,7 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		QueueDepth:     queueDepth,
 		TotalFiles:     aggFiles,
 		TotalBytes:     aggBytes,
-		RecentActivity: recent,
+		RecentActivity: activity,
 		Capabilities:   capShort,
 	})
 }

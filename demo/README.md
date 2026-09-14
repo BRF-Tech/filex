@@ -77,11 +77,10 @@ docker run -p 5212:5212 \
   ghcr.io/brf-tech/filex:latest
 ```
 
-⚠ **Files above the 8 MiB chunk size will not upload from another origin** with
-the default settings. Each chunk is a `PUT` carrying a `Content-Range` header,
-and that header is not in the default CORS allow-list — the preflight answers
-without an `Access-Control-Allow-Headers` for it, and the browser refuses the
-request. The allow-list is `config.yaml`-only; add the header there:
+⚠ **Files above the 8 MiB chunk size need `Content-Range` in the CORS
+allow-list.** Each chunk is a `PUT` carrying that header. It is in the default
+list since filex 0.41.1; on an older server, or if you set your own list in
+`config.yaml`, include it:
 
 ```yaml
 cors:

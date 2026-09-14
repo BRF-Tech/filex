@@ -32,10 +32,10 @@
  * the browser's zone answers. A clock must never throw.
  */
 
-import { onBeforeUnmount, watch, type Ref } from 'vue';
+import { onBeforeUnmount, provide, watch, type Ref } from 'vue';
 import type { ExplorerConfig } from '../types/ExplorerConfig';
 import type { Capabilities } from '../types/FileNode';
-import { releaseTimeZoneOwner, setAccountTimeZone, setHostTimeZone } from '../lib/timezone';
+import { EXPLORER_CLOCK, releaseTimeZoneOwner, setAccountTimeZone, setHostTimeZone } from '../lib/timezone';
 
 export interface ExplorerTimeZoneDeps {
   config: () => ExplorerConfig;
@@ -45,8 +45,11 @@ export interface ExplorerTimeZoneDeps {
   fetchMe: () => Promise<{ user?: { timezone?: unknown } | null } | undefined>;
 }
 
-export function useExplorerTimeZone(deps: ExplorerTimeZoneDeps): void {
+export function useExplorerTimeZone(deps: ExplorerTimeZoneDeps): symbol {
   const owner = Symbol('filex-explorer');
+  // Every component under this explorer reads its dates on this owner's
+  // tiers, not the page's newest (lib/timezone, timeZoneSourcesFor).
+  provide(EXPLORER_CLOCK, owner);
 
   watch(
     () => deps.config().timeZone,
@@ -82,4 +85,5 @@ export function useExplorerTimeZone(deps: ExplorerTimeZoneDeps): void {
   );
 
   onBeforeUnmount(() => releaseTimeZoneOwner(owner));
+  return owner;
 }

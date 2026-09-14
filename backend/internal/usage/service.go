@@ -77,6 +77,23 @@ var (
 	}
 )
 
+// SettingSpecs is the family, in the order they are seeded at boot.
+func SettingSpecs() []dbsetting.Seeder {
+	return []dbsetting.Seeder{
+		SettingProvider, SettingReportStorage, SettingAccountID, SettingPrefix, SettingPricing,
+	}
+}
+
+// SeedSettings consumes the FILEX_USAGE_* variables into the settings table,
+// first boot only. Call once at boot, before anything resolves them.
+//
+// ⚠ Every spec above declared its variable from the start and nothing called
+// this: a compose file that set them came up with an unconfigured page and no
+// word about why, and the docs had to say the variables did not exist.
+func SeedSettings(ctx context.Context, st dbsetting.Store) {
+	dbsetting.SeedAll(ctx, st, SettingSpecs()...)
+}
+
 // Known providers.
 const ProviderB2 = "b2"
 

@@ -187,12 +187,18 @@ The document filex polls is a plain static JSON file, so you can host your own
 }
 ```
 
-Two fields cannot be derived from a git tag, which is why this document exists
-at all:
+Two fields are filex's own rather than GitHub's:
 
-- **`auto_ok`** — the kill switch described above.
+- **`auto_ok`** — the kill switch described above. It cannot be derived from
+  anything, which is why this document exists at all.
 - **`migrations`** — makes "patches carry no schema changes" checkable instead
-  of a promise.
+  of a promise, and makes an install confirm (so a backup is taken) before it
+  takes a release that changes the schema. `scripts/gen-update-manifest.py`
+  **derives** it from the git tags — a tag whose tree holds a migration file no
+  earlier tag held — so a mirror built from a checkout with its tags fetched
+  gets it right without a list to maintain (`--print-migrations` shows the
+  result, `--repo-dir` names the checkout). Every published release is listed,
+  not just the newest ones.
 
 `min_version` is available for releases that must not be jumped to directly;
 installs below it are told to upgrade in steps.

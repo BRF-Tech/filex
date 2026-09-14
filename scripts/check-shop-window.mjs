@@ -600,7 +600,12 @@ async function checkReleasePages() {
   const urls = new Set();
   for (const r of releases.slice(0, 10)) {
     for (const m of (r.body ?? '').match(/https?:\/\/[^\s)>\]]+/g) ?? []) {
-      urls.add(m.replace(/[.,;:]+$/, ''));
+      // ⚠ An address with an ellipsis in it is prose describing a URL shape,
+      // not a link: v0.36.0's notes quote the broken `https://github.com/…/
+      // filex/-/issues` form they fixed, and requesting it reported a dead
+      // link in a release body that has none (measured on v0.41.0).
+      if (m.includes('…')) continue;
+      urls.add(m.replace(/[.,;:`]+$/, ''));
     }
   }
   const broken = [];

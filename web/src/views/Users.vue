@@ -17,7 +17,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Table, { type Column } from '@/components/ui/Table.vue';
-import CopyButton from '@/components/ui/CopyButton.vue';
+import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
 
 const { t, locale } = useI18n();
 const router = useRouter();
@@ -38,16 +38,13 @@ const pageSize = 25;
 const showCreate = ref(false);
 const showDelete = ref<User | null>(null);
 const showReset = ref<User | null>(null);
-const resetPassword = ref<string | null>(null);
 
 const newEmail = ref('');
 const newName = ref('');
 const newRole = ref<UserRole>('viewer');
 const newPassword = ref('');
-const newOidc = ref('');
 const creating = ref(false);
 const deleting = ref(false);
-const resetting = ref(false);
 
 async function load() {
   await users.fetch({
@@ -76,7 +73,7 @@ const columns = computed<Column<User>[]>(() => [
   { key: 'email', label: t('common.email'), sortable: true },
   { key: 'display_name', label: t('users.fields.displayName') },
   { key: 'role', label: t('common.role'), cell: 'slot' },
-  { key: 'last_login_at', label: 'Last login', cell: 'slot' },
+  { key: 'last_login_at', label: t('users.fields.lastLogin'), cell: 'slot' },
   { key: 'actions', label: t('common.actions'), cell: 'slot', align: 'right', width: '180px' },
 ]);
 
@@ -94,14 +91,12 @@ async function submitCreate() {
       display_name: newName.value.trim(),
       role: newRole.value,
       password: newPassword.value || undefined,
-      oidc_subject: newOidc.value.trim() || null,
     });
     toast.success(t('users.createdOk'));
     showCreate.value = false;
     newEmail.value = '';
     newName.value = '';
     newPassword.value = '';
-    newOidc.value = '';
     newRole.value = 'viewer';
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -122,24 +117,6 @@ async function confirmDelete() {
   } finally {
     deleting.value = false;
   }
-}
-
-async function confirmReset() {
-  if (!showReset.value) return;
-  resetting.value = true;
-  try {
-    resetPassword.value = await users.resetPassword(showReset.value.id);
-    toast.success(t('users.resetPasswordOk'));
-  } catch (e: unknown) {
-    toast.error(extractError(e, t('errors.generic')));
-  } finally {
-    resetting.value = false;
-  }
-}
-
-function closeReset() {
-  showReset.value = null;
-  resetPassword.value = null;
 }
 
 onMounted(load);
@@ -215,7 +192,7 @@ onMounted(load);
             size="xs"
             variant="ghost"
             @click="showReset = row as User"
-            :title="t('users.resetPasswordOk')"
+            :title="t('users.resetPassword')"
           >
             <KeyRound class="h-3.5 w-3.5" />
           </Button>
@@ -243,13 +220,7 @@ onMounted(load);
           type="password"
           :label="t('common.password')"
           autocomplete="new-password"
-          :hint="t('common.optional')"
-        />
-        <Input
-          v-model="newOidc"
-          :label="t('users.fields.oidcSubject')"
-          monospace
-          :hint="t('common.optional')"
+          :hint="t('users.passwordOptionalHint')"
         />
       </form>
       <template #footer>
@@ -274,39 +245,6 @@ onMounted(load);
       </template>
     </Modal>
 
-    <!-- Reset password modal -->
-    <Modal
-      :model-value="showReset !== null"
-      :title="t('users.resetPasswordTitle')"
-      size="sm"
-      :prevent-close="resetting"
-      @close="closeReset"
-    >
-      <div v-if="!resetPassword" class="space-y-3 text-sm">
-        <p>{{ t('users.deleteConfirm', { email: showReset?.email }) }}</p>
-      </div>
-      <div v-else class="space-y-2">
-        <p class="text-sm text-zinc-600 dark:text-zinc-400">
-          {{ t('users.resetPasswordSubtitle') }}
-        </p>
-        <div class="flex items-center gap-2">
-          <code
-            class="flex-1 select-all rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-2 text-sm font-mono break-all"
-          >
-            {{ resetPassword }}
-          </code>
-          <CopyButton :value="resetPassword" />
-        </div>
-      </div>
-      <template #footer>
-        <Button v-if="!resetPassword" variant="ghost" @click="closeReset">
-          {{ t('common.cancel') }}
-        </Button>
-        <Button v-if="!resetPassword" :loading="resetting" @click="confirmReset">
-          {{ t('common.confirm') }}
-        </Button>
-        <Button v-else @click="closeReset">{{ t('common.close') }}</Button>
-      </template>
-    </Modal>
+    <ResetPasswordModal :user="showReset" @close="showReset = null" />
   </div>
 </template>

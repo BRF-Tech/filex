@@ -937,6 +937,12 @@ List users. In multi-tenant mode the list is confined to the caller's tenant
   "provider_id": 3
 }
 ```
+`password` is optional. An account created without one has no local password:
+every password check refuses it (login form, recovery login, `/dav`, SFTP, FTP)
+and it signs in through SSO, where the account is matched by e-mail, or with an
+API token. `POST /api/admin/users/{id}/reset-password` gives it one later; the
+answer carries the value once, as `new_password`.
+
 `provider_id` homes the user in a tenant. Omit it and the user lands in the
 **caller's** tenant. A tenant admin may only name their own provider (`403`
 otherwise); an id that matches no provider is `400`. There is no foreign key

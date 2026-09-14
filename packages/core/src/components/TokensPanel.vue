@@ -101,19 +101,28 @@ onMounted(async () => {
   emit('active', { hasToken: tokens.value.length > 0 });
 });
 
+/**
+ * The name a token gets when the field is left empty — one the user will
+ * recognise in the list later.
+ *
+ * A protocol guide knows both halves: `WebDAV — files.example.com`, the host
+ * being the PUBLIC address the guide resolved (connectionsOrigin). The API
+ * keys page knows neither, and it used to make a host up from `apiBase`,
+ * which is whatever the page happens to talk to: every key on a local
+ * instance was called `127.0.0.1:5297`, and that address was printed as the
+ * placeholder in the README screenshots. It names the key by the day it was
+ * made instead.
+ */
 function defaultLabel(): string {
   const p = (props.protocol || '').toUpperCase();
-  return p ? `${p} — ${hostLabel()}` : hostLabel();
+  if (p) return props.host ? `${p} — ${props.host}` : p;
+  return t('conn.tokens.defaultName', { date: new Date().toISOString().slice(0, 10) });
 }
 
-/** A name the user will recognise in the list later. */
-function hostLabel(): string {
-  if (props.host) return props.host;
-  try {
-    return new URL(props.config.apiBase || window.location.origin).host;
-  } catch {
-    return 'filex';
-  }
+/** What the empty name field suggests: the saved default on a protocol guide,
+ *  an example of a useful name on the API keys page. */
+function labelPlaceholder(): string {
+  return props.protocol ? defaultLabel() : t('conn.tokens.namePlaceholder');
 }
 
 async function mint(): Promise<void> {
@@ -206,7 +215,7 @@ function usedLabel(row: ApiToken): string {
       <input
         v-model="label"
         class="fe-cfield__input"
-        :placeholder="defaultLabel()"
+        :placeholder="labelPlaceholder()"
         data-testid="token-label"
       />
       <button class="fe-s3keys__btn" :disabled="busy" data-testid="token-mint" @click="mint">
@@ -220,7 +229,7 @@ function usedLabel(row: ApiToken): string {
       <input
         v-model="label"
         class="fe-cfield__input"
-        :placeholder="defaultLabel()"
+        :placeholder="labelPlaceholder()"
         data-testid="token-label"
       />
 

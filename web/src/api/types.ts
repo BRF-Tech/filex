@@ -22,7 +22,6 @@ export interface User {
    *  explorer's collaboration strip draws for this account, on every client of
    *  it (browser session, desktop app, any API key minted under it). */
   avatar_url?: string;
-  oidc_subject?: string | null;
   totp_enabled?: boolean;
   created_at: string;
   updated_at: string;
