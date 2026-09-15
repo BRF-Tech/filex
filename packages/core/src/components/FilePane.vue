@@ -237,7 +237,7 @@ const emit = defineEmits<{
   /** The virtual `.trash` row was opened — the trash view carries the restore
    *  actions and belongs to the main pane, so the host decides. */
   (e: 'open-trash'): void;
-  (e: 'click-row', node: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }): void;
+  (e: 'click-row', node: FileNode, mod: { ctrl: boolean; shift: boolean }): void;
   /** Right-click. `null` = empty space (nothing selected → "Paste" only). */
   (e: 'context', node: FileNode | null, ev: MouseEvent): void;
   (e: 'clear-selection'): void;
@@ -444,48 +444,36 @@ const paneSubfolders = computed(() =>
  * `useSelection` instance for this pane answers. One set of Ctrl/Shift
  * semantics for both panes — the old right pane had a simplified copy in
  * which Shift behaved as Ctrl. */
-/* issue #26, second round — a press on the NAME opens, so the second click of
- * a habitual double-click lands on whatever the NEW listing put under the
+/* issue #26 — any click that is not on the checkbox OPENS, so the second click
+ * of a habitual double-click lands on whatever the NEW listing put under the
  * pointer (the folder already opened on the first click). Without this guard
- * that click would open or select a row the user never aimed at, and a file's
- * name would open twice (two viewer tabs). */
-const NAME_OPEN_GUARD_MS = 500;
-let nameOpenedAt = 0;
+ * that click would open a row the user never aimed at — or tick its box — and
+ * a file would open twice (two viewer tabs). */
+const OPEN_GUARD_MS = 500;
+let openedAt = 0;
 
-function withinNameOpenGuard(): boolean {
-  return Date.now() - nameOpenedAt < NAME_OPEN_GUARD_MS;
+function withinOpenGuard(): boolean {
+  return Date.now() - openedAt < OPEN_GUARD_MS;
 }
 
 function onViewClick(n: FileNode, mod: ClickMod) {
-  if (withinNameOpenGuard()) return;
-  /* issue #26, second round — the reporter's rule on every device: a press on
-   * the item's name opens it, mouse or finger, selection or not. Ctrl/shift
-   * still mean "add to / extend the selection", so a modifier click on a name
-   * selects as it always did. The checkbox selects on its own path. */
-  if (mod.name && !mod.ctrl && !mod.shift) {
-    nameOpenedAt = Date.now();
-    onRowOpen(n);
+  if (withinOpenGuard()) return;
+  /* issue #26, fourth round — the reporter's rule, on every device: "only
+   * clicking on checkbox selects it, any other click will open". The checkbox
+   * is the one click that reaches the selection; a click or tap anywhere else
+   * on the item opens it, Ctrl/Shift held or not, selection or not. See
+   * composables/useRowTouch. */
+  if (mod.check) {
+    emit('activate');
+    emit('click-row', n, { ctrl: true, shift: mod.shift });
     return;
   }
-  /* issue #26 — a finger has no double-click, so a TAP elsewhere on the item
-   * is the open gesture too: with nothing selected it opens what it lands on,
-   * exactly as a double-click would. Once something is selected (a long press
-   * selects, via its menu) such a tap adds to or removes from the selection,
-   * so picking several files still works. A mouse click beside the name keeps
-   * click-to-select; see composables/useRowTouch. */
-  if (mod.touch && !mod.ctrl && !mod.shift) {
-    if (props.selected.size === 0) {
-      onRowOpen(n);
-      return;
-    }
-    mod = { ...mod, ctrl: true };
-  }
-  emit('activate');
-  emit('click-row', n, mod);
+  openedAt = Date.now();
+  onRowOpen(n);
 }
 
 function onViewDbl(n: FileNode) {
-  if (withinNameOpenGuard()) return;
+  if (withinOpenGuard()) return;
   onRowOpen(n);
 }
 

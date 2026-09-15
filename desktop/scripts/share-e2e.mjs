@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SHOTS, STORAGE, api, check, finish, launchApp, signIn, skipTour } from './lib/harness.mjs';
+import { SHOTS, STORAGE, api, check, finish, launchApp, signIn, skipTour, tickRow } from './lib/harness.mjs';
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -66,11 +66,8 @@ try {
   check('navigator.share exists in the desktop shell', bridge.share === 'function', `share=${bridge.share}`);
 
   // ── open the dialog and create a link ─────────────────────────────
-  const selected = await w.evaluate((name) => {
-    const row = [...document.querySelectorAll('.fe-list__row')].find((r) => r.textContent?.includes(name));
-    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    return !!row;
-  }, NAME);
+  // The checkbox is the click that selects (issue #26); a click on the row opens it.
+  const selected = await tickRow(w, NAME);
   check('the seeded file is listed and selectable', selected, NAME);
   await w.waitForTimeout(500);
 

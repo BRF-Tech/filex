@@ -8,7 +8,7 @@
 //
 // Run: FILEX_EMAIL=… FILEX_PASSWORD=… node scripts/share-limit-e2e.mjs
 
-import { SERVER, STORAGE, api, check, finish, launchApp, signIn, skipTour, sleep } from './lib/harness.mjs';
+import { SERVER, STORAGE, api, check, finish, launchApp, signIn, skipTour, sleep, tickRow } from './lib/harness.mjs';
 
 const NAME = `limit-e2e-${Date.now()}.txt`;
 const { app } = await launchApp({ lang: 'tr' });
@@ -56,11 +56,8 @@ async function clickText(re) {
 }
 
 // ── open Share / Permissions → Link tab ──────────────────────────────
-const selected = await win.evaluate((name) => {
-  const row = [...document.querySelectorAll('.fe-list__row')].find((r) => r.textContent?.includes(name));
-  row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  return !!row;
-}, NAME);
+// The checkbox is the click that selects (issue #26); a click on the row opens it.
+const selected = await tickRow(win, NAME);
 check('the fixture is listed and selectable', selected, NAME);
 await sleep(500);
 

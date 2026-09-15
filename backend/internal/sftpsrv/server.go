@@ -110,6 +110,14 @@ type Server struct {
 	ssh    *ssh.ServerConfig
 	syncer *protocolsync.Syncer
 
+	// ln is set by ListenAndServe and read by Addr and Close from other
+	// goroutines, so it is only touched under mu.
+	//
+	// ⚠ An interface value is two words. Read unguarded while it is being
+	// assigned, it can come back with the type set and the pointer still nil —
+	// Addr then panics inside (*net.TCPListener).Addr. The release CI of 0.41.3
+	// died on exactly that, in the test harness polling Addr.
+	mu     sync.Mutex
 	ln     net.Listener
 	closed chan struct{}
 	wg     sync.WaitGroup
@@ -173,7 +181,16 @@ func (s *Server) ListenAndServe() error {
 	if err != nil {
 		return fmt.Errorf("sftpsrv: listen %s: %w", s.cfg.Addr, err)
 	}
+	s.mu.Lock()
+	select {
+	case <-s.closed:
+		s.mu.Unlock()
+		_ = ln.Close()
+		return nil
+	default:
+	}
 	s.ln = ln
+	s.mu.Unlock()
 	slog.Info("sftp: listening", slog.String("addr", s.cfg.Addr))
 
 	for {
@@ -202,14 +219,18 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
 	select {
 	case <-s.closed:
+		s.mu.Unlock()
 		return nil
 	default:
 		close(s.closed)
 	}
-	if s.ln != nil {
-		_ = s.ln.Close()
+	ln := s.ln
+	s.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
 	}
 	s.wg.Wait()
 	return nil
@@ -217,10 +238,16 @@ func (s *Server) Close() error {
 
 // Addr is the address actually bound, for tests and for logging.
 func (s *Server) Addr() string {
-	if s == nil || s.ln == nil {
+	if s == nil {
 		return ""
 	}
-	return s.ln.Addr().String()
+	s.mu.Lock()
+	ln := s.ln
+	s.mu.Unlock()
+	if ln == nil {
+		return ""
+	}
+	return ln.Addr().String()
 }
 
 // handleConn takes one TCP connection all the way to an SFTP session.

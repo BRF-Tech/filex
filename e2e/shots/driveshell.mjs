@@ -841,7 +841,7 @@ async function run(tokens) {
       const row = [...document.querySelectorAll('.fe-list__row')].find((r) =>
         (r.textContent ?? '').includes('Q3 budget.xlsx'),
       );
-      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      (row?.querySelector('.fe-list__check') ?? null)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await sleep(500);
     if ((await page.locator('.fe-inspector').count()) === 0) {
@@ -896,7 +896,7 @@ async function run(tokens) {
       const row = [...document.querySelectorAll('.fe-list__row')].find((r) =>
         (r.textContent ?? '').includes('Q3 campaign'),
       );
-      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      (row?.querySelector('.fe-list__check') ?? null)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await sleep(1000);
     const peopleRows = await page.locator('[data-testid="inspector-people"] .fe-inspector__person').count();
@@ -1084,7 +1084,8 @@ async function run(tokens) {
       ),
     );
     await shot(dpage, 'driveshell-dark-1440.png');
-    await dpage.locator('.fe-list__row, .fe-grid__card').first().click();
+    // Selected through its checkbox — the one click that selects (issue #26).
+    await dpage.locator('.fe-list__row .fe-list__check, .fe-grid__card .fe-list__check').first().dispatchEvent('click');
     await sleep(500);
     if ((await dpage.locator('.fe-inspector').count()) === 0) {
       await dpage.locator('[data-testid="tabs-inspector"]').click();

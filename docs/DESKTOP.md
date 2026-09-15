@@ -330,7 +330,7 @@ files and folders** — nothing is zipped on the way.
 filex satisfies that in one of two ways, and picks for you:
 
 **1. Real files, when it already has them.** Anything you keep on this computer,
-and any small selection you clicked a moment ago (up to ten files under 8 MB are
+and any small selection you ticked a moment ago (up to ten files under 8 MB are
 fetched quietly in the background as soon as they are selected), is handed to the
 drag as a complete file. This is the route that also works when you drop onto an
 *application* — a chat window, an image editor — because the program receives a

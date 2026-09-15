@@ -85,6 +85,11 @@ type Server struct {
 	// stores — the virtual root, today. It must not move: see fs.Stat.
 	started time.Time
 
+	// ln is set by ListenAndServe and read by Addr and Close from other
+	// goroutines, so it is only touched under mu. An unguarded read of an
+	// interface value while it is being assigned can see the type without the
+	// pointer — the same race took down sftpsrv's release CI in 0.41.3.
+	mu     sync.Mutex
 	ln     net.Listener
 	closed chan struct{}
 	wg     sync.WaitGroup
@@ -126,7 +131,16 @@ func (s *Server) ListenAndServe() error {
 	if err != nil {
 		return fmt.Errorf("nfssrv: listen %s: %w", s.cfg.Addr, err)
 	}
+	s.mu.Lock()
+	select {
+	case <-s.closed:
+		s.mu.Unlock()
+		_ = ln.Close()
+		return nil
+	default:
+	}
 	s.ln = ln
+	s.mu.Unlock()
 	slog.Info("nfs: listening",
 		slog.String("addr", ln.Addr().String()),
 		slog.String("note", "NFSv3 is unencrypted; keep this on a LAN or a VPN"))
@@ -148,14 +162,18 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
 	select {
 	case <-s.closed:
+		s.mu.Unlock()
 		return nil
 	default:
 		close(s.closed)
 	}
-	if s.ln != nil {
-		_ = s.ln.Close()
+	ln := s.ln
+	s.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
 	}
 	s.wg.Wait()
 	return nil
@@ -163,8 +181,14 @@ func (s *Server) Close() error {
 
 // Addr is the address actually bound.
 func (s *Server) Addr() string {
-	if s == nil || s.ln == nil {
+	if s == nil {
 		return ""
 	}
-	return s.ln.Addr().String()
+	s.mu.Lock()
+	ln := s.ln
+	s.mu.Unlock()
+	if ln == nil {
+		return ""
+	}
+	return ln.Addr().String()
 }

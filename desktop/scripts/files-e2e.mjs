@@ -21,7 +21,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SHOTS, SERVER, STORAGE, api, check, finish, launchApp, signIn, skipTour } from './lib/harness.mjs';
+import { SHOTS, SERVER, STORAGE, api, check, finish, launchApp, signIn, skipTour, tickRow } from './lib/harness.mjs';
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -66,13 +66,8 @@ async function clickText(win, re) {
   }, re.source);
 }
 
-async function selectRow(win, name) {
-  return win.evaluate((n) => {
-    const row = [...document.querySelectorAll('.fe-list__row')].find((r) => r.textContent?.includes(n));
-    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    return !!row;
-  }, name);
-}
+// The checkbox is the click that selects (issue #26); a click on the row opens it.
+const selectRow = tickRow;
 
 async function openRow(win, name) {
   return win.evaluate((n) => {

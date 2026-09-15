@@ -152,10 +152,9 @@ function storageCaption(s: HomeStorage): string {
 /**
  * A card opens what it names.
  *
- * ⚠ SINGLE click, and that is not an inconsistency with the listing behind it.
- * A card in the listing has two jobs — click selects, double click opens — and
- * on Home the first of those does not exist (see NO_SELECTION), so a click
- * that only selected would be a click that did nothing at all.
+ * A single click, exactly as in the listing behind it (issue #26: a click
+ * anywhere but the checkbox opens). Home's cards carry no checkbox at all —
+ * there is no selection here to tick anything into (see NO_SELECTION).
  *
  * ⚠ Which is why the double click has to be swallowed: a real double click
  * fires `click-card` twice, and two opens of a file are two viewer tabs. The
@@ -246,6 +245,7 @@ function openNode(n: FileNode) {
         v-if="shownRecent.length"
         :files="shownRecent"
         :selected="NO_SELECTION"
+        :selectable="false"
         :locale="locale"
         :thumb-src="thumbSrc"
         @click-card="openNode"
@@ -292,6 +292,7 @@ function openNode(n: FileNode) {
         v-if="shownStarred.length"
         :files="shownStarred"
         :selected="NO_SELECTION"
+        :selectable="false"
         :locale="locale"
         :thumb-src="thumbSrc"
         @click-card="openNode"

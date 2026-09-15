@@ -318,12 +318,19 @@ const loading = ref(true);
  * person was told about. Both halves are produced by one resolver,
  * `lib/notificationTarget.ts`.
  *
- * ⚠ Done from the embedder, by dispatching a click at the row, because the
- * explorer component takes no "start with this selected" configuration and
- * this page may not edit it. The row carries `data-fe-path="<storage>://<rel>"`
- * — the attribute the component already puts there for middle-click
- * open-in-new-tab — and clicking it goes through the component's own selection
- * code, so range/ctrl behaviour afterwards is exactly as if a hand had done it.
+ * ⚠ Done from the embedder, by dispatching a click at the row's CHECKBOX,
+ * because the explorer component takes no "start with this selected"
+ * configuration and this page may not edit it. The row carries
+ * `data-fe-path="<storage>://<rel>"` — the attribute the component already puts
+ * there for middle-click open-in-new-tab — and ticking its box goes through the
+ * component's own selection code, so range/ctrl behaviour afterwards is exactly
+ * as if a hand had done it.
+ *
+ * ⚠⚠ The checkbox, never the row. Since issue #26 a click anywhere else on a
+ * row OPENS it — clicking the row here opened the file from the notification
+ * instead of pointing at it, and the retry loop below would have kept doing it.
+ * A tick adds to a selection rather than replacing it, so any other row that is
+ * still ticked is unticked first: the notification points at ONE file.
  *
  * ⚠ Compared attribute-by-attribute rather than through a `[data-fe-path="…"]`
  * selector: a real file name may contain a quote or a backslash, and a
@@ -339,6 +346,11 @@ const selectFromQuery = computed(() => {
  *  never appears (deleted meanwhile, filtered out) must not spin forever. */
 const SELECT_TIMEOUT_MS = 8000;
 let selectToken = 0;
+
+/** Toggle a row's selection the one way a click selects: its checkbox. */
+function tick(row: HTMLElement) {
+  row.querySelector<HTMLElement>('.fe-list__check')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
 
 async function revealSelection(qualified: string): Promise<boolean> {
   if (!qualified) return false;
@@ -363,8 +375,11 @@ async function revealSelection(qualified: string): Promise<boolean> {
     } else {
       stable = 0;
       if (row) {
+        for (const other of Array.from(document.querySelectorAll<HTMLElement>('[data-fe-path][aria-selected="true"]'))) {
+          if (other !== row) tick(other);
+        }
         row.scrollIntoView({ block: 'center', behavior: 'auto' });
-        row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        tick(row);
       }
     }
     await new Promise((r) => setTimeout(r, 200));

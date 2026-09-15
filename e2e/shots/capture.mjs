@@ -610,7 +610,8 @@ async function run() {
     // expiry, a DOWNLOAD LIMIT and the one-line curl for the finished link.
     await clearShares(token, 'demo://Photos/aurora.png');
     await openExplorer(page, 'Photos');
-    await page.locator('.fe-list__row, .fe-grid__item').first().click();
+    // Select it through its checkbox — the one click that selects (issue #26).
+    await page.locator('.fe-list__row .fe-list__check').first().click();
     await sleep(400);
     await openAccess(page);
     await page.waitForSelector('.fx-perm-modal', { timeout: 10_000 });

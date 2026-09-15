@@ -521,7 +521,10 @@ test.describe('Round 4-6 — Browser UI regression', () => {
       hasText: 'report.xlsx',
     }).first();
     await tile.waitFor({ state: 'visible', timeout: 15_000 });
-    await tile.click();
+    // Select it: the checkbox is the click that selects (issue #26) — a click
+    // anywhere else on the tile opens the file. A card shows its box on hover.
+    await tile.hover();
+    await tile.locator('.fe-list__check').click();
 
     // The action set shows up in the same toolbar as the up-arrow /
     // new-folder buttons. Match by visible label — accept both the TR

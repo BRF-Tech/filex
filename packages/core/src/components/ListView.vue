@@ -11,7 +11,8 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
+import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
+import ItemCheck from './ItemCheck.vue';
 import {
   arrivedFromOutside,
   ownedByViewer,
@@ -174,7 +175,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onRowClick(n: FileNode, ev: MouseEvent) {
-  emit('click-row', n, clickMod(ev, touch.isTap(ev), NAME_SELECTOR));
+  emit('click-row', n, clickMod(ev, touch.isTap(ev)));
 }
 
 function onRowDbl(n: FileNode) {
@@ -212,17 +213,14 @@ function onRowMenu(n: FileNode, ev: MouseEvent) {
 }
 
 /**
- * gorunum:v1 — the row checkbox drives THE SAME selection the row click
- * drives: one `click-row` emit, one `useSelection.click`, one anchor. A
- * checkbox that kept its own Set would disagree with the row the first time
- * someone mixed the two, and the context menu acts on the row's set.
- *
- * `ctrl: true` because ticking a box adds to a selection rather than replacing
- * it; `shift` is passed through so shift-clicking a box still extends the
- * range from the anchor (the composable answers shift before ctrl).
+ * issue #26 — the checkbox is the one click that selects (a click anywhere
+ * else on the row opens it). It goes out as the same `click-row` emit every
+ * other gesture uses, marked `check`, so FilePane routes it to the one
+ * `useSelection.click` — one anchor, one set, the one the context menu acts
+ * on. See composables/useRowTouch `checkMod`.
  */
 function onCheckClick(n: FileNode, ev: MouseEvent) {
-  emit('click-row', n, { ctrl: true, shift: ev.shiftKey });
+  emit('click-row', n, checkMod(ev));
 }
 
 function onItemDragStart(n: FileNode, ev: DragEvent) {
@@ -266,16 +264,12 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
 }
 
 /* Long press → the row's menu; a tap is reported as a tap (issue #26). */
-/** issue #26 — the item's name: a click or tap on it opens the item. */
-const NAME_SELECTOR = '.fe-list__name';
-
 const touch = useRowTouch<FileNode>(
   (n, at) =>
     emit('context-row', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
   {
-    nameSelector: NAME_SELECTOR,
-    // A finger lifted on the name opens at touchend — see useRowTouch.
-    onNameTap: (n) => emit('click-row', n, { ctrl: false, shift: false, touch: true, name: true }),
+    // A finger lifted on the item, off its controls, opens at touchend — see useRowTouch.
+    onTap: (n) => emit('click-row', n, { ctrl: false, shift: false, touch: true }),
   },
 );
 
@@ -1238,28 +1232,18 @@ const segments = computed<DateRun<FileNode>[]>(() =>
         @touchend="touch.onTouchEnd"
         @touchmove.passive="touch.onTouchMove"
       >
-        <!-- gorunum:v1 — the tick drives the SAME selection the row click
-             does (onCheckClick → click-row → useSelection.click), so shift
-             ranges and ctrl toggles are one implementation, not two.
-             ⚠ A button with role="checkbox", NOT an <input type="checkbox">.
-             The input owns a `checked` state of its own: the browser flips it
-             before the click handler runs and, if the default is prevented,
-             flips it back AFTER Vue has patched — so the row went selected
-             while the box stayed empty (measured: rowSelected=true,
-             domChecked=false). Drawing the state from the selection leaves
-             nothing to drift. Space and Enter still tick it, because a button
-             fires `click` for both. -->
-        <div class="fe-list__col fe-list__col--check" role="gridcell" @click.stop @dblclick.stop>
-          <button
-            type="button"
-            class="fe-list__check"
-            :class="{ 'is-on': isSelected(n) }"
-            role="checkbox"
-            :aria-checked="isSelected(n) ? 'true' : 'false'"
-            :aria-label="nodeDisplayName(n)"
-            :title="nodeDisplayName(n)"
-            @click.stop="onCheckClick(n, $event)"
-          ></button>
+        <!-- issue #26 — the tick is the one click that selects; the whole
+             cell is its target, so a click that just misses the box does not
+             open the row instead. `data-fe-control` keeps a finger on the
+             cell from counting as a tap on the row (useRowTouch). -->
+        <div
+          class="fe-list__col fe-list__col--check"
+          role="gridcell"
+          data-fe-control
+          @click.stop="onCheckClick(n, $event)"
+          @dblclick.stop
+        >
+          <ItemCheck :on="isSelected(n)" :label="nodeDisplayName(n)" />
         </div>
         <div class="fe-list__col fe-list__col--name" role="gridcell" :style="colStyle('name')">
           <!-- ikon:emoji — an encrypted folder is still a FOLDER: it keeps the
@@ -1332,25 +1316,35 @@ const segments = computed<DateRun<FileNode>[]>(() =>
             class="fe-list__col fe-list__col--star"
             role="gridcell"
             :style="colStyle(id)"
-            @click.stop
           >
-            <StarButton
+            <!-- issue #26 — only the star itself is a control; the rest of the
+                 cell (all of it on a folder, which has no star) opens the row
+                 like any other empty space on it. `display: contents`, so the
+                 wrapper stops the click without moving the star. -->
+            <span
               v-if="starEnabled !== false && typeof n.id === 'number' && n.type === 'file'"
-              :starred="!!starredIds?.has(n.id)"
-              :node-id="n.id"
-              :api-base="apiBase"
-              :auth-headers="authHeaders"
-              :auth-credentials="authCredentials"
-              :locale="locale"
-              compact
-              @change="(val: boolean) => emit('star-change', n, val)"
-            />
+              class="fe-list__star-hit"
+              data-fe-control
+              @click.stop
+              @dblclick.stop
+            >
+              <StarButton
+                :starred="!!starredIds?.has(n.id)"
+                :node-id="n.id"
+                :api-base="apiBase"
+                :auth-headers="authHeaders"
+                :auth-credentials="authCredentials"
+                :locale="locale"
+                compact
+                @change="(val: boolean) => emit('star-change', n, val)"
+              />
+            </span>
           </div>
           <div v-else :class="colClass(id)" role="gridcell" :style="colStyle(id)" :title="cellTitle(id, n)">
             {{ cellText(id, n) }}
           </div>
         </template>
-        <div class="fe-list__col fe-list__col--menu" role="gridcell" @click.stop @dblclick.stop>
+        <div class="fe-list__col fe-list__col--menu" role="gridcell" data-fe-control @click.stop @dblclick.stop>
           <button
             type="button"
             class="fe-list__menu"

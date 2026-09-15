@@ -4606,6 +4606,75 @@ filex-explorer {
 .filex-star-btn.is-card.is-starred {
   opacity: 1;
 }
+/* === issue #26 — the checkbox on a grid / gallery card ================
+   The one click on a card that selects; a click anywhere else opens it. The
+   box itself is ItemCheck (.fe-list__check, the list's own tick). It shows
+   when the card is hovered (where hovering exists — see the star note), when
+   something inside the card is focused, when the card is selected, and on
+   every card once anything is selected — which is how a finger, with no
+   hover, finds the next box to tick after a long press selected the first.
+   ⚠ Hidden means `pointer-events: none` as well: an invisible box would take
+   the tap meant to open the card under it. */
+.fe-item-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.fe-grid__card.is-selected .fe-item-check,
+.fe-gal__card.is-selected .fe-item-check,
+.fe-grid.has-selection .fe-item-check,
+.fe-gal.has-selection .fe-item-check,
+.fe-grid__card:focus-within .fe-item-check,
+.fe-gal__card:focus-within .fe-item-check {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: hover) {
+  .fe-grid__card:hover .fe-item-check,
+  .fe-gal__card:hover .fe-item-check {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+/* On a grid card the box takes the type tile's 24px slot in the card's row,
+   so the name does not move when it appears; the tile steps aside. */
+.fe-grid__lead {
+  position: relative;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fe-grid__lead > .fe-item-check {
+  position: absolute;
+  inset: 0;
+}
+.fe-grid__lead > .fe-grid__tile {
+  transition: opacity 120ms ease;
+}
+.fe-grid__card.is-selected .fe-grid__lead--pick > .fe-grid__tile,
+.fe-grid.has-selection .fe-grid__lead--pick > .fe-grid__tile,
+.fe-grid__card:focus-within .fe-grid__lead--pick > .fe-grid__tile {
+  opacity: 0;
+}
+@media (hover: hover) {
+  .fe-grid__card:hover .fe-grid__lead--pick > .fe-grid__tile {
+    opacity: 0;
+  }
+}
+/* On a gallery card it is the thumbnail's top-left corner, opposite the star. */
+.fe-gal__check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+}
+
 /* The chip itself: a round translucent puck, legible over a photo thumbnail
    as well as over a flat icon tile. */
 .filex-star-btn.is-card {
@@ -5962,8 +6031,9 @@ filex-explorer {
   border-bottom: 1px solid var(--fe-border-soft);
 }
 
-/* The tick. It selects the same thing the row does — see ListView.onCheckClick
-   — so it gets the plain control look, not an accent of its own. */
+/* The tick — the one click on an item that selects (issue #26; ListView
+   onCheckClick, components/ItemCheck). The plain control look, not an accent
+   of its own. */
 .fe-list__col--check {
   display: flex;
   align-items: center;
@@ -10314,6 +10384,11 @@ filex-explorer {
 }
 .fe-list__col--star {
   justify-content: center;
+}
+/* issue #26 — the star's click guard (ListView): stops the click without a
+   box of its own, so the star sits where it always did. */
+.fe-list__star-hit {
+  display: contents;
 }
 /* Location was never in the muted-value rule above it — it is a value like
    Type and Owner and reads like one. */

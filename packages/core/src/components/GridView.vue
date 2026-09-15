@@ -20,7 +20,8 @@ import type { FileNode } from '../types/FileNode';
 import { hasInternalDrag } from '../lib/dragOut';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
+import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
+import ItemCheck from './ItemCheck.vue';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
 import {
   createFilePreviews,
@@ -38,7 +39,7 @@ import StarButton from './StarButton.vue';
 import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   files: FileNode[];
   selected: Set<string>;
   clipped?: Set<string>;
@@ -108,7 +109,17 @@ const props = defineProps<{
    * type tiles. Absent/false = the ordinary case.
    */
   e2eActive?: boolean;
-}>();
+  /**
+   * issue #26 — draw the checkbox on each card, the one click that selects.
+   * Default on. Home passes false: its cards open on a click and there is no
+   * selection there to put anything into.
+   */
+  selectable?: boolean;
+}>(), {
+  // ⚠ Not left to `undefined`: Vue casts an absent boolean prop to false, and
+  // the listing would lose its checkboxes wherever the host said nothing.
+  selectable: true,
+});
 
 const emit = defineEmits<{
   (e: 'click-card', node: FileNode, mod: ClickMod): void;
@@ -267,8 +278,17 @@ function isSelected(n: FileNode): boolean {
   return props.selected.has(n.path);
 }
 
+/**
+ * issue #26 — the card's checkbox is the one click that selects (a click
+ * anywhere else on the card opens it), routed exactly like the list row's:
+ * one `click-card` emit marked `check`, one `useSelection.click`.
+ */
+function onCheckClick(n: FileNode, ev: MouseEvent) {
+  emit('click-card', n, checkMod(ev));
+}
+
 function onClick(n: FileNode, ev: MouseEvent) {
-  emit('click-card', n, clickMod(ev, touch.isTap(ev), NAME_SELECTOR));
+  emit('click-card', n, clickMod(ev, touch.isTap(ev)));
 }
 
 function onDbl(n: FileNode) {
@@ -329,16 +349,12 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
 }
 
 /* Long press → the card's menu; a tap is reported as a tap (issue #26). */
-/** issue #26 — the item's name: a click or tap on it opens the item. */
-const NAME_SELECTOR = '.fe-grid__label';
-
 const touch = useRowTouch<FileNode>(
   (n, at) =>
     emit('context-card', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
   {
-    nameSelector: NAME_SELECTOR,
-    // A finger lifted on the name opens at touchend — see useRowTouch.
-    onNameTap: (n) => emit('click-card', n, { ctrl: false, shift: false, touch: true, name: true }),
+    // A finger lifted on the item, off its controls, opens at touchend — see useRowTouch.
+    onTap: (n) => emit('click-card', n, { ctrl: false, shift: false, touch: true }),
   },
 );
 
@@ -391,7 +407,7 @@ function snippetTitle(snippet: string): string {
        localized label + busy state. Structure/layout untouched. -->
   <div
     class="fe-grid"
-    :class="{ 'is-loading': loading }"
+    :class="{ 'is-loading': loading, 'has-selection': selectable && selected.size > 0 }"
     role="listbox"
     aria-multiselectable="true"
     :aria-label="t('grid.aria')"
@@ -505,7 +521,7 @@ function snippetTitle(snippet: string): string {
              the person looking for what they starred, so the chip is always
              painted once the file IS starred and only appears on hover/focus
              otherwise (see .fe-grid__star in styles/base.css). @click.stop so
-             starring never doubles as a card selection. -->
+             starring never doubles as opening the card. -->
         <!-- gorunum:v1-preview — a frame lifted out of a video is, on a card,
              indistinguishable from a photograph. The badge is the difference,
              and it is drawn only over a real frame: a video that fell back to
@@ -534,16 +550,30 @@ function snippetTitle(snippet: string): string {
            On a file it is the 56px footer under the preview; on a folder it is
            the whole 56px card. -->
       <div class="fe-grid__foot">
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span
-          v-if="isEncryptedFolder(n)"
-          class="fe-grid__tile fe-grid__tile--svg"
-          role="img"
-          :aria-label="t('e2e.badge')"
-          v-html="encryptedFolderTile()"
-        ></span>
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span v-else class="fe-grid__tile fe-grid__tile--svg" v-html="fileIconTile(n)"></span>
+        <!-- issue #26 — the checkbox takes the tile's place while it shows
+             (hovered, focused, selected, or once anything is selected), so
+             the name does not move when it appears. -->
+        <span class="fe-grid__lead" :class="{ 'fe-grid__lead--pick': selectable }">
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span
+            v-if="isEncryptedFolder(n)"
+            class="fe-grid__tile fe-grid__tile--svg"
+            role="img"
+            :aria-label="t('e2e.badge')"
+            v-html="encryptedFolderTile()"
+          ></span>
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span v-else class="fe-grid__tile fe-grid__tile--svg" v-html="fileIconTile(n)"></span>
+          <span
+            v-if="selectable"
+            class="fe-item-check"
+            data-fe-control
+            @click.stop="onCheckClick(n, $event)"
+            @dblclick.stop
+          >
+            <ItemCheck :on="isSelected(n)" :label="nodeDisplayName(n)" />
+          </span>
+        </span>
         <div class="fe-grid__main">
           <div class="fe-grid__label" :title="n.basename">
             {{ nodeDisplayName(n) }}

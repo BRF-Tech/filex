@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.4] - 2026-09-15
+
+### Changed
+
+- **Only the checkbox selects; any other click or tap opens** (#26, fourth
+  round). In 0.41.2 a click opened only when it landed on the name itself — the
+  reporter: "need to click precisely on name, if a lil bit on the right then it
+  selects file, change it so if only clicking on checkbox it selects it, any
+  other click will open." That is now the rule, with a mouse and on a phone
+  alike:
+  - A click or tap **anywhere** on a list row, grid card or gallery tile opens
+    it — the name, the icon, the empty space to its right, the size and date
+    cells — with or without a selection, and with Ctrl or Shift held.
+  - The **checkbox** is the one click that selects. Shift on a checkbox still
+    extends the range from the last tick. A right click or a long press still
+    opens the menu; the star and the ⋮ button still do their own job.
+  - **Grid and gallery cards have a checkbox now.** It shows on hover, when the
+    card is focused or selected, and on every card once anything is selected —
+    so on a phone a long press selects the first file and the boxes are there
+    for the rest. In the grid it takes the type icon's place, so the name does
+    not move; in the gallery it sits in the thumbnail's corner opposite the
+    star. The recent and starred cards on Home have none: a click there opens,
+    and there is no selection to add to.
+  - On a phone the tap opens at the moment the finger lifts wherever it lands
+    on the item (0.41.3 did that for the name only), so it never depends on the
+    browser delivering a click.
+  - Ticking a checkbox with the mouse leaves the keyboard focus where it was,
+    so tick-then-Space quick-looks the file instead of unticking it again.
+  - A double-click still opens only the first item: the second click lands on
+    the listing that just opened and is ignored for half a second.
+
+  For embedders: `GridView` and `GalleryView` take a `selectable` prop (default
+  on) that draws the card checkbox; the `click-row` / `click-card` payload marks
+  a checkbox click with `check: true`, and `FilePane` treats every other click
+  as an open.
+
+### Fixed
+
+- **The release build of 0.41.3 stopped on a race in the SFTP server's test
+  harness.** `Addr()` read the listener while `ListenAndServe` was still
+  assigning it, and an interface value read in the middle of that assignment
+  can carry its type with a nil pointer — `(*TCPListener).Addr` then panicked.
+  The SFTP and NFS servers (the same code) now guard the listener, and a
+  `Close` that arrives before the listener is up no longer leaves it open.
+  `go test -race` is clean on both packages.
+
 ## [0.41.3] - 2026-09-15
+
+Tagged, never published: its release build stopped on the SFTP test race fixed
+in 0.41.4. Everything below ships in 0.41.4.
 
 ### Fixed
 

@@ -13,7 +13,7 @@
 import path from 'node:path';
 import {
   REPO, STORAGE,
-  api, check, finish, launchApp, rowEvent, signIn, skipTour,
+  api, check, finish, launchApp, signIn, skipTour, tickRow,
 } from './lib/harness.mjs';
 
 const { app } = await launchApp();
@@ -190,7 +190,8 @@ try {
   // the middle of the window swallowing clicks. Dismiss it before driving
   // anything — measured: every click below landed on the tour instead.
   await skipTour(win);
-  await rowEvent(win, seeded);
+  // Ticked: the checkbox is the click that selects (issue #26).
+  await tickRow(win, seeded);
   await win.waitForTimeout(300);
   // ⚠⚠ Share is on the SELECTION BAR now, and it is an icon.
   //

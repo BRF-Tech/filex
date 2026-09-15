@@ -310,7 +310,9 @@ async function main() {
       for (let i = 0; i < 25 && !document.querySelector(`[data-fe-path="${p}"]`); i++) await wait(200);
       const row = document.querySelector(`[data-fe-path="${p}"]`);
       if (!row) return false;
-      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      // Ticked, not clicked: the checkbox is the click that selects (issue #26),
+      // and a click on the row would open the file instead.
+      row.querySelector('.fe-list__check')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await wait(2500); // 400 ms debounce + the download
       return true;
     }, freshRel);

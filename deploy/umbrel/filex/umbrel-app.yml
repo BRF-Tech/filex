@@ -2,11 +2,11 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.41.3"
+version: "0.41.4"
 releaseNotes: |-
-  filex v0.41.3 — 2026-09-15
-  • On a phone, one tap on a name opens it
-  • The Test button says what the server's probe saw
+  filex v0.41.4 — 2026-09-15
+  • Only the checkbox selects; any other click or tap opens
+  • The release build of 0.41.3 stopped on a race in the SFTP server's test harness.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

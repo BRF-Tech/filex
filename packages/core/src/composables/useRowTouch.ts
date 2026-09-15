@@ -1,44 +1,45 @@
 /**
- * useRowTouch — the one touch grammar every file view speaks (list, grid,
- * gallery).
+ * useRowTouch — the one click and touch grammar every file view speaks (list,
+ * grid, gallery).
  *
- * A mouse selects with a click and opens with a double-click. A finger has no
- * double-click: the browser swallows the second tap into a zoom or never sends
- * `dblclick` at all, so on a phone the desktop grammar left nothing openable
- * (issue #26). What a finger does instead is what every mobile file manager
- * does:
+ * The rule (issue #26, fourth round — the reporter's words: "only clicking on
+ * checkbox selects it, any other click will open"), the same on every device:
  *
- *   - a long press opens the item's menu (and, through it, selects the item);
- *   - a tap is reported AS a tap, so the host can open instead of select.
+ *   - the item's CHECKBOX selects: a tick adds or removes, shift+tick extends
+ *     the range from the anchor;
+ *   - a click or tap ANYWHERE ELSE on the item opens it — the name, the icon,
+ *     the size column, the empty space beside the name, with or without a
+ *     selection, with or without Ctrl/Shift held;
+ *   - a right click (mouse) or a long press (finger) opens the item's menu;
+ *   - the item's own controls — the star, the ⋮ button — do their own job.
  *
- * The views only report. What a tap means is decided once, in FilePane.
+ * The views only report. What a click means is decided once, in FilePane.
  *
- * Issue #26, second round (the reporter's rule, on EVERY device):
- *   - a press on the item's NAME opens it — mouse click or finger tap, with or
- *     without a selection;
- *   - a long press (finger) or a right click (mouse) opens the menu;
- *   - the checkbox selects, exactly as before.
- * So the views also report whether the click landed on the name (`name`).
- *
- * Third round: on a phone the name still needed two taps. A tap is delivered
- * as a click only at the end of the browser's own compatibility sequence
- * (touch → mouse move → hover → mouse down/up → click), and iOS WebKit stops
- * that sequence when the hover step reveals content — the row "highlighted"
- * and the click never came. So a finger lifted on the NAME opens the item
- * right there, at `touchend`, and cancels the emulated mouse events that
- * would otherwise follow (`onNameTap`). The hover reveals are also kept off
- * screens that cannot hover (styles/base.css, `@media (hover: hover)`), for
- * taps anywhere else on the item.
+ * How the rule got here:
+ *   - First round: a finger has no double-click, so on a phone nothing could
+ *     be opened at all. A tap was made to open.
+ *   - Second round: a press on the NAME opened on every device, a press
+ *     beside it still selected. The reporter: "need to click precisely on
+ *     name, if a lil bit on the right then it selects file".
+ *   - Third round: on a phone the name still needed two taps. A tap reaches a
+ *     page as a click only at the end of the browser's compatibility sequence
+ *     (touch → mouse move → hover → mouse down/up → click), and iOS WebKit
+ *     stops that sequence when the hover step reveals content. So a finger
+ *     lifted on the item opens it right there, at `touchend`, and cancels the
+ *     emulated mouse events that would follow (`onTap`); the hover reveals are
+ *     kept off screens that cannot hover (styles/base.css,
+ *     `@media (hover: hover)`).
+ *   - Fourth round: the checkbox became the only way a click selects, and the
+ *     grid and gallery cards got one too (they had none).
  *
  * ⚠ A tap is judged from the gesture that produced the click, never from the
  * screen: `pointerType` where the browser sets it on click (Chromium, Firefox),
  * and the touchend that just preceded the click where it does not (older
- * WebKit). A touch laptop's trackpad therefore keeps the desktop grammar while
- * its screen gets the phone one. A `(pointer: coarse)` media query cannot tell
- * those two apart.
+ * WebKit). A touch laptop's trackpad and its screen are two different gestures
+ * a `(pointer: coarse)` media query cannot tell apart.
  *
  * ⚠ It used to live as three identical copies of the long-press timer, one per
- * view; the tap rule is exactly the kind of addition a copy misses.
+ * view; a rule like this one is exactly the kind of addition a copy misses.
  */
 import { onBeforeUnmount } from 'vue';
 
@@ -48,6 +49,15 @@ export const LONG_PRESS_MS = 500;
 const TAP_WINDOW_MS = 800;
 /** A finger that travels further than this is scrolling, not pressing. */
 const MOVE_TOLERANCE_PX = 10;
+
+/**
+ * What on an item is a control of its own: a press there is the control's,
+ * not the item's. The checkbox is one (it selects on its own click), and so
+ * are the star and the ⋮ button. A wrapper cell that swallows its clicks
+ * carries `data-fe-control` so a finger on its padding is not an open either.
+ */
+export const ITEM_CONTROL_SELECTOR =
+  'button, a, input, select, textarea, label, [role="checkbox"], [data-fe-control]';
 
 export interface TouchPoint {
   clientX: number;
@@ -60,29 +70,38 @@ export interface ClickMod {
   shift: boolean;
   /** The click was a finger's tap. */
   touch?: boolean;
-  /** The click landed on the item's name. */
-  name?: boolean;
+  /** The click was on the item's checkbox — the one click that selects. */
+  check?: boolean;
+}
+
+/** The one place a view turns a click on an item into a `ClickMod`. */
+export function clickMod(ev: MouseEvent, touch: boolean): ClickMod {
+  return { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey, touch };
 }
 
 /**
- * The one place a view turns a click into a `ClickMod`. `nameSelector` is the
- * view's own name element (`.fe-list__name`, `.fe-grid__label`, …).
+ * The one place a view turns a click on an item's CHECKBOX into a `ClickMod`.
+ * `ctrl` because a tick adds to a selection rather than replacing it; `shift`
+ * passes through so a shift-tick still extends the range from the anchor.
  */
-export function clickMod(ev: MouseEvent, touch: boolean, nameSelector: string): ClickMod {
-  const target = ev.target as Element | null;
-  return {
-    ctrl: ev.ctrlKey || ev.metaKey,
-    shift: ev.shiftKey,
-    touch,
-    name: typeof target?.closest === 'function' && target.closest(nameSelector) !== null,
-  };
+export function checkMod(ev: MouseEvent): ClickMod {
+  return { ctrl: true, shift: ev.shiftKey, check: true };
 }
 
 export interface RowTouchOptions<T> {
-  /** The view's own name element (`.fe-list__name`, `.fe-grid__label`, …). */
-  nameSelector?: string;
-  /** A tap that started on the name: open the item, before any click. */
-  onNameTap?: (item: T) => void;
+  /** A tap on the item outside its controls: open it, before any click. */
+  onTap?: (item: T) => void;
+}
+
+/** Whether the press started on one of the item's own controls. */
+function onControl(ev: Event): boolean {
+  const el = ev.target as Element | null;
+  if (typeof el?.closest !== 'function') return false;
+  const control = el.closest(ITEM_CONTROL_SELECTOR);
+  const item = ev.currentTarget as Element | null;
+  // Only a control INSIDE the item counts: the listing itself may sit in a
+  // label or a link on some host page, and that must not disarm every tap.
+  return control !== null && (item === null || typeof item.contains !== 'function' || item.contains(control));
 }
 
 export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, options: RowTouchOptions<T> = {}) {
@@ -91,7 +110,7 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, o
   let origin: TouchPoint = { clientX: 0, clientY: 0 };
   let longPressed = false;
   let tapEndedAt = 0;
-  let startedOnName = false;
+  let startedOnItem = false;
 
   function stopTimer() {
     if (timer) clearTimeout(timer);
@@ -105,9 +124,7 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, o
     target = item;
     longPressed = false;
     origin = { clientX: t0.clientX, clientY: t0.clientY };
-    const el = ev.target as Element | null;
-    startedOnName =
-      !!options.nameSelector && typeof el?.closest === 'function' && el.closest(options.nameSelector) !== null;
+    startedOnItem = !onControl(ev);
     timer = setTimeout(() => {
       timer = undefined;
       if (target === null) return;
@@ -131,7 +148,7 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, o
   /**
    * ⚠ Bind it WITHOUT `.passive`: a passive listener cannot cancel the
    * emulated mouse events, and the click they end in would then reach the new
-   * listing under the finger (FilePane's name-open guard catches that too).
+   * listing under the finger (FilePane's open guard catches that too).
    */
   function onTouchEnd(ev?: TouchEvent) {
     stopTimer();
@@ -139,11 +156,11 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, o
     const tapped = item !== null && !longPressed;
     if (tapped) tapEndedAt = Date.now();
     target = null;
-    if (tapped && startedOnName && options.onNameTap) {
+    if (tapped && startedOnItem && options.onTap) {
       if (ev?.cancelable) ev.preventDefault();
-      options.onNameTap(item as T);
+      options.onTap(item as T);
     }
-    startedOnName = false;
+    startedOnItem = false;
   }
 
   /** Whether this click is a finger's tap. */

@@ -567,11 +567,19 @@ async function run(seeded) {
     const fourth = (await rowNames(page))
       .filter(Boolean)
       .find((n) => n !== first && n !== second && n !== third);
+    // Select ONLY this row. Its checkbox is the click that selects (issue #26),
+    // and a tick ADDS to the selection — the right click on the gallery card
+    // above left that file selected, so without unticking it `S` would star
+    // and then unstar both.
     await page.evaluate((n) => {
+      const tick = (el) => el?.querySelector('.fe-list__check')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       const row = [...document.querySelectorAll('.fe-list__row')].find((r) =>
         (r.textContent ?? '').includes(n),
       );
-      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      for (const other of document.querySelectorAll('[data-fe-path][aria-selected="true"]')) {
+        if (other !== row) tick(other);
+      }
+      tick(row);
     }, fourth);
     await sleep(300);
     await page.keyboard.press('s');

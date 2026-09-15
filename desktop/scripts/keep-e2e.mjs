@@ -71,7 +71,9 @@ async function menuLabels(win) {
 }
 
 async function openMenuOn(win, name) {
-  return rowEvent(win, name, ['click', 'contextmenu']);
+  // A right click selects the row and opens its menu; a left click first would
+  // OPEN it (issue #26).
+  return rowEvent(win, name, ['contextmenu']);
 }
 
 async function clickMenuItem(win, label) {

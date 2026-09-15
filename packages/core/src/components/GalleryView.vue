@@ -13,7 +13,8 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
+import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
+import ItemCheck from './ItemCheck.vue';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
 import {
   createFilePreviews,
@@ -30,7 +31,7 @@ import {
 } from '../lib/dateGroups'; /* gruplama */
 import { useSortStore, type ListingOrder } from '../lib/sortOrder'; /* gruplama */
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   files: FileNode[];
   selected: Set<string>;
   clipped?: Set<string>;
@@ -74,7 +75,16 @@ const props = defineProps<{
    * order the tiles are not in. Omitted = an ordinary folder listing.
    */
   order?: ListingOrder;
-}>();
+  /**
+   * issue #26 — draw the checkbox on each card, the one click that selects.
+   * Default on. Same prop, same meaning as GridView's.
+   */
+  selectable?: boolean;
+}>(), {
+  // ⚠ Not left to `undefined`: Vue casts an absent boolean prop to false, and
+  // the listing would lose its checkboxes wherever the host said nothing.
+  selectable: true,
+});
 
 const emit = defineEmits<{
   (e: 'click-card', node: FileNode, mod: ClickMod): void;
@@ -158,8 +168,17 @@ function isSelected(n: FileNode): boolean {
   return props.selected.has(n.path);
 }
 
+/**
+ * issue #26 — the card's checkbox is the one click that selects (a click
+ * anywhere else on the card opens it), routed exactly like the list row's:
+ * one `click-card` emit marked `check`, one `useSelection.click`.
+ */
+function onCheckClick(n: FileNode, ev: MouseEvent) {
+  emit('click-card', n, checkMod(ev));
+}
+
 function onClick(n: FileNode, ev: MouseEvent) {
-  emit('click-card', n, clickMod(ev, touch.isTap(ev), NAME_SELECTOR));
+  emit('click-card', n, clickMod(ev, touch.isTap(ev)));
 }
 
 function onDbl(n: FileNode) {
@@ -207,16 +226,12 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
 }
 
 /* Long press → the card's menu; a tap is reported as a tap (issue #26). */
-/** issue #26 — the item's name: a click or tap on it opens the item. */
-const NAME_SELECTOR = '.fe-gal__label';
-
 const touch = useRowTouch<FileNode>(
   (n, at) =>
     emit('context-card', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
   {
-    nameSelector: NAME_SELECTOR,
-    // A finger lifted on the name opens at touchend — see useRowTouch.
-    onNameTap: (n) => emit('click-card', n, { ctrl: false, shift: false, touch: true, name: true }),
+    // A finger lifted on the item, off its controls, opens at touchend — see useRowTouch.
+    onTap: (n) => emit('click-card', n, { ctrl: false, shift: false, touch: true }),
   },
 );
 
@@ -242,7 +257,7 @@ function metaFor(n: FileNode): string {
 <template>
   <div
     class="fe-gal"
-    :class="{ 'is-loading': loading }"
+    :class="{ 'is-loading': loading, 'has-selection': selectable && selected.size > 0 }"
     role="listbox"
     aria-multiselectable="true"
     :aria-label="t('gallery.aria')"
@@ -355,6 +370,18 @@ function metaFor(n: FileNode): string {
           class="fe-thumb__play"
           aria-hidden="true"
         ></span>
+        <!-- issue #26 — the card's checkbox, the one click that selects: the
+             corner opposite the star, on the same reveal rule plus "anything
+             is selected" (styles/base.css .fe-item-check). -->
+        <span
+          v-if="selectable"
+          class="fe-item-check fe-gal__check"
+          data-fe-control
+          @click.stop="onCheckClick(n, $event)"
+          @dblclick.stop
+        >
+          <ItemCheck :on="isSelected(n)" :label="nodeDisplayName(n)" />
+        </span>
         <div v-if="canStar(n)" class="fe-gal__star" @click.stop @dblclick.stop>
           <StarButton
             :starred="!!starredIds?.has(n.id!)"

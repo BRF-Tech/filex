@@ -178,6 +178,10 @@ export async function skipTour(win) {
  *
  * types: any of 'click' | 'dblclick' | 'contextmenu' (in order). Returns
  * whether a row was found.
+ *
+ * ⚠ A click OPENS the item (issue #26: only the checkbox selects). To select
+ * a row, use `tickRow` — a 'click' here walks into the folder or opens the
+ * file, and whatever the script does next happens somewhere else.
  */
 export async function rowEvent(win, name, types = ['click']) {
   const found = await win.evaluate(({ n, ts }) => {
@@ -193,5 +197,25 @@ export async function rowEvent(win, name, types = ['click']) {
     return true;
   }, { n: name, ts: types });
   await win.waitForTimeout(types.includes('contextmenu') ? 700 : 400);
+  return found;
+}
+
+/**
+ * Selects the row (or grid card) for `name` the way a person does since
+ * issue #26: by ticking its checkbox, the one click that selects. Same `title`
+ * match as `rowEvent`. Returns whether the checkbox was found.
+ */
+export async function tickRow(win, name) {
+  const found = await win.evaluate((n) => {
+    const byTitle = [...document.querySelectorAll('.fe-list__name, .fe-grid__label')]
+      .find((e) => e.getAttribute('title') === n);
+    const item = byTitle?.closest('[data-fe-path]')
+      ?? [...document.querySelectorAll('[data-fe-path]')].find((r) => (r.textContent ?? '').includes(n));
+    const box = item?.querySelector('.fe-list__check');
+    if (!box) return false;
+    box.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return true;
+  }, name);
+  await win.waitForTimeout(400);
   return found;
 }

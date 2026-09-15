@@ -186,7 +186,7 @@ describe('star action', () => {
 
   it('offers the star on the selection bar for a selection', () => {
     openStorage();
-    cy.get(`[data-fe-path$="${FIXTURE}"]`).click();
+    cy.get(`[data-fe-path$="${FIXTURE}"] .fe-list__check`).click();
     selectionOffers().then((offers) => {
       expect(offers, 'selection bar offers star/unstar').to.satisfy((ls: string[]) =>
         ls.some((s) => /^(star|unstar|Star|Unstar)$/.test(s)),
@@ -197,7 +197,7 @@ describe('star action', () => {
   it('the S key stars the selection', () => {
     cy.intercept('POST', '**/api/files/manager/star').as('starPost');
     openStorage();
-    cy.get(`[data-fe-path$="${FIXTURE}"]`).click();
+    cy.get(`[data-fe-path$="${FIXTURE}"] .fe-list__check`).click();
     // ⚠ On <body>: the shortcut listener is on `window` and ignores events
     // whose target is an input or a button (so it never eats a keystroke meant
     // for a filename), which is why 14-explorer-sidenav types on body too.
@@ -280,7 +280,7 @@ describe('star action', () => {
 
     it('no star on the selection bar', () => {
       openStorage();
-      cy.get(`[data-fe-path$="${FIXTURE}"]`).click();
+      cy.get(`[data-fe-path$="${FIXTURE}"] .fe-list__check`).click();
       selectionOffers().then((offers) => {
         expect(offers, 'the bar still offers the other selection actions').to.have.length
           .greaterThan(2);
@@ -293,7 +293,7 @@ describe('star action', () => {
     it('the S key does nothing', () => {
       cy.intercept('POST', '**/api/files/manager/star').as('starPost');
       openStorage();
-      cy.get(`[data-fe-path$="${FIXTURE}"]`).click();
+      cy.get(`[data-fe-path$="${FIXTURE}"] .fe-list__check`).click();
       cy.get('body').type('s');
       // ⚠ A negative on a network call needs something to wait for, or it
       // asserts "the request had not happened yet". Toggling the inspector is

@@ -69,7 +69,8 @@ test.describe('Quick look — the hint bar stays a pill', () => {
 
     const row = page.locator(`[data-fe-path="${STORAGE}://${FILE_NAME}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.click();
+    // The checkbox is the click that selects (issue #26); a click on the row opens it.
+    await row.locator('.fe-list__check').click();
     await page.keyboard.press('Space');
 
     const hint = page.locator('.fe-ql-hint');
@@ -120,7 +121,8 @@ test.describe('Quick look — the hint bar stays a pill', () => {
 
     const row = page.locator(`[data-fe-path="${STORAGE}://${FILE_NAME}"]`);
     await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.click();
+    // The checkbox is the click that selects (issue #26); a click on the row opens it.
+    await row.locator('.fe-list__check').click();
     await page.keyboard.press('q');
 
     const hint = page.locator('.fe-ql-hint');

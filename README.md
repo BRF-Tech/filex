@@ -16,8 +16,8 @@ background folder sync**, and a **built-in MCP server** so AI agents can drive i
 natively.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.41.3/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.41.3/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.41.4/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.41.4/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -155,35 +155,35 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 | Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
-| ![Share modal](docs/screenshots/v0.41.3/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.41.3/viewer-markdown.png) |
+| ![Share modal](docs/screenshots/v0.41.4/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.41.4/viewer-markdown.png) |
 
 | Admin panel | Demo landing |
 |---|---|
-| ![Admin dashboard](docs/screenshots/v0.41.3/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.41.3/demo-landing.png) |
+| ![Admin dashboard](docs/screenshots/v0.41.4/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.41.4/demo-landing.png) |
 
 | The shell — what everybody lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
 |---|---|
-| ![The filex shell](docs/screenshots/v0.41.3/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.41.3/driveshell/driveshell-search-1440.png) |
+| ![The filex shell](docs/screenshots/v0.41.4/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.41.4/driveshell/driveshell-search-1440.png) |
 
 | Navigation panel — Home, My files, Shared with me, Recent, Starred, Trash, and your storages | Collapsed to the icon rail |
 |---|---|
-| ![Navigation panel](docs/screenshots/v0.41.3/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.41.3/sidenav/sidenav-rail-1440.png) |
+| ![Navigation panel](docs/screenshots/v0.41.4/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.41.4/sidenav/sidenav-rail-1440.png) |
 
 | Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.41.3/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.41.3/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.41.4/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.41.4/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
-| ![How to connect](docs/screenshots/v0.41.3/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.41.3/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.41.4/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.41.4/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
-| ![Connection guide](docs/screenshots/v0.41.3/connections-guide.png) |
+| ![Connection guide](docs/screenshots/v0.41.4/connections-guide.png) |
 
 | A storage filex does not ship — installed as a plugin, describing its own config form |
 |---|
-| ![Plugins](docs/screenshots/v0.41.3/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.41.4/admin-plugins.png) |
 
 ## Quick start — binary
 
@@ -382,7 +382,7 @@ credentials**, so even an agent with no filex token can finish the transfer with
 - **Search** — Bleve embedded, full-text + metadata, permission-aware. VS Code-style filename scoring: folders count and word order does not (`main code` finds `Code/main.go`), separators and typos forgiven (`invoice 2026` finds `invoice_2026.pdf`, `mian.go` finds `main.go`) while numbers are matched literally (`2026` never means `2025`), `tag:` filters, exact matches ranked first.
 - **Thumbnails you can read** — a PDF shows its **first page**, top-anchored so the title is in the card; a video its first frame that is not black (opening on a fade used to produce a black square, and a clip shorter than a second produced nothing at all while the row still said "ready"); an Office document its rendered first page; and a text, code or CSV file **fills the card with its own first lines** rather than repeating the extension the row already prints. image, video (ffmpeg), PDF (ghostscript), Office (libreoffice); capability-aware, and a server missing one of those binaries now says so in its log at boot instead of silently drawing coloured rectangles. A cached thumbnail is released when the file it belongs to is deleted for good, and a periodic reconciler reclaims the orphans an older install accumulated ([docs/thumbnails.md](docs/thumbnails.md)).
 - **Tabs, themes & deep links** — several folders open side by side, light/dark/auto theme, and an address bar that tracks the open folder so a pasted link lands there. Eight palettes ship in the theme gallery, each one a map of the `--fe-*` tokens rather than a second stylesheet, so a host page or an embed can pick one — or set its own values — without forking any CSS.
-- **Mouse and touch, one rule** — a click or a tap on a name opens it, the checkbox selects, and a right click or a long press opens the menu; Ctrl/Shift on a name still build a selection. The same on a phone, a desktop and in every embed.
+- **Mouse and touch, one rule** — the checkbox is the one click or tap that selects (Shift extends the range); a click or a tap anywhere else on a file or folder opens it, and a right click or a long press opens the menu. List rows, grid cards and gallery tiles all carry the checkbox. The same on a phone, a desktop and in every embed.
 - **Keyboard, and it says so** — every verb in the right-click menu and the toolbar prints the key that runs it, read from the registry so it follows a remap. Thirty-two actions are remappable from *Shortcut settings* (stored per browser); the handful of combinations a browser takes for itself, like `Ctrl+W`, are refused with a reason instead of stored as a key that would never fire.
 - **Usage & cost** — filex does not meter your provider's bill; it reads the report the provider already writes, normalises it and prices it with a table you can edit. Backblaze B2's daily CSVs are read over the same S3 API filex already speaks, so no new dependency and no new credential type. Free allowances are their own fields rather than constants in a formula, and the page keeps the provider's account-level row apart from its per-bucket rows — summing them counts the same transactions twice, by exactly the amount nobody notices ([docs/USAGE.md](docs/USAGE.md)).
 - **Audit log** — every mutation recorded with actor, integration identity and metadata.
