@@ -17,11 +17,14 @@ import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Copy, Move, Trash2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
 
+import { opPercent } from '@brftech/filex-core';
 import { usePendingOpsStore } from '@/stores/pendingOps';
+import { formatBytes } from '@/lib/format';
+import type { PendingOp } from '@/api/ops';
 import Button from '@/components/ui/Button.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const store = usePendingOpsStore();
 
 onMounted(() => {
@@ -52,10 +55,29 @@ function verbFor(opType: string): string {
   }
 }
 
-function percentFor(op: { progress_total: number; progress_done: number }): number {
-  if (!op.progress_total || op.progress_total <= 0) return 0;
-  const p = Math.round((op.progress_done / op.progress_total) * 100);
-  return Math.max(0, Math.min(100, p));
+/* issue #27 — the shared rule (core lib/opProgress): bytes when a transfer
+ * reports them, `null` (indeterminate bar, no percentage) when there is no
+ * honest number, per-source otherwise. */
+function percentFor(op: PendingOp): number | null {
+  return opPercent(op);
+}
+
+function progressLine(op: PendingOp): string {
+  const bytesDone = op.bytes_done ?? 0;
+  const bytesTotal = op.bytes_total ?? 0;
+  if (bytesTotal > 0) {
+    return t('pendingOps.progressBytes', {
+      done: formatBytes(bytesDone, locale.value),
+      total: formatBytes(bytesTotal, locale.value),
+      percent: percentFor(op) ?? 0,
+    });
+  }
+  if (bytesDone > 0) {
+    return t('pendingOps.progressBytesOpen', { done: formatBytes(bytesDone, locale.value) });
+  }
+  const percent = percentFor(op);
+  if (percent === null) return t('pendingOps.working');
+  return t('pendingOps.progress', { done: op.progress_done, total: op.progress_total, percent });
 }
 
 function isTerminal(status: string): boolean {
@@ -120,13 +142,7 @@ function isTerminal(status: string): boolean {
                   {{ item.op.error_message || t('pendingOps.failed') }}
                 </template>
                 <template v-else>
-                  {{
-                    t('pendingOps.progress', {
-                      done: item.op.progress_done,
-                      total: item.op.progress_total,
-                      percent: percentFor(item.op),
-                    })
-                  }}
+                  {{ progressLine(item.op) }}
                 </template>
               </p>
               <div
@@ -135,8 +151,14 @@ function isTerminal(status: string): boolean {
                 aria-hidden="true"
               >
                 <span
+                  v-if="percentFor(item.op) !== null"
                   class="block h-full bg-brand-500 transition-all duration-200"
                   :style="{ width: `${percentFor(item.op)}%` }"
+                />
+                <span
+                  v-else
+                  class="fx-tray-indeterminate block h-full w-1/3 bg-brand-500"
+                  data-testid="tray-indeterminate"
                 />
               </div>
             </div>
@@ -176,6 +198,17 @@ function isTerminal(status: string): boolean {
 </template>
 
 <style scoped>
+/* issue #27 — no honest percentage: a sliding segment, not a bar frozen at 0%. */
+.fx-tray-indeterminate {
+  animation: fx-tray-slide 1.2s ease-in-out infinite;
+}
+@keyframes fx-tray-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-tray-indeterminate { animation: none; width: 100%; opacity: 0.45; }
+}
 .tray-enter-active,
 .tray-leave-active {
   transition: all 200ms ease;

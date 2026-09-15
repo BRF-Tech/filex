@@ -13,7 +13,7 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { useRowTouch } from '../composables/useRowTouch';
+import { clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
 import {
   createFilePreviews,
@@ -77,7 +77,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'click-card', node: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }): void;
+  (e: 'click-card', node: FileNode, mod: ClickMod): void;
   (e: 'dbl-card', node: FileNode): void;
   (e: 'context-card', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
@@ -159,7 +159,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onClick(n: FileNode, ev: MouseEvent) {
-  emit('click-card', n, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey, touch: touch.isTap(ev) });
+  emit('click-card', n, clickMod(ev, touch.isTap(ev), '.fe-gal__label'));
 }
 
 function onDbl(n: FileNode) {

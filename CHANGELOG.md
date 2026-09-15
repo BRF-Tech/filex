@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-09-15
+
+### Changed
+
+- **A press on a file or folder name opens it, on every device** (#26). The
+  first round made a tap open on a phone only while nothing was selected; after
+  a long press every tap toggled the selection, so a name could no longer be
+  opened. The rule is now the one the reporter asked for, on a phone and with a
+  mouse alike: a click or tap on the **name** opens the item, with or without a
+  selection · the **checkbox** selects, as before · a **right click** or a
+  **long press** opens the menu · Ctrl/Shift on a name still add to or extend
+  the selection · a click beside the name (the size or date cells) still
+  selects with a mouse. A habitual double-click on a folder name opens that
+  folder only: the second click is ignored instead of opening whatever the new
+  listing put under the pointer. Measured in a real browser at phone size with
+  touch and at desktop size with a mouse; the double-click guard was proven by
+  removing it, which opened the sub-folder under the pointer.
+
+- **The SSO button's label is yours** (#28). *Admin → Branding → SSO button
+  label* (setting `branding.sso_label`, per tenant, up to 60 characters). Empty
+  keeps the default, which no longer names a provider: it reads **Sign in with
+  SSO** instead of "Sign in with SSO (Keycloak)", whatever the identity provider
+  is ([docs/SSO.md](docs/SSO.md#3-sign-in)).
+
+### Fixed
+
+- **A black or white accent no longer hides the sign-in button** (#29). The
+  branding accent was painted as the button's fill with the theme's label colour
+  and nothing else, so a black accent drew a dark label on a black button on the
+  dark card, and a white accent a white label on a white button on the light
+  card. The button is now designed per theme: the label is picked from the
+  accent itself, and whenever the fill does not stand out from the card of the
+  theme it is shown in, the button draws an edge in that theme. Measured in a
+  real browser for black and white in both themes: label contrast ≥ 3:1 on the
+  fill, and fill or edge ≥ 1.6:1 against the card. The public share page's
+  accent button follows the same rule.
+
+- **Folder sizes follow a move, an upload or a delete right away** (#27). They
+  were only recomputed at the end of a sync pass, so on a storage that syncs
+  rarely — or manually — a moved file stayed counted in its old folder and
+  missing from the new one for hours. Every change now schedules a recompute of
+  that storage's folder sizes (2 s after a burst, at most 15 s into a long one)
+  and refreshes the open listings, whichever surface made the change — the
+  explorer, WebDAV, S3, SFTP or NFS. Measured on two MinIO storages: both folders
+  show their new size within seconds; with the refresh removed, even an upload's
+  folder stayed at 0.
+
+- **A running move shows how far it has got** (#27). A queued operation counts
+  what you selected, so moving one large file — or one folder — was "0 of 1"
+  until the end: a bar frozen at 0% that then vanished. A transfer between two
+  storages now reports the bytes it has moved and the total it measured, and
+  both progress surfaces (the explorer's operations center and the admin tray)
+  draw that; when there is no honest percentage they show a moving indicator
+  instead of 0%. `GET /api/files/ops` carries `bytes_done` / `bytes_total` while
+  such an operation runs ([docs/BACKEND.md](docs/BACKEND.md#get-apifilesops-)).
+
+- **A file at a storage's root no longer shows a lone "—" under its name in
+  grid view** — search results and the Recent, Starred and Shared views, where
+  the card names the folder a result lives in. The gallery and the list's
+  Location column already left it empty; the grid printed a dash that read as a
+  stray character. Found while checking this release's screenshots.
+
 ## [0.41.1] - 2026-09-15
 
 ### Changed

@@ -27,6 +27,7 @@ const form = reactive({
   accent: '',
   footer_text: '',
   hide_powered_by: false,
+  sso_label: '',
 });
 const logoError = ref('');
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -38,6 +39,7 @@ watchEffect(() => {
   form.accent = (d['branding.accent'] as string) ?? '';
   form.footer_text = (d['branding.footer_text'] as string) ?? '';
   form.hide_powered_by = String(d['branding.hide_powered_by'] ?? '') === 'true';
+  form.sso_label = (d['branding.sso_label'] as string) ?? '';
 });
 
 const accentValid = computed(() => /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(form.accent));
@@ -88,6 +90,7 @@ async function save() {
       'branding.accent': form.accent.trim(),
       'branding.footer_text': form.footer_text.trim(),
       'branding.hide_powered_by': form.hide_powered_by ? 'true' : 'false',
+      'branding.sso_label': form.sso_label.trim(),
     });
     toast.success(t('settings.savedOk'));
   } catch (e: unknown) {
@@ -103,6 +106,7 @@ async function resetAll() {
       'branding.accent': '',
       'branding.footer_text': '',
       'branding.hide_powered_by': 'false',
+      'branding.sso_label': '',
     });
     logoError.value = '';
     toast.success(t('branding.resetOk'));
@@ -192,6 +196,16 @@ onMounted(() => settings.fetch());
             {{ form.accent && !accentValid ? t('branding.accentInvalid') : t('branding.accentHelp') }}
           </p>
         </div>
+
+        <!-- issue #28 — the SSO button's own label on the sign-in page. -->
+        <Input
+          :model-value="form.sso_label"
+          :label="t('branding.ssoLabel')"
+          :hint="t('branding.ssoLabelHelp')"
+          :placeholder="t('login.oidc')"
+          data-testid="branding-sso-label"
+          @update:model-value="(v) => (form.sso_label = v as string)"
+        />
 
         <Input
           :model-value="form.footer_text"

@@ -1,26 +1,28 @@
 /**
- * 102-touch-tap-opens — issue #26, "On 1st press on mobile devices it selects
- * file/folder … what makes impossible to use on mobile devices. In any
- * browser."
+ * 102-touch-tap-opens — issue #26.
  *
- * The explorer speaks the desktop grammar: a click selects, a double-click
- * opens. A finger has no double-click — the browser either swallows the second
- * tap into a zoom or never delivers `dblclick` at all — so on a phone nothing
- * could be opened. The grammar a phone expects is the one every mobile file
- * manager uses, and it is what this spec pins, on a real touch-emulating
- * Chromium at phone size:
+ * First report: "On 1st press on mobile devices it selects file/folder … what
+ * makes impossible to use on mobile devices. In any browser."
  *
- *   1. a tap on a folder walks into it;
- *   2. a tap on a file opens it;
- *   3. a long press selects (and opens the menu), and while something is
- *      selected a tap adds to the selection instead of opening — so picking
- *      several files still works.
+ * Second report (v0.41.1), the reporter's rule for EVERY device:
+ *   - "on any device if user presses on folder/file name — it opens"
+ *   - "tap and hold on mobile device / second click on desktop — drops menu"
+ *   - "click/tap on any device on checkbox — same behaviour as now"
  *
- * A mouse keeps the desktop grammar: the decision is made from the gesture
- * that produced the click, not from the screen size, so a touch laptop's
- * trackpad and its screen each behave as themselves.
+ * The first round made a tap open only while nothing was selected; after a
+ * long press every tap toggled the selection, so a name could no longer be
+ * opened — that is what "still does not work properly" was. This spec pins the
+ * rule on a real touch-emulating Chromium at phone size AND with a mouse at
+ * desktop size, because the rule is the same on both:
+ *
+ *   phone   tap on a name opens (with or without a selection) · long press
+ *           selects and opens the menu · a tap on the checkbox selects;
+ *   desktop click on a name opens · right click opens the menu · click beside
+ *           the name or on the checkbox selects · a habitual double-click on a
+ *           folder name opens THAT folder only, never the row the new listing
+ *           puts under the pointer.
  */
-import { test, expect, type Locator } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
 
@@ -31,13 +33,18 @@ const PNG = Buffer.from(
   'base64',
 );
 
-test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
-
 async function upload(request: import('@playwright/test').APIRequestContext, dir: string, name: string, mimeType: string, buffer: Buffer) {
   const up = await request.post('/api/files/manager?action=upload', {
     multipart: { path: `${STORAGE}://${dir}`, 'file[]': { name, mimeType, buffer } },
   });
   if (!up.ok()) throw new Error(`upload ${name} failed: ${up.status()} ${await up.text()}`);
+}
+
+async function mkdir(request: import('@playwright/test').APIRequestContext, dir: string, name: string) {
+  const mk = await request.post('/api/files/manager?action=newfolder', {
+    data: { path: `${STORAGE}://${dir}`, name },
+  });
+  if (!mk.ok()) throw new Error(`mkdir ${name} failed: ${mk.status()} ${await mk.text()}`);
 }
 
 /**
@@ -57,56 +64,115 @@ async function longPress(row: Locator) {
   await cdp.detach();
 }
 
-test.describe('Touch — a tap opens (issue #26)', () => {
-  test.beforeAll(async ({ request }) => {
-    await dropStorageByName(request, STORAGE);
-    await seedLocalStorage(request, STORAGE, MOUNT);
-    await apiLogin(request);
-    const mk = await request.post('/api/files/manager?action=newfolder', {
-      data: { path: `${STORAGE}://`, name: 'photos' },
-    });
-    if (!mk.ok()) throw new Error(`mkdir failed: ${mk.status()} ${await mk.text()}`);
-    await upload(request, 'photos', 'inner.txt', 'text/plain', Buffer.from('inside\n'));
-    await upload(request, '', 'dot.png', 'image/png', PNG);
-    await upload(request, '', 'other.txt', 'text/plain', Buffer.from('other\n'));
+const row = (page: Page, rel: string) => page.locator(`[data-fe-path="${STORAGE}://${rel}"]`);
+const nameOf = (r: Locator) => r.locator('.fe-list__name, .fe-grid__label, .fe-gal__label').first();
+const checkOf = (r: Locator) => r.locator('.fe-list__check').first();
+
+test.beforeAll(async ({ request }) => {
+  await dropStorageByName(request, STORAGE);
+  await seedLocalStorage(request, STORAGE, MOUNT);
+  await apiLogin(request);
+  await mkdir(request, '', 'photos');
+  // First row inside `photos`: sits where `photos` sat, so the second click of a
+  // double-click on `photos` lands on it.
+  await mkdir(request, 'photos', 'albums');
+  await upload(request, 'photos/albums', 'deep.txt', 'text/plain', Buffer.from('deep\n'));
+  await upload(request, 'photos', 'inner.txt', 'text/plain', Buffer.from('inside\n'));
+  await upload(request, '', 'dot.png', 'image/png', PNG);
+  await upload(request, '', 'other.txt', 'text/plain', Buffer.from('other\n'));
+});
+
+test.afterAll(async ({ request }) => {
+  await dropStorageByName(request, STORAGE);
+});
+
+async function openExplorer(page: Page) {
+  await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
+  await loginAs(page);
+  await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE)}`);
+  await expect(row(page, 'photos')).toBeVisible({ timeout: 15_000 });
+}
+
+test.describe('Phone — a tap on the name opens (issue #26)', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test.beforeEach(async ({ page }) => openExplorer(page));
+
+  test('a tap on a folder name walks into it', async ({ page }) => {
+    await nameOf(row(page, 'photos')).tap();
+    await expect(row(page, 'photos/inner.txt')).toBeVisible({ timeout: 10_000 });
   });
 
-  test.afterAll(async ({ request }) => {
-    await dropStorageByName(request, STORAGE);
-  });
-
-  test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
-    await loginAs(page);
-    await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE)}`);
-  });
-
-  test('a tap on a folder walks into it', async ({ page }) => {
-    const folder = page.locator(`[data-fe-path="${STORAGE}://photos"]`);
-    await expect(folder).toBeVisible({ timeout: 15_000 });
-    await folder.tap();
-    await expect(page.locator(`[data-fe-path="${STORAGE}://photos/inner.txt"]`)).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('a tap on a file opens it', async ({ page }) => {
-    const file = page.locator(`[data-fe-path="${STORAGE}://dot.png"]`);
-    await expect(file).toBeVisible({ timeout: 15_000 });
-    await file.tap();
+  test('a tap on a file name opens it', async ({ page }) => {
+    await nameOf(row(page, 'dot.png')).tap();
     await expect(page.locator('.fe-viewer')).toBeVisible({ timeout: 10_000 });
   });
 
-  test('a long press selects, and then a tap adds to the selection instead of opening', async ({ page }) => {
-    const png = page.locator(`[data-fe-path="${STORAGE}://dot.png"]`);
-    const other = page.locator(`[data-fe-path="${STORAGE}://other.txt"]`);
-    await expect(png).toBeVisible({ timeout: 15_000 });
+  test('a long press selects; the checkbox adds; a name still opens while things are selected', async ({ page }) => {
+    const png = row(page, 'dot.png');
+    const other = row(page, 'other.txt');
 
     await longPress(png);
     await expect(png).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Escape');
 
-    await other.tap();
+    await checkOf(other).tap();
     await expect(other).toHaveAttribute('aria-selected', 'true');
     await expect(png, 'the first pick survives the second').toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('.fe-viewer')).toHaveCount(0);
+
+    await nameOf(row(page, 'photos')).tap();
+    await expect(row(page, 'photos/inner.txt'), 'the name opens even with a selection').toBeVisible({ timeout: 10_000 });
+  });
+});
+
+test.describe('Desktop — a click on the name opens (issue #26)', () => {
+  test.use({ hasTouch: false, isMobile: false, viewport: { width: 1280, height: 800 } });
+
+  test.beforeEach(async ({ page }) => openExplorer(page));
+
+  test('a click on a folder name walks into it; a click beside the name selects', async ({ page }) => {
+    const other = row(page, 'other.txt');
+    const box = await other.boundingBox();
+    if (!box) throw new Error('row has no box');
+    // Far right of the row: the size/date cells, not the name.
+    await page.mouse.click(box.x + box.width - 140, box.y + box.height / 2);
+    await expect(other).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.fe-viewer')).toHaveCount(0);
+
+    await nameOf(row(page, 'photos')).click();
+    await expect(row(page, 'photos/inner.txt')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('a click on a file name opens it; the checkbox selects without opening', async ({ page }) => {
+    const png = row(page, 'dot.png');
+    await checkOf(png).click();
+    await expect(png).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.fe-viewer')).toHaveCount(0);
+
+    await nameOf(png).click();
+    await expect(page.locator('.fe-viewer')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('a right click opens the menu', async ({ page }) => {
+    await nameOf(row(page, 'other.txt')).click({ button: 'right' });
+    await expect(page.locator('.fe-ctx, .fe-context-menu, [role="menu"]').first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('a double-click on a folder name opens that folder only', async ({ page }) => {
+    // Human speed, not Playwright's back-to-back dblclick: the new listing must
+    // be on screen when the second click lands, or the test passes by accident
+    // (the second click would hit the old `photos` row again).
+    const box = await nameOf(row(page, 'photos')).boundingBox();
+    if (!box) throw new Error('name has no box');
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(250);
+    await page.mouse.click(x, y);
+    await expect(row(page, 'photos/inner.txt')).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(700);
+    await expect(row(page, 'photos/albums/deep.txt'), 'the second click must not open the row under the pointer').toHaveCount(0);
+    await expect(row(page, 'photos/albums')).toBeVisible();
   });
 });

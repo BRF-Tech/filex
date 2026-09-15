@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.41.1"
+version: "0.41.2"
 releaseNotes: |-
-  filex v0.41.1 — 2026-09-15
-  • The OIDC admin mapping now holds on every sign-in, not only when the account is created.
-  • Content-Range is in the default CORS allow-list.
-  • Moving a file larger than 8 MiB onto an S3 storage served over plain http:// failed
-  • On a phone, a tap selected a file or folder instead of opening it
-  • The password reset button in Users asked "Delete user …?"
+  filex v0.41.2 — 2026-09-15
+  • A press on a file or folder name opens it, on every device
+  • The SSO button's label is yours
+  • A black or white accent no longer hides the sign-in button
+  • Folder sizes follow a move, an upload or a delete right away
+  • A running move shows how far it has got
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

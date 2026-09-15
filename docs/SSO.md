@@ -82,8 +82,16 @@ filex discovers the provider's endpoints and keys from
 
 ### 3. Sign in
 
-A "Sign in with SSO" affordance appears on the login page (when `oidc` is in
+A **Sign in with SSO** button appears on the login page (when `oidc` is in
 `FILEX_AUTH_DRIVERS`). It sends the browser to `/api/auth/oidc/start`.
+
+Its label is yours to set: **Admin → Branding → SSO button label** (the setting
+`branding.sso_label`, up to 60 characters; a tenant admin sets their own). Empty
+keeps the default, which names no provider. The button takes the branding
+**accent colour** and stays visible whatever that colour is: its label is picked
+from the accent, and in either theme it draws an edge when the accent would
+otherwise blend into the sign-in card (a black accent on the dark theme, a white
+one on the light theme).
 
 ---
 

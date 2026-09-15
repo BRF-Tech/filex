@@ -18,6 +18,9 @@ export interface PendingOp {
   status: 'pending' | 'running' | 'done' | 'error';
   progress_total: number;
   progress_done: number;
+  /** Running cross-storage transfer's bytes (issue #27); absent otherwise. */
+  bytes_total?: number;
+  bytes_done?: number;
   target_path: string | null;
   source_dir: string | null;
   source_count: number;
@@ -45,6 +48,8 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     progress_total?: number;
     done?: number;
     progress_done?: number;
+    bytes_total?: number;
+    bytes_done?: number;
     failed?: number;
     dest?: string;
     target_path?: string;
@@ -74,6 +79,8 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     status,
     progress_total: Number(r.progress_total ?? r.total ?? sources?.length ?? 0),
     progress_done: Number(r.progress_done ?? r.done ?? 0),
+    bytes_total: Number(r.bytes_total ?? 0),
+    bytes_done: Number(r.bytes_done ?? 0),
     target_path: r.target_path ?? r.dest ?? null,
     source_dir: r.source_dir ?? null,
     source_count: Number(r.source_count ?? sources?.length ?? 0),

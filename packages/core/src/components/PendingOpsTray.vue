@@ -17,6 +17,7 @@ import { watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import type { PendingOp } from '../composables/usePendingOps';
 import type { OperationsStore, OperationStatus } from '../composables/useOperations';
+import { opPercent } from '../lib/opProgress';
 
 const props = defineProps<{
   ops: PendingOp[];
@@ -35,11 +36,9 @@ function mapStatus(op: PendingOp): OperationStatus {
   return 'running'; // pending | running
 }
 
-function percentOf(op: PendingOp): number | null {
-  if (op.status === 'done') return 100;
-  if (op.progress_total <= 0) return null;
-  return Math.min(100, Math.round((op.progress_done / op.progress_total) * 100));
-}
+/* issue #27 — bytes when a cross-storage transfer reports them, no fake 0%
+ * otherwise; the rule is shared with the admin tray (lib/opProgress). */
+const percentOf = (op: PendingOp): number | null => opPercent(op);
 
 watch(
   () => props.ops,

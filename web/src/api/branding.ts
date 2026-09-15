@@ -7,6 +7,9 @@ export interface BrandingConfig {
   accent: string;
   footer_text: string;
   hide_powered_by: boolean;
+  /* issue #28 — the SSO button's own label (settings key `branding.sso_label`).
+     Empty means the product's translated default. */
+  sso_label?: string;
   /* gorunum:v1 — the operator's own stylesheet (settings key `ui.custom_css`).
      It rides this payload instead of getting an endpoint of its own because
      this is the appearance fetch the SPA already makes on every page load,

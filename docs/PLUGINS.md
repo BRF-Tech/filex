@@ -38,7 +38,7 @@ Admin → Plugins → Install          Connections → Add a storage
 | **From a URL** | Downloaded, checked against a **required** SHA256, then as above. | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/v0.41.1/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.41.2/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust — the same

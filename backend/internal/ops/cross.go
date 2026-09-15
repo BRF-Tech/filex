@@ -53,6 +53,10 @@ var skipNames = map[string]bool{
 type TransferHooks struct {
 	OnDir  func(src, dst string)
 	OnFile func(src, dst string, size int64)
+	// OnBytes is told how many new bytes were read from a source file, while
+	// they stream (issue #27). Unlike the two above it fires before
+	// verification — it measures motion, not completion.
+	OnBytes func(n int64)
 }
 
 // Transfer copies `src` (a file or a whole directory) from one storage driver
@@ -113,6 +117,9 @@ func (s *Service) crossTransfer(ctx context.Context, srcDrv, dstDrv storage.Driv
 	if s.dbsync != nil {
 		hooks.OnDir = func(a, b string) { s.dbsync.SyncCopyAcross(ctx, op.StorageID, a, op.DestStorageID, b) }
 		hooks.OnFile = func(a, b string, _ int64) { s.dbsync.SyncCopyAcross(ctx, op.StorageID, a, op.DestStorageID, b) }
+	}
+	if lp := s.liveFor(op.ID); lp != nil {
+		hooks.OnBytes = func(n int64) { lp.done.Add(n) }
 	}
 	if err := Transfer(ctx, srcDrv, dstDrv, src, dst, hooks); err != nil {
 		return err
@@ -185,6 +192,7 @@ func transferFile(ctx context.Context, srcDrv, dstDrv storage.Driver, wr storage
 	if err != nil {
 		return fmt.Errorf("read %q: %w", src, err)
 	}
+	rc = countBytes(rc, hooks.OnBytes)
 	werr := wr.Write(ctx, dst, rc, stat.Size)
 	cerr := rc.Close()
 	if werr != nil {

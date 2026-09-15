@@ -88,6 +88,9 @@ import {
   // naming a key on screen — read the binding, never type it out:
   // shortcuts are remappable, so a hardcoded "Ctrl+K" stops being true
   shortcutHint, eventMatchesShortcut,
+  // how far a queued copy/move/delete has got — bytes when a transfer between
+  // two storages reports them, `null` when there is no honest percentage
+  opPercent,
   // types
   type ExplorerConfig, type AuthConfig, type FileNode, type ShareInfo,
   type Capabilities,
@@ -102,6 +105,11 @@ rather than the key itself: the user may remap any action from the shortcut
 settings, and `''` comes back for one they unbound so you can drop the hint
 instead of drawing an empty key cap. See
 [docs/API.md](https://github.com/BRF-Tech/filex/blob/main/docs/API.md#naming-a-key-on-screen).
+
+If you draw your own progress for queued operations (`usePendingOps`), take the
+percentage from `opPercent(op)` rather than `done / total`: those count the
+selected items, so moving one large file reads `0 / 1` until it ends. A `null`
+means draw a moving indicator, not 0%.
 
 ### Navigation panel
 

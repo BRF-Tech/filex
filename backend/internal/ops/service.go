@@ -60,17 +60,22 @@ type Op struct {
 	// which the worker serves by streaming bytes between the two drivers.
 	// Zero means "same as StorageID" — the shape every row written before
 	// this column existed has.
-	DestStorageID int64      `json:"dest_storage_id,omitempty"`
-	Sources       []string   `json:"sources"`
-	Dest          string     `json:"dest,omitempty"`
-	Total         int        `json:"total"`
-	Done          int        `json:"done"`
-	Failed        int        `json:"failed"`
-	Status        string     `json:"status"`
-	Error         string     `json:"error,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	DestStorageID int64    `json:"dest_storage_id,omitempty"`
+	Sources       []string `json:"sources"`
+	Dest          string   `json:"dest,omitempty"`
+	Total         int      `json:"total"`
+	Done          int      `json:"done"`
+	// BytesTotal / BytesDone are a running cross-storage transfer's byte
+	// counters (issue #27), merged in from memory by Get/List — never stored.
+	// BytesTotal 0 with BytesDone > 0 means the total is not known (yet).
+	BytesTotal int64      `json:"bytes_total,omitempty"`
+	BytesDone  int64      `json:"bytes_done,omitempty"`
+	Failed     int        `json:"failed"`
+	Status     string     `json:"status"`
+	Error      string     `json:"error,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	// ActorID is who asked for this op. The worker runs on a server-lifetime
 	// context long after the request that queued the work is gone, so the only
 	// way a pasted file can be attributed to the person who pasted it is for
@@ -89,6 +94,9 @@ type Service struct {
 	storageResolver func(int64) (storage.Driver, error)
 	dbsync          DBSync
 	uploadCommitter UploadCommitter
+
+	// live holds the byte counters of running cross-storage ops (progress.go).
+	live sync.Map
 
 	wakeup chan struct{}
 	stopMu sync.Mutex
@@ -303,7 +311,11 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	row := s.db.QueryRowContext(ctx, s.q(
 		`SELECT id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at, actor_id
 		 FROM pending_ops WHERE id=?`), id)
-	return scanOp(row)
+	op, err := scanOp(row)
+	if err == nil {
+		s.attachLive(op)
+	}
+	return op, err
 }
 
 // List returns ops, optionally filtered by status (e.g. "running").
@@ -374,6 +386,7 @@ func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64)
 		if op.DestStorageID == 0 {
 			op.DestStorageID = op.StorageID
 		}
+		s.attachLive(op)
 		out = append(out, op)
 	}
 	return out, rows.Err()
@@ -514,6 +527,19 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 			s.fail(ctx, op, "destination storage: "+err.Error())
 			return
 		}
+	}
+
+	if s.isCross(op) {
+		lp := &liveProgress{}
+		s.live.Store(op.ID, lp)
+		defer s.live.Delete(op.ID)
+		// Measured beside the transfer, not before it: the bytes start moving
+		// at once, and the tray shows a spinner until the total is known.
+		go func(srcs []string) {
+			if total, ok := measureSources(ctx, drv, srcs); ok && total > 0 {
+				lp.total.Store(total)
+			}
+		}(append([]string(nil), op.Sources...))
 	}
 
 	var lastErr error

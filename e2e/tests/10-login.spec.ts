@@ -7,7 +7,7 @@ test.describe('Login flow', () => {
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill('admin@local');
     await page.getByLabel(/password|şifre/i).fill('definitely-wrong-password');
     // Exact name disambiguates the local form submit from the OIDC
-    // 'Sign in with SSO (Keycloak)' button.
+    // 'Sign in with SSO' button.
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page).toHaveURL(/\/admin\/login/);
     await expect(page.getByText(/invalid|hata|incorrect|geçersiz|unauthorized/i)).toBeVisible({ timeout: 5_000 });

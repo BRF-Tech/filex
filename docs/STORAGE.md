@@ -675,6 +675,13 @@ enabled means re-scanning the whole storage every sync interval, forever.
 directory entry's own few kilobytes. They never match, and comparing them would
 mark every folder on the storage as drifted on every pass.
 
+Those cached folder sizes are recomputed at the end of every sync pass **and**
+shortly after any change to the storage — a move, copy, upload, delete or
+restore, whether it came through the explorer or over WebDAV, S3, SFTP or NFS:
+2 seconds after a burst of changes ends, and at most 15 seconds into a long
+one, after which open listings are told to refresh. A storage that syncs rarely
+or only manually therefore still shows the right folder sizes.
+
 ---
 
 ## Slow storage

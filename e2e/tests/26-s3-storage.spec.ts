@@ -212,6 +212,59 @@ test.describe('s3 storage', () => {
     expect(found, 'an S3 delete must be recoverable, not permanent').toBeTruthy();
   });
 
+  test('after a move both folders show their new size without waiting for a sync (issue #27)', async ({
+    authedRequest: request,
+  }) => {
+    test.skip(!STORAGE_B, 'the harness registered only one s3 storage');
+    const stamp = Date.now();
+    const srcDir = `sizes-src-${stamp}`;
+    const dstDir = `sizes-dst-${stamp}`;
+    const name = `sized-${stamp}.bin`;
+    const data = payload(300 * 1024);
+
+    for (const [storage, dir] of [[STORAGE_B, srcDir], [STORAGE, dstDir]] as const) {
+      const mk = await request.post('/api/files/manager?action=newfolder', {
+        data: { path: `${storage}://`, name: dir },
+      });
+      expect(mk.ok(), `mkdir ${dir}: ${mk.status()} ${await mk.text()}`).toBeTruthy();
+    }
+    const up = await request.post('/api/files/manager?action=upload', {
+      multipart: {
+        path: `${STORAGE_B}://${srcDir}`,
+        file: { name, mimeType: 'application/octet-stream', buffer: data },
+      },
+    });
+    expect(up.ok(), `upload: ${up.status()} ${await up.text()}`).toBeTruthy();
+
+    const sizeOf = async (storage: string, dir: string): Promise<number | undefined> => {
+      const list = await request.get(`/api/files/manager?action=index&path=${encodeURIComponent(`${storage}://`)}`);
+      expect(list.ok()).toBeTruthy();
+      const body = await list.json();
+      const row = (body.files ?? body.data?.files ?? []).find(
+        (f: { basename?: string; name?: string }) => (f.basename ?? f.name) === dir,
+      );
+      return row ? Number(row.size ?? row.file_size ?? 0) : undefined;
+    };
+    // The refresh is debounced (2 s quiet, 15 s ceiling); a sync pass is far
+    // further away, so 12 s tells the two apart.
+    const expectSize = async (storage: string, dir: string, want: number, why: string) => {
+      await expect.poll(() => sizeOf(storage, dir), { timeout: 12_000, intervals: [500], message: why }).toBe(want);
+    };
+
+    await expectSize(STORAGE_B, srcDir, data.length, 'the upload counts toward its folder');
+
+    const mv = await request.post('/api/files/move', {
+      data: { source: [`${STORAGE_B}://${srcDir}/${name}`], target: `${STORAGE}://${dstDir}` },
+    });
+    expect(mv.status(), `move: ${mv.status()} ${await mv.text()}`).toBe(202);
+    const { op } = (await mv.json()) as { op: { id: number } };
+    const final = await waitForOp(request, op.id, 60_000);
+    expect(final.status, `the move ended ${final.status}: ${final.error ?? ''}`).toBe('ok');
+
+    await expectSize(STORAGE_B, srcDir, 0, 'the source folder lost the file');
+    await expectSize(STORAGE, dstDir, data.length, 'the destination folder gained it');
+  });
+
   test('a file past 8 MiB moves from one S3 storage onto another (issue #27)', async ({
     authedRequest: request,
   }) => {

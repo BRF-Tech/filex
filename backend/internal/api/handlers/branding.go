@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -39,6 +40,10 @@ import (
 
 // brandingLogoMaxBytes caps an inline data-URI logo stored in settings.
 const brandingLogoMaxBytes = 256 * 1024
+
+// brandingSSOLabelMaxRunes caps the SSO button label (issue #28): it has to
+// fit on one button on a phone.
+const brandingSSOLabelMaxRunes = 60
 
 // brandingCacheTTL bounds how stale a public page's branding may be after an
 // admin edit (writes through the Settings handler invalidate immediately;
@@ -50,7 +55,7 @@ const brandingCacheTTL = 15 * time.Second
 var brandingAccentRe = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
 
 // brandingLeaves are the recognised branding.* leaf keys.
-var brandingLeaves = []string{"name", "logo_url", "accent", "footer_text", "hide_powered_by"}
+var brandingLeaves = []string{"name", "logo_url", "accent", "footer_text", "hide_powered_by", "sso_label"}
 
 // BrandingConfig is the effective branding payload — the JSON shape of
 // GET /api/branding and the input to the public-page chrome builder.
@@ -60,6 +65,9 @@ type BrandingConfig struct {
 	Accent        string `json:"accent"`
 	FooterText    string `json:"footer_text"`
 	HidePoweredBy bool   `json:"hide_powered_by"`
+	// SSOLabel is the operator's own text for the sign-in page's SSO button
+	// (issue #28). Empty means the product's translated default.
+	SSOLabel string `json:"sso_label"`
 	// CustomCSS is the operator stylesheet (settings key `ui.custom_css`,
 	// gorunum:v1 — custom_css.go). It rides this payload because /api/branding
 	// is the appearance fetch the SPA already makes at boot, pre-session; the
@@ -186,6 +194,9 @@ func overlayBrandingFromMap(cfg *BrandingConfig, m map[string]string, prefix str
 	if v := strings.TrimSpace(m[prefix+"hide_powered_by"]); v != "" {
 		cfg.HidePoweredBy = brandingBool(v)
 	}
+	if v := strings.TrimSpace(m[prefix+"sso_label"]); v != "" {
+		cfg.SSOLabel = v
+	}
 }
 
 // brandingBool parses the boolish strings the settings store round-trips.
@@ -239,6 +250,10 @@ func validateBrandingSetting(key, value string) error {
 	case "name", "footer_text":
 		if len(value) > 400 {
 			return errors.New("branding text fields are capped at 400 bytes")
+		}
+	case "sso_label":
+		if utf8.RuneCountInString(strings.TrimSpace(value)) > brandingSSOLabelMaxRunes {
+			return fmt.Errorf("branding.sso_label is capped at %d characters (it is a button label)", brandingSSOLabelMaxRunes)
 		}
 	case "hide_powered_by":
 		switch strings.ToLower(strings.TrimSpace(value)) {
@@ -325,7 +340,10 @@ func chromeFor(cfg BrandingConfig) publicChrome {
 		rr, gg, bb := brandingRGB(cfg.Accent)
 		c.BrandCSS = template.HTML(fmt.Sprintf(
 			`<style>:root{--px-accent:%s;--px-accent-hover:%s;--px-accent-soft:rgba(%d,%d,%d,0.14)}</style>`,
-			cfg.Accent, hover, rr, gg, bb))
+			cfg.Accent, hover, rr, gg, bb) +
+			// issue #29 — the label and edge of an accent-filled button follow
+			// the accent and the theme (branding_contrast.go).
+			accentButtonCSS(cfg.Accent))
 	}
 
 	// Header: logo and/or display name above the card.

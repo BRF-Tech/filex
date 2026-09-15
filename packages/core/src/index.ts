@@ -55,6 +55,11 @@ export {
 } from './lib/destinationTree';
 export type { DestinationRow } from './lib/destinationTree';
 
+/* issue #27 — the one "how far along is this queued op" rule, shared by the
+ * explorer's operations center and a host's own tray (the admin app's). */
+export { opPercent } from './lib/opProgress';
+export type { OpProgressLike } from './lib/opProgress';
+
 /* tasi:m1 — "download the selection as one archive". Exported so a host that
  * draws its own selection bar gets the real two-step flow (authorized mint,
  * then a navigation that streams) instead of reaching for window.open per

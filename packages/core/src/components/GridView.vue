@@ -20,7 +20,7 @@ import type { FileNode } from '../types/FileNode';
 import { hasInternalDrag } from '../lib/dragOut';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { useRowTouch } from '../composables/useRowTouch';
+import { clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
 import {
   createFilePreviews,
@@ -111,7 +111,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'click-card', node: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }): void;
+  (e: 'click-card', node: FileNode, mod: ClickMod): void;
   (e: 'dbl-card', node: FileNode): void;
   (e: 'context-card', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
@@ -268,7 +268,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onClick(n: FileNode, ev: MouseEvent) {
-  emit('click-card', n, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey, touch: touch.isTap(ev) });
+  emit('click-card', n, clickMod(ev, touch.isTap(ev), '.fe-grid__label'));
 }
 
 function onDbl(n: FileNode) {
@@ -547,11 +547,15 @@ function snippetTitle(snippet: string): string {
             >{{ keepGlyph(keepBadgeFor(n)!) }}</span>
           </div>
           <div class="fe-grid__meta">{{ captionFor(n) }}</div>
+          <!-- A card at a storage's root has no parent folder to name: no line,
+               not an em dash — the same rule the gallery follows and the list's
+               Location cell (tablo:t1). The dash read as a stray character under
+               the filename in search results. -->
           <div
-            v-if="showParentPath"
+            v-if="showParentPath && parentDirOf(n.path)"
             class="fe-grid__parent"
             :title="parentDirOf(n.path)"
-          >{{ parentDirOf(n.path) || '—' }}</div>
+          >{{ parentDirOf(n.path) }}</div>
           <!-- bul:s3 — content snippet («» → <mark> via TEXT segments, no innerHTML) -->
           <div v-if="cardSnippet(n)" class="fe-grid__snippet" :title="snippetTitle(cardSnippet(n))">
             <template v-for="(seg, si) in snippetSegments(cardSnippet(n))" :key="si">

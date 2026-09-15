@@ -693,24 +693,38 @@ window, carrying `count`) and the client-side debounce advice are in
 Copy / extract / archive create kick off background ops.
 
 ### `GET /api/files/ops` ![user](https://img.shields.io/badge/-user-blue)
-List the caller's ops.
+List the caller's ops, newest first (at most 200). `?status=running` filters.
 
 **Response 200**
 ```json
 {
   "ops": [
     {
-      "id": "op_AbCd", "kind": "copy", "status": "running",
-      "progress": 0.42, "started_at": "...", "eta_seconds": 120
+      "id": 42, "kind": "move", "storage_id": 3, "dest_storage_id": 4,
+      "sources": ["videos/talk.mp4"], "dest": "archive",
+      "total": 1, "done": 0, "failed": 0,
+      "bytes_total": 20983257, "bytes_done": 8388608,
+      "status": "running", "created_at": "...", "started_at": "..."
     }
   ]
 }
 ```
 
-### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
-Single op detail; same shape + final `error` if failed.
+- `total` / `done` / `failed` count **sources** — the items that were selected,
+  not the files inside them. Moving one large file or one folder is `0` of `1`
+  until it ends.
+- `bytes_total` / `bytes_done` appear only while a transfer **between two
+  storages** runs: the bytes streamed so far, and the total measured by walking
+  the sources beside the transfer. `bytes_total` is `0` (omitted) until that
+  walk finishes, or when the tree is too large to measure; draw a moving
+  indicator then, not a percentage. They are live counters in the worker's
+  memory and are gone once the operation ends.
 
-`status` is one of `queued | running | completed | failed | cancelled`.
+### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
+Single op detail; same shape, plus `error` when it failed.
+
+`status` is one of `pending | running | ok | failed | partial` — `partial` when
+some sources failed and others did not.
 
 ### `POST /api/files/ops/:id/cancel` ![user](https://img.shields.io/badge/-user-blue)
 Best-effort cancel. Returns `200` regardless; check `status` afterwards.

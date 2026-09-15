@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -673,7 +674,15 @@ func BuildRouter(d *Deps) http.Handler {
 	// SetChangeEmitter wires the file-mutation handlers to broadcast into it;
 	// a nil emitter (unwired) is a safe no-op.
 	hub := realtime.NewHub()
-	handlers.SetChangeEmitter(hub)
+	// Issue #27: every change also schedules a recompute of that storage's
+	// folder sizes (debounced, with a ceiling), so a move/upload/delete shows
+	// the right totals without waiting for the next sync. Wrapped HERE, once,
+	// so the HTTP handlers and the protocol servers below share it.
+	sizes := syncpkg.NewSizeRefresher(func(ctx context.Context, storageID int64) error {
+		return syncpkg.RecomputeFolderSizes(ctx, d.Store, storageID)
+	}, hub, 2*time.Second, 15*time.Second)
+	emitter := sizes.Wrap(hub)
+	handlers.SetChangeEmitter(emitter)
 	// The protocol servers (WebDAV, S3, SFTP, FTPS, NFS) reach the catalogue
 	// through internal/protocolsync rather than through these handlers, so the
 	// same hub has to be wired there too — otherwise a file written over any
@@ -681,7 +690,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// showing the old listing. Package-level on purpose: s3api is constructed
 	// at the top of this function and the SFTP/FTPS/NFS servers live in
 	// internal/server, so a field would make this depend on wiring order.
-	protocolsync.SetChangeEmitter(hub)
+	protocolsync.SetChangeEmitter(emitter)
 
 	/* bag:b3 event */
 	// Wire the notify sink so the mutation handlers can emit canonical

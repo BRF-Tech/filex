@@ -11,7 +11,7 @@ import { hasInternalDrag } from '../lib/dragOut';
 import type { FileNode } from '../types/FileNode';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
-import { useRowTouch } from '../composables/useRowTouch';
+import { clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import {
   arrivedFromOutside,
   ownedByViewer,
@@ -139,7 +139,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'click-row', node: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }): void;
+  (e: 'click-row', node: FileNode, mod: ClickMod): void;
   (e: 'dbl-row', node: FileNode): void;
   (e: 'context-row', node: FileNode, ev: MouseEvent): void;
   (e: 'item-drag-start', node: FileNode, ev: DragEvent): void;
@@ -174,7 +174,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onRowClick(n: FileNode, ev: MouseEvent) {
-  emit('click-row', n, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey, touch: touch.isTap(ev) });
+  emit('click-row', n, clickMod(ev, touch.isTap(ev), '.fe-list__name'));
 }
 
 function onRowDbl(n: FileNode) {

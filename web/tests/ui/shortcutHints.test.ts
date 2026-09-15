@@ -232,7 +232,7 @@ const FIXED_KEY_HINTS: Record<string, string> = {
 };
 
 /** Combo-shaped literals: `Ctrl+K`, `⌘K`, `Alt+↑`, `F2`, a standalone `Esc`. */
-const COMBO_RE = /(?:(?:Ctrl|⌘|Cmd|Alt|Shift)\s*[+\-]\s*\S)|(?:\bF(?:[1-9]|1[0-2])\b)|(?:\bEsc\b)/;
+const COMBO_RE = /(?:(?:Ctrl|⌘|Cmd|Alt|Shift)\s*[+-]\s*\S)|(?:\bF(?:[1-9]|1[0-2])\b)|(?:\bEsc\b)/;
 
 function scanCatalogue(name: string, table: Record<string, string>): string[] {
   const offenders: string[] = [];

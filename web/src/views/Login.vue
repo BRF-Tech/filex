@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -25,6 +25,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { AuthApi } from '@/api/auth';
 import { BrandingApi, type BrandingConfig } from '@/api/branding'; /* wiring:e1 */
+import { accentButtonStyle } from '@/lib/accentButton';
 
 import LogoMark from '@/components/LogoMark.vue';
 import Button from '@/components/ui/Button.vue';
@@ -101,9 +102,24 @@ const redirecting = ref(false);
    product's, the accent is the operator's). Fetch is public and best-effort:
    default look on failure. */
 const branding = ref<BrandingConfig | null>(null);
-const accentStyle = computed(() =>
-  branding.value?.accent ? { backgroundColor: branding.value.accent, borderColor: branding.value.accent } : undefined,
-);
+/* issue #29 — the accent-filled button is designed per theme: its label is
+   picked from the accent, and it draws an edge whenever the fill does not
+   stand out from the card of the theme it is shown in (lib/accentButton).
+   The theme is the `dark` class lib/theme.ts toggles on <html>; a theme switch
+   in another tab or the OS repaints the button without a reload. */
+const isDark = ref(typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
+let themeObserver: MutationObserver | null = null;
+if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+  themeObserver = new MutationObserver(() => {
+    isDark.value = document.documentElement.classList.contains('dark');
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+}
+onBeforeUnmount(() => themeObserver?.disconnect());
+const accentStyle = computed(() => accentButtonStyle(branding.value?.accent, isDark.value));
+/* issue #28 — the operator's own label for the SSO button; the translated
+   default otherwise. */
+const ssoLabel = computed(() => branding.value?.sso_label?.trim() || t('login.oidc'));
 const wordmark = computed(() => branding.value?.name?.trim() || 'filex');
 async function fetchBranding() {
   try {
@@ -300,7 +316,7 @@ function startOidc() {
         </form>
         <Button v-if="oidcEnabled" variant="outline" block class="mt-3" @click="startOidc">
           <Github class="h-4 w-4" />
-          {{ t('login.oidc') }}
+          {{ ssoLabel }}
         </Button>
       </div>
 
@@ -363,7 +379,7 @@ function startOidc() {
               @click="startOidc"
             >
               <KeyRound class="lg-i18" aria-hidden="true" />
-              {{ t('login.oidc') }}
+              {{ ssoLabel }}
             </button>
 
             <div v-if="showLocalForm && oidcEnabled" class="lg-or">

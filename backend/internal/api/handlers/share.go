@@ -1317,7 +1317,7 @@ body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
 .icon-badge svg { width: 30px; height: 30px; }
 h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 .sub { margin: 0 0 20px; color: var(--px-muted); font-size: 0.9rem; line-height: 1.5; overflow-wrap: anywhere; }
-.btn { display: block; width: 100%; margin-top: 18px; padding: 13px; border: 0; border-radius: 10px; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; background: var(--px-accent); color: #fff; transition: background 0.15s ease; }
+.btn { display: block; width: 100%; margin-top: 18px; padding: 13px; border: 0; border-radius: 10px; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; background: var(--px-accent); color: var(--px-on-accent, #fff); box-shadow: inset 0 0 0 1px var(--px-accent-edge, transparent); transition: background 0.15s ease; }
 .btn:hover:not(:disabled) { background: var(--px-accent-hover); }
 .btn:focus-visible { outline: 2px solid var(--px-accent); outline-offset: 2px; }
 .btn:disabled { opacity: 0.5; cursor: default; }

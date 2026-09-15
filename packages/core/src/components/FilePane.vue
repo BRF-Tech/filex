@@ -66,6 +66,7 @@
 import { computed, provide, ref, watch } from 'vue';
 
 import type { FileApi } from '../composables/useFileApi';
+import type { ClickMod } from '../composables/useRowTouch';
 import type { FileNode, ViewMode } from '../types/FileNode';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
@@ -443,12 +444,35 @@ const paneSubfolders = computed(() =>
  * `useSelection` instance for this pane answers. One set of Ctrl/Shift
  * semantics for both panes — the old right pane had a simplified copy in
  * which Shift behaved as Ctrl. */
-function onViewClick(n: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: boolean }) {
-  /* issue #26 — a finger has no double-click, so a TAP is the open gesture:
-   * with nothing selected it opens what it lands on, exactly as a double-click
-   * would. Once something is selected (a long press selects, via its menu) a
-   * tap adds to or removes from the selection, so picking several files still
-   * works. A mouse keeps click-to-select; see composables/useRowTouch. */
+/* issue #26, second round — a press on the NAME opens, so the second click of
+ * a habitual double-click lands on whatever the NEW listing put under the
+ * pointer (the folder already opened on the first click). Without this guard
+ * that click would open or select a row the user never aimed at, and a file's
+ * name would open twice (two viewer tabs). */
+const NAME_OPEN_GUARD_MS = 500;
+let nameOpenedAt = 0;
+
+function withinNameOpenGuard(): boolean {
+  return Date.now() - nameOpenedAt < NAME_OPEN_GUARD_MS;
+}
+
+function onViewClick(n: FileNode, mod: ClickMod) {
+  if (withinNameOpenGuard()) return;
+  /* issue #26, second round — the reporter's rule on every device: a press on
+   * the item's name opens it, mouse or finger, selection or not. Ctrl/shift
+   * still mean "add to / extend the selection", so a modifier click on a name
+   * selects as it always did. The checkbox selects on its own path. */
+  if (mod.name && !mod.ctrl && !mod.shift) {
+    nameOpenedAt = Date.now();
+    onRowOpen(n);
+    return;
+  }
+  /* issue #26 — a finger has no double-click, so a TAP elsewhere on the item
+   * is the open gesture too: with nothing selected it opens what it lands on,
+   * exactly as a double-click would. Once something is selected (a long press
+   * selects, via its menu) such a tap adds to or removes from the selection,
+   * so picking several files still works. A mouse click beside the name keeps
+   * click-to-select; see composables/useRowTouch. */
   if (mod.touch && !mod.ctrl && !mod.shift) {
     if (props.selected.size === 0) {
       onRowOpen(n);
@@ -458,6 +482,11 @@ function onViewClick(n: FileNode, mod: { ctrl: boolean; shift: boolean; touch?: 
   }
   emit('activate');
   emit('click-row', n, mod);
+}
+
+function onViewDbl(n: FileNode) {
+  if (withinNameOpenGuard()) return;
+  onRowOpen(n);
 }
 
 function onViewContext(n: FileNode, ev: MouseEvent) {
@@ -891,7 +920,7 @@ watch(panePath, () => {
         :auth-credentials="authCredentials"
         @click-row="onViewClick"
         @display-order="(nodes: FileNode[]) => emit('display-order', nodes)"
-        @dbl-row="onRowOpen"
+        @dbl-row="onViewDbl"
         @context-row="onViewContext"
         @item-drag-start="onRowDragStart"
         @item-drop-into="onViewDropInto"
@@ -917,7 +946,7 @@ watch(panePath, () => {
         :auth-credentials="authCredentials"
         @click-card="onViewClick"
         @display-order="(nodes: FileNode[]) => emit('display-order', nodes)"
-        @dbl-card="onRowOpen"
+        @dbl-card="onViewDbl"
         @context-card="onViewContext"
         @item-drag-start="onRowDragStart"
         @item-drop-into="onViewDropInto"
@@ -940,7 +969,7 @@ watch(panePath, () => {
         :auth-headers="authHeaders"
         :auth-credentials="authCredentials"
         @click-card="onViewClick"
-        @dbl-card="onRowOpen"
+        @dbl-card="onViewDbl"
         @context-card="onViewContext"
         @item-drag-start="onRowDragStart"
         @item-drop-into="onViewDropInto"

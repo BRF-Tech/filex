@@ -86,6 +86,19 @@ describe('the views print it', () => {
     expect(w.find('.fe-grid__parent').text()).toBe('Photos');
   });
 
+  it('a grid card at the storage root draws no parent line, not an em dash', () => {
+    const w = mount(GridView, {
+      props: {
+        selected: new Set<string>(),
+        locale: 'en' as const,
+        showParentPath: true,
+        files: [node('My files', 'notes.txt')],
+      },
+    });
+    expect(w.find('.fe-grid__parent').exists()).toBe(false);
+    expect(w.text()).not.toContain('—');
+  });
+
   it('no view carries its own copy of the rule again', () => {
     for (const f of ['components/ListView.vue', 'components/GridView.vue', 'components/GalleryView.vue']) {
       const src = readFileSync(path.join(CORE, f), 'utf8');

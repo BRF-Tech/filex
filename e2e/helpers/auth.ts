@@ -34,7 +34,7 @@ export async function dismissInstallBanner(page: Page) {
  * Home for everyone by default, the dashboard for an admin who picked it.
  *
  * The login page in OIDC-enabled builds shows TWO buttons: the local submit
- * and a `Sign in with SSO (Keycloak)` redirect, so the submit is picked by
+ * and a `Sign in with SSO` redirect, so the submit is picked by
  * exact name rather than a regex that would match both.
  *
  * ⚠ Matched in BOTH languages. `60-profile` deliberately flips the admin's UI
@@ -55,7 +55,7 @@ export async function loginAs(page: Page, email = ADMIN_EMAIL, password = ADMIN_
   await page.goto('/admin/login');
   await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(email);
   await page.getByLabel(/password|şifre/i).fill(password);
-  // `exact` per name, so neither matches "Sign in with SSO (Keycloak)".
+  // `exact` per name, so neither matches "Sign in with SSO".
   const submit = page
     .getByRole('button', { name: 'Sign in', exact: true })
     .or(page.getByRole('button', { name: 'Giriş yap', exact: true }));

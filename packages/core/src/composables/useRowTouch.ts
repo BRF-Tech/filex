@@ -13,6 +13,13 @@
  *
  * The views only report. What a tap means is decided once, in FilePane.
  *
+ * Issue #26, second round (the reporter's rule, on EVERY device):
+ *   - a press on the item's NAME opens it — mouse click or finger tap, with or
+ *     without a selection;
+ *   - a long press (finger) or a right click (mouse) opens the menu;
+ *   - the checkbox selects, exactly as before.
+ * So the views also report whether the click landed on the name (`name`).
+ *
  * ⚠ A tap is judged from the gesture that produced the click, never from the
  * screen: `pointerType` where the browser sets it on click (Chromium, Firefox),
  * and the touchend that just preceded the click where it does not (older
@@ -35,6 +42,30 @@ const MOVE_TOLERANCE_PX = 10;
 export interface TouchPoint {
   clientX: number;
   clientY: number;
+}
+
+/** What a view reports about a click on one of its items. */
+export interface ClickMod {
+  ctrl: boolean;
+  shift: boolean;
+  /** The click was a finger's tap. */
+  touch?: boolean;
+  /** The click landed on the item's name. */
+  name?: boolean;
+}
+
+/**
+ * The one place a view turns a click into a `ClickMod`. `nameSelector` is the
+ * view's own name element (`.fe-list__name`, `.fe-grid__label`, …).
+ */
+export function clickMod(ev: MouseEvent, touch: boolean, nameSelector: string): ClickMod {
+  const target = ev.target as Element | null;
+  return {
+    ctrl: ev.ctrlKey || ev.metaKey,
+    shift: ev.shiftKey,
+    touch,
+    name: typeof target?.closest === 'function' && target.closest(nameSelector) !== null,
+  };
 }
 
 export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void) {
