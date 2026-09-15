@@ -603,11 +603,11 @@ plaintext on disk.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](screenshots/v0.41.2/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.41.2/e2e-recovery/recovery-key-shown-once.png) |
+| ![Creating an encrypted folder](screenshots/v0.41.3/e2e-recovery/create-encrypted-folder.png) | ![The recovery key, shown once](screenshots/v0.41.3/e2e-recovery/recovery-key-shown-once.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
-| ![The lock screen](screenshots/v0.41.2/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.41.2/e2e-recovery/unlock-with-recovery-key.png) |
+| ![The lock screen](screenshots/v0.41.3/e2e-recovery/locked-folder.png) | ![Unlocking with a recovery key](screenshots/v0.41.3/e2e-recovery/unlock-with-recovery-key.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](screenshots/v0.41.2/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.41.2/e2e-recovery/legacy-folder-upgrade-offer.png) |
+| ![The escrow tab](screenshots/v0.41.3/e2e-recovery/unlock-with-escrow-key.png) | ![The offer to a pre-v0.31 folder](screenshots/v0.41.3/e2e-recovery/legacy-folder-upgrade-offer.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with

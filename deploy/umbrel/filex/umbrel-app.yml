@@ -2,14 +2,11 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.41.2"
+version: "0.41.3"
 releaseNotes: |-
-  filex v0.41.2 — 2026-09-15
-  • A press on a file or folder name opens it, on every device
-  • The SSO button's label is yours
-  • A black or white accent no longer hides the sign-in button
-  • Folder sizes follow a move, an upload or a delete right away
-  • A running move shows how far it has got
+  filex v0.41.3 — 2026-09-15
+  • On a phone, one tap on a name opens it
+  • The Test button says what the server's probe saw
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

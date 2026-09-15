@@ -466,10 +466,21 @@ filex-explorer {
   opacity: 0;
   transition: opacity 0.12s;
 }
-.fe-list__row:hover .fe-list__col--star,
+/* issue #26, third round — a reveal ON HOVER only where hovering exists.
+   iOS WebKit treats a tap whose :hover styles reveal content (an opacity
+   transition from 0 counts) as "the user wanted to see the hover state": it
+   applies the hover and swallows the click, so the first tap on a row or card
+   only highlighted it and a second tap was needed to open. `(hover: hover)`
+   keeps these reveals off touch screens, where they could never be hovered on
+   purpose anyway. `:focus-within` and a starred item stay visible everywhere. */
 .fe-list__row:focus-within .fe-list__col--star,
 .fe-list__col--star:has(.is-starred) {
   opacity: 1;
+}
+@media (hover: hover) {
+  .fe-list__row:hover .fe-list__col--star {
+    opacity: 1;
+  }
 }
 .fe-list__col--star .filex-star-btn.is-starred {
   color: var(--fe-warning, #f59e0b);
@@ -3683,10 +3694,24 @@ filex-explorer {
   transition: opacity 0.12s ease, transform 0.12s ease;
   pointer-events: none;
 }
-.fe-gal__card:hover .fe-gal__meta,
 .fe-gal__card:focus-visible .fe-gal__meta {
   opacity: 1;
   transform: translateY(0);
+}
+/* issue #26 — see the note on .fe-list__col--star: no hover reveal on touch.
+   A screen that cannot hover shows the caption outright instead, since it
+   would otherwise never be seen there. */
+@media (hover: hover) {
+  .fe-gal__card:hover .fe-gal__meta {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (hover: none) {
+  .fe-gal__meta {
+    opacity: 1;
+    transform: none;
+  }
 }
 .fe-gal__meta-line {
   overflow: hidden;
@@ -4560,15 +4585,20 @@ filex-explorer {
   opacity: 0;
   transition: opacity 120ms ease;
 }
-.fe-grid__card:hover .fe-grid__star,
 .fe-grid__card:focus-within .fe-grid__star,
-.fe-gal__card:hover .fe-gal__star,
 .fe-gal__card:focus-within .fe-gal__star,
 .fe-grid__star:focus-within,
 .fe-gal__star:focus-within,
 .fe-grid__star:has(.is-starred),
 .fe-gal__star:has(.is-starred) {
   opacity: 1;
+}
+/* issue #26 — see the note on .fe-list__col--star: no hover reveal on touch. */
+@media (hover: hover) {
+  .fe-grid__card:hover .fe-grid__star,
+  .fe-gal__card:hover .fe-gal__star {
+    opacity: 1;
+  }
 }
 /* `:has()` is the modern half of the rule above; this is the same thing for
    engines without it — a starred chip paints itself. Both are needed: the

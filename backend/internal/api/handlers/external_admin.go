@@ -280,6 +280,10 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		"reachable": state.State == "ok",
 		"url":       state.URL,
 		"state":     state.State,
+		// detail is what the probe saw when the answer was not healthy — a
+		// status code, a timeout, a connection error (issue #17). "Not
+		// reachable" alone sent an operator to the network over a 502.
+		"detail": state.Detail,
 		// checked_from is the vantage point of THIS result. The admin page
 		// runs its own probe from the browser and reports the two separately.
 		"checked_from": checkedFromServer,

@@ -99,6 +99,12 @@ export interface ExternalTestResult {
   /** True when the filex PROCESS reached the service. Says nothing else. */
   serverReachable: boolean;
   state: ExternalService['last_state'];
+  /**
+   * What the server's probe saw when the answer was not healthy — "GET
+   * …/healthcheck returned HTTP 502", a timeout, a connection error (issue
+   * #17). Null when it was healthy or not probed.
+   */
+  serverDetail: string | null;
   error: string | null;
   advisories: ExternalAdvisory[];
   publicURL: string;
@@ -182,6 +188,7 @@ export const ExternalApi = {
       reachable?: boolean;
       url?: string;
       state?: string;
+      detail?: string;
       error?: string;
       checked_from?: string;
       not_checked?: string[];
@@ -203,6 +210,7 @@ export const ExternalApi = {
       service: id,
       serverReachable: data.server_reachable ?? data.reachable === true,
       state: data.state ? mapState(data.state) : 'unconfigured',
+      serverDetail: data.detail || null,
       error: data.error ?? null,
       advisories: data.advisories ?? [],
       publicURL: data.public_url ?? lastPublicURL,

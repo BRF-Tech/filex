@@ -11,8 +11,12 @@ package capability
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -158,10 +162,13 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 		// sat next to "OnlyOffice is not configured" in issue #17. Say the true
 		// thing here rather than probing and calling it healthy.
 		st.State = "unconfigured"
-	case probeHTTP(externalProbeURL(name, es.URL)):
-		st.State = "ok"
 	default:
-		st.State = "unreachable"
+		if ok, detail := probeHTTPDetail(externalProbeURL(name, es.URL)); ok {
+			st.State = "ok"
+		} else {
+			st.State = "unreachable"
+			st.Detail = externalProbeHint(name, detail)
+		}
 	}
 	_ = s.store.UpdateExternalServiceState(ctx, name, now, st.State)
 	s.Invalidate()
@@ -366,15 +373,55 @@ func externalProbeURL(name, rawURL string) string {
 	return strings.TrimRight(rawURL, "/") + p
 }
 
-// probeHTTP returns true if the URL responds with 2xx within 3 seconds.
+// probeTimeout is how long a health probe waits for an answer.
+const probeTimeout = 3 * time.Second
+
+// probeHTTP returns true if the URL responds with 2xx within probeTimeout.
 func probeHTTP(rawURL string) bool {
-	client := &http.Client{Timeout: 3 * time.Second}
+	ok, _ := probeHTTPDetail(rawURL)
+	return ok
+}
+
+// probeHTTPDetail is probeHTTP that also says what it saw when the answer was
+// not a healthy one: the status code, a timeout, or the connection error.
+func probeHTTPDetail(rawURL string) (bool, string) {
+	client := &http.Client{Timeout: probeTimeout}
 	resp, err := client.Get(rawURL)
 	if err != nil {
-		return false
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return false, fmt.Sprintf("GET %s: no answer within %s", rawURL, probeTimeout)
+		}
+		return false, fmt.Sprintf("GET %s: %s", rawURL, probeErrorText(err))
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode/100 == 2
+	if resp.StatusCode/100 == 2 {
+		return true, ""
+	}
+	return false, fmt.Sprintf("GET %s returned HTTP %d", rawURL, resp.StatusCode)
+}
+
+// probeErrorText drops the `Get "<url>": ` prefix net/http puts in front of
+// every client error — the URL is already in the sentence around it.
+func probeErrorText(err error) string {
+	var uerr *url.Error
+	if errors.As(err, &uerr) && uerr.Err != nil {
+		return uerr.Err.Error()
+	}
+	return err.Error()
+}
+
+// externalProbeHint adds the one next step a detail on its own does not
+// suggest. ONLYOFFICE Docs serves /healthcheck through its own nginx from the
+// docservice process behind it: a 502/503/504 there means nginx answered and
+// docservice did not, so the network is fine and the fix is inside that
+// container (issue #17: a supervisor change left docservice stopped while the
+// static welcome page still loaded).
+func externalProbeHint(name, detail string) string {
+	if name == "onlyoffice" && (strings.HasSuffix(detail, "HTTP 502") || strings.HasSuffix(detail, "HTTP 503") || strings.HasSuffix(detail, "HTTP 504")) {
+		return detail + " — the document server's web server answered, but its docservice did not: run `supervisorctl status` in that container"
+	}
+	return detail
 }
 
 // MarshalJSONForResponse serializes Capabilities for the public API.

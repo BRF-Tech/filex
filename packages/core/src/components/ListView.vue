@@ -174,7 +174,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onRowClick(n: FileNode, ev: MouseEvent) {
-  emit('click-row', n, clickMod(ev, touch.isTap(ev), '.fe-list__name'));
+  emit('click-row', n, clickMod(ev, touch.isTap(ev), NAME_SELECTOR));
 }
 
 function onRowDbl(n: FileNode) {
@@ -266,8 +266,17 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
 }
 
 /* Long press → the row's menu; a tap is reported as a tap (issue #26). */
-const touch = useRowTouch<FileNode>((n, at) =>
-  emit('context-row', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
+/** issue #26 — the item's name: a click or tap on it opens the item. */
+const NAME_SELECTOR = '.fe-list__name';
+
+const touch = useRowTouch<FileNode>(
+  (n, at) =>
+    emit('context-row', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
+  {
+    nameSelector: NAME_SELECTOR,
+    // A finger lifted on the name opens at touchend — see useRowTouch.
+    onNameTap: (n) => emit('click-row', n, { ctrl: false, shift: false, touch: true, name: true }),
+  },
 );
 
 function keepGlyph(b: 'kept' | 'syncing' | 'cloud' | 'partial'): string {
@@ -1226,7 +1235,7 @@ const segments = computed<DateRun<FileNode>[]>(() =>
         @dragleave="onItemDragLeave(n) /* wiring:c4 */"
         @drop="onItemDrop(n, $event)"
         @touchstart.passive="touch.onTouchStart(n, $event)"
-        @touchend.passive="touch.onTouchEnd"
+        @touchend="touch.onTouchEnd"
         @touchmove.passive="touch.onTouchMove"
       >
         <!-- gorunum:v1 — the tick drives the SAME selection the row click

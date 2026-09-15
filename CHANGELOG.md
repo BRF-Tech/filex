@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.3] - 2026-09-15
+
+### Fixed
+
+- **On a phone, one tap on a name opens it** (#26, third round). 0.41.2 made a
+  tap on a name open on every device, and on a real phone the first tap still
+  only highlighted the row. Two things stood in the way, and both are gone:
+  - A tap reaches a page as a click only at the end of the browser's emulated
+    mouse sequence, and iOS WebKit stops that sequence when the hover step
+    reveals content — the star column and the grid star chip fade in on hover.
+    A finger lifted on a **name** now opens the item right there, at
+    `touchend`, and cancels the emulated mouse events that would follow.
+  - The hover reveals (list star column, grid and gallery star chips, the
+    gallery caption) now apply only where hovering exists
+    (`@media (hover: hover)`), so a tap anywhere else on an item is not spent
+    on a hover either. A screen that cannot hover shows the gallery caption
+    outright.
+  Chromium's touch emulation always delivers the click, which is why 0.41.2's
+  phone-size tests passed while the phone did not. The new tests make the
+  failure measurable there: a name tap has to open even when no click is ever
+  delivered, and hovering on a touch screen must leave the star hidden. Both
+  fail on 0.41.2's code.
+
+- **The Test button says what the server's probe saw** (#17). "Not reachable"
+  was all it printed, so a Document Server whose `/healthcheck` answered `502`
+  — its own nginx up, docservice behind it stopped — looked like a network
+  problem, while `curl` to the same host loaded the welcome page. The server
+  leg now prints the status code, `no answer within 3s`, or the connection
+  error, and for ONLYOFFICE a gateway error points at docservice
+  ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-document-wont-load-or-save)).
+  `POST /api/admin/external/:name/test` returns it as `detail`.
+
 ## [0.41.2] - 2026-09-15
 
 ### Changed

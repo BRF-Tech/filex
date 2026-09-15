@@ -439,6 +439,18 @@ question from a shell.
   `/api/files/onlyoffice/callback`. Same address and same fix — the save goes
   where the fetch came from. Check the filex logs for callback errors
   (`onlyoffice: ...`).
+- **Test says the server leg is not reachable, but `curl` to the Document
+  Server works**: read the line printed under it. `/healthcheck returned HTTP
+  502` (or 503/504) means the Document Server's own nginx answered and the
+  **docservice** process behind it did not — the network between the two
+  machines is fine. The welcome page (`/welcome/`) is a static file nginx
+  serves by itself, so it loads either way. Run `supervisorctl status` inside
+  the Document Server container (`ds:docservice` and `ds:converter` must be
+  `RUNNING`) and read `/var/log/onlyoffice/documentserver/docservice/err.log`.
+  Its own log shows the same thing as `connect() failed (111: Connection
+  refused) while connecting to upstream … :8000`. `no answer within 3s` is a
+  different problem: filex gives up at three seconds, so a slow route or TLS
+  handshake fails the check even when the service is up.
 
 ### Failure: 415 on open
 Unsupported extension (see the type list above). Expected — use preview/download.

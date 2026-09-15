@@ -46,6 +46,8 @@ export const useExternalServicesStore = defineStore('external-services', () => {
    * question, never as a pass.
    */
   const callbackProbes = ref<Record<string, ExternalTestResult['serviceToFilex']>>({});
+  /** What the server's own probe saw when it failed (issue #17), per service. */
+  const serverDetails = ref<Record<string, string | null>>({});
 
   async function fetch(): Promise<void> {
     loading.value = true;
@@ -74,6 +76,9 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     const nextCb = { ...callbackProbes.value };
     delete nextCb[id];
     callbackProbes.value = nextCb;
+    const nextDetail = { ...serverDetails.value };
+    delete nextDetail[id];
+    serverDetails.value = nextDetail;
   }
 
   /** Probe from THIS browser. Safe to call unawaited; it never throws. */
@@ -107,6 +112,7 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     const [server] = await Promise.all([ExternalApi.test(id), probeBrowser(id)]);
     publicUrl.value = server.publicURL || publicUrl.value;
     callbackProbes.value = { ...callbackProbes.value, [id]: server.serviceToFilex };
+    serverDetails.value = { ...serverDetails.value, [id]: server.serverDetail };
     items.value = items.value.map((s) =>
       s.id === id
         ? {
@@ -129,6 +135,7 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     browserProbes,
     browserProbing,
     callbackProbes,
+    serverDetails,
     fetch,
     update,
     test,

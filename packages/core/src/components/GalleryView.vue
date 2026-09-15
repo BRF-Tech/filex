@@ -159,7 +159,7 @@ function isSelected(n: FileNode): boolean {
 }
 
 function onClick(n: FileNode, ev: MouseEvent) {
-  emit('click-card', n, clickMod(ev, touch.isTap(ev), '.fe-gal__label'));
+  emit('click-card', n, clickMod(ev, touch.isTap(ev), NAME_SELECTOR));
 }
 
 function onDbl(n: FileNode) {
@@ -207,8 +207,17 @@ function onItemDrop(n: FileNode, ev: DragEvent) {
 }
 
 /* Long press → the card's menu; a tap is reported as a tap (issue #26). */
-const touch = useRowTouch<FileNode>((n, at) =>
-  emit('context-card', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
+/** issue #26 — the item's name: a click or tap on it opens the item. */
+const NAME_SELECTOR = '.fe-gal__label';
+
+const touch = useRowTouch<FileNode>(
+  (n, at) =>
+    emit('context-card', n, { ...at, preventDefault: () => {}, stopPropagation: () => {} } as unknown as MouseEvent),
+  {
+    nameSelector: NAME_SELECTOR,
+    // A finger lifted on the name opens at touchend — see useRowTouch.
+    onNameTap: (n) => emit('click-card', n, { ctrl: false, shift: false, touch: true, name: true }),
+  },
 );
 
 /**
@@ -268,7 +277,7 @@ function metaFor(n: FileNode): string {
       @dragleave="onItemDragLeave(n)"
       @drop="onItemDrop(n, $event)"
       @touchstart.passive="touch.onTouchStart(n, $event)"
-      @touchend.passive="touch.onTouchEnd"
+      @touchend="touch.onTouchEnd"
       @touchmove.passive="touch.onTouchMove"
     >
       <div class="fe-gal__thumb" :ref="(el) => bindPreview(el, n)">

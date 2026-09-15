@@ -20,6 +20,16 @@
  *   - the checkbox selects, exactly as before.
  * So the views also report whether the click landed on the name (`name`).
  *
+ * Third round: on a phone the name still needed two taps. A tap is delivered
+ * as a click only at the end of the browser's own compatibility sequence
+ * (touch → mouse move → hover → mouse down/up → click), and iOS WebKit stops
+ * that sequence when the hover step reveals content — the row "highlighted"
+ * and the click never came. So a finger lifted on the NAME opens the item
+ * right there, at `touchend`, and cancels the emulated mouse events that
+ * would otherwise follow (`onNameTap`). The hover reveals are also kept off
+ * screens that cannot hover (styles/base.css, `@media (hover: hover)`), for
+ * taps anywhere else on the item.
+ *
  * ⚠ A tap is judged from the gesture that produced the click, never from the
  * screen: `pointerType` where the browser sets it on click (Chromium, Firefox),
  * and the touchend that just preceded the click where it does not (older
@@ -68,12 +78,20 @@ export function clickMod(ev: MouseEvent, touch: boolean, nameSelector: string): 
   };
 }
 
-export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void) {
+export interface RowTouchOptions<T> {
+  /** The view's own name element (`.fe-list__name`, `.fe-grid__label`, …). */
+  nameSelector?: string;
+  /** A tap that started on the name: open the item, before any click. */
+  onNameTap?: (item: T) => void;
+}
+
+export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void, options: RowTouchOptions<T> = {}) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let target: T | null = null;
   let origin: TouchPoint = { clientX: 0, clientY: 0 };
   let longPressed = false;
   let tapEndedAt = 0;
+  let startedOnName = false;
 
   function stopTimer() {
     if (timer) clearTimeout(timer);
@@ -87,6 +105,9 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void) {
     target = item;
     longPressed = false;
     origin = { clientX: t0.clientX, clientY: t0.clientY };
+    const el = ev.target as Element | null;
+    startedOnName =
+      !!options.nameSelector && typeof el?.closest === 'function' && el.closest(options.nameSelector) !== null;
     timer = setTimeout(() => {
       timer = undefined;
       if (target === null) return;
@@ -107,10 +128,22 @@ export function useRowTouch<T>(onLongPress: (item: T, at: TouchPoint) => void) {
     }
   }
 
-  function onTouchEnd() {
+  /**
+   * ⚠ Bind it WITHOUT `.passive`: a passive listener cannot cancel the
+   * emulated mouse events, and the click they end in would then reach the new
+   * listing under the finger (FilePane's name-open guard catches that too).
+   */
+  function onTouchEnd(ev?: TouchEvent) {
     stopTimer();
-    if (target !== null && !longPressed) tapEndedAt = Date.now();
+    const item = target;
+    const tapped = item !== null && !longPressed;
+    if (tapped) tapEndedAt = Date.now();
     target = null;
+    if (tapped && startedOnName && options.onNameTap) {
+      if (ev?.cancelable) ev.preventDefault();
+      options.onNameTap(item as T);
+    }
+    startedOnName = false;
   }
 
   /** Whether this click is a finger's tap. */

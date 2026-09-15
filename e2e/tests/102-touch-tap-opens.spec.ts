@@ -126,6 +126,61 @@ test.describe('Phone — a tap on the name opens (issue #26)', () => {
   });
 });
 
+/**
+ * Third report (v0.41.2): "on mobile … when I tap on folders/files name, it
+ * highlights it but do not open, so need to tap second time". Desktop worked.
+ *
+ * A tap reaches the page as a click only at the end of the browser's emulated
+ * mouse sequence, and iOS WebKit stops that sequence when the hover step
+ * reveals content (the star column / chip fade in on :hover) — the row
+ * highlights and no click follows. Chromium's touch emulation always delivers
+ * the click, which is why the specs above passed while the phone did not.
+ *
+ * These pin the two halves of the fix in a way Chromium can measure: a name
+ * tap must open even when NO click ever arrives, and on a screen that cannot
+ * hover the reveals must not run at all.
+ */
+test.describe('Phone — a name tap does not depend on the click (issue #26, third round)', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test.beforeEach(async ({ page }) => openExplorer(page));
+
+  test('a tap on a folder name opens it even when the browser never delivers the click', async ({ page }) => {
+    // What iOS does when a hover reveals content: the tap ends without a click.
+    await page.evaluate(() => {
+      document.addEventListener(
+        'click',
+        (e) => {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        },
+        true,
+      );
+    });
+    await nameOf(row(page, 'photos')).tap();
+    await expect(row(page, 'photos/inner.txt')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('one tap on a folder name opens exactly that folder, not the row the new listing puts under the finger', async ({ page }) => {
+    await nameOf(row(page, 'photos')).tap();
+    await expect(row(page, 'photos/inner.txt')).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(700);
+    await expect(row(page, 'photos/albums/deep.txt')).toHaveCount(0);
+  });
+
+  test('a screen that cannot hover never runs the hover reveals', async ({ page }) => {
+    expect(await page.evaluate(() => matchMedia('(hover: hover)').matches), 'touch emulation reports no hover').toBe(false);
+    const other = row(page, 'other.txt');
+    const star = other.locator('.fe-list__col--star');
+    test.skip((await star.count()) === 0, 'no star column at this width');
+    const box = await other.boundingBox();
+    if (!box) throw new Error('row has no box');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(300);
+    expect(await star.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+  });
+});
+
 test.describe('Desktop — a click on the name opens (issue #26)', () => {
   test.use({ hasTouch: false, isMobile: false, viewport: { width: 1280, height: 800 } });
 

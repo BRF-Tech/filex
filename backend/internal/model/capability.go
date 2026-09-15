@@ -128,4 +128,9 @@ type ExternalServiceState struct {
 	URL       string     `json:"url,omitempty"`
 	State     string     `json:"state"` // "ok", "unreachable", "unauthorized", "disabled"
 	LastCheck *time.Time `json:"last_check,omitempty"`
+	// Detail says what the probe saw when it did not get a healthy answer:
+	// the HTTP status, a timeout, or the connection error (issue #17).
+	// "unreachable" alone sent an operator to the network when the answer was
+	// a 502 from the service's own web server.
+	Detail string `json:"detail,omitempty"`
 }

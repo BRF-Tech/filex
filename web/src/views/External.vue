@@ -107,7 +107,7 @@ async function test(s: ExternalService) {
       // disagree, and the browser is the one that opens the editor.
       toast.warn(t('external.legs.disagree'));
     } else {
-      toast.warn(server.error || t('external.testFail'));
+      toast.warn(server.error || server.serverDetail || t('external.testFail'));
     }
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
@@ -137,6 +137,11 @@ function callbackLeg(s: ExternalService): { tone: LegTone; key: string } {
   return res.ok
     ? { tone: 'ok', key: 'external.legs.callbackOk' }
     : { tone: 'bad', key: 'external.legs.callbackBad' };
+}
+
+/** issue #17 — what the server's probe saw, under a failed server leg. */
+function serverDetail(s: ExternalService): string {
+  return serverLeg(s).tone === 'bad' ? (ext.serverDetails[s.id] ?? '') : '';
 }
 
 function callbackDetail(s: ExternalService): string {
@@ -355,9 +360,15 @@ onMounted(load);
               class="h-3.5 w-3.5 shrink-0 mt-px text-rose-500"
             />
             <HelpCircle v-else class="h-3.5 w-3.5 shrink-0 mt-px text-zinc-400" />
-            <span>
+            <span :data-testid="`leg-server-${s.id}`">
               <span class="text-zinc-600 dark:text-zinc-300">{{ t('external.legs.server') }}</span>
               <span :class="legClass(serverLeg(s).tone)"> {{ t(serverLeg(s).key) }}</span>
+              <span
+                v-if="serverDetail(s)"
+                class="block font-mono text-[10px] text-zinc-400 break-all"
+                :data-testid="`leg-server-detail-${s.id}`"
+                >{{ serverDetail(s) }}</span
+              >
             </span>
           </div>
 
