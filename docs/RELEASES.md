@@ -19,16 +19,158 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.41.1, 14 September 2026
-A fix release for three reports and the rough edges left after 0.41.0. Moving a file larger than 8 MiB onto an S3 storage served over plain http (Garage or MinIO on a container network) works again (#27). On a phone a tap now opens a file or folder and a long press selects it (#26). The password reset in Users asks the right question and shows the new password, and an account can be created without one (#25).
+::: tip Latest — v0.41.4, 15 September 2026
+A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it — beside the name, on the size and date cells, with a selection, with Ctrl held (#26). Grid and gallery cards gained a checkbox of their own, shown on hover and on every card once something is selected, so a phone can pick several files after a long press. From 0.41.3: on a phone one tap opens, even where the browser swallows the click, and the external services Test button says what its probe saw — an HTTP status, a timeout or the connection error — with a docservice hint for an ONLYOFFICE 502 (#17).
 
-Upgrade notes that matter: with an OIDC admin group configured, the admin role now follows the group at every sign-in — someone removed from the group goes back to user at their next sign-in; the setup account and the last admin are never demoted. Content-Range joins the default CORS allow-list, so large cross-origin uploads from an embed work without a config change. FILEX_USAGE_* variables now seed the usage settings on first boot. Also: notifications, the audit log and the dashboard read in the panel's language, two explorers on one page keep their own clocks, and the update manifest's migrations flag is derived from the tags.
+Upgrade notes that matter: a click beside a name, or a Ctrl/Shift click, no longer selects — tick the checkbox. POST /api/admin/external/:name/test gains a detail field. No migrations.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.41.1
-docker pull ghcr.io/brf-tech/filex:full-v0.41.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.41.4
+docker pull ghcr.io/brf-tech/filex:full-v0.41.4
 ```
+
+## v0.41.4
+
+<span class="filex-release-date">15 September 2026</span>
+
+A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it — beside the name, on the size and date cells, with a selection, with Ctrl held (#26). Grid and gallery cards gained a checkbox of their own, shown on hover and on every card once something is selected, so a phone can pick several files after a long press. From 0.41.3: on a phone one tap opens, even where the browser swallows the click, and the external services Test button says what its probe saw — an HTTP status, a timeout or the connection error — with a docservice hint for an ONLYOFFICE 502 (#17).
+
+Upgrade notes that matter: a click beside a name, or a Ctrl/Shift click, no longer selects — tick the checkbox. POST /api/admin/external/:name/test gains a detail field. No migrations.
+
+## What changed
+
+### Changed
+
+- **Only the checkbox selects; any other click or tap opens** (#26, fourth
+  round). In 0.41.2 a click opened only when it landed on the name itself — the
+  reporter: "need to click precisely on name, if a lil bit on the right then it
+  selects file, change it so if only clicking on checkbox it selects it, any
+  other click will open." That is now the rule, with a mouse and on a phone
+  alike:
+  - A click or tap **anywhere** on a list row, grid card or gallery tile opens
+    it — the name, the icon, the empty space to its right, the size and date
+    cells — with or without a selection, and with Ctrl or Shift held.
+  - The **checkbox** is the one click that selects. Shift on a checkbox still
+    extends the range from the last tick. A right click or a long press still
+    opens the menu; the star and the ⋮ button still do their own job.
+  - **Grid and gallery cards have a checkbox now.** It shows on hover, when the
+    card is focused or selected, and on every card once anything is selected —
+    so on a phone a long press selects the first file and the boxes are there
+    for the rest. In the grid it takes the type icon's place, so the name does
+    not move; in the gallery it sits in the thumbnail's corner opposite the
+    star. The recent and starred cards on Home have none: a click there opens,
+    and there is no selection to add to.
+  - On a phone the tap opens at the moment the finger lifts wherever it lands
+    on the item (0.41.3 did that for the name only), so it never depends on the
+    browser delivering a click.
+  - Ticking a checkbox with the mouse leaves the keyboard focus where it was,
+    so tick-then-Space quick-looks the file instead of unticking it again.
+  - A double-click still opens only the first item: the second click lands on
+    the listing that just opened and is ignored for half a second.
+
+  For embedders: `GridView` and `GalleryView` take a `selectable` prop (default
+  on) that draws the card checkbox; the `click-row` / `click-card` payload marks
+  a checkbox click with `check: true`, and `FilePane` treats every other click
+  as an open.
+
+### Fixed
+
+- **The release build of 0.41.3 stopped on a race in the SFTP server's test
+  harness.** `Addr()` read the listener while `ListenAndServe` was still
+  assigning it, and an interface value read in the middle of that assignment
+  can carry its type with a nil pointer — `(*TCPListener).Addr` then panicked.
+  The SFTP and NFS servers (the same code) now guard the listener, and a
+  `Close` that arrives before the listener is up no longer leaves it open.
+  `go test -race` is clean on both packages.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0414---2026-09-15)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.4`
+
+## v0.41.2
+
+<span class="filex-release-date">15 September 2026</span>
+
+A fix release for four reports on 0.41.1. A press on a file or folder name now opens it on every device — a tap on a phone, a click on a desktop — even while something is selected; the checkbox selects, and a right click or a long press opens the menu (#26). After a move, upload or delete, folder sizes follow within seconds instead of waiting for the next sync, and a move between two storages shows the bytes it has moved rather than a bar frozen at 0% (#27). The SSO button on the sign-in page takes your own label from Admin → Branding, and its default no longer names Keycloak (#28). A black or white branding accent no longer hides that button: its label and edge adapt to the accent and to the light or dark theme (#29).
+
+Upgrade notes that matter: a single click on a name now opens it with a mouse too — select with the checkbox, a click beside the name, or Ctrl/Shift. GET /api/files/ops carries bytes_done and bytes_total while a transfer between storages runs. No migrations.
+
+## What changed
+
+### Changed
+
+- **A press on a file or folder name opens it, on every device** (#26). The
+  first round made a tap open on a phone only while nothing was selected; after
+  a long press every tap toggled the selection, so a name could no longer be
+  opened. The rule is now the one the reporter asked for, on a phone and with a
+  mouse alike: a click or tap on the **name** opens the item, with or without a
+  selection · the **checkbox** selects, as before · a **right click** or a
+  **long press** opens the menu · Ctrl/Shift on a name still add to or extend
+  the selection · a click beside the name (the size or date cells) still
+  selects with a mouse. A habitual double-click on a folder name opens that
+  folder only: the second click is ignored instead of opening whatever the new
+  listing put under the pointer. Measured in a real browser at phone size with
+  touch and at desktop size with a mouse; the double-click guard was proven by
+  removing it, which opened the sub-folder under the pointer.
+
+- **The SSO button's label is yours** (#28). *Admin → Branding → SSO button
+  label* (setting `branding.sso_label`, per tenant, up to 60 characters). Empty
+  keeps the default, which no longer names a provider: it reads **Sign in with
+  SSO** instead of "Sign in with SSO (Keycloak)", whatever the identity provider
+  is ([docs/SSO.md](./SSO.md#3-sign-in)).
+
+### Fixed
+
+- **A black or white accent no longer hides the sign-in button** (#29). The
+  branding accent was painted as the button's fill with the theme's label colour
+  and nothing else, so a black accent drew a dark label on a black button on the
+  dark card, and a white accent a white label on a white button on the light
+  card. The button is now designed per theme: the label is picked from the
+  accent itself, and whenever the fill does not stand out from the card of the
+  theme it is shown in, the button draws an edge in that theme. Measured in a
+  real browser for black and white in both themes: label contrast ≥ 3:1 on the
+  fill, and fill or edge ≥ 1.6:1 against the card. The public share page's
+  accent button follows the same rule.
+
+- **Folder sizes follow a move, an upload or a delete right away** (#27). They
+  were only recomputed at the end of a sync pass, so on a storage that syncs
+  rarely — or manually — a moved file stayed counted in its old folder and
+  missing from the new one for hours. Every change now schedules a recompute of
+  that storage's folder sizes (2 s after a burst, at most 15 s into a long one)
+  and refreshes the open listings, whichever surface made the change — the
+  explorer, WebDAV, S3, SFTP or NFS. Measured on two MinIO storages: both folders
+  show their new size within seconds; with the refresh removed, even an upload's
+  folder stayed at 0.
+
+- **A running move shows how far it has got** (#27). A queued operation counts
+  what you selected, so moving one large file — or one folder — was "0 of 1"
+  until the end: a bar frozen at 0% that then vanished. A transfer between two
+  storages now reports the bytes it has moved and the total it measured, and
+  both progress surfaces (the explorer's operations center and the admin tray)
+  draw that; when there is no honest percentage they show a moving indicator
+  instead of 0%. `GET /api/files/ops` carries `bytes_done` / `bytes_total` while
+  such an operation runs ([docs/BACKEND.md](./BACKEND.md#get-apifilesops-)).
+
+- **A file at a storage's root no longer shows a lone "—" under its name in
+  grid view** — search results and the Recent, Starred and Shared views, where
+  the card names the folder a result lives in. The gallery and the list's
+  Location column already left it empty; the grid printed a dash that read as a
+  stray character. Found while checking this release's screenshots.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0412---2026-09-15)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.2`
 
 ## v0.41.1
 
@@ -2855,228 +2997,14 @@ cannot reach is not shipped.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.30.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.30.0`
 
-## v0.29.0
-
-<span class="filex-release-date">4 September 2026</span>
-
-Open an Office document that lives on your own computer in the editor your filex server already runs: the desktop app registers for the usual extensions, so a machine with no Word or Excel installed can still edit one. Non-admin accounts get a front door of their own at `/drive` rather than landing in the admin shell. Search stopped depending on which separator a filename happened to use, forgives one typo, and has a stated ranking order instead of an inherited one — and `tag:` and `-tag:` filters put a feature that had existed for a long time within reach of the search box.
-
-## What changed
-
-### Added
-
-- **Open an Office document that lives on your own computer, in the editor your
-  server runs.** Double-click a `.docx`, `.xlsx` or `.pptx` (ten Office types in
-  all) and the desktop app opens it — on a machine with no Office installed.
-  Most Linux desktops have none, many Macs have none, and plenty of Windows
-  machines have none either; filex already had a perfectly good editor and the
-  documents on those disks had no way into it.
-
-  Two routes, picked per document. A document inside a folder you keep on this
-  computer opens as **itself** — no copy, no write-back, saving goes to the
-  server and sync brings it down again. A *paused* pair is deliberately not
-  treated as one: the save would reach the server and never come back, and you
-  would believe you had saved. Anything else is copied to a scratch area on the
-  server, edited there, and written back over the original path on every save,
-  with a strip along the bottom of the window naming the file the whole time.
-
-  The write-back is where an editor destroys work, so: the replace is atomic
-  (temp file in the same directory, then rename — never across devices, never a
-  partial write over the document); a document deleted while it was open is not
-  resurrected, its bytes are kept beside it as `<name>.filex-recovered-<time>`;
-  a refused rename keeps the edit, says so in a dialog *and* a notification, and
-  names where it kept it; the scratch copy survives a grace period after the
-  window closes, because OnlyOffice posts its save roughly ten seconds after the
-  editor disconnects and deleting on close would discard the last edit of every
-  session; and a sweep at next start clears whatever a crash left behind.
-
-  Registration is deliberately conservative. The installer adds filex to the
-  **"Open with"** list and changes nothing that is already set: electron-builder's
-  own `fileAssociations` macro writes the *default* ProgId for each extension —
-  it takes the file type at install time, which on a machine with no Office is
-  precisely how filex would become the handler without anyone being asked — so
-  the Windows registration is hand-written instead, and macOS registers as
-  `Alternate` rather than `Default`. Making filex the default is always an
-  explicit action: `xdg-mime` does it on Linux from Settings, Windows opens the
-  default-apps pane (`UserChoice` is hash-protected and cannot be set by an
-  application, and filex does not pretend otherwise), and macOS explains the
-  Finder route. See [docs/DESKTOP.md](./DESKTOP.md#opening-documents-from-your-computer).
-
-- **An end-user front door: `…/drive`.** A non-admin account has always landed
-  in the file manager rather than the admin panel — the router redirected them
-  out of it and every `/api/admin/*` route re-checked the role — but everything
-  around that screen said otherwise. The URL was `/admin/explore`, the browser
-  tab said "filex Admin", and the login form said *"Use your filex admin
-  credentials"*. Deploy filex for a team and each of your users was told three
-  times, before seeing a single file, that this was an administrator's tool.
-
-  The same app is now also served at `/drive`, with a per-route document title
-  and login copy written for everyone. `/admin` is untouched and every existing
-  bookmark still resolves. (Reported as #14.)
-
-- **`tag:` and `-tag:` filters in search.** Tags have been a filex feature for
-  a long time and were not in the search index at all, so `tag:invoice` searched
-  for a *file named* "tag:invoice" and came back empty. They are now a filter
-  rather than a search term, combinable with free text (`invoice 2026
-  tag:paid`), resolved against the database so a re-tag is visible immediately,
-  and applied before the result limit so `limit` counts filtered rows. A tag
-  that does not exist returns nothing — never the whole storage.
-
-- **The filex.sh landing page is in the repository**, at `site/`, deployed with
-  `scripts/sync-site.sh`, and covered by the release documentation audit. It had
-  lived only on the static host, so there was nothing to edit and nobody edited
-  it: it still described roughly v0.14 — no desktop app, no sync, no protocol
-  endpoints, no `filex mount`, no LDAP, no plugins, no search, no
-  multi-tenancy — and claimed five storage drivers when there are six plus a
-  plugin API.
-
-### Fixed
-
-- **Filename search depended on which separator the file's name used.**
-  `invoice 2026` did not find `invoice_2026.pdf`, and `main go` did not find
-  `main.go`, while `foo bar` found `foo-bar.txt` — an inconsistency with a
-  single cause. Name search was a disjunction of an analysed match and an
-  unanalysed `*term*` wildcard: the wildcard half cannot match anything once the
-  query contains a space, leaving only the analysed half, whose tokeniser splits
-  on `-` but joins on `_` and keeps `main.go` whole. So whether search worked
-  was decided by the file's punctuation.
-
-  Names are now indexed a second time in a normalised form (every run of
-  non-alphanumerics collapsed to one space) and the query is normalised the same
-  way, so `.`, `-`, `_` and a space are interchangeable. Multi-word queries
-  require one `*word*` wildcard per word instead of one over the whole string.
-  The normalisation is done in Go rather than as a Bleve field mapping on
-  purpose: a mapping is frozen into the index when it is created, so a fresh
-  install and an upgraded one would have analysed the same filename two
-  different ways. (Reported as #15.)
-
-- **One typo is now forgiven.** `mian.go` finds `main.go`. The fuzzy pass runs
-  only when the strict pass came back short of the limit, and its hits rank
-  below every exact and prefix match. Edit distance scales with word length
-  (none at three characters or fewer, one up to seven, two above).
-
-- **Ranking is now decided, not inherited.** The order is exact filename →
-  prefix → name → path → fuzzy → content, asserted by a test. It had been
-  whatever merging two queries' relevance scores produced: measured before this
-  change, `report-final.txt` ranked *above* `report.txt` for the query `report`.
-  Exact matching compares the name both with and without its extension.
-
-- **The same query meant different things in different boxes.** `GET
-  /api/ai/search` and the MCP `file_search` tool passed the raw string through,
-  so `tag:source` was read there as a filename and `invoice 2026` found nothing
-  — while the toolbar and `/api/files/search` understood both. All four now
-  share one parser and one fallback plan.
-
-- **The explorer's onboarding tour described a search that does not exist.** It
-  said "This box filters the current folder"; the toolbar search covers the
-  whole storage, and every storage when the multi-storage root is open. Its
-  placeholder said "File name". Both were wrong before this release and are
-  fixed in the shared component, so every surface gets the correction.
-
-- **The explorer told a non-admin to configure a storage.** With no visible
-  storage it showed "No storages configured yet" — for a `user` account that
-  almost always means nothing has been *shared* with them, so it sent people to
-  fix something they have no permission to fix.
-
-- **An installed PWA ejected itself into a browser tab.** The manifest scope was
-  `/admin/`, so the first navigation to the new `/drive` front door left the
-  installed app. The manifest scope now covers both; the service worker's scope
-  and the manifest `id` are deliberately unchanged (a changed `id` turns every
-  existing install into a second app).
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0290---2026-09-04)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.29.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.29.0`
-
-## v0.28.0
-
-<span class="filex-release-date">3 September 2026</span>
-
-If you run filex against LDAP or Active Directory, this is the release where that actually works. The directory driver could be configured, initialised and printed in the boot banner while being unreachable from every login path: a directory account with the correct password was refused in under a millisecond — less than one LDAPS round trip, so the request never left the machine. Directory users can now sign in on the normal password form, and on WebDAV, SFTP, FTPS, S3 and NFS as well; their accounts hold no password hash in filex, which is why those protocols used to refuse them forever. Local login is still tried first, so your break-glass admin keeps working while the directory is down. Also here: a `ca_file` option for a private CA (no more rebuilding the container's trust store), a filter that fills every placeholder rather than the first one, and search failures that are finally distinguishable from a wrong password in the log.
-
-## What changed
-
-### Fixed
-
-- **LDAP was configured, initialised, printed in the boot banner — and
-  unreachable from every login path.** With `FILEX_AUTH_DRIVERS=local,ldap` a
-  directory account was answered `401 invalid credentials` even with the right
-  password, in roughly **350 microseconds**: less than one LDAPS round trip, so
-  the request never reached the network at all. Nothing was logged, and the docs
-  described the behaviour that was missing ("filex tries each enabled driver in
-  order"), which made it read as a directory misconfiguration to everyone who
-  hit it. Three separate gaps produced it, and each would have been enough on
-  its own:
-
-  - the bootstrap assigned the login handler's single `LoginDriver` in the
-    `local` case only, so the directory driver was never the one it held;
-  - `*ldap.Driver` did not satisfy `auth.LoginDriver` at all — no `Logout` — so
-    it could not have been assigned even by hand. The compiler had never been
-    asked the question;
-  - `ldap.Login` ended with `return user, "", nil` under a comment saying the
-    caller would mint the session. No caller did: a *correct* password would
-    have handed back an empty cookie, a successful login presenting as a failed
-    one.
-
-  Password drivers are now chained (`auth.LoginChain`) in the order they appear
-  in `auth.drivers` / `FILEX_AUTH_DRIVERS`. `local` first is deliberate — it is
-  a hash compare against a row filex already holds, so `admin@local` and every
-  break-glass password stay answerable while the directory is unreachable.
-
-- **A directory account could sign in to the web UI and still be refused by
-  WebDAV, SFTP, FTPS, S3 and NFS.** Those protocols check the password against
-  `users.password_hash`, which is **empty by construction** for a directory
-  account — filex never learns the password. The refusal was identical to a
-  wrong one. They now ask the directory when the local table cannot judge
-  (`auth.ldap.protocol_login`, on by default). The local hash is still tried
-  first, TOTP accounts are still refused on every protocol, and a successful
-  check is cached for five minutes exactly as a local one is — without that,
-  each request of a WebDAV `PROPFIND` storm would be a fresh LDAPS bind.
-
-- **A search failure and "no such user" were the same answer.** An unreachable
-  directory, an expired service account and a typo in `base_dn` all came out as
-  `unauthorized` with nothing in the log. Transport and protocol failures are
-  now reported and logged apart from a rejected password.
-
-- **`user_filter` silently broke with more than one placeholder.** It was filled
-  with `fmt.Sprintf`, which consumes one argument per verb, so the standard
-  Active Directory filter that accepts either address form became
-  `(userPrincipalName=%!s(MISSING))` — a filter matching nobody. Every `%s` is
-  now filled with the same escaped identifier.
-
-- **Searches used a size limit of 1.** Active Directory answers a subtree search
-  from the domain root with continuation references alongside the match, and a
-  server counting those against a limit of 1 can answer "size limit exceeded"
-  instead of the entry. The limit is 2, and a filter that genuinely matches two
-  accounts is refused with a warning rather than resolved to whichever came
-  first.
-
-### Added
-
-- **`auth.ldap.ca_file` / `FILEX_LDAP_CA_FILE`** — a PEM bundle for a private or
-  internal CA, **appended** to the system trust store (the public roots keep
-  working) and applied to `ldaps://` and StartTLS alike. Previously the only way
-  to reach a directory behind an internal CA was to rebuild the container's
-  `/etc/ssl/certs/ca-certificates.crt`. The file is read at boot, so a wrong
-  path is a startup error rather than a login failure hours later.
-- **`auth.ldap.protocol_login` / `FILEX_LDAP_PROTOCOL_LOGIN`** — set `false` to
-  keep directory passwords on the login form only and require an API token on
-  the file protocols.
-- **The Helm chart can configure LDAP.** `auth.ldap.*` in `values.yaml` renders
-  the `FILEX_LDAP_*` variables; the chart listed `ldap` as a valid driver while
-  offering no way to configure it, so `drivers: "local,ldap"` produced a driver
-  that failed `Init` and was skipped.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0280---2026-09-03)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.28.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.28.0`
-
 ## Earlier releases
 
-The 94 releases before v0.28.0, in brief. Full notes are on GitHub.
+The 96 releases before v0.30.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.29.0](https://github.com/BRF-Tech/filex/releases/tag/v0.29.0) | 4 September 2026 | Open an Office document that lives on your own computer in the editor your filex server already runs: the desktop app registers for the usual extensions, so a machine with no Word or Excel installed can still edit one. |
+| [v0.28.0](https://github.com/BRF-Tech/filex/releases/tag/v0.28.0) | 3 September 2026 | If you run filex against LDAP or Active Directory, this is the release where that actually works. |
 | [v0.27.6](https://github.com/BRF-Tech/filex/releases/tag/v0.27.6) | 1 September 2026 | them with.** `CONTRIBUTING.md` had said `git tag -s` for months while no |
 | [v0.27.5](https://github.com/BRF-Tech/filex/releases/tag/v0.27.5) | 1 September 2026 | budget was widened to six attempts a release ago, and a test proves a 503 is |
 | [v0.27.4](https://github.com/BRF-Tech/filex/releases/tag/v0.27.4) | 29 August 2026 | image tag empty, which the chart resolves to `.Chart.appVersion` — so |
@@ -3174,4 +3102,4 @@ The 94 releases before v0.28.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-14 from 114 published releases.</small>
+<small>Last refreshed 2026-09-15 from 116 published releases.</small>
