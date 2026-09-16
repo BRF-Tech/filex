@@ -1741,73 +1741,99 @@ function docChromeScript(): string {
   })();`;
 }
 
-/**
- * A document window — every in-app "open" lands here (host-owned open: the
- * explorer's `config.openInHost` + the app page's `file-opened` listener). It
- * loads the SERVER's own `/files/edit` route, which picks the right
- * viewer/editor for the type, and opens the REMOTE bytes directly — no scratch
- * copy and no write-back banner. That banner belongs only to the OS "open with"
- * flow (openEditorWindow below), which edits a LOCAL file through a copy.
- */
-function openViewerWindow(acc: Account, remote: string): BrowserWindow {
+/** The `/files/edit` URL for a remote path, in edit mode. */
+function editRouteUrl(acc: Account, remote: string): string {
   const url = new URL('/files/edit', acc.serverUrl);
   url.searchParams.set('path', remote);
   url.searchParams.set('type', extensionOf(remote));
   url.searchParams.set('mode', 'edit');
+  return url.toString();
+}
 
+/**
+ * The shared shell for BOTH document windows — the in-app viewer
+ * (openViewerWindow) and the OS open-with editor (openEditorWindow). Frameless,
+ * our own controls (docWindowChrome + docChromeScript), the title pinned so the
+ * admin SPA cannot overwrite it with the Branding name, and external links
+ * pushed to the browser. `extraInject` adds to the page on every load — the
+ * open-with flow uses it for its "editing a copy" banner.
+ *
+ * ⚠ NOT the app's preload. The page is remote content; handing it `filexApp`
+ * would put account tokens and the sync engine one `window.filexApp` away from
+ * whatever that origin serves. The credential arrives through the header
+ * injector (wireAuthHeaderInjection); the editor preload carries only the
+ * `filexDesktop` flag and the controls-only `filexWin` bridge.
+ */
+function makeDocumentWindow(
+  acc: Account,
+  url: string,
+  title: string,
+  extraInject?: () => string,
+): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 720,
     minHeight: 520,
-    // The page (Editor.vue) retitles itself to the file name once it loads; this
-    // is the pre-load title so the taskbar entry is never a blank "filex".
-    title: remote.slice(remote.lastIndexOf('/') + 1) || remote,
+    // The page retitles itself; this is the pre-load title so the taskbar entry
+    // is never a blank "filex" (and page-title-updated below keeps it).
+    title,
     icon: ICON_PATH,
     autoHideMenuBar: true,
     show: false,
     backgroundColor: windowGround(),
+    // yeni-pencere:v1 — frameless: our controls (Win/Linux) / native traffic
+    // lights (macOS); the reserved top bar + drag come from docChromeScript.
     ...docWindowChrome(),
     webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
   });
   win.once('ready-to-show', () => win.show());
-  // ⚠ Keep the WINDOW title = the file name. The /files/edit page lives under the
-  // admin SPA, which sets document.title to the server's Branding name ("BRF
-  // Teknoloji"), so without this every document window's taskbar entry read the
-  // brand instead of the document. Locking it to the `title` option we set above
-  // is the fix — page-title-updated is where the page tries to override it.
+  // ⚠ Keep the WINDOW title = the file name. /files/edit lives under the admin
+  // SPA, which sets document.title to the Branding name ("BRF Teknoloji"); this
+  // locks the taskbar entry to the `title` we set above.
   win.on('page-title-updated', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(({ url: target }) => {
     openOutward(target, win);
     return { action: 'deny' };
   });
+  // ⚠ The editor page carries plain <a href> links (a download among them); a
+  // navigation would replace the document with no way back. Its own routes stay;
+  // everything else goes to the browser.
   win.webContents.on('will-navigate', (e, target) => {
     if (originOf(target) === originOf(acc.serverUrl)) return;
     e.preventDefault();
     openOutward(target, win);
   });
+  // ⚠ Re-applied on EVERY load, not once — the editor route navigates within
+  // itself (a sign-in bounce, a reload after a save). The window chrome (drag +
+  // controls) and any caller's `extraInject` (the open-with banner) ride along.
   win.webContents.on('did-finish-load', () => {
-    void win.webContents.executeJavaScript(docChromeScript(), true).catch(() => undefined);
+    const extra = extraInject ? extraInject() : '';
+    void win.webContents
+      .executeJavaScript(extra + docChromeScript(), true)
+      .catch(() => undefined);
   });
-  void win.loadURL(url.toString());
+  void win.loadURL(url);
   return win;
 }
 
 /**
- * The editor window.
- *
- * It loads the SERVER's own `/files/edit` route rather than anything of ours:
- * that page is the product's editor, wired to OnlyOffice, Monaco and the rest
- * through the same capability probe the web app uses. Re-implementing it here
- * would be a second editor to keep in step with the first.
- *
- * ⚠ NOT the app's preload. The page is remote content; handing it the
- * `filexApp` bridge would put account tokens and the sync engine one
- * `window.filexApp` away from whatever that origin serves. The credential it
- * needs arrives the same way every other request in this app gets one — the
- * header injector in wireAuthHeaderInjection(). What it does get is a one-line
- * preload carrying a single boolean; see preload-editor.cts for why that one
- * cannot be an executeJavaScript after load.
+ * A document window — every in-app "open" lands here (host-owned open: the
+ * explorer's `config.openInHost` + the app page's `file-opened` listener). It
+ * opens the REMOTE bytes directly, with no scratch copy and no write-back
+ * banner — that belongs only to openEditorWindow's OS open-with flow.
+ */
+function openViewerWindow(acc: Account, remote: string): BrowserWindow {
+  const title = remote.slice(remote.lastIndexOf('/') + 1) || remote;
+  return makeDocumentWindow(acc, editRouteUrl(acc, remote), title);
+}
+
+/**
+ * The OS "open with filex" editor window: edits a LOCAL file through a scratch/
+ * twin copy on the server (openViaScratch), and injects the "you are editing a
+ * copy" banner on every load (openText bannerScratch/bannerTwin). All the window
+ * plumbing — frameless chrome, title pinning, external-link handling — lives in
+ * makeDocumentWindow; only the banner is specific to this flow.
  */
 function openEditorWindow(
   acc: Account,
@@ -1815,63 +1841,13 @@ function openEditorWindow(
   localPath: string,
   mode: 'scratch' | 'twin',
 ): BrowserWindow {
-  const url = new URL('/files/edit', acc.serverUrl);
-  url.searchParams.set('path', remote);
-  url.searchParams.set('type', extensionOf(remote));
-  url.searchParams.set('mode', 'edit');
-
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 720,
-    minHeight: 520,
-    title: path.basename(localPath),
-    icon: ICON_PATH,
-    autoHideMenuBar: true,
-    show: false,
-    // The same remembered ground the other two windows open on. It used to be
-    // `nativeTheme… ? '#14181d' : '#ffffff'` — the OS's answer to a question
-    // the product answers, with a dark value (#14181d) that is not a background
-    // anywhere in filex. See windowGround().
-    backgroundColor: windowGround(),
-    // yeni-pencere:v1 — same frameless chrome as the in-app document windows:
-    // our controls in a reserved top bar (docChromeScript), macOS traffic lights.
-    ...docWindowChrome(),
-    webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
-  });
-  win.once('ready-to-show', () => win.show());
-  // Keep the window title = the file name; the admin SPA would otherwise set it
-  // to the server's Branding name. See openViewerWindow.
-  win.on('page-title-updated', (e) => e.preventDefault());
-  win.webContents.setWindowOpenHandler(({ url: target }) => {
-    openOutward(target, win);
-    return { action: 'deny' };
-  });
-  // ⚠ The same guard the main window has, for the same reason. The editor page
-  // carries plain `<a href>` links — a download button among them — and a
-  // navigation replaces the editor with whatever that URL returns. There is no
-  // back button here, so the document the user was editing would simply be
-  // gone. Its own routes stay in the window; everything else leaves.
-  win.webContents.on('will-navigate', (e, target) => {
-    if (originOf(target) === originOf(acc.serverUrl)) return;
-    e.preventDefault();
-    openOutward(target, win);
-  });
-  // ⚠ Re-applied on EVERY load, not once. The editor route navigates within
-  // itself (a sign-in bounce, a reload after a save), and a banner that only
-  // survived the first paint would leave the user editing a copy with nothing
-  // on screen saying where it lands. The drag strip rides along for the same
-  // reason.
-  win.webContents.on('did-finish-load', () => {
-    const text = mode === 'twin'
-      ? openText('bannerTwin', { file: localPath })
-      : openText('bannerScratch', { file: localPath });
-    void win.webContents
-      .executeJavaScript(bannerScript(text) + docChromeScript(), true)
-      .catch(() => undefined);
-  });
-  void win.loadURL(url.toString());
-  return win;
+  return makeDocumentWindow(acc, editRouteUrl(acc, remote), path.basename(localPath), () =>
+    bannerScript(
+      mode === 'twin'
+        ? openText('bannerTwin', { file: localPath })
+        : openText('bannerScratch', { file: localPath }),
+    ),
+  );
 }
 
 /** The persistent strip along the bottom of the editor window. Self-contained
