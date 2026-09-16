@@ -44,6 +44,18 @@ async function loadInstanceName(): Promise<void> {
 
 export function applyDocumentTitle(to: RouteLocationNormalized): void {
   lastRoute = to;
+  // The standalone editor/viewer route (a tab opened on ONE file) names the
+  // DOCUMENT, not the instance — the same rule the desktop's document windows
+  // follow. Without this the tab read the Branding name ("BRF Teknoloji") over
+  // whatever file was open. Falls back to the instance name when there is no
+  // path (a bare /files/edit).
+  if (to.name === 'files.edit') {
+    const raw = typeof to.query.path === 'string' ? to.query.path : '';
+    const base = raw.split('/').filter(Boolean).pop() ?? '';
+    document.title = base || instanceName;
+    void loadInstanceName();
+    return;
+  }
   // `requiresAdmin` is the panel's own marker (router/index.ts), so this stays
   // correct when a route is added: a new admin page is admin-flavoured because
   // it is admin-gated, not because someone remembered to add it to a list.

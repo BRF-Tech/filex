@@ -1487,6 +1487,10 @@
       "paletteHint": "Which colours that variant is made of. Every palette has a light and a dark version, so this and the setting above work together.",
       "folderMemory": "Remember each folder’s view",
       "folderMemoryHint": "A folder opens the way you last left it — list or grid, and its sort. Off by default; your last choice applies everywhere instead.",
+      "openTrigger": "Open files with",
+      "openTriggerHint": "How a mouse opens a file. On a touchscreen a tap always opens, and the checkbox always selects.",
+      "openTriggerDouble": "Double-click",
+      "openTriggerSingle": "Single-click",
       "desktopApp": "Desktop app",
       "desktopAppHint": "The reminder in the corner of the app can be closed for good — these downloads stay here."
     },

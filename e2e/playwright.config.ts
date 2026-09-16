@@ -43,6 +43,24 @@ export default defineConfig({
 
   use: {
     baseURL: BASE_URL,
+    // Pin the mouse open gesture to 'single' for every context.
+    //
+    // Since v0.42.0 the default (web/src/lib/explorerConfig.ts →
+    // openTriggerPref) is 'double': a single click SELECTS and a double click
+    // OPENS. This suite opens files and folders with a single `.click()`
+    // throughout, so under the new default those "open" steps would only select
+    // the row and the following assertion would time out. Seeding the product's
+    // own preference key via storageState restores one-click open for the whole
+    // run — the one shared seam that reaches every spec's built-in `page`
+    // fixture, including the ones that don't go through helpers/auth. Touch
+    // always taps-to-open and ignores this key. The origin is BASE_URL (the
+    // hermetic server's dynamic address, set by e2e/run.mjs).
+    storageState: {
+      cookies: [],
+      origins: [
+        { origin: BASE_URL, localStorage: [{ name: 'filex.openTrigger', value: 'single' }] },
+      ],
+    },
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

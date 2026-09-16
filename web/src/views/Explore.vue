@@ -37,7 +37,7 @@ const UserSettingsModal = defineAsyncComponent(
   () => import('@/components/UserSettingsModal.vue'),
 );
 import { effectiveTheme } from '@/lib/theme';
-import { explorerAuth } from '@/lib/explorerConfig';
+import { explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
 import { fetchVisibleStorages, type VisibleStorage } from '@/lib/visibleStorages';
 // Live collaboration (WebSocket + presence) now lives INSIDE @brftech/filex-core's
 // FileExplorer, so every consumer (this panel + the embedded webcomponent) gets
@@ -450,6 +450,9 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     auth: authConf,
     theme: currentTheme.value,
     locale: locale.value === 'en' ? 'en' : 'tr',
+    // Mouse open gesture — a per-viewer setting (Settings → Files). Default
+    // double-click opens; touch always taps to open. e2e/cypress pin 'single'.
+    openTrigger: openTriggerPref(),
     // The address bar mirrors the current folder (#<storage>/<sub>…) so the
     // URL is a shareable deep link; localStorage still remembers the last
     // folder for hash-less visits. Priority: hash → ?storage= → remembered.

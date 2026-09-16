@@ -10,6 +10,15 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('filexApp', {
   isDesktop: true,
+  // yeni-pencere:v1 — the page draws its own title bar (frameless window). On
+  // macOS it leaves room for the native traffic lights instead of drawing
+  // buttons; the page needs to know which.
+  isMac: process.platform === 'darwin',
+  // Our own window controls for the frameless MAIN window (Win/Linux). Act on
+  // the window that sent them (main.ts win:* handlers).
+  winMinimize: () => ipcRenderer.invoke('win:minimize'),
+  winToggleMaximize: () => ipcRenderer.invoke('win:toggleMaximize'),
+  winClose: () => ipcRenderer.invoke('win:close'),
 
   getState: () => ipcRenderer.invoke('state:get'),
   token: (accountId: string) => ipcRenderer.invoke('account:token', accountId),
@@ -22,6 +31,10 @@ contextBridge.exposeInMainWorld('filexApp', {
   openAdmin: (id: string) => ipcRenderer.invoke('account:openAdmin', id),
 
   // files
+  /** Host-owned open: open a remote file in its OWN editor/viewer window, one
+   *  per document. The explorer emits `file-opened` and the page calls this. */
+  openDoc: (accountId: string, remote: string) =>
+    ipcRenderer.invoke('doc:open', accountId, remote),
   storages: (accountId: string) => ipcRenderer.invoke('remote:storages', accountId),
   /** The server's own logo + name (Branding settings), for the account rail. */
   branding: (accountId: string) => ipcRenderer.invoke('remote:branding', accountId),

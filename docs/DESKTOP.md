@@ -92,6 +92,17 @@ Add more accounts with **+** on the left rail; switch between them by clicking.
 the embedded OnlyOffice editor, the same one the web app uses, provided your
 server has OnlyOffice configured ([OnlyOffice](ONLYOFFICE.md)).
 
+**Each document opens in its own window.** Opening a file (any type) opens it in
+a dedicated window, one per document, titled with the file's name — the explorer
+window stays where it is. Open a few documents and they are separate windows in
+the taskbar, each named after its file.
+
+**Single click or double click, your choice.** By default a single click
+**selects** and a double click **opens** (Enter opens the selection) — the
+classic desktop file-manager gesture. **Settings → Open files with** switches
+between *Double-click* and *Single-click*. A touchscreen tap always opens, and
+the checkbox is always the one click that selects.
+
 The app authenticates with a bearer token rather than a cookie, and it hands the
 explorer a *function* that returns the current account's token — because the
 token changes when you switch accounts, and a value captured once would be the
@@ -217,6 +228,14 @@ the same question.
 
 The window even reopens on the ground it last painted, so launching filex on a
 dark palette no longer flashes white first.
+
+**The windows are frameless.** The native OS title bar is gone. On **Windows and
+Linux** filex draws its own minimize / maximize / close — in a slim title bar on
+the main window, and in a reserved top strip on each document window so the
+controls never sit on top of the document's own top row (OnlyOffice's
+profile/share stays clear). On **macOS** the native traffic lights are kept
+(top-left) and no buttons are drawn. The top strip is the drag handle in every
+case.
 
 The filex mark and wordmark sit at the top left, in the same corner the web app
 puts them, and follow the palette with everything else. The account rail down

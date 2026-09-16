@@ -93,6 +93,21 @@ const INSTALL_DISMISS_KEY = 'filex.installPrompt.dismissed';
  */
 const TOUR_DONE_KEY = 'filex.tourDone';
 
+/**
+ * The mouse open gesture is pinned to `'single'` before every page load.
+ *
+ * Since v0.42.0 the default (`explorerConfig.openTriggerPref`) is `'double'`: a
+ * single click SELECTS and a double click OPENS. This suite opens files and
+ * folders with a single `.click()` throughout, so without the pin every one of
+ * those "open" steps would only highlight the row and the assertion that
+ * follows would time out. Setting the product's own preference key restores
+ * one-click open for the run — the same thing a person does in User Settings —
+ * rather than teaching every spec to double-click. Touch always taps-to-open
+ * and ignores this key. A spec that wants to measure the double-click default
+ * opts out with `Cypress.env('KEEP_OPEN_TRIGGER_DEFAULT', true)`.
+ */
+const OPEN_TRIGGER_KEY = 'filex.openTrigger';
+
 Cypress.on('window:before:load', (win) => {
   try {
     if (!Cypress.env('KEEP_INSTALL_BANNER')) {
@@ -100,6 +115,9 @@ Cypress.on('window:before:load', (win) => {
     }
     if (!Cypress.env('KEEP_ONBOARDING_TOUR')) {
       win.localStorage.setItem(TOUR_DONE_KEY, '1');
+    }
+    if (!Cypress.env('KEEP_OPEN_TRIGGER_DEFAULT')) {
+      win.localStorage.setItem(OPEN_TRIGGER_KEY, 'single');
     }
   } catch {
     /* private mode / storage blocked — the overlays just stay up */

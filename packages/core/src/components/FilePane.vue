@@ -217,12 +217,18 @@ const props = withDefaults(
      *  encrypted lock screen) — those are WINDOW states with no listing
      *  behind them, so the pane's own state chain must not also run. */
     bodyOverride?: boolean;
+
+    /** Mouse open gesture — 'double' (single selects, double opens) or
+     *  'single' (first click opens). Touch always opens on tap; the checkbox
+     *  always selects. See onViewClick. */
+    openTrigger?: 'single' | 'double';
   }>(),
   {
     showCrumbs: true,
     showFilterBar: true,
     showViewSwitcher: true,
     trashVisible: true,
+    openTrigger: 'double',
   },
 );
 
@@ -458,22 +464,31 @@ function withinOpenGuard(): boolean {
 
 function onViewClick(n: FileNode, mod: ClickMod) {
   if (withinOpenGuard()) return;
-  /* issue #26, fourth round — the reporter's rule, on every device: "only
-   * clicking on checkbox selects it, any other click will open". The checkbox
-   * is the one click that reaches the selection; a click or tap anywhere else
-   * on the item opens it, Ctrl/Shift held or not, selection or not. See
-   * composables/useRowTouch. */
+  /* The checkbox is the one click that always reaches the selection — issue
+   * #26's rule, kept on every device and in either open mode. A shift-tick
+   * still extends the range; a plain tick toggles (ctrl: true). */
   if (mod.check) {
     emit('activate');
     emit('click-row', n, { ctrl: true, shift: mod.shift });
     return;
   }
-  openedAt = Date.now();
-  onRowOpen(n);
+  /* A finger tap always OPENS (the mobile convention — there is no
+   * hover-to-select on a touchscreen). For a mouse the host's `openTrigger`
+   * decides: 'single' opens on this click; 'double' (default) makes a single
+   * click SELECT and leaves opening to onViewDbl. issue #26's "any click
+   * opens" is `openTrigger: 'single'`. */
+  if (mod.touch || props.openTrigger === 'single') {
+    openedAt = Date.now();
+    onRowOpen(n);
+    return;
+  }
+  emit('activate');
+  emit('click-row', n, { ctrl: mod.ctrl, shift: mod.shift });
 }
 
 function onViewDbl(n: FileNode) {
   if (withinOpenGuard()) return;
+  openedAt = Date.now();
   onRowOpen(n);
 }
 

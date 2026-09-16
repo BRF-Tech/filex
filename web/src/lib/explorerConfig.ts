@@ -6,7 +6,42 @@
 // copies of readCsrfCookie/readBearerToken in Explore.vue); a third copy is
 // how one of them ends up not sending the token.
 
+import { ref } from 'vue';
 import type { AuthConfig } from '@brftech/filex-core';
+
+/**
+ * The mouse open gesture, a per-viewer preference stored in localStorage
+ * (`filex.openTrigger`) and written by UserSettingsModal. Default `'double'` —
+ * a single click selects, a double click opens; `'single'` restores one-click
+ * open. Touch is never governed by this (a tap always opens). Kept here so the
+ * explorer page and the embedded web component read the same answer. ⚠ e2e and
+ * Cypress pin this to `'single'` so their single-click "open" steps keep
+ * working — see the suites' setup.
+ *
+ * `openTriggerSignal` makes a `computed` that calls `openTriggerPref()` re-run
+ * when the setting changes, so flipping the toggle re-applies live (the config
+ * prop updates and FilePane reads it reactively) rather than waiting for a
+ * reload — the same immediacy the desktop app's remount gives.
+ */
+export const openTriggerSignal = ref(0);
+
+export function openTriggerPref(): 'single' | 'double' {
+  openTriggerSignal.value; // reactive dependency — see setOpenTriggerPref
+  try {
+    return localStorage.getItem('filex.openTrigger') === 'single' ? 'single' : 'double';
+  } catch {
+    return 'double';
+  }
+}
+
+export function setOpenTriggerPref(value: 'single' | 'double'): void {
+  try {
+    localStorage.setItem('filex.openTrigger', value);
+  } catch {
+    /* private mode / blocked storage — the choice just does not persist */
+  }
+  openTriggerSignal.value++;
+}
 
 export function readCsrfCookie(): string | null {
   const prefix = 'filex_csrf=';

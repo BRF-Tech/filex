@@ -122,7 +122,10 @@ const onStorage = (e: StorageEvent) => {
 
 onMounted(() => {
   const n = node.value;
-  if (n) document.title = `${n.basename} — filex`;
+  // The tab is named after the document (same as the router's afterEach in
+  // lib/documentTitle and the desktop's document windows) — just the file name,
+  // no " — filex" suffix, so all three surfaces read the same.
+  if (n) document.title = n.basename;
   void loadCapabilities();
   htmlObserver = new MutationObserver(() => {
     currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';

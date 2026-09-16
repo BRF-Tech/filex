@@ -107,6 +107,7 @@
       *::-webkit-scrollbar-corner { background: transparent; }
       body {
         display: flex;
+        flex-direction: column;   /* yeni-pencere:v1 — title bar on top, workspace below */
         /* The explorer's scale, not the platform's: 13px on the product's own
            stack. A 14px system-ui shell around a 13px Inter file list is the
            two-applications look this pass exists to remove. */
@@ -115,6 +116,44 @@
         color: var(--fe-text);
         overflow: hidden;
       }
+
+      /* ── our own title bar (frameless: the native OS caption is gone) ──────
+         A slim, draggable strip; on Windows/Linux it carries our minimize /
+         maximize / close in the top-right, on macOS it leaves room on the LEFT
+         for the native traffic lights (body.is-mac) and draws no buttons. */
+      #titlebar {
+        flex: 0 0 34px;
+        display: flex;
+        align-items: stretch;
+        background: var(--fe-bg-elev);
+        border-bottom: 1px solid var(--fe-border);
+        -webkit-app-region: drag;
+        z-index: 220;   /* above #settings / #conn overlays, so it always drags */
+      }
+      body.is-mac #titlebar { padding-left: 76px; }   /* room for traffic lights */
+      #titlebar__brand {
+        display: flex; align-items: center; gap: 8px;
+        padding: 0 12px; font-size: 12.5px; color: var(--fe-text-muted);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #titlebar__brand img { height: 16px; width: auto; border-radius: 3px; }
+      #winctl {
+        margin-left: auto;
+        display: flex;
+        -webkit-app-region: no-drag;
+      }
+      body.is-mac #winctl { display: none; }
+      #winctl button {
+        width: 46px; border: 0; background: transparent;
+        color: var(--fe-text-muted); cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background .12s, color .12s;
+      }
+      #winctl button:hover { background: var(--fe-bg-hover, rgba(128,128,128,.16)); color: var(--fe-text); }
+      #winctl button.winctl--close:hover { background: #e53935; color: #fff; }
+
+      /* The workspace = the old body: the account rail beside the main pane. */
+      #workspace { flex: 1; min-height: 0; display: flex; }
 
       /* ── account rail ──────────────────────────────────────────
          The outermost band of the window's chrome, on the SAME elevated ground
@@ -572,14 +611,21 @@
     </style>
   </head>
   <body>
-    <nav id="rail"></nav>
-    <div id="main">
-      <div id="explorer-host" style="flex:1;min-height:0;display:flex"></div>
-      <div id="boot"></div>
-      <section id="settings"></section>
-      <section id="conn">
-        <div id="conn-host"></div>
-      </section>
+    <!-- yeni-pencere:v1 — our own title bar (native OS caption removed). -->
+    <div id="titlebar">
+      <div id="titlebar__brand"></div>
+      <div id="winctl"></div>
+    </div>
+    <div id="workspace">
+      <nav id="rail"></nav>
+      <div id="main">
+        <div id="explorer-host" style="flex:1;min-height:0;display:flex"></div>
+        <div id="boot"></div>
+        <section id="settings"></section>
+        <section id="conn">
+          <div id="conn-host"></div>
+        </section>
+      </div>
     </div>
 
     <div id="picker" class="dlg"><div class="panel">
@@ -818,6 +864,16 @@
         'rail.add':             ['Add another account', 'Başka bir hesap ekle'],
         'rail.settings':        ['Settings', 'Ayarlar'],
 
+        'win.minimize':         ['Minimize', 'Küçült'],
+        'win.maximize':         ['Maximize', 'Büyüt'],
+        'win.close':            ['Close', 'Kapat'],
+
+        'set.open_trigger':     ['Open files with', 'Dosyaları açma'],
+        'set.open_trigger_sub': ['How a mouse opens a file. A single tap always opens on touchscreens.',
+                                 'Farenin dosyayı nasıl açtığı. Dokunmatik ekranda tek dokunuş her zaman açar.'],
+        'set.open_double':      ['Double-click', 'Çift tık'],
+        'set.open_single':      ['Single-click', 'Tek tık'],
+
         'set.title':            ['Settings', 'Ayarlar'],
         'set.sub':              ["This app's settings, plus the storage connections of the server you are signed in to.",
                                  'Bu uygulamanın ayarları ve bağlı olduğunuz sunucunun depo bağlantıları.'],
@@ -953,6 +1009,35 @@
         return s;
       }
 
+      /**
+       * yeni-pencere:v1 — the frameless window's own chrome. On macOS the native
+       * traffic lights stay (top-left); we only mark the body so the title bar
+       * leaves room and draws no buttons. On Windows/Linux we draw our own
+       * minimize / maximize / close in the top-right (#winctl). The strip itself
+       * is the drag handle (CSS -webkit-app-region: drag).
+       */
+      function setupTitlebar() {
+        const isMac = !!(window.filexApp && window.filexApp.isMac);
+        if (isMac) { document.body.classList.add('is-mac'); return; }
+        const ctl = document.getElementById('winctl');
+        if (!ctl || ctl.childElementCount) return;
+        const S = 'width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.1"';
+        const mk = (labelKey, svg, fn, cls) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.dataset.lk = labelKey;   // so relabelStatic() can retranslate it
+          b.title = T(labelKey);
+          b.setAttribute('aria-label', T(labelKey));
+          if (cls) b.className = cls;
+          b.innerHTML = svg;
+          b.addEventListener('click', fn);
+          return b;
+        };
+        ctl.appendChild(mk('win.minimize', `<svg ${S}><line x1="1" y1="6" x2="10" y2="6"/></svg>`, () => window.filexApp.winMinimize()));
+        ctl.appendChild(mk('win.maximize', `<svg ${S}><rect x="1.2" y="1.2" width="8.6" height="8.6" rx="1"/></svg>`, () => window.filexApp.winToggleMaximize()));
+        ctl.appendChild(mk('win.close', `<svg ${S}><line x1="1.5" y1="1.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="1.5" x2="1.5" y2="9.5"/></svg>`, () => window.filexApp.winClose(), 'winctl--close'));
+      }
+
       const $ = (sel, root = document) => root.querySelector(sel);
       const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1039,12 +1124,33 @@
         return b && b.logoUrl ? b : null;
       }
 
+      /**
+       * The MAIN window's title = the active server's whitelabel NAME, or the
+       * product name "filex" when that server sets no branding. A DOCUMENT opens
+       * in its own window (openDoc → main process), whose page titles itself with
+       * the file name — so this only ever names the explorer window.
+       */
+      function applyWindowTitle() {
+        const b = brands.get(state.activeId);
+        document.title = (b && b.name) ? b.name : 'filex';
+      }
+
+      /** Per-machine open gesture: 'single' or 'double' (default). Touch is
+       *  never governed by this — a tap always opens. Settings toggles it and
+       *  remounts the explorer. */
+      function openTriggerPref() {
+        try {
+          return localStorage.getItem('filex.openTrigger') === 'single' ? 'single' : 'double';
+        } catch { return 'double'; }
+      }
+
       async function loadBrand(account) {
         if (!account || brands.has(account.id)) return;
         brands.set(account.id, { name: '', logoUrl: '' });   // claim the slot
         try {
           const b = await window.filexApp.branding(account.id);
           brands.set(account.id, b || { name: '', logoUrl: '' });
+          if (account.id === state.activeId) applyWindowTitle();
           if (b && b.logoUrl) { renderRail(); repaintBoot(); }
         } catch {
           // A server with no branding set, or an older build without the
@@ -1204,6 +1310,12 @@
           pathPersist: 'none',
           trashVisible: true,
           theme: 'auto',
+          // Host-owned open: every file opens in its OWN window (openDoc below),
+          // not the in-page overlay. One "open" path, one instance per document.
+          openInHost: true,
+          // Mouse open gesture — a per-machine setting (Settings → click). Touch
+          // is untouched: a tap always opens. Default: double-click opens.
+          openTrigger: openTriggerPref(),
           // One language for the whole window. The component defaults to
           // Turkish, so without this an English desktop showed English chrome
           // around a Turkish file list.
@@ -1234,7 +1346,20 @@
           },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
+        // Host-owned open (config.openInHost above): the explorer emits
+        // `file-opened` instead of showing its in-page overlay, and we open the
+        // file in its OWN window. The account id is captured at mount, so a rail
+        // switch cannot open a file against the wrong server.
+        explorer.addEventListener('file-opened', (e) => {
+          // ⚠ Vue's defineCustomElement dispatches an emit's arguments as an
+          // ARRAY in `detail` — so `file-opened({path,basename})` arrives as
+          // `detail:[{path,basename}]`, not `detail:{...}`. Read both shapes.
+          const d = Array.isArray(e.detail) ? e.detail[0] : e.detail;
+          const path = d && d.path;
+          if (path) void window.filexApp.openDoc(account.id, path);
+        });
         slot.appendChild(explorer);
+        applyWindowTitle();
         // From here on the explorer is the authority on light/dark, and the
         // chrome copies it. Re-pointed on every mount: a rail switch replaces
         // the element, and an observer left on the old one watches a node that
@@ -1503,6 +1628,16 @@
                 }>${esc(label)}</button>`).join('')
             }</div>
           </div></div>
+          <div class="card"><div class="between">
+            <div><div class="label">${esc(T('set.open_trigger'))}</div>
+              <div class="muted">${esc(T('set.open_trigger_sub'))}</div></div>
+            <div class="segmented">${
+              [['double', T('set.open_double')], ['single', T('set.open_single')]]
+                .map(([v, label]) => `<button data-opentrigger="${v}"${
+                  openTriggerPref() === v ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
+                }>${esc(label)}</button>`).join('')
+            }</div>
+          </div></div>
           ${toggle('bg', state.runInBackground, T('set.background'), T('set.background_sub'))}
           ${toggle('notifs', state.notifications !== false, T('set.notifications'), T('set.notifications_sub'))}
           ${toggle('login-item', state.launchAtLogin, T('set.autostart'), T(
@@ -1679,6 +1814,15 @@
           applyLang(state.effectiveLocale);
           relabelStatic();
           render();
+          renderSettings();
+        }));
+        // Open gesture (single/double click) — a per-machine preference. Store
+        // it and remount the explorer so the new config.openTrigger takes hold.
+        el.querySelectorAll('[data-opentrigger]').forEach((b) => b.addEventListener('click', () => {
+          try { localStorage.setItem('filex.openTrigger', b.dataset.opentrigger); } catch {}
+          mountedFor = null;
+          const active = state.accounts.find((a) => a.id === state.activeId);
+          if (active) void mountExplorer(active);
           renderSettings();
         }));
         const portableShow = $('#portable-show', el);
@@ -1904,7 +2048,13 @@
           b.title = T('pick.close');
           b.setAttribute('aria-label', T('pick.close'));
         }
+        // Our window-control tooltips follow the language too.
+        document.querySelectorAll('#winctl button[data-lk]').forEach((b) => {
+          b.title = T(b.dataset.lk);
+          b.setAttribute('aria-label', T(b.dataset.lk));
+        });
       }
+      setupTitlebar();
       relabelStatic();
 
       window.filexApp.onChanged(() => {

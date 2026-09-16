@@ -65,6 +65,7 @@ import { useToastStore } from '@/stores/toast';
 import { setStoredLocale, type Locale } from '@/i18n';
 import { getStoredTheme, setStoredTheme, type ThemeMode } from '@/lib/theme';
 import { getDensity, setDensity, type Density } from '@/lib/density';
+import { openTriggerPref, setOpenTriggerPref } from '@/lib/explorerConfig';
 // belge:v1 — the per-folder view memory is OPT-IN (owner's ruling: "user bunu
 // ayarlardan açabilir olacak isterse"), and its switch belongs here. The state
 // itself lives in the server-side document core keeps, NOT in localStorage, so
@@ -274,6 +275,11 @@ const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'dark', label: 'nav.themeDark' },
 ];
 
+const openTriggerOptions: { value: 'single' | 'double'; label: string }[] = [
+  { value: 'double', label: 'userSettings.prefs.openTriggerDouble' },
+  { value: 'single', label: 'userSettings.prefs.openTriggerSingle' },
+];
+
 // System-dark, watched — so the palette previews repaint when the OS flips
 // while the modal is open on 'auto'.
 const systemDark = ref(false);
@@ -383,6 +389,15 @@ function pickFolderMemory(on: boolean) {
 function pickDensity(compact: boolean) {
   density.value = compact ? 'compact' : 'comfortable';
   setDensity(density.value);
+}
+
+// How a mouse opens a file: 'double' (single click selects, double opens) or
+// 'single' (first click opens). Touch always taps-to-open regardless. Writing
+// it re-applies live — the explorer's config recomputes (see lib/explorerConfig).
+const openTrigger = ref<'single' | 'double'>('double');
+function pickOpenTrigger(value: 'single' | 'double') {
+  openTrigger.value = value;
+  setOpenTriggerPref(value);
 }
 
 const quota = ref<QuotaSnapshot | null>(null);
@@ -596,6 +611,7 @@ function sync(open: boolean) {
       hydrateProfile();
       theme.value = getStoredTheme();
       density.value = getDensity();
+      openTrigger.value = openTriggerPref();
       folderMemory.value = folderMemoryEnabled();
       timeZone.value = getStoredTimeZone();
       startPage.value = getStartPage();
@@ -960,6 +976,25 @@ function onBackdropClick(ev: MouseEvent) {
                 <span class="fx-us__label">{{ t('userSettings.prefs.folderMemory') }}</span>
                 <span class="fx-us__hint">{{ t('userSettings.prefs.folderMemoryHint') }}</span>
               </div>
+            </div>
+
+            <div class="fx-us__field">
+              <span class="fx-us__label">{{ t('userSettings.prefs.openTrigger') }}</span>
+              <div class="fx-us__segmented" role="group" :aria-label="t('userSettings.prefs.openTrigger')">
+                <button
+                  v-for="o in openTriggerOptions"
+                  :key="o.value"
+                  type="button"
+                  class="fx-us__seg"
+                  :class="{ 'is-active': openTrigger === o.value }"
+                  :aria-pressed="openTrigger === o.value"
+                  :data-testid="`user-settings-opentrigger-${o.value}`"
+                  @click="pickOpenTrigger(o.value)"
+                >
+                  {{ t(o.label) }}
+                </button>
+              </div>
+              <span class="fx-us__hint">{{ t('userSettings.prefs.openTriggerHint') }}</span>
             </div>
 
             <!-- The downloads, permanently. The corner reminder is dismissible

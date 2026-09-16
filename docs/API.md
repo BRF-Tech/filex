@@ -457,6 +457,20 @@ export interface ExplorerConfig {
    *  Starred row that then disappears. See docs/MCP.md → Token kinds. */
   callerKind?: 'user' | 'app';
 
+  /** How a mouse opens an item. `'double'` (default) — a single click selects
+   *  and a double click opens (Enter opens the selection); `'single'` — the
+   *  first click opens. Touch is unaffected: a tap always opens, the checkbox
+   *  always selects. A per-viewer preference (the desktop app exposes it as
+   *  Settings → Open files with). */
+  openTrigger?: 'single' | 'double';
+
+  /** Hand the OPEN of a file to the host: opening a file emits `file-opened`
+   *  and the explorer skips its in-page preview. Directories still navigate
+   *  inline; Space quick-look and the E2E decrypted preview stay in-page.
+   *  Default false; the desktop app uses it to open each document in its own
+   *  window. */
+  openInHost?: boolean;
+
   /** Remember how each folder was last viewed (view mode + sort), Windows
    *  Explorer style. Default on — the opt-out is for an embed with one shape
    *  it wants. The state lives in a per-user document on the server, not in

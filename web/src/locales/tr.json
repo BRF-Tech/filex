@@ -1487,6 +1487,10 @@
       "paletteHint": "O sürümün hangi renklerden oluştuğu. Her paletin aydınlık ve karanlık bir sürümü vardır; bu ayarla üstteki ayar birlikte çalışır.",
       "folderMemory": "Her klasörün görünümünü hatırla",
       "folderMemoryHint": "Bir klasör, onu en son bıraktığınız gibi açılır — liste ya da ızgara, ve sıralaması. Varsayılan kapalı; kapalıyken son seçiminiz her yerde geçerlidir.",
+      "openTrigger": "Dosyaları açma",
+      "openTriggerHint": "Farenin dosyayı nasıl açtığı. Dokunmatik ekranda tek dokunuş her zaman açar, kutucuk her zaman seçer.",
+      "openTriggerDouble": "Çift tık",
+      "openTriggerSingle": "Tek tık",
       "desktopApp": "Masaüstü uygulaması",
       "desktopAppHint": "Uygulamanın köşesindeki hatırlatmayı kapattığınızda bir daha çıkmaz — indirmeler burada kalır."
     },

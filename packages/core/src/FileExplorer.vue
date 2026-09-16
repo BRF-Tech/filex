@@ -3090,6 +3090,16 @@ function openNode(n: FileNode) {
   }
   if (e2eLocked.value && n.type === 'file') return;
   /* /wiring:e2 */
+  // Host-owned open (desktop app): a file opens in the host's OWN window per
+  // document, not in the in-page overlay. Emit and stop — the host listens on
+  // `file-opened` and spawns the window. Directories still navigate inline
+  // (handled above); Space quick-look still peeks in-page. E2E files fell into
+  // the decrypted in-page branch above, so a host window never gets ciphertext.
+  if (props.config.openInHost && n.type === 'file') {
+    emit('file-opened', { path: n.path, basename: n.basename });
+    void markRecent(n);
+    return;
+  }
   // "Aç" / double-click contract: open in a new tab against the
   // standalone editor route, regardless of file type. The editor page
   // picks the right viewer (OnlyOffice for office, Monaco for code/
@@ -3204,6 +3214,13 @@ function openNodeInNewTab(n: FileNode) {
     return;
   }
   /* /wiring:e2 */
+  // Host-owned open (desktop): the context-menu "Aç" opens the host window
+  // too, so Enter/double-click/"Aç" are ONE open path — not a window here and
+  // a system-browser tab there. openNode carries the `file-opened` emit.
+  if (props.config.openInHost) {
+    openNode(n);
+    return;
+  }
   // RBAC: a viewer (no edit on this item) can't use the editable "Aç"
   // surface — drop to the read-only in-page preview instead.
   if (!permCanEdit((n.perm as string) ?? dirPerm.value)) {
@@ -6365,6 +6382,7 @@ function closeRecoveryKey() {
       :order="listingOrder"
       :view-mode="viewMode"
       :view-modes="allowedViewModes"
+      :open-trigger="props.config.openTrigger"
       :show-crumbs="navView !== 'home' /* Home has no address: its cards come
              from every folder in every storage, so a trail would have to name
              one */"
@@ -6843,6 +6861,7 @@ function closeRecoveryKey() {
       :nav-offers-trash="navOffersTrash"
       :view-mode="paneViewMode"
       :view-modes="allowedViewModes"
+      :open-trigger="props.config.openTrigger"
       :clipped="clippedPaths"
       :can-write="canWriteHere"
       :can-paste="!!clipboard.mode"

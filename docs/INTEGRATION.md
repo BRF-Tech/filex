@@ -103,6 +103,21 @@ const config = {
   // ⚠ Proxying with one shared token (below) is exactly the 'app' case.
   callerKind: 'app',
 
+  // How a MOUSE opens an item. 'double' (default) — a single click selects, a
+  // double click opens (Enter opens the selection). 'single' — the first click
+  // opens. ⚠ TOUCH is not governed by this: a tap always opens (there is no
+  // hover-to-select), and the checkbox always selects, in either mode. A
+  // per-viewer preference; the desktop app exposes it as Settings → Open files with.
+  openTrigger: 'double',
+
+  // Hand the OPEN of a file to the HOST. When true, opening a file emits the
+  // `file-opened` event and the explorer does NOT mount its in-page preview —
+  // the host decides what to do with it. Directories still navigate inline,
+  // Space quick-look still peeks, and an E2E-encrypted file keeps the in-page
+  // decrypted preview. Default false. The desktop app sets it to open each
+  // document in its own window.
+  openInHost: false,
+
   // The product mark at the far left of the top bar, beside the navigation
   // panel's collapse control. Both halves optional; neither renders nothing.
   //   name    — wordmark text, printed verbatim, never translated

@@ -374,6 +374,10 @@ function openMainWindow(): void {
     // a background in this product at all: #14181d was the old shell's text
     // colour. See windowGround().
     backgroundColor: windowGround(),
+    // yeni-pencere:v1 — frameless: the native OS caption is gone; the app page
+    // draws its own slim title bar with our minimize/maximize/close (Win/Linux),
+    // or leaves room for the native traffic lights (macOS). See app.html.
+    ...docWindowChrome(),
     webPreferences: { preload: preload('preload-app.cjs'), contextIsolation: true, sandbox: true },
   });
   mainWindow.once('ready-to-show', () => mainWindow?.show());
@@ -1660,6 +1664,135 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
   live.timer = setInterval(() => void pollOpenWith(id), openWithPollMs());
 }
 
+/* === yeni-pencere:v1 — document windows open frameless (Burak, 2026-09-16) ===
+ *
+ * The OS title bar goes; the native window controls sit as an overlay in the
+ * top-right OVER the document, and a thin strip along the very top edge drags
+ * the window. OnlyOffice runs in a CROSS-ORIGIN iframe (docs.example.com), so its
+ * own top bar cannot be made draggable from here — the top-edge strip is the
+ * closest achievable to "grab OnlyOffice's top bar to move the window", and it
+ * is kept thin on purpose so OnlyOffice's own menu row stays clickable.
+ */
+const DOC_CTL_H = 36; // the reserved top bar's height (our controls live in it)
+const IS_MAC = process.platform === 'darwin';
+
+/**
+ * Frameless document-window chrome, cross-platform:
+ *  - macOS: `hiddenInset` HIDES the bar but KEEPS the native traffic-light
+ *    buttons (top-left, the Mac convention). We add only a drag strip.
+ *  - Windows / Linux: no OS caption at all (`frame:false`); we draw our OWN
+ *    minimize / maximize / close in the top-right (docChromeScript). OS window
+ *    chrome is the one place surface-specific code is the right answer.
+ */
+function docWindowChrome() {
+  return IS_MAC
+    ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 11 } }
+    : { frame: false };
+}
+
+/** Injected into a document window's page: a slim top BAR that RESERVES its own
+ *  height (the page content is pushed down by it) so it never sits on top of the
+ *  viewer's own top row — OnlyOffice's profile/share is in the top-right and our
+ *  close button was landing on it. The bar is the drag handle; on Windows/Linux
+ *  it carries OUR minimize/maximize/close on the right, on macOS it stays empty
+ *  on the right and the native traffic lights float over its left (hiddenInset).
+ *  Idempotent, re-applied on every load (the editor page navigates within itself
+ *  — a sign-in bounce, a reload after save). Buttons call `window.filexWin.*`
+ *  (preload-editor); they opt out of the drag region or it swallows their click.
+ *
+ *  ⚠ The reserve is padding-top on the chromeless backdrop (the same trick the
+ *  bottom open-with banner uses, mirrored) — box-sizing:border-box + the card at
+ *  height:100% shrinks the viewer to sit BELOW the bar. */
+function docChromeScript(): string {
+  const H = DOC_CTL_H;
+  const controls = IS_MAC
+    ? ''
+    : `
+      const ctl = document.createElement('div');
+      ctl.style.cssText = 'margin-left:auto;display:flex;height:100%;-webkit-app-region:no-drag;';
+      const mk = (label, svg, fn, danger) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.setAttribute('aria-label', label); b.title = label;
+        b.innerHTML = svg;
+        b.style.cssText = 'width:46px;height:100%;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--fe-text-muted,#8a94a6);cursor:pointer;-webkit-app-region:no-drag;transition:background .12s,color .12s;';
+        b.onmouseenter = () => { b.style.background = danger ? '#e53935' : 'var(--fe-bg-hover,rgba(128,128,128,.16))'; b.style.color = danger ? '#fff' : 'var(--fe-text,#e6eaf0)'; };
+        b.onmouseleave = () => { b.style.background = 'transparent'; b.style.color = 'var(--fe-text-muted,#8a94a6)'; };
+        b.onclick = fn;
+        return b;
+      };
+      const S = 'width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.1"';
+      ctl.appendChild(mk('Minimize', '<svg '+S+'><line x1="1" y1="6" x2="10" y2="6"/></svg>', () => window.filexWin && window.filexWin.minimize()));
+      ctl.appendChild(mk('Maximize', '<svg '+S+'><rect x="1.2" y="1.2" width="8.6" height="8.6" rx="1"/></svg>', () => window.filexWin && window.filexWin.toggleMaximize()));
+      ctl.appendChild(mk('Close', '<svg '+S+'><line x1="1.5" y1="1.5" x2="9.5" y2="9.5"/><line x1="9.5" y1="1.5" x2="1.5" y2="9.5"/></svg>', () => window.filexWin && window.filexWin.close(), true));
+      bar.appendChild(ctl);`;
+  return `(() => {
+    if (!document.getElementById('filex-winbar-style')) {
+      const st = document.createElement('style');
+      st.id = 'filex-winbar-style';
+      st.textContent = '.fe-modal__backdrop--chromeless{box-sizing:border-box!important;align-items:stretch!important;padding-top:${H}px!important}.fe-modal__card--chromeless{height:100%!important;max-height:100%!important}';
+      document.head.appendChild(st);
+    }
+    if (!document.getElementById('filex-winbar')) {
+      const bar = document.createElement('div');
+      bar.id = 'filex-winbar';
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:${H}px;z-index:2147483647;-webkit-app-region:drag;display:flex;align-items:stretch;background:var(--fe-bg-elev,#1a1d23);border-bottom:1px solid var(--fe-border,rgba(128,128,128,.18));';${controls}
+      (document.body || document.documentElement).appendChild(bar);
+    }
+  })();`;
+}
+
+/**
+ * A document window — every in-app "open" lands here (host-owned open: the
+ * explorer's `config.openInHost` + the app page's `file-opened` listener). It
+ * loads the SERVER's own `/files/edit` route, which picks the right
+ * viewer/editor for the type, and opens the REMOTE bytes directly — no scratch
+ * copy and no write-back banner. That banner belongs only to the OS "open with"
+ * flow (openEditorWindow below), which edits a LOCAL file through a copy.
+ */
+function openViewerWindow(acc: Account, remote: string): BrowserWindow {
+  const url = new URL('/files/edit', acc.serverUrl);
+  url.searchParams.set('path', remote);
+  url.searchParams.set('type', extensionOf(remote));
+  url.searchParams.set('mode', 'edit');
+
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 720,
+    minHeight: 520,
+    // The page (Editor.vue) retitles itself to the file name once it loads; this
+    // is the pre-load title so the taskbar entry is never a blank "filex".
+    title: remote.slice(remote.lastIndexOf('/') + 1) || remote,
+    icon: ICON_PATH,
+    autoHideMenuBar: true,
+    show: false,
+    backgroundColor: windowGround(),
+    ...docWindowChrome(),
+    webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
+  });
+  win.once('ready-to-show', () => win.show());
+  // ⚠ Keep the WINDOW title = the file name. The /files/edit page lives under the
+  // admin SPA, which sets document.title to the server's Branding name ("BRF
+  // Teknoloji"), so without this every document window's taskbar entry read the
+  // brand instead of the document. Locking it to the `title` option we set above
+  // is the fix — page-title-updated is where the page tries to override it.
+  win.on('page-title-updated', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    openOutward(target, win);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e, target) => {
+    if (originOf(target) === originOf(acc.serverUrl)) return;
+    e.preventDefault();
+    openOutward(target, win);
+  });
+  win.webContents.on('did-finish-load', () => {
+    void win.webContents.executeJavaScript(docChromeScript(), true).catch(() => undefined);
+  });
+  void win.loadURL(url.toString());
+  return win;
+}
+
 /**
  * The editor window.
  *
@@ -1692,7 +1825,7 @@ function openEditorWindow(
     height: 860,
     minWidth: 720,
     minHeight: 520,
-    title: `${path.basename(localPath)} — filex`,
+    title: path.basename(localPath),
     icon: ICON_PATH,
     autoHideMenuBar: true,
     show: false,
@@ -1701,9 +1834,15 @@ function openEditorWindow(
     // the product answers, with a dark value (#14181d) that is not a background
     // anywhere in filex. See windowGround().
     backgroundColor: windowGround(),
+    // yeni-pencere:v1 — same frameless chrome as the in-app document windows:
+    // our controls in a reserved top bar (docChromeScript), macOS traffic lights.
+    ...docWindowChrome(),
     webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
   });
   win.once('ready-to-show', () => win.show());
+  // Keep the window title = the file name; the admin SPA would otherwise set it
+  // to the server's Branding name. See openViewerWindow.
+  win.on('page-title-updated', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(({ url: target }) => {
     openOutward(target, win);
     return { action: 'deny' };
@@ -1721,13 +1860,14 @@ function openEditorWindow(
   // ⚠ Re-applied on EVERY load, not once. The editor route navigates within
   // itself (a sign-in bounce, a reload after a save), and a banner that only
   // survived the first paint would leave the user editing a copy with nothing
-  // on screen saying where it lands.
+  // on screen saying where it lands. The drag strip rides along for the same
+  // reason.
   win.webContents.on('did-finish-load', () => {
     const text = mode === 'twin'
       ? openText('bannerTwin', { file: localPath })
       : openText('bannerScratch', { file: localPath });
     void win.webContents
-      .executeJavaScript(bannerScript(text), true)
+      .executeJavaScript(bannerScript(text) + docChromeScript(), true)
       .catch(() => undefined);
   });
   void win.loadURL(url.toString());
@@ -1770,6 +1910,26 @@ function bannerScript(text: string): string {
       document.body.appendChild(el);
     }
     el.textContent = ${JSON.stringify(text)};
+    // ⚠ Reserve the strip's height so it sits BELOW the editor, not on top of
+    // it. /files/edit fills the viewport with a chromeless modal whose card is
+    // 100vh, and the viewers fill that card — so a fixed strip pinned at
+    // bottom:0 lands squarely on the viewer's OWN bottom bar (for a spreadsheet
+    // that is OnlyOffice's sheet-tab + zoom strip, which is exactly what the
+    // user needs to switch sheets). Shrinking the chromeless card by the
+    // measured strip height lifts that bar clear of the strip. Measured after
+    // the text is set — the strip is one nowrap line, so its height is stable.
+    const sid = 'filex-openwith-banner-style';
+    let style = document.getElementById(sid);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = sid;
+      document.head.appendChild(style);
+    }
+    const h = el.offsetHeight || 30;
+    style.textContent =
+      '.fe-modal__backdrop--chromeless{box-sizing:border-box!important;' +
+        'align-items:stretch!important;padding-bottom:' + h + 'px!important}' +
+      '.fe-modal__card--chromeless{height:100%!important;max-height:100%!important}';
   })();`;
 }
 
@@ -2081,6 +2241,31 @@ function wireIpc(): void {
 
   ipcMain.handle('auth:add', () => {
     openShell('/connect', 'filex — Add an account');
+  });
+
+  // Host-owned open: a file opens in its OWN frameless document window. The
+  // explorer emits `file-opened` (config.openInHost) and the app page calls this.
+  ipcMain.handle('doc:open', (_e, accountId: string, remote: string) => {
+    const acc = state.accounts.find((a) => a.id === accountId);
+    if (!acc) throw new Error('unknown account');
+    openViewerWindow(acc, remote);
+  });
+
+  // Our OWN window controls — frameless windows have no native caption on
+  // Windows/Linux (macOS keeps its traffic lights). Each acts on the window that
+  // SENT the call, so these three serve the main window and every document
+  // window alike.
+  ipcMain.handle('win:minimize', (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.minimize();
+  });
+  ipcMain.handle('win:toggleMaximize', (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (!w) return;
+    if (w.isMaximized()) w.unmaximize();
+    else w.maximize();
+  });
+  ipcMain.handle('win:close', (e) => {
+    BrowserWindow.fromWebContents(e.sender)?.close();
   });
 
   // ⚠ The explorer's multi-storage root does NOT discover storages by itself —

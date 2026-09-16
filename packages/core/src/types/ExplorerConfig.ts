@@ -454,6 +454,38 @@ export interface ExplorerConfig {
   callerKind?: 'user' | 'app';
 
 
+  /**
+   * How a mouse opens an item.
+   *
+   *   'double' (default) — a single click SELECTS, a double click OPENS
+   *                        (classic desktop file-manager). This is a
+   *                        per-viewer preference the host may expose as a
+   *                        setting.
+   *   'single'           — a single click OPENS (the item is opened on the
+   *                        first click; the checkbox is still the one click
+   *                        that selects).
+   *
+   * ⚠ TOUCH is not governed by this: a finger tap always opens (the mobile
+   * convention, and there is no hover-to-select on a touchscreen). The
+   * checkbox always selects, on every device and in either mode. See
+   * FilePane.onViewClick + composables/useRowTouch.
+   */
+  openTrigger?: 'single' | 'double';
+
+  /**
+   * Hand the OPEN of a file to the host instead of opening the in-page
+   * preview/editor overlay. When true, opening a file emits `file-opened`
+   * (path + basename) and the explorer does NOT mount its own PreviewModal —
+   * the host decides what to do (the desktop app opens the file in its own
+   * window per document). Directories still navigate inline, and Space
+   * quick-look still peeks in-page. Default false (web/embeds preview inline).
+   *
+   * ⚠ Ignored inside an unlocked E2E-encrypted folder: the host window would
+   * fetch raw server bytes (ciphertext), so those keep the in-page decrypted
+   * preview.
+   */
+  openInHost?: boolean;
+
   /** Default view. */
   viewMode?: 'list' | 'grid';
 

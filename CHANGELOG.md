@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-16
+
+### Changed
+
+- **A single click selects; a double click opens (mouse).** The default open
+  gesture is now the classic desktop file-manager one — a single click selects a
+  row/card, a double click opens it, and **Enter** opens the selection. This
+  reverses 0.41.x's "any click opens" for a mouse; it is a per-viewer setting
+  (`ExplorerConfig.openTrigger: 'single' | 'double'`, default `'double'`), and
+  the desktop app exposes it under **Settings → Open files with**.
+  - ⚠ **Touch is untouched.** A finger tap always opens (the mobile convention,
+    and there is no hover-to-select on a touchscreen); the checkbox is still the
+    one click that selects, on every device and in either mode.
+
+### Added
+
+- **`ExplorerConfig.openInHost`** — when set, opening a file emits `file-opened`
+  and the explorer does NOT mount its own in-page preview; the host opens the
+  file itself. The desktop app uses this to open **every document in its own
+  window**, one per file (any type), so a future editor drops into the same
+  path. Directories still navigate inline; Space quick-look still peeks in-page;
+  E2E-encrypted files keep the in-page decrypted preview.
+- **Desktop: frameless document + main windows with our own window controls.**
+  The native OS caption is gone. On Windows/Linux the app draws its own
+  minimize / maximize / close (the main window in a slim title bar, each document
+  window in a reserved top bar so it never sits on the viewer's own top row —
+  OnlyOffice's profile/share stays clear); on macOS the native traffic lights
+  are kept (`titleBarStyle: 'hiddenInset'`, top-left) and no buttons are drawn.
+  The top strip is the drag handle.
+- **Window / tab titles name the open document.** A document window's title (and,
+  on the web, the `/files/edit` browser tab) is the file's name rather than the
+  server's Branding name; the main explorer window stays the whitelabel name, or
+  `filex` when the server sets no branding. On the desktop the title is pinned in
+  the main process (`page-title-updated` guard) so the admin SPA can't override
+  it; on the web the router's per-route title (`lib/documentTitle`) names the
+  file on the editor route.
+
+## [0.41.5] - 2026-09-16
+
+### Fixed
+
+- **Desktop "Open with filex" editor window: the copy-editing banner no longer
+  covers the document's own bottom bar.** When the desktop app opens an Office
+  file from the OS (the scratch/twin flow, `openEditorWindow`), it injects a
+  persistent strip along the bottom of the `/files/edit` page telling the user
+  they are editing a copy and where saves land. The strip was
+  `position: fixed; bottom: 0`, so it sat squarely on top of the viewer's own
+  bottom bar — for a spreadsheet that is OnlyOffice's sheet-tab + zoom strip
+  ("Sheet1 / Sheet2…"), the one control you need to switch sheets. The banner
+  now measures its own height and reserves that band beneath the chromeless
+  editor (shrinking the full-viewport card), so the sheet tabs and zoom sit
+  clear above it. Measured on the live `/files/edit` page: a 29px overlap
+  before, 0px after, with the tab strip fully visible. Only the desktop editor
+  window injects this banner — a plain browser tab and the in-page preview were
+  never affected.
+
 ## [0.41.4] - 2026-09-15
 
 ### Changed

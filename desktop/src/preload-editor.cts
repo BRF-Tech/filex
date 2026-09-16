@@ -17,6 +17,18 @@
 // ⚠ It has to be a preload rather than an executeJavaScript after load: the
 // prompt decides once, when the Vue app mounts, and by `did-finish-load` that
 // has already happened.
-import { contextBridge } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('filexDesktop', true);
+
+// yeni-pencere:v1 — the document window is frameless (no native caption on
+// Windows/Linux), so our injected buttons (main.ts docChromeScript) need a way
+// to drive THIS window. This bridge is controls-only — minimize / maximize /
+// close, no data and no token — so unlike a `filexApp` bridge it is safe to
+// expose to the remote /files/edit page. Each call acts on the window that sent
+// it (main.ts win:* handlers via BrowserWindow.fromWebContents).
+contextBridge.exposeInMainWorld('filexWin', {
+  minimize: () => ipcRenderer.invoke('win:minimize'),
+  toggleMaximize: () => ipcRenderer.invoke('win:toggleMaximize'),
+  close: () => ipcRenderer.invoke('win:close'),
+});
