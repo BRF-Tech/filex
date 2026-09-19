@@ -19,16 +19,96 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.42.1, 19 September 2026
-A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the same credentials (#31) — the bucket root itself is still never mounted. A read-only storage looks read-only to the people using it: a tag on its row, no + New menu, no New folder or Upload on it (#30). A scan of a large S3 storage is one listing instead of one request per folder, only one run per storage walks at a time, and the per-storage scan interval is on the form (#33). And when FILEX_PUBLIC_URL was never set, administrators see a banner instead of finding out from a share link to localhost (#32).
+::: tip Latest — v0.42.2, 19 September 2026
+A fix release for the issue 32 follow-up and three things that were wrong on screen. The context menu is now the same on Recent, Starred, Shared with me, tag views, the Home cards and the Recently-opened tray as in a folder — rows carry their own permission level, so Rename, Move, Delete and Share no longer vanish there (or leak in from the last folder). Every admin table pins its actions column to the right edge and scrolls sideways instead of squeezing it off screen. The admin Shares page copies the link the server builds from the configured public URL, not the browser's address. And presigned URLs are off by default on S3 storages: downloads and share links stream through filex, so a LAN-only MinIO no longer turns share downloads into dead links — set disable_presign: false to get the redirect back.
 
-Upgrade notes: no migrations. POST /api/admin/storages/{id}/sync answers status "running" instead of starting a second scan while one is in flight; GET /api/files/capabilities gains public_url_configured; POST /api/admin/storages/discover is new.
+Upgrade notes: no migrations. S3 storages saved without disable_presign now stream downloads. GET /api/admin/shares rows gain url; recent/starred/tagged rows gain perm and read_only. The search placeholder now names the storage it searches.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.42.1
-docker pull ghcr.io/brf-tech/filex:full-v0.42.1
+docker pull ghcr.io/brf-tech/filex:slim-v0.42.2
+docker pull ghcr.io/brf-tech/filex:full-v0.42.2
 ```
+
+## v0.42.2
+
+<span class="filex-release-date">19 September 2026</span>
+
+A fix release for the issue 32 follow-up and three things that were wrong on screen. The context menu is now the same on Recent, Starred, Shared with me, tag views, the Home cards and the Recently-opened tray as in a folder — rows carry their own permission level, so Rename, Move, Delete and Share no longer vanish there (or leak in from the last folder). Every admin table pins its actions column to the right edge and scrolls sideways instead of squeezing it off screen. The admin Shares page copies the link the server builds from the configured public URL, not the browser's address. And presigned URLs are off by default on S3 storages: downloads and share links stream through filex, so a LAN-only MinIO no longer turns share downloads into dead links — set disable_presign: false to get the redirect back.
+
+Upgrade notes: no migrations. S3 storages saved without disable_presign now stream downloads. GET /api/admin/shares rows gain url; recent/starred/tagged rows gain perm and read_only. The search placeholder now names the storage it searches.
+
+## What changed
+
+A fix release for the issue 32 follow-up and three things that were wrong on
+screen.
+
+### Changed
+
+- **Presigned URLs are off by default on S3 storages** (`disable_presign:
+  true`). A presigned link hands the browser the bucket's endpoint, which on
+  the LAN-only MinIO most self-hosters run turned every share download into a
+  dead link (#32). Uploads and the downloads behind public share links now
+  stream through filex unless the operator sets `disable_presign: false` —
+  worth it only when the endpoint is reachable from users' browsers and
+  accepts SDK-signed URLs. ⚠ A storage saved without the key streams from now
+  on; set `false` explicitly to get the redirect back.
+- **The top search field says what it searches.** It searches the whole
+  storage (every storage at the root), never the open folder, so the
+  placeholder now names the storage — "Search in Photos storage" — and
+  "Search all storages" on Home, the root and the Recent/Starred/Shared/tag
+  views. The folder-scoped box is still the filter bar's "Filter in this
+  folder…".
+
+### Fixed
+
+- **The context menu is the same everywhere.** On Recent, Starred, Shared with
+  me, tag views, the Home cards and the Recently-opened tray a row offered only
+  Open/Download/Copy/Star — no Rename, Move, Delete or Share — or, if a
+  writable folder had been opened first, all of them plus a meaningless Paste.
+  Rows in those views never carried their own permission level and the
+  folder's level leaked in. Every listed row now carries `perm` and
+  `read_only` from the server, the views forget the previous folder's level on
+  entry, and the menu is built per row; only New folder/Upload/Paste stay out
+  where there is no folder to put things in.
+- **Admin tables keep their actions column in view.** Every admin table — and
+  the token/key panels in the explorer — now scrolls sideways when it is wider
+  than the page and pins the actions column to the right edge, the way the
+  explorer's list view pins its ⋮ menu; the column no longer squeezes off
+  screen on narrow windows. One shared stylesheet (`web/src/styles/table.css`)
+  and `ui/Table.vue`'s `pinned` column option.
+- **The admin Shares page copies the right link.** It built the link from the
+  browser's own address, so an administrator signed in on localhost or through
+  a proxy copied a link nobody else could open (#32). `GET /api/admin/shares`
+  rows now carry the canonical `url` from the configured public origin — the
+  same one the share dialog has always used — and the page prefers it.
+- The S3 "Disable presigned URLs" help text, `STORAGE.md` and `SHARING.md` say
+  the switch governs share downloads too; the minimal compose example warns
+  that `http://localhost:5212` is only right on the machine running it.
+- **The admin sidebar no longer opens over the page on a phone.** Below
+  1024px the sidebar is a drawer with a backdrop, and it started open on every
+  admin page, so the first tap went to the backdrop instead of the page. It now
+  starts closed there, closes when a page is chosen, and comes back as the
+  column when the window is widened.
+- The search field said "Search all storages" on every admin folder: the
+  scope check looked at the multi-storage *mode* (which the admin explorer is
+  always in) rather than at whether a storage was open. It now names the open
+  storage.
+
+### Upgrade notes
+
+- No migrations. S3 storages without `disable_presign` now stream downloads
+  (see Changed). `GET /api/admin/shares` rows gain `url`; the recent/starred/
+  tagged listing rows gain `perm` and `read_only`.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0422---2026-09-19)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.2`
 
 ## v0.42.1
 
@@ -2767,221 +2847,13 @@ entry — and every earlier release — is in [CHANGELOG.md](https://github.com/
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.32.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.32.0`
 
-## v0.31.0
-
-<span class="filex-release-date">5 September 2026</span>
-
-Forgetting the password on an encrypted folder no longer means losing the files. Creating one now shows a recovery key once — filex never stores it, and it opens the folder without the password. The file format did not change: existing encrypted files are byte-identical and open unchanged, verified by a round-trip test against a frozen copy of the previous release's crypto module. A folder made before this release cannot be given a recovery key by the server, because the server has no password to re-wrap with, so filex offers the upgrade at the one moment it holds one — the next successful unlock. Operators who need a second way in can set an escrow key at install time; it is RSA-OAEP, filex keeps only the public half, and the documentation says plainly that this is a backdoor and what its notification can and cannot promise. Also here: starring is a real action rather than a badge that only existed in list view, tags are browsable from the navigation panel, opening a virtual view like Trash from its own URL no longer says "Folder not found", and API tokens are split into user and app kinds so a shared embed credential can no longer manage its owner's keys.
-
-## What changed
-
-### Added
-
-- **Encrypted folders can be recovered.** Until now, forgetting the password
-  meant the files were gone — that was the documented behaviour and it was a
-  bad one. Creating an encrypted folder now shows a recovery key **once**;
-  filex never stores it and it opens the folder without the password.
-
-  The file format did not change. Each file's key is still wrapped by exactly
-  one key in its 97-byte header — that key is now the folder's master key
-  rather than the password key, and the marker holds the master key wrapped
-  once per way in. For a folder created before this release the two are the
-  same thing, so **existing encrypted files are byte-identical and open
-  unchanged**; there is a round-trip test against a frozen copy of the v0.30.1
-  crypto module, in both directions, because that is the promise that matters
-  most here. Such a folder cannot be given a recovery key by the server — it
-  has no password to re-wrap with — so filex offers the upgrade at the one
-  moment it holds one: the next successful unlock, behind a visible notice.
-
-- **Optional operator escrow, fixed at install.** `FILEX_INSTALLATION_E2E_ESCROW_KEY`
-  adds a second way into every folder created while it is set. It is RSA-OAEP:
-  filex holds only the public half, `filex e2e-escrow keygen` prints the private
-  half once and writes it nowhere, and the operator supplies it back when they
-  need it. A stolen database therefore decrypts nothing.
-
-  ⚠ **This is a backdoor, deliberately, and the documentation says so.** When
-  the escrow key is used through filex the folder's owner is notified, and a
-  forged "escrow was used" report is refused — the client must first decrypt a
-  server-issued nonce sealed to the escrow key. But the notification is an
-  announcement, not a control: an operator holding the private key can copy the
-  marker and the ciphertext off disk and decrypt offline, with no request, no
-  notification and no audit row, and filex cannot detect it. If that is not
-  acceptable for your deployment, leave escrow off.
-
-  `FILEX_INSTALLATION_` is a new prefix for settings that are fixed when the
-  data directory is initialised. filex refuses to start if one of them changed,
-  because for escrow the immutability is arithmetic rather than policy: a folder
-  created while escrow was off has no escrow-wrapped key, and switching it on
-  later cannot open it.
-
-- **Star is a real action.** It was rendered in the list view and nowhere else,
-  so v0.30.0 shipped a Starred view that a user in grid view had no way to fill.
-  It is now in the context menu ("Star" / "Unstar", multi-selection aware), on
-  grid and gallery cards (on hover or focus, and painted permanently once
-  starred, so the Starred view is legible without hovering every tile), and on
-  the keyboard as a remappable `S`.
-
-- **Tags in the navigation panel.** Tagging has existed for a long time and
-  there was no way to browse by tag inside the explorer — only an admin page.
-  The panel now lists the tags that exist and opens the files carrying one.
-
-### Fixed
-
-- **A virtual view opened from its own URL said "Folder not found".** The
-  explorer writes the current location into the address bar, so opening Trash
-  put `#.trash` there — and on reload that sentinel was handed to the ordinary
-  folder loader, which 404'd. Reported for Trash; Recent, Starred and Shared
-  behaved the same way. Sentinels are now routed to their view before the
-  request is made, so a reload lands back in the view with its own empty state,
-  and an unknown dot-path is left alone because a user may own `.config`.
-
-- **The details panel printed `.starred`.** Third surface of the same bug that
-  put `.shared` in the tab strip in v0.30.0: the sentinel-to-label map had been
-  written more than once. Every surface that renders a path segment now reads
-  one map.
-
-- **An app token could manage its owner's credentials.** An API token
-  authenticates *as* its owner, and the embeds we run authenticate every visitor
-  with one shared token injected by the host's proxy — so v0.30.0's "API keys"
-  panel entry meant an embed visitor could list and revoke the credential the
-  embed itself runs on, and mint S3, SSH and NFS credentials as the owner.
-
-  A token now declares what it is. `user` is a person's own credential and
-  nothing changes for it; `app` is an integration, and the four credential
-  surfaces (`/api/tokens`, `/api/auth/s3-keys`, `/api/auth/ssh-keys`,
-  `/api/auth/nfs-exports`) refuse it with a 403 that names the token and both
-  ways out. The explorer leaves out the surfaces that belong to a single person
-  — Recent, Starred, Shared with me, API keys — while Upload, the storages,
-  Trash, Tags and "How to connect" stay. Existing tokens migrate to `app`,
-  because the restricting direction is the safe default and these surfaces only
-  matter when a browser UI is drawn.
-
-- **`/api/files/capabilities` could refuse a caller.** Gating it on the token
-  chain meant a revoked token, an unknown token username or a disabled account's
-  cookie got a 403 from a public route — the login screen failing closed. It now
-  annotates the caller when it can and answers everyone.
-
-- **Moving a plaintext file into an encrypted folder is refused.** Uploads were
-  encrypted client-side; move, copy and paste were plain server-side byte
-  operations, so filex's own UI would put plaintext inside an encrypted folder
-  with no warning. The guard is server-side and covers the ops queue, sync moves
-  and the AI/MCP surface.
-
-- **The install banner ate clicks.** Both banners are full-width fixed strips
-  that paint a centred card, and without `pointer-events-none` the empty half
-  sat on top of the sidebar behind it: measured, five destinations unreachable
-  at 1440×900 and eleven on a taller menu. `PendingOpsTray`, the same shape in
-  the same corner, already did this correctly.
-
-- **`slim` was not slim.** The tag was built from the full recipe, so
-  `docs/DOCKER.md` promised ~40 MB while the registry served **511 MB**
-  compressed — `latest`, `slim` and `full` were the same image, and the two
-  Dockerfiles differed by one package that nothing calls. There is now a real
-  slim image: **43 MB compressed**, the binary and the embedded UI, with image
-  thumbnails (pure Go) still working and everything that shells out to ffmpeg,
-  ghostscript or libreoffice reported as unavailable rather than failing.
-
-- **`docs/E2E-ENCRYPTION.md` was 183 lines of Turkish** in an English repo,
-  linked from the README and published on the docs site. Translated, and
-  corrected against the code while translating: it under-counted the places that
-  filter the marker, missed two disabled surfaces and the refusal to nest
-  encrypted folders, and its "v2 roadmap" listed six things none of which had
-  shipped — those are now stated as limitations rather than promises.
-
-### Changed
-
-- **Docker images build natively per architecture.** arm64 was emulated, and the
-  emulated part was `apk add libreoffice` plus a JRE — the worst possible thing
-  to run under QEMU. Each architecture now builds on its own runner and the tags
-  are joined from the digests, so no tag exists until both have landed. The
-  docker job also no longer waits for goreleaser: it builds its own binary from
-  source and took nothing from the Release, so the dependency only lengthened
-  the critical path.
-
-- **The browser suite is a gate.** Cypress defaulted to `https://fm.example.com` —
-  the live deployment — and ran in no pipeline. It now boots its own instance
-  and runs in CI. Getting there meant fixing 19 red specs, several of which had
-  been passing for the wrong reason: one matched the sidebar link instead of the
-  dashboard it was meant to assert on, and two asserted a capability slot that
-  only existed because production still carried a row from an older version.
-  227 of 227 pass, and the run went from 9m58s to 1m25s once the service worker
-  stopped re-precaching the bundle between tests.
-
-### Added
-
-- **Encrypted folders can be recovered.** Until now, forgetting the password to
-  an E2E-encrypted folder destroyed it — the documentation said so, and it was
-  true. Every folder created from this release on gets a **user recovery key**:
-  160 bits, shown exactly once when the folder is created, never stored by
-  filex, and enough to open the folder without the password. It is a password
-  equivalent, so keep it somewhere other than the password.
-
-  The file format did not change. A per-file key was already wrapped by one
-  folder key; that key is now a **folder master key** held in the marker,
-  wrapped once per way of reaching it. Adding a recovery path costs one more
-  wrapped copy of 32 bytes, not a re-encrypt of anything — which is why not a
-  byte of anyone's existing data was touched.
-
-- **Optional key escrow for operators**, fixed at install time via
-  `FILEX_INSTALLATION_E2E_ESCROW_KEY`. `filex e2e-escrow keygen` mints the pair;
-  the server gets the **public** half only, so it can seal new folders to the
-  escrow identity and open nothing. The private half is the operator's, and a
-  stolen filex database still decrypts nothing. Using the escrow key notifies
-  the folder's owner, and the notification is *evidence*: the client must
-  decrypt a server-issued challenge sealed to the escrow key before the event
-  is recorded, so it cannot be forged — and, stated plainly in the docs, cannot
-  be relied on either, because an operator holding the private key can decrypt
-  offline without ever asking filex.
-
-- **Install-time settings, as a convention.** Anything prefixed
-  `FILEX_INSTALLATION_` is recorded on the first boot and frozen; filex refuses
-  to start if it later disagrees with the environment, and says what changed and
-  what the operator can and cannot do about it. Escrow is the first of these,
-  and the reason is arithmetic rather than policy: a folder created while escrow
-  was off carries no escrow-wrapped key, so switching it on later cannot open
-  it, and a server that started anyway would be claiming a capability it has
-  over only half its data.
-
-### Fixed
-
-- **filex's own UI would put a plaintext file inside an encrypted folder.**
-  Uploads are intercepted and encrypted in the browser, but paste,
-  drag-and-drop and duplicate are server-side byte copies that never touch the
-  crypto — so a file dragged into an encrypted folder was stored exactly as it
-  arrived, looked like its encrypted neighbours in the listing, and nothing
-  warned anyone. The reverse was as bad: a file moved *out* stayed encrypted
-  somewhere no password prompt would ever appear.
-
-  The server cannot fix either by encrypting or decrypting, because it has no
-  key, so it refuses: a copy or move may not cross an encryption boundary
-  (HTTP 409, naming the file). The rule lives in one place and every transfer
-  surface calls it — the ops queue, the synchronous move and the AI/MCP move —
-  rather than in the one client that happened to notice.
-
-### Changed
-
-- **Folders created before this release keep working, untouched.** Their format
-  is read as a first-class path, not a migration shim, and the test suite proves
-  it against a frozen copy of the v0.30.1 module rather than a re-creation of
-  it. They cannot be given a recovery key by the server, because that needs the
-  folder password and filex does not have it — so filex asks at the one moment
-  it does: the next successful unlock. The offer is a visible strip with the
-  consequences spelled out, including that accepting on an escrow-enabled
-  installation also gives the operator a key. Declining changes nothing.
-
-- The create-folder warning no longer says recovery is impossible, because for
-  new folders it is not.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0310---2026-09-05)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.31.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.31.0`
-
 ## Earlier releases
 
-The 98 releases before v0.31.0, in brief. Full notes are on GitHub.
+The 99 releases before v0.32.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.31.0](https://github.com/BRF-Tech/filex/releases/tag/v0.31.0) | 5 September 2026 | Forgetting the password on an encrypted folder no longer means losing the files. Creating one now shows a recovery key once — filex never stores it, and it opens the folder without the password. |
 | [v0.30.1](https://github.com/BRF-Tech/filex/releases/tag/v0.30.1) | 4 September 2026 | A one-line patch. Opening Recent, Starred, Shared or Trash put the raw internal name of the view in the tab — `.shared` instead of Shared. |
 | [v0.30.0](https://github.com/BRF-Tech/filex/releases/tag/v0.30.0) | 4 September 2026 | The explorer grew a collapsible navigation panel: Recent, Starred, Shared with me, tags and Trash on the left, with Upload as the primary action. |
 | [v0.29.0](https://github.com/BRF-Tech/filex/releases/tag/v0.29.0) | 4 September 2026 | Open an Office document that lives on your own computer in the editor your filex server already runs: the desktop app registers for the usual extensions, so a machine with no Word or Excel installed can still edit one. |
@@ -3083,4 +2955,4 @@ The 98 releases before v0.31.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-19 from 118 published releases.</small>
+<small>Last refreshed 2026-09-19 from 119 published releases.</small>
