@@ -44,6 +44,7 @@ import Input from '@/components/ui/Input.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
@@ -394,7 +395,7 @@ const rejecting = computed(() => items.value.filter((p) => p.load.rejected > 0))
         <span>{{ t('plugins.load.rejectingBanner', { names: rejecting.map((p) => p.name).join(', ') }) }}</span>
       </div>
 
-      <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
         <table class="w-full text-sm">
           <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
             <tr>
@@ -406,7 +407,7 @@ const rejecting = computed(() => items.value.filter((p) => p.load.rejected > 0))
               <th class="px-3 py-2 text-left">{{ t('plugins.fields.load') }}</th>
               <th class="px-3 py-2 text-left">{{ t('plugins.fields.inUse') }}</th>
               <th class="px-3 py-2 text-left">{{ t('plugins.fields.enabled') }}</th>
-              <th class="px-3 py-2 text-right">{{ t('webhooks.fields.actions') }}</th>
+              <th class="px-3 py-2 text-right tbl-actions">{{ t('webhooks.fields.actions') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -500,7 +501,7 @@ const rejecting = computed(() => items.value.filter((p) => p.load.rejected > 0))
                   @update:model-value="(v: boolean) => toggleEnabled(p, v)"
                 />
               </td>
-              <td class="px-3 py-2">
+              <td class="px-3 py-2 tbl-actions">
                 <div class="flex justify-end gap-1">
                   <Button
                     v-if="p.kind === 'binary'"
@@ -536,7 +537,7 @@ const rejecting = computed(() => items.value.filter((p) => p.load.rejected > 0))
             </tr>
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       <p v-if="anyRunning" class="text-xs text-zinc-500 dark:text-zinc-400">{{ t('plugins.whereNext') }}</p>
     </template>

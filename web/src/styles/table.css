@@ -1,0 +1,62 @@
+/* ------------------------------------------------------------------
+   Admin tables: sideways scroll + the actions column pinned to the right.
+
+   The explorer's list view (packages/core ListView.vue, `.fe-list__col--menu`)
+   settled this model and the owner asked for the same in every admin table,
+   verbatim: "admin panelinde bütün tablolarımızda işlemler bölgesi sağda
+   sabit kalsın, file explorer içindeki tablolarımız gibi".
+
+   The three parts, and why each is what it is:
+
+   1. `.tbl-scroll` — the scroll container. The table inside is allowed to be
+      as wide as its content (`min-width: max-content`) and the WRAPPER
+      scrolls; nothing is squeezed, wrapped into a column of single words or
+      dropped. A table narrower than its wrapper still fills it (`width:
+      100%`), so hover and the row dividers do not stop halfway across.
+
+   2. `.tbl-actions` — the pinned cell. `position: sticky; right: 0` only ever
+      SHIFTS a box that would otherwise be further right than the wrapper's
+      edge, so when the table fits it stays exactly where it is, as the last
+      cell. When the table overflows, the cell rides the right edge and the
+      other columns slide underneath it — which is why it has to carry the
+      row's own ground: `background-color: inherit` takes the <tr>'s colour,
+      hover state included, and is written at zero specificity so any
+      Tailwind `bg-*` put on the cell itself still wins. ⚠ The row's colour
+      must be OPAQUE (`bg-white dark:bg-zinc-950`, `hover:bg-zinc-50`, …): a
+      translucent `zinc-900/50` on the cell lets the sliding text show
+      through at half strength.
+
+      The chain `thead/tbody/tr → cell` is what lets a `bg-*` on <thead> reach
+      the header's pinned <th> without every <tr> restating it.
+
+   3. `.is-scrolled-x` — the divider, drawn only while something is actually
+      scrolled underneath (TableScroll.vue flips the class on `scrollLeft`).
+      A permanent line would claim the column is floating when it is simply
+      the last cell of a table that fits. `box-shadow` rather than a border
+      so turning it on moves nothing.
+   ------------------------------------------------------------------ */
+
+.tbl-scroll {
+  overflow-x: auto;
+}
+.tbl-scroll > table {
+  width: 100%;
+  min-width: max-content;
+}
+
+:where(.tbl-scroll, .tbl-scroll table, .tbl-scroll thead, .tbl-scroll tbody, .tbl-scroll tr, .tbl-actions) {
+  background-color: inherit;
+}
+
+.tbl-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+
+.tbl-scroll.is-scrolled-x .tbl-actions {
+  box-shadow: -1px 0 0 0 #e4e4e7; /* zinc-200 */
+}
+.dark .tbl-scroll.is-scrolled-x .tbl-actions {
+  box-shadow: -1px 0 0 0 #27272a; /* zinc-800 */
+}

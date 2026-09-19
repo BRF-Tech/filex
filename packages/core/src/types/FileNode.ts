@@ -42,6 +42,14 @@ export interface FileNode {
    *  projectFileNodes emits it when a storage has RBAC on). '' / undefined =
    *  ACL not enforced. Used to gate edit/manage affordances client-side. */
   perm?: 'none' | 'viewer' | 'editor' | 'owner';
+  /** The row sits on a read-only storage. Carried by the rows that come from
+   *  OUTSIDE a folder listing — Recent, Starred, a tag view, the Home cards,
+   *  the Recently-opened tray (`handlers/meta.go`) — because there the
+   *  listing-level `read_only` has no folder to describe. A folder listing's
+   *  rows leave it unset; `dirReadOnly` answers for the whole folder. Folded
+   *  into the write gate with `perm`, so the context menu is the same in
+   *  every view. */
+  read_only?: boolean;
   /* wiring:e2 — dir rows: true when the folder is E2E-encrypted (carries a
    * `.filex-e2e.json` marker). Drives the 🔒 badge in the listings. */
   e2e?: boolean;

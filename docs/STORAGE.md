@@ -456,7 +456,7 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
 | `path_style` | no | auto | Path‑style addressing. **Auto‑enabled when `endpoint` is set** (MinIO/Hetzner/B2/R2 need it); AWS stays virtual‑host. |
 | `access_key` | no | — | Static key. If omitted, the AWS default credential chain is used (env/IRSA/instance role). |
 | `secret_key` | no | — | Static secret (with `access_key`). |
-| `disable_presign` | no | `false` | Force filex to stream downloads itself instead of issuing presigned URLs. |
+| `disable_presign` | no | **`true`** (since v0.42.2) | Uploads and the downloads behind public share links stream through filex, so the bucket `endpoint` never has to be reachable from a browser. Set `false` only when it is (AWS, a public MinIO) and you want the browser to talk to the bucket directly via presigned URLs — faster for very large files; the store must accept SDK-signed URLs. ⚠ A storage saved before v0.42.2 without this key now streams; set `false` explicitly to get the old redirect back. |
 
 **Examples**
 
@@ -492,9 +492,13 @@ Storage / Ceph RGW**, and other S3‑compatible stores.
   passes on B2 — write, prefix listing, ranged read, a 12 MiB multipart upload
   read back byte-for-byte, rename, a presigned URL fetched by a browser, and
   delete (`internal/storage/drivers/s3`, `TestLiveProviderConformance`).
-- **Hetzner Object Storage / Ceph RGW** reject some AWS‑SDK presigned URLs with
-  `SignatureDoesNotMatch`. If downloads fail there, set
-  `"disable_presign": true` — filex then streams the bytes itself.
+- **Presigned URLs are off by default** (`disable_presign: true`, since
+  v0.42.2): every download streams through filex, so the bucket endpoint never
+  has to be reachable from a browser. Turning them on (`"disable_presign":
+  false`) makes downloads a redirect straight to the bucket — only worth it when
+  the endpoint is public and the store accepts SDK-signed URLs. **Hetzner Object
+  Storage / Ceph RGW** reject some of those with `SignatureDoesNotMatch`; if you
+  turned presigning on and downloads fail there, turn it back off.
 - Empty folders are represented by a hidden `.empty` marker object (created on
   mkdir, hidden from listings). Folder move/delete/copy recurse the prefix, so
   deleting or renaming a folder works even though S3 has no real directories.
@@ -747,7 +751,7 @@ another region — filex is built so that the slow part stays the slow part.
 | `sync_mode: ondemand` | storage row | Never walks on its own — you trigger it with `POST /api/admin/storages/{id}/sync` (e.g. from the job that writes to the share). |
 | `filex thumb backfill` | CLI | Pays the first‑browse cost up front instead of making a user wait. Takes `--storage <id\|name>`, `--limit N`, `--concurrency N`, `--retry-failed`. |
 | `FILEX_THUMB_BACKFILL_ON_BOOT=once` | env | Same thing, once, in the background at startup. |
-| `disable_presign: true` | S3 `config` | The **opposite** of a speed‑up: it forces download bytes through filex instead of a redirect straight to the bucket. Use it only when presigned URLs don't work for your users (Hetzner/Ceph `SignatureDoesNotMatch`, or a bucket that isn't reachable from the browser). |
+| `disable_presign: false` | S3 `config` | The one speed-up here: with presigning ON, downloads (panel *and* public share links) are a redirect straight to the bucket instead of bytes through filex. Only when the bucket's `endpoint` is reachable from your users' browsers and accepts SDK-signed URLs; the default (`true`, since v0.42.2) streams, because a LAN-only MinIO turned every share download into a dead link (issue #32). |
 
 **Downloads support ranges.** `GET …?action=download|preview` answers
 `Accept-Ranges: bytes` and serves `206` / `Content-Range` for a `Range`

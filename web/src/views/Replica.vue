@@ -21,6 +21,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 type Tab = 'rules' | 'failures' | 'report' | 'settings';
 
@@ -421,7 +422,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
         </form>
       </div>
 
-      <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
         <table class="w-full text-sm">
           <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
             <tr>
@@ -430,7 +431,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
               <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.mode') }}</th>
               <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.description') }}</th>
               <th class="px-3 py-2 text-left">{{ t('replica.rules.fields.enabled') }}</th>
-              <th class="px-3 py-2 text-right"></th>
+              <th class="px-3 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -438,11 +439,11 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
               <td class="px-3 py-2 text-right">{{ r.priority }}</td>
               <td class="px-3 py-2 font-mono text-xs">{{ r.path_pattern }}</td>
               <td class="px-3 py-2"><Badge :tone="modeBadgeTone(r.mode)">{{ r.mode }}</Badge></td>
-              <td class="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400">{{ r.description }}</td>
+              <td class="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400"><div class="max-w-md">{{ r.description }}</div></td>
               <td class="px-3 py-2">
                 <Badge :tone="r.enabled ? 'emerald' : 'zinc'">{{ r.enabled ? 'on' : 'off' }}</Badge>
               </td>
-              <td class="px-3 py-2 text-right">
+              <td class="px-3 py-2 text-right tbl-actions">
                 <div class="flex justify-end gap-1">
                   <Button size="xs" variant="outline" @click="openEditRule(r)">{{ t('common.edit') }}</Button>
                   <Button size="xs" variant="ghost" @click="deleteRule(r)">
@@ -456,7 +457,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
             </tr>
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
 
     <!-- ── Failures ───────────────────────────────────── -->
@@ -475,7 +476,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
         </div>
       </div>
 
-      <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
         <table class="w-full text-sm">
           <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
             <tr>
@@ -486,7 +487,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
               <th class="px-3 py-2 text-right">{{ t('replica.failures.fields.attempts') }}</th>
               <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.lastAttempt') }}</th>
               <th class="px-3 py-2 text-left">{{ t('replica.failures.fields.resolved') }}</th>
-              <th class="px-3 py-2 text-right"></th>
+              <th class="px-3 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -494,14 +495,14 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
               <td class="px-3 py-2 font-mono text-xs">{{ f.path }}</td>
               <td class="px-3 py-2">{{ f.op }}</td>
               <td class="px-3 py-2 font-mono text-xs">{{ f.error_code }}</td>
-              <td class="px-3 py-2 text-xs text-rose-600 dark:text-rose-400 max-w-md truncate">{{ f.error_msg }}</td>
+              <td class="px-3 py-2 text-xs text-rose-600 dark:text-rose-400"><div class="max-w-md truncate" :title="f.error_msg">{{ f.error_msg }}</div></td>
               <td class="px-3 py-2 text-right">{{ f.attempts }}</td>
               <td class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDate(f.last_attempt_at, locale) }}</td>
               <td class="px-3 py-2 text-xs">
                 <Badge v-if="f.resolved_at" tone="emerald">{{ t('replica.failures.resolvedYes') }}</Badge>
                 <Badge v-else tone="rose">{{ t('replica.failures.resolvedNo') }}</Badge>
               </td>
-              <td class="px-3 py-2 text-right">
+              <td class="px-3 py-2 text-right whitespace-nowrap tbl-actions">
                 <Button v-if="!f.resolved_at" size="xs" variant="outline" @click="fixOne(f.path, f.op)">
                   <Wrench class="h-3.5 w-3.5" />
                   {{ t('replica.failures.fixOne') }}
@@ -513,7 +514,7 @@ function modeBadgeTone(m: ReplicaMode): 'emerald' | 'amber' | 'zinc' {
             </tr>
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       <div v-if="replica.failurePages > 1" class="flex items-center justify-between text-xs">
         <span>{{ t('common.pageOf', { current: replica.failureCurrentPage, total: replica.failurePages }) }}</span>

@@ -13,6 +13,7 @@ import Button from '@/components/ui/Button.vue';
 import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
 import StatCard from '@/components/ui/StatCard.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 const { t, locale } = useI18n();
 const queue = useQueueStore();
@@ -127,7 +128,7 @@ function gotoPage(p: number) {
       <Select :model-value="queue.filter" :options="statusOptions" :label="t('queue.filter.status')" class="w-48" @update:model-value="setStatus" />
     </div>
 
-    <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+    <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
       <table class="w-full text-sm">
         <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
           <tr>
@@ -138,7 +139,7 @@ function gotoPage(p: number) {
             <th class="px-3 py-2 text-left">{{ t('queue.fields.payload') }}</th>
             <th class="px-3 py-2 text-left">{{ t('queue.fields.lastError') }}</th>
             <th class="px-3 py-2 text-left">{{ t('queue.fields.enqueued') }}</th>
-            <th class="px-3 py-2 text-right"></th>
+            <th class="px-3 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -148,9 +149,9 @@ function gotoPage(p: number) {
             <td class="px-3 py-2"><Badge :tone="tone(op.status)">{{ op.status }}</Badge></td>
             <td class="px-3 py-2 text-right">{{ op.attempts }} / {{ op.max_attempts }}</td>
             <td class="px-3 py-2 text-xs font-mono text-zinc-500 dark:text-zinc-400">{{ shortPayload(op.payload) }}</td>
-            <td class="px-3 py-2 text-xs text-rose-600 dark:text-rose-400">{{ op.last_error || '' }}</td>
+            <td class="px-3 py-2 text-xs text-rose-600 dark:text-rose-400"><div class="max-w-md break-words">{{ op.last_error || '' }}</div></td>
             <td class="px-3 py-2 whitespace-nowrap text-xs">{{ formatDate(op.enqueued_at, locale) }}</td>
-            <td class="px-3 py-2 text-right">
+            <td class="px-3 py-2 text-right tbl-actions">
               <div class="flex justify-end gap-1">
                 <Button v-if="op.status === 'failed'" size="xs" variant="outline" @click="retry(op.id)">
                   <RotateCcw class="h-3.5 w-3.5" /> {{ t('queue.retry') }}
@@ -168,7 +169,7 @@ function gotoPage(p: number) {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
 
     <div v-if="queue.totalPages > 1" class="flex items-center justify-between text-xs">
       <span>{{ t('common.pageOf', { current: queue.currentPage, total: queue.totalPages }) }}</span>

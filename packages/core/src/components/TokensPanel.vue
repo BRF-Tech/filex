@@ -30,6 +30,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { ApiToken } from '../types/Tokens';
 import { useLocale } from '../composables/useLocale';
 import { useTokens } from '../composables/useTokens';
+import { useScrolledX } from '../composables/useScrolledX';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -61,6 +62,7 @@ const emit = defineEmits<{
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
+const { scrolledX, onScroll } = useScrolledX();
 
 const { tokens, loading, error, canMint, revealed, load, create, remove, dismiss } = useTokens(
   props.config,
@@ -288,28 +290,30 @@ function usedLabel(row: ApiToken): string {
     </div>
 
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <table v-else-if="tokens.length" class="fe-s3keys__table">
-      <thead>
-        <tr>
-          <th>{{ t('conn.tokens.col.label') }}</th>
-          <th>{{ t('conn.tokens.col.scopes') }}</th>
-          <th>{{ t('conn.tokens.col.used') }}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in tokens" :key="row.id">
-          <td>{{ row.label || '—' }}</td>
-          <td><code>{{ row.scopes }}</code></td>
-          <td>{{ usedLabel(row) }}</td>
-          <td class="fe-s3keys__actions">
-            <button class="fe-s3keys__link is-danger" :disabled="busy" @click="revoke(row)">
-              {{ confirming === row.id ? t('conn.tokens.confirm') : t('conn.tokens.revoke') }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else-if="tokens.length" class="fe-s3keys__scroll" :class="{ 'is-scrolled-x': scrolledX }" @scroll.passive="onScroll">
+      <table class="fe-s3keys__table">
+        <thead>
+          <tr>
+            <th>{{ t('conn.tokens.col.label') }}</th>
+            <th>{{ t('conn.tokens.col.scopes') }}</th>
+            <th>{{ t('conn.tokens.col.used') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in tokens" :key="row.id">
+            <td>{{ row.label || '—' }}</td>
+            <td><code>{{ row.scopes }}</code></td>
+            <td>{{ usedLabel(row) }}</td>
+            <td class="fe-s3keys__actions">
+              <button class="fe-s3keys__link is-danger" :disabled="busy" @click="revoke(row)">
+                {{ confirming === row.id ? t('conn.tokens.confirm') : t('conn.tokens.revoke') }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p v-else-if="canMint" class="fe-s3keys__muted">{{ t('conn.tokens.empty') }}</p>
 
     <!-- ⚠ Said next to the button rather than in a document nobody opens: a

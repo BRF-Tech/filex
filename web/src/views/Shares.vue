@@ -42,11 +42,16 @@ interface ShareRow {
   creator_email?: string;
   node_path?: string;
   storage_name?: string;
+  /** Canonical public link from the server (configured public origin). */
+  url?: string;
   [k: string]: unknown;
 }
 function shareOf(row: unknown): Share {
   const r = row as ShareRow & Share;
-  return (r.share ?? (r as unknown as Share));
+  const s = r.share ?? (r as unknown as Share);
+  // The envelope carries the server-built link; carry it onto the share so
+  // shareUrl() below never has to guess an origin.
+  return r.url && !s.url ? { ...s, url: r.url } : s;
 }
 
 async function load() {
@@ -99,10 +104,14 @@ async function remove() {
   }
 }
 
-// Build the public share URL the recipient would actually use. We
-// hit `/s/<token>` on the same origin as the panel — that's how
-// nginx is configured + the backend's share viewer is mounted.
+// The public share URL the recipient would actually use. It comes from the
+// server (`url` on every admin row = configured public origin + /s/<token>),
+// exactly as the share dialog's links do. Building it from the panel's own
+// address was wrong the moment the admin opened the panel on localhost or
+// through a proxy: they copied a link nobody else could open (issue #32).
+// The origin fallback remains only for a server too old to send `url`.
 function shareUrl(s: Share): string {
+  if (s.url) return s.url;
   if (typeof window === 'undefined') return `/s/${s.token}`;
   return `${window.location.origin}/s/${s.token}`;
 }

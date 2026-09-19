@@ -12,6 +12,7 @@ import { trashApi, type TrashEntry } from '@/api/trash';
 import Button from '@/components/ui/Button.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import Modal from '@/components/ui/Modal.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 import { Trash2, RotateCcw, AlertTriangle } from 'lucide-vue-next';
 import { formatBytes, formatDate } from '@/lib/format';
 
@@ -142,50 +143,52 @@ onMounted(async () => {
       :description="t('trash.empty_description')"
     />
 
-    <div v-else class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <table class="w-full text-sm">
-        <thead class="bg-zinc-50 dark:bg-zinc-900 text-left">
-          <tr>
-            <th class="px-3 py-2">{{ t('trash.col_name') }}</th>
-            <th class="px-3 py-2">{{ t('trash.col_storage') }}</th>
-            <th class="px-3 py-2">{{ t('trash.col_size') }}</th>
-            <th class="px-3 py-2">{{ t('trash.col_deleted_at') }}</th>
-            <th class="px-3 py-2">{{ t('trash.col_ttl') }}</th>
-            <th class="px-3 py-2 text-right">{{ t('common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="e in entries"
-            :key="e.id"
-            class="border-t border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
-          >
-            <td class="px-3 py-2 font-medium">
-              <div>{{ e.name }}</div>
-              <div class="text-xs text-zinc-500">{{ e.path }}</div>
-            </td>
-            <td class="px-3 py-2 text-zinc-600 dark:text-zinc-400">{{ e.storage_name ?? `#${e.storage_id}` }}</td>
-            <td class="px-3 py-2 tabular-nums">{{ fmtBytes(e.size) }}</td>
-            <td class="px-3 py-2 text-zinc-500">{{ fmtDate(e.deleted_at) }}</td>
-            <td class="px-3 py-2 text-zinc-500">
-              <span v-if="e.ttl_days !== undefined && e.ttl_days <= 3" class="inline-flex items-center gap-1 text-rose-600">
-                <AlertTriangle :size="12" /> {{ e.ttl_days }} {{ t('trash.days_left') }}
-              </span>
-              <span v-else>{{ e.ttl_days ?? '—' }} {{ t('trash.days_left') }}</span>
-            </td>
-            <td class="px-3 py-2 text-right">
-              <div class="inline-flex gap-2">
-                <Button size="sm" variant="ghost" @click="restore(e)">
-                  <RotateCcw :size="12" /> {{ t('trash.restore') }}
-                </Button>
-                <Button size="sm" variant="danger" @click="purge(e)">
-                  <Trash2 :size="12" /> {{ t('trash.purge') }}
-                </Button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+      <TableScroll>
+        <table class="w-full text-sm">
+          <thead class="bg-zinc-50 dark:bg-zinc-900 text-left">
+            <tr>
+              <th class="px-3 py-2">{{ t('trash.col_name') }}</th>
+              <th class="px-3 py-2">{{ t('trash.col_storage') }}</th>
+              <th class="px-3 py-2">{{ t('trash.col_size') }}</th>
+              <th class="px-3 py-2">{{ t('trash.col_deleted_at') }}</th>
+              <th class="px-3 py-2">{{ t('trash.col_ttl') }}</th>
+              <th class="px-3 py-2 text-right tbl-actions">{{ t('common.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="e in entries"
+              :key="e.id"
+              class="border-t border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900"
+            >
+              <td class="px-3 py-2 font-medium">
+                <div>{{ e.name }}</div>
+                <div class="text-xs text-zinc-500">{{ e.path }}</div>
+              </td>
+              <td class="px-3 py-2 text-zinc-600 dark:text-zinc-400">{{ e.storage_name ?? `#${e.storage_id}` }}</td>
+              <td class="px-3 py-2 tabular-nums">{{ fmtBytes(e.size) }}</td>
+              <td class="px-3 py-2 text-zinc-500">{{ fmtDate(e.deleted_at) }}</td>
+              <td class="px-3 py-2 text-zinc-500">
+                <span v-if="e.ttl_days !== undefined && e.ttl_days <= 3" class="inline-flex items-center gap-1 text-rose-600">
+                  <AlertTriangle :size="12" /> {{ e.ttl_days }} {{ t('trash.days_left') }}
+                </span>
+                <span v-else>{{ e.ttl_days ?? '—' }} {{ t('trash.days_left') }}</span>
+              </td>
+              <td class="px-3 py-2 text-right tbl-actions">
+                <div class="inline-flex gap-2">
+                  <Button size="sm" variant="ghost" @click="restore(e)">
+                    <RotateCcw :size="12" /> {{ t('trash.restore') }}
+                  </Button>
+                  <Button size="sm" variant="danger" @click="purge(e)">
+                    <Trash2 :size="12" /> {{ t('trash.purge') }}
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
       <footer class="px-3 py-2 text-xs text-zinc-500 flex justify-between">
         <span>{{ t('trash.total_count', { n: fmt.format(total) }) }}</span>
         <span v-if="loading">{{ t('common.loading') }}</span>

@@ -34,6 +34,7 @@ import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -168,25 +169,25 @@ onMounted(load);
       :description="t('versions.emptyDescription')"
     />
 
-    <div
+    <TableScroll
       v-else-if="versions.length"
-      class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
+      class="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
     >
       <table class="w-full text-sm">
-        <thead class="bg-zinc-50 dark:bg-zinc-900/50 text-left text-zinc-600 dark:text-zinc-400">
+        <thead class="bg-zinc-50 dark:bg-zinc-900 text-left text-zinc-600 dark:text-zinc-400">
           <tr>
             <th class="px-4 py-2 font-medium">{{ t('versions.col.version') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('versions.col.size') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('versions.col.createdAt') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('versions.col.etag') }}</th>
-            <th class="px-4 py-2 font-medium text-right">{{ t('common.actions') }}</th>
+            <th class="px-4 py-2 font-medium text-right tbl-actions">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
           <tr
             v-for="(v, idx) in versions"
             :key="v.id"
-            class="hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
+            class="bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800"
           >
             <td class="px-4 py-2">
               <div class="flex items-center gap-2">
@@ -204,7 +205,7 @@ onMounted(load);
               <span v-if="v.etag" :title="v.etag">{{ v.etag.slice(0, 12) }}…</span>
               <span v-else>—</span>
             </td>
-            <td class="px-4 py-2 text-right">
+            <td class="px-4 py-2 text-right tbl-actions">
               <div class="inline-flex gap-1">
                 <Button
                   size="xs"
@@ -233,7 +234,7 @@ onMounted(load);
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
 
     <Modal v-model="restoreOpen" :title="t('versions.restoreModalTitle')">
       <p v-if="restoreTarget" class="text-sm text-zinc-700 dark:text-zinc-300">

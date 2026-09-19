@@ -341,6 +341,8 @@ export interface AuditEntry {
 export interface Share {
   id: number;
   token: string;
+  /** Canonical public link (`<public origin>/s/<token>`), sent by the server. */
+  url?: string;
   node_id?: number;
   storage_id?: number;
   storage_name?: string;

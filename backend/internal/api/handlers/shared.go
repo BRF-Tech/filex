@@ -227,30 +227,6 @@ func (h *Shared) project(ctx context.Context, st *model.Storage, g *model.FileGr
 	return entry
 }
 
-// attachStorageNames fills each node's Storage with the name of the storage
-// holding it.
-//
-// Nodes returned outside a folder listing (starred, recently opened) carry
-// only `storage_id`, and a client in multi-storage mode cannot build the
-// `name://path` it needs to open a row from a numeric id — so those lists
-// rendered names the user could click and nothing happened. One map lookup per
-// node, one storage query per call.
-func attachStorageNames(ctx context.Context, store db.Store, nodes []*model.Node) []*model.Node {
-	if len(nodes) == 0 {
-		return nodes
-	}
-	storages, err := store.ListEnabledStorages(ctx)
-	if err != nil {
-		return nodes
-	}
-	byID := make(map[int64]string, len(storages))
-	for _, st := range storages {
-		byID[st.ID] = st.Name
-	}
-	for _, n := range nodes {
-		if n != nil {
-			n.Storage = byID[n.StorageID]
-		}
-	}
-	return nodes
-}
+// attachStorageNames moved to meta.go as (*Meta).rows — the starred / recent /
+// tag listings now stamp `perm` and `read_only` beside the storage name, and
+// that needs the ACL resolver the Meta handler carries.

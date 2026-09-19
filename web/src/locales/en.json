@@ -247,7 +247,7 @@
       "region": "Defaults to \"auto\" when left empty.",
       "endpoint": "Leave empty for AWS S3. Any S3-compatible store needs its endpoint.",
       "pathStyle": "On for every non-AWS store. It is turned on automatically when an endpoint is set and this was never touched.",
-      "disablePresign": "Turn on when the store rejects SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch); uploads then stream through the backend.",
+      "disablePresign": "On by default: uploads and the downloads behind public share links stream through filex, so the bucket endpoint never has to be reachable from a browser (a LAN-only MinIO just works). Turn it off only when the endpoint is reachable from your users' browsers (AWS, a public MinIO) and you want them to talk to the bucket directly — faster for very large files, and the store must accept SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch).",
       "sftpAuth": "Either a password or a private key is required.",
       "keyPath": "Path to a key file on the server, read when the storage starts. Used when the PEM field is empty.",
       "knownHosts": "OpenSSH known_hosts path for strict host-key checking. Default is trust-on-first-use in ~/.filex/known_hosts.",

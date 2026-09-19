@@ -22,6 +22,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { S3AccessKey } from '../types/S3Keys';
 import { useLocale } from '../composables/useLocale';
 import { useS3Keys } from '../composables/useS3Keys';
+import { useScrolledX } from '../composables/useScrolledX';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -37,6 +38,7 @@ const emit = defineEmits<{
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
+const { scrolledX, onScroll } = useScrolledX();
 
 const {
   keys,
@@ -231,33 +233,35 @@ function scopeOf(k: S3AccessKey): string {
 
     <!-- ── the keys ─────────────────────────────────────────────── -->
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <table v-else-if="keys.length" class="fe-s3keys__table">
-      <thead>
-        <tr>
-          <th>{{ t('conn.s3keys.col.label') }}</th>
-          <th>{{ t('conn.s3keys.col.key') }}</th>
-          <th>{{ t('conn.s3keys.col.scope') }}</th>
-          <th>{{ t('conn.s3keys.col.lastUsed') }}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="k in keys" :key="k.id" :class="{ 'is-off': !!k.disabled_at }">
-          <td>{{ k.label || t('conn.s3keys.noLabel') }}</td>
-          <td><code>{{ k.access_key_id }}</code></td>
-          <td>{{ scopeOf(k) }}</td>
-          <td>{{ k.last_used_at ? shortDate(k.last_used_at) : t('conn.s3keys.neverUsed') }}</td>
-          <td class="fe-s3keys__actions">
-            <button class="fe-s3keys__link" :disabled="busy" @click="toggle(k)">
-              {{ k.disabled_at ? t('conn.s3keys.enable') : t('conn.s3keys.disable') }}
-            </button>
-            <button class="fe-s3keys__link is-danger" :disabled="busy" @click="revoke(k)">
-              {{ confirmRevoke === k.id ? t('conn.s3keys.confirm') : t('conn.s3keys.revoke') }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else-if="keys.length" class="fe-s3keys__scroll" :class="{ 'is-scrolled-x': scrolledX }" @scroll.passive="onScroll">
+      <table class="fe-s3keys__table">
+        <thead>
+          <tr>
+            <th>{{ t('conn.s3keys.col.label') }}</th>
+            <th>{{ t('conn.s3keys.col.key') }}</th>
+            <th>{{ t('conn.s3keys.col.scope') }}</th>
+            <th>{{ t('conn.s3keys.col.lastUsed') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="k in keys" :key="k.id" :class="{ 'is-off': !!k.disabled_at }">
+            <td>{{ k.label || t('conn.s3keys.noLabel') }}</td>
+            <td><code>{{ k.access_key_id }}</code></td>
+            <td>{{ scopeOf(k) }}</td>
+            <td>{{ k.last_used_at ? shortDate(k.last_used_at) : t('conn.s3keys.neverUsed') }}</td>
+            <td class="fe-s3keys__actions">
+              <button class="fe-s3keys__link" :disabled="busy" @click="toggle(k)">
+                {{ k.disabled_at ? t('conn.s3keys.enable') : t('conn.s3keys.disable') }}
+              </button>
+              <button class="fe-s3keys__link is-danger" :disabled="busy" @click="revoke(k)">
+                {{ confirmRevoke === k.id ? t('conn.s3keys.confirm') : t('conn.s3keys.revoke') }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p v-else-if="canMint" class="fe-s3keys__muted">{{ t('conn.s3keys.empty') }}</p>
   </section>
 </template>
@@ -389,4 +393,6 @@ function scopeOf(k: S3AccessKey): string {
   white-space: nowrap;
   text-align: right;
 }
+/* Its pinning (sticky right, ground, scroll divider) is in styles/base.css
+   next to the list view's `.fe-list__col--menu`, so the two stay one model. */
 </style>

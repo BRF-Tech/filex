@@ -537,6 +537,11 @@ type ShareWithMeta struct {
 	CreatorEmail string       `json:"creator_email,omitempty"`
 	NodePath     string       `json:"node_path,omitempty"`
 	StorageName  string       `json:"storage_name,omitempty"`
+	// URL is the canonical public link (`<origin>/s/<token>`), filled by the
+	// admin handler from the configured public origin — never by the store.
+	// The admin Shares page used to build it from the browser's address, so an
+	// operator signed in on localhost copied a localhost link (issue #32).
+	URL string `json:"url,omitempty"`
 }
 
 // AuditEntryWithUser is an audit row joined with the user.email column

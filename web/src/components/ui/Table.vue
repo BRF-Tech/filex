@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-vue-next';
 import Spinner from './Spinner.vue';
+import TableScroll from './TableScroll.vue';
 
 export interface Column<Row> {
   key: string;
@@ -11,6 +12,14 @@ export interface Column<Row> {
   width?: string;
   format?: (row: Row) => string | number | null;
   cell?: 'slot'; // forces use of named slot `cell-<key>`
+  /**
+   * Pin the column to the right edge of the scroll container, the way the
+   * explorer's list view pins its ⋮ column: the table may be wider than the
+   * card and scroll sideways, but this cell stays put. Defaults to pinned for
+   * the column whose `key` is `actions`; pass `null` to opt that one out.
+   * The mechanics live in src/styles/table.css (`.tbl-actions`).
+   */
+  pinned?: 'right' | null;
 }
 
 interface Props {
@@ -81,6 +90,11 @@ function go(p: number) {
   emit('page', p);
 }
 
+function isPinned(col: Column<T>): boolean {
+  if (col.pinned === null) return false;
+  return col.pinned === 'right' || col.key === 'actions';
+}
+
 function alignClass(c: Column<T>['align']): string {
   if (c === 'right') return 'text-right';
   if (c === 'center') return 'text-center';
@@ -94,9 +108,12 @@ function alignClass(c: Column<T>['align']): string {
       <slot name="toolbar" />
     </div>
 
-    <div class="overflow-x-auto">
+    <!-- ⚠ Opaque grounds only, on <thead> and on every <tr>: the pinned cell
+         paints with the row's own colour (`background-color: inherit`) and a
+         translucent one lets the columns sliding under it show through. -->
+    <TableScroll>
       <table class="w-full text-sm">
-        <thead class="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-600 dark:text-zinc-400">
+        <thead class="bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400">
           <tr>
             <th
               v-for="col in columns"
@@ -106,6 +123,7 @@ function alignClass(c: Column<T>['align']): string {
                 'px-4 py-2 font-medium select-none',
                 alignClass(col.align),
                 col.sortable && 'cursor-pointer hover:text-zinc-900 dark:hover:text-zinc-100',
+                isPinned(col) && 'tbl-actions',
               ]"
               :scope="'col'"
               @click="clickHeader(col)"
@@ -130,7 +148,7 @@ function alignClass(c: Column<T>['align']): string {
             <th
               v-for="col in columns"
               :key="`f-${col.key}`"
-              class="px-4 pb-2 font-normal align-top"
+              :class="['px-4 pb-2 font-normal align-top', isPinned(col) && 'tbl-actions']"
             >
               <slot :name="`filter-${col.key}`" :col="col" />
             </th>
@@ -152,13 +170,16 @@ function alignClass(c: Column<T>['align']): string {
             v-for="(row, idx) in rows"
             v-else
             :key="rowKeyFor(row, idx)"
-            :class="[hover && 'hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors']"
+            :class="[
+              'bg-white dark:bg-zinc-900',
+              hover && 'hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors',
+            ]"
             @click="emit('row-click', row)"
           >
             <td
               v-for="col in columns"
               :key="`${rowKeyFor(row, idx)}-${col.key}`"
-              :class="['px-4 py-2', alignClass(col.align)]"
+              :class="['px-4 py-2', alignClass(col.align), isPinned(col) && 'tbl-actions']"
             >
               <slot
                 v-if="col.cell === 'slot'"
@@ -173,7 +194,7 @@ function alignClass(c: Column<T>['align']): string {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
 
     <div
       v-if="showPager"

@@ -17,8 +17,12 @@ services:
     ports:
       - "5212:5212"
     environment:
-      # Must be the URL users actually open in the browser. Behind a reverse
-      # proxy set this to your https://… domain instead.
+      # ⚠ Must be the URL users actually open in the browser — every share
+      # link and every link in an e-mail is built on it. `http://localhost:5212`
+      # is only right on the machine running this file; on a server, behind a
+      # reverse proxy, set your real https://… domain or every share link will
+      # say localhost (issue #32). The variable is spelled exactly like this;
+      # FILEX_APPLICATION_URL, APP_URL and BASE_URL are not read.
       FILEX_PUBLIC_URL: http://localhost:5212
       # A local storage is auto-created on first boot pointing at /srv/files
       # (the ./files bind-mount below) — so you can upload immediately, no

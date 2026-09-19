@@ -108,3 +108,33 @@ func TestInit_Integration(t *testing.T) {
 	_, err := d.List(context.Background(), "/")
 	require.NoError(t, err)
 }
+
+// Presigned URLs are opt-in since v0.42.2. A presigned link hands the browser
+// the bucket's endpoint, which on the LAN-only MinIO most self-hosters run is
+// a dead link for a share recipient (issue #32). A row without the key streams;
+// only an explicit `disable_presign: false` turns the redirect on.
+func TestInit_PresignIsOffUnlessExplicitlyEnabled(t *testing.T) {
+	base := map[string]any{"bucket": "b", "region": "auto", "endpoint": "https://s3.example.test", "access_key": "a", "secret_key": "s"}
+
+	d := &Driver{}
+	require.NoError(t, d.Init(context.Background(), base))
+	assert.False(t, d.Capabilities().Presign, "no key = stream through filex")
+
+	on := map[string]any{}
+	for k, v := range base {
+		on[k] = v
+	}
+	on["disable_presign"] = false
+	d = &Driver{}
+	require.NoError(t, d.Init(context.Background(), on))
+	assert.True(t, d.Capabilities().Presign, "explicit false = presigned redirects on")
+
+	off := map[string]any{}
+	for k, v := range base {
+		off[k] = v
+	}
+	off["disable_presign"] = true
+	d = &Driver{}
+	require.NoError(t, d.Init(context.Background(), off))
+	assert.False(t, d.Capabilities().Presign)
+}

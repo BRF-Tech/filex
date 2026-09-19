@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-09-19
+
+A fix release for the issue 32 follow-up and three things that were wrong on
+screen.
+
+### Changed
+
+- **Presigned URLs are off by default on S3 storages** (`disable_presign:
+  true`). A presigned link hands the browser the bucket's endpoint, which on
+  the LAN-only MinIO most self-hosters run turned every share download into a
+  dead link (#32). Uploads and the downloads behind public share links now
+  stream through filex unless the operator sets `disable_presign: false` —
+  worth it only when the endpoint is reachable from users' browsers and
+  accepts SDK-signed URLs. ⚠ A storage saved without the key streams from now
+  on; set `false` explicitly to get the redirect back.
+- **The top search field says what it searches.** It searches the whole
+  storage (every storage at the root), never the open folder, so the
+  placeholder now names the storage — "Search in Photos storage" — and
+  "Search all storages" on Home, the root and the Recent/Starred/Shared/tag
+  views. The folder-scoped box is still the filter bar's "Filter in this
+  folder…".
+
+### Fixed
+
+- **The context menu is the same everywhere.** On Recent, Starred, Shared with
+  me, tag views, the Home cards and the Recently-opened tray a row offered only
+  Open/Download/Copy/Star — no Rename, Move, Delete or Share — or, if a
+  writable folder had been opened first, all of them plus a meaningless Paste.
+  Rows in those views never carried their own permission level and the
+  folder's level leaked in. Every listed row now carries `perm` and
+  `read_only` from the server, the views forget the previous folder's level on
+  entry, and the menu is built per row; only New folder/Upload/Paste stay out
+  where there is no folder to put things in.
+- **Admin tables keep their actions column in view.** Every admin table — and
+  the token/key panels in the explorer — now scrolls sideways when it is wider
+  than the page and pins the actions column to the right edge, the way the
+  explorer's list view pins its ⋮ menu; the column no longer squeezes off
+  screen on narrow windows. One shared stylesheet (`web/src/styles/table.css`)
+  and `ui/Table.vue`'s `pinned` column option.
+- **The admin Shares page copies the right link.** It built the link from the
+  browser's own address, so an administrator signed in on localhost or through
+  a proxy copied a link nobody else could open (#32). `GET /api/admin/shares`
+  rows now carry the canonical `url` from the configured public origin — the
+  same one the share dialog has always used — and the page prefers it.
+- The S3 "Disable presigned URLs" help text, `STORAGE.md` and `SHARING.md` say
+  the switch governs share downloads too; the minimal compose example warns
+  that `http://localhost:5212` is only right on the machine running it.
+- **The admin sidebar no longer opens over the page on a phone.** Below
+  1024px the sidebar is a drawer with a backdrop, and it started open on every
+  admin page, so the first tap went to the backdrop instead of the page. It now
+  starts closed there, closes when a page is chosen, and comes back as the
+  column when the window is widened.
+- The search field said "Search all storages" on every admin folder: the
+  scope check looked at the multi-storage *mode* (which the admin explorer is
+  always in) rather than at whether a storage was open. It now names the open
+  storage.
+
+### Upgrade notes
+
+- No migrations. S3 storages without `disable_presign` now stream downloads
+  (see Changed). `GET /api/admin/shares` rows gain `url`; the recent/starred/
+  tagged listing rows gain `perm` and `read_only`.
+
 ## [0.42.1] - 2026-09-19
 
 A fix release for four reports on 0.42.0.

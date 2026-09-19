@@ -16,6 +16,7 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
@@ -195,7 +196,7 @@ async function testTarget(target: WebhookTarget) {
 
     <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ t('webhooks.subtitle') }}</p>
 
-    <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+    <TableScroll class="rounded-xl border border-zinc-200 dark:border-zinc-800">
       <table class="w-full text-sm">
         <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
           <tr>
@@ -205,13 +206,13 @@ async function testTarget(target: WebhookTarget) {
             <th class="px-3 py-2 text-left">{{ t('webhooks.fields.secret') }}</th>
             <th class="px-3 py-2 text-left">{{ t('webhooks.fields.lastStatus') }}</th>
             <th class="px-3 py-2 text-left">{{ t('webhooks.fields.enabled') }}</th>
-            <th class="px-3 py-2 text-right">{{ t('webhooks.fields.actions') }}</th>
+            <th class="px-3 py-2 text-right tbl-actions">{{ t('webhooks.fields.actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
           <tr v-for="w in items" :key="w.id" class="bg-white dark:bg-zinc-950">
             <td class="px-3 py-2 font-medium">{{ w.name }}</td>
-            <td class="px-3 py-2 max-w-xs truncate font-mono text-xs">{{ w.url }}</td>
+            <td class="px-3 py-2 font-mono text-xs"><div class="max-w-xs truncate" :title="w.url">{{ w.url }}</div></td>
             <td class="px-3 py-2 text-xs">
               <template v-if="w.events.length">
                 <span
@@ -245,7 +246,7 @@ async function testTarget(target: WebhookTarget) {
             <td class="px-3 py-2">
               <Toggle :model-value="w.enabled" @update:model-value="(v: boolean) => toggleEnabled(w, v)" />
             </td>
-            <td class="px-3 py-2">
+            <td class="px-3 py-2 tbl-actions">
               <div class="flex justify-end gap-1">
                 <Button size="xs" variant="outline" :loading="testingId === w.id" @click="testTarget(w)">
                   <Send class="h-3.5 w-3.5" />
@@ -267,7 +268,7 @@ async function testTarget(target: WebhookTarget) {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
 
     <Modal v-model="showForm" :title="editingId == null ? t('webhooks.add') : t('webhooks.edit')" size="lg">
       <form class="space-y-4" @submit.prevent="save">

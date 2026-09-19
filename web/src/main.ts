@@ -11,6 +11,10 @@ import { installAxiosInterceptors } from './api/client';
 import { initRuntimeConfig } from './api/runtimeConfig';
 
 import './styles/main.css';
+// Admin tables: sideways scroll + the actions column pinned to the right edge
+// (see the file's header). After main.css so its zero-specificity ground rule
+// sits under Tailwind's utilities, never over them.
+import './styles/table.css';
 // gorunum:v3-shell — the product's look, loaded ONCE for the whole app.
 //
 // ⚠⚠ It used to be imported per view (Explore, Home), which meant the `--fe-*`

@@ -67,7 +67,17 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 	d.region, _ = cfg["region"].(string)
 	d.endpoint, _ = cfg["endpoint"].(string)
 	d.pathStyle, _ = cfg["path_style"].(bool)
-	d.disablePresign, _ = cfg["disable_presign"].(bool)
+	// Presigned URLs are OFF unless the operator turns them on. A presigned
+	// link hands the BROWSER the bucket's endpoint: fine on AWS, a dead link
+	// on the LAN-only MinIO most self-hosters run (issue #32 — the share page
+	// opened, the download did not). Streaming through filex works on every
+	// endpoint; the redirect is an optimisation the operator opts into.
+	// A row that never carried the key streams from now on (2026-09-19).
+	if v, ok := cfg["disable_presign"].(bool); ok {
+		d.disablePresign = v
+	} else {
+		d.disablePresign = true
+	}
 	// Custom endpoints almost always mean a non-AWS S3-compatible
 	// service (Hetzner Object Storage, MinIO, Backblaze B2 S3-compat,
 	// Cloudflare R2 — all of which serve path-style and reject

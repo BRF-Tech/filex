@@ -10449,6 +10449,30 @@ filex-explorer {
   box-shadow: -1px 0 0 0 var(--fe-border);
 }
 
+/* The key/token tables in the connection panels (S3KeysPanel, SSHKeysPanel
+   and TokensPanel share `.fe-s3keys__*`) follow the same model as the list
+   view above: the table is as wide as its content and the panel scrolls
+   sideways, the actions cell rides the right edge over the columns sliding
+   under it, carrying the panel's own ground (`--fe-bg-elev`, what
+   `.fe-s3keys` paints), and its divider appears only while something is
+   scrolled underneath (`useScrolledX` flips the class). One rule here rather
+   than three copies in the panels, so they cannot drift apart. */
+.fe-s3keys__scroll {
+  overflow-x: auto;
+}
+.fe-s3keys__scroll .fe-s3keys__table {
+  min-width: max-content;
+}
+.fe-s3keys__table .fe-s3keys__actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--fe-bg-elev);
+}
+.fe-s3keys__scroll.is-scrolled-x .fe-s3keys__actions {
+  box-shadow: -1px 0 0 0 var(--fe-border);
+}
+
 /* The date headings travel with the horizontal scroll rather than sliding off
    the left edge — they are `max-content` wide so sticky has somewhere to move
    them to (a full-width block has none). */

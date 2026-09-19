@@ -16,6 +16,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
 import Spinner from '@/components/ui/Spinner.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
@@ -253,9 +254,9 @@ onMounted(() => {
 
     <!-- Tokens table -->
     <div v-if="loading" class="card card-body text-center text-zinc-500"><Spinner /></div>
-    <div v-else class="card overflow-hidden">
+    <TableScroll v-else class="card">
       <table class="w-full text-sm">
-        <thead class="bg-zinc-50 dark:bg-zinc-800/50 text-left text-xs text-zinc-500">
+        <thead class="bg-zinc-50 dark:bg-zinc-800 text-left text-xs text-zinc-500">
           <tr>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.label') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.usernames') }}</th>
@@ -264,7 +265,7 @@ onMounted(() => {
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.lastUsed') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.expires') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('apiMcp.cols.created') }}</th>
-            <th class="px-4 py-2"></th>
+            <th class="px-4 py-2 text-right tbl-actions"><span class="sr-only">{{ t('common.actions') }}</span></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -296,7 +297,7 @@ onMounted(() => {
               </div>
             </td>
             <td class="px-4 py-2 text-xs">
-              <span v-if="rootScope(tok.scopes)" class="font-mono text-violet-600 dark:text-violet-400 break-all">
+              <span v-if="rootScope(tok.scopes)" class="inline-block max-w-xs font-mono text-violet-600 dark:text-violet-400 break-all">
                 📁 {{ rootScope(tok.scopes) }}
               </span>
               <span v-else class="text-zinc-400">{{ t('apiMcp.fullDisk') }}</span>
@@ -310,7 +311,7 @@ onMounted(() => {
             <td class="px-4 py-2 text-xs text-zinc-500">
               {{ formatRelative(tok.created_at, locale) }}
             </td>
-            <td class="px-4 py-2 text-right">
+            <td class="px-4 py-2 text-right whitespace-nowrap tbl-actions">
               <Button size="xs" variant="ghost" @click="openEdit(tok)" :title="t('common.edit')">
                 <Pencil class="h-3.5 w-3.5 text-zinc-500" />
               </Button>
@@ -326,7 +327,7 @@ onMounted(() => {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
 
     <!-- Create / reveal modal -->
     <Modal

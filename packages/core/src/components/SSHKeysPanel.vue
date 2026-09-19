@@ -18,6 +18,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { FTPSFacts, SSHPublicKey } from '../types/SSHKeys';
 import { useLocale } from '../composables/useLocale';
 import { useSSHKeys } from '../composables/useSSHKeys';
+import { useScrolledX } from '../composables/useScrolledX';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -50,6 +51,7 @@ const emit = defineEmits<{
 
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
+const { scrolledX, onScroll } = useScrolledX();
 
 const { keys, connection, loading, error, canAdd, hasUsableKey, load, add, setDisabled, remove } =
   useSSHKeys(props.config);
@@ -171,31 +173,33 @@ function fingerprintOf(k: SSHPublicKey): string {
     </div>
 
     <p v-if="loading" class="fe-s3keys__muted">…</p>
-    <table v-else-if="keys.length" class="fe-s3keys__table">
-      <thead>
-        <tr>
-          <th>{{ t('conn.sshkeys.col.name') }}</th>
-          <th>{{ t('conn.sshkeys.col.fingerprint') }}</th>
-          <th>{{ t('conn.sshkeys.col.lastUsed') }}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="k in keys" :key="k.id" :class="{ 'is-off': !!k.disabled_at }">
-          <td>{{ k.name || t('conn.sshkeys.noName') }}</td>
-          <td><code>{{ fingerprintOf(k) }}</code></td>
-          <td>{{ k.last_used_at ? shortDate(k.last_used_at) : t('conn.sshkeys.neverUsed') }}</td>
-          <td class="fe-s3keys__actions">
-            <button class="fe-s3keys__link" :disabled="busy" @click="toggle(k)">
-              {{ k.disabled_at ? t('conn.sshkeys.enable') : t('conn.sshkeys.disable') }}
-            </button>
-            <button class="fe-s3keys__link is-danger" :disabled="busy" @click="drop(k)">
-              {{ confirmRemove === k.id ? t('conn.sshkeys.confirm') : t('conn.sshkeys.remove') }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-else-if="keys.length" class="fe-s3keys__scroll" :class="{ 'is-scrolled-x': scrolledX }" @scroll.passive="onScroll">
+      <table class="fe-s3keys__table">
+        <thead>
+          <tr>
+            <th>{{ t('conn.sshkeys.col.name') }}</th>
+            <th>{{ t('conn.sshkeys.col.fingerprint') }}</th>
+            <th>{{ t('conn.sshkeys.col.lastUsed') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="k in keys" :key="k.id" :class="{ 'is-off': !!k.disabled_at }">
+            <td>{{ k.name || t('conn.sshkeys.noName') }}</td>
+            <td><code>{{ fingerprintOf(k) }}</code></td>
+            <td>{{ k.last_used_at ? shortDate(k.last_used_at) : t('conn.sshkeys.neverUsed') }}</td>
+            <td class="fe-s3keys__actions">
+              <button class="fe-s3keys__link" :disabled="busy" @click="toggle(k)">
+                {{ k.disabled_at ? t('conn.sshkeys.enable') : t('conn.sshkeys.disable') }}
+              </button>
+              <button class="fe-s3keys__link is-danger" :disabled="busy" @click="drop(k)">
+                {{ confirmRemove === k.id ? t('conn.sshkeys.confirm') : t('conn.sshkeys.remove') }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p v-else-if="canAdd" class="fe-s3keys__muted">{{ t('conn.sshkeys.empty') }}</p>
   </section>
 </template>

@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.42.1"
+version: "0.42.2"
 releaseNotes: |-
-  filex v0.42.1 — 2026-09-19
-  • Mount several folders at once
-  • Scan every (minutes)
-  • A sign when FILEX_PUBLIC_URL is unset
-  • One sync run per storage at a time
-  • An S3 scan is one listing, not one request per folder
+  filex v0.42.2 — 2026-09-19
+  • Presigned URLs are off by default on S3 storages
+  • The top search field says what it searches.
+  • The context menu is the same everywhere.
+  • Admin tables keep their actions column in view.
+  • The admin Shares page copies the right link.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

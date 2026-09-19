@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -33,26 +34,98 @@ const (
 // Meta hosts the tags / star / recent endpoints.
 type Meta struct {
 	Store db.Store
+	// ACL is the RBAC resolver the folder listing consults for its per-row
+	// `perm`. Optional — nil means no enforcement and no `perm` on the wire,
+	// exactly as the folder listing behaves with the resolver unwired.
+	ACL *acl.Resolver
 }
 
 // NewMeta constructs the handler.
 func NewMeta(store db.Store) *Meta { return &Meta{Store: store} }
 
-// nonNilNodes guarantees a JSON array on the wire.
+// AttachACL wires the RBAC/ACL resolver so every starred / recent / tag row
+// carries the caller's effective level on it.
+func (h *Meta) AttachACL(r *acl.Resolver) { h.ACL = r }
+
+// metaRow is a node row as the starred / recent / tag listings put it on the
+// wire: the indexed node, plus the two facts the explorer's context menu
+// needs to decide which verbs a row gets.
+//
+// ⚠⚠ THE CONTEXT MENU MUST BE THE SAME EVERYWHERE (owner, 2026-09-19: "son
+// kullanılanlar, ana sayfa gibi sayfalarda context menu eksik kalıyor").
+// A folder listing stamps `perm` on each entry (manager.go, projectFileNodes)
+// and `read_only` on the response, and the explorer gates Rename / Delete /
+// Move / Share on those two. These three listings emitted neither, so a row on
+// Recent, Starred, a tag view or the Home cards had no level of its own and
+// fell back to the level of the folder last opened — which on the landing
+// page is no folder at all — and the menu came up with every write verb
+// missing (or, after a writable folder had been visited, with all of them,
+// on a read-only mount). The row has to say for itself what may be done to
+// it, because in these views there is no folder to ask.
+type metaRow struct {
+	*model.Node
+	// Perm is the caller's effective level on this node (`set.Effective`),
+	// omitted when the ACL resolver is unwired — the same contract as the
+	// folder listing's per-entry `perm`.
+	Perm string `json:"perm,omitempty"`
+	// ReadOnly is the holding storage's read-only flag. Never omitted: a
+	// consumer must be able to tell "writable" from "an older server that
+	// did not say".
+	ReadOnly bool `json:"read_only"`
+}
+
+// rows turns the store's node rows into the wire shape: storage NAME,
+// `perm` and `read_only` on every row. Always a non-nil slice.
+//
+// The storage name is what a qualified path needs — a node row carries only a
+// numeric `storage_id`, and a client in multi-storage mode cannot build the
+// `name://path` it needs to open a row from a number, so before the name was
+// attached these lists rendered names the user could click and nothing
+// happened. One storage query per call, one ACL set per storage per call.
+func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
+	out := make([]metaRow, 0, len(nodes))
+	if len(nodes) == 0 {
+		return out
+	}
+	byID := map[int64]*model.Storage{}
+	if storages, err := h.Store.ListEnabledStorages(ctx); err == nil {
+		for _, st := range storages {
+			byID[st.ID] = st
+		}
+	}
+	user := auth.UserFrom(ctx)
+	sets := map[int64]*acl.Set{}
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		row := metaRow{Node: n}
+		st := byID[n.StorageID]
+		if st != nil {
+			n.Storage = st.Name
+			row.ReadOnly = st.ReadOnly
+			if h.ACL != nil {
+				set, ok := sets[n.StorageID]
+				if !ok {
+					set, _ = h.ACL.LoadSet(ctx, user, st)
+					sets[n.StorageID] = set
+				}
+				row.Perm = permString(set, n.Path)
+			}
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// nonNilStrings guarantees a JSON array on the wire for the tag-name list.
 //
 // A nil Go slice marshals to `null`, and every one of these endpoints is
 // consumed as a list (`.length`, `.map`, `v-for`). A user with nothing
 // starred, nothing opened recently, or no nodes under a tag is the NORMAL
 // first-run state — exactly when these lists get read — so the empty case is
-// the one that has to be right.
-func nonNilNodes(n []*model.Node) []*model.Node {
-	if n == nil {
-		return []*model.Node{}
-	}
-	return n
-}
-
-// nonNilStrings is nonNilNodes for the tag-name list.
+// the one that has to be right. The node listings get the same guarantee from
+// (*Meta).rows, which always allocates.
 func nonNilStrings(s []string) []string {
 	if s == nil {
 		return []string{}
@@ -184,12 +257,12 @@ func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 	// row it cannot address (guessing the drive would open somebody else's).
 	// So "Nothing is tagged X" was drawn over three files that were tagged X
 	// (measured 2026-09-13: `?tag=test` answered with 3 nodes, the view showed
-	// 0 rows). Starred and Recently-opened — the two sibling handlers above,
-	// and the very case attachStorageNames was written for — have always called
-	// it; the tag listing is the third door into the same catalogue and was the
-	// one that missed it.
+	// 0 rows). Starred and Recently-opened — the two sibling handlers below,
+	// and the very case the storage-name attach was written for — have always
+	// gone through `rows`; the tag listing is the third door into the same
+	// catalogue and was the one that missed it.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
+		"nodes": h.rows(r.Context(), nodes),
 		"tag":   tag,
 	})
 }
@@ -272,7 +345,7 @@ func (h *Meta) ListStarred(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
+		"nodes": h.rows(r.Context(), nodes),
 		"limit": limit,
 	})
 }
@@ -330,7 +403,7 @@ func (h *Meta) ListRecent(w http.ResponseWriter, r *http.Request) {
 	nodes = confineNodesToTenant(r.Context(), nodes)
 	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": nonNilNodes(attachStorageNames(r.Context(), h.Store, nodes)),
+		"nodes": h.rows(r.Context(), nodes),
 		"limit": limit,
 	})
 }

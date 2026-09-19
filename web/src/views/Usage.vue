@@ -302,7 +302,7 @@ onMounted(load);
         <!-- Per bucket. -->
         <div v-if="perBucket.length" class="card card-body space-y-2" data-testid="usage-buckets">
           <h2 class="text-sm font-semibold">{{ t('usage.buckets.title') }}</h2>
-          <div class="overflow-x-auto">
+          <div class="tbl-scroll">
             <table class="w-full text-sm">
               <thead class="text-xs text-zinc-500 text-left">
                 <tr>

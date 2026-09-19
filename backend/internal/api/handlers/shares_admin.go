@@ -15,15 +15,24 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/tenant"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
 // SharesAdmin handles /api/admin/shares.
 type SharesAdmin struct {
 	Store db.Store
+	// Tenants resolves the origin every listed link is built on — the same
+	// resolver the share dialog's links use (handlers.Share). Zero value yields
+	// relative "/s/<token>" links, which every existing test constructing this
+	// handler by hand gets.
+	Tenants tenanturl.Resolver
 }
 
 // NewSharesAdmin constructs the handler.
 func NewSharesAdmin(store db.Store) *SharesAdmin { return &SharesAdmin{Store: store} }
+
+// AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
+func (h *SharesAdmin) AttachTenants(rv tenanturl.Resolver) { h.Tenants = rv }
 
 // List returns all shares with optional creator/active filters.
 func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +93,18 @@ func (h *SharesAdmin) List(w http.ResponseWriter, r *http.Request) {
 	// exists precisely to say "you have no shares".
 	if rows == nil {
 		rows = []*db.ShareWithMeta{}
+	}
+	// The canonical link, from the configured public origin. Issue #32: the
+	// Shares page built it from window.location.origin, so an administrator
+	// signed in on http://localhost:5212 copied a localhost link even with
+	// FILEX_PUBLIC_URL set — and on a proxied or multi-tenant host, the wrong
+	// origin. The share dialog has always used the server's answer; now so
+	// does this list.
+	base := h.Tenants.FromRequest(r)
+	for _, row := range rows {
+		if row != nil && row.Share != nil && row.Share.Token != "" {
+			row.URL = base + "/s/" + row.Share.Token
+		}
 	}
 	// Dual envelope: `items/total/page/page_size` is what the admin
 	// SPA expects (PaginatedResponse); `entries/limit/offset` keeps

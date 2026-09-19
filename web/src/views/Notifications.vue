@@ -281,7 +281,7 @@ function currentPage(): number {
     </div>
 
     <!-- Table -->
-    <div class="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+    <div class="tbl-scroll rounded-xl border border-zinc-200 dark:border-zinc-800">
       <table class="w-full text-sm">
         <thead class="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
           <tr>
@@ -299,8 +299,8 @@ function currentPage(): number {
             <td class="px-3 py-2 font-mono text-xs">{{ n.event }}</td>
             <td class="px-3 py-2"><Badge :tone="severityTone(n.severity)">{{ severityLabel(n.severity) }}</Badge></td>
             <td class="px-3 py-2">{{ n.text.title }}</td>
-            <td class="px-3 py-2 max-w-md truncate text-xs text-zinc-600 dark:text-zinc-400">
-              {{ n.text.body }}
+            <td class="px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
+              <div class="max-w-md truncate" :title="n.text.body">{{ n.text.body }}</div>
             </td>
             <td class="px-3 py-2 text-xs">
               <span v-if="n.user_id">user #{{ n.user_id }}</span>

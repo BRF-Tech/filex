@@ -34,8 +34,10 @@ The response includes the public URL (`https://files.example.com/s/<token>`) and
 if requested, the one‑time PIN.
 
 **Open** `/s/{token}`:
-- **A file** streams as a download (presigned redirect where the storage
-  supports it, otherwise streamed by filex). `?inline=1` renders inline.
+- **A file** streams as a download through filex. (An S3 storage with
+  `disable_presign: false` answers with a redirect to a presigned bucket URL
+  instead — off by default since v0.42.2, see [STORAGE.md](STORAGE.md#s3--s3-compatible).)
+  `?inline=1` renders inline.
 - **A folder** streams **every file under it as a ZIP** (internal folders like
   `.filex-trash` are skipped).
 - **PIN‑protected** links show a PIN form first; a correct PIN unlocks the
@@ -85,8 +87,8 @@ thumbnails on that page, the ZIP progress poll and the "preparing…" page do no
 curl -fSL -o 'q3.pdf' 'https://files.example.com/s/<token>?pin=12345678'
 ```
 
-`-L` matters: an S3-backed instance answers with a redirect to a presigned URL,
-and without it curl saves the redirect instead of the file. For a folder link
+`-L` matters: an S3 storage with presigned URLs turned on answers with a
+redirect to the bucket, and without it curl saves the redirect instead of the file. For a folder link
 the command targets `?zip=wait`, which blocks until the archive is built and
 then streams it.
 

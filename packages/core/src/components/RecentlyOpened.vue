@@ -13,6 +13,10 @@ interface RecentNode {
   name: string;
   mime?: string;
   last_opened?: string;
+  /** The raw row carries more (`storage`, `perm`, `read_only`, `type`,
+   *  the mtimes…) — the explorer turns it into a FileNode for the context
+   *  menu with the same converter Recent / Starred / a tag view use. */
+  [k: string]: unknown;
 }
 
 const props = defineProps<{
@@ -30,6 +34,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'open', node: RecentNode): void;
+  /** Right-click on a row. The tray does not build a menu of its own — the
+   *  explorer opens the ONE menu every listing row gets (owner: "CONTEXT
+   *  MENÜ HER YERDE AYNI OLMALI"), so a file here offers exactly what the
+   *  same file offers in its folder. */
+  (e: 'context', node: RecentNode, ev: MouseEvent): void;
   (e: 'error', message: string): void;
 }>();
 
@@ -101,8 +110,13 @@ watch(() => props.refreshKey, load);
     </header>
 
     <ul v-if="items.length">
-      <li v-for="n in items" :key="n.id">
-        <button type="button" @click="emit('open', n)" class="filex-recent-item">
+      <li v-for="n in items" :key="n.id" data-testid="recent-tray-item" :data-fe-path="n.path">
+        <button
+          type="button"
+          class="filex-recent-item"
+          @click="emit('open', n)"
+          @contextmenu.prevent="emit('context', n, $event)"
+        >
           <span class="filex-recent-name">{{ n.name }}</span>
           <span class="filex-recent-meta">{{ fmtTime(n.last_opened) }}</span>
         </button>

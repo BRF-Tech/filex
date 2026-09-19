@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { RouterView } from 'vue-router';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { RouterView, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useAuthStore } from '@/stores/auth';
@@ -9,7 +9,28 @@ import TopNav from './TopNav.vue';
 import Breadcrumbs from './Breadcrumbs.vue';
 import PendingOpsTray from './PendingOpsTray.vue';
 
-const sidebarOpen = ref(true);
+/* Below `lg` (1024px, the Tailwind breakpoint the sidebar's `lg:translate-x-0`
+   uses) the sidebar is a DRAWER over the page, with a backdrop. It must start
+   closed there: `ref(true)` opened it on top of every admin page a phone
+   visited, and the backdrop then swallowed the first tap (2026-09-19, caught
+   by cypress/e2e/41-users-crud at 700px). On a wide screen the ref is
+   irrelevant to layout — the column is always shown — so `true` keeps the
+   desktop exactly as it was. */
+const WIDE = '(min-width: 1024px)';
+const wideMq = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(WIDE) : null;
+const sidebarOpen = ref(wideMq ? wideMq.matches : true);
+const route = useRoute();
+// Choosing a page from the drawer closes it — the page is what was asked for.
+watch(() => route.fullPath, () => {
+  if (wideMq && !wideMq.matches) sidebarOpen.value = false;
+});
+// Crossing the breakpoint: a drawer left open must not stay open when the
+// window is narrowed (it would cover the page); widening restores the column.
+function onWideChange(ev: MediaQueryListEvent) {
+  sidebarOpen.value = ev.matches;
+}
+onMounted(() => wideMq?.addEventListener('change', onWideChange));
+onBeforeUnmount(() => wideMq?.removeEventListener('change', onWideChange));
 // ⚠ Said once, at the layout, rather than on each page: a visitor who is
 // refused a save should already know why before they try it. The refusal
 // itself is the server's (api/demo_guard.go) — this is the sign on the door.

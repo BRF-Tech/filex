@@ -161,6 +161,7 @@ import {
   injectTrashRow,
   hydrateTrashRow as hydrateTrashRowShared,
 } from './lib/listing';
+import { nodeRowToFileNode as nodeRowToFileNodePure } from './lib/nodeRow'; /* Recent / Starred / tag / Home rows — one shape, with `perm` + `read_only` */
 import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
 import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
 import { setNodeStarred } from './lib/star';
@@ -999,17 +1000,40 @@ function onNodeTagsChanged() {
 }
 
 function onRecentOpen(entry: { id: number; storage_id?: number; path: string; name: string }) {
-  // RecentlyOpened emits the bare row — synthesize a FileNode shaped
-  // enough for openNode to route into the editor / preview.
-  const node = {
-    type: 'file',
-    path: entry.path,
-    basename: entry.name,
-    extension: (entry.name.split('.').pop() || '').toLowerCase(),
-    id: entry.id,
-  } as unknown as FileNode;
+  // RecentlyOpened emits the bare row. The same converter Recent / Starred /
+  // a tag / Home use gives openNode a row with its storage-qualified path AND
+  // its own `perm` + `read_only`, so the editor-vs-preview split reads the
+  // row's level, not the folder's. The bare synthesis stays as the fallback
+  // for a row the converter cannot address (no storage name at a
+  // multi-storage root) — it was the only shape until 2026-09-19.
+  const node =
+    nodeRowToFileNode(entry as unknown as Record<string, unknown>) ??
+    ({
+      type: 'file',
+      path: entry.path,
+      basename: entry.name,
+      extension: (entry.name.split('.').pop() || '').toLowerCase(),
+      id: entry.id,
+    } as unknown as FileNode);
   showRecents.value = false;
   openNode(node);
+}
+
+/**
+ * Right-click on a row of the Recently-opened tray: the SAME menu a listing
+ * row gets (owner: "CONTEXT MENÜ HER YERDE AYNI OLMALI"). The tray's row is
+ * the raw node row the endpoint answers with, so it goes through
+ * `nodeRowToFileNode` like Recent / Starred / a tag / Home do and arrives
+ * with its own `perm` + `read_only`; `onContextTarget` then treats it like a
+ * Home card — a target outside this pane's listing. The tray closes first,
+ * as it does on open: it is a modal over the listing, and the verb the menu
+ * runs (Rename, Move to…) opens a dialog of its own.
+ */
+function onRecentContext(row: Record<string, unknown>, ev: MouseEvent) {
+  const node = nodeRowToFileNode(row);
+  if (!node) return;
+  showRecents.value = false;
+  void onContextTarget(node, ev);
 }
 
 // Resolution order for each external viewer: explicit config override → live
@@ -1593,15 +1617,22 @@ function onToolbarSearch(v: string) {
  * searches what is on screen.
  */
 const driveScopeLabel = computed(() => {
-  /* gorunum:v3-shell — Home is not a place to search IN. Its three blocks are
-     an overview of everything, so "Search in Home" would name a scope that
-     does not exist; the placeholder falls back to the everywhere wording. */
-  if (navView.value === 'home') return '';
-  if (navView.value === 'tag') return navTag.value;
-  if (navView.value) return t(`sidenav.${navView.value}`);
-  const rel = currentPath.value.replace(/\/+$/, '');
-  const last = rel.split('/').filter(Boolean).pop();
-  return last || adapter.value || '';
+  /* ⚠ The field searches the WHOLE storage (`?action=search` filters by
+     storage id only — see handlers/manager.go vfSearch), and at the virtual
+     root every storage. Naming the open FOLDER here ("Search in Photos") was
+     a lie the user found: results came from the whole storage. The scope is
+     the storage; the folder-scoped box is FilterBar's "Filter in this
+     folder…". Home, the virtual root and the cross-storage views (Recent,
+     Starred, Shared, tags) have no single storage → the everywhere wording.
+     ⚠ `multiStorageRoot` is the MODE (the admin explorer is always in it), not
+     the place: inside a storage the scope is that storage. Gating on the mode
+     printed "Search all storages" on every admin folder (caught by
+     e2e/tests/107 on the v0.42.2 chain). */
+  if (navView.value || atVirtualRoot.value) return '';
+  const name = adapter.value;
+  if (!name) return '';
+  const st = (props.config.storages ?? []).find((s) => s.name === name);
+  return st?.label || name;
 });
 
 /**
@@ -1680,70 +1711,19 @@ async function loadQuota() {
 }
 
 /**
- * nodeRowToFileNode — the starred / recently-opened endpoints answer with raw
- * node rows (relative `path`, numeric `storage_id`), not the listing shape.
- *
- * The storage NAME is what a qualified path needs, and a node row does not
- * carry the id-to-name mapping. The backend fills `storage` for exactly this
- * (handlers/shared.go, attachStorageNames); against an older server the only
- * safe fallback is the single-storage case — guessing in a multi-storage
- * install sends the user to a path in somebody else's drive.
+ * nodeRowToFileNode — the starred / recently-opened / tag endpoints answer
+ * with raw node rows (relative `path`, numeric `storage_id`), not the listing
+ * shape. The conversion itself lives in `lib/nodeRow` (pure, unit-tested);
+ * this binds it to the explorer's config. Every view that lists such rows —
+ * Recent, Starred, a tag, the Home cards, the Recently-opened tray — goes
+ * through here, so they all carry the same `perm` + `read_only` the context
+ * menu gates its write verbs on.
  */
-/** tablo:t1 — an RFC3339 stamp from a node row as unix ms, or undefined. A
- *  string we cannot parse is left undefined rather than turned into `NaN`,
- *  which would print as "Invalid Date" and sort unpredictably. */
-function rowMillis(v: unknown): number | undefined {
-  if (typeof v !== 'string' || !v) return undefined;
-  const ms = Date.parse(v);
-  return Number.isFinite(ms) ? ms : undefined;
-}
-
 function nodeRowToFileNode(row: Record<string, unknown>): FileNode | null {
-  const rel = String(row?.path ?? '').replace(/^\/+/, '');
-  if (!rel) return null;
-  const configured = props.config.storages ?? [];
-  const storageName =
-    typeof row.storage === 'string' && row.storage
-      ? row.storage
-      : configured.length === 1
-        ? configured[0].name
-        : '';
-  if (multiStorageRoot.value && !storageName) return null;
-  const name = String(row.name ?? rel.split('/').pop() ?? '');
-  const isDir = row.type === 'dir';
-  const size = typeof row.size === 'number' ? row.size : 0;
-  const id = typeof row.id === 'number' ? row.id : undefined;
-  return {
-    type: isDir ? 'dir' : 'file',
-    id,
-    /* tablo:t1 — ⚠⚠ THE DATE. A node row carries `backend_mtime` (what the
-       storage says) and `db_mtime` (what our last scan recorded) as RFC3339
-       strings; `FileNode.last_modified` is unix MILLISECONDS. Nothing mapped
-       between the two, so every row from Recent, Starred and a tag view
-       arrived with no date at all — measured on Recent: eleven rows, eleven em
-       dashes in the Modified column, and a Modified column header you could
-       click that then sorted nothing. It also made the date grouping this view
-       is supposed to show impossible, because every row fell in the "No date"
-       bucket. Storage first: `backend_mtime` is the file's own truth and
-       `db_mtime` only says when we last looked at it. */
-    last_modified: rowMillis(row.backend_mtime) ?? rowMillis(row.db_mtime),
-    path: storageName ? `${storageName}://${rel}` : rel,
-    basename: name,
-    extension: isDir
-      ? ''
-      : name.includes('.')
-        ? (name.split('.').pop() || '').toLowerCase()
-        : '',
-    storage: storageName,
-    visibility: 'private',
-    size,
-    file_size: size,
-    mime_type: typeof row.mime === 'string' ? row.mime : '',
-    // Keyed by node id. A file with no rendered thumbnail 404s here and the
-    // view falls back to its icon — the contract the ordinary listing has too.
-    thumb_url: !isDir && id !== undefined ? `/api/files/thumb/${id}` : undefined,
-    extra_metadata: {},
-  } as unknown as FileNode;
+  return nodeRowToFileNodePure(row, {
+    storages: props.config.storages ?? [],
+    multiStorageRoot: multiStorageRoot.value,
+  });
 }
 
 /** GET one of the view endpoints. Returns rows already in listing shape. */
@@ -1833,6 +1813,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
     navTag.value = '';
     trashMode.value = false;
     e2eRoot.value = '';
+    forgetFolderPerm();
     selection.clear();
     files.value = [];
     dirname.value = NAV_VIEW_DIRNAME.home;
@@ -1866,6 +1847,7 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   navTag.value = '';
   trashMode.value = false;
   e2eRoot.value = '';
+  forgetFolderPerm();
   selection.clear();
   try {
     files.value = await fetchNavRows(kind);
@@ -1906,6 +1888,7 @@ async function loadTagView(tag: string) {
   navTag.value = name;
   trashMode.value = false;
   e2eRoot.value = '';
+  forgetFolderPerm();
   selection.clear();
   try {
     const rows = await fetchTaggedRows(name, {
@@ -2054,11 +2037,83 @@ function permCanEdit(p: string | undefined): boolean {
 function permIsOwner(p: string | undefined): boolean {
   return p === 'owner';
 }
-// Effective perm for a selection: a single entry's own perm (falls back to the
-// directory perm), else the directory perm for multi-select / background.
-function selPerm(sel: FileNode[]): string {
-  if (sel.length === 1 && typeof sel[0]?.perm === 'string') return sel[0].perm as string;
-  return dirPerm.value;
+/* ⚠⚠ THE CONTEXT MENU MUST BE THE SAME EVERYWHERE (owner, 2026-09-19: "son
+ * kullanılanlar, ana sayfa gibi sayfalarda context menu eksik kalıyor.
+ * CONTEXT MENÜ HER YERDE AYNI OLMALI").
+ *
+ * `dirPerm` / `dirReadOnly` describe the FOLDER being listed, and only
+ * `load()` sets them. Recent, Starred, Shared, a tag view and Home list rows
+ * from every storage and have no folder — so whatever folder was open LAST
+ * answered for them. On the landing page that is no folder at all
+ * (`dirPerm === ''`), and `permCanEdit('')` is false, so the menu on a Home
+ * card or a Recent row came up without Rename / Delete / Move to / Share.
+ * After a writable folder had been visited the stale level said yes to
+ * everything, including rows on a read-only mount. Intermittent, therefore
+ * reported as "eksik kalıyor" rather than "yok".
+ *
+ * Three rules restore one menu:
+ *   1. entering a virtual view forgets the folder (`forgetFolderPerm`), so
+ *      nothing stale can leak into it;
+ *   2. a row answers for itself — its own `perm` (every listing carries it
+ *      now, `handlers/meta.go`) and its own storage's `read_only`;
+ *   3. a multi-selection is as weak as its weakest row, because the server
+ *      refuses the whole batch on the one row the caller may not touch.
+ * What stays hidden in a virtual view is only what is structurally
+ * impossible there — New folder, Upload, Paste need a destination folder
+ * (`atVirtualRoot`).
+ */
+function forgetFolderPerm() {
+  dirPerm.value = '';
+  dirReadOnly.value = false;
+}
+/** A view whose rows span every storage: no folder is behind it. */
+const inVirtualView = computed(() => !!navView.value && navView.value !== 'trash');
+/** The row's own level; the folder's when the row has none. In a virtual view
+ *  a row without a level (a server older than `handlers/meta.go`'s `perm`)
+ *  is ungated — the server enforces, this only shapes the menu — rather than
+ *  gated by an empty folder level that would hide every write verb. */
+function rowPerm(n: FileNode): string | undefined {
+  if (typeof n.perm === 'string') return n.perm;
+  return inVirtualView.value ? undefined : dirPerm.value;
+}
+/** The row sits on a read-only storage: its own `read_only` (nav/tag rows),
+ *  else the host's storage list — a folder listing's rows carry no flag of
+ *  their own because `dirReadOnly` already answers for the whole folder. */
+function nodeReadOnly(n: FileNode): boolean {
+  if (n.read_only === true) return true;
+  const storage = typeof n.storage === 'string' ? n.storage : '';
+  if (!storage) return false;
+  return (props.config.storages ?? []).some((s) => s.name === storage && s.readOnly === true);
+}
+/** May the caller write THIS row — level and read-only mount folded together.
+ *  The one predicate behind the editor/preview split and the menu's write
+ *  verbs, so a Home card and a listing row cannot disagree. */
+function nodeCanEdit(n: FileNode): boolean {
+  return permCanEdit(rowPerm(n)) && !nodeReadOnly(n);
+}
+const PERM_RANK: Record<string, number> = { none: 0, viewer: 1, editor: 2, owner: 3 };
+// Effective perm for a selection: a single entry's own perm, the WEAKEST of a
+// multi-selection's own perms, else the directory perm (background / rows
+// that carry no level).
+function selPerm(sel: FileNode[]): string | undefined {
+  if (sel.length === 0) return dirPerm.value;
+  let weakest: string | undefined;
+  let ungated = false;
+  for (const n of sel) {
+    const p = rowPerm(n);
+    if (p === undefined) {
+      ungated = true;
+      continue;
+    }
+    if (weakest === undefined || (PERM_RANK[p] ?? 0) < (PERM_RANK[weakest] ?? 0)) weakest = p;
+  }
+  // An ungated row (no level, unwired ACL) never strengthens a selection
+  // that also holds a gated one; alone, it stays ungated.
+  return weakest ?? (ungated ? undefined : dirPerm.value);
+}
+/** Any row of the selection on a read-only storage → the selection is. */
+function selReadOnly(sel: FileNode[]): boolean {
+  return sel.some(nodeReadOnly);
 }
 // Can the current user write into the directory being viewed? Gates the
 // toolbar New Folder / Upload / Paste + drag-drop upload.
@@ -3134,7 +3189,7 @@ function openNode(n: FileNode) {
   const ext = (n.extension || '').toLowerCase();
   // RBAC: viewers (no edit on this item) always get the read-only preview
   // modal — never the editable surface. This is the "view vs edit" split.
-  previewMode.value = permCanEdit((n.perm as string) ?? dirPerm.value)
+  previewMode.value = nodeCanEdit(n)
     ? previewModeForExt(ext)
     : 'view';
   previewTarget.value = n;
@@ -3236,7 +3291,7 @@ function openNodeInNewTab(n: FileNode) {
   }
   // RBAC: a viewer (no edit on this item) can't use the editable "Aç"
   // surface — drop to the read-only in-page preview instead.
-  if (!permCanEdit((n.perm as string) ?? dirPerm.value)) {
+  if (!nodeCanEdit(n)) {
     previewNode(n);
     return;
   }
@@ -3663,7 +3718,10 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   // RBAC: gate mutating actions when the caller lacks edit on the target. The
   // "İzinler" (permissions) action shows only for owners on RBAC-on storages.
   const p = selPerm(sel);
-  const w = permCanEdit(p); // may write here
+  // May write to the selection: the weakest row's level, and no row on a
+  // read-only mount — `selReadOnly` is what `dirReadOnly` cannot answer in a
+  // view whose rows come from several storages (Recent, Starred, a tag, Home).
+  const w = permCanEdit(p) && !selReadOnly(sel);
   // Unified "Paylaş / İzinler" popup: public share link (editor+) + per-user
   // permissions (owner-only, decided inside the modal).
   // Unified "Paylaş / İzinler" popup carries the public share link, per-user
@@ -3716,7 +3774,10 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
        They borrow the clipboard verbs' marks, which is what they are. */
     { key: 'move-to', label: t('ctx.move_to'), icon: 'cut', hidden: !any || !w, disabled: !any },
     { key: 'copy-to', label: t('ctx.copy_to'), icon: 'copy', hidden: !any, disabled: !any },
-    { key: 'paste', label: t('ctx.paste'), hidden: !w, disabled: !clipboard.value.mode },
+    /* Paste needs a destination folder; a virtual view (Recent / Starred /
+       Shared / a tag / Home) has none, so it is the one write verb the row
+       menu does not carry there — every per-row verb above and below does. */
+    { key: 'paste', label: t('ctx.paste'), hidden: !w || atVirtualRoot.value, disabled: !clipboard.value.mode },
     { divider: true, key: 'sep-meta', label: '', hidden: !singleHasId && !canStar },
     /* yildiz:s1 — "star must be an action, like a tag" (owner, v0.30.0).
        Beside Tags on purpose: they are the same kind of verb, and this is the
@@ -4121,7 +4182,7 @@ async function onDocumentCreated(file: { path: string; name: string; ext: string
   previewTarget.value = node;
   // ⚠ NOT previewModeForExt: that sends office types to 'view', which is right
   // for a peek at somebody else's file and wrong for the one you just made.
-  previewMode.value = permCanEdit((node.perm as string) ?? dirPerm.value) ? 'edit' : 'view';
+  previewMode.value = nodeCanEdit(node) ? 'edit' : 'view';
   showPreview.value = true;
   emit('file-opened', { path: node.path, basename: node.basename });
   void markRecent(node);
@@ -7294,6 +7355,7 @@ function closeRecoveryKey() {
             :limit="20"
             :refresh-key="recentRefreshKey"
             @open="onRecentOpen"
+            @context="onRecentContext"
             @error="(msg: string) => emit('error', { message: msg, context: { op: 'recents' } })"
           />
         </div>

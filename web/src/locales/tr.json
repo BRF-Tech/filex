@@ -247,7 +247,7 @@
       "region": "Boş bırakılırsa \"auto\" kullanılır.",
       "endpoint": "AWS S3 için boş bırakın. S3 uyumlu diğer tüm depolar kendi endpoint'ini ister.",
       "pathStyle": "AWS dışındaki tüm depolarda açık olmalı. Endpoint girildiyse ve bu alana hiç dokunulmadıysa kendiliğinden açılır.",
-      "disablePresign": "Depo, SDK'nın imzaladığı URL'leri reddediyorsa açın (Ceph RGW / bazı Hetzner kurulumları SignatureDoesNotMatch döner); yüklemeler o zaman arka uç üzerinden akar.",
+      "disablePresign": "Varsayılan olarak açık: yüklemeler ve herkese açık paylaşım bağlantılarındaki indirmeler filex üzerinden akar; kova endpoint'inin tarayıcıdan erişilebilir olması gerekmez (yalnız yerel ağdaki MinIO doğrudan çalışır). Yalnızca endpoint kullanıcıların tarayıcısından erişilebiliyorsa (AWS, herkese açık MinIO) ve tarayıcının kovayla doğrudan konuşmasını istiyorsanız kapatın — çok büyük dosyalarda daha hızlıdır, ama depo SDK'nın imzaladığı URL'leri kabul etmelidir (Ceph RGW / bazı Hetzner kurulumları SignatureDoesNotMatch döner).",
       "sftpAuth": "Parola ya da özel anahtardan biri zorunludur.",
       "keyPath": "Sunucudaki anahtar dosyasının yolu; depo başlarken okunur. PEM alanı boşken kullanılır.",
       "knownHosts": "Katı sunucu anahtarı denetimi için OpenSSH known_hosts yolu. Varsayılan, ~/.filex/known_hosts içinde ilk bağlantıda güven.",

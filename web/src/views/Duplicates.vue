@@ -165,7 +165,7 @@ onMounted(async () => {
           </span>
         </button>
 
-        <div v-if="expanded.has(g.key)" class="border-t border-zinc-200 dark:border-zinc-800 overflow-x-auto">
+        <div v-if="expanded.has(g.key)" class="border-t border-zinc-200 dark:border-zinc-800 tbl-scroll">
           <table class="w-full text-sm">
             <thead class="bg-zinc-50 dark:bg-zinc-900 text-left text-xs text-zinc-500">
               <tr>
@@ -187,7 +187,7 @@ onMounted(async () => {
                 </td>
                 <td class="px-4 py-2 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{{ storageName(n.storage_id) }}</td>
                 <td class="px-4 py-2 tabular-nums whitespace-nowrap">{{ formatBytes(n.size, locale) }}</td>
-                <td class="px-4 py-2 font-mono text-xs text-zinc-500 truncate max-w-[160px]" :title="n.etag">{{ n.etag || '—' }}</td>
+                <td class="px-4 py-2 font-mono text-xs text-zinc-500"><div class="truncate max-w-[160px]" :title="n.etag">{{ n.etag || '—' }}</div></td>
               </tr>
             </tbody>
           </table>

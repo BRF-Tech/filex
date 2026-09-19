@@ -983,7 +983,7 @@ export const en: Record<string, string> = {
   'storages.fields.share': 'Share',
   'storages.fields.domain': 'Domain / workgroup',
   'storages.fields.dialTimeout': 'Connect timeout (seconds)',
-  'storages.fieldHelp.disablePresign': 'Turn on when the store rejects SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch); uploads then stream through the backend.',
+  'storages.fieldHelp.disablePresign': 'On by default: uploads and the downloads behind public share links stream through filex, so the bucket endpoint never has to be reachable from a browser (a LAN-only MinIO just works). Turn it off only when the endpoint is reachable from your users\' browsers (AWS, a public MinIO) and you want them to talk to the bucket directly — faster for very large files, and the store must accept SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch).',
   'storages.fieldHelp.endpoint': 'Leave empty for AWS S3. Any S3-compatible store needs its endpoint.',
   'storages.fieldHelp.hostKey': 'A single public key in authorized_keys / known_hosts line form.',
   'storages.fieldHelp.insecureSkipHostKey': 'Accepts any host key. Only for throwaway hosts.',
@@ -1122,8 +1122,13 @@ export const en: Record<string, string> = {
   'newdoc.create': 'Create',
   'newdoc.creating': 'Creating…',
   'newdoc.cancel': 'Cancel',
+  // ⚠ The top search field searches the WHOLE storage (and every storage at
+  // the root) — never only the open folder. The scope named here is therefore
+  // the storage, not the folder; "Filter in this folder…" (FilterBar) is the
+  // folder-scoped one. It used to say "Search in Photos" for a folder called
+  // Photos, which was a lie (2026-09-19).
   'drive.search.placeholder': 'Search in {scope}',
-  'drive.search.placeholder_all': 'Search your files',
+  'drive.search.placeholder_all': 'Search all storages',
   'drive.search.hint_title': 'Search everywhere and run commands ({combo})',
   'drive.storage.used': '{used} of {total} used',
   'drive.storage.used_unlimited': '{used} used',

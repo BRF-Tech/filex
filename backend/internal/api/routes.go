@@ -452,6 +452,7 @@ func BuildRouter(d *Deps) http.Handler {
 	auditH.DemoMode = d.Cfg.Demo.Mode
 	syncAdmH := handlers.NewSyncAdmin(d.Store)
 	sharesAdmH := handlers.NewSharesAdmin(d.Store)
+	sharesAdmH.AttachTenants(tenants)
 	// Storage usage + cost (issue #20). The report bucket is an ordinary
 	// storage, looked up by name, so the credentials and the encryption are
 	// the ones the operator already configured rather than a second copy.
@@ -486,6 +487,9 @@ func BuildRouter(d *Deps) http.Handler {
 	trashH.AttachSearchIndex(d.Index)
 	trashH.AttachACL(d.ACL)
 	metaH := handlers.NewMeta(d.Store)
+	// Starred / recent / tag rows carry the caller's `perm` like a folder
+	// listing does — the explorer's context menu is the same in every view.
+	metaH.AttachACL(d.ACL)
 	sharedH := handlers.NewShared(d.Store)
 	sharedH.AttachThumbSigner(thumbSigner)
 	quotaH := handlers.NewQuota(d.Quota, d.Store)

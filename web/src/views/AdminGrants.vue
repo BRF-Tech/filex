@@ -10,6 +10,7 @@ import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import Spinner from '@/components/ui/Spinner.vue';
 import Badge from '@/components/ui/Badge.vue';
+import TableScroll from '@/components/ui/TableScroll.vue';
 
 const { t } = useI18n();
 const toast = useToastStore();
@@ -78,7 +79,7 @@ async function revoke(g: AdminGrant) {
     </div>
 
     <div v-if="loading" class="card card-body text-center text-zinc-500"><Spinner /></div>
-    <div v-else class="card overflow-x-auto">
+    <TableScroll v-else class="card">
       <table class="w-full text-sm">
         <thead class="text-left text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
           <tr>
@@ -86,7 +87,7 @@ async function revoke(g: AdminGrant) {
             <th class="px-4 py-2 font-medium">{{ t('grants.storage') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('grants.path') }}</th>
             <th class="px-4 py-2 font-medium">{{ t('grants.level') }}</th>
-            <th class="px-4 py-2 font-medium text-right">{{ t('common.actions') }}</th>
+            <th class="px-4 py-2 font-medium text-right tbl-actions">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -99,7 +100,7 @@ async function revoke(g: AdminGrant) {
             <td class="px-4 py-2">{{ g.storage_name }}</td>
             <td class="px-4 py-2 font-mono text-xs">{{ g.path_prefix || '/' }}<span v-if="g.is_dir && g.path_prefix" class="text-zinc-400">/…</span></td>
             <td class="px-4 py-2"><Badge :tone="levelTone(g.level)">{{ g.level }}</Badge></td>
-            <td class="px-4 py-2 text-right">
+            <td class="px-4 py-2 text-right tbl-actions">
               <button
                 class="inline-flex items-center gap-1 text-rose-600 hover:text-rose-500 text-xs"
                 @click="revoke(g)"
@@ -113,6 +114,6 @@ async function revoke(g: AdminGrant) {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   </div>
 </template>
