@@ -19,16 +19,142 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved —
 see [Updates](./UPDATES.md).
 
-::: tip Latest — v0.41.4, 15 September 2026
-A fix release that carries 0.41.3, whose release build never finished. Only the checkbox selects now, and any other click or tap on a file or folder opens it — beside the name, on the size and date cells, with a selection, with Ctrl held (#26). Grid and gallery cards gained a checkbox of their own, shown on hover and on every card once something is selected, so a phone can pick several files after a long press. From 0.41.3: on a phone one tap opens, even where the browser swallows the click, and the external services Test button says what its probe saw — an HTTP status, a timeout or the connection error — with a docservice hint for an ONLYOFFICE 502 (#17).
+::: tip Latest — v0.42.1, 19 September 2026
+A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the same credentials (#31) — the bucket root itself is still never mounted. A read-only storage looks read-only to the people using it: a tag on its row, no + New menu, no New folder or Upload on it (#30). A scan of a large S3 storage is one listing instead of one request per folder, only one run per storage walks at a time, and the per-storage scan interval is on the form (#33). And when FILEX_PUBLIC_URL was never set, administrators see a banner instead of finding out from a share link to localhost (#32).
 
-Upgrade notes that matter: a click beside a name, or a Ctrl/Shift click, no longer selects — tick the checkbox. POST /api/admin/external/:name/test gains a detail field. No migrations.
+Upgrade notes: no migrations. POST /api/admin/storages/{id}/sync answers status "running" instead of starting a second scan while one is in flight; GET /api/files/capabilities gains public_url_configured; POST /api/admin/storages/discover is new.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.41.4
-docker pull ghcr.io/brf-tech/filex:full-v0.41.4
+docker pull ghcr.io/brf-tech/filex:slim-v0.42.1
+docker pull ghcr.io/brf-tech/filex:full-v0.42.1
 ```
+
+## v0.42.1
+
+<span class="filex-release-date">19 September 2026</span>
+
+A fix release for four reports on 0.42.0. A bucket with several top-level folders is one form now, not one per folder: Storages → Add lists the folders under the root you typed and creates one storage per ticked folder with the same credentials (#31) — the bucket root itself is still never mounted. A read-only storage looks read-only to the people using it: a tag on its row, no + New menu, no New folder or Upload on it (#30). A scan of a large S3 storage is one listing instead of one request per folder, only one run per storage walks at a time, and the per-storage scan interval is on the form (#33). And when FILEX_PUBLIC_URL was never set, administrators see a banner instead of finding out from a share link to localhost (#32).
+
+Upgrade notes: no migrations. POST /api/admin/storages/{id}/sync answers status "running" instead of starting a second scan while one is in flight; GET /api/files/capabilities gains public_url_configured; POST /api/admin/storages/discover is new.
+
+## What changed
+
+A fix release for four reports on 0.42.0.
+
+### Added
+
+- **Mount several folders at once** (#31). *Storages → Add* lists the folders
+  directly under the root you typed — the bucket root included — and creates
+  one storage per ticked folder with the same credentials, so a bucket with
+  N top-level folders is one form, not N. The bucket root itself is still
+  never mounted (`ROOT_PATH_FORBIDDEN`); this is how "the whole bucket" is
+  offered instead. Behind it: `POST /api/admin/storages/discover`
+  `{driver, config}` → `{ok, root_key, folders:[{name, root}]}`. Every driver
+  with a root field (s3, local, sftp, ftp, webdav, smb).
+- **Scan every (minutes)** on the storage form (#33). The per-storage poll
+  cadence (`sync_interval_s`) existed on the row and in the API and was
+  reachable from no form; empty = the server default (15 min).
+- **A sign when `FILEX_PUBLIC_URL` is unset** (#32). Administrators see a
+  banner in the panel until it is set: every share link, file-request link
+  and mailed link is otherwise built on `http://localhost:5212`. The API says
+  the same as `public_url_configured` on `GET /api/files/capabilities`. The
+  report had set `FILEX_APPLICATION_URL`, a variable filex has never read;
+  [CONFIGURATION.md → Public URL](./CONFIGURATION.md#public-url) now says
+  so in as many words.
+
+### Changed
+
+- **One sync run per storage at a time** (#33). "Scan now" while a run is
+  walking starts no second full walk over the same rows — it answers **202**
+  with `status: "running"`, the scan asked for being the one in progress; a
+  poll tick that finds the previous run still in flight is skipped and logged
+  at INFO, not counted as a failure.
+- **An S3 scan is one listing, not one request per folder** (#33). The S3
+  driver hands the sync worker the whole tree in a single un-delimited
+  `ListObjectsV2` pass (`storage.TreeWalker`), so 150,000 objects in a few
+  thousand prefixes cost ~150 calls instead of a few thousand; the walk then
+  reads directories out of memory. Over two million objects the worker falls
+  back to the per-directory walk. Same rows, same order guarantees, measured
+  against the per-directory walk.
+
+### Fixed
+
+- **A read-only storage looks read-only to its users** (#30). The navigation
+  panel's storage row carries a *Read-only* tag and its Home card says so; on
+  such a storage the panel's **+ New** menu, the toolbar's New folder / Upload
+  and the write entries of the context menu are not offered. Before, only
+  the admin list had an "RO" badge and every attempt ended in the server's
+  403. Sharing a read-only file is still allowed — the ACL level is unchanged,
+  only the write affordances go (`@brftech/filex-core` `permCanEdit` folds the
+  listing's `read_only` in, so every embed gets the same).
+
+### Upgrade notes
+
+- No migrations. `POST /api/admin/storages/{id}/sync` answers 202 with
+  `status: "running"` (instead of `"started"`) while a run is already in
+  flight; nothing is started twice.
+- A client that reads `GET /api/files/capabilities` sees one more boolean,
+  `public_url_configured`.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0421---2026-09-19)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.1`
+
+## v0.42.0
+
+<span class="filex-release-date">16 September 2026</span>
+
+## What changed
+
+### Changed
+
+- **A single click selects; a double click opens (mouse).** The default open
+  gesture is now the classic desktop file-manager one — a single click selects a
+  row/card, a double click opens it, and **Enter** opens the selection. This
+  reverses 0.41.x's "any click opens" for a mouse; it is a per-viewer setting
+  (`ExplorerConfig.openTrigger: 'single' | 'double'`, default `'double'`), and
+  the desktop app exposes it under **Settings → Open files with**.
+  - ⚠ **Touch is untouched.** A finger tap always opens (the mobile convention,
+    and there is no hover-to-select on a touchscreen); the checkbox is still the
+    one click that selects, on every device and in either mode.
+
+### Added
+
+- **`ExplorerConfig.openInHost`** — when set, opening a file emits `file-opened`
+  and the explorer does NOT mount its own in-page preview; the host opens the
+  file itself. The desktop app uses this to open **every document in its own
+  window**, one per file (any type), so a future editor drops into the same
+  path. Directories still navigate inline; Space quick-look still peeks in-page;
+  E2E-encrypted files keep the in-page decrypted preview.
+- **Desktop: frameless document + main windows with our own window controls.**
+  The native OS caption is gone. On Windows/Linux the app draws its own
+  minimize / maximize / close (the main window in a slim title bar, each document
+  window in a reserved top bar so it never sits on the viewer's own top row —
+  OnlyOffice's profile/share stays clear); on macOS the native traffic lights
+  are kept (`titleBarStyle: 'hiddenInset'`, top-left) and no buttons are drawn.
+  The top strip is the drag handle.
+- **Window / tab titles name the open document.** A document window's title (and,
+  on the web, the `/files/edit` browser tab) is the file's name rather than the
+  server's Branding name; the main explorer window stays the whitelabel name, or
+  `filex` when the server sets no branding. On the desktop the title is pinned in
+  the main process (`page-title-updated` guard) so the admin SPA can't override
+  it; on the web the router's per-route title (`lib/documentTitle`) names the
+  file on the editor route.
+
+[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0420---2026-09-16)
+
+- **Documentation** — &lt;https://docs.filex.sh>
+- **Report a bug** — &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** — &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** — &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.42.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.42.0`
 
 ## v0.41.4
 
@@ -2850,159 +2976,14 @@ Forgetting the password on an encrypted folder no longer means losing the files.
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.31.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.31.0`
 
-## v0.30.1
-
-<span class="filex-release-date">4 September 2026</span>
-
-A one-line patch. Opening Recent, Starred, Shared or Trash put the raw internal name of the view in the tab — `.shared` instead of Shared.
-
-## What changed
-
-### Fixed
-
-- **The tab strip printed the raw sentinel for the new views** — a tab opened on
-  Recent, Starred or Shared with me read `.recent`, `.starred`, `.shared`.
-  Trash was right, and that is the whole story: the sentinel-to-label map was
-  written twice, and when the three new views arrived only the breadcrumb copy
-  was extended. A second copy of a mapping is a second chance to forget it, and
-  the symptom hides itself — the old view keeps working, so it reads as "only
-  the new one is missing something" rather than as a bug. There is one map now
-  (`lib/listing.ts`), and every surface that renders a path segment reads it.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0301---2026-09-05)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.30.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.30.1`
-
-## v0.30.0
-
-<span class="filex-release-date">4 September 2026</span>
-
-The explorer grew a collapsible navigation panel: Recent, Starred, Shared with me, tags and Trash on the left, with Upload as the primary action. It is part of the shared component, so it reaches the npm packages and every embed, not just the admin app — and `uiProfile: 'simple'` turns the admin-facing parts off for an end user. Connecting a client and minting an API key moved into the explorer too; both surfaces existed but lived only in the admin app. On the search side, the index now repairs itself after an upgrade instead of waiting for someone to rebuild it by hand, filename ranking is a port of VS Code's Quick Open scorer, and multi-word content search was an OR — so adding a word made the result set larger rather than smaller.
-
-## What changed
-
-Everything here came out of two issues opened by the same person, and the most
-useful thing in the release is the one we got wrong: v0.29.0 fixed filename
-search and **nobody could see it**, because the index only gains new fields for
-documents that are re-indexed and nothing ever rebuilt it. He measured our own
-demo, correctly concluded that nothing had changed, and reported that content
-search "doesn't work at all" — it was the same cause. A fix an existing install
-cannot reach is not shipped.
-
-### Added
-
-- **A collapsible navigation panel in the explorer.** Upload as the primary
-  action, then Recent, Starred, Shared with me and Trash, then the storages the
-  caller can see, with the ones reached through a grant marked as shared. It
-  collapses to a 56px icon rail rather than disappearing — a panel that vanishes
-  takes its own way back with it — and below 560px it is a drawer instead of a
-  column, so the listing keeps its width (measured: 388px with the drawer open
-  and closed). The collapsed choice is remembered per viewer.
-
-  It lives in `@brftech/filex-core`, so the web app, the desktop app and every
-  embed get the same panel from one implementation. `sideNav` turns it on or
-  off; the web component also takes a `sidenav` attribute for hosts that never
-  touch JavaScript.
-
-- **`uiProfile: 'standard' | 'simple'`.** The reporter's argument was that most
-  of his users are not in IT and will not relearn a file manager: tabs, a split
-  pane, four view modes and mount instructions are a power-user tool. `simple`
-  turns those off and expands the panel; nothing is removed from the build, and
-  an embedder can set either profile. The admin panel keeps today's defaults.
-
-- **Connections and API keys from inside the explorer.** Both surfaces existed
-  and neither was reachable: our own web app wired the buttons itself, so an
-  embedder mounting `<filex-explorer>` gave their users no way to see how to
-  mount a drive or to mint a token. `SelfTokensModal` has moved out of the web
-  app into the shared component and the web copy is gone.
-
-  Why it had never moved: the web version hid the write and delete scopes from
-  viewer accounts by reading a store only the web app has. The shared component
-  does not reproduce that. It offers every scope and lets the server refuse —
-  which it already does, in words worth reading (`scope 'write' is not
-  available here`). Asking is not granting, and a UI-side role check hides the
-  surface from exactly the accounts that need it. For a year the only place to
-  mint the token the FTPS guide names was the admin panel.
-
-- **`GET /api/files/manager/shared-with-me`** — the nodes a caller holds a grant
-  on. The data existed in `file_grants`; the only listing over it was
-  path-scoped and owner-only, so "what has been shared with me" had no answer.
-  Tenant-scoped explicitly, like search.
-
-### Fixed
-
-- **The search index now repairs itself after an upgrade.** On start it compares
-  the document schema it was built with; if it is behind, it builds a
-  replacement **alongside** the live index and swaps it in atomically. The old
-  index answers every query until the swap, and extracted text is carried across
-  document by document rather than re-derived — which is what makes this safe to
-  do automatically. The blackout that argument was made against in v0.29.0 does
-  not happen: measured on 20 202 documents, the rebuild took 2.96 s and 601
-  searches issued during it returned 0 errors and 0 missing hits.
-
-  An interrupted rebuild is discarded and retried; a crash during the swap
-  restores the known-good index; it refuses and keeps serving the old index if
-  the disk cannot hold both. `FILEX_SEARCH_AUTO_REBUILD=0` turns it off — but
-  off by default would reproduce exactly the failure it exists to fix.
-
-- **Filename ranking is now a port of VS Code's Quick Open scorer.** The
-  reporter's words were "VS Code does this fine, I can't do it here", and he was
-  pointing at a specific method, so we ported it: a subsequence match scored
-  with position bonuses (start of name, after a path separator, after `_ - .`,
-  camelCase humps, runs of consecutive characters), the query split into pieces
-  matched independently so **word order does not matter**, and the filename
-  scored separately from its folders and weighted above them. Bleve still
-  retrieves the candidates; the scorer re-ranks them and, crucially, **drops
-  candidates that do not answer every piece**.
-
-  Measured against the corpus he tested on: `Code main` went from nine results
-  to one. `main code` finds `Code/main.go` too. `Code/main.go` and
-  `example/main.go` stopped being the same thing to the search. Exact filename
-  still outranks prefix, which outranks everything fuzzy — now asserted by a
-  test rather than emergent from merged relevance scores.
-
-  Edit distance stays, ranked below the subsequence pass: `mian.go` finds
-  `main.go`, which Quick Open itself would not.
-
-- **Multi-word content search was an OR**, so adding a word *widened* it. That,
-  not the filename side, was where most of the noise came from — seven of the
-  nine results for `Code main` were files that merely contain the word "code".
-  Every word is now required.
-
-- **The typo pass almost never fired.** It was gated on the number of candidates
-  the index returned rather than the number that survived filtering, so a query
-  that retrieved plenty and kept none still counted as "enough".
-
-- **The recently-opened tray read the wrong field** (`entries` from an endpoint
-  that answers `nodes`), so it was empty on every server that ever served it.
-  It was also unreachable — the toolbar declared the event that opens it and
-  never emitted it. The panel is now the working surface.
-
-- **Starred and Recent rows were unopenable in multi-storage mode**: the rows
-  carried no storage name, so no `storage://path` could be built for them.
-
-- **`docs/WEBDAV.md`, `docs/LDAP.md` and `docs/METRICS.md` sent people to
-  "Settings → API tokens"** — a screen that has never existed in the product.
-
-- **The web-component embedding example authenticated nothing.** It assigned
-  `config` after the import that registers and mounts the element, so the first
-  folder request went out without credentials: the explorer rendered and the
-  listing said "could not load this folder".
-
-- A query could arrive while the search index handle was being swapped, because
-  the read lock was released before the query ran rather than after. One error
-  in 269 hammered queries; now impossible by construction.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0300---2026-09-04)
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.30.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.30.0`
-
 ## Earlier releases
 
-The 96 releases before v0.30.0, in brief. Full notes are on GitHub.
+The 98 releases before v0.31.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.30.1](https://github.com/BRF-Tech/filex/releases/tag/v0.30.1) | 4 September 2026 | A one-line patch. Opening Recent, Starred, Shared or Trash put the raw internal name of the view in the tab — `.shared` instead of Shared. |
+| [v0.30.0](https://github.com/BRF-Tech/filex/releases/tag/v0.30.0) | 4 September 2026 | The explorer grew a collapsible navigation panel: Recent, Starred, Shared with me, tags and Trash on the left, with Upload as the primary action. |
 | [v0.29.0](https://github.com/BRF-Tech/filex/releases/tag/v0.29.0) | 4 September 2026 | Open an Office document that lives on your own computer in the editor your filex server already runs: the desktop app registers for the usual extensions, so a machine with no Word or Excel installed can still edit one. |
 | [v0.28.0](https://github.com/BRF-Tech/filex/releases/tag/v0.28.0) | 3 September 2026 | If you run filex against LDAP or Active Directory, this is the release where that actually works. |
 | [v0.27.6](https://github.com/BRF-Tech/filex/releases/tag/v0.27.6) | 1 September 2026 | them with.** `CONTRIBUTING.md` had said `git tag -s` for months while no |
@@ -3102,4 +3083,4 @@ The 96 releases before v0.30.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-09-15 from 116 published releases.</small>
+<small>Last refreshed 2026-09-19 from 118 published releases.</small>

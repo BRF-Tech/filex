@@ -1,7 +1,37 @@
 {
   "repo": "BRF-Tech/filex",
-  "generatedAt": "2026-09-15",
+  "generatedAt": "2026-09-19",
   "releases": [
+    {
+      "tag": "v0.42.1",
+      "date": "2026-09-19T12:27:36Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.42.1",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\nA fix release for four reports on 0.42.0.\n\n### Added\n\n- **Mount several folders at once** (#31). *Storages → Add* lists the folders\n  directly under the root you typed — the bucket root included — and creates\n  one storage per ticked folder with the same credentials, so a bucket with\n  N top-level folders is one form, not N. The bucket root itself is still\n  never mounted (`ROOT_PATH_FORBIDDEN`); this is how \"the whole bucket\" is\n  offered instead. Behind it: `POST /api/admin/storages/discover`\n  `{driver, config}` → `{ok, root_key, folders:[{name, root}]}`. Every driver\n  with a root field (s3, local, sftp, ftp, webdav, smb).\n- **Scan every (minutes)** on the storage form (#33). The per-storage poll\n  cadence (`sync_interval_s`) existed on the row and in the API and was\n  reachable from no form; empty = the server default (15 min).\n- **A sign when `FILEX_PUBLIC_URL` is unset** (#32). Administrators see a\n  banner in the panel until it is set: every share link, file-request link\n  and mailed link is otherwise built on `http://localhost:5212`. The API says\n  the same as `public_url_configured` on `GET /api/files/capabilities`. The\n  report had set `FILEX_APPLICATION_URL`, a variable filex has never read;\n  [CONFIGURATION.md → Public URL](docs/CONFIGURATION.md#public-url) now says\n  so in as many words.\n\n### Changed\n\n- **One sync run per storage at a time** (#33). \"Scan now\" while a run is\n  walking starts no second full walk over the same rows — it answers **202**\n  with `status: \"running\"`, the scan asked for being the one in progress; a\n  poll tick that finds the previous run still in flight is skipped and logged\n  at INFO, not counted as a failure.\n- **An S3 scan is one listing, not one request per folder** (#33). The S3\n  driver hands the sync worker the whole tree in a single un-delimited\n  `ListObjectsV2` pass (`storage.TreeWalker`), so 150,000 objects in a few\n  thousand prefixes cost ~150 calls instead of a few thousand; the walk then\n  reads directories out of memory. Over two million objects the worker falls\n  back to the per-directory walk. Same rows, same order guarantees, measured\n  against the per-directory walk.\n\n### Fixed\n\n- **A read-only storage looks read-only to its users** (#30). The navigation\n  panel's storage row carries a *Read-only* tag and its Home card says so; on\n  such a storage the panel's **+ New** menu, the toolbar's New folder / Upload\n  and the write entries of the context menu are not offered. Before, only\n  the admin list had an \"RO\" badge and every attempt ended in the server's\n  403. Sharing a read-only file is still allowed — the ACL level is unchanged,\n  only the write affordances go (`@brftech/filex-core` `permCanEdit` folds the\n  listing's `read_only` in, so every embed gets the same).\n\n### Upgrade notes\n\n- No migrations. `POST /api/admin/storages/{id}/sync` answers 202 with\n  `status: \"running\"` (instead of `\"started\"`) while a run is already in\n  flight; nothing is started twice.\n- A client that reads `GET /api/files/capabilities` sees one more boolean,\n  `public_url_configured`.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0421---2026-09-19)\n\n- **Documentation** — <https://docs.filex.sh>\n- **Report a bug** — <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** — <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.42.1",
+        "ghcr.io/brf-tech/filex:full-v0.42.1"
+      ],
+      "hasDesktop": true,
+      "assetCount": 25
+    },
+    {
+      "tag": "v0.42.0",
+      "date": "2026-09-16T20:22:21Z",
+      "url": "https://github.com/BRF-Tech/filex/releases/tag/v0.42.0",
+      "prerelease": false,
+      "headline": null,
+      "groups": [],
+      "prose": "## What changed\n\n### Changed\n\n- **A single click selects; a double click opens (mouse).** The default open\n  gesture is now the classic desktop file-manager one — a single click selects a\n  row/card, a double click opens it, and **Enter** opens the selection. This\n  reverses 0.41.x's \"any click opens\" for a mouse; it is a per-viewer setting\n  (`ExplorerConfig.openTrigger: 'single' | 'double'`, default `'double'`), and\n  the desktop app exposes it under **Settings → Open files with**.\n  - ⚠ **Touch is untouched.** A finger tap always opens (the mobile convention,\n    and there is no hover-to-select on a touchscreen); the checkbox is still the\n    one click that selects, on every device and in either mode.\n\n### Added\n\n- **`ExplorerConfig.openInHost`** — when set, opening a file emits `file-opened`\n  and the explorer does NOT mount its own in-page preview; the host opens the\n  file itself. The desktop app uses this to open **every document in its own\n  window**, one per file (any type), so a future editor drops into the same\n  path. Directories still navigate inline; Space quick-look still peeks in-page;\n  E2E-encrypted files keep the in-page decrypted preview.\n- **Desktop: frameless document + main windows with our own window controls.**\n  The native OS caption is gone. On Windows/Linux the app draws its own\n  minimize / maximize / close (the main window in a slim title bar, each document\n  window in a reserved top bar so it never sits on the viewer's own top row —\n  OnlyOffice's profile/share stays clear); on macOS the native traffic lights\n  are kept (`titleBarStyle: 'hiddenInset'`, top-left) and no buttons are drawn.\n  The top strip is the drag handle.\n- **Window / tab titles name the open document.** A document window's title (and,\n  on the web, the `/files/edit` browser tab) is the file's name rather than the\n  server's Branding name; the main explorer window stays the whitelabel name, or\n  `filex` when the server sets no branding. On the desktop the title is pinned in\n  the main process (`page-title-updated` guard) so the admin SPA can't override\n  it; on the web the router's per-route title (`lib/documentTitle`) names the\n  file on the editor route.\n\n[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0420---2026-09-16)\n\n- **Documentation** — <https://docs.filex.sh>\n- **Report a bug** — <https://github.com/BRF-Tech/filex/issues>\n- **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>\n- **Every release** — <https://github.com/BRF-Tech/filex/releases>",
+      "images": [
+        "ghcr.io/brf-tech/filex:slim-v0.42.0",
+        "ghcr.io/brf-tech/filex:full-v0.42.0"
+      ],
+      "hasDesktop": true,
+      "assetCount": 25
+    },
     {
       "tag": "v0.41.4",
       "date": "2026-09-15T14:44:29Z",
