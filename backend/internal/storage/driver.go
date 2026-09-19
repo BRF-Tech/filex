@@ -35,6 +35,36 @@ type Driver interface {
 	Capabilities() Capabilities
 }
 
+// TreeWalker lets a backend hand over a whole subtree in ONE pass instead of
+// being asked for every directory separately.
+//
+// List is one round trip per directory. A poll over an object store with
+// 150,000 objects in a few thousand prefixes therefore made a few thousand
+// ListObjectsV2 calls — each a network round trip — and a scan took longer
+// than its own interval (issue #33). An object store has no directories to
+// descend into: a single un-delimited listing returns every key under a
+// prefix, 1,000 per page, so the same tree costs ~150 calls.
+//
+// Contract:
+//
+//   - fn is called once per object below `path`, files AND the directories
+//     the driver derives from their paths (every ancestor exactly once, the
+//     driver's own markers such as an empty-folder key excluded). Order is
+//     the backend's; the caller groups by parent itself.
+//   - Object.Path is the full logical path (as List would report it); a
+//     directory's Kind is KindDirectory.
+//   - Returning a non-nil error from fn stops the walk and is returned as-is,
+//     so a caller can bound how much it is willing to hold.
+//   - A path that does not exist yields no calls and a nil error (an empty
+//     prefix is a listing, not a miss).
+//
+// Drivers with real directories (local, sftp, …) do not implement this: a
+// recursive readdir is not cheaper than the per-directory walk, and the walk
+// keeps its readdir order guarantees.
+type TreeWalker interface {
+	WalkTree(ctx context.Context, path string, fn func(Object) error) error
+}
+
 // Writer adds upload support.
 type Writer interface {
 	Write(ctx context.Context, path string, r io.Reader, size int64) error

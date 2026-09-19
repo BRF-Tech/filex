@@ -33,7 +33,9 @@ func TestCapabilities_PublicURL(t *testing.T) {
 			c.PublicURL = "https://files.example.com"
 			c.PublicURLSet = true
 		})
-		require.Equal(t, "https://files.example.com", get(t, srv.URL, client)["public_url"])
+		out := get(t, srv.URL, client)
+		require.Equal(t, "https://files.example.com", out["public_url"])
+		require.Equal(t, true, out["public_url_configured"])
 	})
 
 	t.Run("built-in guess: never announced", func(t *testing.T) {
@@ -41,9 +43,13 @@ func TestCapabilities_PublicURL(t *testing.T) {
 			c.PublicURL = config.DefaultPublicURL
 			c.PublicURLSet = false
 		})
-		_, present := get(t, srv.URL, client)["public_url"]
+		out := get(t, srv.URL, client)
+		_, present := out["public_url"]
 		require.False(t, present,
 			"the default %s was published — a guide would send every client to the reader's own machine",
 			config.DefaultPublicURL)
+		// …but the fact that nobody chose one IS said, so the admin panel can
+		// warn before the first share link goes out with localhost in it (#32).
+		require.Equal(t, false, out["public_url_configured"])
 	})
 }

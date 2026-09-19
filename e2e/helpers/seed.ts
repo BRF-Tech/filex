@@ -47,6 +47,8 @@ export async function seedLocalStorage(
   request: APIRequestContext,
   name = 'e2e-local',
   mountPath = '/tmp/filex-e2e-storage',
+  /** Row fields a spec wants otherwise (`read_only: true`, a poll cadence…). */
+  overrides: Record<string, unknown> = {},
 ) {
   await apiLogin(request);
   const root = storageRoot(mountPath);
@@ -62,6 +64,7 @@ export async function seedLocalStorage(
       sync_interval_s: 0,
       enabled: true,
       read_only: false,
+      ...overrides,
     },
   });
   if (!res.ok()) throw new Error(`seedLocalStorage failed: ${res.status()} ${await res.text()}`);

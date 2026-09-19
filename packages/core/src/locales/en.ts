@@ -1047,6 +1047,7 @@ export const en: Record<string, string> = {
   // "expand" would promise a width change to something that has no width.
   'sidenav.open': 'Open navigation',
   'sidenav.storage.shared': 'Shared',
+  'sidenav.storage.readOnly': 'Read-only',
   // ⚠ `toolbar.nav` is GONE, and nothing replaced it. It was the one label on
   // the panel's collapse control, first as the noun "Navigation" — which names
   // the panel and never says the button does anything to it, so the owner

@@ -222,6 +222,95 @@ func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
 	return out, nil
 }
 
+// WalkTree implements storage.TreeWalker: every object below p in ONE
+// un-delimited ListObjectsV2 pass (1,000 keys a page), with the directories
+// synthesised from the keys the way List synthesises them from CommonPrefixes.
+//
+// The rules are List's, applied to a whole subtree at once: the bare prefix
+// key is not an object, the hidden `.empty` marker is not a file but does
+// prove its folder exists, and a key ending in "/" (a folder object written by
+// another tool) is a directory, not a file. Each ancestor directory is
+// reported exactly once, before any object under it, so a caller grouping by
+// parent never meets a child whose folder it has not seen.
+func (d *Driver) WalkTree(ctx context.Context, p string, fn func(storage.Object) error) error {
+	prefix := d.key(p)
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	base := path.Clean("/" + p)
+	seenDir := map[string]bool{}
+	emitDirs := func(rel string) error {
+		// rel is "a/b/c.txt" relative to prefix → report /a and /a/b once.
+		parts := strings.Split(rel, "/")
+		cur := base
+		for _, part := range parts[:len(parts)-1] {
+			if part == "" {
+				continue
+			}
+			cur = path.Join(cur, part)
+			if seenDir[cur] {
+				continue
+			}
+			seenDir[cur] = true
+			if err := fn(storage.Object{Path: cur, Name: part, Kind: storage.KindDirectory}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var token *string
+	for {
+		resp, err := d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(d.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return fmt.Errorf("s3: list tree: %w", err)
+		}
+		for _, obj := range resp.Contents {
+			key := aws.ToString(obj.Key)
+			if key == prefix {
+				continue
+			}
+			rel := strings.TrimPrefix(key, prefix)
+			if rel == "" {
+				continue
+			}
+			if strings.HasSuffix(rel, "/") {
+				// A folder object: its own path is a directory, so let the
+				// ancestor pass report it by treating it as "<dir>/" + nothing.
+				if err := emitDirs(rel + "."); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := emitDirs(rel); err != nil {
+				return err
+			}
+			name := path.Base(rel)
+			if name == emptyMarker {
+				continue // hidden empty-folder keep-marker: proves the folder, is not a file
+			}
+			if err := fn(storage.Object{
+				Path:  path.Join(base, rel),
+				Name:  name,
+				Size:  aws.ToInt64(obj.Size),
+				Etag:  strings.Trim(aws.ToString(obj.ETag), `"`),
+				Mtime: aws.ToTime(obj.LastModified),
+				Kind:  storage.KindFile,
+			}); err != nil {
+				return err
+			}
+		}
+		if !aws.ToBool(resp.IsTruncated) {
+			break
+		}
+		token = resp.NextContinuationToken
+	}
+	return nil
+}
+
 // Stat implements storage.Driver.
 //
 // 404 from HeadObject (NotFound / NoSuchKey) is mapped to

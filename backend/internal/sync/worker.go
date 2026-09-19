@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -225,6 +226,23 @@ type storageSyncer struct {
 	fallback time.Duration
 	// failures counts CONSECUTIVE failed runs. See noteRun.
 	failures int
+	// runMu admits one RunOnce at a time; inFlight is the same fact for a
+	// reader that must not block (Worker.Running, the admin's 409).
+	runMu    sync.Mutex
+	inFlight atomic.Bool
+}
+
+// ErrRunInProgress is what RunOnce (and so Worker.Trigger) returns when this
+// storage is already being walked. It is not a failure of the run — the run
+// the caller wanted is the one in progress — and noteRun does not count it.
+var ErrRunInProgress = errors.New("sync: a run is already in progress for this storage")
+
+// Running reports whether a sync run is in flight for the storage right now.
+func (w *Worker) Running(storageID int64) bool {
+	w.mu.Lock()
+	syncer, ok := w.syncers[storageID]
+	w.mu.Unlock()
+	return ok && syncer.inFlight.Load()
 }
 
 // FailureReportThreshold is how many runs in a row must fail before a failure
@@ -252,6 +270,13 @@ const FailureReportThreshold = 3
 // warning once: the tracker groups by message, so a sustained outage shows up
 // as a rising count on one issue, which is the signal an operator wants.
 func (s *storageSyncer) noteRun(err error) {
+	if errors.Is(err, ErrRunInProgress) {
+		// The tick found the previous run still walking. Not a failure, and
+		// not a reason to wait: the next tick asks again.
+		slog.Info("sync: tick skipped, the previous run is still in progress",
+			slog.String("storage", s.storage.Name))
+		return
+	}
 	if err == nil {
 		if s.failures >= FailureReportThreshold {
 			slog.Info("sync: recovered",

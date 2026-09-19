@@ -93,6 +93,9 @@ export interface StorageRef {
   enabled: boolean;
   config: Record<string, unknown>;
   read_only: boolean;
+  /** Poll cadence in seconds (`poll` mode). 0 = the server default (15 min,
+   *  or FILEX_SYNC_INTERVAL); anything under 5 s is treated as unset. */
+  sync_interval_s?: number;
   /** Per-storage RBAC toggle. When true, non-admins see only paths granted
    *  to them (via the permissions panel); when false the storage is open to
    *  every authenticated user (capability by account role). Default false. */
@@ -161,6 +164,21 @@ export interface StorageCreateRequest {
   config: Record<string, unknown>;
   read_only?: boolean;
   rbac_enabled?: boolean;
+  sync_interval_s?: number;
+}
+
+/** One folder under a probed root, with the root a storage on it would carry. */
+export interface DiscoveredFolder {
+  name: string;
+  root: string;
+}
+
+export interface StorageDiscoverResponse {
+  ok: boolean;
+  error?: string;
+  /** Which config key the root lives in for this driver (`prefix`, `path`, `root`…). */
+  root_key?: string;
+  folders?: DiscoveredFolder[];
 }
 
 export interface StorageUpdateRequest {
@@ -169,6 +187,7 @@ export interface StorageUpdateRequest {
   enabled?: boolean;
   read_only?: boolean;
   rbac_enabled?: boolean;
+  sync_interval_s?: number;
   role?: 'primary' | 'replica';
   replica_of_id?: number | null;
   replica_mode?: 'async' | 'sync';
@@ -229,6 +248,14 @@ export interface Capabilities {
    *  demo_mode is on — the demo landing publishes these credentials. */
   demo_pass?: string;
   default_locale?: string | null;
+  /** The origin the server builds absolute links on — present only when the
+   *  operator chose one (FILEX_PUBLIC_URL) or the request came in on a
+   *  tenant's own host. */
+  public_url?: string;
+  /** False when FILEX_PUBLIC_URL was never set: every share link and every
+   *  mailed link then carries the built-in guess (http://localhost:5212). The
+   *  admin layout puts up a sign for exactly this (#32). */
+  public_url_configured?: boolean;
 }
 
 export interface SettingsMap {

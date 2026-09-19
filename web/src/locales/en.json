@@ -206,6 +206,8 @@
       "name": "Display name",
       "namePlaceholder": "Personal photos",
       "readOnly": "Read-only mount",
+      "syncInterval": "Scan every (minutes)",
+      "syncIntervalHint": "How often filex walks this storage for changes made outside it (poll mode). Leave empty for the server default (15 minutes). A large, rarely changing storage is happier with a long interval; a scan that outlasts its interval is not started twice.",
       "rbac": "Per-item access control (RBAC)",
       "rbacHint": "When on, non-admins see only files/folders explicitly granted to them via the permissions panel. When off, the storage is open to all users (capability by role).",
       "path": "Filesystem path",
@@ -264,6 +266,21 @@
       "fail": "Connection failed",
       "syncHistory": "Sync history",
       "drift": "Drift report"
+    },
+    "discover": {
+      "title": "Mount several folders at once",
+      "hint": "The root of a bucket or share is never mounted as one storage. Instead, list the folders under the root you entered above and mount each one you tick as its own storage — same credentials, one sidebar entry per folder.",
+      "list": "List folders under this root",
+      "listing": "Listing…",
+      "none": "No folders under this root.",
+      "found": "One folder found — tick it to mount it. The name is what the sidebar shows; the root is where the storage points. | {count} folders found — tick the ones to mount. The name is what the sidebar shows; the root is where the storage points.",
+      "nameLabel": "Storage name",
+      "create": "Create 1 storage | Create {count} storages",
+      "creating": "Creating…",
+      "createdOk": "1 storage created | {count} storages created",
+      "createdPartial": "{ok} of {total} created — {failed} failed: {names}",
+      "selectAll": "Select all",
+      "selectNone": "Select none"
     },
     "deleteConfirm": "Delete storage \"{name}\"? Files in the backend are kept; only the filex index is removed.",
     "deletedOk": "Storage deleted",
@@ -800,6 +817,10 @@
     "copy": "Copy",
     "empty": "No keys yet.",
     "keyword": "key"
+  },
+  "instance": {
+    "publicUrlUnset": "FILEX_PUBLIC_URL is not set. Share links, file-request links and every link in an e-mail are built on http://localhost:5212 until you set it to the address people open this instance at.",
+    "publicUrlDocs": "How to set it"
   },
   "demo": {
     "badge": "Live demo",

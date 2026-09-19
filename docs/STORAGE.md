@@ -27,7 +27,7 @@ boxes also speak SFTP/FTP/WebDAV natively. See
 > lives in [PROTOCOLS.md](PROTOCOLS.md).
 
 - [How storages work](#how-storages-work)
-- [Adding a storage](#adding-a-storage)
+- [Adding a storage](#adding-a-storage) — [several folders at once](#mounting-several-folders-at-once)
 - [The storage config](#the-storage-config)
 - [Adapters](#adapters) — [local](#local) · [NAS / SMB / NFS](#nas-nfs-smb-and-friends) · [S3](#s3--s3-compatible) · [SFTP](#sftp) · [WebDAV](#webdav) · [FTP](#ftp--ftps)
 - [Sync — staying in step with the backend](#sync)
@@ -72,7 +72,34 @@ and offers a "Test connection" before saving.
 ### Admin UI
 Sign in as an admin → **Storages → Add**. Pick a driver, fill in the config
 fields, click **Test connection**, then **Save**. The first sync starts
-automatically.
+automatically. **Scan every (minutes)** on the same form is the storage's own
+poll cadence (`sync_interval_s`); leave it empty for the server default of
+15 minutes — see [Sync](#sync).
+
+### Mounting several folders at once
+
+The root of a bucket, share or disk is never mounted as one storage — filex
+would take ownership of everything at the root of a namespace it shares with
+other tools (the [root-path guard](#path-validation--errors)). A bucket that
+holds `photos/`, `documents/` and `archive/` therefore used to mean three trips
+through the form with the same credentials.
+
+The form now does that in one go. Fill in the driver and its credentials, put
+the **parent** in the root field (the bucket root — an empty prefix — or any
+folder), and press **List folders under this root** in the *Mount several
+folders at once* card. Every folder directly under it is listed; tick the ones
+to mount, rename any you like, and **Create N storages** makes one storage per
+tick — same credentials, that folder as the storage's root, the read-only
+switch and scan cadence from the form applied to each. Each one is a separate
+entry in the sidebar, which is what "the whole bucket in filex" looks like.
+
+Folders whose name starts with `.` (`.filex-trash`, `.git`, …) are not offered.
+The listing is a probe, not a mount: looking at a root is allowed, the rows are
+still created through the ordinary create and its guard.
+
+Behind the button: `POST /api/admin/storages/discover` with `{driver, config}`
+→ `{ok, root_key, folders:[{name, root}]}`, where `root` is the value to put
+under `root_key` for that folder's storage.
 
 ### Editing a storage afterwards
 
@@ -133,7 +160,9 @@ curl -X POST https://files.example.com/api/admin/storages \
 
 Test credentials **without saving** first:
 `POST /api/admin/storages/test` with the same body → `{ok, sample_listing, object_count}`
-or `{ok:false, error:"…"}` (the driver's error, verbatim).
+or `{ok:false, error:"…"}` (the driver's error, verbatim). To list the folders
+under a root before mounting them one by one: `POST /api/admin/storages/discover`
+(see [Mounting several folders at once](#mounting-several-folders-at-once)).
 
 The probe is bounded at **10 seconds**. That is a limit on the *button*, not on
 the driver: the S3 driver keeps its wide retry budget because a background sync
@@ -243,7 +272,7 @@ storage:
 | `config` | object | `{}` | Per‑adapter settings (see [Adapters](#adapters)). |
 | `mount_path` | string | `/` | Logical mount point inside filex. |
 | `sync_mode` | string | `poll` | `poll` · `fsnotify` (the local driver, **or a [plugin](PLUGINS.md) that streams its own changes**) · `ondemand`. Anything else is **rejected on write** — see [Modes](#sync). |
-| `sync_interval_s` | int (seconds) | `900` | Poll cadence. **Values < 5 s are clamped to 15 min.** |
+| `sync_interval_s` | int (seconds) | `900` | Poll cadence — **Scan every (minutes)** on the storage form. **Values < 5 s are clamped to 15 min.** |
 | `enabled` | bool | `true` | Disabled storages are hidden and not synced. |
 | `read_only` | bool | `false` | Block all writes to this mount. |
 | `rbac_enabled` | bool | `false` | When true, per‑user [RBAC](RBAC.md) grants gate access; when false the storage is visible to all authenticated users. |
@@ -548,7 +577,12 @@ uploaded straight to the S3 console).
 
 **Modes** (`sync_mode`):
 - **`poll`** (default) — a full recursive walk every `sync_interval_s` seconds.
-  Intervals below 5 s are clamped to 15 minutes.
+  Intervals below 5 s are clamped to 15 minutes. On an object store the walk
+  is **one listing**, not one request per folder: the S3 driver hands the sync
+  worker the whole tree in a single un-delimited `ListObjectsV2` pass (1,000
+  keys a page), so 150,000 objects in a few thousand prefixes cost ~150 calls
+  rather than a few thousand. Over two million objects the worker falls back
+  to the per-directory walk rather than hold that much in memory.
 - **`fsnotify`** — event‑driven instead of timed. It resolves in this order:
   the **OS watch** (inotify / kqueue / ReadDirectoryChangesW) when the driver is
   `local`; otherwise the **driver's own change stream**, when it has one — today
@@ -625,9 +659,16 @@ and deletes. The guard buys a cycle to notice the outage in — see
 
 **Cadence is per storage.** The poll loop uses the storage row's
 `sync_interval_s` (`900` when you don't set one; anything under 5 s is treated
-as 15 minutes). Every enabled storage gets its own goroutine and walks its
-backend sequentially — there is no shared worker pool, so set the interval on
-the storage rather than looking for a global knob.
+as 15 minutes) — **Scan every (minutes)** on the storage form. Every enabled
+storage gets its own goroutine and walks its backend sequentially — there is
+no shared worker pool, so set the interval on the storage rather than looking
+for a global knob.
+
+**One run at a time.** A storage is never walked by two runs at once. If a
+scan outlasts its interval the next tick is skipped (logged at INFO, not
+counted as a failure), and **Scan now** while a run is in flight starts no
+second walk: it answers **202** with `status: "running"` — the scan you asked
+for is the one in progress. Progress is under *Storages → sync runs* as before.
 
 You can watch runs at `GET /api/admin/storages/{id}/sync-runs` and detect drift
 with `GET /api/admin/storages/{id}/drift`.
@@ -823,6 +864,13 @@ Set `read_only: true` to expose a storage for browsing/download but block every
 write (upload, rename, move, delete, share‑drop). Writes return **403
 `storage is read-only`**. Useful for archives or a replica you don't want edited.
 
+The people using it are told, not refused: the storage's row in the navigation
+panel carries a **Read-only** tag, its card on Home says so, and on such a
+storage the panel's **+ New** menu, the toolbar's New folder / Upload and the
+write entries of the context menu are not offered at all. Sharing a read-only
+file is still allowed — the level the ACL grants is unchanged, only the write
+affordances go.
+
 ---
 
 ## Path validation & errors
@@ -835,7 +883,9 @@ ROOT_PATH_FORBIDDEN: storage prefix/path cannot be empty or root '/';
 use a sub-folder like 'fileman' or 'data/files'
 ```
 
-Always mount a sub‑folder (S3 `prefix`, or `root`/`path` for the others).
+Always mount a sub‑folder (S3 `prefix`, or `root`/`path` for the others). To
+have every top-level folder of a bucket in filex, mount them as separate
+storages in one go — [Mounting several folders at once](#mounting-several-folders-at-once).
 
 **Driver errors → HTTP:** `not found → 404`, `read-only → 403`,
 `unsupported → 501`, `already exists → 409`, anything else `→ 500`. The

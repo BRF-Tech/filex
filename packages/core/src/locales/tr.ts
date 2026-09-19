@@ -1047,6 +1047,7 @@ export const tr: Record<string, string> = {
   // genişliği büyütmeyi vaat ederdi.
   'sidenav.open': 'Gezintiyi aç',
   'sidenav.storage.shared': 'Paylaşılan',
+  'sidenav.storage.readOnly': 'Salt okunur',
   // ⚠ `toolbar.nav` KALDIRILDI, yerine bir şey konmadı — bkz. en.ts'teki not.
   // Paneli daraltan tek denetimin etiketiydi; önce "Gezinti" (panelin adı,
   // düğmenin ne yaptığını söylemiyor), sonra "Gezintiyi göster/gizle" (sabit

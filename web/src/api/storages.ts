@@ -2,6 +2,8 @@ import { api } from './client';
 import type {
   DriftReport,
   StorageCreateRequest,
+  StorageDiscoverResponse,
+  StorageDriver,
   StorageRef,
   StorageUpdateRequest,
   SyncRun,
@@ -110,6 +112,16 @@ export const StoragesApi = {
 
   async drift(id: number): Promise<DriftReport> {
     const { data } = await api.get<DriftReport>(`/admin/storages/${id}/drift`);
+    return data;
+  },
+
+  /** The folders directly under a driver config's root, without saving
+   *  anything — the first step of mounting several of them at once. */
+  async discover(payload: {
+    driver: StorageDriver;
+    config: Record<string, unknown>;
+  }): Promise<StorageDiscoverResponse> {
+    const { data } = await api.post<StorageDiscoverResponse>('/admin/storages/discover', payload);
     return data;
   },
 

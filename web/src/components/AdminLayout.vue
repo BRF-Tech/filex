@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { RouterView } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useCapabilitiesStore } from '@/stores/capabilities';
+import { useAuthStore } from '@/stores/auth';
 import Sidebar from './Sidebar.vue';
 import TopNav from './TopNav.vue';
 import Breadcrumbs from './Breadcrumbs.vue';
@@ -13,6 +14,9 @@ const sidebarOpen = ref(true);
 // refused a save should already know why before they try it. The refusal
 // itself is the server's (api/demo_guard.go) — this is the sign on the door.
 const caps = useCapabilitiesStore();
+// The public-URL sign is for the person who can fix it. A viewer cannot set
+// an environment variable, and a warning they cannot act on is noise.
+const auth = useAuthStore();
 const { t } = useI18n();
 
 function toggleSidebar() {
@@ -29,7 +33,10 @@ function toggleSidebar() {
       @click="sidebarOpen = false"
     />
 
-    <Sidebar :open="sidebarOpen" @close="sidebarOpen = false" />
+    <Sidebar
+      :open="sidebarOpen"
+      @close="sidebarOpen = false"
+    />
 
     <div class="flex min-w-0 flex-1 flex-col lg:pl-64">
       <TopNav @toggle-sidebar="toggleSidebar" />
@@ -42,9 +49,25 @@ function toggleSidebar() {
           >
             {{ t('demo.readOnly') }}
           </p>
+          <p
+            v-if="auth.isAdmin && caps.publicUrlUnset"
+            class="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200"
+            data-testid="public-url-unset"
+          >
+            {{ t('instance.publicUrlUnset') }}
+            <a
+              href="https://docs.filex.sh/CONFIGURATION#public-url"
+              target="_blank"
+              rel="noopener"
+              class="underline"
+            >{{ t('instance.publicUrlDocs') }}</a>
+          </p>
           <Breadcrumbs class="mb-3" />
           <RouterView v-slot="{ Component }">
-            <transition name="fade" mode="out-in">
+            <transition
+              name="fade"
+              mode="out-in"
+            >
               <component :is="Component" />
             </transition>
           </RouterView>
@@ -59,8 +82,7 @@ function toggleSidebar() {
             class="hover:text-brand-600 dark:hover:text-brand-400"
             target="_blank"
             rel="noopener"
-            >github.com/BRF-Tech/filex</a
-          >
+          >github.com/BRF-Tech/filex</a>
         </div>
       </footer>
     </div>

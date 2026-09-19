@@ -16,8 +16,8 @@ background folder sync**, and a **built-in MCP server** so AI agents can drive i
 natively.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.41.4/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.41.4/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.42.1/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.42.1/explorer-grid-light.png" alt="filex explorer — thumbnail grid" width="900">
 </picture>
 
 </div>
@@ -38,7 +38,8 @@ That serves **the folder you ran it in** — open the UI and your files are alre
 there. `/data` is filex's own directory (SQLite database, search index, thumbnail cache),
 which is why it is a named volume and not the folder you drop files into; the two are
 separate on purpose. Point `$PWD` somewhere else, or add more storages from the admin
-panel later.
+panel later — a bucket with several top-level folders can be mounted as one storage
+per folder in one go (*Storages → Add → Mount several folders at once*).
 
 The container runs as **root** by default, so what it writes into `/data` is root-owned;
 set `PUID`/`PGID` to run it as yourself
@@ -155,35 +156,35 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 | Sharing — PIN, expiry, download limit, one-line `curl` | Markdown viewer |
 |---|---|
-| ![Share modal](docs/screenshots/v0.41.4/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.41.4/viewer-markdown.png) |
+| ![Share modal](docs/screenshots/v0.42.1/share-modal.png) | ![Markdown viewer](docs/screenshots/v0.42.1/viewer-markdown.png) |
 
 | Admin panel | Demo landing |
 |---|---|
-| ![Admin dashboard](docs/screenshots/v0.41.4/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.41.4/demo-landing.png) |
+| ![Admin dashboard](docs/screenshots/v0.42.1/admin-dashboard.png) | ![Demo landing](docs/screenshots/v0.42.1/demo-landing.png) |
 
 | The shell — what everybody lands on | Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette |
 |---|---|
-| ![The filex shell](docs/screenshots/v0.41.4/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.41.4/driveshell/driveshell-search-1440.png) |
+| ![The filex shell](docs/screenshots/v0.42.1/driveshell/driveshell-hero-1440.png) | ![Searching a folder](docs/screenshots/v0.42.1/driveshell/driveshell-search-1440.png) |
 
 | Navigation panel — Home, My files, Shared with me, Recent, Starred, Trash, and your storages | Collapsed to the icon rail |
 |---|---|
-| ![Navigation panel](docs/screenshots/v0.41.4/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.41.4/sidenav/sidenav-rail-1440.png) |
+| ![Navigation panel](docs/screenshots/v0.42.1/sidenav/sidenav-expanded-1440.png) | ![Collapsed to a rail](docs/screenshots/v0.42.1/sidenav/sidenav-rail-1440.png) |
 
 | Shared with me — folders other people granted you, no mount instructions | Embedded in another product's page |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.41.4/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.41.4/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.42.1/sidenav/view-shared-1440.png) | ![Embedded web component](docs/screenshots/v0.42.1/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect — the guides, built from *your* deployment | API keys — mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry) |
 |---|---|
-| ![How to connect](docs/screenshots/v0.41.4/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.41.4/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.42.1/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.42.1/sidenav/apikeys-minted-1440.png) |
 
 | Reaching filex from anything — S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment |
 |---|
-| ![Connection guide](docs/screenshots/v0.41.4/connections-guide.png) |
+| ![Connection guide](docs/screenshots/v0.42.1/connections-guide.png) |
 
 | A storage filex does not ship — installed as a plugin, describing its own config form |
 |---|
-| ![Plugins](docs/screenshots/v0.41.4/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.42.1/admin-plugins.png) |
 
 ## Quick start — binary
 

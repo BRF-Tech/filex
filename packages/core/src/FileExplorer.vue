@@ -332,6 +332,10 @@ const files = ref<FileNode[]>([]);
 // RBAC effective level for the current directory ('' = ACL not enforced on
 // this storage → no gating). Drives which write/manage actions are offered.
 const dirPerm = ref<string>('');
+/** The listed folder sits on a read-only storage (`read_only` on the index
+ *  response). Folded into permCanEdit so every write affordance — toolbar,
+ *  sidebar menu, context menu, drop zone, editor mode — reads the same fact. */
+const dirReadOnly = ref(false);
 // The dead deep-link state: set to the requested path when a listing came
 // back 404 (folder doesn't exist) or 403 (RBAC-hidden — rendered identically
 // on purpose so a denied folder doesn't reveal that it exists). '' = none.
@@ -2034,6 +2038,14 @@ function onInspectorManage(n: FileNode) {
 // (the pre-RBAC default). Otherwise 'editor'/'owner' may write; only 'owner'
 // manages permissions. Enforcement is server-side; this just shapes the menu.
 function permCanEdit(p: string | undefined): boolean {
+  // A read-only storage refuses every write on the server (403 "storage is
+  // read-only") whatever level the ACL grants — an owner of a read-only mount
+  // is an owner who cannot write. Say so here rather than after the click:
+  // until this line the toolbar offered New folder / Upload and the sidebar's
+  // "+ New" menu on a read-only mount, and the user found out from the error
+  // (issue #30). The level itself is left alone: 'owner' still opens the
+  // permissions panel, sharing a read-only file is still allowed.
+  if (dirReadOnly.value) return false;
   // undefined = ACL not enforced (dev / unwired) → full access. In production
   // the backend always sends a level; 'none'/'viewer' cannot write, only
   // 'editor'/'owner' can.
@@ -2350,6 +2362,7 @@ async function load(path?: string) {
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
+    dirReadOnly.value = resp.read_only === true;
     /* wiring:e2 — backend tells us when this dir sits inside an encrypted
        subtree; '' resets on every plain folder. Drives the lock screen. */
     e2eRoot.value = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';

@@ -214,6 +214,12 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	if origin := h.Tenants.FromRequest(r); origin != "" && (h.PublicURLSet || origin != h.Tenants.Fallback()) {
 		merged["public_url"] = origin
 	}
+	// Said separately from the address itself, so the admin panel can put up a
+	// sign when the operator never chose one: every share link and every mailed
+	// link is then built on the built-in guess, and the person who finds out is
+	// whoever receives the link (issue #32 — a compose file setting a variable
+	// filex has never read, and links to localhost:5212 on a public host).
+	merged["public_url_configured"] = h.PublicURLSet
 
 	writeJSON(w, http.StatusOK, merged)
 }

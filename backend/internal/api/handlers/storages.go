@@ -365,10 +365,25 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	// leaving the catalogue half-updated and the tombstone pass with a partial
 	// view. Reported on a Garage/S3 storage in issue #21.
 	//
-	// The syncer serialises its own runs, so a second press while one is in
-	// flight is safe. Progress is where it already was: Storages → sync runs.
+	// A second press while a run is in flight is answered, not queued: the
+	// syncer admits one run per storage (sync.ErrRunInProgress) and the run the
+	// operator wants is the one already walking. It is still a 202 — the
+	// request was "scan this storage" and that is what is happening — with
+	// `status: "running"` so a caller that cares can tell. A script that
+	// creates a storage and asks for a scan straight away lands here every
+	// time (the first poll starts with the syncer), and refusing it would turn
+	// a correct sequence into an error. Progress is where it already was:
+	// Storages → sync runs.
 	if !h.Worker.Known(id) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
+		return
+	}
+	if h.Worker.Running(id) {
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"ok":     true,
+			"status": "running",
+			"note":   "a scan is already running for this storage; no second one was started — watch its progress under sync runs",
+		})
 		return
 	}
 	go func() {

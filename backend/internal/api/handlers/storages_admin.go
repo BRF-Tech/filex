@@ -3,6 +3,7 @@
 // Extra admin actions on storages beyond plain CRUD:
 //
 //	POST /api/admin/storages/test            — try a connection without saving
+//	POST /api/admin/storages/discover        — list the folders under a root, to mount several at once
 //	GET  /api/admin/storages/{id}/sync-runs  — recent runs for one storage
 //	GET  /api/admin/storages/{id}/drift      — recent sync conflicts
 package handlers
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +120,98 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// DiscoveredFolder is one folder directly under a probed root, with the root
+// value a storage mounted on it would carry.
+type DiscoveredFolder struct {
+	Name string `json:"name"`
+	Root string `json:"root"`
+}
+
+// Discover lists the folders directly under the given driver+config's root
+// without saving anything, so the operator can mount several of them as
+// separate storages in one go.
+//
+// Issue #31: a bucket holding N top-level folders meant filling in the storage
+// form N times, once per folder, because the bucket ROOT is never mounted
+// (storage.ErrRootPathForbidden — filex would otherwise take ownership of
+// everything at the root of a shared namespace). This is how "the whole
+// bucket" is offered instead: the same credentials once, every folder listed,
+// each one ticked becomes its own storage with its own sidebar entry. The
+// probe itself may look at the root — looking is not mounting — and the rows
+// the caller then creates go through Create and its root guard like any other.
+//
+//	POST /api/admin/storages/discover  {driver, config}
+//	→ {ok, root_key, folders:[{name, root}]}
+//
+// Folders whose name starts with "." (filex's own `.filex-trash`, a `.git`,
+// an editor's scratch) are left out: they are nobody's document root.
+func (h *StoragesAdmin) Discover(w http.ResponseWriter, r *http.Request) {
+	var req storageTestReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	desc, ok := storage.DescriptorFor(req.Driver)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown driver"})
+		return
+	}
+	rootField, hasRoot := desc.RootField()
+	if !hasRoot {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this driver has no root folder to look under"})
+		return
+	}
+	drv, err := storage.Get(req.Driver)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown driver"})
+		return
+	}
+	if req.Config == nil {
+		req.Config = map[string]any{}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), ProbeTimeout)
+	defer cancel()
+	if err := drv.Init(ctx, req.Config); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": probeError(ctx, err)})
+		return
+	}
+	objects, err := drv.List(ctx, "")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": probeError(ctx, err)})
+		return
+	}
+	current := storage.ConfigString(req.Config, rootField.Key, rootField.Aliases...)
+	folders := make([]DiscoveredFolder, 0, len(objects))
+	for _, o := range objects {
+		if o.Kind != storage.KindDirectory || o.Name == "" || strings.HasPrefix(o.Name, ".") {
+			continue
+		}
+		folders = append(folders, DiscoveredFolder{Name: o.Name, Root: childRoot(current, o.Name)})
+	}
+	sort.Slice(folders, func(i, j int) bool { return folders[i].Name < folders[j].Name })
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"root_key": rootField.Key,
+		"folders":  folders,
+	})
+}
+
+// childRoot spells the root a storage mounted on `name` under `current`
+// carries. A Windows path keeps its backslashes; everything else — S3 prefixes,
+// POSIX paths, SFTP/WebDAV roots — joins with "/". An empty current root (the
+// bucket root, which a probe may look at) yields the bare folder name.
+func childRoot(current, name string) string {
+	cur := strings.TrimRight(strings.TrimSpace(current), `/\`)
+	if cur == "" {
+		return name
+	}
+	sep := "/"
+	if strings.Contains(cur, `\`) && !strings.Contains(cur, "/") {
+		sep = `\`
+	}
+	return cur + sep + name
 }
 
 // probeError names a probe that ran out of time as such.

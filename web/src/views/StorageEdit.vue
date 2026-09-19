@@ -17,6 +17,7 @@ import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { DriftReport, StorageRef, SyncRun } from '@/api/types';
 import { formatBytes, formatDate, formatDuration, formatNumber, formatRelative } from '@/lib/format';
+import { minutesFromSeconds, secondsFromMinutes } from '@/lib/syncInterval';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -41,6 +42,8 @@ const name = ref('');
 const enabled = ref(true);
 const readOnly = ref(false);
 const rbacEnabled = ref(false);
+/** Poll cadence in minutes; '' = the server default. Seconds on the wire. */
+const syncIntervalMin = ref<number | ''>('');
 const config = ref<Record<string, unknown>>({});
 
 // Renaming is not cosmetic: the name is the first path segment on every file
@@ -84,6 +87,7 @@ async function load() {
     enabled.value = s.enabled;
     readOnly.value = s.read_only;
     rbacEnabled.value = s.rbac_enabled ?? false;
+    syncIntervalMin.value = minutesFromSeconds(s.sync_interval_s);
     config.value = { ...(s.config ?? {}) };
     await Promise.allSettled([loadRuns(), loadDrift()]);
   } catch (e: unknown) {
@@ -122,6 +126,7 @@ async function save() {
       enabled: enabled.value,
       read_only: readOnly.value,
       rbac_enabled: rbacEnabled.value,
+      sync_interval_s: secondsFromMinutes(syncIntervalMin.value),
       config: config.value,
     });
     item.value = updated;
@@ -215,13 +220,23 @@ onMounted(load);
 </script>
 
 <template>
-  <div v-if="loading" class="card card-body text-center text-zinc-500"><Spinner /></div>
-  <div v-else-if="item" class="space-y-5">
+  <div
+    v-if="loading"
+    class="card card-body text-center text-zinc-500"
+  >
+    <Spinner />
+  </div>
+  <div
+    v-else-if="item"
+    class="space-y-5"
+  >
     <div class="flex items-end justify-between gap-4 flex-wrap">
       <div class="min-w-0">
         <h1 class="text-xl font-semibold flex items-center gap-2">
           {{ item.name }}
-          <Badge size="xs">{{ item.driver }}</Badge>
+          <Badge size="xs">
+            {{ item.driver }}
+          </Badge>
         </h1>
         <p class="text-sm text-zinc-500 dark:text-zinc-400">
           {{ formatBytes(item.stats?.total_size_bytes ?? item.total_bytes ?? 0, locale) }} ·
@@ -230,24 +245,45 @@ onMounted(load);
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <Button variant="ghost" size="sm" @click="router.push({ name: 'storages' })">
+        <Button
+          variant="ghost"
+          size="sm"
+          @click="router.push({ name: 'storages' })"
+        >
           <ArrowLeft class="h-4 w-4" />
           {{ t('common.back') }}
         </Button>
-        <Button variant="outline" size="sm" @click="syncNow">
+        <Button
+          variant="outline"
+          size="sm"
+          @click="syncNow"
+        >
           <RefreshCcw class="h-4 w-4" />
           {{ t('common.syncNow') }}
         </Button>
       </div>
     </div>
 
-    <form class="card card-body space-y-3" @submit.prevent="save">
-      <Input v-model="name" :label="t('storages.fields.name')" required />
-      <p v-if="nameChanged" class="-mt-1 text-xs text-amber-600 dark:text-amber-500">
+    <form
+      class="card card-body space-y-3"
+      @submit.prevent="save"
+    >
+      <Input
+        v-model="name"
+        :label="t('storages.fields.name')"
+        required
+      />
+      <p
+        v-if="nameChanged"
+        class="-mt-1 text-xs text-amber-600 dark:text-amber-500"
+      >
         {{ t('storages.fields.nameChangedWarning') }}
       </p>
 
-      <div v-if="item.uid" class="rounded-md border border-zinc-200 dark:border-zinc-700 p-3 text-xs space-y-2">
+      <div
+        v-if="item.uid"
+        class="rounded-md border border-zinc-200 dark:border-zinc-700 p-3 text-xs space-y-2"
+      >
         <p class="font-medium text-zinc-700 dark:text-zinc-200">
           {{ t('storages.fields.stableAddress') }}
         </p>
@@ -259,36 +295,85 @@ onMounted(load);
           class="font-mono break-all text-left w-full rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-1 hover:bg-zinc-200 dark:hover:bg-zinc-700"
           :title="t('common.copy')"
           @click="copyUID"
-        >{{ item.uid }}</button>
-        <p class="font-mono text-zinc-500 dark:text-zinc-400 break-all">/dav/{{ item.uid }}/</p>
+        >
+          {{ item.uid }}
+        </button>
+        <p class="font-mono text-zinc-500 dark:text-zinc-400 break-all">
+          /dav/{{ item.uid }}/
+        </p>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Toggle v-model="enabled" :label="t('common.enabled')" />
-        <Toggle v-model="readOnly" :label="t('storages.fields.readOnly')" />
-        <Toggle v-model="rbacEnabled" :label="t('storages.fields.rbac')" />
+        <Toggle
+          v-model="enabled"
+          :label="t('common.enabled')"
+        />
+        <Toggle
+          v-model="readOnly"
+          :label="t('storages.fields.readOnly')"
+        />
+        <Toggle
+          v-model="rbacEnabled"
+          :label="t('storages.fields.rbac')"
+        />
         <p class="text-xs text-zinc-500 dark:text-zinc-400 -mt-1">
           {{ t('storages.fields.rbacHint') }}
         </p>
       </div>
+      <Input
+        v-model="syncIntervalMin"
+        type="number"
+        :min="1"
+        :step="1"
+        :label="t('storages.fields.syncInterval')"
+        :hint="t('storages.fields.syncIntervalHint')"
+        placeholder="15"
+        data-testid="storage-sync-interval"
+      />
       <hr class="divider" />
-      <StorageDriverFields v-model="config" :driver="item.driver" />
+      <StorageDriverFields
+        v-model="config"
+        :driver="item.driver"
+      />
 
-      <div v-if="testResult" class="rounded-md border p-3 text-sm" :class="testResult.ok ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300' : 'border-rose-300 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/30 text-rose-700 dark:text-rose-300'">
-        <p v-if="testResult.ok">{{ t('storages.actions.ok') }}</p>
-        <p v-else class="font-mono break-all">{{ testResult.error }}</p>
+      <div
+        v-if="testResult"
+        class="rounded-md border p-3 text-sm"
+        :class="testResult.ok ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300' : 'border-rose-300 bg-rose-50 dark:bg-rose-500/10 dark:border-rose-500/30 text-rose-700 dark:text-rose-300'"
+      >
+        <p v-if="testResult.ok">
+          {{ t('storages.actions.ok') }}
+        </p>
+        <p
+          v-else
+          class="font-mono break-all"
+        >
+          {{ testResult.error }}
+        </p>
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-2 pt-2">
-        <Button type="button" variant="outline" :loading="testing" @click="test">
+        <Button
+          type="button"
+          variant="outline"
+          :loading="testing"
+          @click="test"
+        >
           <Activity class="h-4 w-4" />
           {{ t('storages.actions.test') }}
         </Button>
         <div class="flex items-center gap-2">
-          <Button type="button" variant="danger" @click="showDelete = true">
+          <Button
+            type="button"
+            variant="danger"
+            @click="showDelete = true"
+          >
             <Trash2 class="h-4 w-4" />
             {{ t('common.delete') }}
           </Button>
-          <Button type="submit" :loading="saving">
+          <Button
+            type="submit"
+            :loading="saving"
+          >
             <Save class="h-4 w-4" />
             {{ t('common.save') }}
           </Button>
@@ -298,14 +383,29 @@ onMounted(load);
 
     <section class="card">
       <header class="card-header flex items-center justify-between">
-        <h2 class="text-sm font-semibold">{{ t('storages.actions.syncHistory') }}</h2>
-        <Button variant="ghost" size="xs" :loading="runsLoading" @click="loadRuns">
+        <h2 class="text-sm font-semibold">
+          {{ t('storages.actions.syncHistory') }}
+        </h2>
+        <Button
+          variant="ghost"
+          size="xs"
+          :loading="runsLoading"
+          @click="loadRuns"
+        >
           <RefreshCcw class="h-3.5 w-3.5" />
         </Button>
       </header>
-      <Table :columns="runColumns" :rows="runs" :loading="runsLoading" :empty="t('sync.noResults')">
+      <Table
+        :columns="runColumns"
+        :rows="runs"
+        :loading="runsLoading"
+        :empty="t('sync.noResults')"
+      >
         <template #cell-state="{ row }">
-          <Badge :tone="stateTone((row as SyncRun).state)" size="xs">
+          <Badge
+            :tone="stateTone((row as SyncRun).state)"
+            size="xs"
+          >
             {{ (row as SyncRun).state }}
           </Badge>
         </template>
@@ -314,30 +414,66 @@ onMounted(load);
 
     <section class="card">
       <header class="card-header flex items-center justify-between">
-        <h2 class="text-sm font-semibold">{{ t('storages.actions.drift') }}</h2>
-        <Button variant="ghost" size="xs" :loading="driftLoading" @click="loadDrift">
+        <h2 class="text-sm font-semibold">
+          {{ t('storages.actions.drift') }}
+        </h2>
+        <Button
+          variant="ghost"
+          size="xs"
+          :loading="driftLoading"
+          @click="loadDrift"
+        >
           <RefreshCcw class="h-3.5 w-3.5" />
         </Button>
       </header>
       <div class="card-body">
-        <div v-if="driftLoading" class="text-center text-zinc-500"><Spinner /></div>
-        <div v-else-if="!drift" class="text-sm text-zinc-500">—</div>
-        <div v-else class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+        <div
+          v-if="driftLoading"
+          class="text-center text-zinc-500"
+        >
+          <Spinner />
+        </div>
+        <div
+          v-else-if="!drift"
+          class="text-sm text-zinc-500"
+        >
+          —
+        </div>
+        <div
+          v-else
+          class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"
+        >
           <div>
-            <p class="text-xs text-zinc-500">Missing in DB</p>
-            <p class="font-semibold">{{ drift.missing_in_db }}</p>
+            <p class="text-xs text-zinc-500">
+              Missing in DB
+            </p>
+            <p class="font-semibold">
+              {{ drift.missing_in_db }}
+            </p>
           </div>
           <div>
-            <p class="text-xs text-zinc-500">Missing in storage</p>
-            <p class="font-semibold">{{ drift.missing_in_storage }}</p>
+            <p class="text-xs text-zinc-500">
+              Missing in storage
+            </p>
+            <p class="font-semibold">
+              {{ drift.missing_in_storage }}
+            </p>
           </div>
           <div>
-            <p class="text-xs text-zinc-500">Size mismatch</p>
-            <p class="font-semibold">{{ drift.size_mismatch }}</p>
+            <p class="text-xs text-zinc-500">
+              Size mismatch
+            </p>
+            <p class="font-semibold">
+              {{ drift.size_mismatch }}
+            </p>
           </div>
           <div>
-            <p class="text-xs text-zinc-500">Hash mismatch</p>
-            <p class="font-semibold">{{ drift.hash_mismatch }}</p>
+            <p class="text-xs text-zinc-500">
+              Hash mismatch
+            </p>
+            <p class="font-semibold">
+              {{ drift.hash_mismatch }}
+            </p>
           </div>
           <div class="col-span-full text-xs text-zinc-500">
             {{ formatRelative(drift.generated_at, locale) }}
@@ -346,14 +482,27 @@ onMounted(load);
       </div>
     </section>
 
-    <Modal v-model="showDelete" :title="t('common.delete')" size="sm">
+    <Modal
+      v-model="showDelete"
+      :title="t('common.delete')"
+      size="sm"
+    >
       <p class="text-sm text-zinc-700 dark:text-zinc-300 flex items-start gap-2">
         <AlertTriangle class="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
         <span>{{ t('storages.deleteConfirm', { name: item.name }) }}</span>
       </p>
       <template #footer>
-        <Button variant="ghost" @click="showDelete = false">{{ t('common.cancel') }}</Button>
-        <Button variant="danger" :loading="deleting" @click="confirmDelete">
+        <Button
+          variant="ghost"
+          @click="showDelete = false"
+        >
+          {{ t('common.cancel') }}
+        </Button>
+        <Button
+          variant="danger"
+          :loading="deleting"
+          @click="confirmDelete"
+        >
           {{ t('common.yesDelete') }}
         </Button>
       </template>

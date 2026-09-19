@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"path"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -30,6 +31,19 @@ import (
 // than 30% of its objects will trip the step-4 guard once (a warning, and one
 // tombstone pass skipped); the next run compares like with like.
 func (s *storageSyncer) RunOnce(ctx context.Context) error {
+	// ⚠ One run at a time per storage. The poll loop is sequential by itself,
+	// but "Scan now" (Worker.Trigger) is a second door: pressed while a poll
+	// was still walking a 150K-object bucket, it started a second full walk
+	// over the same rows — two runs racing each other's seen_at, each one
+	// making the other slower (issue #33). The second caller is told, not
+	// queued: the run it wanted is the one already in progress.
+	if !s.runMu.TryLock() {
+		return ErrRunInProgress
+	}
+	defer s.runMu.Unlock()
+	s.inFlight.Store(true)
+	defer s.inFlight.Store(false)
+
 	// ⚠⚠ The scanner attributes NOTHING. Every row it creates or updates is
 	// SYSTEM, and that is true however the run was started.
 	//
@@ -61,7 +75,15 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 		return err
 	}
 	added, updated := 0, 0
-	seen, err := s.walk(ctx, "/", nil, &added, &updated)
+	// A backend that can hand over the whole tree in one pass (object stores)
+	// is asked once, up front; the walk then reads directories out of memory.
+	// Anything else — or a tree too large to hold — is walked directory by
+	// directory as before.
+	list := dirLister(s.driver.List)
+	if idx, ok := s.prefetchTree(ctx); ok {
+		list = idx.list
+	}
+	seen, err := s.walk(ctx, "/", nil, &added, &updated, list)
 	if err != nil {
 		_ = s.store.FinishSyncRun(ctx, run.ID, "", seen, added, updated, 0, "failed", err.Error())
 		return err
@@ -123,14 +145,79 @@ func CatalogueTree(ctx context.Context, store db.Store, idx *search.Index,
 	st *model.Storage, drv storage.Driver, dir string, parent *int64) error {
 	s := &storageSyncer{store: store, index: idx, avScan: avScan, storage: st, driver: drv, ctx: ctx}
 	added, updated := 0, 0
-	_, err := s.walk(ctx, dir, parent, &added, &updated)
+	// ⚠ Always the live listing, never a prefetch: the subtree was written a
+	// moment ago by the caller and no snapshot taken before that can hold it.
+	_, err := s.walk(ctx, dir, parent, &added, &updated, s.driver.List)
 	return err
 }
 
+// dirLister answers "what is in directory p" for one walk — the driver's List,
+// or a prefetched tree standing in for it.
+type dirLister func(ctx context.Context, p string) ([]storage.Object, error)
+
+// treeIndex is a whole subtree fetched in one pass (storage.TreeWalker) and
+// grouped by parent directory, so the walk reads each directory out of memory
+// instead of asking the backend for it.
+type treeIndex map[string][]storage.Object
+
+func (idx treeIndex) list(_ context.Context, p string) ([]storage.Object, error) {
+	return idx[path.Clean("/"+p)], nil
+}
+
+// TreePrefetchMax bounds how many objects one RunOnce will hold in memory
+// from a single-pass listing before it gives up on the shortcut and walks
+// directory by directory instead. Two million objects is on the order of a
+// few hundred MB, which a server syncing a bucket that size has.
+var TreePrefetchMax = 2_000_000
+
+var errTreeTooLarge = errors.New("sync: tree too large to prefetch")
+
+// prefetchTree asks a TreeWalker backend for everything under "/" in one pass
+// and returns it grouped by parent. ok is false when the driver cannot, the
+// tree is over TreePrefetchMax, or the pass failed — the caller then walks the
+// backend the ordinary way, so a shortcut that does not fit never costs a scan.
+//
+// The trash subtree is dropped here rather than in the walk (which skips it
+// anyway): with 30% of a bucket in `.filex-trash/` that is 30% less to hold.
+func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
+	tw, ok := s.driver.(storage.TreeWalker)
+	if !ok {
+		return nil, false
+	}
+	idx := treeIndex{}
+	n := 0
+	started := time.Now()
+	err := tw.WalkTree(ctx, "/", func(o storage.Object) error {
+		if trash.IsTrashPath(o.Path) {
+			return nil
+		}
+		n++
+		if n > TreePrefetchMax {
+			return errTreeTooLarge
+		}
+		parent := path.Dir(path.Clean("/" + o.Path))
+		idx[parent] = append(idx[parent], o)
+		return nil
+	})
+	if err != nil {
+		slog.Warn("sync: single-pass listing unavailable, walking directory by directory",
+			slog.String("storage", s.storage.Name),
+			slog.Int("objects", n),
+			slog.String("err", err.Error()))
+		return nil, false
+	}
+	slog.Debug("sync: tree prefetched in one pass",
+		slog.String("storage", s.storage.Name),
+		slog.Int("objects", n),
+		slog.Duration("took", time.Since(started)))
+	return idx, true
+}
+
 // walk recursively lists the storage from `path` downwards. parent is the
-// DB id of the parent node (nil at root).
-func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added, updated *int) (int, error) {
-	objs, err := s.driver.List(ctx, p)
+// DB id of the parent node (nil at root). list answers each directory —
+// the driver, or a tree fetched up front (see prefetchTree).
+func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added, updated *int, list dirLister) (int, error) {
+	objs, err := list(ctx, p)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return 0, nil
@@ -271,7 +358,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			// of an existing storage, and the reason the hook exists.
 			s.enqueueScan(ctx, created)
 			if obj.Kind == storage.KindDirectory {
-				cn, err := s.walk(ctx, obj.Path, &created.ID, added, updated)
+				cn, err := s.walk(ctx, obj.Path, &created.ID, added, updated, list)
 				if err == nil {
 					count += cn
 				}
@@ -314,7 +401,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			}
 			count++
 			if existing.Type == model.NodeTypeDirectory {
-				cn, err := s.walk(ctx, obj.Path, &existing.ID, added, updated)
+				cn, err := s.walk(ctx, obj.Path, &existing.ID, added, updated, list)
 				if err == nil {
 					count += cn
 				}

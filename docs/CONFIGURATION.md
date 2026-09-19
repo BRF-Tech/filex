@@ -173,6 +173,29 @@ and what makes losing the private key unrecoverable.
 | `FILEX_COOKIE_DOMAIN` | — (host-only) | `Domain` attribute for the `filex_session` cookie, e.g. `.example.com` — subdomains of that domain then share the session. Applied on **both** set and clear, so logout removes the same cookie it created. Empty = host-only cookie (unchanged behaviour). `Secure`/`SameSite`/`HttpOnly` are unaffected. **Multi-tenant:** this is only the last-resort fallback — the cookie Domain resolves per tenant: the provider's `cookie_domain` field wins, else it is derived from the provider host by dropping its first label (`files.example.com` → `.example.com`), else this global value. ⚠ A tenant served on its bare apex, or whose derivation would land on a public suffix (`tenant.com.tr` → `.com.tr`, which browsers reject), must set `cookie_domain` explicitly. See [MULTI-TENANCY.md](./MULTI-TENANCY.md). |
 | `FILEX_CONFIG` | — | Path to `config.yaml` (same as `--config`). |
 
+### Public URL
+
+`FILEX_PUBLIC_URL` is the one address filex hands to other people: every share
+link and file-request link, the links inside every e-mail, the OIDC redirect
+and the address OnlyOffice fetches documents from. Set it to what a browser
+types to reach this instance — `https://files.example.com`, no trailing slash,
+the proxy's hostname rather than the container's.
+
+**When it is not set**, filex assumes `http://localhost:5212` and builds every
+one of those links on it. The link looks fine on the machine that runs filex
+and is dead everywhere else — and the first person to find out is whoever
+receives it. So an administrator signed in to the panel sees a banner saying
+the variable is unset until it is; `GET /api/files/capabilities` says the same
+thing as `public_url_configured: false`.
+
+⚠ The variable is `FILEX_PUBLIC_URL`, exactly. filex reads no
+`FILEX_APPLICATION_URL`, `APP_URL`, `BASE_URL` or `SITE_URL`, and a typo in a
+compose file is not an error at startup — it is a share link to `localhost`
+some time later. The panel banner is there for precisely that case.
+
+In [multi-tenant](./MULTI-TENANCY.md) mode a tenant's links are built on the
+tenant's own host; `FILEX_PUBLIC_URL` is the operator's fallback.
+
 ---
 
 ## Logging

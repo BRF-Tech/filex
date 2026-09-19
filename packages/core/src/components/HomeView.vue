@@ -144,9 +144,12 @@ const storageTile = fileIconTile({ type: 'dir', mime_type: 'inode/storage' });
  * with the wrong size line says something false.
  */
 function storageCaption(s: HomeStorage): string {
-  return typeof s.usedBytes === 'number' && s.usedBytes >= 0
-    ? t('drive.storage.used_unlimited', { used: formatSize(s.usedBytes) })
-    : t('conn.guide.storage');
+  const base =
+    typeof s.usedBytes === 'number' && s.usedBytes >= 0
+      ? t('drive.storage.used_unlimited', { used: formatSize(s.usedBytes) })
+      : t('conn.guide.storage');
+  // A read-only mount says so on its card too (issue #30).
+  return s.readOnly ? `${base} · ${t('sidenav.storage.readOnly')}` : base;
 }
 
 /**

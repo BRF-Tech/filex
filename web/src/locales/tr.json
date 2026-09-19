@@ -206,6 +206,8 @@
       "name": "Görünen isim",
       "namePlaceholder": "Kişisel fotoğraflar",
       "readOnly": "Salt okunur mount",
+      "syncInterval": "Tarama aralığı (dakika)",
+      "syncIntervalHint": "filex bu depoyu dışarıdan yapılan değişiklikler için ne sıklıkla tarasın (yoklama modu). Sunucu varsayılanı (15 dakika) için boş bırakın. Büyük ve seyrek değişen bir depo uzun aralıkla daha rahattır; aralığını aşan bir tarama ikinci kez başlatılmaz.",
       "rbac": "Öğe bazlı erişim denetimi (RBAC)",
       "rbacHint": "Açıkken admin olmayanlar yalnızca izin panelinden kendilerine verilen dosya/klasörleri görür. Kapalıyken depo tüm kullanıcılara açıktır (yetki role göre).",
       "path": "Dizin yolu",
@@ -264,6 +266,21 @@
       "fail": "Bağlantı başarısız",
       "syncHistory": "Senkron geçmişi",
       "drift": "Drift raporu"
+    },
+    "discover": {
+      "title": "Birden çok klasörü tek seferde bağla",
+      "hint": "Bir kovanın ya da paylaşımın kökü tek bir depo olarak asla bağlanmaz. Bunun yerine yukarıda girdiğiniz kökün altındaki klasörleri listeleyin ve işaretlediğiniz her birini ayrı depo olarak bağlayın — aynı kimlik bilgileri, klasör başına bir kenar çubuğu girdisi.",
+      "list": "Bu kökün altındaki klasörleri listele",
+      "listing": "Listeleniyor…",
+      "none": "Bu kökün altında klasör yok.",
+      "found": "{count} klasör bulundu — bağlanacakları işaretleyin. Ad kenar çubuğunda görünendir; kök, deponun işaret ettiği yerdir.",
+      "nameLabel": "Depo adı",
+      "create": "{count} depo oluştur",
+      "creating": "Oluşturuluyor…",
+      "createdOk": "{count} depo oluşturuldu",
+      "createdPartial": "{total} depodan {ok} tanesi oluşturuldu — {failed} başarısız: {names}",
+      "selectAll": "Tümünü seç",
+      "selectNone": "Seçimi kaldır"
     },
     "deleteConfirm": "\"{name}\" deposunu sil? Backend'deki dosyalar korunur, sadece filex indeksinden çıkarılır.",
     "deletedOk": "Depo silindi",
@@ -800,6 +817,10 @@
     "copy": "Kopyala",
     "empty": "Henüz anahtar yok.",
     "keyword": "anahtar"
+  },
+  "instance": {
+    "publicUrlUnset": "FILEX_PUBLIC_URL ayarlı değil. Paylaşım bağlantıları, dosya isteme bağlantıları ve e-postadaki her bağlantı, bu örneğin açıldığı adresi girene kadar http://localhost:5212 üzerine kurulur.",
+    "publicUrlDocs": "Nasıl ayarlanır"
   },
   "demo": {
     "badge": "Canlı demo",

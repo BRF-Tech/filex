@@ -55,6 +55,16 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
   // server on the next release.
   const demoReadOnly = computed(() => data.value.demo_mode === true);
 
+  // The operator never chose a public URL. Every share link and every mailed
+  // link is then built on the built-in guess (http://localhost:5212), and the
+  // first person to notice is whoever receives one (issue #32: a compose file
+  // set a variable filex has never read). Only once capabilities have loaded —
+  // the empty default must not raise a warning about a server nobody asked.
+  // A tenant host announces its own origin, and that is a configured answer.
+  const publicUrlUnset = computed(
+    () => loaded.value && data.value.public_url_configured === false && !data.value.public_url,
+  );
+
   function has(key: keyof Capabilities): boolean {
     const v = data.value[key];
     if (typeof v === 'boolean') return v;
@@ -63,5 +73,5 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
     return Boolean(v);
   }
 
-  return { data, loading, loaded, demoReadOnly, fetch, has };
+  return { data, loading, loaded, demoReadOnly, publicUrlUnset, fetch, has };
 });

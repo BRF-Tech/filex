@@ -2,13 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.42.0"
+version: "0.42.1"
 releaseNotes: |-
-  filex v0.42.0 — 2026-09-16
-  • A single click selects; a double click opens (mouse).
-  • ExplorerConfig.openInHost
-  • Desktop: frameless document + main windows with our own window controls.
-  • Window / tab titles name the open document.
+  filex v0.42.1 — 2026-09-19
+  • Mount several folders at once
+  • Scan every (minutes)
+  • A sign when FILEX_PUBLIC_URL is unset
+  • One sync run per storage at a time
+  • An S3 scan is one listing, not one request per folder
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

@@ -1056,6 +1056,7 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/", stg.List)
 				r.Post("/", stg.Create)
 				r.Post("/test", storagesAdmH.Test)
+				r.Post("/discover", storagesAdmH.Discover)
 				r.Get("/{id}", stg.Get)
 				r.Patch("/{id}", stg.Update)
 				r.Delete("/{id}", stg.Delete)

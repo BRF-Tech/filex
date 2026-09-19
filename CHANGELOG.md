@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-09-19
+
+A fix release for four reports on 0.42.0.
+
+### Added
+
+- **Mount several folders at once** (#31). *Storages → Add* lists the folders
+  directly under the root you typed — the bucket root included — and creates
+  one storage per ticked folder with the same credentials, so a bucket with
+  N top-level folders is one form, not N. The bucket root itself is still
+  never mounted (`ROOT_PATH_FORBIDDEN`); this is how "the whole bucket" is
+  offered instead. Behind it: `POST /api/admin/storages/discover`
+  `{driver, config}` → `{ok, root_key, folders:[{name, root}]}`. Every driver
+  with a root field (s3, local, sftp, ftp, webdav, smb).
+- **Scan every (minutes)** on the storage form (#33). The per-storage poll
+  cadence (`sync_interval_s`) existed on the row and in the API and was
+  reachable from no form; empty = the server default (15 min).
+- **A sign when `FILEX_PUBLIC_URL` is unset** (#32). Administrators see a
+  banner in the panel until it is set: every share link, file-request link
+  and mailed link is otherwise built on `http://localhost:5212`. The API says
+  the same as `public_url_configured` on `GET /api/files/capabilities`. The
+  report had set `FILEX_APPLICATION_URL`, a variable filex has never read;
+  [CONFIGURATION.md → Public URL](docs/CONFIGURATION.md#public-url) now says
+  so in as many words.
+
+### Changed
+
+- **One sync run per storage at a time** (#33). "Scan now" while a run is
+  walking starts no second full walk over the same rows — it answers **202**
+  with `status: "running"`, the scan asked for being the one in progress; a
+  poll tick that finds the previous run still in flight is skipped and logged
+  at INFO, not counted as a failure.
+- **An S3 scan is one listing, not one request per folder** (#33). The S3
+  driver hands the sync worker the whole tree in a single un-delimited
+  `ListObjectsV2` pass (`storage.TreeWalker`), so 150,000 objects in a few
+  thousand prefixes cost ~150 calls instead of a few thousand; the walk then
+  reads directories out of memory. Over two million objects the worker falls
+  back to the per-directory walk. Same rows, same order guarantees, measured
+  against the per-directory walk.
+
+### Fixed
+
+- **A read-only storage looks read-only to its users** (#30). The navigation
+  panel's storage row carries a *Read-only* tag and its Home card says so; on
+  such a storage the panel's **+ New** menu, the toolbar's New folder / Upload
+  and the write entries of the context menu are not offered. Before, only
+  the admin list had an "RO" badge and every attempt ended in the server's
+  403. Sharing a read-only file is still allowed — the ACL level is unchanged,
+  only the write affordances go (`@brftech/filex-core` `permCanEdit` folds the
+  listing's `read_only` in, so every embed gets the same).
+
+### Upgrade notes
+
+- No migrations. `POST /api/admin/storages/{id}/sync` answers 202 with
+  `status: "running"` (instead of `"started"`) while a run is already in
+  flight; nothing is started twice.
+- A client that reads `GET /api/files/capabilities` sees one more boolean,
+  `public_url_configured`.
+
 ## [0.42.0] - 2026-09-16
 
 ### Changed

@@ -243,6 +243,16 @@ const views = computed(() => {
 const writable = computed(() => props.canWrite !== false);
 
 /**
+ * The storage the listing is in is mounted read-only. Its "+ New" menu is not
+ * disabled but GONE: on a read-only mount there is no folder where any of
+ * its rows could ever work, and a disabled menu invites the question a menu
+ * cannot answer. The row itself says why — see the tag on it (issue #30).
+ */
+const activeReadOnly = computed(
+  () => !!props.activeStorage && props.storages.some((s) => s.name === props.activeStorage && s.readOnly === true),
+);
+
+/**
  * Which row reads as the one you are standing on.
  *
  * Every view answers for itself. "My files" is the exception, because it has
@@ -426,6 +436,7 @@ const toggleLabel = computed(() => t('sidenav.close'));
            stand here behind `v-if="!newMenu"` (Upload + New folder) is gone:
            both verbs are the first two rows of this menu. -->
       <button
+        v-if="!activeReadOnly"
         ref="newBtnEl"
         type="button"
         class="fe-sidenav__new"
@@ -692,6 +703,17 @@ const toggleLabel = computed(() => t('sidenav.close'));
                 role="img"
                 :aria-label="t('sidenav.storage.shared')"
                 >{{ t('sidenav.storage.shared') }}</span
+              >
+              <!-- A read-only mount says so on the row, where the user looks
+                   for it. The admin list had an "RO" badge; the people it
+                   applied to never saw one (issue #30). -->
+              <span
+                v-if="showLabels && s.readOnly"
+                class="fe-sidenav__tag"
+                role="img"
+                data-testid="sidenav-storage-readonly"
+                :aria-label="t('sidenav.storage.readOnly')"
+                >{{ t('sidenav.storage.readOnly') }}</span
               >
             </button>
           </li>

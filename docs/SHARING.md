@@ -228,8 +228,11 @@ admin settings.)
   uploader's.
 - **Uploader sees folder contents?** — they don't; the drop page never lists the
   folder. If you want them to *see* files, use a download share instead.
-- **Share link opens the wrong URL / host** — `FILEX_PUBLIC_URL` is wrong. It's
-  baked into every generated link (see [CONFIGURATION.md](CONFIGURATION.md)).
+- **Share link opens the wrong URL / host** — `FILEX_PUBLIC_URL` is wrong or
+  unset. It's baked into every generated link; unset, every link says
+  `http://localhost:5212`, and the admin panel shows a banner until it is set.
+  The variable is spelled exactly `FILEX_PUBLIC_URL` — nothing else is read
+  (see [Public URL](CONFIGURATION.md#public-url)).
 - **Email not sent** — SMTP not configured/verified; the response is
   `{emailed:false}` and the UI still shows the link to share manually.
 
