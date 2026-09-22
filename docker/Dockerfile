@@ -121,6 +121,8 @@ FROM alpine:3.20
 # Single apk layer — keeps the Docker layer cache friendly when nothing in
 # the dep list changes between builds.
 #   ca-certificates / tzdata / su-exec — base runtime niceties.
+#   tini                                — PID 1: reaps orphaned processes
+#                                         (see ENTRYPOINT below).
 #   ffmpeg                              — video thumbnails (1st keyframe).
 #   ghostscript + poppler-utils         — PDF → JPEG (page 1). gs preferred,
 #                                         pdftoppm as fallback (matches
@@ -140,6 +142,7 @@ RUN apk --no-cache add \
         ca-certificates \
         tzdata \
         su-exec \
+        tini \
         ffmpeg \
         imagemagick \
         ghostscript \
@@ -176,5 +179,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# ⚠⚠ tini is PID 1, not filex. A process that is PID 1 inherits every orphan
+# in the container, and the Go runtime only ever waits for the children it
+# started itself: LibreOffice's helpers (gpgconf, gpgsm, gpg) were never
+# collected, and one deployment measured 19,110 zombies in ten days — until
+# the task limit was full, the healthcheck could not fork and every thumbnail
+# failed. tini reaps them, and forwards SIGTERM to the entrypoint, which
+# `exec`s filex so that filex is the process that receives it. `-s` also
+# registers tini as a subreaper, so an outer init (compose `init: true`,
+# `docker run --init`) is harmless rather than a warning.
+ENTRYPOINT ["/sbin/tini", "-s", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["serve"]

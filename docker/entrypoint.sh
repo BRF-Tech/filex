@@ -25,6 +25,10 @@
 # files are not ours to re-own: a storage may be a network mount, may be shared
 # with other software, and may be enormous. If filex cannot write there after
 # you set PUID, fix the permissions on that folder — that is a deliberate line.
+#
+# ⚠ This script runs as tini's child (the Dockerfiles' ENTRYPOINT), and every
+# branch ends in `exec`, so filex REPLACES it: tini forwards SIGTERM to its
+# child, and that child has to be filex, not a shell waiting on it.
 set -eu
 
 BIN=/usr/local/bin/filex

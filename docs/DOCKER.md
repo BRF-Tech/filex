@@ -7,6 +7,7 @@ that lets you assemble the stack you actually need.
 - [Compose profiles](#compose-profiles)
 - [Volume layout](#volume-layout)
 - [Which user the container runs as](#which-user-the-container-runs-as)
+- [The init process (PID 1)](#the-init-process-pid-1)
 - [Reverse proxies](#reverse-proxies)
 - [TLS termination](#tls-termination)
 - [Backups](#backups)
@@ -61,7 +62,9 @@ Both Dockerfiles are multi-stage:
 1. `frontend-build` — node 20 + pnpm, builds packages + admin UI
 2. `embed-prep` — stages the dist files
 3. `backend-build` — golang 1.25, builds with `//go:embed` consuming the staged dist
-4. runtime — `alpine:3.20`; this is the only stage where slim and full differ
+4. runtime — `alpine:3.20`; this is the only stage where slim and full differ.
+   Both start `tini` as PID 1, which runs the entrypoint, which `exec`s filex —
+   see [The init process](#the-init-process-pid-1)
 
 Pass build-args to embed version metadata into the binary:
 ```bash
@@ -237,6 +240,48 @@ permissions.
 | default | `root` | no | no |
 | `PUID`/`PGID` | that uid | yes, once | no |
 | `--user` / `runAsUser` | that uid | no (cannot) | **yes** |
+
+---
+
+## The init process (PID 1)
+
+Both images start **[tini](https://github.com/krallin/tini)** as PID 1:
+
+```
+ENTRYPOINT ["/sbin/tini", "-s", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD ["serve"]
+```
+
+tini runs the entrypoint, the entrypoint `exec`s filex (as root, or as your
+`PUID`/`PGID`), and tini stays behind to do the two things PID 1 has to do in a
+container: pass `docker stop`'s SIGTERM on to filex, and **collect every
+orphaned process**.
+
+⚠ The second one is why it is there. Images up to v0.42.2 ran filex itself as
+PID 1, and PID 1 inherits every process whose parent exits. LibreOffice, which
+draws office-document thumbnails, leaves helper processes behind (`gpgconf`,
+`gpgsm`, `gpg`); the Go runtime only ever waits for the children it started
+itself, so nobody collected them. Measured on one deployment: **19,110 zombie
+processes in ten days**, until the container's task limit was full — at which
+point the healthcheck could not fork `wget` and every thumbnail failed with
+`can't fork`. On an older image this counts them, and `init: true` (below) is
+the workaround:
+
+```bash
+docker exec filex sh -c "grep -l '^State:.*Z' /proc/[0-9]*/status | wc -l"
+```
+
+**`init: true` / `docker run --init`** is harmless alongside it, and no longer
+needed. Docker's own init becomes PID 1 and tini runs under it; `-s` registers
+tini as a subreaper, so it still collects what is orphaned beneath it instead of
+warning that it cannot.
+
+**Kubernetes** needs nothing either — the image's entrypoint is tini whatever
+the pod spec says, as long as you do not replace it.
+
+⚠ **If you override the entrypoint** (`--entrypoint`, compose `entrypoint:`, a
+Kubernetes `command:`), you replace tini too. Keep it in front —
+`["/sbin/tini", "-s", "--", …]` — or run with `init: true`.
 
 ---
 
