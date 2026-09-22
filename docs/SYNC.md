@@ -191,6 +191,7 @@ filex sync list [--json]
 filex sync move <pair-id> <new-local-path>
 filex sync remove <pair-id>
 filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet] [--transfers <n>]
+               [--limit-down <KiB/s>] [--limit-up <KiB/s>] [--window HH:MM-HH:MM]
 filex sync trash [--pair <id>] [--restore <path>]
 filex sync confirm <pair-id>
 filex sync discard <pair-id>
@@ -213,6 +214,22 @@ first, and deletes and conflict copies still run one at a time in the planner's
 deepest-first order. Server folders are listed eight at a time for the same
 reason: the inventory of a 3,000-folder tree is minutes rather than a quarter of
 an hour.
+
+`--limit-down` / `--limit-up` cap the transfer rate in KiB/s — **all transfers
+of the run together**, not each one: `--transfers` only changes how many files
+move at once, never how fast. A first sync of 52 GiB once held a server's
+~18 Mbit line for nine hours and everyone else using that server felt it. The
+limit paces the file bodies, not the connection, so the client's
+dead-connection pings are never delayed by it.
+
+`--window 22:00-07:00` only starts rounds between those local times (a window
+may wrap midnight). A round still busy when the window closes is stopped the
+way Ctrl-C stops it — its checkpoint written — and carries on in the next
+window. Outside the window a watcher says `sync: waiting for the sync window …`
+once and waits; a one-off `sync run` does nothing and says so.
+
+The `transfer:` progress line carries bytes and, after the first few seconds,
+an estimate: `transfer: 120/11704 (1.2 GiB of 52.6 GiB, about 8h 10m left)`.
 
 `--dry-run` prints exactly what would happen and touches nothing — worth running
 the first time you pair a folder that already has files in it.

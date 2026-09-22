@@ -216,7 +216,13 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	for _, a := range planned {
 		cp.planned[a.Rel] = true
 	}
-	var mu sync.Mutex // guards res, held, the progress counter and cp; the IO runs unlocked
+	var bytesTotal, bytesDone int64
+	for _, a := range actions {
+		bytesTotal += transferBytes(a, local)
+	}
+	transfersStarted := time.Now()
+	lastLine := transfersStarted
+	var mu sync.Mutex // guards res, held, the progress counters and cp; the IO runs unlocked
 	done := 0
 	settle := func(a Action, tmp Result, out outcome, err error) {
 		mu.Lock()
@@ -235,14 +241,18 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 			if out.held {
 				held[a.Rel] = local[a.Rel].Signature()
 			}
+			bytesDone += transferBytes(a, local)
 			cp.note(a, out)
 			if cp.due() {
 				cp.flush(ctx)
 			}
 		}
 		done++
-		if done%10 == 0 || done == res.Planned {
-			e.progressf("transfer: %d/%d", done, res.Planned)
+		// Every tenth action, the last one, and at least every few seconds:
+		// a tree of 1 GB files would otherwise report once per 10 GB.
+		if done%10 == 0 || done == res.Planned || time.Since(lastLine) >= 5*time.Second {
+			lastLine = time.Now()
+			e.progressf("%s", transferLine(done, res.Planned, bytesDone, bytesTotal, time.Since(transfersStarted)))
 		}
 	}
 	runSerial := func(batch []Action) bool {

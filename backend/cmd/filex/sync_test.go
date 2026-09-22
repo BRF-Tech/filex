@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,4 +132,64 @@ func TestSyncList_JSONCarriesTheHold(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, `"hold_new": true`)
 	require.Contains(t, out, `"held": 1`)
+}
+
+// countingServer answers every request 200 with an empty listing and counts them.
+func countingServer(t *testing.T) (*httptest.Server, *int64) {
+	t.Helper()
+	var n int64
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"adapter":"docs","files":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &n
+}
+
+// outsideWindow moves the watcher's clock to noon for a night-time window.
+func outsideWindow(t *testing.T) {
+	t.Helper()
+	old := nowFunc
+	nowFunc = func() time.Time { return time.Date(2026, 9, 22, 12, 0, 0, 0, time.Local) }
+	t.Cleanup(func() { nowFunc = old })
+}
+
+func TestSyncRun_OutsideTheWindowDoesNothing(t *testing.T) {
+	dir, st := syncEnv(t)
+	srv, hits := countingServer(t)
+	_, err := st.AddPair(filesync.Pair{Local: filepath.Join(dir, "mirror"), Remote: "docs://work"})
+	require.NoError(t, err)
+	outsideWindow(t)
+
+	err, out, _ := runSync(t, context.Background(), "run", "--url", srv.URL, "--token", "t", "--window", "22:00-07:00")
+	require.NoError(t, err)
+	require.Contains(t, out, "outside the sync window 22:00-07:00")
+	require.Zero(t, *hits, "not one request outside the window")
+}
+
+func TestSyncRun_TheWatcherWaitsForTheWindow(t *testing.T) {
+	dir, st := syncEnv(t)
+	srv, hits := countingServer(t)
+	_, err := st.AddPair(filesync.Pair{Local: filepath.Join(dir, "mirror"), Remote: "docs://work"})
+	require.NoError(t, err)
+	outsideWindow(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	err, out, _ := runSync(t, ctx, "run", "--url", srv.URL, "--token", "t", "--window", "22:00-07:00", "--watch", "20ms")
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(out, "sync: waiting for the sync window 22:00-07:00"), "said once, not every tick:\n%s", out)
+	require.Zero(t, *hits)
+}
+
+func TestSyncRun_RejectsABadWindowOrLimit(t *testing.T) {
+	syncEnv(t)
+	err, _, _ := runSync(t, context.Background(), "run", "--url", "http://x", "--token", "t", "--window", "22-07")
+	require.ErrorContains(t, err, "--window")
+	err, _, _ = runSync(t, context.Background(), "run", "--url", "http://x", "--token", "t", "--limit-up", "-1")
+	require.ErrorContains(t, err, "cannot be negative")
 }

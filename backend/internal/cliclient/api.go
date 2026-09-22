@@ -216,7 +216,7 @@ func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, 
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(part, f); err != nil {
+			if _, err := io.Copy(part, c.UpLimit.Reader(ctx, f)); err != nil {
 				return err
 			}
 			return mw.Close()
@@ -329,7 +329,7 @@ func (c *Client) DownloadSized(ctx context.Context, remote string, w io.Writer, 
 	if want >= 0 && declared >= 0 && declared != want {
 		return 0, &SizeMismatchError{Remote: remote, Want: want, Got: declared}
 	}
-	n, err := io.Copy(w, resp.Body)
+	n, err := io.Copy(w, c.DownLimit.Reader(ctx, resp.Body))
 	if err != nil {
 		return n, err
 	}

@@ -221,6 +221,9 @@ func syncRemoveCmd() *cobra.Command {
 	})
 }
 
+// nowFunc is the watcher's clock; tests move it.
+var nowFunc = time.Now
+
 func syncRunCmd(opts *clientOpts) *cobra.Command {
 	var (
 		pairID    string
@@ -229,6 +232,9 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 		watch     time.Duration
 		quietOut  bool
 		transfers int
+		limitDown int64
+		limitUp   int64
+		windowArg string
 	)
 	c := &cobra.Command{
 		Use:   "run",
@@ -240,6 +246,13 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			// kill lands between two baseline writes.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			win, err := parseSyncWindow(windowArg)
+			if err != nil {
+				return err
+			}
+			if limitDown < 0 || limitUp < 0 {
+				return errors.New("--limit-down and --limit-up are KiB/s and cannot be negative")
+			}
 			st, err := syncStore()
 			if err != nil {
 				return err
@@ -248,6 +261,8 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			if err != nil {
 				return authHint(err)
 			}
+			api.DownLimit = cliclient.NewRateLimiter(limitDown * 1024)
+			api.UpLimit = cliclient.NewRateLimiter(limitUp * 1024)
 			pairs, err := st.LoadPairs()
 			if err != nil {
 				return err
@@ -268,7 +283,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return nil
 			}
 
-			run := func(pairs []filesync.Pair) error {
+			run := func(ctx context.Context, pairs []filesync.Pair) error {
 				for _, p := range pairs {
 					// ⚠ One token cannot speak for two servers. The desktop app
 					// runs one process per signed-in account and filters here;
@@ -312,13 +327,46 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return nil
 			}
 
+			// round runs every pair once inside the sync window, if there is
+			// one: a round that is still busy when the window closes is
+			// cancelled like a Ctrl-C (its checkpoint flushed) and picks up in
+			// the next window.
+			round := func() error {
+				rctx := ctx
+				if win != nil {
+					var cancel context.CancelFunc
+					rctx, cancel = context.WithDeadline(ctx, win.closesAfter(nowFunc()))
+					defer cancel()
+				}
+				if err := run(rctx, pairs); err != nil {
+					return err
+				}
+				if win != nil && ctx.Err() == nil && rctx.Err() != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "sync: the sync window %s closed; the rest continues when it opens\n", win)
+				}
+				return nil
+			}
+
 			if watch <= 0 {
-				return run(pairs)
+				if win != nil && !win.contains(nowFunc()) {
+					fmt.Fprintf(cmd.OutOrStdout(), "sync: outside the sync window %s; nothing was done\n", win)
+					return nil
+				}
+				return round()
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Watching %d pair(s); checking every %s. Ctrl-C to stop.\n", len(pairs), watch)
+			waiting := false
 			for {
-				if err := run(pairs); err != nil {
-					return err
+				if win != nil && !win.contains(nowFunc()) {
+					if !waiting {
+						fmt.Fprintf(cmd.OutOrStdout(), "sync: waiting for the sync window %s\n", win)
+						waiting = true
+					}
+				} else {
+					waiting = false
+					if err := round(); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -343,6 +391,9 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 	c.Flags().DurationVar(&watch, "watch", 0, "keep running, re-checking at this interval (e.g. 30s)")
 	c.Flags().BoolVar(&quietOut, "quiet", false, "print only the summary line per pair (progress lines still print)")
 	c.Flags().IntVar(&transfers, "transfers", 0, "concurrent uploads/downloads per pair (0 = default 4, 1 = fully serial)")
+	c.Flags().Int64Var(&limitDown, "limit-down", 0, "cap downloads at this many KiB/s, all transfers together (0 = no limit)")
+	c.Flags().Int64Var(&limitUp, "limit-up", 0, "cap uploads at this many KiB/s, all transfers together (0 = no limit)")
+	c.Flags().StringVar(&windowArg, "window", "", "only start transfer rounds between these local times, e.g. 22:00-07:00 (may wrap midnight)")
 	return quiet(c)
 }
 

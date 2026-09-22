@@ -35,6 +35,10 @@ type Client struct {
 	// across process restarts. Empty disables persistence: uploads still
 	// resume within a run, but a restart begins the file again.
 	ResumeDir string
+	// DownLimit and UpLimit cap download and upload bodies (bytes per
+	// second), shared by every transfer of this client. nil = no limit.
+	DownLimit *RateLimiter
+	UpLimit   *RateLimiter
 }
 
 // newHTTPClient is an http.Client that cannot hang forever on a half-dead

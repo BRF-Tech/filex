@@ -20,10 +20,11 @@ package cliclient
 //  2. **The bookmark is written before the first chunk**, not after. The window
 //     this closes is a crash between `begin` and the first PUT — small, and
 //     exactly the window a flaky link keeps landing in.
-//  3. **A body is a *os.File section**, never a wrapped reader. io.NewSectionReader
-//     keeps the request body seekable and exactly as long as the Content-Range
-//     claims; net/http can then retry it, and a short body is impossible rather
-//     than merely unlikely.
+//  3. **A body is an *os.File section**, exactly as long as the Content-Range
+//     claims: a short body is impossible rather than merely unlikely. The only
+//     thing ever wrapped around it is the upload limiter, which passes every
+//     byte through unchanged, and GetBody rebuilds the same section so
+//     net/http can replay it.
 
 import (
 	"context"
@@ -321,11 +322,14 @@ func (c *Client) putChunk(ctx context.Context, id string, f *os.File, offset, le
 	// A section of the open file: seekable, exactly `length` long, and
 	// replayable by net/http. Never io.MultiReader — that is what once cost
 	// the S3 SDK its ability to measure a body (manager_mutate.go:585).
-	body := io.NewSectionReader(f, offset, length)
-	req, err := c.newRequest(ctx, http.MethodPut, "/api/files/upload/"+id, nil, body)
+	section := func() io.Reader {
+		return c.UpLimit.Reader(ctx, io.NewSectionReader(f, offset, length))
+	}
+	req, err := c.newRequest(ctx, http.MethodPut, "/api/files/upload/"+id, nil, section())
 	if err != nil {
 		return 0, err
 	}
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(section()), nil }
 	req.ContentLength = length
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, offset+length-1, total))
