@@ -253,7 +253,15 @@ loop:
         skip                                  # filex's own bookkeeping,
                                               # -- not catalogue content
       seen.add(entry.path)
-      upsert(files, storage_id, entry)
+      if row is staged/failed:              # a staged upload never flipped
+        if no staging session and entry has the committed size and is not
+           older than the commit:           # the bytes did land
+          mark stored, queue antivirus scan
+        else:
+          touch seen_at only                 # keep the committed size/time
+          continue
+      upsert(files, storage_id, entry)      # keeps the row's mime when the
+                                            # listing has none (object stores)
 
     # anything LIVE inside .filex-trash/ is a defect, and both kinds are fixed
     for f in db.files where storage_id=$id and path under .filex-trash/ and not deleted:

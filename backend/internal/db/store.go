@@ -298,6 +298,11 @@ type Store interface {
 	// are in filex's staging area, "stored" once they are on the driver, and
 	// "failed" when the transfer to the driver did not succeed.
 	SetNodeTransferState(ctx context.Context, nodeID int64, state string) error
+	// ListUnstoredNodes pages through every LIVE row whose transfer_state is
+	// "staged" or "failed" — bytes a staged upload committed that were never
+	// confirmed on the storage — in id order, after afterID. The staged-upload
+	// boot pass settles the ones whose bytes did land.
+	ListUnstoredNodes(ctx context.Context, afterID int64, limit int) ([]*model.Node, error)
 
 	// Sync runs / conflicts
 	CreateSyncRun(ctx context.Context, storageID int64, cursorBefore string) (*model.SyncRun, error)

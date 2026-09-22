@@ -167,6 +167,18 @@ for the transfer. `ok` means the bytes are on the driver and the node is
 `stored`; `failed` means the staging directory has been kept and `commit` can be
 called again to retry, without re-uploading a byte.
 
+⚠ **`ok` is only answered once the node says `stored`.** After the driver write
+two catalogue writes remain — the backend's metadata and the `stored` flip —
+and they used to be fire-and-forget, with the staging and the session deleted
+right after whatever had happened. One failed write (a database busy under a
+large scan) left a file that was listed, entirely on the storage, and
+unreadable for good: `staged`, nothing staged, `503 STAGING_GONE` on every
+read, while the op had said `ok`. Both writes are now retried through a
+transient failure, on a context a shutdown cannot cancel, and the staging and
+the session are released only after the flip. If it still cannot be written the
+transfer is reported `failed`, the staging is kept, the file stays readable from
+it, and `commit` retries as above.
+
 ⚠ **The `202` is not success.** It says filex holds every byte, not that the
 storage does — the transfer happens afterwards, and it can fail. So the browser
 client (`useUploadChunked`) waits for that op by default, showing a
@@ -390,6 +402,26 @@ for a healthy one. It is also what the storage sync reads: a node that is not
 absence from a listing as a deletion and will not move it to trash. The bytes
 stay in staging and `commit` can be called again.
 
+**When the session is gone, the storage decides.** A node can still end up
+`staged` or `failed` with no session behind it — the process died between the
+driver write and the flip, or an older version released the staging without
+flipping. Two passes settle it, on the same evidence:
+
+- the **storage sync**, for every row it walks;
+- a **boot pass**, once per start, after the first staging sweep — for storages
+  nobody scans (`ondemand`).
+
+A row is marked `stored` only when **no staging session references it** (while
+one does, the session owns the bytes — in flight, or failed and retryable) **and
+the object at its key has the committed size and is not older than the commit**
+(`backend_mtime` for an overwrite, the row's creation for a new file, with two
+seconds of clock skew allowed). A settled file is re-indexed, gets its thumbnail
+and is queued for the antivirus scan that never ran. Anything short of that
+evidence is left exactly as it was and logged. Until it settles, the sync also
+leaves an unstored row's committed size and time alone: the object at the key
+may be the version the upload is replacing, and writing its metadata over the
+row would show the wrong file and erase the very evidence above.
+
 ## Reading a file while it is still transferring
 
 A `staged` node is readable. Every read surface resolves its byte source through
@@ -423,7 +455,9 @@ Three rules decide what a reader sees:
   behind it. Reads then answer `503` with `code: STAGING_GONE` and a
   message naming the file. There is no fallback to the driver: on an overwrite
   it holds the previous version at that exact path, and serving that would be a
-  silent wrong answer rather than a visible failure.
+  silent wrong answer rather than a visible failure. When the bytes DID land,
+  the answer is to settle the node (see *When the session is gone* above), not
+  to guess on the read path.
 
 Ranged reads work out of staging too — the assembled staging reader seeks across
 part boundaries, so a video is scrubbable and a download resumable before its

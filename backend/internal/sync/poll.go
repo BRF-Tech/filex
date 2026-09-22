@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -80,7 +81,7 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	added, updated := 0, 0
+	c := &walkCounts{}
 	// A backend that can hand over the whole tree in one pass (object stores)
 	// is asked once, up front; the walk then reads directories out of memory.
 	// Anything else — or a tree too large to hold — is walked directory by
@@ -89,9 +90,9 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	if idx, ok := s.prefetchTree(ctx); ok {
 		list = idx.list
 	}
-	seen, err := s.walk(ctx, "/", nil, &added, &updated, list)
+	seen, err := s.walk(ctx, "/", nil, c, list)
 	if err != nil {
-		s.finishRun(ctx, run.ID, seen, added, updated, 0, err)
+		s.finishRun(ctx, run.ID, seen, c.added, c.updated, 0, err)
 		return err
 	}
 
@@ -119,7 +120,7 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 		slog.Warn("sync: folder-size recompute",
 			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
 	}
-	s.finishRun(ctx, run.ID, seen, added, updated, deleted, nil)
+	s.finishRun(ctx, run.ID, seen, c.added, c.updated, deleted, nil)
 	// A run whose context died after the walk skipped whatever came after it
 	// (the tombstone pass, the folder sizes); it is recorded as aborted and
 	// the caller hears why.
@@ -177,11 +178,18 @@ func CatalogueTree(ctx context.Context, store db.Store, idx *search.Index,
 	avScan func(ctx context.Context, n *model.Node),
 	st *model.Storage, drv storage.Driver, dir string, parent *int64) error {
 	s := &storageSyncer{store: store, index: idx, avScan: avScan, storage: st, driver: drv, ctx: ctx}
-	added, updated := 0, 0
 	// ⚠ Always the live listing, never a prefetch: the subtree was written a
 	// moment ago by the caller and no snapshot taken before that can hold it.
-	_, err := s.walk(ctx, dir, parent, &added, &updated, s.driver.List)
+	_, err := s.walk(ctx, dir, parent, &walkCounts{}, s.driver.List)
 	return err
+}
+
+// walkCounts is what one walk did to the catalogue.
+type walkCounts struct {
+	added, updated int
+	// reconciled is the part of updated that settled a staged upload whose
+	// bytes were already on the storage (settleTransfer).
+	reconciled int
 }
 
 // dirLister answers "what is in directory p" for one walk — the driver's List,
@@ -251,7 +259,7 @@ func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
 // walk recursively lists the storage from `path` downwards. parent is the
 // DB id of the parent node (nil at root). list answers each directory —
 // the driver, or a tree fetched up front (see prefetchTree).
-func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added, updated *int, list dirLister) (int, error) {
+func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister) (int, error) {
 	objs, err := list(ctx, p)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -389,9 +397,9 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 				}
 			}
 			if wasRepair {
-				*updated++
+				c.updated++
 			} else {
-				*added++
+				c.added++
 			}
 			count++
 			if s.index != nil {
@@ -402,20 +410,40 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			// of an existing storage, and the reason the hook exists.
 			s.enqueueScan(ctx, created)
 			if obj.Kind == storage.KindDirectory {
-				cn, err := s.walk(ctx, obj.Path, &created.ID, added, updated, list)
+				cn, err := s.walk(ctx, obj.Path, &created.ID, c, list)
 				if err == nil {
 					count += cn
 				}
 			}
 		} else {
-			// existing — update if the backend's copy drifted from the row
+			// existing. A row whose staged upload never flipped to stored is
+			// settled first when the object is demonstrably its bytes; then
+			// the row is updated if the backend's copy drifted from it.
+			unstored := isUnstored(existing)
+			settled := unstored && s.settleTransfer(ctx, existing, obj)
 			drifted := false
-			if objectDrift(existing, obj) {
-				if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, obj.Mime, obj.Etag, obj.Mtime); err == nil {
-					*updated++
+			switch {
+			case unstored && !settled:
+				// ⚠ Seen, and nothing else. An unstored row describes the upload
+				// that was COMMITTED, not whatever sits at its key — the version
+				// an in-flight overwrite is replacing, a partial write, nothing
+				// related. Writing that object's size and time over the row
+				// would show the wrong file, and would erase the evidence
+				// settleTransfer reads: the next pass would take the wrong
+				// object for the upload.
+				_ = s.store.TouchNodeSeen(ctx, existing.ID)
+			case objectDrift(existing, obj):
+				// An object store's listing carries no mime at all. The row's
+				// came from sniffing the bytes at upload, and a listing with
+				// nothing to say about it must not erase it.
+				mime := obj.Mime
+				if mime == "" {
+					mime = existing.Mime
+				}
+				if err := s.store.UpdateNodeMeta(ctx, existing.ID, obj.Size, mime, obj.Etag, obj.Mtime); err == nil {
 					drifted = true
 				}
-			} else {
+			default:
 				_ = s.store.TouchNodeSeen(ctx, existing.ID)
 				// Backfill a missing backend_mtime for nodes first synced by an
 				// older version (before mtime was recorded on insert). Without
@@ -426,16 +454,23 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 					_ = s.store.SetNodeMtime(ctx, existing.ID, timePtr(obj.Mtime))
 				}
 			}
-			// ⚠ Only a DRIFTED file is re-read here. The walk sees every
-			// object on every pass, so hanging a scan off "the walk saw it"
-			// would re-scan the whole storage every sync interval, forever.
-			// Content that has not changed has already been scanned by the
-			// pass that first catalogued it.
+			if settled {
+				c.reconciled++
+			}
+			if settled || drifted {
+				c.updated++
+			}
+			// ⚠ Only a DRIFTED or a SETTLED file is re-read here. The walk
+			// sees every object on every pass, so hanging a scan off "the walk
+			// saw it" would re-scan the whole storage every sync interval,
+			// forever. Content that has not changed has already been scanned
+			// by the pass that first catalogued it — except a settled upload's:
+			// the post-transfer hooks that scan it never ran.
 			//
 			// The row is re-read once and shared by both consumers: `existing`
 			// still carries the PRE-drift size, and the scanner's size ceiling
 			// has to be applied to the bytes that are actually there.
-			if drifted && (s.index != nil || s.avScan != nil) {
+			if (drifted || settled) && (s.index != nil || s.avScan != nil) {
 				if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
 					if s.index != nil {
 						_ = s.index.IndexNode(ctx, fresh)
@@ -445,7 +480,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, added
 			}
 			count++
 			if existing.Type == model.NodeTypeDirectory {
-				cn, err := s.walk(ctx, obj.Path, &existing.ID, added, updated, list)
+				cn, err := s.walk(ctx, obj.Path, &existing.ID, c, list)
 				if err == nil {
 					count += cn
 				}
@@ -609,6 +644,55 @@ func (s *storageSyncer) reconcileInternalTrees(ctx context.Context) {
 			slog.Int("rows", dropped),
 			slog.String("storage", s.storage.Name))
 	}
+}
+
+// isUnstored reports whether a file row's bytes were never confirmed on the
+// storage: a staged upload committed it, and its transfer has not flipped it
+// to "stored" — still running, failed, or its bookkeeping was lost.
+func isUnstored(n *model.Node) bool {
+	return n.Type == model.NodeTypeFile && n.TransferState != "" && n.TransferState != model.TransferStateStored
+}
+
+// settleTransfer marks an unstored file row "stored" when its bytes are
+// demonstrably on the storage and nothing else will ever say so.
+//
+// A staged upload flips its row to "stored" in a catalogue write AFTER the
+// driver write. When that write failed and the cleanup after it went ahead,
+// the row said "staged" for ever with no staging behind it: listed, but every
+// read answered 503 STAGING_GONE, every overwrite was refused (the version
+// snapshot reads the same way) and the bytes were never scanned. A full scan
+// saw the object, updated the row's metadata and never touched
+// transfer_state.
+//
+// Both of these must hold:
+//
+//   - no staged_uploads session references the row. While one does, the
+//     session owns the bytes — in flight, or failed and retryable — and its
+//     commit or the sweeper settles it. A lookup that fails is not "none".
+//   - model.TransferLanded: the object has the committed size and is not
+//     older than the commit.
+func (s *storageSyncer) settleTransfer(ctx context.Context, n *model.Node, obj storage.Object) bool {
+	if obj.Kind == storage.KindDirectory || !model.TransferLanded(n, obj.Size, obj.Mtime) {
+		return false
+	}
+	sess, err := s.store.GetStagedUploadByNode(ctx, n.ID)
+	switch {
+	case err == nil && sess != nil:
+		return false
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return false
+	}
+	if err := s.store.SetNodeTransferState(ctx, n.ID, model.TransferStateStored); err != nil {
+		slog.Warn("sync: could not mark a landed staged upload stored",
+			slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
+		return false
+	}
+	slog.Info("sync: a staged upload's bytes were already on the storage; the row now says stored",
+		slog.Int64("node", n.ID),
+		slog.String("path", n.Path),
+		slog.String("was", n.TransferState),
+		slog.String("storage", s.storage.Name))
+	return true
 }
 
 // tombstone moves the stale candidates that are really gone into the trash

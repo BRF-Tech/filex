@@ -626,6 +626,16 @@ catalogued file and a file whose content drifted are also **queued for an
 antivirus scan**, one priority step below everything a person asked for, so a
 first import of twenty thousand files does not make an upload's scan wait
 behind it ([PROTECTION.md → Files the sync discovers](PROTECTION.md#files-the-sync-discovers)).
+A changed object's size, etag and time are copied onto its row; its **mime is
+kept** when the listing has none to offer (an object store's never does), since
+the row's came from sniffing the bytes at upload.
+
+**A staged upload whose bytes landed is settled.** A row a staged upload left
+`staged` or `failed` — no staging session behind it any more, and the object at
+its key has the committed size and is not older than the commit — is marked
+`stored`, counted as updated, and queued for the antivirus scan it never had.
+Short of that evidence the row is left alone, metadata included (see
+[UPLOADS.md → transfer_state](UPLOADS.md#transfer_state)).
 
 **What a sync does not do: it never un‑deletes.** Deleting in filex is a
 rename — the bytes move to `.filex-trash/` and the row is soft‑deleted and

@@ -2092,6 +2092,28 @@ func (s *Store) SumOpenStagedUploadBytes(ctx context.Context, userID int64) (int
 	return total.Int64, nil
 }
 
+func (s *Store) ListUnstoredNodes(ctx context.Context, afterID int64, limit int) ([]*model.Node, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+
+		` FROM nodes WHERE deleted_at IS NULL AND transfer_state IN ('staged','failed') AND id > ? ORDER BY id LIMIT ?`,
+		afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SetNodeTransferState(ctx context.Context, nodeID int64, state string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE nodes SET transfer_state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, state, nodeID)
