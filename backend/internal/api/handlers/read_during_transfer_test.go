@@ -162,6 +162,7 @@ type transferFixture struct {
 	*stagedFixture
 	gate  *gateDriver
 	thumb *thumb.Pipeline
+	ops   []int64 // every transfer stageAndCommit started, drained at cleanup
 }
 
 // newTransferFixture is the staged-upload fixture with the driver behind a
@@ -192,12 +193,25 @@ func newTransferFixture(t *testing.T) *transferFixture {
 	require.NoError(t, err)
 	require.NotNil(t, gate)
 	pipeline.AttachStorage(f.storage.ID, gate)
+	tf := &transferFixture{stagedFixture: f, gate: gate, thumb: pipeline}
 	// Always open the gate at the end of the test, whatever happened: an
 	// assertion that fires while the transfer is parked must be reported, not
 	// swallowed by a shutdown waiting on a blocked worker.
-	t.Cleanup(gate.let)
-
-	return &transferFixture{stagedFixture: f, gate: gate, thumb: pipeline}
+	//
+	// …and then wait for the transfers it was holding. Their bookkeeping runs
+	// on a context nothing can cancel (a "stored" flip must not be lost to a
+	// shutdown), so a transfer released here is still writing into this
+	// fixture's directories while t.TempDir removes them — "unlinkat …:
+	// directory not empty", now and then, on a busy runner. Registered after
+	// the staged fixture's own cleanups, so it runs before them: the server is
+	// still up to answer, and the directories still exist.
+	t.Cleanup(func() {
+		gate.let()
+		for _, op := range tf.ops {
+			tf.waitForOp(t, op)
+		}
+	})
+	return tf
 }
 
 // stageAndCommit pushes body through the staged protocol into main://<dir>/<name>
@@ -229,7 +243,9 @@ func (f *transferFixture) stageAndCommit(t *testing.T, dir, name string, body []
 	code, committed := f.commit(t, id)
 	require.Equal(t, http.StatusAccepted, code, "commit: %v", committed)
 	require.Equal(t, model.TransferStateStaged, committed["transfer_state"])
-	return num(committed["node_id"]), num(committed["op_id"])
+	nodeID, opID = num(committed["node_id"]), num(committed["op_id"])
+	f.ops = append(f.ops, opID)
+	return nodeID, opID
 }
 
 // ── surface drivers (each one is the real HTTP route) ───────────────────────
