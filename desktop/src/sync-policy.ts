@@ -195,3 +195,25 @@ export function pairView(input: {
   }
   return st.running ? { kind: 'watching' } : { kind: 'stopped' };
 }
+
+// ── held items ───────────────────────────────────────────────────────────
+
+/** The slice of a pair (`filex sync list --json`) that says it is holding. */
+export interface HoldingPair {
+  /** Set by the engine when a FIRST run would have pushed a stale mirror's
+   *  worth of local-only items into a server folder that has content. */
+  hold_new?: boolean;
+  /** How many items the last run held back. */
+  held?: number;
+}
+
+/**
+ * How many items this pair is waiting on a decision for — the number the
+ * notice in Settings shows. Only while the pair is holding AND holds some: a
+ * count left behind without the flag is history, and a pair that holds but
+ * held nothing last time has nothing to decide.
+ */
+export function heldItems(p: HoldingPair): number {
+  if (p.hold_new !== true) return 0;
+  return typeof p.held === 'number' && Number.isFinite(p.held) && p.held > 0 ? Math.floor(p.held) : 0;
+}

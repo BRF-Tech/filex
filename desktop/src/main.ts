@@ -82,10 +82,22 @@ import {
   uploadFile,
   type RemoteContext,
 } from './openwith-io.js';
-import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
+import {
+  SyncSupervisor,
+  addPair,
+  cliPath,
+  confirmHeld,
+  discardHeld,
+  listPairs,
+  listTrash,
+  movePair,
+  removePair,
+  type Pair,
+} from './sync.js';
 import {
   LIMIT_PRESETS_KIB,
   WINDOW_PRESETS,
+  heldItems,
   normLimit,
   normWindow,
   pairView,
@@ -1111,6 +1123,8 @@ function publicState() {
       remotePath: p.remote,
       localPath: p.local,
       enabled: !p.paused,
+      // Items the engine is holding for a decision (0 = nothing to decide).
+      held: heldItems(p),
       // What to say under this folder — decided in src/sync-policy.ts, so
       // the page only turns it into words.
       view: pairView({
@@ -1246,6 +1260,16 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
   unexpectedTitle: ['filex hit an unexpected error', 'filex beklenmedik bir hatayla karşılaştı'],
+  discardTitle: ['Move held items to the local trash', 'Bekleyen öğeleri yerel çöpe taşı'],
+  discardMessageOne: ['Move the 1 held item off this computer?', 'Bekleyen 1 öğe bu bilgisayardan kaldırılsın mı?'],
+  discardMessage: ['Move the {n} held items off this computer?', 'Bekleyen {n} öğe bu bilgisayardan kaldırılsın mı?'],
+  discardDetail: [
+    'They go to the sync trash on this computer and are kept there for 30 days (Settings → Removed by sync). Nothing on the server changes.\n\n{local}',
+    'Bu bilgisayardaki eşitleme çöpüne gider ve orada 30 gün saklanır (Ayarlar → Eşitlemenin sildikleri). Sunucuda hiçbir şey değişmez.\n\n{local}',
+  ],
+  discardButton: ['Move to local trash', 'Yerel çöpe taşı'],
+  holdTitle: ['Items held for a decision', 'Karar bekleyen öğeler'],
+  holdFailed: ['filex could not do that: {err}', 'filex bunu yapamadı: {err}'],
   signedOutTitle: ['{email} is signed out of {host}', '{email}, {host} oturumundan çıkarıldı'],
   signedOutBody: [
     "The server no longer accepts this computer's sign-in, so sync for this account has stopped. Open filex and choose Reconnect.",
@@ -2735,6 +2759,53 @@ function wireIpc(): void {
     return publicState();
   });
 
+  // ── items the engine holds for a decision (`hold_new` / `held`) ──
+  //
+  // A first sync that would push a stale mirror's worth of files into a
+  // server folder with content holds them instead. The two answers are the
+  // engine's own commands; afterwards the pair's watcher is restarted so the
+  // decision is acted on now rather than at the next tick.
+
+  const holdAnswer = async (pairId: string, act: (id: string) => Promise<string>): Promise<void> => {
+    const pair = knownPairs.find((p) => p.id === pairId);
+    if (!pair) return; // the list was stale; the next refresh says so
+    try {
+      log('sync', 'hold answered', { pairId, said: await act(pair.id) });
+    } catch (e) {
+      await tellUser('error', syncText('holdTitle'), syncText('holdFailed', { err: String((e as Error)?.message ?? e) }));
+    } finally {
+      if (pair.account) supervisor?.stop(pair.account);
+      await refreshPairs();
+    }
+  };
+
+  ipcMain.handle('sync:holdUpload', async (_e, pairId: string) => {
+    await holdAnswer(String(pairId), confirmHeld);
+    return publicState();
+  });
+
+  ipcMain.handle('sync:holdDiscard', async (_e, pairId: string) => {
+    const pair = knownPairs.find((p) => p.id === String(pairId));
+    if (!pair) return publicState();
+    const n = heldItems(pair);
+    // ⚠ Asked natively, defaulting to Cancel: these are files on this
+    // computer, and one misplaced click next to "Upload them" must not be
+    // what moves them. They go to the sync trash, not away.
+    const response = await askChoice({
+      type: 'question',
+      title: syncText('discardTitle'),
+      message: n === 1 ? syncText('discardMessageOne') : syncText('discardMessage', { n: String(n) }),
+      detail: syncText('discardDetail', { local: pair.local }),
+      buttons: [syncText('discardButton'), syncText('cancel')],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response !== 0) return publicState();
+    await holdAnswer(pair.id, discardHeld);
+    return publicState();
+  });
+
   // ── dragging files OUT onto the desktop ──────────────────────────
   //
   // Two calls, because the bytes have to be on this computer before an OS drag
@@ -3281,16 +3352,23 @@ if (!app.requestSingleInstanceLock()) {
     // started here, not when the Sync folders window opens: syncing that only
     // happens while a panel is on screen is not syncing.
     sleepGuard = new SleepGuard(powerSaveBlocker, (msg) => log('power', msg));
-    supervisor = new SyncSupervisor(
-      () => {
+    supervisor = new SyncSupervisor({
+      onChange: () => {
         // While any pair is being worked on the machine does not idle-sleep;
         // the moment none is, it may again. See src/power.ts.
         sleepGuard?.update(syncBusy(supervisor?.statuses() ?? []));
         for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
       },
-      (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
-      () => currentWatchPrefs(),
-    );
+      onSignedOut: (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
+      // A run held items: re-read the pair list (it carries the count the
+      // notice shows) unless it already says exactly this.
+      onHold: (_accountId, pairId, count) => {
+        const known = knownPairs.find((p) => p.id === pairId);
+        if (known && heldItems(known) === count && known.hold_new === true) return;
+        void refreshPairs();
+      },
+      watchPrefs: () => currentWatchPrefs(),
+    });
     // Local copies for dragging files out. Under userData rather than the OS
     // temp dir: the point of keeping them is that the SECOND drag of the same
     // file is instant, and a folder the OS may empty at any moment cannot

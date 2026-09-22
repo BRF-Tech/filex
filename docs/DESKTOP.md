@@ -335,6 +335,24 @@ complete folder; if even that cannot be arranged, the folder is unpaired rather
 than left pointing at a partial tree, and the dialog says so.
 
 
+### When filex holds items back
+
+A folder's **first** sync sometimes finds far more on this computer than the
+server has, in a server folder that already has content — which is what an old
+copy of the folder (a restored backup, a machine that was away for months) looks
+like. Uploading all of it would put stale files back on the server, so the
+engine holds those items instead and asks. The folder's card in *Settings →
+Synced folders* then says how many items on this computer are not on the server
+or differ from it, with two buttons:
+
+- **Upload them** — they are wanted: they go to the server on the next run.
+- **Move to local trash** — they are not: after one more question they move into
+  this computer's sync trash, kept for 30 days (*Removed by sync*). Nothing on
+  the server changes.
+
+Everything else in the folder keeps syncing while it waits, and after either
+answer the folder's sync restarts at once.
+
 ### Bandwidth and hours
 
 A first sync of a large store can fill the server's line for hours, and

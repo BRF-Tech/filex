@@ -447,6 +447,17 @@
         background: var(--fe-bg-elev);
       }
       .between { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+      /* Items the engine holds for a decision — a notice inside the folder's
+         card, not a dialog: nothing is lost while it waits, and the rest of
+         the folder keeps syncing. */
+      .hold {
+        margin-top: var(--fe-gap-sm);
+        padding: var(--fe-gap-sm) var(--fe-gap);
+        border-left: 3px solid var(--fe-warning);
+        border-radius: var(--fe-radius-sm);
+        background: var(--fe-bg);
+      }
+      .hold .row { margin-top: var(--fe-gap-sm); }
       .row { display: flex; gap: var(--fe-gap-sm); align-items: center; }
       .label { font-size: var(--fe-text-sm); font-weight: 500; color: var(--fe-text); }
       .muted { color: var(--fe-text-muted); font-size: var(--fe-text-xs); }
@@ -1018,6 +1029,14 @@
         'sync.signed_out':      ['stopped — the server signed this account out; Reconnect to continue',
                                  'durdu — sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
         'sync.window_wait':     ['waiting for the sync window, {window}', 'eşitleme saatleri bekleniyor, {window}'],
+        'sync.held_one':        ['1 item on this computer is not on the server or differs from it.',
+                                 'Bu bilgisayardaki 1 öğe sunucuda yok ya da sunucudakinden farklı.'],
+        'sync.held_many':       ['{n} items on this computer are not on the server or differ from it.',
+                                 'Bu bilgisayardaki {n} öğe sunucuda yok ya da sunucudakinden farklı.'],
+        'sync.held_sub':        ["filex is holding them back instead of uploading them: this folder's first sync would have sent a great many items into a server folder that already has content — which is what an old copy of the folder looks like. Everything else keeps syncing.",
+                                 'filex bunları yüklemek yerine bekletiyor: bu klasörün ilk eşitlemesi, zaten içeriği olan bir sunucu klasörüne çok sayıda öğe gönderecekti — bu, klasörün eski bir kopyasına benziyor. Geri kalan her şey eşitlenmeye devam ediyor.'],
+        'sync.held_upload':     ['Upload them', 'Sunucuya yükle'],
+        'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
         'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
         'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
         'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
@@ -1694,7 +1713,15 @@
               <button data-openlocal="${esc(f.localPath)}">${esc(T('set.open_folder'))}</button>
               <button class="danger" data-rmsync="${f.id}">${esc(T('set.stop_sync'))}</button>
             </div>
-          </div></div>`;
+          </div>${f.held > 0 ? `
+            <div class="hold" role="status">
+              <div class="label">${esc(f.held === 1 ? T('sync.held_one') : T('sync.held_many', { n: String(f.held) }))}</div>
+              <div class="muted">${esc(T('sync.held_sub'))}</div>
+              <div class="row">
+                <button class="primary" data-hold-upload="${esc(f.id)}">${esc(T('sync.held_upload'))}</button>
+                <button data-hold-discard="${esc(f.id)}">${esc(T('sync.held_discard'))}</button>
+              </div>
+            </div>` : ''}</div>`;
         }).join('') : `<div class="empty">${esc(T('set.no_folders'))}</div>`;
 
         const engineWarning = state.syncEngine === 'missing'
@@ -1962,6 +1989,18 @@
           state = await window.filexApp.setSettings({ notifications: state.notifications === false });
           renderSettings();
         });
+        // Held items: the engine's own confirm / discard; the main process
+        // asks before discarding and restarts the folder's watcher after.
+        el.querySelectorAll('[data-hold-upload]').forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          state = await window.filexApp.syncHoldUpload(b.dataset.holdUpload);
+          render(); renderSettings();
+        }));
+        el.querySelectorAll('[data-hold-discard]').forEach((b) => b.addEventListener('click', async () => {
+          b.disabled = true;
+          state = await window.filexApp.syncHoldDiscard(b.dataset.holdDiscard);
+          render(); renderSettings();
+        }));
         $('#sync-pause', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ syncPaused: state.syncPaused !== true });
           render(); renderSettings();

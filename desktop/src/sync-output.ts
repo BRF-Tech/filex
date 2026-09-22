@@ -151,6 +151,10 @@ export type EngineLine =
   | { kind: 'pair-error'; pairId: string; message: string }
   /** Any other stderr line (`  ! <action failed>`, `filex: …`). */
   | { kind: 'error'; message: string }
+  /** `<pair>: hold: <n> item(s) here are not on the server or differ from it
+   *  — waiting for a decision (…)`. Only the number is read: the pair list
+   *  (`hold_new` / `held`) is what the app shows. */
+  | { kind: 'hold'; pairId: string; count: number }
   /** `sync: waiting for the sync window W` — outside the window, no rounds;
    *  `sync: the sync window W closed; …` — a round was cancelled by it (and
    *  prints no summary: this line is what ends the activity). */
@@ -160,6 +164,7 @@ export type EngineLine =
 
 const PROGRESS_RE = /^(\S+): (inventory|plan|transfer|settling): (.*)$/;
 const WINDOW_WAIT_RE = /^sync: waiting for the sync window (\S+)$/;
+const HOLD_RE = /^(\S+): hold: (\d+)\b/;
 const WINDOW_CLOSED_RE = /^sync: the sync window (\S+) closed\b/;
 const SETTLED_RE = /^(\S+): (?:(already in step)$|(\d+)\/(\d+) done\b)/;
 const PAIR_ERROR_RE = /^(\S+): /;
@@ -174,6 +179,8 @@ export function parseEngineLine(raw: string, stream: 'out' | 'err'): EngineLine 
   }
   const p = PROGRESS_RE.exec(line);
   if (p) return { kind: 'progress', pairId: p[1], phase: p[2] as SyncPhase, detail: p[3] };
+  const h = HOLD_RE.exec(line);
+  if (h) return { kind: 'hold', pairId: h[1], count: Number(h[2]) };
   const ww = WINDOW_WAIT_RE.exec(line);
   if (ww) return { kind: 'window', window: ww[1], closed: false };
   const wc = WINDOW_CLOSED_RE.exec(line);
@@ -211,6 +218,8 @@ export class SyncStatusTracker {
   /** The pair whose summary line came last: the engine prints a round's
    *  `  ! <action failed>` lines right AFTER that pair's summary. */
   private lastSettled: string | null = null;
+  /** Hold lines not yet handed to the supervisor (takeHolds). */
+  private holds: Array<{ pairId: string; count: number }> = [];
 
   constructor(accountId: string, now: () => Date = () => new Date()) {
     this.now = now;
@@ -224,6 +233,14 @@ export class SyncStatusTracker {
       errors: {},
       waitingWindow: null,
     };
+  }
+
+  /** The hold lines seen since the last call — each is a cue to re-read the
+   *  pair list, which carries the numbers the app shows. */
+  takeHolds(): Array<{ pairId: string; count: number }> {
+    const out = this.holds;
+    this.holds = [];
+    return out;
   }
 
   /**
@@ -318,6 +335,9 @@ export class SyncStatusTracker {
         // whose summary came last.
         this.raise(st.active?.pairId ?? this.lastSettled ?? PROCESS, ev.message);
         return true;
+      case 'hold':
+        this.holds.push({ pairId: ev.pairId, count: ev.count });
+        break;
       case 'window':
         // Either way nothing is being worked on until the window opens.
         st.active = null;

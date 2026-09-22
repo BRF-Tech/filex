@@ -35,6 +35,11 @@ export interface Pair {
   paused?: boolean;
   /** Single-file pair: local is a file path, remote names a file. */
   file?: boolean;
+  /** The engine is holding items here that the server does not have (or has
+   *  differently) until someone decides — see heldItems in sync-policy.ts. */
+  hold_new?: boolean;
+  /** How many items the last run held back. */
+  held?: number;
 }
 
 /** How often each account's watcher re-checks. Frequent enough to feel live,
@@ -156,6 +161,18 @@ export async function movePair(id: string, newLocal: string): Promise<void> {
   await run(['sync', 'move', id, newLocal]);
 }
 
+/** The items a pair holds go to the server on its next run. Returns the
+ *  engine's one-line answer. */
+export async function confirmHeld(id: string): Promise<string> {
+  return (await run(['sync', 'confirm', id])).trim();
+}
+
+/** The items a pair holds move into its local sync trash (kept 30 days).
+ *  Returns the engine's one-line answer. */
+export async function discardHeld(id: string): Promise<string> {
+  return (await run(['sync', 'discard', id])).trim();
+}
+
 /**
  * Keeps one `filex sync run --watch` process alive per signed-in account.
  *
@@ -163,24 +180,36 @@ export async function movePair(id: string, newLocal: string): Promise<void> {
  * against exactly one server, so a single process would try to sync account B's
  * folders with account A's credentials.
  */
+export interface SupervisorHooks {
+  /** Something about sync changed — repaint. */
+  onChange: () => void;
+  /** The server refused this account's token. The watcher is already
+   *  stopped; the caller marks the account so that reconcile() does not start
+   *  it again until the user reconnects. */
+  onSignedOut?: (accountId: string) => void;
+  /** A pair's run held items for a decision: the cue to re-read the pair
+   *  list, which carries the count the app shows. */
+  onHold?: (accountId: string, pairId: string, count: number) => void;
+  /** The bandwidth limits and sync window a watcher is started with (read at
+   *  start; a change means stop + reconcile). */
+  watchPrefs?: () => WatchPrefs;
+}
+
 export class SyncSupervisor {
   private procs = new Map<string, ReturnType<typeof spawn>>();
   private trackers = new Map<string, SyncStatusTracker>();
   private stopping = false;
+  private readonly onChange: () => void;
+  private readonly onSignedOut: (accountId: string) => void;
+  private readonly onHold: (accountId: string, pairId: string, count: number) => void;
+  private readonly watchPrefs: () => WatchPrefs;
 
-  /**
-   * @param onChange   something about sync changed — repaint.
-   * @param onSignedOut the server refused this account's token. The watcher is
-   *   already stopped; the caller marks the account so that reconcile() does
-   *   not start it again until the user reconnects.
-   * @param watchPrefs the bandwidth limits and sync window a watcher is
-   *   started with (read at start; a change means stop + reconcile).
-   */
-  constructor(
-    private onChange: () => void,
-    private onSignedOut: (accountId: string) => void = () => {},
-    private watchPrefs: () => WatchPrefs = () => ({}),
-  ) {}
+  constructor(hooks: SupervisorHooks) {
+    this.onChange = hooks.onChange;
+    this.onSignedOut = hooks.onSignedOut ?? (() => {});
+    this.onHold = hooks.onHold ?? (() => {});
+    this.watchPrefs = hooks.watchPrefs ?? (() => ({}));
+  }
 
   statuses(): SyncStatus[] {
     return [...this.trackers.values()].map((t) => t.status);
@@ -252,8 +281,14 @@ export class SyncSupervisor {
       this.onSignedOut(acc.id);
     };
 
+    const holds = () => {
+      for (const h of tracker.takeHolds()) this.onHold(acc.id, h.pairId, h.count);
+    };
+
     proc.stdout?.on('data', (c: Buffer) => {
-      if (tracker.feed(c, 'out')) this.onChange();
+      if (!tracker.feed(c, 'out')) return;
+      holds();
+      this.onChange();
     });
     proc.stderr?.on('data', (c: Buffer) => {
       if (!tracker.feed(c, 'err')) return;
@@ -274,6 +309,7 @@ export class SyncSupervisor {
       this.procs.delete(acc.id);
       tracker.end();
       tracker.exited(code, this.stopping, signal);
+      holds();
       signedOut();
       this.onChange();
     });

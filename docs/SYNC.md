@@ -181,6 +181,12 @@ runs no watcher at all — for any account, and across restarts — until it is
 resumed. A `filex sync run` you start in a terminal is not affected: the pause
 is the app's, not the pairs'.
 
+A pair that is holding items for a decision (`hold_new` / `held` in
+`filex sync list --json`) gets a notice on its card in Settings with the count
+and two buttons — **Upload them** runs `filex sync confirm <pair>`, **Move to
+local trash** runs `filex sync discard <pair>` after asking — and the account's
+watcher is restarted after either.
+
 Settings' **Download limit**, **Upload limit** and **When to sync** presets are
 handed to every watcher as `--limit-down` / `--limit-up` (KiB/s) and
 `--window HH:MM-HH:MM`; a change restarts the watchers. Nothing is passed while

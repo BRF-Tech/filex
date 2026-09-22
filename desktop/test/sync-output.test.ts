@@ -287,3 +287,24 @@ test('the estimate is read into seconds, whatever unit the engine chose', () => 
   assert.equal(parseEta('soon'), null);
   assert.equal(parseEta(''), null);
 });
+
+// ── held items ──
+//
+// A first run that would push a stale mirror's worth of local-only files into
+// a server folder with content HOLDS them and waits for a decision. The
+// count the notice shows comes from `sync list --json` (hold_new / held); the
+// progress line is only the cue to re-read it, so only its number is parsed.
+
+test('a hold line is handed over once, and changes nothing about the activity', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: settling: listed 1 server folder(s), 12 item(s) so far\n', 'out');
+  t.feed(
+    'pair-1: hold: 7 item(s) here are not on the server or differ from it — waiting for a decision ' +
+      '(`filex sync confirm pair-1` sends them, `filex sync discard pair-1` moves them to the local sync trash)\n',
+    'out',
+  );
+  assert.equal(t.status.active?.phase, 'settling');
+  assert.deepEqual(t.takeHolds(), [{ pairId: 'pair-1', count: 7 }]);
+  assert.deepEqual(t.takeHolds(), []);
+  assert.equal(t.status.lastError, null);
+});

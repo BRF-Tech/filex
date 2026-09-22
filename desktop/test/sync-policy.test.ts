@@ -11,6 +11,7 @@ import {
   WINDOW_PRESETS,
   normLimit,
   normWindow,
+  heldItems,
   pairView,
   watchArgs,
   watchPrefsKey,
@@ -187,4 +188,15 @@ test("the folder line carries the transfer's bytes and estimate through", () => 
     kind: 'active', phase: 'transfer', done: 120, total: 11704,
     bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 29400,
   });
+});
+
+// ── held items ──
+
+test('a pair shows held items only while it is holding AND holds some', () => {
+  assert.equal(heldItems({ hold_new: true, held: 5 }), 5);
+  assert.equal(heldItems({ hold_new: true }), 0, 'holding, but the last run held nothing');
+  assert.equal(heldItems({ hold_new: true, held: 0 }), 0);
+  assert.equal(heldItems({ held: 5 }), 0, 'a count without the flag is stale');
+  assert.equal(heldItems({ hold_new: false, held: 3 }), 0);
+  assert.equal(heldItems({}), 0);
 });
