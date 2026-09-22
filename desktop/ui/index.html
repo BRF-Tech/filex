@@ -164,6 +164,10 @@
       }
       let state = null;
       let waiting = null; // { authUrl, serverUrl } once a sign-in is in flight
+      // Reconnect (from the app window) starts the sign-in in the MAIN process
+      // for a server it already knows, and opens this window on #/reconnect.
+      // The attempt is adopted once — after Cancel the connect form stays.
+      let adopted = null;
 
 
       // ⚠ No navigation here any more. Settings and Sync folders live in the
@@ -234,6 +238,11 @@
 
       async function render() {
         state = await window.filexShell.getState();
+        const pending = state && state.pendingAuth;
+        if (!waiting && pending && location.hash.startsWith('#/reconnect') && adopted !== pending.authUrl) {
+          adopted = pending.authUrl;
+          waiting = { serverUrl: pending.serverUrl, authUrl: pending.authUrl };
+        }
         root.innerHTML = '';
         root.appendChild($(`<div>${MARK}${connectView()}</div>`));
         wire();

@@ -35,6 +35,27 @@ export interface SyncStatus {
   /** Errors still standing, by pair id ('*' for the process itself). A pair's
    *  entry goes away when a later round of THAT pair settles completely. */
   errors?: Record<string, string>;
+  /** The server no longer accepts this account's token: the engine exited with
+   *  SIGNED_OUT_EXIT, or (an older engine, which keeps looping) printed a 401.
+   *  The supervisor stops the watcher and does not restart it. */
+  signedOut?: boolean;
+}
+
+/** `filex sync run` exits with this status when the server answers 401, and
+ *  does not retry. */
+export const SIGNED_OUT_EXIT = 3;
+
+/**
+ * A 401 in the engine's own words: `HTTP 401: <message>` (cliclient's
+ * APIError) or `(HTTP 401)` (the signed-out line). Anchored on what follows
+ * the number, so a FILE called "HTTP 401.txt" in an error line does not sign
+ * anybody out.
+ */
+const UNAUTHORIZED_RE = /\bHTTP 401(?=[:)]|$)/;
+
+/** True for an engine error line that means "the server refused the token". */
+export function isUnauthorizedLine(line: string): boolean {
+  return UNAUTHORIZED_RE.test(line.trim());
 }
 
 /**
@@ -189,6 +210,13 @@ export class SyncStatusTracker {
   exited(code: number | null, stopping: boolean, signal?: string | null): void {
     this.status.running = false;
     this.status.active = null;
+    if (code === SIGNED_OUT_EXIT) {
+      this.status.signedOut = true;
+      if (this.status.lastError === null) {
+        this.raise(PROCESS, 'signed out: the server no longer accepts this token (HTTP 401)');
+      }
+      return;
+    }
     if (!stopping && code !== 0 && this.status.lastError === null) {
       this.raise(PROCESS, `sync stopped unexpectedly (exit ${code ?? signal ?? 'unknown'})`);
     }
@@ -198,6 +226,7 @@ export class SyncStatusTracker {
     const ev = parseEngineLine(raw, stream);
     if (!ev) return false;
     const st = this.status;
+    if (stream === 'err' && isUnauthorizedLine(raw)) st.signedOut = true;
     switch (ev.kind) {
       case 'progress': {
         const tr = ev.phase === 'transfer' ? /^(\d+)\/(\d+)/.exec(ev.detail) : null;

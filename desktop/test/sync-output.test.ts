@@ -181,3 +181,42 @@ test('an unpaired folder takes its error with it', () => {
   assert.equal(t.status.lastError, 'pair-1: list docs://a: HTTP 502');
   assert.equal(t.retainPairs(new Set(['pair-1'])), false);
 });
+
+// ── a token the server no longer accepts ──
+//
+// A revoked token used to mean a watcher printing `HTTP 401` every 30 seconds
+// forever, and an app that retried it forever — even across reboots. The
+// engine now exits with status 3 on a 401 and says so; an older engine that
+// keeps looping is recognised by its 401 line.
+
+test('exit status 3 is "signed out", not a crash', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('filex: signed out: the server no longer accepts this token (HTTP 401)\n', 'err');
+  t.exited(3, false);
+  assert.equal(t.status.signedOut, true);
+  assert.equal(t.status.running, false);
+  assert.equal(t.status.lastError, 'filex: signed out: the server no longer accepts this token (HTTP 401)');
+});
+
+test('…even when the process said nothing first', () => {
+  const t = new SyncStatusTracker('acc');
+  t.exited(3, false);
+  assert.equal(t.status.signedOut, true);
+  assert.ok(t.status.lastError);
+});
+
+test('an older engine that keeps looping on 401 is recognised from its output', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://work: HTTP 401: unauthorized\n', 'err');
+  assert.equal(t.status.signedOut, true);
+});
+
+test('…but not from a 403, a 5xx, or a file that happens to be called "HTTP 401"', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://work: HTTP 403: this account is disabled\n', 'err');
+  t.feed('pair-1: list docs://work: HTTP 502\n', 'err');
+  t.feed('  ! upload HTTP 401.txt: HTTP 500\n', 'err');
+  assert.notEqual(t.status.signedOut, true);
+  t.exited(1, false);
+  assert.notEqual(t.status.signedOut, true);
+});

@@ -434,7 +434,9 @@ function startNotifier(): void {
   notifier = new DesktopNotifier({
     account: () => {
       const acc = activeAccount(state);
-      return acc ? { id: acc.id, serverUrl: acc.serverUrl, token: acc.token } : null;
+      // A token the server refused is not asked again every 15 seconds —
+      // until Reconnect clears the mark.
+      return acc && !acc.signedOut ? { id: acc.id, serverUrl: acc.serverUrl, token: acc.token } : null;
     },
     enabled: () => state.notifications !== false,
     fetchRows: async (acc, limit) => {
@@ -442,10 +444,13 @@ function startNotifier(): void {
       url.searchParams.set('unread', 'true');
       url.searchParams.set('limit', String(limit));
       const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${acc.token}` } });
-      if (!res.ok) throw new Error(`server said ${res.status}`);
+      // The status travels as a property: isUnauthorized() reads that, not
+      // the wording.
+      if (!res.ok) throw Object.assign(new Error(`server said ${res.status}`), { status: res.status });
       const body = (await res.json()) as { items?: NotificationRow[] };
       return body.items ?? [];
     },
+    onUnauthorized: (accountId) => markSignedOut(accountId, 'the bell was refused twice in a row (HTTP 401)'),
     // The reader's language, read per row — see DesktopNotifierOptions.locale.
     locale: () => effectiveLocale(),
     show: (row, text, onClick) => {
@@ -529,6 +534,7 @@ function effectiveLocale(): 'en' | 'tr' {
 const TRAY_STRINGS: Record<string, [en: string, tr: string]> = {
   signedOut: ['Not signed in', 'Giriş yapılmadı'],
   open: ['Open filex', "filex'i aç"],
+  signedOutSuffix: ['signed out', 'oturum kapalı'],
   pause: ['Pause sync', 'Eşitlemeyi duraklat'],
   resume: ['Resume sync', 'Eşitlemeyi sürdür'],
   pausedTip: ['filex — sync paused', 'filex — eşitleme duraklatıldı'],
@@ -552,7 +558,12 @@ function refreshTray(): void {
   tray.setToolTip(paused ? trayText('pausedTip') : 'filex');
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : trayText('signedOut'), enabled: false },
+      {
+        label: acc
+          ? `${acc.email} — ${new URL(acc.serverUrl).host}${acc.signedOut ? ` (${trayText('signedOutSuffix')})` : ''}`
+          : trayText('signedOut'),
+        enabled: false,
+      },
       { type: 'separator' },
       { label: trayText('open'), click: () => route() },
       {
@@ -608,13 +619,63 @@ async function completeAuth(state_: string, code: string): Promise<void> {
   // token kept being used until the app restarted.
   if (existed) supervisor?.stop(account.id);
   shellWindow?.close();
+  const hadWindow = !!mainWindow && !mainWindow.isDestroyed();
   openMainWindow();
-  // ⚠ Tell the window. Adding a SECOND account happens in a different window,
-  // and openMainWindow() only shows the existing one — it does not reload it.
-  // Without this the new account was stored but the rail kept showing one
-  // avatar until the app was restarted. Measured, not theorised.
-  mainWindow?.webContents.send('sync:changed');
+  if (existed && hadWindow) {
+    // A reconnect: the window is showing the signed-out screen, or an explorer
+    // built around the refused token. Start it over rather than patch it.
+    mainWindow?.reload();
+  } else {
+    // ⚠ Tell the window. Adding a SECOND account happens in a different
+    // window, and openMainWindow() only shows the existing one — it does not
+    // reload it. Without this the new account was stored but the rail kept
+    // showing one avatar until the app was restarted. Measured, not theorised.
+    mainWindow?.webContents.send('sync:changed');
+  }
+  refreshTray();
   void refreshPairs();
+}
+
+/**
+ * The server no longer accepts this account's token — it was revoked, or it
+ * expired. Mark the account (stored, so a reboot does not retry it), stop
+ * everything that uses the token, and say so ONCE.
+ *
+ * ⚠ What happened before: a watcher printing `HTTP 401` every 30 seconds, a
+ * bell poll logging it every 15, a file view with only "Try again" on it — and
+ * after a reboot, all of it again. While the mark is set the account has no
+ * watcher (watcherAccounts) and no bell poll; the window offers Reconnect,
+ * which signs in again in the browser and keeps the account's id, pairs and
+ * filex folder (signIn clears the mark).
+ */
+function markSignedOut(accountId: string, why: string): void {
+  const acc = state.accounts.find((a) => a.id === accountId);
+  if (!acc || acc.signedOut) return;
+  acc.signedOut = new Date().toISOString();
+  log('auth', "the server no longer accepts this account's token; sync and the bell stop until Reconnect", {
+    accountId,
+    why,
+  });
+  try {
+    saveState(state);
+  } catch (e) {
+    log('auth', 'could not store the signed-out mark', String((e as Error)?.message ?? e));
+  }
+  supervisor?.stop(accountId);
+  refreshTray();
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+  try {
+    if (Notification.isSupported()) {
+      const n = new Notification({
+        title: syncText('signedOutTitle', { email: acc.email, host: new URL(acc.serverUrl).host }),
+        body: syncText('signedOutBody'),
+      });
+      n.on('click', () => openMainWindow());
+      n.show();
+    }
+  } catch {
+    /* the notification is a courtesy; the window and Settings say it too */
+  }
 }
 
 /** OS-delivered deep link. No UI is waiting on it, so failures surface as a
@@ -1037,6 +1098,10 @@ function publicState() {
     locale: state.locale,
     notifications: state.notifications !== false,
     syncPaused: state.syncPaused === true,
+    // The sign-in waiting in the browser, for the shell's Reconnect screen. The
+    // URL carries the state and the challenge HASH only — no secret (see
+    // auth:begin).
+    pendingAuth: pendingAuth ? { serverUrl: pendingAuth.serverUrl, authUrl: pendingAuth.authUrl } : null,
     // What 'system' currently resolves to, so the window does not have to
     // re-derive it from navigator.language and disagree with the tray.
     effectiveLocale: effectiveLocale(),
@@ -1131,6 +1196,11 @@ const SYNC_STRINGS: Record<string, [en: string, tr: string]> = {
     'Şu ankinin içinde olmayan (ve onu içermeyen) bir klasör seç.',
   ],
   unexpectedTitle: ['filex hit an unexpected error', 'filex beklenmedik bir hatayla karşılaştı'],
+  signedOutTitle: ['{email} is signed out of {host}', '{email}, {host} oturumundan çıkarıldı'],
+  signedOutBody: [
+    "The server no longer accepts this computer's sign-in, so sync for this account has stopped. Open filex and choose Reconnect.",
+    "Sunucu bu bilgisayarın oturumunu artık kabul etmiyor; bu hesabın eşitlemesi durdu. filex'i açıp Yeniden bağlan'ı seç.",
+  ],
   dragFailedTitle: ['Drag out failed', 'Dışarı sürükleme başarısız'],
   dragFailedBody: [
     'The files were dropped in {dir} but could not be downloaded there: {err}',
@@ -2313,6 +2383,19 @@ function wireIpc(): void {
     openShell('/connect', 'filex — Add an account');
   });
 
+  // Reconnect: the same browser sign-in, for the SAME server — so a user
+  // whose token was revoked gets it back without retyping the address, and
+  // without signing out (which would forget the account's synced folders).
+  // Signing in as the same person replaces the token and keeps everything
+  // else; see completeAuth().
+  ipcMain.handle('auth:reconnect', (_e, id: string) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('unknown account');
+    pendingAuth = beginBrowserAuth(acc.serverUrl);
+    openShell('/reconnect', 'filex — Reconnect');
+    return publicState();
+  });
+
   // Host-owned open: a file opens in its OWN frameless document window. The
   // explorer emits `file-opened` (config.openInHost) and the app page calls this.
   ipcMain.handle('doc:open', (_e, accountId: string, remote: string) => {
@@ -2351,6 +2434,11 @@ function wireIpc(): void {
     const res = await net.fetch(url.toString(), {
       headers: { Authorization: `Bearer ${acc.token}` },
     });
+    // ⚠ A 401 here is the server saying the token is dead, not "try again":
+    // the window used to show "Can't reach" with a Try again that could never
+    // work. Mark the account; the window asks the main process and offers
+    // Reconnect instead.
+    if (res.status === 401) markSignedOut(acc.id, 'the file listing was refused (HTTP 401)');
     if (!res.ok) throw new Error(`server said ${res.status}`);
     const body = (await res.json()) as { storages?: string[] };
     return (body.storages ?? []).map((name) => ({ name }));
@@ -2393,6 +2481,7 @@ function wireIpc(): void {
     const res = await net.fetch(url.toString(), {
       headers: { Authorization: `Bearer ${acc.token}` },
     });
+    if (res.status === 401) markSignedOut(acc.id, 'the folder picker was refused (HTTP 401)');
     if (!res.ok) throw new Error(`server said ${res.status}`);
     const body = (await res.json()) as {
       storages?: string[];
@@ -3131,9 +3220,12 @@ if (!app.requestSingleInstanceLock()) {
     // The supervisor keeps a `filex sync run --watch` alive per account. It is
     // started here, not when the Sync folders window opens: syncing that only
     // happens while a panel is on screen is not syncing.
-    supervisor = new SyncSupervisor(() => {
-      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
-    });
+    supervisor = new SyncSupervisor(
+      () => {
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+      },
+      (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
+    );
     // Local copies for dragging files out. Under userData rather than the OS
     // temp dir: the point of keeping them is that the SECOND drag of the same
     // file is instant, and a folder the OS may empty at any moment cannot

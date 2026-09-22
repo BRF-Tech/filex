@@ -88,8 +88,23 @@ credential by itself.
 account on this computer and its folder sync stops at once; the files stay where
 they are, on both sides. The folders do not come back if you sign in afterwards:
 that is a new account on this computer, and you keep them again from the
-explorer. To get a working credential back for an account you still want,
-sign in again instead of signing out.
+explorer. To get a working credential back for an account you still want, use
+**Reconnect** (below) instead of signing out.
+
+### Signed out by the server
+
+When the server stops accepting this computer's credential — an admin revoked
+the token, or it expired — the app stops asking. The account's folder sync is
+stopped (the engine exits instead of retrying every 30 seconds), its bell is no
+longer polled, and it stays that way after a restart. You are told once, with a
+notification; the rail shows a red dot on the account, and its file view reads
+**Signed out of &lt;server&gt;** with two buttons:
+
+- **Reconnect** opens the same browser sign-in for the same server. Sign in as
+  the same person and the account gets its new credential and keeps everything
+  else — its synced folders, its filex folder — and sync picks up where it
+  stopped. The same button is on the account in *Settings → Accounts*.
+- **Sign out** forgets the account, as above.
 
 ---
 
@@ -579,10 +594,13 @@ application rather than a folder, so there was nowhere on disk to put the file.
 Drop into a folder (or the desktop), or keep the file on this computer first and
 drag it from there.
 
-**"Could not reach &lt;server&gt;"** on the file view — the app reached the sign-in
-step but not the file listing. If the token was revoked server-side, sign in
-again with **+** as the same person — do **not** sign out first: signing out
-forgets the account, and with it which folders it was keeping on this computer.
+**"Could not reach &lt;server&gt;"** on the file view — the server did not answer
+the file listing: it is down, or this computer is off the network. *Try again*
+once it is back. (A server that answers but refuses the credential shows
+**Signed out of &lt;server&gt;** instead — see
+[Signed out by the server](#signed-out-by-the-server). Use **Reconnect** there;
+do not sign out first: signing out forgets which folders the account was
+keeping on this computer.)
 
 **Nothing syncs, and Settings says the engine is missing** — the package could
 not find the `filex` binary it ships with. Reinstall, or point the app at a CLI

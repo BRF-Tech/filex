@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DesktopNotifier, newRows, type NotificationRow } from '../src/notifications.ts';
+import { DesktopNotifier, isUnauthorized, newRows, type NotificationRow } from '../src/notifications.ts';
 import type { NotificationText } from '../../web/src/lib/notificationText.ts';
 
 const ACC = { id: 'a1', serverUrl: 'https://files.example.com', token: 't' };
@@ -162,4 +162,51 @@ test('an unknown event falls back to the server title, not to the id', async () 
   await n.poll();
   await n.poll();
   assert.deepEqual(texts, [{ title: 'Disk almost full', body: '/data at 96%' }]);
+});
+
+// ── a token the server no longer accepts ─────────────────────────────────
+//
+// After a token was revoked the log held nothing but
+// `[notify] notifications: poll failed {"err":"Error: server said 401"}`, every
+// 15 seconds, forever. The poll is also often the ONLY thing that talks to
+// the server at all — an account with no synced folders has no watcher — so
+// it is the one that has to notice.
+
+function unauthorized(): Error {
+  return Object.assign(new Error('server said 401'), { status: 401 });
+}
+
+test('two 401s in a row report the account once; a success in between resets', async () => {
+  const reported: string[] = [];
+  const answers: Array<'ok' | '401' | '500'> = ['ok', '401', 'ok', '401', '500', '401', '401', '401'];
+  let i = 0;
+  const n = new DesktopNotifier({
+    account: () => ACC,
+    enabled: () => true,
+    onOpen: () => {},
+    fetchRows: async () => {
+      const a = answers[Math.min(i++, answers.length - 1)];
+      if (a === '401') throw unauthorized();
+      if (a === '500') throw Object.assign(new Error('server said 500'), { status: 500 });
+      return [];
+    },
+    show: () => {},
+    onUnauthorized: (id) => reported.push(id),
+  });
+  for (let k = 0; k < 5; k++) await n.poll();
+  // ok, 401, ok, 401, 500: never two 401s back to back.
+  assert.deepEqual(reported, []);
+  await n.poll(); // 401 after a 500 — the 500 broke the run of 401s
+  assert.deepEqual(reported, []);
+  await n.poll(); // second 401 in a row
+  assert.deepEqual(reported, ['a1']);
+  await n.poll(); // still 401 — already reported
+  assert.deepEqual(reported, ['a1']);
+});
+
+test('isUnauthorized reads the status, not the wording', () => {
+  assert.equal(isUnauthorized(unauthorized()), true);
+  assert.equal(isUnauthorized(new Error('server said 401')), false);
+  assert.equal(isUnauthorized(Object.assign(new Error('x'), { status: 403 })), false);
+  assert.equal(isUnauthorized(undefined), false);
 });

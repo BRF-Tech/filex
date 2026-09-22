@@ -181,6 +181,12 @@ runs no watcher at all — for any account, and across restarts — until it is
 resumed. A `filex sync run` you start in a terminal is not affected: the pause
 is the app's, not the pairs'.
 
+When the server refuses an account's token (HTTP 401 — revoked or expired), the
+engine stops instead of retrying, and the app keeps that account's watcher
+stopped — across restarts — until you **Reconnect** it. Reconnecting as the
+same person keeps the account's pairs, so the next round is an ordinary
+incremental one.
+
 ⚠ A pair's remote path may not contain a `..` segment. Nothing legitimate needs
 one — the server resolves paths from its own storage root — and a client that
 turns a remote path into a local folder name would otherwise be told, by the

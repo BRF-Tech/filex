@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('filexApp', {
   // accounts
   addAccount: () => ipcRenderer.invoke('auth:add'),
   signOut: (id: string) => ipcRenderer.invoke('auth:signOut', id),
+  /** The browser sign-in again, for the same server — after the server stopped
+   *  accepting this account's token. Keeps the account's folders. */
+  reconnect: (id: string) => ipcRenderer.invoke('auth:reconnect', id),
   switchAccount: (id: string) => ipcRenderer.invoke('auth:switch', id),
   /** Opens the SERVER's admin panel in the system browser, not in here. */
   openAdmin: (id: string) => ipcRenderer.invoke('account:openAdmin', id),

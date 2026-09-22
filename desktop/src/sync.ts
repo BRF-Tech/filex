@@ -168,7 +168,16 @@ export class SyncSupervisor {
   private trackers = new Map<string, SyncStatusTracker>();
   private stopping = false;
 
-  constructor(private onChange: () => void) {}
+  /**
+   * @param onChange   something about sync changed — repaint.
+   * @param onSignedOut the server refused this account's token. The watcher is
+   *   already stopped; the caller marks the account so that reconcile() does
+   *   not start it again until the user reconnects.
+   */
+  constructor(
+    private onChange: () => void,
+    private onSignedOut: (accountId: string) => void = () => {},
+  ) {}
 
   statuses(): SyncStatus[] {
     return [...this.trackers.values()].map((t) => t.status);
@@ -224,11 +233,28 @@ export class SyncSupervisor {
     this.trackers.set(acc.id, tracker);
     this.procs.set(acc.id, proc);
 
+    // The server refused the token. Said once per watcher; an older engine
+    // that keeps looping on the 401 instead of exiting is stopped here.
+    let refused = false;
+    const signedOut = () => {
+      if (refused || !tracker.status.signedOut) return;
+      refused = true;
+      if (this.procs.get(acc.id) === proc) {
+        proc.kill();
+        this.procs.delete(acc.id);
+      }
+      tracker.status.running = false;
+      tracker.status.active = null;
+      this.onSignedOut(acc.id);
+    };
+
     proc.stdout?.on('data', (c: Buffer) => {
       if (tracker.feed(c, 'out')) this.onChange();
     });
     proc.stderr?.on('data', (c: Buffer) => {
-      if (tracker.feed(c, 'err')) this.onChange();
+      if (!tracker.feed(c, 'err')) return;
+      signedOut();
+      this.onChange();
     });
 
     // ⚠ 'close', not 'exit': 'exit' can fire while the pipes still hold the
@@ -244,6 +270,7 @@ export class SyncSupervisor {
       this.procs.delete(acc.id);
       tracker.end();
       tracker.exited(code, this.stopping, signal);
+      signedOut();
       this.onChange();
     });
   }

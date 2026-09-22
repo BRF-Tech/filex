@@ -94,6 +94,25 @@ export interface DesktopNotifierOptions {
    */
   show: (row: NotificationRow, text: NotificationText, onClick: () => void) => void;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
+  /**
+   * The server refused this account's token — twice in a row, so one odd
+   * answer from a proxy does not sign anybody out. main.ts marks the account
+   * and stops everything that uses the token; `account()` then returns null
+   * for it and polling stops. Called once per run of refusals.
+   *
+   * ⚠ This poll is often the only thing talking to the server at all: an
+   * account with no synced folders has no watcher to notice a revoked token.
+   */
+  onUnauthorized?: (accountId: string) => void;
+}
+
+/** How many refusals in a row mean "this token is dead". */
+export const UNAUTHORIZED_STREAK = 2;
+
+/** True for a failed fetch the server answered 401. Reads the `status` the
+ *  caller attaches, never the wording of the message. */
+export function isUnauthorized(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { status?: unknown }).status === 401;
 }
 
 /**
@@ -109,6 +128,8 @@ export class DesktopNotifier {
   private since: number | null = null;
   private watching: string | null = null;
   private inFlight = false;
+  /** Consecutive 401s for the watched account. */
+  private refusals = 0;
   private readonly opts: DesktopNotifierOptions;
 
   constructor(opts: DesktopNotifierOptions) {
@@ -135,6 +156,7 @@ export class DesktopNotifier {
   reset(): void {
     this.since = null;
     this.watching = null;
+    this.refusals = 0;
   }
 
   async poll(): Promise<void> {
@@ -147,10 +169,12 @@ export class DesktopNotifier {
     if (this.watching !== acc.id) {
       this.watching = acc.id;
       this.since = null;
+      this.refusals = 0;
     }
     this.inFlight = true;
     try {
       const rows = await this.opts.fetchRows(acc, 10);
+      this.refusals = 0;
       const top = rows.reduce((m, r) => (r.id > m ? r.id : m), 0);
       if (this.since === null) {
         this.since = top;
@@ -171,9 +195,17 @@ export class DesktopNotifier {
         );
       }
     } catch (err) {
-      // A server that is asleep, a token that expired, no network: the app
-      // keeps working and says nothing. This is a courtesy channel.
+      // A server that is asleep, no network: the app keeps working and says
+      // nothing. This is a courtesy channel.
       this.opts.log?.('notifications: poll failed', { err: String(err) });
+      // …except for a token the server no longer accepts, which is not going
+      // to start working by being asked again every 15 seconds.
+      if (isUnauthorized(err)) {
+        this.refusals++;
+        if (this.refusals === UNAUTHORIZED_STREAK) this.opts.onUnauthorized?.(acc.id);
+      } else {
+        this.refusals = 0;
+      }
     } finally {
       this.inFlight = false;
     }

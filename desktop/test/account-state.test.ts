@@ -71,3 +71,17 @@ test('an account whose folders are all paused has no watcher either', () => {
   assert.deepEqual([...wantedWatchers(s.accounts, [{ id: 'pair-1', account: a.id, paused: true }])], []);
   assert.deepEqual([...wantedWatchers(s.accounts, [])], []);
 });
+
+test('reconnecting a signed-out account clears the mark and keeps everything else', () => {
+  const s = fresh();
+  const { account } = signIn(s, { serverUrl: 'https://a.example', email: 'x@a.example', token: 'revoked' });
+  account.syncRoot = '/home/x/filex/a.example';
+  account.signedOut = '2026-09-22T10:00:00.000Z';
+
+  const again = signIn(s, { serverUrl: 'https://a.example', email: 'x@a.example', token: 'fresh' });
+  assert.equal(again.existed, true);
+  assert.equal(again.account.id, account.id);
+  assert.equal(again.account.token, 'fresh');
+  assert.equal(again.account.signedOut, undefined);
+  assert.equal(again.account.syncRoot, '/home/x/filex/a.example');
+});

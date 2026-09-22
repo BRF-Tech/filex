@@ -35,3 +35,13 @@ test('resumed: every signed-in account with pairs gets its watcher back', () => 
 test('a fresh install is not paused', () => {
   assert.notEqual(EMPTY_STATE.syncPaused, true);
 });
+
+// ── signed out by the server ──
+
+test('an account the server signed out gets no watcher until it reconnects', () => {
+  const out = { id: 'a', signedOut: '2026-09-22T10:00:00.000Z' };
+  assert.deepEqual(watcherAccounts([out, B], {}), [B]);
+  assert.deepEqual([...wantedWatchers(watcherAccounts([out, B], {}), PAIRS)], ['b']);
+  const back = { id: 'a' };
+  assert.deepEqual([...wantedWatchers(watcherAccounts([back, B], {}), PAIRS)].sort(), ['a', 'b']);
+});

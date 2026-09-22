@@ -860,6 +860,10 @@
         'boot.unreachable_sub': ['The server did not answer. It may be offline, or this computer may be off the network.',
                                  'Sunucu yanıt vermedi. Kapalı olabilir ya da bu bilgisayar ağ dışında olabilir.'],
         'boot.retry':           ['Try again', 'Yeniden dene'],
+        'boot.signed_out':      ['Signed out of {host}', '{host} oturumu kapandı'],
+        'boot.signed_out_sub':  ["The server no longer accepts this computer's sign-in — it was revoked or it expired. Sync for this account is stopped. Reconnect signs in again in your browser and keeps this account's synced folders.",
+                                 'Sunucu bu bilgisayarın oturumunu artık kabul etmiyor — iptal edilmiş ya da süresi dolmuş. Bu hesabın eşitlemesi durdu. Yeniden bağlan, tarayıcında tekrar giriş yapar ve bu hesabın eşitlenen klasörlerini korur.'],
+        'boot.reconnect':       ['Reconnect', 'Yeniden bağlan'],
 
         'rail.add':             ['Add another account', 'Başka bir hesap ekle'],
         'rail.settings':        ['Settings', 'Ayarlar'],
@@ -889,6 +893,9 @@
         'set.accounts':         ['Accounts', 'Hesaplar'],
         'set.admin':            ['Admin panel ↗', 'Yönetim paneli ↗'],
         'set.signout':          ['Sign out', 'Çıkış yap'],
+        'set.reconnect':        ['Reconnect', 'Yeniden bağlan'],
+        'set.signed_out':       ["Signed out by the server — this account's sync is stopped until you reconnect.",
+                                 'Sunucu oturumu kapattı — yeniden bağlanana kadar bu hesabın eşitlemesi durdu.'],
         'set.no_accounts':      ['No accounts.', 'Hesap yok.'],
         'set.folders':          ['Synced folders', 'Eşitlenen klasörler'],
         'set.pause':            ['Pause sync', 'Eşitlemeyi duraklat'],
@@ -993,6 +1000,8 @@
         'sync.watching':        ['watching for changes', 'değişiklikler izleniyor'],
         'sync.stopped':         ['stopped', 'durdu'],
         'sync.paused':          ['paused — resume sync to continue', 'duraklatıldı — devam etmek için eşitlemeyi sürdür'],
+        'sync.signed_out':      ['stopped — the server signed this account out; Reconnect to continue',
+                                 'durdu — sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
         'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
         'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
 
@@ -1235,6 +1244,36 @@
         return false;
       }
 
+      /**
+       * The server refused this account's token (revoked or expired). The
+       * main process has already stopped its sync and its bell; this surface
+       * says so and offers the two things that can help. Reconnect is the
+       * browser sign-in again for the same server — it keeps the account's
+       * synced folders, which signing out and back in would not.
+       */
+      function showSignedOut(account) {
+        const slot = $('#explorer-host');
+        slot.innerHTML = '';
+        explorer = null;
+        mountedFor = 'signedout:' + account.id;
+        adoptExplorerTheme(null);
+        showBoot(
+          `<div class="boot__title">${esc(T('boot.signed_out', { host: host(account.serverUrl) }))}</div>` +
+          `<div class="boot__sub">${esc(account.email)}</div>` +
+          `<div class="boot__sub">${esc(T('boot.signed_out_sub'))}</div>` +
+          `<div class="boot__actions">` +
+          `<button class="primary" id="boot-reconnect">${esc(T('boot.reconnect'))}</button>` +
+          `<button id="boot-signout">${esc(T('set.signout'))}</button>` +
+          `</div>`,
+        );
+        $('#boot-reconnect').addEventListener('click', () => { void window.filexApp.reconnect(account.id); });
+        $('#boot-signout').addEventListener('click', async () => {
+          state = await window.filexApp.signOut(account.id);
+          mountedFor = null;
+          render();
+        });
+      }
+
       async function mountExplorer(account) {
         const slot = $('#explorer-host');
         if (!account) {
@@ -1249,6 +1288,13 @@
             `<div class="boot__actions"><button class="primary" id="boot-add">${esc(T('boot.add'))}</button></div>`,
           );
           $('#boot-add').addEventListener('click', () => window.filexApp.addAccount());
+          return;
+        }
+        // ⚠ Before the "already mounted" check: an explorer that is on screen
+        // when the server refuses its token has to be taken down, not left
+        // answering every click with an error.
+        if (account.signedOut) {
+          if (mountedFor !== 'signedout:' + account.id) showSignedOut(account);
           return;
         }
         if (mountedFor === account.id) return;
@@ -1269,6 +1315,13 @@
           storages = await window.filexApp.storages(account.id);
         } catch (e) {
           if (mountedFor !== account.id) return;
+          // A 401 is not "unreachable": the main process has marked the
+          // account, and Try again could never work. Ask it rather than
+          // parsing the message.
+          try { state = await window.filexApp.getState(); } catch { /* keep what we had */ }
+          if (mountedFor !== account.id) return;
+          const now = (state.accounts || []).find((a) => a.id === account.id);
+          if (now && now.signedOut) { renderRail(); showSignedOut(now); return; }
           showBoot(
             `<div class="boot__title">${esc(T('boot.unreachable', { host: host(account.serverUrl) }))}</div>` +
             `<div class="boot__sub">${esc(T('boot.unreachable_sub'))}</div>` +
@@ -1464,9 +1517,9 @@
             b.title = `${a.email}\n${host(a.serverUrl)}`;
             b.appendChild(document.createTextNode(initials(a.email)));
           }
-          if (st) {
+          if (st || a.signedOut) {
             const dot = document.createElement('span');
-            dot.className = `dot ${st.lastError ? 'err' : st.running ? 'ok' : ''}`;
+            dot.className = `dot ${a.signedOut || (st && st.lastError) ? 'err' : st && st.running ? 'ok' : ''}`;
             b.appendChild(dot);
           }
           b.addEventListener('click', async () => {
@@ -1532,9 +1585,11 @@
             <div style="min-width:0">
               <div class="label">${esc(a.email)}</div>
               <div class="muted" style="overflow-wrap:anywhere">${esc(a.serverUrl)}</div>
+              ${a.signedOut ? `<div class="muted err">${esc(T('set.signed_out'))}</div>` : ''}
             </div>
             <div class="row">
               <button class="link" data-admin="${a.id}">${esc(T('set.admin'))}</button>
+              ${a.signedOut ? `<button class="primary" data-reconnect="${a.id}">${esc(T('set.reconnect'))}</button>` : ''}
               <button class="danger" data-signout="${a.id}">${esc(T('set.signout'))}</button>
             </div>
           </div></div>`).join('') : `<div class="empty">${esc(T('set.no_accounts'))}</div>`;
@@ -1544,6 +1599,7 @@
           const st = statusOf[f.accountId];
           let line = T('sync.waiting'), cls = 'muted';
           if (state.syncPaused) { line = T('sync.paused'); }
+          else if (acc && acc.signedOut) { line = T('sync.signed_out'); cls = 'err'; }
           else if (st && st.lastError) { line = st.lastError; cls = 'err'; }
           else if (st && st.running) { line = st.lastLine || T('sync.watching'); cls = 'ok'; }
           else if (st) { line = T('sync.stopped'); cls = 'err'; }
@@ -1788,6 +1844,9 @@
         }));
         el.querySelectorAll('[data-admin]').forEach((b) => b.addEventListener('click', () =>
           window.filexApp.openAdmin(b.dataset.admin)));
+        el.querySelectorAll('[data-reconnect]').forEach((b) => b.addEventListener('click', () => {
+          void window.filexApp.reconnect(b.dataset.reconnect);
+        }));
         el.querySelectorAll('[data-openlocal]').forEach((b) => b.addEventListener('click', () =>
           window.filexApp.openLocal(b.dataset.openlocal)));
         el.querySelectorAll('[data-rmsync]').forEach((b) => b.addEventListener('click', async () => {

@@ -24,6 +24,16 @@ export interface Account {
    *  the storage list and could settle on a different one than last time,
    *  scattering working copies across the account. */
   openWithStorage?: string;
+  /**
+   * When the server stopped accepting this account's token (ISO time), or
+   * absent while it is signed in.
+   *
+   * ⚠ Stored, so a revoked token is not retried after every restart. While it
+   * is set the account has no sync watcher and the bell is not polled; the
+   * window offers Reconnect, and a sign-in to the same server as the same
+   * person clears it (upsertAccount).
+   */
+  signedOut?: string;
 }
 
 export interface DesktopState {
@@ -110,6 +120,9 @@ export function upsertAccount(state: DesktopState, acc: Omit<Account, 'id' | 'ad
   const existing = findAccount(state, acc.serverUrl, acc.email);
   if (existing) {
     existing.token = acc.token;
+    // A new token is a new sign-in: whatever the server said about the old
+    // one no longer applies.
+    delete existing.signedOut;
     state.activeId = existing.id;
     return existing;
   }

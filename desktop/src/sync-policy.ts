@@ -7,6 +7,8 @@
 /** The slice of an account this module reads. */
 export interface PolicyAccount {
   id: string;
+  /** Set while the server refuses the account's token (Account.signedOut). */
+  signedOut?: string | null;
 }
 
 /** The slice of a pair (`filex sync list --json`) this module reads. */
@@ -43,8 +45,12 @@ export interface WatchGate {
  * stops every watcher and starts no new one — at startup too, which is the
  * point: the login item launches the app hidden, and a pause that lasted only
  * until the next sign-in would not be a pause.
+ *
+ * An account the server signed out is left out as well, until Reconnect: its
+ * token is refused, and a watcher restarted with it would only be refused
+ * again — every 30 seconds, and after every reboot.
  */
 export function watcherAccounts<A extends PolicyAccount>(accounts: readonly A[], gate: WatchGate): A[] {
   if (gate.paused) return [];
-  return [...accounts];
+  return accounts.filter((a) => !a.signedOut);
 }
