@@ -1,6 +1,7 @@
 package filesync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -56,6 +57,10 @@ type Result struct {
 	Errors       []string
 	FirstRun     bool
 	Duration     time.Duration
+
+	// Identical counts conflicts that turned out to hold the same bytes on
+	// both sides: no copy was made and nothing was uploaded.
+	Identical int
 }
 
 // Engine runs one pair.
@@ -85,6 +90,10 @@ type Engine struct {
 	Progress func(string)
 	// Now is injectable for tests.
 	Now func() time.Time
+
+	// runRemote is this run's remote snapshot, so a conflict copy's name can
+	// be checked against what the server already holds.
+	runRemote Snapshot
 }
 
 func (e *Engine) now() time.Time {
@@ -160,6 +169,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	e.runRemote = remote
 
 	actions := Plan(local, remote, base, Options{FirstRun: res.FirstRun, Now: e.now()})
 	res.Planned = len(actions)
@@ -188,7 +198,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	cp := e.newCheckpoint(base, local, remote)
 	var mu sync.Mutex // guards res, the progress counter and cp; the IO runs unlocked
 	done := 0
-	settle := func(a Action, tmp Result, err error) {
+	settle := func(a Action, tmp Result, out outcome, err error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
@@ -201,7 +211,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 			res.DeletedLocal += tmp.DeletedLocal
 			res.DeletedRemot += tmp.DeletedRemot
 			res.Conflicts += tmp.Conflicts
-			cp.note(a)
+			res.Identical += tmp.Identical
+			cp.note(a, out)
 			if cp.due() {
 				cp.flush(ctx)
 			}
@@ -217,8 +228,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 				return false
 			}
 			var tmp Result
-			err := e.apply(ctx, a, &tmp)
-			settle(a, tmp, err)
+			out, err := e.apply(ctx, a, &tmp)
+			settle(a, tmp, out, err)
 		}
 		return true
 	}
@@ -243,8 +254,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 							continue
 						}
 						var tmp Result
-						err := e.apply(ctx, a, &tmp)
-						settle(a, tmp, err)
+						out, err := e.apply(ctx, a, &tmp)
+						settle(a, tmp, out, err)
 					}
 				}()
 			}
@@ -393,6 +404,7 @@ func (e *Engine) runFile(ctx context.Context) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	parent.runRemote = remote
 
 	actions := Plan(local, remote, base, Options{FirstRun: res.FirstRun, Now: e.now()})
 	res.Planned = len(actions)
@@ -404,7 +416,7 @@ func (e *Engine) runFile(ctx context.Context) (Result, error) {
 			res.Errors = append(res.Errors, "stopped: "+err.Error())
 			break
 		}
-		if err := parent.apply(ctx, a, &res); err != nil {
+		if _, err := parent.apply(ctx, a, &res); err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
 			e.logf("!! %s %s: %v", a.Kind, a.Rel, err)
 		} else {
@@ -538,23 +550,31 @@ func (c *checkpoint) every() int {
 	return DefaultCheckpointEvery
 }
 
+// localNode stats rel in the pair folder as it is NOW.
+func (c *checkpoint) localNode(rel string) (Node, bool) {
+	lp, err := localPathOf(c.e.Pair.Local, rel)
+	if err != nil {
+		return Node{}, false
+	}
+	info, err := os.Lstat(lp)
+	if err != nil || !info.Mode().IsRegular() {
+		return Node{}, false
+	}
+	return Node{Rel: rel, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}, true
+}
+
 // note records one SETTLED action. Called under the engine's mutex.
-func (c *checkpoint) note(a Action) {
+func (c *checkpoint) note(a Action, out outcome) {
 	switch a.Kind {
 	case ActionDownload:
 		r, ok := c.remote[a.Rel]
 		if !ok {
 			return
 		}
-		lp, err := localPathOf(c.e.Pair.Local, a.Rel)
-		if err != nil {
+		l, ok := c.localNode(a.Rel)
+		if !ok {
 			return
 		}
-		info, err := os.Lstat(lp)
-		if err != nil || !info.Mode().IsRegular() {
-			return
-		}
-		l := Node{Rel: a.Rel, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}
 		c.rows[a.Rel] = BaselineEntry{Local: l.Signature(), Remote: r.Signature()}
 	case ActionUpload:
 		l, ok := c.local[a.Rel]
@@ -562,6 +582,34 @@ func (c *checkpoint) note(a Action) {
 			return
 		}
 		c.pending[a.Rel] = l
+	case ActionConflict:
+		if out.identical {
+			// The same bytes on both sides: settled exactly as a download
+			// would be, against the remote signature the plan compared.
+			r, ok := c.remote[a.Rel]
+			if !ok {
+				return
+			}
+			l, ok := c.localNode(a.Rel)
+			if !ok {
+				return
+			}
+			c.rows[a.Rel] = BaselineEntry{Local: l.Signature(), Remote: r.Signature()}
+			break
+		}
+		// Kept both: the local file went up over the server's, and the
+		// server's version went up again under the copy's name. Both are
+		// uploads waiting for their remote signature — which is what puts the
+		// copy in the baseline NOW, so a copy tidied away on the server is
+		// deleted here next run instead of being uploaded again as "new".
+		if l, ok := c.local[a.Rel]; ok && !l.IsDir {
+			c.pending[a.Rel] = l
+		}
+		if out.sideRel != "" {
+			if l, ok := c.localNode(out.sideRel); ok {
+				c.pending[out.sideRel] = l
+			}
+		}
 	case ActionDeleteLocal, ActionDeleteRemot:
 		delete(c.rows, a.Rel)
 		delete(c.pending, a.Rel)
@@ -634,21 +682,28 @@ func (e *Engine) trashDays() int {
 	return TrashRetentionDays
 }
 
-func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
+// outcome is what one applied action left behind that its Action does not
+// say — the checkpoint needs it to record the right rows.
+type outcome struct {
+	identical bool   // a conflict whose two sides held the same bytes
+	sideRel   string // a conflict copy written beside the original AND uploaded
+}
+
+func (e *Engine) apply(ctx context.Context, a Action, res *Result) (outcome, error) {
 	lp, err := localPathOf(e.Pair.Local, a.Rel)
 	if err != nil {
-		return err
+		return outcome{}, err
 	}
 	rp := joinRemote(e.Pair.Remote, a.Rel)
 
 	switch a.Kind {
 	case ActionMkdirLocal:
 		e.logf("+  %s/  (%s)", a.Rel, a.Reason)
-		return os.MkdirAll(lp, 0o755)
+		return outcome{}, os.MkdirAll(lp, 0o755)
 
 	case ActionMkdirRemote:
 		e.logf("+> %s/  (%s)", a.Rel, a.Reason)
-		return e.API.Mkdir(ctx, rp)
+		return outcome{}, e.API.Mkdir(ctx, rp)
 
 	case ActionUpload:
 		e.logf("-> %s  (%s)", a.Rel, a.Reason)
@@ -657,53 +712,179 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 			_ = err
 		}
 		if err := e.API.Upload(ctx, lp, rp); err != nil {
-			return err
+			return outcome{}, err
 		}
 		res.Uploaded++
-		return nil
+		return outcome{}, nil
 
 	case ActionDownload:
 		e.logf("<- %s  (%s)", a.Rel, a.Reason)
 		if err := e.download(ctx, rp, lp, a.RemoteMod, a.RemoteSize); err != nil {
-			return err
+			return outcome{}, err
 		}
 		res.Downloaded++
-		return nil
+		return outcome{}, nil
 
 	case ActionDeleteLocal:
 		e.logf("x  %s  (%s)", a.Rel, a.Reason)
 		if err := e.Store.TrashLocal(e.Pair.ID, e.Pair.Local, a.Rel, e.now()); err != nil {
-			return err
+			return outcome{}, err
 		}
 		res.DeletedLocal++
-		return nil
+		return outcome{}, nil
 
 	case ActionDeleteRemot:
 		e.logf("x> %s  (%s)", a.Rel, a.Reason)
 		if err := e.API.Remove(ctx, rp); err != nil {
-			return err
+			return outcome{}, err
 		}
 		res.DeletedRemot++
-		return nil
+		return outcome{}, nil
 
 	case ActionConflict:
-		// Keep both. The server's copy lands beside the local one under a name
-		// that says where it came from; the local file then goes up unchanged,
-		// so neither edit is lost and the user resolves it by looking at two
-		// files in their own folder.
-		e.logf("!! %s  (%s) — keeping both", a.Rel, a.Reason)
-		sidePath := filepath.Join(filepath.Dir(lp), a.ConflictName)
-		if err := e.download(ctx, rp, sidePath, a.RemoteMod, a.RemoteSize); err != nil {
-			return err
-		}
-		res.Conflicts++
-		if err := e.API.Upload(ctx, lp, rp); err != nil {
-			return err
-		}
-		res.Uploaded++
-		return nil
+		return e.resolveConflict(ctx, a, lp, rp, res)
 	}
-	return fmt.Errorf("unknown action %q", a.Kind)
+	return outcome{}, fmt.Errorf("unknown action %q", a.Kind)
+}
+
+// resolveConflict keeps both versions of a file that changed on both sides —
+// unless they are the same bytes, which is far more common than a real
+// conflict: a lost baseline, a reinstalled client, two people saving the same
+// attachment. The server's copy is fetched first and COMPARED; only a real
+// difference makes a copy.
+//
+// When they differ, the server's version is installed beside the local file
+// under a name that says where it came from, uploaded under that same name,
+// and then the local file goes up over the server's. Neither edit is lost, both
+// sides hold both files, and the checkpoint records both — a copy that is
+// later tidied away on the server is deleted here, never re-uploaded as "new".
+func (e *Engine) resolveConflict(ctx context.Context, a Action, lp, rp string, res *Result) (outcome, error) {
+	if a.Mixed {
+		// A folder on one side and a file on the other. Neither may win and
+		// nothing is touched; the person has to rename one of them.
+		return outcome{}, fmt.Errorf("a folder on one side and a file on the other: nothing was touched, rename one of them")
+	}
+	tmp, err := e.fetch(ctx, rp, filepath.Dir(lp), a.RemoteSize)
+	if err != nil {
+		return outcome{}, err
+	}
+	same, err := sameFileContent(tmp, lp)
+	if err != nil {
+		os.Remove(tmp)
+		return outcome{}, err
+	}
+	if same {
+		os.Remove(tmp)
+		e.logf("=  %s  (%s, but the same bytes on both sides — nothing to keep twice)", a.Rel, a.Reason)
+		res.Identical++
+		return outcome{identical: true}, nil
+	}
+
+	e.logf("!! %s  (%s) — keeping both", a.Rel, a.Reason)
+	relDir := path.Dir(a.Rel)
+	if relDir == "." {
+		relDir = ""
+	}
+	sideName := e.freeSideName(filepath.Dir(lp), relDir, a.ConflictName)
+	sidePath := filepath.Join(filepath.Dir(lp), sideName)
+	if err := e.install(tmp, sidePath, a.RemoteMod); err != nil {
+		return outcome{}, err
+	}
+	res.Conflicts++
+
+	var out outcome
+	// A single-file pair covers one name; a copy beside it belongs to no pair
+	// on the server, so it stays on this machine only.
+	if !e.Pair.File {
+		sideRel := sideName
+		if relDir != "" {
+			sideRel = relDir + "/" + sideName
+		}
+		if err := e.API.Upload(ctx, sidePath, joinRemote(e.Pair.Remote, sideRel)); err != nil {
+			// Not fatal: the copy is safe on this disk and goes up next run
+			// as a new file. Failing here would re-conflict the original.
+			e.logf("!! %s: kept here, not uploaded yet: %v", sideRel, err)
+		} else {
+			res.Uploaded++
+			out.sideRel = sideRel
+		}
+	}
+	if err := e.API.Upload(ctx, lp, rp); err != nil {
+		return out, err
+	}
+	res.Uploaded++
+	return out, nil
+}
+
+// freeSideName returns name, or name with " (2)", " (3)"… before its
+// extension — the first that is taken neither in this folder nor on the
+// server. Two conflicts on one file inside the same minute used to write the
+// second server version over the first.
+func (e *Engine) freeSideName(localDir, relDir, name string) string {
+	ext := path.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 1; ; i++ {
+		cand := name
+		if i > 1 {
+			cand = fmt.Sprintf("%s (%d)%s", stem, i, ext)
+		}
+		if _, err := os.Lstat(filepath.Join(localDir, cand)); err == nil {
+			continue
+		}
+		rel := cand
+		if relDir != "" {
+			rel = relDir + "/" + cand
+		}
+		if _, taken := e.runRemote[rel]; taken {
+			continue
+		}
+		return cand
+	}
+}
+
+// sameFileContent reports whether two files hold exactly the same bytes.
+func sameFileContent(a, b string) (bool, error) {
+	fa, err := os.Open(a)
+	if err != nil {
+		return false, err
+	}
+	defer fa.Close()
+	fb, err := os.Open(b)
+	if err != nil {
+		return false, err
+	}
+	defer fb.Close()
+	sa, err := fa.Stat()
+	if err != nil {
+		return false, err
+	}
+	sb, err := fb.Stat()
+	if err != nil {
+		return false, err
+	}
+	if sa.Size() != sb.Size() {
+		return false, nil
+	}
+	bufA := make([]byte, 64<<10)
+	bufB := make([]byte, 64<<10)
+	for {
+		na, errA := io.ReadFull(fa, bufA)
+		nb, errB := io.ReadFull(fb, bufB)
+		if na != nb || !bytes.Equal(bufA[:na], bufB[:nb]) {
+			return false, nil
+		}
+		endA := errA == io.EOF || errA == io.ErrUnexpectedEOF
+		endB := errB == io.EOF || errB == io.ErrUnexpectedEOF
+		if errA != nil && !endA {
+			return false, errA
+		}
+		if errB != nil && !endB {
+			return false, errB
+		}
+		if endA || endB {
+			return endA && endB, nil
+		}
+	}
 }
 
 // download writes to a temporary file in the destination directory and renames
@@ -716,33 +897,48 @@ func (e *Engine) apply(ctx context.Context, a Action, res *Result) error {
 // how 202 "preparing" JSON replaced 45 large files on a real server: every one
 // of them was listed at tens of megabytes and delivered as ~100 bytes.
 func (e *Engine) download(ctx context.Context, remote, dest string, remoteMod, size int64) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dest), ".filex-part-*")
+	tmp, err := e.fetch(ctx, remote, filepath.Dir(dest), size)
 	if err != nil {
 		return err
+	}
+	return e.install(tmp, dest, remoteMod)
+}
+
+// fetch downloads remote into a new `.filex-part-*` file in dir and returns
+// its path; the caller installs it or removes it. A body of the wrong length
+// never leaves here.
+func (e *Engine) fetch(ctx context.Context, remote, dir string, size int64) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(dir, ".filex-part-*")
+	if err != nil {
+		return "", err
 	}
 	tmpName := tmp.Name()
-	defer func() {
-		tmp.Close()
-		os.Remove(tmpName) // no-op once the rename has happened
-	}()
-
 	n, err := e.API.Download(ctx, remote, size, tmp)
+	if err == nil && size >= 0 && n != size {
+		err = fmt.Errorf("the server listed %d bytes but sent %d; not installed", size, n)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
-		return err
+		os.Remove(tmpName)
+		return "", err
 	}
-	if size >= 0 && n != size {
-		return fmt.Errorf("the server listed %d bytes but sent %d; not installed", size, n)
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
+	return tmpName, nil
+}
+
+// install renames a fetched temporary file into place and stamps the server's
+// mtime on it. The temporary file is gone either way.
+func (e *Engine) install(tmpName, dest string, remoteMod int64) error {
 	if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+		os.Remove(tmpName)
 		return err
 	}
 	if err := os.Rename(tmpName, dest); err != nil {
+		os.Remove(tmpName)
 		return err
 	}
 	// Stamp the server's own mtime on the copy. (size, mtime) equality is how

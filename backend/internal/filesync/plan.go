@@ -20,6 +20,7 @@ package filesync
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -107,6 +108,9 @@ type Action struct {
 	// how a status report sent in place of a file (a 202 "preparing" JSON, a
 	// proxy's error page) is told apart from the file.
 	RemoteSize int64
+	// Mixed marks a conflict between a folder on one side and a file on the
+	// other. Nothing is downloaded or uploaded for it: the user is told.
+	Mixed bool
 }
 
 // Options tunes a plan.
@@ -199,7 +203,7 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 		// too means the local disk never gets into that state either. Neither
 		// side wins — the user is told and nothing is touched.
 		case hasL && hasR && l.IsDir != r.IsDir:
-			out = append(out, Action{Kind: ActionConflict, Rel: rel,
+			out = append(out, Action{Kind: ActionConflict, Rel: rel, Mixed: true,
 				ConflictName: conflictName(rel, SideRemote, opts.Now),
 				Reason:       "one side has a folder where the other has a file"})
 			continue
@@ -234,8 +238,10 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
 					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "changed on the server"})
 			default:
-				// Both moved. Same size is not proof of same content, so we do
-				// not try to be clever: keep both and let the person decide.
+				// Both moved. Same size is not proof of same content, so the
+				// planner does not try to be clever: it asks for a conflict, and
+				// the engine compares the actual bytes before keeping two copies
+				// of what may well be one file (apply, ActionConflict).
 				out = append(out, Action{Kind: ActionConflict, Rel: rel,
 					ConflictName: conflictName(rel, SideRemote, opts.Now),
 					RemoteMod:    r.ModMillis,
@@ -315,14 +321,27 @@ func isDelete(k ActionKind) bool {
 	return k == ActionDeleteLocal || k == ActionDeleteRemot
 }
 
+// conflictMarkers matches the "(server copy …)" / "(local copy …)" suffixes
+// conflictName appends, plus the " (2)" counter the engine adds when a name is
+// taken — one or more of them at the end of a stem.
+var conflictMarkers = regexp.MustCompile(`(?:\s*\((?:server|local) copy(?: \d{4}-\d{2}-\d{2} \d{2}-\d{2})?\)(?: \(\d+\))?)+$`)
+
 // conflictName builds "report (server copy 2026-08-07 14-05).xlsx".
 //
 // The extension is preserved so the copy still opens in the right application —
 // a conflict file the user cannot double-click is a conflict file they ignore.
+//
+// ⚠ A conflict on a file that is itself a conflict copy does not add a second
+// marker: the old markers are dropped first. Nesting them is how one busy
+// 13 KB spreadsheet grew 14,724 copies named `X (server copy A) (server copy
+// B) (server copy C)…` — each round's copy conflicted in the next round.
 func conflictName(rel string, from Side, now time.Time) string {
 	base := path.Base(rel)
 	ext := path.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
+	if clean := conflictMarkers.ReplaceAllString(stem, ""); clean != "" {
+		stem = clean
+	}
 	if now.IsZero() {
 		return fmt.Sprintf("%s (%s copy)%s", stem, from, ext)
 	}

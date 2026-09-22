@@ -355,6 +355,9 @@ func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
 	if res.Conflicts > 0 {
 		fmt.Fprintf(out, ", %d kept as both versions", res.Conflicts)
 	}
+	if res.Identical > 0 {
+		fmt.Fprintf(out, ", %d already identical", res.Identical)
+	}
 	fmt.Fprintf(out, "  (%s)\n", res.Duration.Round(time.Millisecond))
 	// Report what was NOT done rather than letting a summary imply full coverage.
 	for _, e := range res.Errors {

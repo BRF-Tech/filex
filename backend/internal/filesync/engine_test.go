@@ -773,7 +773,7 @@ func TestInterruptedFirstRunResumesWithoutConflicts(t *testing.T) {
 // The slack in adoption is two seconds — FAT's mtime step, and a cover for
 // tools that stamp times through float seconds and land a millisecond off
 // (measured: 1,667 conflict pairs from exactly that). Outside it, the
-// planner stays as suspicious as ever.
+// planner stays as suspicious as ever — and the engine compares the bytes.
 func TestAdoptionToleratesCoarseMtimes(t *testing.T) {
 	r := newRig(t)
 	r.srv.files["a.txt"] = []byte("same bytes")
@@ -804,8 +804,11 @@ func TestAdoptionToleratesCoarseMtimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	res = r.run()
-	if res.Conflicts != 1 {
-		t.Fatalf("5s off must conflict, got %+v", res)
+	// Outside the slack the planner still refuses to adopt on metadata alone;
+	// the engine then compares the bytes, finds them equal, and settles the
+	// pair without a copy.
+	if res.Planned != 1 || res.Conflicts != 0 || res.Identical != 1 || res.Uploaded != 0 {
+		t.Fatalf("5s off must be planned as a conflict and resolved as identical, got %+v", res)
 	}
 }
 
