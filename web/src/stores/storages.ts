@@ -50,12 +50,13 @@ export const useStoragesStore = defineStore('storages', () => {
     try {
       await StoragesApi.syncNow(id);
     } finally {
-      // ⚠ The run is over by the time this resolves — the endpoint executes it
-      // synchronously — so the row on screen is now stale, not pending. Without
-      // this refetch the optimistic 'running' was the LAST thing the store ever
-      // wrote: the storage kept reading "Never ran" until a full page reload,
-      // which is exactly what issue #16 reported. Refresh on failure too, so a
-      // failed run shows its state instead of spinning for ever.
+      // ⚠ The endpoint answers 202 as soon as the run has STARTED (it walks in
+      // the background), so what the refetch shows is the run's real state —
+      // running, or finished if it was quick. Without this refetch the
+      // optimistic 'running' was the LAST thing the store ever wrote: the
+      // storage kept reading "Never ran" until a full page reload, which is
+      // exactly what issue #16 reported. Refresh on failure too, so a failed
+      // request shows the storage's state instead of spinning for ever.
       await fetch();
     }
   }

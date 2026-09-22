@@ -722,6 +722,26 @@ counted as a failure), and **Scan now** while a run is in flight starts no
 second walk: it answers **202** with `status: "running"` — the scan you asked
 for is the one in progress. Progress is under *Storages → sync runs* as before.
 
+**Rescanning one folder.** `POST /api/admin/storages/{id}/sync?path=<folder>`
+rescans a single catalogued folder's subtree instead of the whole storage — for
+when you know what changed and a full scan is expensive (169,000 rows is about
+twenty minutes, and every row's `seen_at` is rewritten). It is the same walk
+with the same rules — new objects catalogued, changed ones updated, staged
+uploads settled — and three differences that keep it the folder's business:
+
+- only rows **inside the folder** can go to the trash, and the ~70 % guard
+  compares what the listing saw with the folder's own catalogued size;
+- a listing that **failed part-way** removes nothing (a folder the walk could
+  not look into is not a deleted folder);
+- **no sync-run row** is written and the storage's last-synced time does not
+  move.
+
+It shares the one-run lock (while any scan walks the storage it answers **202**
+`status: "running"`), answers with its counts when it is done, and gives up
+after ten minutes with **504** and the counts so far. The folder must already be
+in the catalogue (**404** otherwise — rescan its parent); `..` and filex's own
+trees are refused with **400**. See [BACKEND.md](BACKEND.md) for the answer.
+
 You can watch runs at `GET /api/admin/storages/{id}/sync-runs` and detect drift
 with `GET /api/admin/storages/{id}/drift`.
 

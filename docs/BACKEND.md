@@ -966,9 +966,41 @@ Removes the storage and its DB cache rows. Files in the underlying backend
 are **not** deleted.
 
 ### `POST /api/admin/storages/:id/sync` ![admin](https://img.shields.io/badge/-admin-red)
-Triggers an immediate sync run. Returns `202 + { run_id: "..." }`; poll via
-`/api/admin/sync-runs/:id`, or read this storage's history at
-`GET /api/admin/storages/:id/sync-runs`.
+Triggers an immediate **full** scan of the storage. The scan runs in the
+background, so the answer comes at once:
+
+```json
+{ "ok": true, "status": "started", "note": "the sync runs in the background; watch its progress under sync runs" }
+```
+
+`status: "running"` (still `202`) means a scan was already walking this storage
+and no second one was started. There is no run id in the answer: watch the run
+under `GET /api/admin/storages/:id/sync-runs` or `GET /api/admin/sync-runs`.
+
+**`?path=<folder>` rescans one catalogued folder** instead of the whole storage
+— its subtree only, with the same rules as a full scan: new objects are
+catalogued, changed ones updated, a staged upload whose bytes landed is settled,
+and objects gone from inside the folder go to the trash, with the 70 % guard
+comparing what the listing saw against the folder's **own** size. A listing that
+failed part-way removes nothing. No sync-run row is written and the storage's
+`last_sync_at` does not move. It answers when it is done (at most ten minutes):
+
+```json
+{ "ok": true, "path": "/Müşteri/2026", "scanned": 412, "added": 3, "updated": 1, "removed": 2, "reconciled": 0 }
+```
+
+`reconciled` counts staged uploads settled as stored; `removal_skipped`, when
+present, says why nothing was removed (partial listing, or the guard tripped).
+
+| Answer | When |
+|---|---|
+| `200` | done — the counts above |
+| `202` `{status:"running"}` | a scan is already walking the storage; nothing was started |
+| `400` | the path climbs out with `..`, names filex's own trees (`.versions/`, `.thumbs/`, `.filex-trash/`), or is a file |
+| `404` | the storage is unknown, or the folder is not in the catalogue (rescan its parent, or run a full scan) |
+| `504` | ten minutes were not enough: the counts so far, the rows reached are updated, nothing was removed |
+
+`?path=` empty, `/`, or anything that cleans to the root is the full scan above.
 
 ### `POST /api/admin/storages/test` ![admin](https://img.shields.io/badge/-admin-red)
 Validates a connection without persisting. ⚠ The candidate configuration is in

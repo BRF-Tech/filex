@@ -87,7 +87,7 @@ func (s *storageSyncer) RunOnce(ctx context.Context) error {
 	// Anything else — or a tree too large to hold — is walked directory by
 	// directory as before.
 	list := dirLister(s.driver.List)
-	if idx, ok := s.prefetchTree(ctx); ok {
+	if idx, ok := s.prefetchTree(ctx, "/"); ok {
 		list = idx.list
 	}
 	seen, err := s.walk(ctx, "/", nil, c, list)
@@ -190,6 +190,10 @@ type walkCounts struct {
 	// reconciled is the part of updated that settled a staged upload whose
 	// bytes were already on the storage (settleTransfer).
 	reconciled int
+	// partial is set when a directory below the walk's root could not be
+	// listed, or was left uncatalogued: the walk carries on past it, and
+	// everything under it looks unseen without being gone.
+	partial bool
 }
 
 // dirLister answers "what is in directory p" for one walk — the driver's List,
@@ -213,7 +217,7 @@ var TreePrefetchMax = 2_000_000
 
 var errTreeTooLarge = errors.New("sync: tree too large to prefetch")
 
-// prefetchTree asks a TreeWalker backend for everything under "/" in one pass
+// prefetchTree asks a TreeWalker backend for everything under root in one pass
 // and returns it grouped by parent. ok is false when the driver cannot, the
 // tree is over TreePrefetchMax, or the pass failed — the caller then walks the
 // backend the ordinary way, so a shortcut that does not fit never costs a scan.
@@ -222,7 +226,7 @@ var errTreeTooLarge = errors.New("sync: tree too large to prefetch")
 // here rather than in the walk (which skips them anyway): with 30% of a bucket
 // in the trash, or a version history as large as the files it keeps, that is
 // that much less to hold.
-func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
+func (s *storageSyncer) prefetchTree(ctx context.Context, root string) (treeIndex, bool) {
 	tw, ok := s.driver.(storage.TreeWalker)
 	if !ok {
 		return nil, false
@@ -230,7 +234,7 @@ func (s *storageSyncer) prefetchTree(ctx context.Context) (treeIndex, bool) {
 	idx := treeIndex{}
 	n := 0
 	started := time.Now()
-	err := tw.WalkTree(ctx, "/", func(o storage.Object) error {
+	err := tw.WalkTree(ctx, root, func(o storage.Object) error {
 		if versioning.IsInternalTree(o.Path) {
 			return nil
 		}
@@ -390,6 +394,7 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 					if obj.Name == e2e.MarkerName && obj.Kind != storage.KindDirectory {
 						slog.Warn("sync: leaving a directory uncatalogued this pass, its encrypted-folder marker row could not be written",
 							slog.String("path", p), slog.String("storage", s.storage.Name))
+						c.partial = true
 						return count, nil
 					}
 					/* /wiring:e2 */
@@ -413,6 +418,8 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 				cn, err := s.walk(ctx, obj.Path, &created.ID, c, list)
 				if err == nil {
 					count += cn
+				} else {
+					c.partial = true
 				}
 			}
 		} else {
@@ -483,6 +490,8 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 				cn, err := s.walk(ctx, obj.Path, &existing.ID, c, list)
 				if err == nil {
 					count += cn
+				} else {
+					c.partial = true
 				}
 			}
 		}

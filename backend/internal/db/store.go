@@ -98,6 +98,13 @@ type Store interface {
 	HardDeleteNode(ctx context.Context, id int64) error
 	MoveNode(ctx context.Context, id int64, parentID *int64, name, path, pathHash string) error
 	ListStaleNodes(ctx context.Context, storageID int64, before time.Time) ([]*model.Node, error)
+	// ListStaleNodesUnder is ListStaleNodes bounded to the rows strictly BELOW
+	// dir (the folder's own row excluded), matched exactly as ListNodesUnder
+	// matches — the tombstone candidates of a folder rescan.
+	ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error)
+	// CountLiveNodesUnder counts the live rows strictly below dir — the
+	// baseline a folder rescan's 70% guard compares what it saw against.
+	CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error)
 	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
 
 	// Replication targets — separate entity. Storages.replica_target_id

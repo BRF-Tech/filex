@@ -860,6 +860,41 @@ func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time
 	return out, rows.Err()
 }
 
+func (s *Store) ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error) {
+	slashed, bare, ok := treeSpellings(dir)
+	if !ok {
+		return nil, nil
+	}
+	args := append([]any{storageID, before}, belowArgs(slashed, bare)...)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+nodeColumns()+
+		` FROM nodes WHERE storage_id=$1 AND seen_at < $2 AND deleted_at IS NULL AND `+belowClause(3), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error) {
+	slashed, bare, ok := treeSpellings(dir)
+	if !ok {
+		return 0, nil
+	}
+	var n int64
+	args := append([]any{storageID}, belowArgs(slashed, bare)...)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL AND `+belowClause(2), args...).Scan(&n)
+	return n, err
+}
+
 func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {
 	var n int64
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`, storageID).Scan(&n)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -341,7 +342,12 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// TriggerSync forces an immediate sync run for a storage.
+// ScopedRescanTimeout bounds a folder rescan (TriggerSync with ?path=), which
+// answers inside the request.
+var ScopedRescanTimeout = 10 * time.Minute
+
+// TriggerSync forces an immediate sync run for a storage — or, with
+// ?path=<folder>, a rescan of that one catalogued folder (rescanFolder).
 func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -354,6 +360,20 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 	if h.Worker == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "worker offline"})
 		return
+	}
+	// ?path=<folder> rescans that one catalogued folder instead of the whole
+	// storage. "", "/" and anything that cleans to the root are the full scan
+	// below, exactly as before.
+	if raw := r.URL.Query().Get("path"); raw != "" {
+		dir, err := syncpkg.ScopePath(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if dir != "" {
+			h.rescanFolder(w, r, id, dir)
+			return
+		}
 	}
 	// ⚠⚠ The run is DETACHED from the request, and answered immediately.
 	//
@@ -402,4 +422,61 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		"status": "started",
 		"note":   "the sync runs in the background; watch its progress under sync runs",
 	})
+}
+
+// rescanFolder is TriggerSync for one folder (sync.Worker.RescanFolder).
+//
+// Unlike the full scan it answers with its result, because a folder is small
+// enough to wait for — and bounded by ScopedRescanTimeout, because some are
+// not. It runs detached from the request like the full scan (a client that
+// gives up must not cancel a walk half way); on the time limit it answers 504
+// with the counts so far: the rows it reached are updated, and nothing was
+// removed, since the tombstone pass never runs on a partial view. No sync_runs
+// row is written and the storage's last-synced time does not move.
+func (h *Storages) rescanFolder(w http.ResponseWriter, r *http.Request, id int64, dir string) {
+	if !h.Worker.Known(id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "storage not found"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), ScopedRescanTimeout)
+	defer cancel()
+	res, err := h.Worker.RescanFolder(ctx, id, dir)
+	body := map[string]any{
+		"path":       res.Path,
+		"scanned":    res.Scanned,
+		"added":      res.Added,
+		"updated":    res.Updated,
+		"removed":    res.Removed,
+		"reconciled": res.Reconciled,
+	}
+	if res.RemovalSkipped != "" {
+		body["removal_skipped"] = res.RemovalSkipped
+	}
+	switch {
+	case err == nil:
+		body["ok"] = true
+		writeJSON(w, http.StatusOK, body)
+	case errors.Is(err, syncpkg.ErrRunInProgress):
+		// The same answer as a second full-scan press: not queued, not an
+		// error — the storage is being walked right now.
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"ok":     true,
+			"status": "running",
+			"note":   "a scan is already running for this storage; no folder rescan was started — ask again once it has finished",
+		})
+	case errors.Is(err, syncpkg.ErrFolderNotCatalogued):
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": err.Error() + "; rescan the folder above it, or run a full scan",
+		})
+	case errors.Is(err, syncpkg.ErrNotAFolder), errors.Is(err, syncpkg.ErrScopeInvalid):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		body["error"] = fmt.Sprintf("the rescan did not finish within %s: the rows it reached are updated and nothing was removed; rescan a smaller folder, or run a full scan", ScopedRescanTimeout)
+		writeJSON(w, http.StatusGatewayTimeout, body)
+	default:
+		slog.Warn("storages: folder rescan failed",
+			slog.Int64("storage", id), slog.String("path", dir), slog.String("err", err.Error()))
+		body["error"] = err.Error()
+		writeJSON(w, http.StatusInternalServerError, body)
+	}
 }

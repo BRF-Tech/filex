@@ -300,6 +300,14 @@ loop:
   close every sync_run with no finished_at as "aborted"
 ```
 
+A **folder rescan** (`POST /api/admin/storages/{id}/sync?path=`) runs the same
+walk from one catalogued folder's row (`Worker.RescanFolder`): the one-pass
+listing asks for that subtree only, the tombstone candidates are the stale rows
+strictly below the folder (an exact, character-counted prefix — never `LIKE`),
+the whole-listing guard compares against the folder's own live row count, and a
+listing that failed part-way skips the tombstone pass. It takes the storage's
+one-run lock and writes no `sync_runs` row.
+
 ⚠ Absence from a listing is not proof of deletion, and answering it with
 "move to trash" turns any unrelated bug into lost data — which is exactly
 what happened in GitHub #16, where uploads that never reached S3 were trashed

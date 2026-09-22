@@ -9,6 +9,13 @@ import type {
   SyncRun,
 } from './types';
 
+/** What POST /admin/storages/{id}/sync answers (see syncNow). */
+export interface SyncStartResponse {
+  ok: boolean;
+  status: 'started' | 'running';
+  note?: string;
+}
+
 interface BackendSyncRun {
   id: number;
   storage_id: number;
@@ -87,8 +94,12 @@ export const StoragesApi = {
     await api.delete(`/admin/storages/${id}`);
   },
 
-  async syncNow(id: number): Promise<{ run_id: number }> {
-    const { data } = await api.post<{ run_id: number }>(`/admin/storages/${id}/sync`);
+  /** POST /admin/storages/{id}/sync answers 202 once the scan has started in
+   *  the background (`started`), or when one is already walking the storage
+   *  (`running`). There is no run id in the answer — the run shows up under
+   *  the storage's sync runs. */
+  async syncNow(id: number): Promise<SyncStartResponse> {
+    const { data } = await api.post<SyncStartResponse>(`/admin/storages/${id}/sync`);
     return data;
   },
 
