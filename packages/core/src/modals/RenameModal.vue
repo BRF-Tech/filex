@@ -8,6 +8,10 @@ const props = defineProps<{
   open: boolean;
   locale: LocaleCode;
   currentName: string;
+  /** Why the last attempt did not happen — the host's answer from the server
+   *  (a taken name, a refusal, an outage). Shown under the field until the
+   *  name is edited. */
+  error?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -17,20 +21,41 @@ const emit = defineEmits<{
 
 const { t } = useLocale(() => props.locale);
 const name = ref('');
+// What the dialog is saying right now: the host's error, or its own refusal
+// of a name that is not one. Either goes away once the person edits the name.
+const shownError = ref<string | null>(null);
 
 watch(
   () => [props.open, props.currentName] as const,
   ([isOpen, cur]) => {
     if (isOpen) {
       name.value = cur;
+      shownError.value = props.error ?? null;
     }
   },
 );
 
+watch(
+  () => props.error,
+  (err) => {
+    shownError.value = err ?? null;
+  },
+  { immediate: true },
+);
+
+function onInput() {
+  shownError.value = null;
+}
+
 function submit() {
   const clean = name.value.trim();
   if (!clean) return;
-  if (/[\\/]/.test(clean) || clean === '.' || clean === '..') return;
+  if (/[\\/]/.test(clean) || clean === '.' || clean === '..') {
+    // Refused here with a word, not by doing nothing: a Save button that
+    // silently ignores the click reads as a broken dialog.
+    shownError.value = t('modal.newfolder.invalid');
+    return;
+  }
   emit('submit', clean);
 }
 </script>
@@ -43,8 +68,10 @@ function submit() {
         type="text"
         class="fe-input"
         autocomplete="off"
+        @input="onInput"
         @keydown.enter.prevent="submit"
       />
+      <p v-if="shownError" class="fe-form__error" role="alert" data-testid="rename-error">{{ shownError }}</p>
     </form>
     <template #actions>
       <button type="button" class="fe-btn" @click="emit('close')">

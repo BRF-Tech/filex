@@ -1103,6 +1103,14 @@ const showRename = ref(false);
 const showDelete = ref(false);
 const showPreview = ref(false);
 const renameTarget = ref<FileNode | null>(null);
+/* Why the last rename did not happen, shown in the dialog. A failure used to be
+ * only EMITTED, which the stock web app logs to the console: the dialog stayed
+ * open and silent, the one answer a person can act on — the name is taken —
+ * unseen. */
+const renameError = ref<string | null>(null);
+watch(showRename, (open) => {
+  if (open) renameError.value = null;
+});
 /* ui-fix — does the open rename/delete/new-folder modal belong to the side
  * pane? (the menu is identical to the main pane's; this routes the mutation
  * to the right one.) */
@@ -4252,7 +4260,11 @@ async function submitRename(name: string) {
       });
     }
   } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'rename' } });
+    const e = err as Error & { status?: number };
+    // 409 is the server refusing to replace what already has the name
+    // (NAME_TAKEN). Everything else still says what went wrong, in the dialog.
+    renameError.value = e.status === 409 ? t('newdoc.err.exists', { name }) : e.message || String(err);
+    emit('error', { message: e.message, context: { op: 'rename' } });
   }
 }
 
@@ -7273,6 +7285,7 @@ function closeRecoveryKey() {
       :open="showRename"
       :locale="locale"
       :current-name="renameTarget?.basename || ''"
+      :error="renameError"
       @close="showRename = false"
       @submit="submitRename"
     />
