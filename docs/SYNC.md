@@ -176,6 +176,11 @@ pair; **Keep online only** removes the pair and asks whether the local copy
 should go to the Trash or stay. See
 **[docs/DESKTOP.md](DESKTOP.md#keeping-folders-on-this-computer)**.
 
+The app also has a **Pause sync** switch (tray menu and Settings). Paused, it
+runs no watcher at all — for any account, and across restarts — until it is
+resumed. A `filex sync run` you start in a terminal is not affected: the pause
+is the app's, not the pairs'.
+
 ⚠ A pair's remote path may not contain a `..` segment. Nothing legitimate needs
 one — the server resolves paths from its own storage root — and a client that
 turns a remote path into a local folder name would otherwise be told, by the

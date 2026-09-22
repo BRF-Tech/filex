@@ -82,6 +82,7 @@ import {
   type RemoteContext,
 } from './openwith-io.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
+import { watcherAccounts } from './sync-policy.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
 // ─────────────────────────── portable build ───────────────────────────
@@ -501,7 +502,6 @@ function buildTray(): void {
   let img = nativeImage.createFromPath(ICON_PATH);
   img = img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 16, height: 16 });
   tray = new Tray(img);
-  tray.setToolTip('filex');
   refreshTray();
   tray.on('click', () => route());
 }
@@ -529,6 +529,9 @@ function effectiveLocale(): 'en' | 'tr' {
 const TRAY_STRINGS: Record<string, [en: string, tr: string]> = {
   signedOut: ['Not signed in', 'Giriş yapılmadı'],
   open: ['Open filex', "filex'i aç"],
+  pause: ['Pause sync', 'Eşitlemeyi duraklat'],
+  resume: ['Resume sync', 'Eşitlemeyi sürdür'],
+  pausedTip: ['filex — sync paused', 'filex — eşitleme duraklatıldı'],
   updateReady: ['Update {v} ready — installs itself (or now)', '{v} güncellemesi hazır — kendiliğinden kurulur (ya da şimdi)'],
   settings: ['Settings…', 'Ayarlar…'],
   quit: ['Quit filex', "filex'ten çık"],
@@ -543,11 +546,19 @@ function trayText(key: string, vars: Record<string, string> = {}): string {
 function refreshTray(): void {
   if (!tray) return;
   const acc = activeAccount(state);
+  const paused = state.syncPaused === true;
+  // The tray icon is often all there is on screen: a paused client has to be
+  // recognisable from it without opening anything.
+  tray.setToolTip(paused ? trayText('pausedTip') : 'filex');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: acc ? `${acc.email} — ${new URL(acc.serverUrl).host}` : trayText('signedOut'), enabled: false },
       { type: 'separator' },
       { label: trayText('open'), click: () => route() },
+      {
+        label: trayText(paused ? 'resume' : 'pause'),
+        click: () => void setSyncPaused(!paused).catch((e) => log('sync', 'pause failed', String(e))),
+      },
       // The update installs itself — while you are away, or when you quit. This
       // line is for the person who would rather have it now than later, so it
       // says what will happen either way; it is not a prompt to act on.
@@ -1025,6 +1036,7 @@ function publicState() {
     launchAtLogin: state.launchAtLogin,
     locale: state.locale,
     notifications: state.notifications !== false,
+    syncPaused: state.syncPaused === true,
     // What 'system' currently resolves to, so the window does not have to
     // re-derive it from navigator.language and disagree with the tray.
     effectiveLocale: effectiveLocale(),
@@ -1059,7 +1071,28 @@ let knownPairs: Pair[] = [];
 
 async function refreshPairs(): Promise<void> {
   knownPairs = await listPairs();
-  await supervisor?.reconcile(state.accounts, (id) => state.accounts.find((a) => a.id === id)?.token ?? null);
+  // Paused hands the supervisor no accounts: every watcher stops and none
+  // starts — at launch too. See watcherAccounts().
+  await supervisor?.reconcile(
+    watcherAccounts(state.accounts, { paused: state.syncPaused === true }),
+    (id) => state.accounts.find((a) => a.id === id)?.token ?? null,
+  );
+}
+
+/**
+ * Pause sync / Resume sync — the tray item and the Settings switch.
+ *
+ * ⚠ Stored, not just applied. "Quit it" was the only way to stop a client in a
+ * bad state, and it lasted until the next sign-in started it again, hidden,
+ * syncing. A pause survives the restart; resuming starts the watchers again.
+ */
+async function setSyncPaused(paused: boolean): Promise<void> {
+  if ((state.syncPaused === true) === paused) return;
+  state.syncPaused = paused;
+  saveState(state);
+  log('sync', paused ? 'paused by the user' : 'resumed by the user');
+  refreshTray();
+  await refreshPairs();
 }
 
 // ─────────────────────────── selective sync ───────────────────────────
@@ -2494,7 +2527,8 @@ function wireIpc(): void {
     return publicState();
   });
 
-  ipcMain.handle('settings:set', (_e, patch: Partial<DesktopState>) => {
+  ipcMain.handle('settings:set', async (_e, patch: Partial<DesktopState>) => {
+    if (typeof patch.syncPaused === 'boolean') await setSyncPaused(patch.syncPaused);
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
     if (typeof patch.notifications === 'boolean') state.notifications = patch.notifications;
     if (typeof patch.launchAtLogin === 'boolean') {

@@ -891,6 +891,9 @@
         'set.signout':          ['Sign out', 'Çıkış yap'],
         'set.no_accounts':      ['No accounts.', 'Hesap yok.'],
         'set.folders':          ['Synced folders', 'Eşitlenen klasörler'],
+        'set.pause':            ['Pause sync', 'Eşitlemeyi duraklat'],
+        'set.pause_sub':        ['Nothing is uploaded or downloaded until you resume — and it stays paused after a restart. The tray menu has the same switch.',
+                                 'Sen sürdürene kadar hiçbir şey yüklenmez ya da indirilmez — yeniden başlatınca da duraklatılmış kalır. Aynı düğme tepsi menüsünde de var.'],
         'set.no_engine':        ['The sync engine is missing from this build, so nothing will transfer.',
                                  'Bu sürümde eşitleme motoru yok, hiçbir dosya aktarılmayacak.'],
         'set.no_folders':       ['No folders are syncing yet.', 'Henüz eşitlenen klasör yok.'],
@@ -989,6 +992,7 @@
         'sync.waiting':         ['waiting to start', 'başlaması bekleniyor'],
         'sync.watching':        ['watching for changes', 'değişiklikler izleniyor'],
         'sync.stopped':         ['stopped', 'durdu'],
+        'sync.paused':          ['paused — resume sync to continue', 'duraklatıldı — devam etmek için eşitlemeyi sürdür'],
         'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
         'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
 
@@ -1539,7 +1543,8 @@
           const acc = state.accounts.find((a) => a.id === f.accountId);
           const st = statusOf[f.accountId];
           let line = T('sync.waiting'), cls = 'muted';
-          if (st && st.lastError) { line = st.lastError; cls = 'err'; }
+          if (state.syncPaused) { line = T('sync.paused'); }
+          else if (st && st.lastError) { line = st.lastError; cls = 'err'; }
           else if (st && st.running) { line = st.lastLine || T('sync.watching'); cls = 'ok'; }
           else if (st) { line = T('sync.stopped'); cls = 'err'; }
           return `
@@ -1596,6 +1601,7 @@
 
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
+          ${toggle('sync-pause', state.syncPaused === true, T('set.pause'), T('set.pause_sub'))}
           ${active ? `<div class="card"><div class="between">
             <div style="min-width:0">
               <div class="label">${esc(T('set.sync_root'))}</div>
@@ -1806,6 +1812,10 @@
         $('#notifs', el).addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ notifications: state.notifications === false });
           renderSettings();
+        });
+        $('#sync-pause', el).addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ syncPaused: state.syncPaused !== true });
+          render(); renderSettings();
         });
         el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ locale: b.dataset.locale });

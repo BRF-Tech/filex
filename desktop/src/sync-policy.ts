@@ -31,3 +31,20 @@ export function wantedWatchers(accounts: readonly PolicyAccount[], pairs: readon
     accounts.filter((a) => pairs.some((p) => p.account === a.id && !p.paused)).map((a) => a.id),
   );
 }
+
+/** The preferences that decide which accounts may sync at all. */
+export interface WatchGate {
+  /** Settings / tray → Pause sync. Stored, so it survives a restart. */
+  paused?: boolean;
+}
+
+/**
+ * The accounts handed to the supervisor. Paused means NONE: reconcile() then
+ * stops every watcher and starts no new one — at startup too, which is the
+ * point: the login item launches the app hidden, and a pause that lasted only
+ * until the next sign-in would not be a pause.
+ */
+export function watcherAccounts<A extends PolicyAccount>(accounts: readonly A[], gate: WatchGate): A[] {
+  if (gate.paused) return [];
+  return [...accounts];
+}

@@ -45,6 +45,9 @@ export interface DesktopState {
    *  Default ON — the desktop window has no bell of its own, so off would mean
    *  the always-running client is the one that never tells you anything. */
   notifications: boolean;
+  /** Settings / tray → Pause sync. Absent means not paused. Stored, so a
+   *  pause survives a restart, a reboot and the hidden launch at sign-in. */
+  syncPaused?: boolean;
   /**
    * The ground the window last painted, as the RENDERER resolved it — the
    * palette's own `--fe-bg`, in whichever variant was active.

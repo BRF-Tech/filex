@@ -321,8 +321,9 @@ than left pointing at a partial tree, and the dialog says so.
 
 
 > Sync runs while the app does, so a folder kept a moment ago starts filling on
-> the next round (30 seconds) — no restart. The engine's rules below apply
-> unchanged: the first pass deletes nothing.
+> the next round (30 seconds) — no restart — unless sync is paused (see
+> [Running in the background](#running-in-the-background)). The engine's rules
+> below apply unchanged: the first pass deletes nothing.
 
 ---
 
@@ -441,6 +442,14 @@ Linux — the app takes that as your answer: at its next start the switch in
 Settings turns itself off to match, and filex never puts itself back. (After a
 reinstall into a different folder the switch can read off for the same reason;
 turn it on again once.)
+
+**Pause sync** — in the tray menu, and as a switch at the top of *Settings →
+Synced folders* — stops every folder's sync, on every account, until you resume
+it. It is remembered: a paused filex stays paused after a restart, a reboot and
+the hidden start at sign-in, which quitting never did. The window keeps working
+while sync is paused; only the background transfers stop, and the tray icon's
+tooltip says *sync paused*. Resume starts the watchers again, and each folder
+picks up where it left off.
 
 Quit properly from the tray menu.
 
