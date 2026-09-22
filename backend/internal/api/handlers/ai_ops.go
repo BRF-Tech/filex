@@ -848,7 +848,9 @@ func (a *aiOps) Search(ctx context.Context, p, query string) ([]aiEntry, error) 
 	if a.acl != nil {
 		set, _ = a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
 	}
-	rows, err := a.store.SearchNodes(ctx, s.ID, "%"+query+"%", 200)
+	// `query` is the planner's anchor word (aiNameSearch), so it is also the
+	// word to rank by before the database applies the limit.
+	rows, err := a.store.SearchNodes(ctx, s.ID, "%"+query+"%", query, 200)
 	if err != nil {
 		return nil, err
 	}

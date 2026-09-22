@@ -873,6 +873,15 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 	return out
 }
 
+// The toolbar search's page sizes. The index is asked for managerSearchPage
+// hits; without it, the SQL fallback reads a window of FallbackOverFetch times
+// that from the storage — or managerCrossStoragePage times that from EACH
+// storage when the search spans them.
+const (
+	managerSearchPage       = 250
+	managerCrossStoragePage = 100
+)
+
 // vfSearch runs a search inside the storage and projects matches onto
 // the FileNode shape. The dirname stays at the requested folder so the
 // breadcrumb keeps its place.
@@ -880,6 +889,11 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 // Strategy: try the Bleve full-text index first (handles content + name
 // matching, fuzzy, prefix). Fall back to SQL LIKE on `nodes.name` when
 // the index is missing, returns nothing, or errors.
+//
+// The response carries `truncated`: true when more rows matched than came
+// back — the index filled its page, or the fallback filled its window — so a
+// client can say "narrow your search" instead of letting a cut list read as
+// the whole answer.
 func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Storage, rel, filter string, storageNames []string) {
 	if filter == "" {
 		h.vfIndex(w, r, s, rel, storageNames, false)
@@ -944,6 +958,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		return crossStorage || n.StorageID == s.ID
 	}
 
+	truncated := false
 	switch {
 	case parsed.HasTagFilter() && parsed.Text == "":
 		// A bare `tag:x` lists the tagged nodes; there is no text to score.
@@ -953,7 +968,9 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			}
 		}
 	case h.Index != nil:
-		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, 250, search.ScopeName, tagFilter)
+		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, managerSearchPage, search.ScopeName, tagFilter)
+		// The index returns at most a page; a full page is a cut answer.
+		truncated = len(hits) >= managerSearchPage
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err != nil || !keep(n) {
@@ -966,6 +983,22 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	// 2) Fall back to SQL LIKE when the index didn't return anything.
 	if len(nodes) == 0 && parsed.Text != "" {
 		plan := search.PlanFallback(parsed.Text)
+		// What is said about the answer is said about the fallback's rows now.
+		truncated = false
+		// window reads one storage's share: ranked in SQL before the LIMIT
+		// (plan.Anchor — exact and prefix names first), and one row past it,
+		// because a row beyond the window is the only proof it was full.
+		window := func(storageID int64, size int) ([]*model.Node, error) {
+			rows, err := h.Store.SearchNodes(r.Context(), storageID, plan.Like, plan.Anchor, size+1)
+			if err != nil {
+				return nil, err
+			}
+			if len(rows) > size {
+				truncated = true
+				rows = rows[:size]
+			}
+			return rows, nil
+		}
 		accept := func(rows []*model.Node) {
 			for _, n := range rows {
 				// ⚠ Same choke point as keep() above — the index branch runs
@@ -986,7 +1019,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			storages, err := h.Store.ListEnabledStorages(r.Context())
 			if err == nil {
 				for _, st := range storages {
-					rows, err := h.Store.SearchNodes(r.Context(), st.ID, plan.Like, 100*search.FallbackOverFetch)
+					rows, err := window(st.ID, managerCrossStoragePage*search.FallbackOverFetch)
 					if err != nil {
 						continue
 					}
@@ -994,7 +1027,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 				}
 			}
 		} else {
-			fallback, err := h.Store.SearchNodes(r.Context(), s.ID, plan.Like, 250*search.FallbackOverFetch)
+			fallback, err := window(s.ID, managerSearchPage*search.FallbackOverFetch)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
@@ -1003,8 +1036,8 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 		// The toolbar is the box people actually type into, so its
 		// index-less answer is ranked by the same tiers as everybody
-		// else's. Without this the rows arrive in `ORDER BY name` and the
-		// exact match can sit below an alphabetically luckier prefix.
+		// else's. SQL ranked only by the anchor word, to decide which rows
+		// make the window; this orders them by the whole query.
 		sort.SliceStable(nodes, func(a, b int) bool {
 			ra := plan.Rank(nodes[a].Name, nodes[a].Path)
 			rb := plan.Rank(nodes[b].Name, nodes[b].Path)
@@ -1060,6 +1093,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		"dirname":   joinAdapterPath(s.Name, rel),
 		"read_only": s.ReadOnly,
 		"files":     files,
+		"truncated": truncated,
 	})
 }
 

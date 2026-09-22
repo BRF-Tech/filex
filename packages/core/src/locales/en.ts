@@ -249,6 +249,7 @@ export const en: Record<string, string> = {
   'palette.save': 'Save search',
   'palette.saved.delete': 'Delete saved search',
   'search.in_content': 'In content',
+  'search.truncated': 'More results than shown — narrow your search',
 
   /* === bag:b4 === */
   'toolbar.more': 'More actions',

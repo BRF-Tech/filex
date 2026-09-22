@@ -105,7 +105,19 @@ type Store interface {
 	// storages list page so each row can show "N files, 1.2 GB" without
 	// the SPA looping every node row.
 	StorageStats(ctx context.Context, storageID int64) (fileCount int64, totalBytes int64, err error)
-	SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error)
+	// SearchNodes returns up to `limit` live nodes of a storage whose NAME
+	// matches the LIKE pattern `like`, ignoring case; `\` escapes `%` and `_`
+	// on every engine. It is the search an install without the index runs.
+	//
+	// `prefer` decides which rows survive the LIMIT. Empty: the old order,
+	// by name. A word (search.Fallback.Anchor): names equal to it — or to it
+	// plus an extension — first, then names starting with it, then the rest,
+	// each tier shortest name first. The word is matched literally.
+	//
+	// ⚠ Rank BEFORE the limit, never after: a LIMIT on `ORDER BY name` keeps
+	// the alphabetically first rows, and a search for `report` among a
+	// thousand `a-report-…` files lost `report.txt` itself.
+	SearchNodes(ctx context.Context, storageID int64, like, prefer string, limit int) ([]*model.Node, error)
 
 	// Users
 	CreateUser(ctx context.Context, email, passwordHash, role, locale, tz string) (*model.User, error)

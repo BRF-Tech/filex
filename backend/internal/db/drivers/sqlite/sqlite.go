@@ -971,7 +971,11 @@ func (s *Store) ListDuplicateNodes(ctx context.Context, minSize int64) ([]db.Dup
 	return out, rows.Err()
 }
 
-func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error) {
+// likeLiteral escapes s for use inside a LIKE pattern whose escape character
+// is `\`, so every character in it matches only itself.
+var likeLiteral = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func (s *Store) SearchNodes(ctx context.Context, storageID int64, like, prefer string, limit int) ([]*model.Node, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -979,12 +983,36 @@ func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, l
 	// two files that differ only by case are two files. A search is the one
 	// place that should still ignore case (the fallback planner hands in a
 	// lower-cased word), so it names the collation it wants explicitly.
-	nameMatch := `name LIKE ?`
+	//
+	// ⚠ The escape character is spelled out on SQLite and must NOT be on
+	// MySQL. SQLite has none unless the statement names one, so the `\%` and
+	// `\_` that search.SQLLike writes meant "a backslash, then anything" there
+	// and matched nothing. MySQL escapes with `\` by default, and `'\'` is an
+	// unterminated string literal in its dialect.
+	nameMatch := `name LIKE ? ESCAPE '\'`
+	nameLength := `length(name)` // characters, for a TEXT value
 	if s.mysql {
 		nameMatch = `name COLLATE utf8mb4_0900_ai_ci LIKE ?`
+		nameLength = `CHAR_LENGTH(name)` // LENGTH() counts bytes there
 	}
-	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+` FROM nodes WHERE storage_id=? AND `+nameMatch+` AND deleted_at IS NULL ORDER BY name LIMIT ?`,
-		storageID, like, limit)
+	q := nodeSelectColumns() + ` FROM nodes WHERE storage_id=? AND ` + nameMatch + ` AND deleted_at IS NULL`
+	args := []any{storageID, like}
+	if prefer != "" {
+		// Rank BEFORE the LIMIT (see db.Store.SearchNodes): the name is the
+		// word, or the word plus an extension; then it starts with the word;
+		// then everything else. The same LIKE as the filter, so the same
+		// case rules. The patterns are built here and bound, never
+		// concatenated in SQL: `||` is a logical OR on MySQL.
+		p := likeLiteral.Replace(prefer)
+		q += ` ORDER BY CASE WHEN ` + nameMatch + ` OR ` + nameMatch + ` THEN 0 WHEN ` + nameMatch + ` THEN 1 ELSE 2 END, ` +
+			nameLength + `, name`
+		args = append(args, p, p+".%", p+"%")
+	} else {
+		q += ` ORDER BY name`
+	}
+	q += ` LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

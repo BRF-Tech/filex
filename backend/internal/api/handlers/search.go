@@ -325,12 +325,14 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := []searchResult{}
+	// truncated: more matched than came back (see the response below).
+	truncated := false
 	switch {
 	case parsed.HasTagFilter() && parsed.Text == "":
 		// A bare `tag:x` is a listing, not a search: there is no text to
 		// score, so the tagged nodes ARE the answer (newest first, the
 		// order ListNodesByTag already returns them in).
-		for _, n := range tagged {
+		for i, n := range tagged {
 			if req.StorageID != 0 && n.StorageID != req.StorageID {
 				continue
 			}
@@ -343,11 +345,14 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			}
 			results = append(results, searchResult{Node: n, Matched: search.MatchedName})
 			if len(results) >= req.Limit {
+				truncated = i < len(tagged)-1
 				break
 			}
 		}
 	case h.Index != nil:
 		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, req.Limit, sc, tagFilter)
+		// The index returns at most `limit` hits; a full page is a cut answer.
+		truncated = len(hits) >= req.Limit
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
 			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
@@ -369,10 +374,23 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// index cannot answer would otherwise LIKE-scan every mount in the
 	// deployment. That gate is deliberate and predates this change; it is
 	// documented in docs/SEARCH.md and left alone here.
+	//
+	// ⚠ Ranked BEFORE it is cut to `limit`, twice over. The database ranks the
+	// window it returns (plan.Anchor: exact and prefix names first), and the
+	// whole window is ranked here before `limit` rows are kept. This loop used
+	// to stop at `limit` rows in `ORDER BY name` and rank only those, so with
+	// a small limit the exact match was never among them.
 	if len(results) == 0 && req.StorageID != 0 && parsed.Text != "" && sc != search.ScopeContent {
 		plan := search.PlanFallback(parsed.Text)
-		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, plan.Like, req.Limit*search.FallbackOverFetch)
+		truncated = false
+		window := req.Limit * search.FallbackOverFetch
+		// One row past the window: a row beyond it is the proof it was full.
+		fallback, err := h.Store.SearchNodes(r.Context(), req.StorageID, plan.Like, plan.Anchor, window+1)
 		if err == nil {
+			if len(fallback) > window {
+				truncated = true
+				fallback = fallback[:window]
+			}
 			for _, n := range fallback {
 				/* wiring:e2 — the marker file stays hidden in name search too */
 				if n.Name == e2e.MarkerName {
@@ -385,11 +403,12 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				results = append(results, searchResult{Node: n, Matched: search.MatchedName})
-				if len(results) >= req.Limit {
-					break
-				}
 			}
 			sortByRank(results, plan)
+			if len(results) > req.Limit {
+				truncated = true
+				results = results[:req.Limit]
+			}
 		}
 	}
 	// Multi-tenant: drop hits in storages outside the caller's tenant. This is
@@ -429,5 +448,9 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// to drop — and so a dropped row can never leak the name of whoever owns
 	// it.
 	h.describeHits(r.Context(), results)
-	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	// `truncated`: more rows matched than came back — the index filled its
+	// page, or the fallback filled its window or had more than `limit` left
+	// after ranking. Rows the tenant or RBAC filters then dropped do not make
+	// an answer "cut"; only the page and the window do.
+	writeJSON(w, http.StatusOK, map[string]any{"results": results, "truncated": truncated})
 }

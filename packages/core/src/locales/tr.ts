@@ -246,6 +246,7 @@ export const tr: Record<string, string> = {
   'palette.save': 'Aramayı kaydet',
   'palette.saved.delete': 'Kayıtlı aramayı sil',
   'search.in_content': 'İçerikte',
+  'search.truncated': 'Gösterilenden daha fazla sonuç var — aramanızı daraltın',
 
   /* === bag:b4 === */
   'toolbar.more': 'Diğer işlemler',

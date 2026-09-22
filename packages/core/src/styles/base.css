@@ -129,6 +129,16 @@ filex-explorer {
   border-bottom: 1px solid var(--fe-border, rgba(0, 0, 0, 0.06));
 }
 
+/* "More results than shown" — a search answer the server cut (FileExplorer's
+ * banners slot). Quiet on purpose: it qualifies the list, it is not an error. */
+.fe-search-cut {
+  flex: 0 0 auto;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--fe-border, rgba(0, 0, 0, 0.06));
+  color: var(--fe-text-muted);
+  font-size: 0.8125rem;
+}
+
 /* Initial-load spinner (shown until the first listing arrives). */
 .fe__loading {
   display: flex;

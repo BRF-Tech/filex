@@ -161,11 +161,36 @@ in Go by the **same scorer** the index path uses, and ranked into the same tiers
 `invoice 2026` finds `invoice_2026.pdf` with the index switched off, and `Code
 main` drops the `Code` folder there exactly as it does with the index on.
 
+**The fallback reads a window, and ranks it before the cut.** The database
+returns at most a fixed number of rows — the explorer's search box reads 1,000
+(its 250-hit page, four times over; 400 per storage when it searches every
+storage from the root), `/api/files/search` four times its `limit`. Which rows
+make that window is decided in SQL, before the `LIMIT`: names equal to the word
+(or to the word plus an extension) first, then names starting with it, then the
+rest, shorter names first. Releases up to v0.42.2 took the first rows in
+`ORDER BY name` instead, so a word that matched more names than the window held
+could lose its exact match — a search for `report` among a thousand
+`a-report-…` files came back without `report.txt`. The rows are then re-ranked in Go by the whole
+query, as described above.
+
+**An answer that was cut says so.** Both search responses carry `truncated`:
+`true` when more rows matched than came back — the index filled its page, or the
+fallback filled its window (with the fallback, rows past the window were never
+read, so a window that was full is a cut answer even when few of its rows match
+every word). The explorer shows *"More results than shown — narrow your search"*
+above such a list.
+
 Two things the fallback does not do. **Typo tolerance** — edit distance is not
 something a `LIKE` can express, and faking it with more patterns would turn one
 scan into many. And the LIKE itself runs against the **name** column only, so a
 query whose words appear solely in a folder name will not be *retrieved* this
 way — though once a row is retrieved, its folders are scored like anywhere else.
+
+⚠ **Case-insensitive matching is ASCII-only on SQLite.** SQLite's `LIKE` folds
+`A`–`Z` and nothing else, so with the index off on a SQLite install a lower-case
+query does not find an upper-case non-ASCII name — `şubat` misses `ŞUBAT.pdf`.
+PostgreSQL (`ILIKE`) and MySQL (its case- and accent-insensitive collation) fold
+them. The index folds them on every engine.
 
 **RBAC filtering.** Whichever path produced the hits, results are filtered
 through the caller's [RBAC](RBAC.md) grants before they're returned — a user
@@ -257,7 +282,9 @@ tier, is reported once, and carries `matched: "both"` plus its snippet.
 The tier is internal; it is not on the wire. The response shape is unchanged.
 
 The SQL LIKE fallback applies the same tiers in Go, so an index-less deployment
-answers in the same order rather than in `ORDER BY name`.
+answers in the same order rather than in `ORDER BY name` — and the database
+already prefers exact and prefix names when it decides which rows reach Go (see
+[How it works](#how-it-works)).
 
 ### Scoring — how candidates are ordered and filtered
 
@@ -448,9 +475,12 @@ curl -X POST https://files.example.com/api/files/search \
 | `limit` | int | `50` | Max results. |
 | `scope` | string | `all` | `name` \| `content` \| `all` — which fields to consult (see [Content search](#content-search)). |
 
-Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ] }`,
+Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ], "truncated": false }`,
 already RBAC-filtered and in [rank order](#ranking). `snippet` is `""` for
-name-only hits.
+name-only hits. `truncated` is `true` when more matched than came back: the
+index returned a full `limit`, or the LIKE fallback filled its window or still
+had more than `limit` rows after ranking. The explorer's own search
+(`/api/files/manager?action=search`) carries the same flag.
 
 Each hit also says what a bare node row cannot say about itself, so a client
 can open and label a hit from any storage without a second request:

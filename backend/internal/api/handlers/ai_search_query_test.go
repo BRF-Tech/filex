@@ -54,7 +54,7 @@ func aiSearchNames(t *testing.T, srv string, client *http.Client, tok, q string)
 func aiTagNode(t *testing.T, store db.Store, storageID int64, like string, tags ...string) {
 	t.Helper()
 	ctx := context.Background()
-	rows, err := store.SearchNodes(ctx, storageID, like, 10)
+	rows, err := store.SearchNodes(ctx, storageID, like, "", 10)
 	require.NoError(t, err)
 	require.NotEmpty(t, rows, "no node matching %q to tag", like)
 	require.NoError(t, store.SetNodeTags(ctx, rows[0].ID, tags))

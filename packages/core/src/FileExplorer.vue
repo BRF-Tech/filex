@@ -400,6 +400,14 @@ const viewMode = customRef<ViewMode>((track, trigger) => {
    mirrored here only so the root `.fe` can carry fe--density-compact. */
 const density = ref<'comfortable' | 'compact'>('comfortable');
 const searchQuery = ref('');
+/** The search answer on screen was cut: more rows matched than came back
+ *  (`truncated` on the response; lib/advSearch `advSearchTruncated`). Reset by
+ *  every load(), so it can only ever describe the listing that is showing. */
+const searchTruncated = ref(false);
+/** The manager's search action asks the index for this many hits
+ *  (handlers.Manager, managerSearchPage) — the page an older server's full
+ *  answer is recognised by. */
+const MANAGER_SEARCH_PAGE = 250;
 // trashMode — true while viewing the filex trash (soft-deleted nodes from the
 // backend trash endpoint), entered by opening the virtual `.trash` row and
 // exited by any normal navigation (load() resets it). Replaces a brittle
@@ -1536,15 +1544,28 @@ function advHitToNode(h: GlobalSearchHit, storageName: string): FileNode {
   };
 }
 
-/** Run one advanced search and hand back the rows, unfiltered. */
-async function advFetchRows(scope: AdvScope, query: string, target: string): Promise<FileNode[]> {
+/** Run one advanced search and hand back the rows, unfiltered — and whether
+ *  the answer was cut. The name scope has the server's own word for that
+ *  (`truncated`); /api/files/search's flag does not survive `globalSearch`,
+ *  which returns hits only, so the content scope keeps the full-page guess. */
+async function advFetchRows(
+  scope: AdvScope,
+  query: string,
+  target: string,
+): Promise<{ rows: FileNode[]; truncated: boolean }> {
   if (scope === 'name') {
     const resp = await api.search(target, query);
-    return filterListing(resp.files);
+    return {
+      rows: filterListing(resp.files),
+      truncated: advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated),
+    };
   }
   const hits = await api.globalSearch(query, { limit: ADV_CONTENT_LIMIT, scope });
   const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
-  return filterListing(hits.map((h) => advHitToNode(h, storageName)));
+  return {
+    rows: filterListing(hits.map((h) => advHitToNode(h, storageName))),
+    truncated: advSearchTruncated(hits.length, ADV_CONTENT_LIMIT),
+  };
 }
 
 /** The target `load()` would use for the current position. */
@@ -1567,11 +1588,10 @@ function advTarget(): string {
  */
 async function advSearchCount(req: AdvSearchRequest): Promise<AdvCountResult> {
   const query = advQueryString(req);
-  const rows = await advFetchRows(req.scope, query, advTarget());
-  const limit = req.scope === 'name' ? 250 : ADV_CONTENT_LIMIT;
+  const { rows, truncated } = await advFetchRows(req.scope, query, advTarget());
   return {
     count: applyFilters(rows, req.filters).length,
-    capped: advSearchTruncated(rows.length, limit),
+    capped: truncated,
   };
 }
 
@@ -2291,6 +2311,9 @@ function refreshAll() {
 }
 
 async function load(path?: string) {
+  // Whatever an earlier search said about ITS answer, this listing has not
+  // answered yet (the "more results than shown" strip reads this).
+  searchTruncated.value = false;
   /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
    * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
    * or the breadcrumb crumb for the view you are standing in all arrive here
@@ -2403,17 +2426,24 @@ async function load(path?: string) {
        here. Everything downstream — the views, the selection, the inspector —
        sees ordinary rows, which is the point: one results surface. */
     const advContent = !!searchQuery.value && advScope.value !== 'name';
-    const resp: ManagerResponse = advContent
+    const adv = advContent ? await advFetchRows(advScope.value, searchQuery.value, target) : null;
+    const resp: ManagerResponse = adv
       ? {
           adapter: adapter.value,
           storages: (props.config.storages ?? []).map((s) => s.name),
           dirname: dirname.value,
           read_only: false,
-          files: await advFetchRows(advScope.value, searchQuery.value, target),
+          files: adv.rows,
+          truncated: adv.truncated,
         }
       : searchQuery.value
         ? await api.search(target, searchQuery.value)
         : await api.index(target);
+    // A search that matched more than it returned says so (banner strip). The
+    // server's `truncated` is the answer; an older server that does not send
+    // it leaves the full-page guess the advanced search count always made.
+    searchTruncated.value =
+      !!searchQuery.value && advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated);
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
     dirPerm.value = (resp.perm as string) || '';
@@ -6520,6 +6550,16 @@ function closeRecoveryKey() {
 
       <!-- Strips that describe the WINDOW's state rather than the listing. -->
       <template #banners>
+    <!-- A search that matched more than it returned: the index filled its page,
+         or the index-less fallback filled its window of names. Without this a
+         cut list reads as the whole answer. No count — the number that came
+         back is the window's, not the matches'. -->
+    <div
+      v-if="searchQuery && searchTruncated && !navView && !trashActive"
+      class="fe-search-cut"
+      role="status"
+    >{{ t('search.truncated') }}</div>
+
     <!-- Live presence: who else is viewing this folder (empty → nothing shown).
          When the live socket is unavailable the same strip carries a small
          degraded-connection badge instead (presence is empty in fallback);

@@ -313,7 +313,7 @@ func TestStore_Nodes_Search(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	results, err := store.SearchNodes(ctx, stg.ID, "holiday%", 50)
+	results, err := store.SearchNodes(ctx, stg.ID, "holiday%", "", 50)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 }

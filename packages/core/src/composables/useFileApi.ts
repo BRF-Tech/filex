@@ -75,6 +75,11 @@ export interface ManagerResponse {
   e2e?: boolean;
   e2e_root?: string;
   files: FileNode[];
+  /** `action=search` only: more rows matched than came back — the index
+   *  filled its page, or the index-less fallback filled its window — so the
+   *  list is not the whole answer. Absent on other actions and on servers
+   *  older than the flag. */
+  truncated?: boolean;
 }
 
 /** A single ACL grant row (RBAC permissions panel). */

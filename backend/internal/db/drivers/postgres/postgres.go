@@ -850,11 +850,28 @@ func (s *Store) ListDuplicateNodes(ctx context.Context, minSize int64) ([]db.Dup
 	return out, rows.Err()
 }
 
-func (s *Store) SearchNodes(ctx context.Context, storageID int64, like string, limit int) ([]*model.Node, error) {
+// likeLiteral escapes s for use inside a LIKE pattern whose escape character
+// is `\` (PostgreSQL's default), so every character in it matches only itself.
+var likeLiteral = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+func (s *Store) SearchNodes(ctx context.Context, storageID int64, like, prefer string, limit int) ([]*model.Node, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+nodeColumns()+` FROM nodes WHERE storage_id=$1 AND name ILIKE $2 AND deleted_at IS NULL ORDER BY name LIMIT $3`, storageID, like, limit)
+	q := `SELECT ` + nodeColumns() + ` FROM nodes WHERE storage_id=$1 AND name ILIKE $2 AND deleted_at IS NULL`
+	args := []any{storageID, like}
+	if prefer != "" {
+		// Rank BEFORE the LIMIT (see db.Store.SearchNodes): the name is the
+		// word, or the word plus an extension; then it starts with the word;
+		// then everything else. ILIKE like the filter, so the same case rules.
+		p := likeLiteral.Replace(prefer)
+		q += ` ORDER BY CASE WHEN name ILIKE $3 OR name ILIKE $4 THEN 0 WHEN name ILIKE $5 THEN 1 ELSE 2 END, length(name), name LIMIT $6`
+		args = append(args, p, p+".%", p+"%", limit)
+	} else {
+		q += ` ORDER BY name LIMIT $3`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -172,7 +172,7 @@ func TestNamesDifferingOnlyByCaseOrAccentOnEveryEngine(t *testing.T) {
 
 			// A search still ignores case: the fallback planner lower-cases
 			// the word it sends, so a case-sensitive LIKE would find nothing.
-			hits, err := store.SearchNodes(ctx, st.ID, "%readme%", 50)
+			hits, err := store.SearchNodes(ctx, st.ID, "%readme%", "", 50)
 			require.NoError(t, err)
 			require.Len(t, hits, 2, "search matches both spellings")
 
@@ -189,6 +189,77 @@ func TestNamesDifferingOnlyByCaseOrAccentOnEveryEngine(t *testing.T) {
 			grants, err := store.ListFileGrantsByStorageUser(ctx, st.ID, user.ID)
 			require.NoError(t, err)
 			require.Len(t, grants, 2, "two grants on two different folders")
+		})
+	}
+}
+
+// TestSearchNodesRanksBeforeTheLimitOnEveryEngine — SearchNodes is the search
+// an install without the index runs, and its LIMIT used to cut `ORDER BY name`:
+// the first N names alphabetically, ranked only afterwards, in Go. A term that
+// matched more names than the LIMIT lost its exact match whenever that name
+// sorted late — measured on SQLite with 1,001 `a-report-NNNN.txt` beside
+// `report.txt`: the search for `report` returned 1,000 rows and not the one
+// file called report. The ranking now happens in the ORDER BY, before the cut.
+//
+// It runs on every engine because every engine spells it differently: an
+// ESCAPE clause on SQLite, a case- and accent-insensitive collation on MySQL,
+// ILIKE on PostgreSQL.
+func TestSearchNodesRanksBeforeTheLimitOnEveryEngine(t *testing.T) {
+	for _, e := range engines() {
+		t.Run(e.name, func(t *testing.T) {
+			sqlDB, drv := openMigrated(t, e)
+			store := drv.NewStore(sqlDB)
+			ctx := context.Background()
+
+			st := createEngineStorage(t, store)
+			for _, name := range []string{
+				// Every one of these contains the word, and sorts before the
+				// best answers in some engine's `ORDER BY name`.
+				"a-report-1.txt", "a-report-2.txt", "B-report.txt",
+				"report-final.txt", // a prefix match
+				"report.txt",       // the name without its extension IS the word
+				"REPORT",           // the name IS the word, in another case
+				"my_file.txt", "myXfile.txt",
+			} {
+				p := "/" + name
+				_, err := store.CreateNode(ctx, &model.Node{
+					StorageID: st.ID, Name: name, Path: p,
+					PathHash: pathkey.Hash(st.ID, p), Type: model.NodeTypeFile,
+				})
+				require.NoError(t, err, "catalogue %q", name)
+			}
+			names := func(nodes []*model.Node) []string {
+				out := make([]string, 0, len(nodes))
+				for _, n := range nodes {
+					out = append(out, n.Name)
+				}
+				return out
+			}
+
+			// Exact (the name, or the name without its extension) first, then
+			// prefix, then the rest; within a tier the shorter name first.
+			hits, err := store.SearchNodes(ctx, st.ID, "%report%", "report", 3)
+			require.NoError(t, err)
+			require.Equal(t, []string{"REPORT", "report.txt", "report-final.txt"}, names(hits),
+				"the best matches must survive the LIMIT")
+
+			// No preference: every match, in the old order.
+			all, err := store.SearchNodes(ctx, st.ID, "%report%", "", 50)
+			require.NoError(t, err)
+			require.Len(t, all, 6)
+
+			// `\` escapes the LIKE wildcards on every engine. SQLite has no
+			// escape character unless the statement names one, so `\_` there
+			// used to mean "a backslash, then any character" and found nothing.
+			literal, err := store.SearchNodes(ctx, st.ID, `%my\_file%`, "", 10)
+			require.NoError(t, err)
+			require.Equal(t, []string{"my_file.txt"}, names(literal), "`_` is a literal underscore here")
+
+			// The preferred word is matched literally too: `my_file` must not
+			// rank `myXfile.txt` as an exact match, which `_` as a wildcard would.
+			ranked, err := store.SearchNodes(ctx, st.ID, "%file%", "my_file", 1)
+			require.NoError(t, err)
+			require.Equal(t, []string{"my_file.txt"}, names(ranked))
 		})
 	}
 }
