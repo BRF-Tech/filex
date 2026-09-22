@@ -99,7 +99,7 @@ func (a *aiOps) attachSearchIndex(idx *search.Index) { a.index = idx }
 // from the index on delete, and moved a folder without its children. All three
 // were already solved in that package.
 func (a *aiOps) sync() *protocolsync.Syncer {
-	return protocolsync.New(a.store, a.index, a.thumbs, a.origin)
+	return protocolsync.New(a.store, a.index, a.thumbs, a.origin).WithResolver(a.resolver)
 }
 
 // allow reports whether the bound user has at least `need` on rel within s.

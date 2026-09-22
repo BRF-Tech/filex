@@ -100,11 +100,24 @@ func (s *Service) AttachSync(sy *protocolsync.Syncer) { s.Sync = sy }
 // (there is none to carry) but keeps the other three side effects, because a
 // missing wire must not be the difference between a document being scanned and
 // not being scanned.
+//
+// ⚠ It always carries a way back to the backend. The callback stores the etag
+// of the saved document (read with Stat) BEFORE it announces the save, and the
+// gate records what landed on an overwrite; a gate that could not ask would
+// record an empty etag over the correct one it was handed. So a syncer
+// attached without a Resolver is given this service's own, on a copy — the
+// attached one is left as it was.
 func (s *Service) syncer() *protocolsync.Syncer {
-	if s.Sync != nil {
-		return s.Sync
+	sy := s.Sync
+	if sy == nil {
+		sy = protocolsync.New(s.Store, nil, nil, writehook.OriginOnlyOffice)
 	}
-	return protocolsync.New(s.Store, nil, nil, writehook.OriginOnlyOffice)
+	if sy.Resolver == nil && s.StorageResolver != nil {
+		c := *sy
+		c.Resolver = s.StorageResolver
+		sy = &c
+	}
+	return sy
 }
 
 // settings resolves the configuration in force RIGHT NOW.

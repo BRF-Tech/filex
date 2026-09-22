@@ -778,7 +778,10 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		clean := normalizeDBPath(fullRel)
 		hash := pathkey.Hash(current.ID, clean)
 		if existing, _ := h.Store.GetNodeByPath(r.Context(), current.ID, hash); existing != nil {
-			_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, fh.Size, mime, existing.Etag, time.Now())
+			// What landed — never `existing.Etag`, the etag of the file this
+			// upload just replaced (see storage.Landed).
+			size, etag, mtime := storage.Landed(r.Context(), drv, fullRel, fh.Size)
+			_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, size, mime, etag, mtime)
 			// Refresh the row pointer so the index entry carries the
 			// new size/mime — IndexNode keys off node fields.
 			if fresh, _ := h.Store.GetNode(r.Context(), existing.ID); fresh != nil {
@@ -1168,7 +1171,9 @@ func (h *Manager) IngestFile(ctx context.Context, st *model.Storage, destRel, fi
 	clean := normalizeDBPath(fullRel)
 	hash := pathkey.Hash(st.ID, clean)
 	if existing, _ := h.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
-		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now())
+		// What landed, not the replaced file's etag (see storage.Landed).
+		lsize, etag, mtime := storage.Landed(ctx, drv, fullRel, size)
+		_ = h.Store.UpdateNodeMeta(ctx, existing.ID, lsize, mime, etag, mtime)
 		if fresh, _ := h.Store.GetNode(ctx, existing.ID); fresh != nil {
 			h.indexNode(ctx, fresh)
 			h.dispatchThumb(fresh)

@@ -421,7 +421,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// its pre-edit text in content search and is the one write ClamAV never
 	// sees (docs/ONLYOFFICE.md, "What a save does").
 	if d.OnlyOffice != nil {
-		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice))
+		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice).WithResolver(d.StorageResolver))
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	th.AttachACL(d.ACL)

@@ -56,7 +56,6 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -242,8 +241,14 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 
 	// Refresh cache metadata so the next listing carries the new size.
 	if existing != nil {
-		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, int64(len(body)), existing.Mime, existing.Etag, time.Now())
-		existing.Size = int64(len(body))
+		// What landed: size, etag and mtime from the backend. The row's own etag
+		// is the PRE-edit file's, and indexing against it below would leave the
+		// old text searchable (search.ContentFingerprint prefers the etag).
+		size, etag, mtime := storage.Landed(r.Context(), drv, rel, int64(len(body)))
+		_ = h.Store.UpdateNodeMeta(r.Context(), existing.ID, size, existing.Mime, etag, mtime)
+		existing.Size = size
+		existing.Etag = etag
+		existing.BackendMtime = &mtime
 		// ⚠ Re-index, or the document keeps the pre-edit text for good:
 		// nothing else ever revisits a file whose path did not change.
 		sy.IndexNode(r.Context(), existing)

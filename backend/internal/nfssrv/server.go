@@ -116,7 +116,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	return &Server{
 		cfg:     cfg,
-		syncer:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginNFS),
+		syncer:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginNFS).WithResolver(cfg.Resolver),
 		started: time.Now(),
 		closed:  make(chan struct{}),
 	}, nil

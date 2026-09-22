@@ -55,6 +55,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
@@ -129,11 +130,35 @@ type Syncer struct {
 	// Origin is the writehook origin for this protocol (writehook.OriginDAV,
 	// OriginS3, …). It is what the audit trail reports.
 	Origin string
+	// Resolver lets a write read back what it left on the backend (size,
+	// etag, mtime — storage.Landed) when it REPLACES a file. Optional: without
+	// it an overwrite records an empty etag, which the next scan corrects.
+	// What it must never do is keep the replaced file's etag.
+	Resolver func(storageID int64) (storage.Driver, error)
 }
 
 // New builds a Syncer.
 func New(store db.Store, index *search.Index, thumbs *thumb.Pipeline, origin string) *Syncer {
 	return &Syncer{Store: store, Index: index, Thumbs: thumbs, Origin: origin}
+}
+
+// WithResolver sets Resolver and returns the Syncer, so a construction site
+// stays one expression.
+func (s *Syncer) WithResolver(r func(storageID int64) (storage.Driver, error)) *Syncer {
+	s.Resolver = r
+	return s
+}
+
+// landed is storage.Landed through this Syncer's Resolver. With no Resolver,
+// or a driver that cannot be reached, it is the caller's size, an empty etag
+// and now.
+func (s *Syncer) landed(ctx context.Context, storageID int64, rel string, size int64) (int64, string, time.Time) {
+	if s.Resolver != nil {
+		if drv, err := s.Resolver(storageID); err == nil && drv != nil {
+			return storage.Landed(ctx, drv, rel, size)
+		}
+	}
+	return size, "", time.Now()
 }
 
 // NormalizePath canonicalises a path the way the shared pathkey.Hash key
@@ -216,12 +241,18 @@ func (s *Syncer) WriteRows(ctx context.Context, st *model.Storage, rel string, s
 	hash := pathkey.Hash(st.ID, clean)
 
 	if existing, _ := s.Store.GetNodeByPath(ctx, st.ID, hash); existing != nil {
-		if err := s.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, existing.Etag, time.Now()); err != nil {
+		// ⚠ What landed, not `existing.Etag`: that is the etag of the file
+		// this write just replaced, and every consumer of the etag (content
+		// search, client change detection, the scan) reads it as "unchanged".
+		size, etag, mtime := s.landed(ctx, st.ID, rel, size)
+		if err := s.Store.UpdateNodeMeta(ctx, existing.ID, size, mime, etag, mtime); err != nil {
 			s.warn("node meta update", slog.String("path", clean), slog.String("err", err.Error()))
 			return nil, writehook.Replaced, false
 		}
 		existing.Size = size
 		existing.Mime = mime
+		existing.Etag = etag
+		existing.BackendMtime = &mtime
 		s.IndexNode(ctx, existing)
 		s.DispatchThumb(existing)
 		return existing, writehook.Replaced, true

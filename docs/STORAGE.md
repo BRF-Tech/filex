@@ -683,7 +683,11 @@ Catching a file that was changed *outside* filex is the whole point of the sync,
 so it matters exactly how "changed" is decided.
 
 **With an etag** — the backend's own content fingerprint — that is the answer,
-and it is exact. Only **S3 and WebDAV** report one.
+and it is exact. Only **S3 and WebDAV** report one. A write filex makes itself
+records the etag the backend reports for the new bytes (or an empty one when the
+backend cannot be asked, which the next pass fills in). ⚠ It used to keep the
+etag of the file it had replaced, so a later out-of-band change that happened to
+restore those exact bytes compared equal and was never noticed.
 
 **Without one** — local, SFTP, SMB, FTP, and any WebDAV server that omits the
 header — the comparison is the file's **size and modification time**, the two

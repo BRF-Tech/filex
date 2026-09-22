@@ -86,7 +86,7 @@ func NewHandler(cfg Config) *Handler {
 	return &Handler{
 		cfg:    cfg,
 		auth:   NewAuthenticator(cfg.Auth),
-		syncer: protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginS3),
+		syncer: protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginS3).WithResolver(cfg.Resolver),
 	}
 }
 

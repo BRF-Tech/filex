@@ -65,7 +65,7 @@ func (a *Archive) AttachThumbs(p *thumb.Pipeline) { a.Thumbs = p }
 // manager's own Extract/Compress, reached from the SPA under a user session;
 // they are not a new protocol.
 func (a *Archive) sync() *protocolsync.Syncer {
-	return protocolsync.New(a.Store, a.Index, a.Thumbs, writehook.OriginManager)
+	return protocolsync.New(a.Store, a.Index, a.Thumbs, writehook.OriginManager).WithResolver(a.StorageResolver)
 }
 
 // storageRow fetches the storage record the bookkeeper needs. A miss returns

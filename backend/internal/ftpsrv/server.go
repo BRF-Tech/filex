@@ -158,7 +158,7 @@ func New(cfg Config) (*Server, error) {
 
 	s := &Server{
 		cfg:    cfg,
-		syncer: protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginFTP),
+		syncer: protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginFTP).WithResolver(cfg.Resolver),
 	}
 	tlsCfg, err := s.tlsConfig()
 	if err != nil {

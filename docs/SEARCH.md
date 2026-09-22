@@ -355,6 +355,18 @@ reads the file from its storage driver, runs the matching extractor, and
 updates the node's document with the text — metadata fields are preserved.
 Unchanged files never re-extract; errors are logged and skipped.
 
+⚠ **An overwrite through filex did not move the fingerprint on S3 or WebDAV**
+until the write paths started recording the etag of what they had just written.
+A browser upload over an existing file, a save from the text editor, a file-drop
+submission, a new document over a stale row, and every protocol write (WebDAV,
+the S3 gateway, SFTP, FTPS, NFS, the agent API, archive extract) kept the
+*replaced* file's etag on the row while updating its size — so the fingerprint
+said "unchanged", the new text was not extracted, and search kept finding the
+old words until the next storage scan noticed the etag drift. Each of them now
+reads back the size, etag and modification time the backend reports for what
+landed; when the backend cannot be asked, the etag is left empty (which the next
+scan corrects), never the old one.
+
 ⚠ **On `local`, `sftp`, `smb` and `ftp` this never fired for a file changed
 outside filex, until v0.34.0.** The fingerprint falls back to size+mtime, but
 the *sync* that decides whether to re-index compared etags only — and those

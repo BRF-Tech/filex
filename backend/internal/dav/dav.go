@@ -149,7 +149,7 @@ func NewHandler(cfg Config) *Handler {
 		cfg:   cfg,
 		locks: locks,
 		auth:  pa,
-		sync:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginDAV),
+		sync:  protocolsync.New(cfg.Store, cfg.Index, cfg.Thumbs, writehook.OriginDAV).WithResolver(cfg.Resolver),
 	}
 }
 
