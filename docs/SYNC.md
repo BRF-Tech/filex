@@ -46,10 +46,35 @@ failure mode is *too many copies*, never *the file is gone*.
 | First run of a pair | **Nothing is deleted.** Both sides are merged. |
 | New on one side | Copied to the other |
 | Changed on one side | Copied over |
-| Changed in **both** places | **Both are kept** — yours keeps its name, the server's copy lands beside it as `report (server copy 2026-08-07 14-05).xlsx` |
+| Changed in **both** places, to the **same bytes** | Nothing to keep twice: the path is settled, no copy is made |
+| Changed in **both** places, differently | **Both are kept, on both sides** — yours keeps its name, the server's version lands beside it as `report (server copy 2026-08-07 14-05).xlsx` here *and* on the server |
 | Deleted on one side, untouched on the other | The delete carries across |
 | Deleted on one side, **edited** on the other | The edit wins; the file comes back |
-| A folder on one side, a file of the same name on the other | Refused, both kept — the same collision the server-side guard rejects |
+| A folder on one side, a file of the same name on the other | Refused, nothing touched — the same collision the server-side guard rejects |
+
+### A conflict compares the bytes first
+
+"Changed in both places" is decided on size and modification time, and most
+such changes are the same file: a pair whose history was lost, a reinstalled
+client, a scanner that touched a timestamp. So before keeping two copies the
+engine downloads the server's version and **compares it byte for byte** with
+yours. The same bytes settle the file; only a real difference makes a copy.
+
+When it does, the copy goes to the server too, under the same name, and both
+files are recorded at once — a copy you later tidy away on the server is
+removed here as well (into the local trash) instead of coming back as a new
+file. A copy's name never nests: a conflict on `report (server copy …).xlsx`
+makes another `report (server copy …).xlsx`, not `report (server copy …)
+(server copy …).xlsx`, and a name already taken gets ` (2)`. (Before this, one
+busy spreadsheet on a client that kept losing its history grew 14,724 nested
+copies, one every ~30 seconds.)
+
+### An edit made while a run is busy is not lost
+
+A run of a large tree takes a while — a first sync can take hours. Only what
+the run actually **transferred** is recorded as in step; a file that changed
+on either side while the run was busy with others keeps its previous history,
+so the next run sees the change and carries it across.
 
 ### The first run never deletes
 
