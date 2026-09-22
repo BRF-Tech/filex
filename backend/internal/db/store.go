@@ -397,7 +397,16 @@ type Store interface {
 	GetUserDisplayNames(ctx context.Context, ids []int64) (map[int64]string, error)
 
 	// Trash retention
-	ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error)
+	// ListTrashedExpired returns up to limit trashed rows deleted before
+	// `before`, oldest first. storageIDs narrows them to those storages: nil
+	// means every storage, and an EMPTY, non-nil slice matches nothing (a
+	// scope that reaches no storage must not read as "no restriction").
+	//
+	// ⚠ The narrowing is in the SQL on purpose. The purge used to read every
+	// storage's rows and skip the foreign ones in Go; a skipped row is never
+	// removed, so behind a full batch of somebody else's rows it re-read the
+	// same batch forever.
+	ListTrashedExpired(ctx context.Context, before time.Time, storageIDs []int64, limit int) ([]*model.Node, error)
 	// ListTrashed returns soft-deleted nodes (paginated). storage filter optional.
 	ListTrashed(ctx context.Context, storageID *int64, limit, offset int) ([]*model.Node, int, error)
 	RestoreNode(ctx context.Context, id int64) error

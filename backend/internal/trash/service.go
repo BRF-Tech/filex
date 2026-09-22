@@ -392,14 +392,21 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageI
 	}
 	const batchSize = 500
 	var res PurgeResult
+	scope := purgeScope(ctx, storageID)
 	for {
-		batch, err := s.Store.ListTrashedExpired(ctx, cutoff, batchSize)
+		// ⚠⚠ Narrowed in the SQL, not only below. A row skipped in Go is never
+		// removed, so when the oldest batch belonged entirely to other storages
+		// (or other tenants) the next read returned the same batch, and the
+		// next — emptying one storage's trash spun until the request died and
+		// purged nothing.
+		batch, err := s.Store.ListTrashedExpired(ctx, cutoff, scope, batchSize)
 		if err != nil {
 			return res, fmt.Errorf("trash: list: %w", err)
 		}
 		if len(batch) == 0 {
 			return res, nil
 		}
+		purged := 0
 		for _, n := range batch {
 			// The storage the caller narrowed to, if any. Filtered here for
 			// the same reason tenancy is: the service walks the whole trash in
@@ -436,10 +443,39 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, storageI
 			}
 			res.Deleted++
 			res.Bytes += n.Size
+			purged++
 		}
 		if len(batch) < batchSize {
 			return res, nil
 		}
+		// A full batch in which not one row went away would be read again,
+		// unchanged, forever (every purge failing, say). End the run; the
+		// failures are counted and logged, and the next run tries again.
+		if purged == 0 {
+			return res, nil
+		}
+	}
+}
+
+// purgeScope is the set of storages a purge may touch, for the SQL:
+// nil means every storage — the nightly worker, a supertenant, a single-tenant
+// install — and a non-nil slice is the named storage and/or the caller's
+// tenant scope. An empty slice reaches nothing.
+func purgeScope(ctx context.Context, storageID int64) []int64 {
+	sc, scoped := tenant.FromContext(ctx)
+	confined := scoped && sc != nil && !sc.IsSupertenant
+	switch {
+	case storageID != 0 && confined:
+		if sc.CanAccessStorage(storageID) {
+			return []int64{storageID}
+		}
+		return []int64{}
+	case storageID != 0:
+		return []int64{storageID}
+	case confined:
+		return append([]int64{}, sc.StorageIDs...)
+	default:
+		return nil
 	}
 }
 

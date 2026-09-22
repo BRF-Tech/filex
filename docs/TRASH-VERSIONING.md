@@ -130,6 +130,14 @@ restart‑looping server doesn't hammer the backend. The purge is batched (500
 rows at a time) and reports a summary (`scanned` / `deleted` / `failed` /
 `bytes`).
 
+A purge narrowed to one storage (`storage_id`) or to a tenant's own storages
+reads only those storages' rows. ⚠ It used to read every storage's oldest rows
+and skip the foreign ones, and a skipped row never goes away: with 500 older
+trashed rows on other storages, emptying one storage's trash re-read the same
+500 until the request timed out, and purged nothing. A batch in which not one
+row could be purged now ends the run as well (the failures are counted and
+logged; the next run tries again).
+
 ### Trash endpoints
 
 **User (authenticated session/token):**

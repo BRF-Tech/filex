@@ -2991,13 +2991,25 @@ func (s *Store) GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error) 
 // ─────────────────── Trash retention ───────────────────
 
 // ListTrashedExpired returns soft-deleted nodes whose deleted_at is older than `before`.
-func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error) {
+func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, storageIDs []int64, limit int) ([]*model.Node, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 500
 	}
+	if storageIDs != nil && len(storageIDs) == 0 {
+		return nil, nil // a scope that reaches no storage sees nothing
+	}
+	where := `deleted_at IS NOT NULL AND deleted_at < ?`
+	args := []any{before}
+	if storageIDs != nil {
+		where += ` AND storage_id IN (?` + strings.Repeat(`,?`, len(storageIDs)-1) + `)`
+		for _, id := range storageIDs {
+			args = append(args, id)
+		}
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, nodeSelectColumns()+`
-		FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < ?
-		ORDER BY deleted_at ASC LIMIT ?`, before, limit)
+		FROM nodes WHERE `+where+`
+		ORDER BY deleted_at ASC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

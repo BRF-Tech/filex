@@ -2752,14 +2752,28 @@ func (s *Store) GetNodeOwner(ctx context.Context, nodeID int64) (*int64, error) 
 // ─────────────────── Trash retention ───────────────────
 
 // ListTrashedExpired returns soft-deleted nodes whose deleted_at is older than `before`.
-func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, limit int) ([]*model.Node, error) {
+func (s *Store) ListTrashedExpired(ctx context.Context, before time.Time, storageIDs []int64, limit int) ([]*model.Node, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 500
 	}
+	if storageIDs != nil && len(storageIDs) == 0 {
+		return nil, nil // a scope that reaches no storage sees nothing
+	}
+	where := `deleted_at IS NOT NULL AND deleted_at < $1`
+	args := []any{before}
+	if storageIDs != nil {
+		ph := make([]string, len(storageIDs))
+		for i, id := range storageIDs {
+			args = append(args, id)
+			ph[i] = fmt.Sprintf("$%d", len(args))
+		}
+		where += ` AND storage_id IN (` + strings.Join(ph, ",") + `)`
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+nodeColumns()+`
-		 FROM nodes WHERE deleted_at IS NOT NULL AND deleted_at < $1
-		 ORDER BY deleted_at ASC LIMIT $2`, before, limit)
+		 FROM nodes WHERE `+where+`
+		 ORDER BY deleted_at ASC LIMIT `+fmt.Sprintf("$%d", len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
