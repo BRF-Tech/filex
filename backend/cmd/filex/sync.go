@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -228,6 +230,11 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 		Short: "Sync every pair once, or keep syncing with --watch",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// A stop request (Ctrl-C, or the desktop app ending its watcher)
+			// cancels the run in flight, which flushes its checkpoint; a plain
+			// kill lands between two baseline writes.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
 			st, err := syncStore()
 			if err != nil {
 				return err
@@ -244,6 +251,18 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return fmt.Errorf("no folders are paired; add one with `filex sync add`")
 			}
 
+			// ⚠ A 401 is not a bad round, it is the end: the token was revoked
+			// or has expired, and retrying it every 30 s only fills the
+			// server's log while the person is told nothing. The whole watcher
+			// stops — every pair of this process shares the token — with a
+			// status the desktop app acts on (exitSignedOut).
+			signedOut := func(err error) error {
+				if cliclient.IsUnauthorized(err) {
+					return &exitError{code: exitSignedOut, err: errSignedOut}
+				}
+				return nil
+			}
+
 			run := func(pairs []filesync.Pair) error {
 				for _, p := range pairs {
 					// ⚠ One token cannot speak for two servers. The desktop app
@@ -255,7 +274,10 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 						continue
 					}
 					if dryRun {
-						if err := printPlan(cmd, api, st, p); err != nil {
+						if err := printPlan(ctx, cmd, api, st, p); err != nil {
+							if so := signedOut(err); so != nil {
+								return so
+							}
 							fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
 						}
 						continue
@@ -269,8 +291,14 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 					if !quietOut {
 						eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
 					}
-					res, err := eng.Run(cmd.Context())
+					res, err := eng.Run(ctx)
 					if err != nil {
+						if so := signedOut(err); so != nil {
+							return so
+						}
+						if ctx.Err() != nil {
+							return nil // asked to stop; the checkpoint is flushed
+						}
 						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
 						continue
 					}
@@ -288,7 +316,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 					return err
 				}
 				select {
-				case <-cmd.Context().Done():
+				case <-ctx.Done():
 					return nil
 				case <-time.After(watch):
 				}
@@ -315,12 +343,12 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 
 // printPlan is --dry-run. It answers the question people actually ask before
 // letting a sync tool near their files: what are you about to do?
-func printPlan(cmd *cobra.Command, api *cliclient.Client, st *filesync.Store, p filesync.Pair) error {
+func printPlan(ctx context.Context, cmd *cobra.Command, api *cliclient.Client, st *filesync.Store, p filesync.Pair) error {
 	local, _, err := filesync.WalkLocal(p.Local)
 	if err != nil {
 		return err
 	}
-	remote, err := filesync.WalkRemote(cmd.Context(), apiAdapter{api}, p.Remote, nil)
+	remote, err := filesync.WalkRemote(ctx, apiAdapter{api}, p.Remote, nil)
 	if err != nil {
 		return err
 	}

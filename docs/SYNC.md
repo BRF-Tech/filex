@@ -257,3 +257,12 @@ you — see above.
 **"list …: HTTP 502" (or a timeout) and nothing happened.** The server folder
 could not be listed, so the run stopped rather than treat the folder as gone.
 It is retried on the next round.
+
+**The watcher stopped: "signed out: the server no longer accepts this token
+(HTTP 401)".** The token was revoked (or has expired), and a watcher that kept
+retrying it would only fill the server's log. `filex sync run` stops at the
+first 401 with **exit status 3** — every other failure exits 1 — so a
+supervisor can tell "sign in again" from "try again". Sign in again
+(`filex client login`, or *Reconnect* in the desktop app) and start it again.
+A stop request (Ctrl-C, SIGTERM) cancels the run in flight cleanly: the
+checkpoint is written, so the next run resumes where this one stopped.
