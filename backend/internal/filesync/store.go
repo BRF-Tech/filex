@@ -28,6 +28,7 @@ const TrashRetentionDays = 30
 //
 //	pairs.json                     the configured pairs
 //	baseline/<pair-id>.json        last agreed state
+//	held/<pair-id>.json            local items held for a decision (Pair.HoldNew)
 //	trash/<pair-id>/<stamp>/...    files this engine deleted locally
 type Store struct{ Dir string }
 
@@ -225,7 +226,161 @@ func (s *Store) RemovePair(id string) error {
 	if err := os.Remove(s.path("baseline", id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if err := os.Remove(s.path("held", id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	return nil
+}
+
+// UpdatePair applies fn to the stored pair with this id and saves pairs.json.
+// A pair removed in the meantime is not an error; nothing is written.
+func (s *Store) UpdatePair(id string, fn func(*Pair)) error {
+	pairs, err := s.LoadPairs()
+	if err != nil {
+		return err
+	}
+	for i := range pairs {
+		if pairs[i].ID == id {
+			before := pairs[i]
+			fn(&pairs[i])
+			if pairs[i] == before {
+				return nil
+			}
+			return s.SavePairs(pairs)
+		}
+	}
+	return nil
+}
+
+// ─────────────────────────── held items ───────────────────────────
+
+// LoadHeld returns the items the last run held for a decision, keyed by
+// pair-relative path, with the local signature each had then ("dir" for a
+// folder). Nothing held is an empty map.
+func (s *Store) LoadHeld(pairID string) (map[string]string, error) {
+	raw, err := os.ReadFile(s.path("held", pairID+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("read held items of %s: %w", pairID, err)
+	}
+	return out, nil
+}
+
+func (s *Store) saveHeld(pairID string, held map[string]string) error {
+	if len(held) == 0 {
+		err := os.Remove(s.path("held", pairID+".json"))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(s.path("held"), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(held)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(s.path("held", pairID+".json"), raw)
+}
+
+// recordHold stores what a run held. triggered means this run started the
+// hold (a first run); otherwise the hold is only refreshed while the stored
+// pair still has it — a confirm or discard made while the run was busy wins.
+func (s *Store) recordHold(pairID string, triggered bool, held map[string]string) error {
+	holding := false
+	err := s.UpdatePair(pairID, func(p *Pair) {
+		if triggered {
+			p.HoldNew = true
+		}
+		if p.HoldNew {
+			holding = true
+			p.Held = len(held)
+		}
+	})
+	if err != nil || !holding {
+		return err
+	}
+	return s.saveHeld(pairID, held)
+}
+
+// clearHold ends a hold.
+func (s *Store) clearHold(pairID string) error {
+	if err := s.UpdatePair(pairID, func(p *Pair) { p.HoldNew, p.Held = false, 0 }); err != nil {
+		return err
+	}
+	return s.saveHeld(pairID, nil)
+}
+
+// ConfirmHeld ends a hold so the next run sends the held items to the
+// server. It returns how many the last run held.
+func (s *Store) ConfirmHeld(pairID string) (int, error) {
+	held, err := s.LoadHeld(pairID)
+	if err != nil {
+		return 0, err
+	}
+	return len(held), s.clearHold(pairID)
+}
+
+// DiscardHeld ends a hold by moving the held files into the pair's local sync
+// trash (recoverable for TrashRetentionDays), so the next run makes this side
+// match the server: files that are only here are gone, and a file that
+// differs comes down from the server. A folder that held only such files is
+// removed once empty. A file whose signature changed since it was held is
+// not what the person decided about: it is left in place and counted in kept.
+func (s *Store) DiscardHeld(p Pair, now time.Time) (moved, kept int, err error) {
+	held, err := s.LoadHeld(p.ID)
+	if err != nil {
+		return 0, 0, err
+	}
+	var files, dirs []string
+	for rel, sig := range held {
+		if sig == "dir" {
+			dirs = append(dirs, rel)
+		} else {
+			files = append(files, rel)
+		}
+	}
+	sort.Strings(files)
+	for _, rel := range files {
+		lp, err := localPathOf(p.Local, rel)
+		if err != nil {
+			return moved, kept, err
+		}
+		info, err := os.Lstat(lp)
+		if errors.Is(err, os.ErrNotExist) {
+			continue // already gone: nothing to decide
+		}
+		if err != nil {
+			return moved, kept, err
+		}
+		cur := Node{Rel: rel, Size: info.Size(), ModMillis: info.ModTime().UnixMilli()}
+		if !info.Mode().IsRegular() || cur.Signature() != held[rel] {
+			kept++
+			continue
+		}
+		if err := s.TrashLocal(p.ID, p.Local, rel, now); err != nil {
+			return moved, kept, err
+		}
+		moved++
+	}
+	// Deepest first, and only when empty: a folder that still holds anything
+	// keeps it.
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.Count(dirs[i], "/") > strings.Count(dirs[j], "/")
+	})
+	for _, rel := range dirs {
+		if lp, err := localPathOf(p.Local, rel); err == nil {
+			_ = os.Remove(lp)
+		}
+	}
+	return moved, kept, s.clearHold(p.ID)
 }
 
 func overlaps(a, b string) bool {

@@ -99,6 +99,8 @@ func syncCmd() *cobra.Command {
 		syncRemoveCmd(),
 		syncRunCmd(opts),
 		syncTrashCmd(),
+		syncConfirmCmd(),
+		syncDiscardCmd(),
 	)
 	return c
 }
@@ -166,6 +168,9 @@ func syncListCmd() *cobra.Command {
 				state := "active"
 				if p.Paused {
 					state = "paused"
+				}
+				if p.HoldNew {
+					state = fmt.Sprintf("holding %d item(s)", p.Held)
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.ID, p.Local, p.Remote, state)
 			}
@@ -386,6 +391,9 @@ func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
 	if res.Identical > 0 {
 		fmt.Fprintf(out, ", %d already identical", res.Identical)
 	}
+	if res.Held > 0 {
+		fmt.Fprintf(out, ", %d held for a decision", res.Held)
+	}
 	fmt.Fprintf(out, "  (%s)\n", res.Duration.Round(time.Millisecond))
 	// Report what was NOT done rather than letting a summary imply full coverage.
 	for _, e := range res.Errors {
@@ -398,6 +406,89 @@ func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
 		fmt.Fprintf(out, "  %d file(s) moved to the local trash — recover with `filex sync trash --pair %s`\n",
 			res.DeletedLocal, p.ID)
 	}
+}
+
+// findPair returns the stored pair with this id.
+func findPair(st *filesync.Store, id string) (filesync.Pair, error) {
+	pairs, err := st.LoadPairs()
+	if err != nil {
+		return filesync.Pair{}, err
+	}
+	for _, p := range pairs {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return filesync.Pair{}, fmt.Errorf("no such pair: %s", id)
+}
+
+func syncConfirmCmd() *cobra.Command {
+	return quiet(&cobra.Command{
+		Use:   "confirm <pair-id>",
+		Short: "Send the items a pair is holding for a decision to the server",
+		Long: "A first run that would upload many files the server does not have, into a\n" +
+			"server folder that already has content, holds them instead: with no sync\n" +
+			"history, a file that is new here and a file that was deleted on the server\n" +
+			"look the same. `confirm` says they are wanted: the next run uploads them.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := syncStore()
+			if err != nil {
+				return err
+			}
+			p, err := findPair(st, args[0])
+			if err != nil {
+				return err
+			}
+			if !p.HoldNew {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is not holding anything.\n", p.ID)
+				return nil
+			}
+			n, err := st.ConfirmHeld(p.ID)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: %d held item(s) go to the server on the next run.\n", p.ID, n)
+			return nil
+		},
+	})
+}
+
+func syncDiscardCmd() *cobra.Command {
+	return quiet(&cobra.Command{
+		Use:   "discard <pair-id>",
+		Short: "Move the items a pair is holding into the local sync trash",
+		Long: "The other answer to a hold: the files are not wanted on the server (typically\n" +
+			"they were cleaned up there, and this machine's copy is stale). They move into\n" +
+			"the pair's local sync trash — recoverable with `filex sync trash` for 30 days —\n" +
+			"and the next run makes this folder match the server. A file edited after it\n" +
+			"was held is left where it is.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := syncStore()
+			if err != nil {
+				return err
+			}
+			p, err := findPair(st, args[0])
+			if err != nil {
+				return err
+			}
+			if !p.HoldNew {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s is not holding anything.\n", p.ID)
+				return nil
+			}
+			moved, kept, err := st.DiscardHeld(p, time.Now())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: moved %d held file(s) to the local sync trash", p.ID, moved)
+			if kept > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "; %d changed since and were left in place", kept)
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), ".")
+			return nil
+		},
+	})
 }
 
 func syncTrashCmd() *cobra.Command {

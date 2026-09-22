@@ -111,6 +111,10 @@ type Action struct {
 	// Mixed marks a conflict between a folder on one side and a file on the
 	// other. Nothing is downloaded or uploaded for it: the user is told.
 	Mixed bool
+	// Hold marks a conflict planned while the pair holds its local-only items
+	// for a decision (Pair.HoldNew): it is settled if both sides turn out to
+	// hold the same bytes, and otherwise left exactly as it is.
+	Hold bool
 }
 
 // Options tunes a plan.

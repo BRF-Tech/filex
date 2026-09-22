@@ -41,6 +41,15 @@ type Pair struct {
 	// file on the server. Same planner, same rules, same trash — the
 	// snapshots just carry one entry.
 	File bool `json:"file,omitempty"`
+	// HoldNew is set by the engine when a FIRST run would have pushed more
+	// than MassUploadThreshold local-only files into a server folder that
+	// already has content — the shape a stale mirror leaves behind. While it
+	// is set, items on this machine that the baseline does not know are held
+	// (not uploaded, not resolved) until the person decides: `filex sync
+	// confirm` sends them, `filex sync discard` moves them to the local sync
+	// trash. Held is how many items the last run held.
+	HoldNew bool `json:"hold_new,omitempty"`
+	Held    int  `json:"held,omitempty"`
 }
 
 // Result reports what one run did. Every field is a measurement, not an
@@ -61,6 +70,8 @@ type Result struct {
 	// Identical counts conflicts that turned out to hold the same bytes on
 	// both sides: no copy was made and nothing was uploaded.
 	Identical int
+	// Held counts local items left alone for a decision (Pair.HoldNew).
+	Held int
 }
 
 // Engine runs one pair.
@@ -172,6 +183,12 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	e.runRemote = remote
 
 	actions := Plan(local, remote, base, Options{FirstRun: res.FirstRun, Now: e.now()})
+	planned := actions
+	holding, triggered := e.shouldHold(actions, remote, res.FirstRun)
+	var held map[string]string // rel → local signature when it was held
+	if holding {
+		actions, held = holdLocalOnly(actions, base, local)
+	}
 	res.Planned = len(actions)
 	if res.Planned > 0 {
 		e.progressf("plan: %d change(s) to make", res.Planned)
@@ -196,12 +213,14 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	}
 
 	cp := e.newCheckpoint(base, local, remote)
-	var mu sync.Mutex // guards res, the progress counter and cp; the IO runs unlocked
+	for _, a := range planned {
+		cp.planned[a.Rel] = true
+	}
+	var mu sync.Mutex // guards res, held, the progress counter and cp; the IO runs unlocked
 	done := 0
 	settle := func(a Action, tmp Result, out outcome, err error) {
 		mu.Lock()
 		defer mu.Unlock()
-		cp.touched[a.Rel] = true
 		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
 			e.logf("!! %s %s: %v", a.Kind, a.Rel, err)
@@ -213,6 +232,9 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 			res.DeletedRemot += tmp.DeletedRemot
 			res.Conflicts += tmp.Conflicts
 			res.Identical += tmp.Identical
+			if out.held {
+				held[a.Rel] = local[a.Rel].Signature()
+			}
 			cp.note(a, out)
 			if cp.due() {
 				cp.flush(ctx)
@@ -306,6 +328,15 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	}
 	if err := e.Store.SaveBaseline(e.Pair.ID, cp.final(local2, remote2)); err != nil {
 		return res, err
+	}
+	if holding {
+		res.Held = len(held)
+		if err := e.Store.recordHold(e.Pair.ID, triggered, held); err != nil {
+			res.Errors = append(res.Errors, "record held items: "+err.Error())
+		}
+		e.progressf("hold: %d item(s) here are not on the server or differ from it — waiting for a decision "+
+			"(`filex sync confirm %s` sends them, `filex sync discard %s` moves them to the local sync trash)",
+			res.Held, e.Pair.ID, e.Pair.ID)
 	}
 
 	if n, err := e.Store.PruneTrash(e.Pair.ID, e.trashDays(), e.now()); err != nil {
@@ -535,7 +566,7 @@ type checkpoint struct {
 	local   Snapshot // pre-run snapshots: the signatures that were transferred
 	remote  Snapshot
 	pending map[string]Node // uploaded rel → its local node, remote side not yet listed
-	touched map[string]bool // every rel an action was attempted for, succeeded or not
+	planned map[string]bool // every rel the plan had an action for, held ones included
 	dirty   int
 	last    time.Time
 }
@@ -545,7 +576,7 @@ func (e *Engine) newCheckpoint(base Baseline, local, remote Snapshot) *checkpoin
 	for k, v := range base {
 		rows[k] = v
 	}
-	return &checkpoint{e: e, rows: rows, local: local, remote: remote, pending: map[string]Node{}, touched: map[string]bool{}, last: time.Now()}
+	return &checkpoint{e: e, rows: rows, local: local, remote: remote, pending: map[string]Node{}, planned: map[string]bool{}, last: time.Now()}
 }
 
 func (c *checkpoint) every() int {
@@ -588,6 +619,9 @@ func (c *checkpoint) note(a Action, out outcome) {
 		}
 		c.pending[a.Rel] = l
 	case ActionConflict:
+		if out.held {
+			return // nothing moved: the next run looks at it again
+		}
 		if out.identical {
 			// The same bytes on both sides: settled exactly as a download
 			// would be, against the remote signature the plan compared.
@@ -717,8 +751,11 @@ func (c *checkpoint) final(local2, remote2 Snapshot) Baseline {
 			out[rel] = BaselineEntry{Local: l2.Signature(), Remote: r2.Signature(), IsDir: true}
 			continue
 		}
-		if c.touched[rel] {
-			continue // its action failed: the next run tries again
+		if c.planned[rel] {
+			// The plan wanted something done here that did not settle — a
+			// failed action, or one held for a decision. Adopting it would
+			// record two different files as agreed.
+			continue
 		}
 		l1, okL := c.local[rel]
 		r1, okR := c.remote[rel]
@@ -728,6 +765,63 @@ func (c *checkpoint) final(local2, remote2 Snapshot) Baseline {
 		out[rel] = BaselineEntry{Local: l2.Signature(), Remote: r2.Signature()}
 	}
 	return out
+}
+
+// MassUploadThreshold is how many local-only files a FIRST run may upload into
+// a server folder that already has content before it stops and asks. A client
+// whose baseline did not know 9,665 files that had been cleaned up on the
+// server uploaded every one of them again; with no history, "new here" and
+// "deleted there" look the same, and only the person can tell them apart.
+const MassUploadThreshold = 100
+
+// shouldHold decides whether this run holds its local-only items: yes while
+// the pair is already holding, and on a first run that would upload more than
+// MassUploadThreshold files into a server folder with at least one file in it
+// (triggered). An empty server folder is the obvious "upload my folder".
+func (e *Engine) shouldHold(actions []Action, remote Snapshot, firstRun bool) (holding, triggered bool) {
+	if e.Pair.HoldNew {
+		return true, false
+	}
+	if !firstRun || e.Pair.File {
+		return false, false
+	}
+	uploads := 0
+	for _, a := range actions {
+		if a.Kind == ActionUpload {
+			uploads++
+		}
+	}
+	if uploads <= MassUploadThreshold {
+		return false, false
+	}
+	for _, n := range remote {
+		if !n.IsDir {
+			return true, true
+		}
+	}
+	return false, false
+}
+
+// holdLocalOnly takes out every upload and remote mkdir for a path the
+// baseline does not know, and marks conflicts to settle only if identical.
+func holdLocalOnly(actions []Action, base Baseline, local Snapshot) ([]Action, map[string]string) {
+	kept := make([]Action, 0, len(actions))
+	held := map[string]string{}
+	for _, a := range actions {
+		switch a.Kind {
+		case ActionUpload, ActionMkdirRemote:
+			if _, known := base[a.Rel]; !known {
+				held[a.Rel] = local[a.Rel].Signature()
+				continue
+			}
+		case ActionConflict:
+			if _, known := base[a.Rel]; !known {
+				a.Hold = true
+			}
+		}
+		kept = append(kept, a)
+	}
+	return kept, held
 }
 
 // DefaultTransfers is how many uploads/downloads run concurrently. Four is
@@ -753,6 +847,7 @@ func (e *Engine) trashDays() int {
 // say — the checkpoint needs it to record the right rows.
 type outcome struct {
 	identical bool   // a conflict whose two sides held the same bytes
+	held      bool   // a held conflict whose sides differ: nothing was touched
 	sideRel   string // a conflict copy written beside the original AND uploaded
 }
 
@@ -845,6 +940,14 @@ func (e *Engine) resolveConflict(ctx context.Context, a Action, lp, rp string, r
 		e.logf("=  %s  (%s, but the same bytes on both sides — nothing to keep twice)", a.Rel, a.Reason)
 		res.Identical++
 		return outcome{identical: true}, nil
+	}
+	if a.Hold {
+		// The pair is waiting for a decision about this machine's side:
+		// pushing a possibly stale local version over the server's is
+		// exactly what it is waiting to be told.
+		os.Remove(tmp)
+		e.logf("?  %s  (%s — held for a decision)", a.Rel, a.Reason)
+		return outcome{held: true}, nil
 	}
 
 	e.logf("!! %s  (%s) — keeping both", a.Rel, a.Reason)

@@ -83,6 +83,30 @@ from *"you have not downloaded it yet"*. Guessing wrong empties someone's
 folder, so the first pass is a union merge. From the second run on, deletes
 propagate.
 
+### A first run that would re-upload a stale copy asks first
+
+With no history, a file that is **new here** and a file that was **deleted on
+the server** look exactly the same — and the first run copies both up. That is
+right for a folder you are pairing for the first time, and exactly wrong for
+an old mirror of a folder that has since been tidied on the server: one client
+put 9,665 cleaned-up files back that way.
+
+So a first run that would upload **more than 100** files the server does not
+have, into a server folder that **already has files**, holds them instead. The
+rest of the run goes ahead (downloads, identical files); the held items — and
+any file that differs between the two sides — are left exactly as they are,
+and the pair shows `holding N item(s)` until you decide:
+
+```bash
+filex sync confirm <pair-id>   # they are wanted: the next run uploads them
+filex sync discard <pair-id>   # they are stale: into the local sync trash; the next run makes this side match the server
+```
+
+`discard` never touches a file you edited after it was held, and everything it
+moves is recoverable with `filex sync trash` for 30 days. A first sync into an
+**empty** server folder is never held. `filex sync list --json` carries
+`hold_new` and `held` for the desktop app, which offers the same two choices.
+
 ### An interrupted first run resumes
 
 A run of a large tree can be cut short — a closed laptop, a killed watcher, a
@@ -168,6 +192,8 @@ filex sync move <pair-id> <new-local-path>
 filex sync remove <pair-id>
 filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--dry-run] [--quiet] [--transfers <n>]
 filex sync trash [--pair <id>] [--restore <path>]
+filex sync confirm <pair-id>
+filex sync discard <pair-id>
 ```
 
 `move` repoints a pair at a folder (or file) that you have **already moved** on
