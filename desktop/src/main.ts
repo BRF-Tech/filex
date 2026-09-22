@@ -35,11 +35,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  EMPTY_STATE,
   activeAccount,
   loadState,
   removeAccount,
   saveState,
-  upsertAccount,
+  signIn,
   type Account,
   type DesktopState,
 } from './accounts.js';
@@ -147,7 +148,7 @@ const HIDDEN_FLAG = '--hidden';
 // of whatever they were doing. See applyUpdateQuietly().
 const UPDATED_FLAG = '--updated';
 
-let state: DesktopState = { accounts: [], activeId: null, syncFolders: [], runInBackground: true, launchAtLogin: false, locale: 'system', notifications: true };
+let state: DesktopState = structuredClone(EMPTY_STATE);
 /** Watches the active account's bell and raises native notifications. */
 let notifier: DesktopNotifier | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -585,9 +586,15 @@ async function completeAuth(state_: string, code: string): Promise<void> {
   // Only clear the attempt once it actually worked: a mistyped code must leave
   // the user able to try again rather than sending them back to the start.
   pendingAuth = null;
-  upsertAccount(state, { serverUrl: attempt.serverUrl, email, token });
+  const { account, existed } = signIn(state, { serverUrl: attempt.serverUrl, email, token });
   saveState(state);
   accountsChanged();
+  // ⚠ Signing in again to an account this computer already has keeps its id,
+  // pairs and filex folder and replaces only the token — and its watcher was
+  // started with the OLD token in its environment. reconcile() only starts
+  // watchers that are missing, so without this the replaced (often revoked)
+  // token kept being used until the app restarted.
+  if (existed) supervisor?.stop(account.id);
   shellWindow?.close();
   openMainWindow();
   // ⚠ Tell the window. Adding a SECOND account happens in a different window,
@@ -2168,10 +2175,16 @@ function wireIpc(): void {
     return publicState();
   });
 
-  ipcMain.handle('auth:signOut', (_e, id: string) => {
+  ipcMain.handle('auth:signOut', async (_e, id: string) => {
     removeAccount(state, id);
     saveState(state);
     accountsChanged();
+    // ⚠ The account's watcher goes with it. Nothing reconciled here before:
+    // the process kept syncing with the signed-out account's token — the one
+    // credential the user had just asked this computer to forget — until the
+    // app restarted. Its pairs stay in pairs.json, inert (no account, no
+    // watcher); see docs/DESKTOP.md on signing out vs Reconnect.
+    await refreshPairs();
     if (!activeAccount(state)) {
       mainWindow?.destroy();
       mainWindow = null;

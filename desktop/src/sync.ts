@@ -23,6 +23,7 @@ import { app } from 'electron';
 import type { Account } from './accounts.js';
 import { portableMode } from './portable.js';
 import { SyncStatusTracker, type SyncStatus } from './sync-output.js';
+import { wantedWatchers } from './sync-policy.js';
 
 export type { SyncActivity, SyncStatus } from './sync-output.js';
 
@@ -178,11 +179,7 @@ export class SyncSupervisor {
   async reconcile(accounts: Account[], tokenFor: (id: string) => string | null): Promise<void> {
     if (this.stopping) return;
     const pairs = await listPairs();
-    const wanted = new Set(
-      accounts
-        .filter((a) => pairs.some((p) => p.account === a.id && !p.paused))
-        .map((a) => a.id),
-    );
+    const wanted = wantedWatchers(accounts, pairs);
 
     for (const [id, proc] of this.procs) {
       if (!wanted.has(id)) {

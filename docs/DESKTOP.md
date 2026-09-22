@@ -79,6 +79,18 @@ shows a code you can type into the app by hand. Either route works.
 
 Add more accounts with **+** on the left rail; switch between them by clicking.
 
+**Signing in again** to the same server as the same person (with **+**) replaces
+that account's credential and keeps everything else — its synced folders, its
+filex folder, its place on the rail — and its folder sync restarts with the new
+credential by itself.
+
+**Sign out** (*Settings → Accounts*) is not the same thing. It forgets the
+account on this computer and its folder sync stops at once; the files stay where
+they are, on both sides. The folders do not come back if you sign in afterwards:
+that is a new account on this computer, and you keep them again from the
+explorer. To get a working credential back for an account you still want,
+sign in again instead of signing out.
+
 ---
 
 ## Opening and previewing files
@@ -550,8 +562,9 @@ Drop into a folder (or the desktop), or keep the file on this computer first and
 drag it from there.
 
 **"Could not reach &lt;server&gt;"** on the file view — the app reached the sign-in
-step but not the file listing. Usually the token was revoked server-side; sign
-out and back in.
+step but not the file listing. If the token was revoked server-side, sign in
+again with **+** as the same person — do **not** sign out first: signing out
+forgets the account, and with it which folders it was keeping on this computer.
 
 **Nothing syncs, and Settings says the engine is missing** — the package could
 not find the `filex` binary it ships with. Reinstall, or point the app at a CLI
