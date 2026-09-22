@@ -335,6 +335,27 @@ complete folder; if even that cannot be arranged, the folder is unpaired rather
 than left pointing at a partial tree, and the dialog says so.
 
 
+### Bandwidth and hours
+
+A first sync of a large store can fill the server's line for hours, and
+everybody else using that server feels it. *Settings → Synced folders* has three
+rows for the engine:
+
+- **Download limit** and **Upload limit** — Unlimited, 10, 5 or 1 MB/s. The
+  limit is shared by all of one account's transfers (they run four at a time),
+  and each signed-in account has its own. It applies to folder sync only:
+  opening, previewing or dragging a file in the window is not limited.
+- **When to sync** — Any time, Evenings & nights (19:00–08:00) or Nights
+  (22:00–07:00), in this computer's local time. Outside those hours no new round
+  starts and the folder reads *waiting for the sync window*; a round still
+  running when they end stops the way Ctrl-C stops it — what it finished is
+  recorded — and carries on in the next window.
+
+A change restarts the watchers at once, so it applies to a transfer already
+running. The line under each folder in Settings says what the engine is doing
+with that folder right now — listing the server, moving files `120/11704`,
+finishing up, waiting for the window — or the error from its last round.
+
 > Sync runs while the app does, so a folder kept a moment ago starts filling on
 > the next round (30 seconds) — no restart — unless sync is paused (see
 > [Running in the background](#running-in-the-background)). The engine's rules

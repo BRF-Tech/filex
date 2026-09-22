@@ -220,3 +220,31 @@ test('…but not from a 403, a 5xx, or a file that happens to be called "HTTP 40
   t.exited(1, false);
   assert.notEqual(t.status.signedOut, true);
 });
+
+// ── the sync window ──
+//
+// Outside its window the watcher says `sync: waiting for the sync window …`
+// once and starts no rounds. A round still busy when the window closes is
+// cancelled like Ctrl-C and says `sync: the sync window … closed; …` — with NO
+// summary line after it, so that line is what ends the activity. Missing it
+// would leave a transfer "active" all day, and the sleep guard holding with it.
+
+test('waiting for the sync window is a state, and it is not activity', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('sync: waiting for the sync window 22:00-07:00\n', 'out');
+  assert.equal(t.status.waitingWindow, '22:00-07:00');
+  assert.equal(t.status.active, null);
+  // The window opens and a round starts.
+  t.feed('pair-1: inventory: 3 item(s) here, listing the server…\n', 'out');
+  assert.equal(t.status.waitingWindow, null);
+});
+
+test('a window that closes mid-transfer ends the activity even without a summary', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: transfer: 40/900 (1.2 GiB of 52.6 GiB, about 8h 10m left)\n', 'out');
+  assert.equal(t.status.active?.pairId, 'pair-1');
+  t.feed('sync: the sync window 22:00-07:00 closed; the rest continues when it opens\n', 'out');
+  assert.equal(t.status.active, null);
+  assert.equal(t.status.waitingWindow, '22:00-07:00');
+  assert.equal(t.status.lastError, null, 'a closing window is not an error');
+});

@@ -39,6 +39,10 @@ export interface SyncStatus {
    *  SIGNED_OUT_EXIT, or (an older engine, which keeps looping) printed a 401.
    *  The supervisor stops the watcher and does not restart it. */
   signedOut?: boolean;
+  /** Outside its sync window (`--window`), the engine starts no rounds and
+   *  says so once: this is that window, e.g. '22:00-07:00'. Cleared when a
+   *  round starts. The page still checks the clock — see pairView. */
+  waitingWindow?: string | null;
 }
 
 /** `filex sync run` exits with this status when the server answers 401, and
@@ -103,10 +107,16 @@ export type EngineLine =
   | { kind: 'pair-error'; pairId: string; message: string }
   /** Any other stderr line (`  ! <action failed>`, `filex: …`). */
   | { kind: 'error'; message: string }
+  /** `sync: waiting for the sync window W` — outside the window, no rounds;
+   *  `sync: the sync window W closed; …` — a round was cancelled by it (and
+   *  prints no summary: this line is what ends the activity). */
+  | { kind: 'window'; window: string; closed: boolean }
   /** Any other stdout line. */
   | { kind: 'info'; text: string };
 
 const PROGRESS_RE = /^(\S+): (inventory|plan|transfer|settling): (.*)$/;
+const WINDOW_WAIT_RE = /^sync: waiting for the sync window (\S+)$/;
+const WINDOW_CLOSED_RE = /^sync: the sync window (\S+) closed\b/;
 const SETTLED_RE = /^(\S+): (?:(already in step)$|(\d+)\/(\d+) done\b)/;
 const PAIR_ERROR_RE = /^(\S+): /;
 
@@ -120,6 +130,10 @@ export function parseEngineLine(raw: string, stream: 'out' | 'err'): EngineLine 
   }
   const p = PROGRESS_RE.exec(line);
   if (p) return { kind: 'progress', pairId: p[1], phase: p[2] as SyncPhase, detail: p[3] };
+  const ww = WINDOW_WAIT_RE.exec(line);
+  if (ww) return { kind: 'window', window: ww[1], closed: false };
+  const wc = WINDOW_CLOSED_RE.exec(line);
+  if (wc) return { kind: 'window', window: wc[1], closed: true };
   const s = SETTLED_RE.exec(line);
   if (s) {
     return { kind: 'settled', pairId: s[1], complete: s[2] !== undefined || s[3] === s[4] };
@@ -164,6 +178,7 @@ export class SyncStatusTracker {
       lastError: null,
       active: null,
       errors: {},
+      waitingWindow: null,
     };
   }
 
@@ -229,6 +244,7 @@ export class SyncStatusTracker {
     if (stream === 'err' && isUnauthorizedLine(raw)) st.signedOut = true;
     switch (ev.kind) {
       case 'progress': {
+        st.waitingWindow = null; // a round started: we are inside the window
         const tr = ev.phase === 'transfer' ? /^(\d+)\/(\d+)/.exec(ev.detail) : null;
         st.active = {
           pairId: ev.pairId,
@@ -261,6 +277,11 @@ export class SyncStatusTracker {
         // whose summary came last.
         this.raise(st.active?.pairId ?? this.lastSettled ?? PROCESS, ev.message);
         return true;
+      case 'window':
+        // Either way nothing is being worked on until the window opens.
+        st.active = null;
+        st.waitingWindow = ev.window;
+        break;
       case 'info':
         break;
     }

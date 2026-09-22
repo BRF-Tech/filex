@@ -83,7 +83,16 @@ import {
   type RemoteContext,
 } from './openwith-io.js';
 import { SyncSupervisor, addPair, cliPath, listPairs, listTrash, movePair, removePair, type Pair } from './sync.js';
-import { watcherAccounts } from './sync-policy.js';
+import {
+  LIMIT_PRESETS_KIB,
+  WINDOW_PRESETS,
+  normLimit,
+  normWindow,
+  pairView,
+  watchPrefsKey,
+  watcherAccounts,
+  type WatchPrefs,
+} from './sync-policy.js';
 import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
@@ -1102,8 +1111,24 @@ function publicState() {
       remotePath: p.remote,
       localPath: p.local,
       enabled: !p.paused,
+      // What to say under this folder — decided in src/sync-policy.ts, so
+      // the page only turns it into words.
+      view: pairView({
+        pairId: p.id,
+        paused: state.syncPaused === true,
+        signedOut: !!state.accounts.find((a) => a.id === p.account)?.signedOut,
+        status: supervisor?.statuses().find((st) => st.accountId === p.account) ?? null,
+        minuteOfDay: new Date().getHours() * 60 + new Date().getMinutes(),
+      }),
     })),
     syncStatuses: supervisor?.statuses() ?? [],
+    // Bandwidth limits and the sync window, with the presets Settings offers
+    // (one list, here, rather than a copy in the page).
+    limitDownKiB: normLimit(state.limitDownKiB),
+    limitUpKiB: normLimit(state.limitUpKiB),
+    syncWindow: normWindow(state.syncWindow),
+    limitPresets: LIMIT_PRESETS_KIB,
+    windowPresets: WINDOW_PRESETS,
     syncEngine: cliPath() ? 'bundled' : 'missing',
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
@@ -1154,6 +1179,19 @@ async function refreshPairs(): Promise<void> {
     watcherAccounts(state.accounts, { paused: state.syncPaused === true }),
     (id) => state.accounts.find((a) => a.id === id)?.token ?? null,
   );
+}
+
+/** The limits and window every watcher is started with (Settings). */
+function currentWatchPrefs(): WatchPrefs {
+  return { limitDownKiB: state.limitDownKiB, limitUpKiB: state.limitUpKiB, syncWindow: state.syncWindow };
+}
+
+/** Restarts every watcher, so a changed limit or window takes effect now. A
+ *  stopped engine flushes its checkpoint (SIGTERM; on Windows the kill is
+ *  abrupt, and the checkpoint and resumable uploads bound what repeats). */
+async function restartWatchers(): Promise<void> {
+  for (const acc of state.accounts) supervisor?.stop(acc.id);
+  await refreshPairs();
 }
 
 /**
@@ -2630,6 +2668,12 @@ function wireIpc(): void {
 
   ipcMain.handle('settings:set', async (_e, patch: Partial<DesktopState>) => {
     if (typeof patch.syncPaused === 'boolean') await setSyncPaused(patch.syncPaused);
+    // Limits and the window are engine flags: a change restarts the watchers.
+    const watchBefore = watchPrefsKey(currentWatchPrefs());
+    if ('limitDownKiB' in patch) state.limitDownKiB = normLimit(patch.limitDownKiB);
+    if ('limitUpKiB' in patch) state.limitUpKiB = normLimit(patch.limitUpKiB);
+    if ('syncWindow' in patch) state.syncWindow = normWindow(patch.syncWindow);
+    const watchChanged = watchPrefsKey(currentWatchPrefs()) !== watchBefore;
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
     if (typeof patch.notifications === 'boolean') state.notifications = patch.notifications;
     if (typeof patch.launchAtLogin === 'boolean') {
@@ -2649,6 +2693,10 @@ function wireIpc(): void {
       refreshTray();
     }
     saveState(state);
+    if (watchChanged) {
+      log('sync', 'limits or window changed; restarting the watchers', currentWatchPrefs());
+      await restartWatchers();
+    }
     return publicState();
   });
 
@@ -3241,6 +3289,7 @@ if (!app.requestSingleInstanceLock()) {
         for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
       },
       (accountId) => markSignedOut(accountId, 'the sync engine was refused (HTTP 401)'),
+      () => currentWatchPrefs(),
     );
     // Local copies for dragging files out. Under userData rather than the OS
     // temp dir: the point of keeping them is that the SECOND drag of the same

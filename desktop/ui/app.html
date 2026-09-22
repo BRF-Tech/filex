@@ -901,6 +901,21 @@
         'set.pause':            ['Pause sync', 'Eşitlemeyi duraklat'],
         'set.pause_sub':        ['Nothing is uploaded or downloaded until you resume — and it stays paused after a restart. The tray menu has the same switch.',
                                  'Sen sürdürene kadar hiçbir şey yüklenmez ya da indirilmez — yeniden başlatınca da duraklatılmış kalır. Aynı düğme tepsi menüsünde de var.'],
+        'set.limit_down':       ['Download limit', 'İndirme sınırı'],
+        'set.limit_down_sub':   ['How fast folder sync may download, for each signed-in account. Opening or dragging a file in this window is not limited.',
+                                 'Klasör eşitlemenin indirme hızı, oturum açılmış her hesap için ayrı. Bu pencerede dosya açmak ya da sürüklemek sınırlanmaz.'],
+        'set.limit_up':         ['Upload limit', 'Yükleme sınırı'],
+        'set.limit_up_sub':     ['How fast folder sync may upload — so a big first sync does not fill the line everyone else on the server uses.',
+                                 'Klasör eşitlemenin yükleme hızı — büyük bir ilk eşitleme sunucudaki herkesin kullandığı hattı doldurmasın.'],
+        'set.limit_none':       ['Unlimited', 'Sınırsız'],
+        'set.limit_mb':         ['{n} MB/s', '{n} MB/sn'],
+        'set.limit_custom':     ['Currently {n} KB/s', 'Şu an {n} KB/sn'],
+        'set.window':           ['When to sync', 'Ne zaman eşitlensin'],
+        'set.window_sub':       ['Evenings & nights is 19:00–08:00, nights 22:00–07:00, local time. Outside those hours no new sync round starts; one still running when they end stops and carries on next time.',
+                                 'Akşam ve gece 19:00–08:00, gece 22:00–07:00 arasıdır (yerel saat). Bu saatlerin dışında yeni eşitleme turu başlamaz; saat dolduğunda süren tur durur ve bir sonrakinde devam eder.'],
+        'set.window_any':       ['Any time', 'Her zaman'],
+        'set.window_19:00-08:00': ['Evenings & nights', 'Akşam ve gece'],
+        'set.window_22:00-07:00': ['Nights', 'Gece'],
         'set.no_engine':        ['The sync engine is missing from this build, so nothing will transfer.',
                                  'Bu sürümde eşitleme motoru yok, hiçbir dosya aktarılmayacak.'],
         'set.no_folders':       ['No folders are syncing yet.', 'Henüz eşitlenen klasör yok.'],
@@ -1002,6 +1017,11 @@
         'sync.paused':          ['paused — resume sync to continue', 'duraklatıldı — devam etmek için eşitlemeyi sürdür'],
         'sync.signed_out':      ['stopped — the server signed this account out; Reconnect to continue',
                                  'durdu — sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
+        'sync.window_wait':     ['waiting for the sync window, {window}', 'eşitleme saatleri bekleniyor, {window}'],
+        'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
+        'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
+        'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
+        'sync.phase_settling':  ['finishing up…', 'tamamlanıyor…'],
         'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
         'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
 
@@ -1565,9 +1585,36 @@
       // native menu built in the main process, and nothing in the file list can
       // tell it what language to speak. One control, in the one place that can
       // reach all three surfaces (this window, the tray, the explorer).
+      /** One of the engine's phases, in words, for the folder line. */
+      function activityLine(v) {
+        if (v.phase === 'transfer' && v.total > 0) {
+          return T('sync.phase_transfer', { done: String(v.done), total: String(v.total) });
+        }
+        if (v.phase === 'plan') return T('sync.phase_plan');
+        if (v.phase === 'settling') return T('sync.phase_settling');
+        return T('sync.phase_inventory');
+      }
+
+      /** A bandwidth limit: the presets the main process offers, KiB/s. A
+       *  stored value that is not one of them is named rather than hidden. */
+      function limitRow(id, current, label, sub) {
+        const presets = state.limitPresets || [0];
+        const now = Number(current) || 0;
+        const custom = !presets.includes(now);
+        return `<div class="card"><div class="between">
+            <div><div class="label">${esc(label)}</div>
+              <div class="muted">${esc(sub)}</div>
+              ${custom ? `<div class="muted">${esc(T('set.limit_custom', { n: String(now) }))}</div>` : ''}</div>
+            <div class="segmented">${
+              presets.map((kib) => `<button data-${id}="${kib}"${
+                now === kib ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
+              }>${esc(kib === 0 ? T('set.limit_none') : T('set.limit_mb', { n: String(kib / 1024) }))}</button>`).join('')
+            }</div>
+          </div></div>`;
+      }
+
       function settingsHtml() {
         const active = state.accounts.find((a) => a.id === state.activeId);
-        const statusOf = Object.fromEntries((state.syncStatuses || []).map((s) => [s.accountId, s]));
 
         /** A yes/no row: the label, what it means, and a switch that shows the
          *  state instead of a button whose text is the state. */
@@ -1596,13 +1643,19 @@
 
         const pairs = state.syncFolders.length ? state.syncFolders.map((f) => {
           const acc = state.accounts.find((a) => a.id === f.accountId);
-          const st = statusOf[f.accountId];
+          // What to say is decided in the main process (src/sync-policy.ts
+          // pairView); this only puts it into words.
+          const v = f.view || { kind: 'starting' };
           let line = T('sync.waiting'), cls = 'muted';
-          if (state.syncPaused) { line = T('sync.paused'); }
-          else if (acc && acc.signedOut) { line = T('sync.signed_out'); cls = 'err'; }
-          else if (st && st.lastError) { line = st.lastError; cls = 'err'; }
-          else if (st && st.running) { line = st.lastLine || T('sync.watching'); cls = 'ok'; }
-          else if (st) { line = T('sync.stopped'); cls = 'err'; }
+          switch (v.kind) {
+            case 'paused': line = T('sync.paused'); break;
+            case 'signed-out': line = T('sync.signed_out'); cls = 'err'; break;
+            case 'active': line = activityLine(v); cls = 'ok'; break;
+            case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '–') }); break;
+            case 'error': line = v.message; cls = 'err'; break;
+            case 'watching': line = T('sync.watching'); cls = 'ok'; break;
+            case 'stopped': line = T('sync.stopped'); cls = 'err'; break;
+          }
           return `
           <div class="card"><div class="between">
             <div style="min-width:0">
@@ -1658,6 +1711,17 @@
           <h2>${esc(T('set.folders'))}</h2>
           ${engineWarning}
           ${toggle('sync-pause', state.syncPaused === true, T('set.pause'), T('set.pause_sub'))}
+          ${limitRow('limit-down', state.limitDownKiB, T('set.limit_down'), T('set.limit_down_sub'))}
+          ${limitRow('limit-up', state.limitUpKiB, T('set.limit_up'), T('set.limit_up_sub'))}
+          <div class="card"><div class="between">
+            <div><div class="label">${esc(T('set.window'))}</div>
+              <div class="muted">${esc(T('set.window_sub'))}</div></div>
+            <div class="segmented">${
+              (state.windowPresets || ['']).map((w) => `<button data-sync-window="${esc(w)}"${
+                (state.syncWindow || '') === w ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
+              }${w ? ` title="${esc(w.replace('-', '–'))}"` : ''}>${esc(w ? T('set.window_' + w) : T('set.window_any'))}</button>`).join('')
+            }</div>
+          </div></div>
           ${active ? `<div class="card"><div class="between">
             <div style="min-width:0">
               <div class="label">${esc(T('set.sync_root'))}</div>
@@ -1876,6 +1940,19 @@
           state = await window.filexApp.setSettings({ syncPaused: state.syncPaused !== true });
           render(); renderSettings();
         });
+        // Limits and the window restart the watchers in the main process.
+        el.querySelectorAll('[data-limit-down]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ limitDownKiB: Number(b.dataset.limitDown) });
+          renderSettings();
+        }));
+        el.querySelectorAll('[data-limit-up]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ limitUpKiB: Number(b.dataset.limitUp) });
+          renderSettings();
+        }));
+        el.querySelectorAll('[data-sync-window]').forEach((b) => b.addEventListener('click', async () => {
+          state = await window.filexApp.setSettings({ syncWindow: b.dataset.syncWindow || '' });
+          renderSettings();
+        }));
         el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ locale: b.dataset.locale });
           // The main process resolves 'system'; taking its answer keeps this

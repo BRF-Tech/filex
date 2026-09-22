@@ -23,7 +23,7 @@ import { app } from 'electron';
 import type { Account } from './accounts.js';
 import { portableMode } from './portable.js';
 import { SyncStatusTracker, type SyncStatus } from './sync-output.js';
-import { wantedWatchers } from './sync-policy.js';
+import { wantedWatchers, watchArgs, type WatchPrefs } from './sync-policy.js';
 
 export type { SyncActivity, SyncStatus } from './sync-output.js';
 
@@ -173,10 +173,13 @@ export class SyncSupervisor {
    * @param onSignedOut the server refused this account's token. The watcher is
    *   already stopped; the caller marks the account so that reconcile() does
    *   not start it again until the user reconnects.
+   * @param watchPrefs the bandwidth limits and sync window a watcher is
+   *   started with (read at start; a change means stop + reconcile).
    */
   constructor(
     private onChange: () => void,
     private onSignedOut: (accountId: string) => void = () => {},
+    private watchPrefs: () => WatchPrefs = () => ({}),
   ) {}
 
   statuses(): SyncStatus[] {
@@ -220,7 +223,8 @@ export class SyncSupervisor {
 
     const proc = spawn(
       bin,
-      ['sync', 'run', '--account', acc.id, '--watch', WATCH_INTERVAL, '--quiet'],
+      // --limit-down / --limit-up / --window only when Settings asks for them.
+      watchArgs(acc.id, this.watchPrefs(), WATCH_INTERVAL),
       {
         env: engineEnv({ FILEX_URL: acc.serverUrl, FILEX_TOKEN: token }),
         windowsHide: true,

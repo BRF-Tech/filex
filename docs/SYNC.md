@@ -181,6 +181,11 @@ runs no watcher at all — for any account, and across restarts — until it is
 resumed. A `filex sync run` you start in a terminal is not affected: the pause
 is the app's, not the pairs'.
 
+Settings' **Download limit**, **Upload limit** and **When to sync** presets are
+handed to every watcher as `--limit-down` / `--limit-up` (KiB/s) and
+`--window HH:MM-HH:MM`; a change restarts the watchers. Nothing is passed while
+they are left at *Unlimited* / *Any time*.
+
 When the server refuses an account's token (HTTP 401 — revoked or expired), the
 engine stops instead of retrying, and the app keeps that account's watcher
 stopped — across restarts — until you **Reconnect** it. Reconnecting as the

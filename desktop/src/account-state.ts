@@ -58,6 +58,13 @@ export interface DesktopState {
   /** Settings / tray → Pause sync. Absent means not paused. Stored, so a
    *  pause survives a restart, a reboot and the hidden launch at sign-in. */
   syncPaused?: boolean;
+  /** Settings → Download limit / Upload limit, KiB/s; absent or 0 = none.
+   *  Every watcher gets them as --limit-down / --limit-up. */
+  limitDownKiB?: number;
+  limitUpKiB?: number;
+  /** Settings → When to sync: 'HH:MM-HH:MM' local time (may wrap midnight),
+   *  absent or '' = any time. Every watcher gets it as --window. */
+  syncWindow?: string;
   /**
    * The ground the window last painted, as the RENDERER resolved it — the
    * palette's own `--fe-bg`, in whichever variant was active.
