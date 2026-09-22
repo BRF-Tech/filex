@@ -287,13 +287,6 @@ const KNOWN_DUPLICATION: Debt[] = [
     maxTokens: 150,
   },
   {
-    files: ['backend/internal/filesync/engine.go'],
-    reason:
-      'The post-pass settle block (re-walk the remote, save the next baseline, prune ' +
-      'expired trash, record the duration) runs in two places in the engine.',
-    maxTokens: 160,
-  },
-  {
     files: ['backend/internal/trash/service.go', 'backend/internal/versioning/cleanup.go'],
     reason:
       'Two daily-purge loops: clamp a non-positive interval to 24h, NewTicker, defer ' +
