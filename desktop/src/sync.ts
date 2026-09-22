@@ -22,6 +22,9 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { Account } from './accounts.js';
 import { portableMode } from './portable.js';
+import { SyncStatusTracker, type SyncStatus } from './sync-output.js';
+
+export type { SyncActivity, SyncStatus } from './sync-output.js';
 
 export interface Pair {
   id: string;
@@ -31,27 +34,6 @@ export interface Pair {
   paused?: boolean;
   /** Single-file pair: local is a file path, remote names a file. */
   file?: boolean;
-}
-
-/** One pair's live phase, parsed from the engine's progress lines. */
-export interface SyncActivity {
-  pairId: string;
-  phase: 'inventory' | 'plan' | 'transfer' | 'settling';
-  /** transfer only: actions done / planned. 0/0 elsewhere. */
-  done: number;
-  total: number;
-}
-
-/** What the supervisor has observed about one account's sync process. */
-export interface SyncStatus {
-  accountId: string;
-  running: boolean;
-  lastLine: string;
-  lastRunAt: string | null;
-  lastError: string | null;
-  /** The pair the engine is working on RIGHT NOW, or null between runs.
-   *  One value, not a map: the engine walks its pairs sequentially. */
-  active: SyncActivity | null;
 }
 
 /** How often each account's watcher re-checks. Frequent enough to feel live,
@@ -230,56 +212,22 @@ export class SyncSupervisor {
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
-    const st: SyncStatus = {
-      accountId: acc.id,
-      running: true,
-      lastLine: 'starting…',
-      lastRunAt: null,
-      lastError: null,
-      active: null,
-    };
-    this.status.set(acc.id, st);
+    // The engine's output is parsed in ONE place (src/sync-output.ts) — line
+    // by line, not chunk by chunk — and the UI gets typed data.
+    const tracker = new SyncStatusTracker(acc.id);
+    this.status.set(acc.id, tracker.status);
     this.procs.set(acc.id, proc);
 
-    // The engine's progress lines are `<pair-id>: <phase>: <detail>` (Engine
-    // .Progress, printed even under --quiet); a run ends with the summary
-    // `<pair-id>: N/N done — …` or `<pair-id>: already in step`. Parsing them
-    // HERE keeps the string format in one place — the UI gets typed data.
-    const progressRe = /^(\S+): (inventory|plan|transfer|settling): (.*)$/;
-    const settledRe = /^(\S+): (?:already in step$|\d+\/\d+ done\b)/;
-    const absorb = (chunk: Buffer, isErr: boolean) => {
-      for (const line of chunk.toString().split('\n')) {
-        const t = line.trim();
-        if (!t) continue;
-        if (isErr) {
-          st.lastError = t;
-          // `<pair-id>: <error>` means that pair's run died — it is not active.
-          const ep = /^(\S+): /.exec(t);
-          if (ep && st.active?.pairId === ep[1]) st.active = null;
-        } else {
-          st.lastLine = t;
-          st.lastRunAt = new Date().toISOString();
-          const p = progressRe.exec(t);
-          if (p) {
-            const tr = p[2] === 'transfer' ? /^(\d+)\/(\d+)/.exec(p[3]) : null;
-            st.active = {
-              pairId: p[1],
-              phase: p[2] as SyncActivity['phase'],
-              done: tr ? Number(tr[1]) : 0,
-              total: tr ? Number(tr[2]) : 0,
-            };
-          } else {
-            const s = settledRe.exec(t);
-            if (s && st.active?.pairId === s[1]) st.active = null;
-          }
-        }
-      }
-      this.onChange();
-    };
-    proc.stdout?.on('data', (c: Buffer) => absorb(c, false));
-    proc.stderr?.on('data', (c: Buffer) => absorb(c, true));
+    proc.stdout?.on('data', (c: Buffer) => {
+      if (tracker.feed(c, 'out')) this.onChange();
+    });
+    proc.stderr?.on('data', (c: Buffer) => {
+      if (tracker.feed(c, 'err')) this.onChange();
+    });
 
-    proc.on('exit', (code) => {
+    // ⚠ 'close', not 'exit': 'exit' can fire while the pipes still hold the
+    // process's last words — the one line that says WHY it stopped.
+    proc.on('close', (code, signal) => {
       // A watcher this supervisor already let go of — stop() during a root
       // move, reconcile() after a sign-out — must not touch the bookkeeping
       // of its successor. Its exit can land AFTER the replacement started,
@@ -288,14 +236,8 @@ export class SyncSupervisor {
       // engines racing over one baseline.
       if (this.procs.get(acc.id) !== proc) return;
       this.procs.delete(acc.id);
-      st.running = false;
-      st.active = null;
-      // A watcher is meant to run forever. Exiting means the server went away,
-      // the token expired, or the binary crashed — say so instead of leaving a
-      // panel that claims everything is fine.
-      if (!this.stopping && code !== 0) {
-        st.lastError = st.lastError ?? `sync stopped unexpectedly (exit ${code})`;
-      }
+      tracker.end();
+      tracker.exited(code, this.stopping, signal);
       this.onChange();
     });
   }

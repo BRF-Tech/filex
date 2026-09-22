@@ -1,0 +1,111 @@
+// How the desktop app reads the sync engine's output.
+//
+// Run:  node --experimental-strip-types --test desktop/test/sync-output.test.ts
+//
+// The watcher's stdout and stderr are the ONLY channel between the engine and
+// the app: every badge, the bottom strip, the rail dot and the Settings line
+// are parsed out of them. A pipe delivers bytes, not lines, so a chunk can end
+// anywhere — in the middle of a progress line, or of a Turkish file name.
+
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { LineBuffer, SyncStatusTracker, parseEngineLine } from '../src/sync-output.ts';
+
+test('a line split across two chunks is read as ONE line', () => {
+  const b = new LineBuffer();
+  assert.deepEqual(b.push('pair-1: transfer: 1'), []);
+  assert.deepEqual(b.push('20/300\npair-1: tra'), ['pair-1: transfer: 120/300']);
+  assert.deepEqual(b.push('nsfer: 130/300\n'), ['pair-1: transfer: 130/300']);
+});
+
+test('…a multi-byte character split between chunks survives', () => {
+  const b = new LineBuffer();
+  const bytes = Buffer.from('  ! upload Türkçe adlı dosya.txt: HTTP 500\n', 'utf8');
+  // Cut inside the two-byte "ü" (0xC3 0xBC).
+  const cut = bytes.indexOf(0xbc);
+  assert.deepEqual(b.push(bytes.subarray(0, cut)), []);
+  assert.deepEqual(b.push(bytes.subarray(cut)), ['  ! upload Türkçe adlı dosya.txt: HTTP 500']);
+});
+
+test('…a Windows line ending is not part of the line, and the tail is kept for end()', () => {
+  const b = new LineBuffer();
+  assert.deepEqual(b.push('a\r\nb\r\nlast without newline'), ['a', 'b']);
+  assert.deepEqual(b.end(), ['last without newline']);
+  assert.deepEqual(b.end(), []);
+});
+
+test('the engine line grammar', () => {
+  assert.deepEqual(parseEngineLine('pair-1: transfer: 20/300', 'out'), {
+    kind: 'progress', pairId: 'pair-1', phase: 'transfer', detail: '20/300',
+  });
+  assert.deepEqual(parseEngineLine('pair-1: already in step', 'out'), {
+    kind: 'settled', pairId: 'pair-1', complete: true,
+  });
+  assert.deepEqual(parseEngineLine('pair-1: 12/12 done — 3 up, 9 down  (1.2s)', 'out'), {
+    kind: 'settled', pairId: 'pair-1', complete: true,
+  });
+  assert.deepEqual(parseEngineLine('pair-1: 10/12 done — 3 up, 7 down  (1.2s)', 'out'), {
+    kind: 'settled', pairId: 'pair-1', complete: false,
+  });
+  assert.deepEqual(parseEngineLine('pair-2: list docs://x: HTTP 502', 'err'), {
+    kind: 'pair-error', pairId: 'pair-2', message: 'pair-2: list docs://x: HTTP 502',
+  });
+  assert.deepEqual(parseEngineLine('  ! upload a.txt: HTTP 413', 'err'), {
+    kind: 'error', message: '! upload a.txt: HTTP 413',
+  });
+  assert.deepEqual(parseEngineLine('Watching 2 pair(s); checking every 30s.', 'out'), {
+    kind: 'info', text: 'Watching 2 pair(s); checking every 30s.',
+  });
+  assert.equal(parseEngineLine('   ', 'out'), null);
+});
+
+test('a progress line cut by the pipe no longer reads as "transfer 0/0"', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed(Buffer.from('pair-1: transfer: 1'), 'out');
+  // Nothing complete yet — the half line must not be parsed on its own.
+  assert.equal(t.status.active, null);
+  t.feed(Buffer.from('20/300\n'), 'out');
+  assert.deepEqual(t.status.active, { pairId: 'pair-1', phase: 'transfer', done: 120, total: 300 });
+  assert.equal(t.status.lastLine, 'pair-1: transfer: 120/300');
+});
+
+test('the run summary ends the activity; a pair error ends it too and is reported', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: inventory: 12 item(s) here, listing the server…\n', 'out');
+  assert.equal(t.status.active?.phase, 'inventory');
+  t.feed('pair-1: already in step\n', 'out');
+  assert.equal(t.status.active, null);
+
+  t.feed('pair-2: plan: 4 change(s) to make\n', 'out');
+  t.feed('pair-2: list docs://x: HTTP 502\n', 'err');
+  assert.equal(t.status.active, null);
+  assert.equal(t.status.lastError, 'pair-2: list docs://x: HTTP 502');
+});
+
+test('feed() says whether anything changed, so an empty chunk does not repaint the app', () => {
+  const t = new SyncStatusTracker('acc');
+  assert.equal(t.feed('', 'out'), false);
+  assert.equal(t.feed('pair-1: transf', 'out'), false);
+  assert.equal(t.feed('er: 1/2\n', 'out'), true);
+});
+
+test('what is still buffered when the process ends is read, not dropped', () => {
+  const t = new SyncStatusTracker('acc');
+  t.feed('pair-1: list docs://x: HTTP 502', 'err'); // no trailing newline
+  assert.equal(t.status.lastError, null);
+  t.end();
+  assert.equal(t.status.lastError, 'pair-1: list docs://x: HTTP 502');
+});
+
+test('an unexpected exit is said out loud; a requested stop is not an error', () => {
+  const a = new SyncStatusTracker('acc');
+  a.exited(1, false);
+  assert.equal(a.status.running, false);
+  assert.equal(a.status.lastError, 'sync stopped unexpectedly (exit 1)');
+
+  const b = new SyncStatusTracker('acc');
+  b.exited(null, true);
+  assert.equal(b.status.running, false);
+  assert.equal(b.status.lastError, null);
+});
