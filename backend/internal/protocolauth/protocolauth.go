@@ -57,6 +57,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
@@ -145,6 +146,9 @@ func (p *Principal) WithContext(ctx context.Context) context.Context {
 	}
 	ctx = auth.WithUser(ctx, p.User)
 	if p.Scope != nil {
+		// /dav and /s3 resolve the tenant here instead of in
+		// auth.TenantResolver, so this is where the access log learns it.
+		httpx.RequestLogFrom(ctx).NoteTenant(p.Scope.Slug)
 		ctx = tenant.WithScope(ctx, p.Scope)
 	}
 	return ctx

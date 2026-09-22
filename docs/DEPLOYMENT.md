@@ -410,7 +410,10 @@ filex migrate down       # roll back exactly one migration
   self‑hosted GlitchTip. Empty DSN = off. See
   [CONFIGURATION.md → Error reporting](CONFIGURATION.md#error-reporting).
 - **Structured logs:** `FILEX_LOG_FORMAT=json` (with `FILEX_LOG_LEVEL=info|debug|…`)
-  emits JSON lines for Loki / ELK / Datadog ingestion.
+  emits JSON lines for Loki / ELK / Datadog ingestion. Each request's `msg=http`
+  line names its caller (`user_id`, `token_id`, `tenant`) and, on the file
+  manager, its verb (`action`) — never the query string; see
+  [CONFIGURATION.md → Logging](CONFIGURATION.md#logging).
 - **Operational surfaces** (admin session/token): the admin **Dashboard**, plus
   queue stats (`/api/admin/queue/stats`) and storage **sync‑runs / drift**
   (`/api/admin/storages/{id}/sync-runs`, `…/drift`) let you watch worker health

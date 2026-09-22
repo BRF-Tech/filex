@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -31,8 +32,12 @@ type tokenCtxKey struct{}
 // tokenUserCtxKey carries the resolved token username for the request.
 type tokenUserCtxKey struct{}
 
-// WithToken stores the matched API token on ctx.
+// WithToken stores the matched API token on ctx, and notes its id (never the
+// secret) on the request's access-log holder, like WithUser does the account.
 func WithToken(ctx context.Context, t *model.APIToken) context.Context {
+	if t != nil {
+		httpx.RequestLogFrom(ctx).NoteToken(t.ID)
+	}
 	return context.WithValue(ctx, tokenCtxKey{}, t)
 }
 

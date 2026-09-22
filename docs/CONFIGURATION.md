@@ -205,6 +205,27 @@ tenant's own host; `FILEX_PUBLIC_URL` is the operator's fallback.
 | `FILEX_LOG_LEVEL` | `info` | `debug` · `info` · `warn` · `error` |
 | `FILEX_LOG_FORMAT` | `text` | `text` · `json` |
 
+Every HTTP request writes one `info` line, `msg=http`:
+
+| Field | Always | Meaning |
+|---|---|---|
+| `method`, `path`, `status`, `ip`, `dur_us` | yes | the request, its answer, and how long it took (µs) |
+| `user_id` | when signed in | the account the request acted as |
+| `token_id` | when an API token was used | the token's row id (as listed on the API keys page), never its secret |
+| `tenant` | multi-tenant only | the tenant (provider) slug the request was scoped to |
+| `action` | `/api/files/manager` only | the file manager's verb — `index`, `search`, `upload`, `rename`, `move`, `delete`… — or `other` for anything it does not have |
+
+```
+time=2026-09-22T10:04:12.345Z level=INFO msg=http method=POST path=/api/files/manager status=500 ip=10.0.0.5 dur_us=812 user_id=12 token_id=34 action=upload
+```
+
+⚠ The **query string is never logged**. It carries thumbnail and OnlyOffice
+signatures, WebSocket tickets, share PINs, OIDC codes, S3 presigned credentials
+and people's search text. `action` is the only value read from it, and only as
+one of the manager's own verbs. The **path** is logged as sent, and share and
+drop links carry their token in it (`/s/…`, `/d/…`), so treat the access log as
+you would the database.
+
 ---
 
 ## Database

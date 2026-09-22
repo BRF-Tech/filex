@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -56,7 +57,15 @@ type OIDCDriver interface {
 type userCtxKey struct{}
 
 // WithUser stores u on ctx.
+//
+// It also notes the account on the request's access-log holder, when there is
+// one (httpx.RequestLog): every door that authenticates a request passes
+// through here, so the access log learns who asked without each of them
+// having to remember to say so.
 func WithUser(ctx context.Context, u *model.User) context.Context {
+	if u != nil {
+		httpx.RequestLogFrom(ctx).NoteUser(u.ID)
+	}
 	return context.WithValue(ctx, userCtxKey{}, u)
 }
 
